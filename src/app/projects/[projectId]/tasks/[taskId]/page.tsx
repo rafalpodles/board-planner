@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import Markdown from "react-markdown";
 import { useApi } from "@/hooks/use-api";
 import { ApiTask, ApiProject, STATUS_LABELS } from "@/types";
 import { Badge } from "@/components/ui/Badge";
@@ -136,9 +137,9 @@ export default function TaskDetailPage() {
         {task.description && (
           <div>
             <h2 className="font-semibold mb-2">Description</h2>
-            <p className="text-sm whitespace-pre-wrap text-text-muted">
-              {task.description}
-            </p>
+            <div className="text-sm text-text-muted prose prose-invert prose-sm max-w-none">
+              <Markdown>{task.description}</Markdown>
+            </div>
           </div>
         )}
 
@@ -146,9 +147,9 @@ export default function TaskDetailPage() {
         {task.acceptanceCriteria && (
           <div>
             <h2 className="font-semibold mb-2">Acceptance Criteria</h2>
-            <p className="text-sm whitespace-pre-wrap text-text-muted">
-              {task.acceptanceCriteria}
-            </p>
+            <div className="text-sm text-text-muted prose prose-invert prose-sm max-w-none">
+              <Markdown>{task.acceptanceCriteria}</Markdown>
+            </div>
           </div>
         )}
 
