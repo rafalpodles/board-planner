@@ -9,7 +9,6 @@ const statusBorderColors: Record<TaskStatus, string> = {
   in_progress: "border-t-status-in-progress",
   in_review: "border-t-status-in-review",
   ready_to_test: "border-t-status-ready-to-test",
-  in_testing: "border-t-status-in-testing",
   done: "border-t-status-done",
 };
 

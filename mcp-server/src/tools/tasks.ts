@@ -66,7 +66,7 @@ export function getTaskTools(client: ApiClient) {
           status: {
             type: "string",
             description:
-              "Filter by status (comma-separated). Values: planned, todo, in_progress, in_review, ready_to_test, in_testing, done",
+              "Filter by status (comma-separated). Values: planned, todo, in_progress, in_review, ready_to_test, done",
           },
           assignee: {
             type: "string",
@@ -251,7 +251,7 @@ export function getTaskTools(client: ApiClient) {
 
     change_task_status: {
       description:
-        "Change the status of a task. Valid statuses: planned, todo, in_progress, in_review, ready_to_test, in_testing, done",
+        "Change the status of a task. Valid statuses: planned, todo, in_progress, in_review, ready_to_test, done",
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -262,7 +262,7 @@ export function getTaskTools(client: ApiClient) {
           status: {
             type: "string",
             description:
-              "New status: planned, todo, in_progress, in_review, ready_to_test, in_testing, done",
+              "New status: planned, todo, in_progress, in_review, ready_to_test, done",
           },
         },
         required: ["taskKey", "status"],
