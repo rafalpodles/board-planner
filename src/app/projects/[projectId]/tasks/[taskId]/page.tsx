@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Markdown from "react-markdown";
 import { useApi } from "@/hooks/use-api";
-import { ApiTask, ApiProject, STATUS_LABELS } from "@/types";
+import { ApiTask, ApiProject, TASK_STATUSES, STATUS_LABELS } from "@/types";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -45,6 +45,20 @@ export default function TaskDetailPage() {
     loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId]);
+
+  async function handleStatusChange(newStatus: string) {
+    try {
+      await api.patch(
+        `/api/projects/${projectId}/tasks/${taskId}/status`,
+        { status: newStatus }
+      );
+      setTask((prev) =>
+        prev ? { ...prev, status: newStatus as ApiTask["status"] } : prev
+      );
+    } catch (err) {
+      console.error(err);
+    }
+  }
 
   async function handleDuplicate() {
     try {
@@ -99,9 +113,17 @@ export default function TaskDetailPage() {
             <span className="font-mono text-text-muted">
               {project.key}-{task.taskNumber}
             </span>
-            <Badge variant="status" value={task.status}>
-              {STATUS_LABELS[task.status]}
-            </Badge>
+            <select
+              value={task.status}
+              onChange={(e) => handleStatusChange(e.target.value)}
+              className="text-xs font-medium bg-bg-input border border-border rounded px-2 py-1 text-text focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+            >
+              {TASK_STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {STATUS_LABELS[s]}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 
