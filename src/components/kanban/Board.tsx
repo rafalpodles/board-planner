@@ -29,21 +29,28 @@ export function Board({
   );
 
   return (
-    <div className="overflow-x-auto pb-4">
-      <div className="grid grid-cols-6 gap-4 min-w-[1200px]">
-        {TASK_STATUSES.map((status) => (
-          <Column
-            key={status}
-            status={status}
-            tasks={grouped[status]}
-            projectKey={projectKey}
-            selectedTasks={selectedTasks}
-            onStatusChange={onStatusChange}
-            onTaskClick={onTaskClick}
-            onTaskSelect={onTaskSelect}
-          />
-        ))}
+    <div className="relative">
+      <div
+        className="overflow-x-auto pb-4 overscroll-x-contain"
+        style={{ WebkitOverflowScrolling: "touch" }}
+      >
+        <div className="grid grid-cols-6 gap-4 min-w-[1200px]">
+          {TASK_STATUSES.map((status) => (
+            <Column
+              key={status}
+              status={status}
+              tasks={grouped[status]}
+              projectKey={projectKey}
+              selectedTasks={selectedTasks}
+              onStatusChange={onStatusChange}
+              onTaskClick={onTaskClick}
+              onTaskSelect={onTaskSelect}
+            />
+          ))}
+        </div>
       </div>
+      {/* Scroll hint fade on right edge for small screens */}
+      <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-bg to-transparent sm:hidden" />
     </div>
   );
 }
