@@ -17,16 +17,20 @@ interface ColumnProps {
   status: TaskStatus;
   tasks: ApiTask[];
   projectKey: string;
+  selectedTasks?: Set<string>;
   onStatusChange: (taskId: string, status: string) => void;
   onTaskClick: (taskId: string) => void;
+  onTaskSelect?: (taskId: string) => void;
 }
 
 export function Column({
   status,
   tasks,
   projectKey,
+  selectedTasks,
   onStatusChange,
   onTaskClick,
+  onTaskSelect,
 }: ColumnProps) {
   const [isDragOver, setIsDragOver] = useState(false);
 
@@ -70,6 +74,9 @@ export function Column({
             key={task._id}
             task={task}
             projectKey={projectKey}
+            selected={selectedTasks?.has(task._id)}
+            selectionActive={(selectedTasks?.size ?? 0) > 0}
+            onSelect={onTaskSelect}
             onClick={() => onTaskClick(task._id)}
           />
         ))}

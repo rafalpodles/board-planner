@@ -3,7 +3,8 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
-import { ApiProject, ApiTask } from "@/types";
+import { ApiProject, ApiTask, TASK_STATUSES, STATUS_LABELS } from "@/types";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Board } from "@/components/kanban/Board";
 import { BoardFilters } from "@/components/kanban/BoardFilters";
 import { TaskForm } from "@/components/tasks/TaskForm";
@@ -24,6 +25,9 @@ export default function KanbanPage() {
   const [showNewTask, setShowNewTask] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showExport, setShowExport] = useState(false);
+  const [selectedTasks, setSelectedTasks] = useState<Set<string>>(new Set());
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -49,16 +53,70 @@ export default function KanbanPage() {
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+
       if (e.key === "n" && !e.metaKey && !e.ctrlKey && !e.altKey) {
-        const tag = (e.target as HTMLElement).tagName;
-        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
         e.preventDefault();
         setShowNewTask(true);
+      }
+      if (e.key === "Escape") {
+        setSelectedTasks(new Set());
       }
     }
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, []);
+
+  function handleTaskSelect(taskId: string) {
+    setSelectedTasks((prev) => {
+      const next = new Set(prev);
+      if (next.has(taskId)) {
+        next.delete(taskId);
+      } else {
+        next.add(taskId);
+      }
+      return next;
+    });
+  }
+
+  async function handleBulkMove(status: string) {
+    try {
+      await Promise.all(
+        Array.from(selectedTasks).map((id) =>
+          api.patch(`/api/projects/${projectId}/tasks/${id}/status`, { status })
+        )
+      );
+      setTasks((prev) =>
+        prev.map((t) =>
+          selectedTasks.has(t._id)
+            ? { ...t, status: status as ApiTask["status"] }
+            : t
+        )
+      );
+      setSelectedTasks(new Set());
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  async function handleBulkDelete() {
+    setBulkDeleting(true);
+    try {
+      await Promise.all(
+        Array.from(selectedTasks).map((id) =>
+          api.del(`/api/projects/${projectId}/tasks/${id}`)
+        )
+      );
+      setTasks((prev) => prev.filter((t) => !selectedTasks.has(t._id)));
+      setSelectedTasks(new Set());
+      setConfirmBulkDelete(false);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setBulkDeleting(false);
+    }
+  }
 
   async function handleStatusChange(taskId: string, status: string) {
     try {
@@ -156,13 +214,49 @@ export default function KanbanPage() {
         </div>
       )}
 
+      {selectedTasks.size > 0 && (
+        <div className="mb-4 flex items-center gap-3 bg-bg-card border border-primary/30 rounded-lg px-4 py-2.5">
+          <span className="text-sm font-medium">
+            {selectedTasks.size} selected
+          </span>
+          <select
+            onChange={(e) => {
+              if (e.target.value) handleBulkMove(e.target.value);
+              e.target.value = "";
+            }}
+            className="text-xs bg-bg-input border border-border rounded px-2 py-1.5 text-text-muted focus:outline-none focus:ring-1 focus:ring-primary"
+            defaultValue=""
+          >
+            <option value="" disabled>Move to...</option>
+            {TASK_STATUSES.map((s) => (
+              <option key={s} value={s}>{STATUS_LABELS[s]}</option>
+            ))}
+          </select>
+          <Button
+            size="sm"
+            variant="danger"
+            onClick={() => setConfirmBulkDelete(true)}
+          >
+            Delete
+          </Button>
+          <button
+            onClick={() => setSelectedTasks(new Set())}
+            className="text-xs text-text-muted hover:text-text ml-auto"
+          >
+            Clear selection
+          </button>
+        </div>
+      )}
+
       <Board
         tasks={filteredTasks}
         projectKey={project.key}
+        selectedTasks={selectedTasks}
         onStatusChange={handleStatusChange}
         onTaskClick={(taskId) =>
           router.push(`/projects/${projectId}/tasks/${taskId}`)
         }
+        onTaskSelect={handleTaskSelect}
       />
 
       <Modal
@@ -192,6 +286,16 @@ export default function KanbanPage() {
         open={showExport}
         onClose={() => setShowExport(false)}
         projectId={projectId}
+      />
+
+      <ConfirmDialog
+        open={confirmBulkDelete}
+        onClose={() => setConfirmBulkDelete(false)}
+        onConfirm={handleBulkDelete}
+        title="Delete Selected Tasks"
+        message={`Are you sure you want to delete ${selectedTasks.size} task${selectedTasks.size === 1 ? "" : "s"}? This action cannot be undone.`}
+        confirmLabel={`Delete ${selectedTasks.size} task${selectedTasks.size === 1 ? "" : "s"}`}
+        loading={bulkDeleting}
       />
     </div>
   );

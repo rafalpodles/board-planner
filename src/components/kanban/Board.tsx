@@ -6,15 +6,19 @@ import { Column } from "./Column";
 interface BoardProps {
   tasks: ApiTask[];
   projectKey: string;
+  selectedTasks?: Set<string>;
   onStatusChange: (taskId: string, status: string) => void;
   onTaskClick: (taskId: string) => void;
+  onTaskSelect?: (taskId: string) => void;
 }
 
 export function Board({
   tasks,
   projectKey,
+  selectedTasks,
   onStatusChange,
   onTaskClick,
+  onTaskSelect,
 }: BoardProps) {
   const grouped = TASK_STATUSES.reduce(
     (acc, status) => {
@@ -33,8 +37,10 @@ export function Board({
             status={status}
             tasks={grouped[status]}
             projectKey={projectKey}
+            selectedTasks={selectedTasks}
             onStatusChange={onStatusChange}
             onTaskClick={onTaskClick}
+            onTaskSelect={onTaskSelect}
           />
         ))}
       </div>

@@ -6,12 +6,18 @@ import { Badge } from "@/components/ui/Badge";
 interface TaskCardProps {
   task: ApiTask;
   projectKey: string;
+  selected?: boolean;
+  selectionActive?: boolean;
+  onSelect?: (taskId: string) => void;
   onClick: () => void;
 }
 
 export function TaskCard({
   task,
   projectKey,
+  selected = false,
+  selectionActive = false,
+  onSelect,
   onClick,
 }: TaskCardProps) {
   return (
@@ -21,11 +27,36 @@ export function TaskCard({
         e.dataTransfer.setData("text/plain", task._id);
         e.dataTransfer.effectAllowed = "move";
       }}
-      className="bg-bg rounded-lg border border-border p-3 cursor-grab
-        hover:border-primary/50 transition-colors group active:cursor-grabbing"
-      onClick={onClick}
+      className={`bg-bg rounded-lg border p-3 cursor-grab
+        transition-colors group active:cursor-grabbing relative
+        ${selected ? "border-primary bg-primary/5" : "border-border hover:border-primary/50"}`}
+      onClick={(e) => {
+        if (e.ctrlKey || e.metaKey) {
+          e.preventDefault();
+          onSelect?.(task._id);
+        } else {
+          onClick();
+        }
+      }}
     >
-      <div className="flex items-start justify-between gap-2 mb-2">
+      {(selectionActive || selected) && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onSelect?.(task._id);
+          }}
+          className={`absolute top-2 right-2 w-5 h-5 rounded border flex items-center justify-center
+            transition-colors text-[10px]
+            ${selected
+              ? "bg-primary border-primary text-white"
+              : "border-border bg-bg-input text-transparent hover:border-primary/50"
+            }`}
+        >
+          {selected && "\u2713"}
+        </button>
+      )}
+
+      <div className="flex items-start justify-between gap-2 mb-2 pr-6">
         <span className="text-xs font-mono text-text-muted">
           {projectKey}-{task.taskNumber}
         </span>
