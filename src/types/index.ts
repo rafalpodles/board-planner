@@ -1,0 +1,146 @@
+import { Types } from "mongoose";
+
+// Difficulty levels
+export type Difficulty = "S" | "M" | "L" | "XL";
+
+// Task categories
+export type Category = "bug" | "doc" | "user-story" | "idea";
+
+// Task statuses for Kanban columns
+export type TaskStatus =
+  | "planned"
+  | "todo"
+  | "in_progress"
+  | "in_review"
+  | "ready_to_test"
+  | "in_testing"
+  | "done";
+
+export const TASK_STATUSES: TaskStatus[] = [
+  "planned",
+  "todo",
+  "in_progress",
+  "in_review",
+  "ready_to_test",
+  "in_testing",
+  "done",
+];
+
+export const DIFFICULTIES: Difficulty[] = ["S", "M", "L", "XL"];
+export const CATEGORIES: Category[] = ["bug", "doc", "user-story", "idea"];
+
+export const STATUS_LABELS: Record<TaskStatus, string> = {
+  planned: "Planned",
+  todo: "To Do",
+  in_progress: "In Progress",
+  in_review: "In Review",
+  ready_to_test: "Ready to Test",
+  in_testing: "In Testing",
+  done: "Done",
+};
+
+// Document interfaces (what Mongoose returns)
+export interface IUser {
+  _id: Types.ObjectId;
+  username: string;
+  password: string;
+  fullName: string;
+  createdAt: Date;
+}
+
+export interface IProject {
+  _id: Types.ObjectId;
+  name: string;
+  key: string;
+  description: string;
+  components: string[];
+  taskCounter: number;
+  owner: Types.ObjectId | IUser;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface ITask {
+  _id: Types.ObjectId;
+  project: Types.ObjectId | IProject;
+  taskNumber: number;
+  title: string;
+  description: string;
+  difficulty: Difficulty;
+  component: string;
+  category: Category;
+  status: TaskStatus;
+  assignee: Types.ObjectId | IUser | null;
+  acceptanceCriteria: string;
+  order: number;
+  createdBy: Types.ObjectId | IUser;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface IComment {
+  _id: Types.ObjectId;
+  task: Types.ObjectId | ITask;
+  author: Types.ObjectId | IUser;
+  body: string;
+  createdAt: Date;
+}
+
+// API response types (serialized, no ObjectId)
+export interface ApiUser {
+  _id: string;
+  username: string;
+  fullName: string;
+  createdAt: string;
+}
+
+export interface ApiProject {
+  _id: string;
+  name: string;
+  key: string;
+  description: string;
+  components: string[];
+  taskCounter: number;
+  owner: ApiUser | string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApiTask {
+  _id: string;
+  project: string;
+  taskKey: string;
+  taskNumber: number;
+  title: string;
+  description: string;
+  difficulty: Difficulty;
+  component: string;
+  category: Category;
+  status: TaskStatus;
+  assignee: ApiUser | null;
+  acceptanceCriteria: string;
+  order: number;
+  createdBy: ApiUser | string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApiComment {
+  _id: string;
+  task: string;
+  author: ApiUser | string;
+  body: string;
+  createdAt: string;
+}
+
+// Parsed markdown task for import
+export interface ParsedTask {
+  title: string;
+  category: Category;
+  component?: string;
+  difficulty?: Difficulty;
+  status?: TaskStatus;
+  assignee?: string;
+  description?: string;
+  acceptanceCriteria?: string;
+}

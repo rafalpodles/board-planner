@@ -1,0 +1,144 @@
+"use client";
+
+import { useEffect, useState, useCallback } from "react";
+import { useParams, useRouter } from "next/navigation";
+import { useApi } from "@/hooks/use-api";
+import { ApiProject, ApiTask } from "@/types";
+import { Board } from "@/components/kanban/Board";
+import { TaskForm } from "@/components/tasks/TaskForm";
+import { ImportDialog } from "@/components/import-export/ImportDialog";
+import { ExportDialog } from "@/components/import-export/ExportDialog";
+import { Button } from "@/components/ui/Button";
+import { Modal } from "@/components/ui/Modal";
+
+export default function KanbanPage() {
+  const { projectId } = useParams<{ projectId: string }>();
+  const router = useRouter();
+  const api = useApi();
+
+  const [project, setProject] = useState<ApiProject | null>(null);
+  const [tasks, setTasks] = useState<ApiTask[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showNewTask, setShowNewTask] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [showExport, setShowExport] = useState(false);
+
+  const loadData = useCallback(async () => {
+    try {
+      const [proj, taskList] = await Promise.all([
+        api.get(`/api/projects/${projectId}`),
+        api.get(`/api/projects/${projectId}/tasks`),
+      ]);
+      setProject(proj);
+      setTasks(taskList);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  async function handleStatusChange(taskId: string, status: string) {
+    try {
+      await api.patch(
+        `/api/projects/${projectId}/tasks/${taskId}/status`,
+        { status }
+      );
+      setTasks((prev) =>
+        prev.map((t) =>
+          t._id === taskId ? { ...t, status: status as ApiTask["status"] } : t
+        )
+      );
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  if (loading || !project) {
+    return (
+      <div className="flex justify-center py-12">
+        <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary border-t-transparent" />
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-6">
+        <div>
+          <h1 className="text-2xl font-bold">{project.name}</h1>
+          <p className="text-sm text-text-muted">{project.key}</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" onClick={() => setShowNewTask(true)}>
+            New Task
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => setShowImport(true)}
+          >
+            Import
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => setShowExport(true)}
+          >
+            Export
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => router.push(`/projects/${projectId}/settings`)}
+          >
+            Settings
+          </Button>
+        </div>
+      </div>
+
+      <Board
+        tasks={tasks}
+        projectKey={project.key}
+        onStatusChange={handleStatusChange}
+        onTaskClick={(taskId) =>
+          router.push(`/projects/${projectId}/tasks/${taskId}`)
+        }
+      />
+
+      <Modal
+        open={showNewTask}
+        onClose={() => setShowNewTask(false)}
+        title="New Task"
+      >
+        <TaskForm
+          projectId={projectId}
+          components={project.components}
+          onSaved={() => {
+            setShowNewTask(false);
+            loadData();
+          }}
+          onCancel={() => setShowNewTask(false)}
+        />
+      </Modal>
+
+      <ImportDialog
+        open={showImport}
+        onClose={() => setShowImport(false)}
+        projectId={projectId}
+        onImported={loadData}
+      />
+
+      <ExportDialog
+        open={showExport}
+        onClose={() => setShowExport(false)}
+        projectId={projectId}
+      />
+    </div>
+  );
+}
