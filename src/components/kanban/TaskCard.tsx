@@ -50,7 +50,7 @@ export function TaskCard({
             <span className="w-5 h-5 rounded-full bg-primary/30 flex items-center justify-center text-[10px] font-medium">
               {task.assignee.fullName?.charAt(0).toUpperCase() || "?"}
             </span>
-            <span className="hidden sm:inline">{task.assignee.username}</span>
+            <span>{task.assignee.username}</span>
           </span>
         ) : (
           <span />
