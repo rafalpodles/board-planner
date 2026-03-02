@@ -7,6 +7,7 @@ import { ApiProject } from "@/types";
 import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
 import { Button } from "@/components/ui/Button";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 export default function ProjectSettingsPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -19,6 +20,8 @@ export default function ProjectSettingsPage() {
   const [newComponent, setNewComponent] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -79,12 +82,14 @@ export default function ProjectSettingsPage() {
   }
 
   async function handleDelete() {
-    if (!confirm("Delete this project and all its tasks?")) return;
+    setDeleting(true);
     try {
       await api.del(`/api/projects/${projectId}`);
       router.replace("/projects");
     } catch (err) {
       console.error(err);
+      setDeleting(false);
+      setConfirmDelete(false);
     }
   }
 
@@ -172,10 +177,20 @@ export default function ProjectSettingsPage() {
       {/* Danger Zone */}
       <div className="border-t border-border pt-6">
         <h2 className="font-semibold text-danger mb-3">Danger Zone</h2>
-        <Button variant="danger" onClick={handleDelete}>
+        <Button variant="danger" onClick={() => setConfirmDelete(true)}>
           Delete Project
         </Button>
       </div>
+
+      <ConfirmDialog
+        open={confirmDelete}
+        onClose={() => setConfirmDelete(false)}
+        onConfirm={handleDelete}
+        title="Delete Project"
+        message={`Are you sure you want to delete "${project.name}" and all its tasks? This action cannot be undone.`}
+        confirmLabel="Delete Project"
+        loading={deleting}
+      />
     </div>
   );
 }

@@ -6,6 +6,7 @@ import { useApi } from "@/hooks/use-api";
 import { ApiTask, ApiProject, STATUS_LABELS } from "@/types";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { TaskForm } from "@/components/tasks/TaskForm";
 import { Comments } from "@/components/tasks/Comments";
 
@@ -20,6 +21,8 @@ export default function TaskDetailPage() {
   const [task, setTask] = useState<ApiTask | null>(null);
   const [project, setProject] = useState<ApiProject | null>(null);
   const [editing, setEditing] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [loading, setLoading] = useState(true);
 
   async function loadData() {
@@ -43,12 +46,14 @@ export default function TaskDetailPage() {
   }, [taskId]);
 
   async function handleDelete() {
-    if (!confirm("Delete this task?")) return;
+    setDeleting(true);
     try {
       await api.del(`/api/projects/${projectId}/tasks/${taskId}`);
       router.push(`/projects/${projectId}`);
     } catch (err) {
       console.error(err);
+      setDeleting(false);
+      setConfirmDelete(false);
     }
   }
 
@@ -152,7 +157,7 @@ export default function TaskDetailPage() {
           <Button size="sm" onClick={() => setEditing(true)}>
             Edit
           </Button>
-          <Button size="sm" variant="danger" onClick={handleDelete}>
+          <Button size="sm" variant="danger" onClick={() => setConfirmDelete(true)}>
             Delete
           </Button>
         </div>
@@ -162,6 +167,15 @@ export default function TaskDetailPage() {
           <Comments projectId={projectId} taskId={taskId} />
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmDelete}
+        onClose={() => setConfirmDelete(false)}
+        onConfirm={handleDelete}
+        title="Delete Task"
+        message={`Are you sure you want to delete ${project.key}-${task.taskNumber} "${task.title}"? This action cannot be undone.`}
+        loading={deleting}
+      />
     </div>
   );
 }
