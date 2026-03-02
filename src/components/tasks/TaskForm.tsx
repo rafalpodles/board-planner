@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, FormEvent, useEffect } from "react";
+import { useState, useCallback, FormEvent, useEffect } from "react";
 import { useApi } from "@/hooks/use-api";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
@@ -56,6 +56,17 @@ export function TaskForm({
     api.get("/api/users").then(setUsers).catch(console.error);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const handleFileUpload = useCallback(
+    async (file: File): Promise<string> => {
+      const formData = new FormData();
+      formData.append("file", file);
+      const result = await api.upload("/api/uploads", formData);
+      return result.markdown;
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -149,6 +160,7 @@ export function TaskForm({
         value={description}
         onChange={(e) => setDescription(e.target.value)}
         rows={4}
+        onFileUpload={handleFileUpload}
       />
 
       <Textarea
@@ -157,6 +169,7 @@ export function TaskForm({
         onChange={(e) => setAcceptanceCriteria(e.target.value)}
         rows={4}
         placeholder="- [ ] criterion 1&#10;- [ ] criterion 2"
+        onFileUpload={handleFileUpload}
       />
 
       {error && <p className="text-sm text-danger">{error}</p>}

@@ -39,11 +39,36 @@ export function useApi() {
     [getAuthHeader]
   );
 
+  const upload = useCallback(
+    async (url: string, formData: FormData) => {
+      const authHeader = getAuthHeader();
+      const headers: Record<string, string> = {};
+      if (authHeader) {
+        headers["Authorization"] = authHeader;
+      }
+
+      const res = await fetch(url, {
+        method: "POST",
+        headers,
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({ error: res.statusText }));
+        throw new Error(error.error || res.statusText);
+      }
+
+      return res.json();
+    },
+    [getAuthHeader]
+  );
+
   return {
     get: (url: string) => request("GET", url),
     post: (url: string, body: unknown) => request("POST", url, { body }),
     put: (url: string, body: unknown) => request("PUT", url, { body }),
     patch: (url: string, body: unknown) => request("PATCH", url, { body }),
     del: (url: string, body?: unknown) => request("DELETE", url, { body }),
+    upload,
   };
 }
