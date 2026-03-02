@@ -114,6 +114,27 @@ export default function KanbanPage() {
         </div>
       </div>
 
+      {tasks.length > 0 && (
+        <div className="mb-4">
+          <div className="flex items-center justify-between text-xs text-text-muted mb-1">
+            <span>
+              {tasks.filter((t) => t.status === "done").length}/{tasks.length} done
+            </span>
+            <span>
+              {Math.round((tasks.filter((t) => t.status === "done").length / tasks.length) * 100)}%
+            </span>
+          </div>
+          <div className="h-1.5 bg-bg-input rounded-full overflow-hidden">
+            <div
+              className="h-full bg-status-done rounded-full transition-all duration-300"
+              style={{
+                width: `${(tasks.filter((t) => t.status === "done").length / tasks.length) * 100}%`,
+              }}
+            />
+          </div>
+        </div>
+      )}
+
       <Board
         tasks={tasks}
         projectKey={project.key}
