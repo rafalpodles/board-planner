@@ -45,6 +45,19 @@ export default function KanbanPage() {
     return () => clearInterval(interval);
   }, [loadData]);
 
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "n" && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        const tag = (e.target as HTMLElement).tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+        e.preventDefault();
+        setShowNewTask(true);
+      }
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   async function handleStatusChange(taskId: string, status: string) {
     try {
       await api.patch(
@@ -77,8 +90,8 @@ export default function KanbanPage() {
           <p className="text-sm text-text-muted">{project.key}</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" onClick={() => setShowNewTask(true)}>
-            New Task
+          <Button size="sm" onClick={() => setShowNewTask(true)} title="New Task (N)">
+            New Task <kbd className="ml-1 text-[10px] opacity-50 bg-bg-input px-1 rounded">N</kbd>
           </Button>
           <Button
             size="sm"
