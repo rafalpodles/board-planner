@@ -13,7 +13,6 @@ export type TaskStatus =
   | "in_progress"
   | "in_review"
   | "ready_to_test"
-  | "in_testing"
   | "done";
 
 export const TASK_STATUSES: TaskStatus[] = [
@@ -22,7 +21,6 @@ export const TASK_STATUSES: TaskStatus[] = [
   "in_progress",
   "in_review",
   "ready_to_test",
-  "in_testing",
   "done",
 ];
 
@@ -35,7 +33,6 @@ export const STATUS_LABELS: Record<TaskStatus, string> = {
   in_progress: "In Progress",
   in_review: "In Review",
   ready_to_test: "Ready to Test",
-  in_testing: "In Testing",
   done: "Done",
 };
 
