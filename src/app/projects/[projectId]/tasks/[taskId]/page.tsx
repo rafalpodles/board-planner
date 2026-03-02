@@ -21,7 +21,7 @@ export default function TaskDetailPage() {
 
   const [task, setTask] = useState<ApiTask | null>(null);
   const [project, setProject] = useState<ApiProject | null>(null);
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(true);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -83,24 +83,6 @@ export default function TaskDetailPage() {
     );
   }
 
-  if (editing) {
-    return (
-      <div className="max-w-2xl mx-auto">
-        <h1 className="text-2xl font-bold mb-6">Edit Task</h1>
-        <TaskForm
-          projectId={projectId}
-          task={task}
-          components={project.components}
-          onSaved={() => {
-            setEditing(false);
-            loadData();
-          }}
-          onCancel={() => setEditing(false)}
-        />
-      </div>
-    );
-  }
-
   return (
     <div className="max-w-2xl mx-auto">
       <button
@@ -120,61 +102,81 @@ export default function TaskDetailPage() {
             <Badge variant="status" value={task.status}>
               {STATUS_LABELS[task.status]}
             </Badge>
-            <Badge variant="difficulty" value={task.difficulty}>
-              {task.difficulty}
-            </Badge>
-            <Badge variant="category" value={task.category}>
-              {task.category}
-            </Badge>
-          </div>
-          <h1 className="text-2xl font-bold">{task.title}</h1>
-        </div>
-
-        {/* Meta */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-          {task.component && (
-            <div>
-              <span className="text-text-muted">Component: </span>
-              <span>{task.component}</span>
-            </div>
-          )}
-          {task.assignee && typeof task.assignee === "object" && (
-            <div>
-              <span className="text-text-muted">Assignee: </span>
-              <span>{task.assignee.fullName}</span>
-            </div>
-          )}
-          <div>
-            <span className="text-text-muted">Created: </span>
-            <span>{new Date(task.createdAt).toLocaleDateString()}</span>
           </div>
         </div>
 
-        {/* Description */}
-        {task.description && (
-          <div>
-            <h2 className="font-semibold mb-2">Description</h2>
-            <div className="text-sm text-text-muted prose prose-invert prose-sm max-w-none">
-              <Markdown>{task.description}</Markdown>
-            </div>
-          </div>
-        )}
+        {editing ? (
+          <TaskForm
+            projectId={projectId}
+            task={task}
+            components={project.components}
+            onSaved={() => {
+              setEditing(false);
+              loadData();
+            }}
+            onCancel={() => setEditing(false)}
+          />
+        ) : (
+          <>
+            <h1 className="text-2xl font-bold">{task.title}</h1>
 
-        {/* Acceptance Criteria */}
-        {task.acceptanceCriteria && (
-          <div>
-            <h2 className="font-semibold mb-2">Acceptance Criteria</h2>
-            <div className="text-sm text-text-muted prose prose-invert prose-sm max-w-none">
-              <Markdown>{task.acceptanceCriteria}</Markdown>
+            {/* Meta */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+              <div className="flex gap-2">
+                <Badge variant="difficulty" value={task.difficulty}>
+                  {task.difficulty}
+                </Badge>
+                <Badge variant="category" value={task.category}>
+                  {task.category}
+                </Badge>
+              </div>
+              {task.component && (
+                <div>
+                  <span className="text-text-muted">Component: </span>
+                  <span>{task.component}</span>
+                </div>
+              )}
+              {task.assignee && typeof task.assignee === "object" && (
+                <div>
+                  <span className="text-text-muted">Assignee: </span>
+                  <span>{task.assignee.fullName}</span>
+                </div>
+              )}
+              <div>
+                <span className="text-text-muted">Created: </span>
+                <span>{new Date(task.createdAt).toLocaleDateString()}</span>
+              </div>
             </div>
-          </div>
+
+            {/* Description */}
+            {task.description && (
+              <div>
+                <h2 className="font-semibold mb-2">Description</h2>
+                <div className="text-sm text-text-muted prose prose-invert prose-sm max-w-none">
+                  <Markdown>{task.description}</Markdown>
+                </div>
+              </div>
+            )}
+
+            {/* Acceptance Criteria */}
+            {task.acceptanceCriteria && (
+              <div>
+                <h2 className="font-semibold mb-2">Acceptance Criteria</h2>
+                <div className="text-sm text-text-muted prose prose-invert prose-sm max-w-none">
+                  <Markdown>{task.acceptanceCriteria}</Markdown>
+                </div>
+              </div>
+            )}
+          </>
         )}
 
         {/* Actions */}
         <div className="flex gap-3">
-          <Button size="sm" onClick={() => setEditing(true)}>
-            Edit
-          </Button>
+          {!editing && (
+            <Button size="sm" onClick={() => setEditing(true)}>
+              Edit
+            </Button>
+          )}
           <Button size="sm" variant="secondary" onClick={handleDuplicate}>
             Duplicate
           </Button>
