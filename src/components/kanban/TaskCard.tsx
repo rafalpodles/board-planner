@@ -1,19 +1,17 @@
 "use client";
 
-import { ApiTask, STATUS_LABELS, TASK_STATUSES } from "@/types";
+import { ApiTask } from "@/types";
 import { Badge } from "@/components/ui/Badge";
 
 interface TaskCardProps {
   task: ApiTask;
   projectKey: string;
-  onStatusChange: (taskId: string, status: string) => void;
   onClick: () => void;
 }
 
 export function TaskCard({
   task,
   projectKey,
-  onStatusChange,
   onClick,
 }: TaskCardProps) {
   return (
@@ -49,36 +47,16 @@ export function TaskCard({
         </div>
       )}
 
-      <div className="flex items-center justify-between">
-        {task.assignee && typeof task.assignee === "object" ? (
+      {task.assignee && typeof task.assignee === "object" && (
+        <div className="flex items-center">
           <span className="text-xs text-text-muted flex items-center gap-1">
             <span className="w-5 h-5 rounded-full bg-primary/30 flex items-center justify-center text-[10px] font-medium">
               {task.assignee.fullName?.charAt(0).toUpperCase() || "?"}
             </span>
             <span>{task.assignee.username}</span>
           </span>
-        ) : (
-          <span />
-        )}
-
-        <select
-          value={task.status}
-          onChange={(e) => {
-            e.stopPropagation();
-            onStatusChange(task._id, e.target.value);
-          }}
-          onClick={(e) => e.stopPropagation()}
-          className="text-xs bg-bg-input border border-border rounded px-1.5 py-1
-            text-text-muted hover:text-text focus:outline-none focus:ring-1 focus:ring-primary
-            min-h-[32px]"
-        >
-          {TASK_STATUSES.map((s) => (
-            <option key={s} value={s}>
-              {STATUS_LABELS[s]}
-            </option>
-          ))}
-        </select>
-      </div>
+        </div>
+      )}
     </div>
   );
 }

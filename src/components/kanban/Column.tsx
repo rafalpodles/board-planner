@@ -70,7 +70,6 @@ export function Column({
             key={task._id}
             task={task}
             projectKey={projectKey}
-            onStatusChange={onStatusChange}
             onClick={() => onTaskClick(task._id)}
           />
         ))}
