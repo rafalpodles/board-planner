@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { ApiTask, TaskStatus, STATUS_LABELS } from "@/types";
 import { TaskCard } from "./TaskCard";
 
@@ -27,10 +28,34 @@ export function Column({
   onStatusChange,
   onTaskClick,
 }: ColumnProps) {
+  const [isDragOver, setIsDragOver] = useState(false);
+
   return (
     <div
+      onDragOver={(e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+      }}
+      onDragEnter={(e) => {
+        e.preventDefault();
+        setIsDragOver(true);
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+          setIsDragOver(false);
+        }
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        setIsDragOver(false);
+        const taskId = e.dataTransfer.getData("text/plain");
+        if (taskId) {
+          onStatusChange(taskId, status);
+        }
+      }}
       className={`bg-bg-card rounded-xl border border-border
-        border-t-2 ${statusBorderColors[status]} flex flex-col max-h-[calc(100vh-12rem)]`}
+        border-t-2 ${statusBorderColors[status]} flex flex-col max-h-[calc(100vh-12rem)]
+        transition-colors ${isDragOver ? "bg-primary/5 border-primary/30" : ""}`}
     >
       <div className="px-3 py-2.5 flex items-center justify-between border-b border-border">
         <h3 className="text-sm font-medium">{STATUS_LABELS[status]}</h3>

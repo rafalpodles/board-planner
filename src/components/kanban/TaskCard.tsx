@@ -18,8 +18,13 @@ export function TaskCard({
 }: TaskCardProps) {
   return (
     <div
-      className="bg-bg rounded-lg border border-border p-3 cursor-pointer
-        hover:border-primary/50 transition-colors group"
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData("text/plain", task._id);
+        e.dataTransfer.effectAllowed = "move";
+      }}
+      className="bg-bg rounded-lg border border-border p-3 cursor-grab
+        hover:border-primary/50 transition-colors group active:cursor-grabbing"
       onClick={onClick}
     >
       <div className="flex items-start justify-between gap-2 mb-2">
