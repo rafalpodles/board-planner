@@ -29,7 +29,7 @@ export function Column({
 }: ColumnProps) {
   return (
     <div
-      className={`flex-shrink-0 w-[85vw] sm:w-72 bg-bg-card rounded-xl border border-border
+      className={`bg-bg-card rounded-xl border border-border
         border-t-2 ${statusBorderColors[status]} flex flex-col max-h-[calc(100vh-12rem)]`}
     >
       <div className="px-3 py-2.5 flex items-center justify-between border-b border-border">

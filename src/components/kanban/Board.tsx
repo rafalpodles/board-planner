@@ -25,19 +25,19 @@ export function Board({
   );
 
   return (
-    <div className="flex gap-4 overflow-x-auto pb-4 snap-x snap-mandatory sm:snap-none
-      -mx-4 px-4 sm:mx-0 sm:px-0">
-      {TASK_STATUSES.map((status) => (
-        <div key={status} className="snap-center">
+    <div className="overflow-x-auto pb-4">
+      <div className="grid grid-cols-6 gap-4 min-w-[960px]">
+        {TASK_STATUSES.map((status) => (
           <Column
+            key={status}
             status={status}
             tasks={grouped[status]}
             projectKey={projectKey}
             onStatusChange={onStatusChange}
             onTaskClick={onTaskClick}
           />
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   );
 }
