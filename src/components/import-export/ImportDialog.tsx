@@ -57,6 +57,65 @@ export function ImportDialog({
   return (
     <Modal open={open} onClose={onClose} title="Import Tasks from Markdown">
       <form onSubmit={handleSubmit} className="space-y-4">
+        <details className="rounded-lg border border-border bg-bg-hover/50 text-sm">
+          <summary className="cursor-pointer px-4 py-2 font-medium text-text-muted hover:text-text select-none">
+            Format instructions & example
+          </summary>
+          <div className="px-4 pb-3 pt-1 space-y-2 text-text-muted">
+            <p>
+              Each task uses <strong>YAML frontmatter</strong> + optional
+              markdown body. Separate multiple tasks with{" "}
+              <code className="bg-bg-card px-1 rounded">===</code>.
+            </p>
+            <div className="text-xs space-y-1">
+              <p>
+                <strong>Required:</strong>{" "}
+                <code className="bg-bg-card px-1 rounded">title</code>,{" "}
+                <code className="bg-bg-card px-1 rounded">category</code>{" "}
+                (bug | doc | user-story | idea)
+              </p>
+              <p>
+                <strong>Optional:</strong>{" "}
+                <code className="bg-bg-card px-1 rounded">difficulty</code>{" "}
+                (S | M | L | XL),{" "}
+                <code className="bg-bg-card px-1 rounded">status</code>,{" "}
+                <code className="bg-bg-card px-1 rounded">assignee</code>,{" "}
+                <code className="bg-bg-card px-1 rounded">component</code>
+              </p>
+            </div>
+            <pre className="bg-bg-card rounded-lg p-3 overflow-x-auto text-xs leading-relaxed whitespace-pre">{`---
+title: Add dark mode support
+category: user-story
+difficulty: M
+assignee: rpo
+component: ui
+---
+
+## Description
+
+Implement theme switching with system
+preference detection.
+
+## Acceptance Criteria
+
+- Toggle in settings switches theme
+- System preference is respected
+
+===
+
+---
+title: Fix login redirect loop
+category: bug
+difficulty: S
+---
+
+## Description
+
+After session expires, login redirects
+back to login page in a loop.`}</pre>
+          </div>
+        </details>
+
         <div>
           <label className="block text-sm font-medium text-text-muted mb-2">
             Upload .md file
