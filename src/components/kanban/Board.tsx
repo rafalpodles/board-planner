@@ -26,7 +26,7 @@ export function Board({
 
   return (
     <div className="overflow-x-auto pb-4">
-      <div className="grid grid-cols-6 gap-4 min-w-[960px]">
+      <div className="grid grid-cols-6 gap-4 min-w-[1200px]">
         {TASK_STATUSES.map((status) => (
           <Column
             key={status}
