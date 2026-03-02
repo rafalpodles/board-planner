@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
 import { ApiProject, ApiTask } from "@/types";
 import { Board } from "@/components/kanban/Board";
+import { BoardFilters } from "@/components/kanban/BoardFilters";
 import { TaskForm } from "@/components/tasks/TaskForm";
 import { ImportDialog } from "@/components/import-export/ImportDialog";
 import { ExportDialog } from "@/components/import-export/ExportDialog";
@@ -18,6 +19,7 @@ export default function KanbanPage() {
 
   const [project, setProject] = useState<ApiProject | null>(null);
   const [tasks, setTasks] = useState<ApiTask[]>([]);
+  const [filteredTasks, setFilteredTasks] = useState<ApiTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [showNewTask, setShowNewTask] = useState(false);
   const [showImport, setShowImport] = useState(false);
@@ -127,6 +129,12 @@ export default function KanbanPage() {
         </div>
       </div>
 
+      <BoardFilters
+        tasks={tasks}
+        components={project.components}
+        onFilter={setFilteredTasks}
+      />
+
       {tasks.length > 0 && (
         <div className="mb-4">
           <div className="flex items-center justify-between text-xs text-text-muted mb-1">
@@ -149,7 +157,7 @@ export default function KanbanPage() {
       )}
 
       <Board
-        tasks={tasks}
+        tasks={filteredTasks}
         projectKey={project.key}
         onStatusChange={handleStatusChange}
         onTaskClick={(taskId) =>
