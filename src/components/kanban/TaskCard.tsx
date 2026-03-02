@@ -38,6 +38,12 @@ export function TaskCard({
 
       <h3 className="text-sm font-medium mb-2 line-clamp-2">{task.title}</h3>
 
+      {task.component && (
+        <div className="mb-2">
+          <Badge className="text-[10px]">{task.component}</Badge>
+        </div>
+      )}
+
       <div className="flex items-center justify-between">
         {task.assignee && typeof task.assignee === "object" ? (
           <span className="text-xs text-text-muted flex items-center gap-1">
