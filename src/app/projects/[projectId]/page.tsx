@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
 import { ApiProject, ApiTask, TASK_STATUSES, STATUS_LABELS } from "@/types";
@@ -28,6 +28,20 @@ export default function KanbanPage() {
   const [selectedTasks, setSelectedTasks] = useState<Set<string>>(new Set());
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+
+  // Tick every 60s so the activity indicator transitions from Working → Idle
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const activityStatus = useMemo(() => {
+    if (tasks.length === 0) return null;
+    const latest = Math.max(...tasks.map((t) => new Date(t.updatedAt).getTime()));
+    const minutesAgo = (now - latest) / 60_000;
+    return minutesAgo < 15 ? "working" : "idle";
+  }, [tasks, now]);
 
   const loadData = useCallback(async () => {
     try {
@@ -37,6 +51,7 @@ export default function KanbanPage() {
       ]);
       setProject(proj);
       setTasks(taskList);
+      setNow(Date.now());
     } catch (err) {
       console.error(err);
     } finally {
@@ -147,7 +162,21 @@ export default function KanbanPage() {
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-6">
         <div>
           <h1 className="text-2xl font-bold">{project.name}</h1>
-          <p className="text-sm text-text-muted">{project.key}</p>
+          <div className="flex items-center gap-2">
+            <p className="text-sm text-text-muted">{project.key}</p>
+            {activityStatus && (
+              <span className="flex items-center gap-1 text-xs text-text-muted">
+                <span
+                  className={`w-2 h-2 rounded-full ${
+                    activityStatus === "working"
+                      ? "bg-green-500 animate-pulse"
+                      : "bg-gray-500"
+                  }`}
+                />
+                {activityStatus === "working" ? "Working" : "Idle"}
+              </span>
+            )}
+          </div>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button size="sm" onClick={() => setShowNewTask(true)} title="New Task (N)">
