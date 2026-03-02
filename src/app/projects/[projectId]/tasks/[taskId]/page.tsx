@@ -46,6 +46,23 @@ export default function TaskDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId]);
 
+  async function handleDuplicate() {
+    try {
+      const created = await api.post(`/api/projects/${projectId}/tasks`, {
+        title: `Copy of ${task!.title}`,
+        description: task!.description,
+        difficulty: task!.difficulty,
+        category: task!.category,
+        component: task!.component,
+        acceptanceCriteria: task!.acceptanceCriteria,
+        status: "planned",
+      });
+      router.push(`/projects/${projectId}/tasks/${created._id}`);
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
   async function handleDelete() {
     setDeleting(true);
     try {
@@ -157,6 +174,9 @@ export default function TaskDetailPage() {
         <div className="flex gap-3">
           <Button size="sm" onClick={() => setEditing(true)}>
             Edit
+          </Button>
+          <Button size="sm" variant="secondary" onClick={handleDuplicate}>
+            Duplicate
           </Button>
           <Button size="sm" variant="danger" onClick={() => setConfirmDelete(true)}>
             Delete
