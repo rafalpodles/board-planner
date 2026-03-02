@@ -18,6 +18,12 @@ export function Navbar() {
 
         {user && (
           <div className="flex items-center gap-3">
+            <Link
+              href="/users"
+              className="text-sm text-text-muted hover:text-text min-h-[44px] flex items-center"
+            >
+              Users
+            </Link>
             <span className="text-sm text-text-muted hidden sm:inline">
               {user.fullName}
             </span>
