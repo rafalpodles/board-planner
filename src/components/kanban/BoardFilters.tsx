@@ -1,7 +1,16 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { ApiTask, DIFFICULTIES, CATEGORIES, Difficulty, Category } from "@/types";
+import {
+  ApiTask,
+  DIFFICULTIES,
+  CATEGORIES,
+  SORT_OPTIONS,
+  SortField,
+  SortDir,
+  Difficulty,
+  Category,
+} from "@/types";
 
 interface Filters {
   search: string;
@@ -25,6 +34,8 @@ export function BoardFilters({ tasks, components, onFilter }: BoardFiltersProps)
     category: "",
     difficulty: "",
   });
+  const [sortField, setSortField] = useState<SortField>("updatedAt");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [showFilters, setShowFilters] = useState(false);
 
   const assignees = Array.from(
@@ -65,9 +76,33 @@ export function BoardFilters({ tasks, components, onFilter }: BoardFiltersProps)
       result = result.filter((t) => t.difficulty === filters.difficulty);
     }
 
+    // Sort
+    const difficultyOrder: Record<string, number> = { S: 0, M: 1, L: 2, XL: 3 };
+    const dir = sortDir === "asc" ? 1 : -1;
+
+    result = [...result].sort((a, b) => {
+      let cmp = 0;
+      switch (sortField) {
+        case "updatedAt":
+        case "createdAt":
+          cmp = new Date(a[sortField]).getTime() - new Date(b[sortField]).getTime();
+          break;
+        case "difficulty":
+          cmp = (difficultyOrder[a.difficulty] ?? 0) - (difficultyOrder[b.difficulty] ?? 0);
+          break;
+        case "category":
+          cmp = a.category.localeCompare(b.category);
+          break;
+        case "title":
+          cmp = a.title.localeCompare(b.title);
+          break;
+      }
+      return cmp * dir;
+    });
+
     onFilter(result);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters, tasks]);
+  }, [filters, tasks, sortField, sortDir]);
 
   function clearFilters() {
     setFilters({ search: "", assignee: "", component: "", category: "", difficulty: "" });
@@ -94,6 +129,28 @@ export function BoardFilters({ tasks, components, onFilter }: BoardFiltersProps)
               text-text placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-primary"
           />
         </div>
+
+        <select
+          value={sortField}
+          onChange={(e) => {
+            const field = e.target.value as SortField;
+            setSortField(field);
+            setSortDir(SORT_OPTIONS.find((o) => o.value === field)?.defaultDir ?? "desc");
+          }}
+          className="text-xs bg-bg-input border border-border rounded-lg px-2 py-1.5 text-text-muted focus:outline-none focus:ring-1 focus:ring-primary"
+        >
+          {SORT_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </select>
+
+        <button
+          onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}
+          className="text-xs px-2 py-1.5 rounded-lg border border-border text-text-muted hover:text-text hover:border-border transition-colors"
+          title={sortDir === "asc" ? "Ascending" : "Descending"}
+        >
+          {sortDir === "asc" ? "\u2191" : "\u2193"}
+        </button>
 
         <button
           onClick={() => setShowFilters(!showFilters)}

@@ -130,6 +130,18 @@ export interface ApiComment {
   createdAt: string;
 }
 
+// Sort options for board columns
+export type SortField = "updatedAt" | "createdAt" | "difficulty" | "category" | "title";
+export type SortDir = "asc" | "desc";
+
+export const SORT_OPTIONS: { value: SortField; label: string; defaultDir: SortDir }[] = [
+  { value: "updatedAt", label: "Last updated", defaultDir: "desc" },
+  { value: "createdAt", label: "Created", defaultDir: "desc" },
+  { value: "difficulty", label: "Difficulty", defaultDir: "asc" },
+  { value: "category", label: "Category", defaultDir: "asc" },
+  { value: "title", label: "Title", defaultDir: "asc" },
+];
+
 // Parsed markdown task for import
 export interface ParsedTask {
   title: string;
