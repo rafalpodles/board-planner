@@ -49,7 +49,8 @@ export function Board({
           ))}
         </div>
       </div>
-      {/* Scroll hint fade on right edge for small screens */}
+      {/* Scroll hint fades on edges for small screens */}
+      <div className="pointer-events-none absolute left-0 top-0 bottom-0 w-8 bg-gradient-to-r from-bg to-transparent sm:hidden" />
       <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-bg to-transparent sm:hidden" />
     </div>
   );
