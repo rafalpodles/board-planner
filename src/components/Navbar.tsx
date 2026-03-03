@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useAuth } from "@/hooks/use-auth";
 import { useRouter } from "next/navigation";
 import { useState, useRef, useEffect } from "react";
@@ -26,7 +27,8 @@ export function Navbar() {
   return (
     <nav className="border-b border-border bg-bg-card sticky top-0 z-40">
       <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between">
-        <Link href="/projects" className="font-bold text-lg">
+        <Link href="/projects" className="font-bold text-lg flex items-center gap-2">
+          <Image src="/logo.svg" alt="ClaudePlanner" width={24} height={24} />
           ClaudePlanner
         </Link>
 
