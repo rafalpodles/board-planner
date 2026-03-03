@@ -23,10 +23,11 @@ interface Filters {
 interface BoardFiltersProps {
   tasks: ApiTask[];
   components: string[];
+  currentUsername?: string;
   onFilter: (filtered: ApiTask[]) => void;
 }
 
-export function BoardFilters({ tasks, components, onFilter }: BoardFiltersProps) {
+export function BoardFilters({ tasks, components, currentUsername, onFilter }: BoardFiltersProps) {
   const [filters, setFilters] = useState<Filters>({
     search: "",
     assignee: "",
@@ -34,6 +35,7 @@ export function BoardFilters({ tasks, components, onFilter }: BoardFiltersProps)
     category: "",
     difficulty: "",
   });
+  const [myTasks, setMyTasks] = useState(false);
   const [sortField, setSortField] = useState<SortField>("updatedAt");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [showFilters, setShowFilters] = useState(false);
@@ -49,7 +51,7 @@ export function BoardFilters({ tasks, components, onFilter }: BoardFiltersProps)
     ).values()
   );
 
-  const hasActiveFilters = filters.assignee || filters.component || filters.category || filters.difficulty;
+  const hasActiveFilters = myTasks || filters.assignee || filters.component || filters.category || filters.difficulty;
 
   useEffect(() => {
     let result = tasks;
@@ -57,6 +59,14 @@ export function BoardFilters({ tasks, components, onFilter }: BoardFiltersProps)
     if (filters.search) {
       const q = filters.search.toLowerCase();
       result = result.filter((t) => t.title.toLowerCase().includes(q));
+    }
+    if (myTasks && currentUsername) {
+      result = result.filter(
+        (t) =>
+          t.assignee &&
+          typeof t.assignee === "object" &&
+          t.assignee.username === currentUsername
+      );
     }
     if (filters.assignee) {
       result = result.filter(
@@ -102,9 +112,10 @@ export function BoardFilters({ tasks, components, onFilter }: BoardFiltersProps)
 
     onFilter(result);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters, tasks, sortField, sortDir]);
+  }, [filters, tasks, sortField, sortDir, myTasks, currentUsername]);
 
   function clearFilters() {
+    setMyTasks(false);
     setFilters({ search: "", assignee: "", component: "", category: "", difficulty: "" });
   }
 
@@ -129,6 +140,19 @@ export function BoardFilters({ tasks, components, onFilter }: BoardFiltersProps)
               text-text placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-primary"
           />
         </div>
+
+        {currentUsername && (
+          <button
+            onClick={() => setMyTasks((v) => !v)}
+            className={`text-xs px-3 py-1.5 rounded-lg border transition-colors
+              ${myTasks
+                ? "border-primary bg-primary/10 text-primary"
+                : "border-border text-text-muted hover:text-text hover:border-border"
+              }`}
+          >
+            My tasks
+          </button>
+        )}
 
         <select
           value={sortField}

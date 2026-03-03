@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useApi } from "@/hooks/use-api";
+import { useAuth } from "@/hooks/use-auth";
 import { ApiProject, ApiTask, TASK_STATUSES, STATUS_LABELS } from "@/types";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Board } from "@/components/kanban/Board";
@@ -19,6 +20,7 @@ export default function KanbanPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const router = useRouter();
   const api = useApi();
+  const { user } = useAuth();
   const { toast } = useToast();
 
   const [project, setProject] = useState<ApiProject | null>(null);
@@ -252,6 +254,7 @@ export default function KanbanPage() {
       <BoardFilters
         tasks={tasks}
         components={project.components}
+        currentUsername={user?.username}
         onFilter={setFilteredTasks}
       />
 
