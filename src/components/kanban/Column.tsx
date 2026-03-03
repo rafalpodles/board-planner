@@ -81,8 +81,8 @@ export function Column({
           />
         ))}
         {tasks.length === 0 && (
-          <p className="text-xs text-text-muted text-center py-4">
-            No tasks
+          <p className="text-xs text-text-muted/50 text-center py-6">
+            Drop tasks here
           </p>
         )}
       </div>

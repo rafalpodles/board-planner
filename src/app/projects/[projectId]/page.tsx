@@ -264,6 +264,19 @@ export default function KanbanPage() {
         </div>
       )}
 
+      {tasks.length === 0 && (
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+          <svg className="w-16 h-16 text-text-muted/30 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+          </svg>
+          <h2 className="text-lg font-medium text-text-muted mb-2">No tasks yet</h2>
+          <p className="text-sm text-text-muted/70 mb-4">Create your first task to get started</p>
+          <Button size="sm" onClick={() => setShowNewTask(true)}>
+            Create Task
+          </Button>
+        </div>
+      )}
+
       {selectedTasks.size > 0 && (
         <div className="mb-4 flex items-center gap-3 bg-bg-card border border-primary/30 rounded-lg px-4 py-2.5">
           <span className="text-sm font-medium">
