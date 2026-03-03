@@ -1,8 +1,10 @@
 import mongoose from "mongoose";
 import { connectDB } from "@/lib/db";
-import { withAuth } from "@/lib/middleware";
 
-export const GET = withAuth(async (_request, { params }) => {
+export async function GET(
+  _request: Request,
+  { params }: { params: Promise<Record<string, string>> }
+) {
   await connectDB();
   const { fileId } = await params;
 
@@ -50,4 +52,4 @@ export const GET = withAuth(async (_request, { params }) => {
       "Cache-Control": "public, max-age=31536000, immutable",
     },
   });
-});
+}

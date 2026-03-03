@@ -96,6 +96,19 @@ export default function TaskDetailPage() {
     }
   }
 
+  const markdownComponents = {
+    img: ({ src, alt, ...props }: React.ImgHTMLAttributes<HTMLImageElement>) => (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={src}
+        alt={alt || ""}
+        {...props}
+        className="rounded-lg max-w-full h-auto border border-border"
+        loading="lazy"
+      />
+    ),
+  };
+
   if (loading || !task || !project) {
     return (
       <div className="flex justify-center py-12">
@@ -182,7 +195,7 @@ export default function TaskDetailPage() {
               <div>
                 <h2 className="font-semibold mb-2">Description</h2>
                 <div className="text-sm text-text-muted prose prose-invert prose-sm max-w-none">
-                  <Markdown>{task.description}</Markdown>
+                  <Markdown components={markdownComponents}>{task.description}</Markdown>
                 </div>
               </div>
             )}
@@ -192,7 +205,7 @@ export default function TaskDetailPage() {
               <div>
                 <h2 className="font-semibold mb-2">Acceptance Criteria</h2>
                 <div className="text-sm text-text-muted prose prose-invert prose-sm max-w-none">
-                  <Markdown>{task.acceptanceCriteria}</Markdown>
+                  <Markdown components={markdownComponents}>{task.acceptanceCriteria}</Markdown>
                 </div>
               </div>
             )}
