@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <rect width="32" height="32" rx="8" fill="#3b82f6"/>
+  <!-- Three kanban columns with staggered cards -->
+  <!-- Column 1: 2 cards -->
+  <rect x="5" y="6" width="6" height="4" rx="1" fill="white" opacity="0.9"/>
+  <rect x="5" y="12" width="6" height="4" rx="1" fill="white" opacity="0.6"/>
+  <!-- Column 2: 3 cards -->
+  <rect x="13" y="6" width="6" height="4" rx="1" fill="white" opacity="0.9"/>
+  <rect x="13" y="12" width="6" height="4" rx="1" fill="white" opacity="0.6"/>
+  <rect x="13" y="18" width="6" height="4" rx="1" fill="white" opacity="0.4"/>
+  <!-- Column 3: 1 card -->
+  <rect x="21" y="6" width="6" height="4" rx="1" fill="white" opacity="0.9"/>
+</svg>
