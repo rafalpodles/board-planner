@@ -12,6 +12,7 @@ import { BoardFilters } from "@/components/kanban/BoardFilters";
 import { TaskForm } from "@/components/tasks/TaskForm";
 import { ImportDialog } from "@/components/import-export/ImportDialog";
 import { ExportDialog } from "@/components/import-export/ExportDialog";
+import { TaskContextMenu } from "@/components/kanban/TaskContextMenu";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
@@ -33,6 +34,8 @@ export default function KanbanPage() {
   const [selectedTasks, setSelectedTasks] = useState<Set<string>>(new Set());
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ taskId: string; x: number; y: number } | null>(null);
+  const [confirmContextDelete, setConfirmContextDelete] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
   // Tick every 60s so the activity indicator transitions from Working → Idle
@@ -170,6 +173,40 @@ export default function KanbanPage() {
     } catch (err) {
       console.error(err);
       toast("Failed to update status", "error");
+    }
+  }
+
+  async function handleContextDuplicate(taskId: string) {
+    const task = tasks.find((t) => t._id === taskId);
+    if (!task) return;
+    try {
+      await api.post(`/api/projects/${projectId}/tasks`, {
+        title: `Copy of ${task.title}`,
+        description: task.description,
+        difficulty: task.difficulty,
+        category: task.category,
+        component: task.component,
+        acceptanceCriteria: task.acceptanceCriteria,
+        status: "planned",
+      });
+      toast("Task duplicated", "success");
+      loadData();
+    } catch (err) {
+      console.error(err);
+      toast("Failed to duplicate task", "error");
+    }
+  }
+
+  async function handleContextDelete(taskId: string) {
+    try {
+      await api.del(`/api/projects/${projectId}/tasks/${taskId}`);
+      setTasks((prev) => prev.filter((t) => t._id !== taskId));
+      toast("Task deleted", "success");
+    } catch (err) {
+      console.error(err);
+      toast("Failed to delete task", "error");
+    } finally {
+      setConfirmContextDelete(null);
     }
   }
 
@@ -335,6 +372,35 @@ export default function KanbanPage() {
           router.push(`/projects/${projectId}/tasks/${taskId}`)
         }
         onTaskSelect={handleTaskSelect}
+        onTaskContextMenu={(taskId, x, y) => setContextMenu({ taskId, x, y })}
+      />
+
+      {contextMenu && (() => {
+        const task = tasks.find((t) => t._id === contextMenu.taskId);
+        if (!task) return null;
+        return (
+          <TaskContextMenu
+            x={contextMenu.x}
+            y={contextMenu.y}
+            currentStatus={task.status}
+            onStatusChange={(status) => handleStatusChange(contextMenu.taskId, status)}
+            onDuplicate={() => handleContextDuplicate(contextMenu.taskId)}
+            onDelete={() => {
+              setConfirmContextDelete(contextMenu.taskId);
+              setContextMenu(null);
+            }}
+            onClose={() => setContextMenu(null)}
+          />
+        );
+      })()}
+
+      <ConfirmDialog
+        open={!!confirmContextDelete}
+        onClose={() => setConfirmContextDelete(null)}
+        onConfirm={() => confirmContextDelete && handleContextDelete(confirmContextDelete)}
+        title="Delete Task"
+        message="Are you sure you want to delete this task? This action cannot be undone."
+        confirmLabel="Delete"
       />
 
       <Modal

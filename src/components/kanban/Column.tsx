@@ -21,6 +21,7 @@ interface ColumnProps {
   onStatusChange: (taskId: string, status: string) => void;
   onTaskClick: (taskId: string) => void;
   onTaskSelect?: (taskId: string) => void;
+  onTaskContextMenu?: (taskId: string, x: number, y: number) => void;
 }
 
 export function Column({
@@ -31,6 +32,7 @@ export function Column({
   onStatusChange,
   onTaskClick,
   onTaskSelect,
+  onTaskContextMenu,
 }: ColumnProps) {
   const [isDragOver, setIsDragOver] = useState(false);
 
@@ -78,6 +80,7 @@ export function Column({
             selectionActive={(selectedTasks?.size ?? 0) > 0}
             onSelect={onTaskSelect}
             onClick={() => onTaskClick(task._id)}
+            onContextMenu={onTaskContextMenu}
           />
         ))}
         {tasks.length === 0 && (

@@ -10,6 +10,7 @@ interface TaskCardProps {
   selectionActive?: boolean;
   onSelect?: (taskId: string) => void;
   onClick: () => void;
+  onContextMenu?: (taskId: string, x: number, y: number) => void;
 }
 
 export function TaskCard({
@@ -19,6 +20,7 @@ export function TaskCard({
   selectionActive = false,
   onSelect,
   onClick,
+  onContextMenu,
 }: TaskCardProps) {
   return (
     <div
@@ -30,6 +32,10 @@ export function TaskCard({
       className={`bg-bg rounded-lg border p-3 cursor-grab
         transition-colors group active:cursor-grabbing relative
         ${selected ? "border-primary bg-primary/5" : "border-border hover:border-primary/50"}`}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onContextMenu?.(task._id, e.clientX, e.clientY);
+      }}
       onClick={(e) => {
         if (e.ctrlKey || e.metaKey) {
           e.preventDefault();

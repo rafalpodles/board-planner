@@ -10,6 +10,7 @@ interface BoardProps {
   onStatusChange: (taskId: string, status: string) => void;
   onTaskClick: (taskId: string) => void;
   onTaskSelect?: (taskId: string) => void;
+  onTaskContextMenu?: (taskId: string, x: number, y: number) => void;
 }
 
 export function Board({
@@ -19,6 +20,7 @@ export function Board({
   onStatusChange,
   onTaskClick,
   onTaskSelect,
+  onTaskContextMenu,
 }: BoardProps) {
   const grouped = TASK_STATUSES.reduce(
     (acc, status) => {
@@ -45,6 +47,7 @@ export function Board({
               onStatusChange={onStatusChange}
               onTaskClick={onTaskClick}
               onTaskSelect={onTaskSelect}
+              onTaskContextMenu={onTaskContextMenu}
             />
           ))}
         </div>
