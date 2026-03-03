@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { Textarea } from "@/components/ui/Textarea";
 import { Button } from "@/components/ui/Button";
+import { useToast } from "@/components/ui/Toast";
 import {
   ApiTask,
   ApiUser,
@@ -51,6 +52,7 @@ export function TaskForm({
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const api = useApi();
+  const { toast } = useToast();
 
   useEffect(() => {
     api.get("/api/users").then(setUsers).catch(console.error);
@@ -93,6 +95,7 @@ export function TaskForm({
       } else {
         await api.post(`/api/projects/${projectId}/tasks`, body);
       }
+      toast(task ? "Task updated" : "Task created", "success");
       onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save");

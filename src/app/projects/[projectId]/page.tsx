@@ -12,11 +12,13 @@ import { ImportDialog } from "@/components/import-export/ImportDialog";
 import { ExportDialog } from "@/components/import-export/ExportDialog";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
+import { useToast } from "@/components/ui/Toast";
 
 export default function KanbanPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const router = useRouter();
   const api = useApi();
+  const { toast } = useToast();
 
   const [project, setProject] = useState<ApiProject | null>(null);
   const [tasks, setTasks] = useState<ApiTask[]>([]);
@@ -110,8 +112,10 @@ export default function KanbanPage() {
         )
       );
       setSelectedTasks(new Set());
+      toast(`Moved ${selectedTasks.size} task${selectedTasks.size === 1 ? "" : "s"}`, "success");
     } catch (err) {
       console.error(err);
+      toast("Failed to move tasks", "error");
     }
   }
 
@@ -124,10 +128,13 @@ export default function KanbanPage() {
         )
       );
       setTasks((prev) => prev.filter((t) => !selectedTasks.has(t._id)));
+      const count = selectedTasks.size;
       setSelectedTasks(new Set());
       setConfirmBulkDelete(false);
+      toast(`Deleted ${count} task${count === 1 ? "" : "s"}`, "success");
     } catch (err) {
       console.error(err);
+      toast("Failed to delete tasks", "error");
     } finally {
       setBulkDeleting(false);
     }
@@ -146,6 +153,7 @@ export default function KanbanPage() {
       );
     } catch (err) {
       console.error(err);
+      toast("Failed to update status", "error");
     }
   }
 

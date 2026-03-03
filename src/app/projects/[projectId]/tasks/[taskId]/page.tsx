@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { TaskForm } from "@/components/tasks/TaskForm";
 import { Comments } from "@/components/tasks/Comments";
+import { useToast } from "@/components/ui/Toast";
 
 export default function TaskDetailPage() {
   const { projectId, taskId } = useParams<{
@@ -18,6 +19,7 @@ export default function TaskDetailPage() {
   }>();
   const router = useRouter();
   const api = useApi();
+  const { toast } = useToast();
 
   const [task, setTask] = useState<ApiTask | null>(null);
   const [project, setProject] = useState<ApiProject | null>(null);
@@ -57,6 +59,7 @@ export default function TaskDetailPage() {
       );
     } catch (err) {
       console.error(err);
+      toast("Failed to update status", "error");
     }
   }
 
@@ -71,9 +74,11 @@ export default function TaskDetailPage() {
         acceptanceCriteria: task!.acceptanceCriteria,
         status: "planned",
       });
+      toast("Task duplicated", "success");
       router.push(`/projects/${projectId}/tasks/${created._id}`);
     } catch (err) {
       console.error(err);
+      toast("Failed to duplicate task", "error");
     }
   }
 
@@ -81,9 +86,11 @@ export default function TaskDetailPage() {
     setDeleting(true);
     try {
       await api.del(`/api/projects/${projectId}/tasks/${taskId}`);
+      toast("Task deleted", "success");
       router.push(`/projects/${projectId}`);
     } catch (err) {
       console.error(err);
+      toast("Failed to delete task", "error");
       setDeleting(false);
       setConfirmDelete(false);
     }
