@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
+import Link from "next/link";
 import { useApi } from "@/hooks/use-api";
 import { ApiProject, ApiTask, TASK_STATUSES, STATUS_LABELS } from "@/types";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -182,8 +183,19 @@ export default function KanbanPage() {
     <div>
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-6">
         <div>
-          <h1 className="text-2xl font-bold">{project.name}</h1>
           <div className="flex items-center gap-2">
+            <Link
+              href="/projects"
+              className="text-text-muted hover:text-text transition-colors"
+              title="All projects"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+            </Link>
+            <h1 className="text-2xl font-bold">{project.name}</h1>
+          </div>
+          <div className="flex items-center gap-2 ml-7">
             <p className="text-sm text-text-muted">{project.key}</p>
             {activityStatus && (
               <span className="flex items-center gap-1 text-xs text-text-muted">
