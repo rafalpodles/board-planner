@@ -68,6 +68,19 @@ export default function KanbanPage() {
     return () => clearInterval(interval);
   }, [loadData]);
 
+  // Update browser tab title with task counts
+  useEffect(() => {
+    if (!project) return;
+    const todoCount = tasks.filter((t) => t.status === "todo").length;
+    const inProgressCount = tasks.filter((t) => t.status === "in_progress").length;
+    const parts: string[] = [];
+    if (inProgressCount > 0) parts.push(`${inProgressCount} in progress`);
+    if (todoCount > 0) parts.push(`${todoCount} todo`);
+    const suffix = parts.length > 0 ? ` (${parts.join(", ")})` : "";
+    document.title = `${project.name}${suffix} — ClaudePlanner`;
+    return () => { document.title = "ClaudePlanner"; };
+  }, [project, tasks]);
+
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       const tag = (e.target as HTMLElement).tagName;
