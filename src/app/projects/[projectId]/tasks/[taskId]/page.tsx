@@ -48,6 +48,15 @@ export default function TaskDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId]);
 
+  useEffect(() => {
+    if (!editing) return;
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setEditing(false);
+    }
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [editing]);
+
   async function handleStatusChange(newStatus: string) {
     try {
       await api.patch(
