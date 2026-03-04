@@ -5,6 +5,7 @@ import { Task } from "@/models/task";
 import { Project } from "@/models/project";
 import { User } from "@/models/user";
 import { TASK_STATUSES, TaskStatus } from "@/types";
+import { logActivity } from "@/lib/activity";
 
 const populateFields = [
   { path: "assignee", select: "username fullName" },
@@ -106,6 +107,8 @@ export const POST = withAuth(async (request, { params, user }) => {
   });
 
   const populated = await Task.findById(task._id).populate(populateFields);
+
+  await logActivity(task._id, user._id, "created");
 
   return NextResponse.json(populated, { status: 201 });
 });

@@ -156,6 +156,37 @@ export const SORT_OPTIONS: { value: SortField; label: string; defaultDir: SortDi
   { value: "title", label: "Title", defaultDir: "asc" },
 ];
 
+// Activity log
+export type ActivityAction =
+  | "created"
+  | "updated"
+  | "status_changed"
+  | "comment_added"
+  | "comment_edited"
+  | "comment_deleted";
+
+export interface IActivityLog {
+  _id: Types.ObjectId;
+  task: Types.ObjectId;
+  user: Types.ObjectId | IUser;
+  action: ActivityAction;
+  field: string;
+  oldValue: string;
+  newValue: string;
+  createdAt: Date;
+}
+
+export interface ApiActivityLog {
+  _id: string;
+  task: string;
+  user: { _id: string; username: string; fullName: string } | string;
+  action: ActivityAction;
+  field: string;
+  oldValue: string;
+  newValue: string;
+  createdAt: string;
+}
+
 // Parsed markdown task for import
 export interface ParsedTask {
   title: string;

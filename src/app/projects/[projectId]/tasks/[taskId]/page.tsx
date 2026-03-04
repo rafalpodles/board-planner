@@ -13,6 +13,7 @@ import { TaskForm } from "@/components/tasks/TaskForm";
 import { Comments } from "@/components/tasks/Comments";
 import { TaskLinks } from "@/components/tasks/TaskLinks";
 import { useToast } from "@/components/ui/Toast";
+import { ActivityTimeline } from "@/components/tasks/ActivityTimeline";
 
 export default function TaskDetailPage() {
   const { projectId, taskId } = useParams<{
@@ -250,6 +251,11 @@ export default function TaskDetailPage() {
         {/* Comments */}
         <div className="border-t border-border pt-6">
           <Comments projectId={projectId} taskId={taskId} />
+        </div>
+
+        {/* Activity Log */}
+        <div className="border-t border-border pt-6">
+          <ActivityTimeline projectId={projectId} taskId={taskId} />
         </div>
       </div>
 

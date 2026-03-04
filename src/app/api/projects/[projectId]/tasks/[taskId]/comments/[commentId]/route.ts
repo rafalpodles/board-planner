@@ -3,6 +3,7 @@ import { connectDB } from "@/lib/db";
 import { withAuth } from "@/lib/middleware";
 import { Comment } from "@/models/comment";
 import { Task } from "@/models/task";
+import { logActivity } from "@/lib/activity";
 
 export const PUT = withAuth(async (request, { params, user }) => {
   const { projectId, taskId, commentId } = await params;
@@ -38,6 +39,8 @@ export const PUT = withAuth(async (request, { params, user }) => {
     select: "username fullName",
   });
 
+  await logActivity(taskId, user._id, "comment_edited");
+
   return NextResponse.json(populated);
 });
 
@@ -60,6 +63,8 @@ export const DELETE = withAuth(async (_request, { params, user }) => {
   }
 
   await comment.deleteOne();
+
+  await logActivity(taskId, user._id, "comment_deleted");
 
   return NextResponse.json({ message: "Comment deleted" });
 });

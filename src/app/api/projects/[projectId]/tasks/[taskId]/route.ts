@@ -4,6 +4,7 @@ import { withAuth } from "@/lib/middleware";
 import { Task } from "@/models/task";
 import { Comment } from "@/models/comment";
 import { User } from "@/models/user";
+import { logActivity } from "@/lib/activity";
 
 const populateFields = [
   { path: "assignee", select: "username fullName" },
@@ -35,7 +36,7 @@ export const GET = withAuth(async (_request, { params }) => {
   return NextResponse.json(taskObj);
 });
 
-export const PUT = withAuth(async (request, { params }) => {
+export const PUT = withAuth(async (request, { params, user }) => {
   const { projectId, taskId } = await params;
   await connectDB();
 
@@ -51,6 +52,14 @@ export const PUT = withAuth(async (request, { params }) => {
     if (body[field] !== undefined) {
       updates[field] = body[field];
     }
+  }
+
+  // Read old values before updating for activity log
+  const oldTask = await Task.findOne({ _id: taskId, project: projectId })
+    .populate("assignee", "username fullName")
+    .lean();
+  if (!oldTask) {
+    return NextResponse.json({ error: "Task not found" }, { status: 404 });
   }
 
   // Resolve assignee username to ObjectId if provided as string
@@ -69,6 +78,30 @@ export const PUT = withAuth(async (request, { params }) => {
 
   if (!task) {
     return NextResponse.json({ error: "Task not found" }, { status: 404 });
+  }
+
+  // Log field changes
+  const trackFields = ["title", "difficulty", "component", "category", "status", "acceptanceCriteria"];
+  for (const field of trackFields) {
+    const oldVal = String(oldTask[field as keyof typeof oldTask] ?? "");
+    const newVal = String(task[field as keyof typeof task] ?? "");
+    if (oldVal !== newVal) {
+      const action = field === "status" ? "status_changed" as const : "updated" as const;
+      await logActivity(taskId, user._id, action, field, oldVal, newVal);
+    }
+  }
+
+  // Log assignee change separately (need to resolve names)
+  if (updates.assignee !== undefined) {
+    const oldAssignee = oldTask.assignee && typeof oldTask.assignee === "object"
+      ? (oldTask.assignee as { username: string }).username
+      : "";
+    const newAssignee = task.assignee && typeof task.assignee === "object"
+      ? (task.assignee as { username: string }).username
+      : "";
+    if (oldAssignee !== newAssignee) {
+      await logActivity(taskId, user._id, "updated", "assignee", oldAssignee, newAssignee);
+    }
   }
 
   return NextResponse.json(task);

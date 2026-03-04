@@ -3,6 +3,7 @@ import { connectDB } from "@/lib/db";
 import { withAuth } from "@/lib/middleware";
 import { Comment } from "@/models/comment";
 import { Task } from "@/models/task";
+import { logActivity } from "@/lib/activity";
 
 export const GET = withAuth(async (_request, { params }) => {
   const { projectId, taskId } = await params;
@@ -50,6 +51,8 @@ export const POST = withAuth(async (request, { params, user }) => {
     path: "author",
     select: "username fullName",
   });
+
+  await logActivity(taskId, user._id, "comment_added");
 
   return NextResponse.json(populated, { status: 201 });
 });
