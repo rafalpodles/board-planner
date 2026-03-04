@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, FormEvent } from "react";
+import Markdown from "react-markdown";
 import { useApi } from "@/hooks/use-api";
 import { ApiComment } from "@/types";
 import { Button } from "@/components/ui/Button";
@@ -78,7 +79,9 @@ export function Comments({ projectId, taskId }: CommentsProps) {
                 {formatDate(comment.createdAt)}
               </span>
             </div>
-            <p className="text-sm whitespace-pre-wrap">{comment.body}</p>
+            <div className="text-sm prose prose-invert prose-sm max-w-none">
+              <Markdown>{comment.body}</Markdown>
+            </div>
           </div>
         ))}
         {comments.length === 0 && (
