@@ -131,6 +131,18 @@ export interface IProject {
   updatedAt: Date;
 }
 
+export interface IChecklistItem {
+  _id: Types.ObjectId;
+  text: string;
+  done: boolean;
+}
+
+export interface ApiChecklistItem {
+  _id: string;
+  text: string;
+  done: boolean;
+}
+
 export interface ITask {
   _id: Types.ObjectId;
   project: Types.ObjectId | IProject;
@@ -142,7 +154,7 @@ export interface ITask {
   category: Category;
   status: TaskStatus;
   assignee: Types.ObjectId | IUser | null;
-  acceptanceCriteria: string;
+  checklist: IChecklistItem[];
   labels: Types.ObjectId[];
   pinned: boolean;
   blockedBy: (Types.ObjectId | ITask)[];
@@ -231,7 +243,7 @@ export interface ApiTask {
   category: Category;
   status: TaskStatus;
   assignee: ApiUser | null;
-  acceptanceCriteria: string;
+  checklist: ApiChecklistItem[];
   labels: string[];
   pinned: boolean;
   blockedBy: ApiTaskLink[];

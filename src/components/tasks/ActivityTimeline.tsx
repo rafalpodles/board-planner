@@ -55,8 +55,8 @@ function actionColor(action: string) {
 
 function formatFieldLabel(field: string): string {
   switch (field) {
-    case "acceptanceCriteria":
-      return "acceptance criteria";
+    case "checklist":
+      return "checklist";
     default:
       return field;
   }

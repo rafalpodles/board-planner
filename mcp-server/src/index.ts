@@ -94,7 +94,7 @@ server.tool(
     category: z.string().optional().describe("Category: bug, doc, user-story, idea"),
     assignee: z.string().optional().describe("Assignee username"),
     status: z.string().optional().describe("Initial status (default: planned)"),
-    acceptanceCriteria: z.string().optional().describe("Acceptance criteria"),
+    acceptanceCriteria: z.string().optional().describe("Acceptance criteria (markdown checklist, converted to structured checklist items)"),
   },
   async ({ project, title, description, difficulty, component, category, assignee, status, acceptanceCriteria }) => {
     const proj = await client.getProjectByKey(project) as { _id: string };
@@ -130,7 +130,7 @@ server.tool(
     component: z.string().optional(),
     category: z.string().optional(),
     assignee: z.string().optional().describe("Assignee username. Empty string to unassign."),
-    acceptanceCriteria: z.string().optional(),
+    acceptanceCriteria: z.string().optional().describe("Acceptance criteria (markdown checklist, converted to structured checklist items)"),
   },
   async ({ taskKey, title, description, difficulty, component, category, assignee, acceptanceCriteria }) => {
     const { projectId, task } = await resolveTaskKey(taskKey);

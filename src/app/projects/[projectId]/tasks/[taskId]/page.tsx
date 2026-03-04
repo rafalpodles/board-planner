@@ -84,7 +84,7 @@ export default function TaskDetailPage() {
         difficulty: task!.difficulty,
         category: task!.category,
         component: task!.component,
-        acceptanceCriteria: task!.acceptanceCriteria,
+        checklist: task!.checklist,
         status: "planned",
       });
       toast("Task duplicated", "success");
@@ -270,12 +270,61 @@ export default function TaskDetailPage() {
               </div>
             )}
 
-            {/* Acceptance Criteria */}
-            {task.acceptanceCriteria && (
+            {/* Checklist */}
+            {task.checklist && task.checklist.length > 0 && (
               <div>
-                <h2 className="font-semibold mb-2">Acceptance Criteria</h2>
-                <div className="text-sm text-text-muted prose prose-invert prose-sm max-w-none overflow-x-auto">
-                  <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{task.acceptanceCriteria}</Markdown>
+                <div className="flex items-center gap-2 mb-2">
+                  <h2 className="font-semibold">Checklist</h2>
+                  <span className="text-xs text-text-muted">
+                    {task.checklist.filter((i) => i.done).length}/{task.checklist.length}
+                  </span>
+                </div>
+                <div className="space-y-1">
+                  {task.checklist.map((item) => (
+                    <label
+                      key={item._id}
+                      className="flex items-center gap-2 text-sm cursor-pointer group"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={item.done}
+                        onChange={async () => {
+                          // Optimistic update
+                          setTask((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  checklist: prev.checklist.map((i) =>
+                                    i._id === item._id
+                                      ? { ...i, done: !i.done }
+                                      : i
+                                  ),
+                                }
+                              : prev
+                          );
+                          try {
+                            await api.put(
+                              `/api/projects/${projectId}/tasks/${taskId}/checklist`,
+                              { itemId: item._id, done: !item.done }
+                            );
+                          } catch {
+                            loadData();
+                            toast("Failed to update checklist", "error");
+                          }
+                        }}
+                        className="rounded border-border"
+                      />
+                      <span
+                        className={
+                          item.done
+                            ? "line-through text-text-muted"
+                            : "text-text"
+                        }
+                      >
+                        {item.text}
+                      </span>
+                    </label>
+                  ))}
                 </div>
               </div>
             )}

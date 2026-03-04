@@ -12,6 +12,7 @@ import {
   ApiUser,
   ApiLabel,
   ApiTaskTemplate,
+  ApiChecklistItem,
   TaskStatus,
   Difficulty,
   Category,
@@ -20,6 +21,7 @@ import {
   DIFFICULTIES,
   CATEGORIES,
 } from "@/types";
+import { parseChecklistString } from "@/lib/checklist";
 import type { GeneratedTask } from "@/lib/ai";
 
 interface TaskFormProps {
@@ -54,9 +56,10 @@ export function TaskForm({
       ? task.assignee._id
       : ""
   );
-  const [acceptanceCriteria, setAcceptanceCriteria] = useState(
-    task?.acceptanceCriteria || ""
+  const [checklist, setChecklist] = useState<{ text: string; done: boolean }[]>(
+    task?.checklist || []
   );
+  const [newChecklistItem, setNewChecklistItem] = useState("");
   const [selectedLabels, setSelectedLabels] = useState<string[]>(
     task?.labels || []
   );
@@ -105,7 +108,7 @@ export function TaskForm({
       setDifficulty(result.difficulty || "M");
       setCategory(result.category || "user-story");
       setComponent(result.component || "");
-      setAcceptanceCriteria(result.acceptanceCriteria || "");
+      setChecklist(parseChecklistString(result.acceptanceCriteria || ""));
       setAiInsights(result);
       toast("Fields filled by AI — review and save", "success");
     } catch {
@@ -128,7 +131,7 @@ export function TaskForm({
       category,
       status,
       assignee: assignee || null,
-      acceptanceCriteria,
+      checklist,
       labels: selectedLabels,
     };
 
@@ -164,7 +167,7 @@ export function TaskForm({
               setDifficulty(tpl.difficulty);
               setCategory(tpl.category);
               if (tpl.component) setComponent(tpl.component);
-              if (tpl.acceptanceCriteria) setAcceptanceCriteria(tpl.acceptanceCriteria);
+              if (tpl.acceptanceCriteria) setChecklist(parseChecklistString(tpl.acceptanceCriteria));
             }
           }}
           options={taskTemplates.map((t) => ({ value: t._id, label: t.name }))}
@@ -344,14 +347,83 @@ export function TaskForm({
         onFileUpload={handleFileUpload}
       />
 
-      <Textarea
-        label="Acceptance Criteria"
-        value={acceptanceCriteria}
-        onChange={(e) => setAcceptanceCriteria(e.target.value)}
-        rows={4}
-        placeholder="- [ ] criterion 1&#10;- [ ] criterion 2"
-        onFileUpload={handleFileUpload}
-      />
+      <div>
+        <label className="block text-sm font-medium mb-1">Checklist</label>
+        <div className="space-y-1 mb-2">
+          {checklist.map((item, i) => (
+            <div key={i} className="flex items-center gap-2 group">
+              <input
+                type="checkbox"
+                checked={item.done}
+                onChange={() =>
+                  setChecklist((prev) =>
+                    prev.map((it, idx) =>
+                      idx === i ? { ...it, done: !it.done } : it
+                    )
+                  )
+                }
+                className="rounded border-border"
+              />
+              <input
+                type="text"
+                value={item.text}
+                onChange={(e) =>
+                  setChecklist((prev) =>
+                    prev.map((it, idx) =>
+                      idx === i ? { ...it, text: e.target.value } : it
+                    )
+                  )
+                }
+                className="flex-1 bg-transparent border-b border-transparent focus:border-border text-sm py-0.5 focus:outline-none"
+              />
+              <button
+                type="button"
+                onClick={() =>
+                  setChecklist((prev) => prev.filter((_, idx) => idx !== i))
+                }
+                className="text-text-muted hover:text-danger opacity-0 group-hover:opacity-100 transition-opacity text-xs min-w-[24px] min-h-[24px]"
+              >
+                &times;
+              </button>
+            </div>
+          ))}
+        </div>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={newChecklistItem}
+            onChange={(e) => setNewChecklistItem(e.target.value)}
+            placeholder="Add checklist item..."
+            className="flex-1 bg-bg-input border border-border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && newChecklistItem.trim()) {
+                e.preventDefault();
+                setChecklist((prev) => [
+                  ...prev,
+                  { text: newChecklistItem.trim(), done: false },
+                ]);
+                setNewChecklistItem("");
+              }
+            }}
+          />
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            onClick={() => {
+              if (newChecklistItem.trim()) {
+                setChecklist((prev) => [
+                  ...prev,
+                  { text: newChecklistItem.trim(), done: false },
+                ]);
+                setNewChecklistItem("");
+              }
+            }}
+          >
+            Add
+          </Button>
+        </div>
+      </div>
 
       {error && <p className="text-sm text-danger">{error}</p>}
 

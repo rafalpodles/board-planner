@@ -280,7 +280,7 @@ export default function KanbanPage() {
         difficulty: task.difficulty,
         category: task.category,
         component: task.component,
-        acceptanceCriteria: task.acceptanceCriteria,
+        checklist: task.checklist,
         status: "planned",
       });
       toast("Task duplicated", "success");

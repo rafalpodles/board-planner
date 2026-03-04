@@ -45,9 +45,12 @@ const taskSchema = new Schema<ITask>(
       ref: "User",
       default: null,
     },
-    acceptanceCriteria: {
-      type: String,
-      default: "",
+    checklist: {
+      type: [{
+        text: { type: String, required: true },
+        done: { type: Boolean, default: false },
+      }],
+      default: [],
     },
     labels: {
       type: [{ type: Schema.Types.ObjectId }],

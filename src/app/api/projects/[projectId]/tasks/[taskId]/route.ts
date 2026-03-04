@@ -6,6 +6,7 @@ import { Comment } from "@/models/comment";
 import { ActivityLog } from "@/models/activityLog";
 import { User } from "@/models/user";
 import { logActivity } from "@/lib/activity";
+import { parseChecklistString } from "@/lib/checklist";
 
 const populateFields = [
   { path: "assignee", select: "username fullName" },
@@ -46,7 +47,7 @@ export const PUT = withProjectAccess(async (request, { params, user }) => {
   // Whitelist allowed fields to prevent overwriting protected fields
   const allowed = [
     "title", "description", "difficulty", "component", "category",
-    "status", "assignee", "acceptanceCriteria", "labels", "order", "pinned",
+    "status", "assignee", "checklist", "labels", "order", "pinned",
   ];
   const updates: Record<string, unknown> = {};
   for (const field of allowed) {
@@ -55,9 +56,12 @@ export const PUT = withProjectAccess(async (request, { params, user }) => {
     }
   }
 
-  // Coerce acceptanceCriteria array to string (AI may send arrays)
-  if (Array.isArray(updates.acceptanceCriteria)) {
-    updates.acceptanceCriteria = (updates.acceptanceCriteria as string[]).join("\n");
+  // Support acceptanceCriteria string input (from AI/MCP) — convert to checklist
+  if (body.acceptanceCriteria !== undefined && updates.checklist === undefined) {
+    const acText = Array.isArray(body.acceptanceCriteria)
+      ? body.acceptanceCriteria.join("\n")
+      : body.acceptanceCriteria;
+    updates.checklist = parseChecklistString(acText);
   }
 
   // Read old values before updating for activity log
@@ -88,7 +92,7 @@ export const PUT = withProjectAccess(async (request, { params, user }) => {
 
   // Log field changes (parallel)
   const activities: Promise<void>[] = [];
-  const trackFields = ["title", "difficulty", "component", "category", "status", "acceptanceCriteria"];
+  const trackFields = ["title", "difficulty", "component", "category", "status"];
   for (const field of trackFields) {
     const oldVal = String(oldTask[field as keyof typeof oldTask] ?? "");
     const newVal = String(task[field as keyof typeof task] ?? "");

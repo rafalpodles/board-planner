@@ -5,6 +5,7 @@ import { Task } from "@/models/task";
 import { Project } from "@/models/project";
 import { User } from "@/models/user";
 import { parseTasksFromMarkdown } from "@/lib/markdown";
+import { parseChecklistString } from "@/lib/checklist";
 
 export const POST = withProjectAccess(async (request, { params, user }) => {
   const { projectId } = await params;
@@ -79,7 +80,7 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
       category: parsedTask.category,
       status: parsedTask.status ?? "planned",
       assignee: assigneeId,
-      acceptanceCriteria: parsedTask.acceptanceCriteria ?? "",
+      checklist: parseChecklistString(parsedTask.acceptanceCriteria ?? ""),
       order: 0,
       createdBy: user._id,
     });

@@ -33,6 +33,9 @@ Claude automatically picks up tasks in `todo` status (assigned to `claude` or un
 - Create a feature branch from `main`: `cp-<number>/<short-slug>` (e.g. `cp-5/remove-in-testing`).
 - Implement the task on that branch.
 
+**1.1. needs_human_review**
+- implementation requires human review before proceeding. Used when Claude encounters ambiguous requirements, architectural decisions that need human judgment, or changes with significant impact that should be verified by a human before moving forward. Claude moves tasks here and **stops working on them** until a human reviews and advances the status.
+
 **2. in_progress → in_review (Implementation done)**
 - Run `npm run build` to verify the build passes.
 - Commit changes to the feature branch (conventional commits).

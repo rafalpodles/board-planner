@@ -70,7 +70,7 @@ interface TaskForExport {
   status?: string;
   assignee?: { username: string } | string | null;
   description?: string;
-  acceptanceCriteria?: string;
+  checklist?: { text: string; done: boolean }[];
 }
 
 export function exportTasksToMarkdown(tasks: (ITask | TaskForExport)[]): string {
@@ -95,8 +95,12 @@ export function exportTasksToMarkdown(tasks: (ITask | TaskForExport)[]): string 
       if (task.description) {
         body += `\n## Description\n\n${task.description}\n`;
       }
-      if (task.acceptanceCriteria) {
-        body += `\n## Acceptance Criteria\n\n${task.acceptanceCriteria}\n`;
+      const checklist = "checklist" in task ? task.checklist : undefined;
+      if (checklist && checklist.length > 0) {
+        const items = checklist
+          .map((item) => `- [${item.done ? "x" : " "}] ${item.text}`)
+          .join("\n");
+        body += `\n## Acceptance Criteria\n\n${items}\n`;
       }
 
       return matter.stringify(body, fm).trim();

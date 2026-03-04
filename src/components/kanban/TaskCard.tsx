@@ -116,6 +116,22 @@ export function TaskCard({
         </div>
       )}
 
+      {task.checklist && task.checklist.length > 0 && (
+        <div className="mb-2 flex items-center gap-1.5">
+          <div className="flex-1 h-1 bg-bg-input rounded-full overflow-hidden">
+            <div
+              className="h-full bg-primary rounded-full transition-all"
+              style={{
+                width: `${(task.checklist.filter((i) => i.done).length / task.checklist.length) * 100}%`,
+              }}
+            />
+          </div>
+          <span className="text-[10px] text-text-muted whitespace-nowrap">
+            {task.checklist.filter((i) => i.done).length}/{task.checklist.length}
+          </span>
+        </div>
+      )}
+
       {task.assignee && typeof task.assignee === "object" && (
         <div className="flex items-center">
           <span className="text-xs text-text-muted flex items-center gap-1">
