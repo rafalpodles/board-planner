@@ -178,6 +178,45 @@ export default function KanbanPage() {
     }
   }
 
+  async function handleTaskDrop(taskId: string, status: string, dropIndex: number) {
+    // Get tasks in the target column, excluding the dragged task
+    const columnTasks = tasks
+      .filter((t) => t.status === status && t._id !== taskId)
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+
+    let newOrder: number;
+    if (columnTasks.length === 0) {
+      newOrder = 0;
+    } else if (dropIndex <= 0) {
+      newOrder = (columnTasks[0].order ?? 0) - 1;
+    } else if (dropIndex >= columnTasks.length) {
+      newOrder = (columnTasks[columnTasks.length - 1].order ?? 0) + 1;
+    } else {
+      const before = columnTasks[dropIndex - 1].order ?? 0;
+      const after = columnTasks[dropIndex].order ?? 0;
+      newOrder = (before + after) / 2;
+    }
+
+    // Optimistic update
+    setTasks((prev) =>
+      prev.map((t) =>
+        t._id === taskId
+          ? { ...t, status: status as ApiTask["status"], order: newOrder }
+          : t
+      )
+    );
+
+    try {
+      await api.put(`/api/projects/${projectId}/tasks/${taskId}`, {
+        status,
+        order: newOrder,
+      });
+    } catch {
+      toast("Failed to move task", "error");
+      loadData();
+    }
+  }
+
   async function handleContextDuplicate(taskId: string) {
     const task = tasks.find((t) => t._id === taskId);
     if (!task) return;
@@ -392,6 +431,7 @@ export default function KanbanPage() {
           projectKey={project.key}
           selectedTasks={selectedTasks}
           onStatusChange={handleStatusChange}
+          onTaskDrop={handleTaskDrop}
           onTaskClick={(taskId) =>
             router.push(`/projects/${projectId}/tasks/${taskId}`)
           }

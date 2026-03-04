@@ -8,6 +8,7 @@ interface BoardProps {
   projectKey: string;
   selectedTasks?: Set<string>;
   onStatusChange: (taskId: string, status: string) => void;
+  onTaskDrop?: (taskId: string, status: string, dropIndex: number) => void;
   onTaskClick: (taskId: string) => void;
   onTaskSelect?: (taskId: string) => void;
   onTaskContextMenu?: (taskId: string, x: number, y: number) => void;
@@ -18,6 +19,7 @@ export function Board({
   projectKey,
   selectedTasks,
   onStatusChange,
+  onTaskDrop,
   onTaskClick,
   onTaskSelect,
   onTaskContextMenu,
@@ -45,6 +47,7 @@ export function Board({
               projectKey={projectKey}
               selectedTasks={selectedTasks}
               onStatusChange={onStatusChange}
+              onTaskDrop={onTaskDrop}
               onTaskClick={onTaskClick}
               onTaskSelect={onTaskSelect}
               onTaskContextMenu={onTaskContextMenu}
