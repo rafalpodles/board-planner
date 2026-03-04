@@ -18,6 +18,7 @@ import {
   DIFFICULTIES,
   CATEGORIES,
 } from "@/types";
+import type { GeneratedTask } from "@/lib/ai";
 
 interface TaskFormProps {
   projectId: string;
@@ -51,11 +52,20 @@ export function TaskForm({
   const [users, setUsers] = useState<ApiUser[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiEnabled, setAiEnabled] = useState(false);
   const api = useApi();
   const { toast } = useToast();
 
   useEffect(() => {
     api.get("/api/users").then(setUsers).catch(console.error);
+    if (!task) {
+      api
+        .get(`/api/projects/${projectId}/ai/generate-task`)
+        .then((res: { enabled: boolean }) => setAiEnabled(res.enabled))
+        .catch(() => setAiEnabled(false));
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -69,6 +79,28 @@ export function TaskForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     []
   );
+
+  async function handleAiGenerate() {
+    if (!aiPrompt.trim()) return;
+    setAiLoading(true);
+    try {
+      const result: GeneratedTask = await api.post(
+        `/api/projects/${projectId}/ai/generate-task`,
+        { prompt: aiPrompt.trim() }
+      );
+      setTitle(result.title || "");
+      setDescription(result.description || "");
+      setDifficulty(result.difficulty || "M");
+      setCategory(result.category || "user-story");
+      setComponent(result.component || "");
+      setAcceptanceCriteria(result.acceptanceCriteria || "");
+      toast("Fields filled by AI — review and save", "success");
+    } catch {
+      toast("AI generation failed", "error");
+    } finally {
+      setAiLoading(false);
+    }
+  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -106,6 +138,39 @@ export function TaskForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
+      {aiEnabled && !task && (
+        <div className="bg-bg-input border border-border rounded-lg p-3 space-y-2">
+          <label className="text-sm font-medium">AI Assist</label>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={aiPrompt}
+              onChange={(e) => setAiPrompt(e.target.value)}
+              placeholder="Describe what you need, e.g. 'add dark mode toggle'"
+              className="flex-1 bg-bg border border-border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  handleAiGenerate();
+                }
+              }}
+              disabled={aiLoading}
+            />
+            <Button
+              type="button"
+              size="sm"
+              onClick={handleAiGenerate}
+              disabled={aiLoading || !aiPrompt.trim()}
+            >
+              {aiLoading ? "Generating..." : "Generate"}
+            </Button>
+          </div>
+          <p className="text-xs text-text-muted">
+            AI will fill all fields below. You can edit before saving.
+          </p>
+        </div>
+      )}
+
       <Input
         label="Title"
         value={title}
