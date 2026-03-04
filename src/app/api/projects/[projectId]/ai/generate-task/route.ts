@@ -4,6 +4,7 @@ import { withAuth } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { Task } from "@/models/task";
 import { isAIEnabled, generateTask, ExistingTaskSummary } from "@/lib/ai";
+import { getSettings } from "@/models/settings";
 
 async function fetchReadme(githubRepo: string): Promise<string | undefined> {
   if (!githubRepo) return undefined;
@@ -78,13 +79,18 @@ export const POST = withAuth(async (request, { params }) => {
   }));
 
   try {
-    const task = await generateTask(prompt.trim(), {
-      name: project.name,
-      description: project.description || "",
-      components: project.components || [],
-      readme,
-      existingTasks,
-    });
+    const settings = await getSettings();
+    const task = await generateTask(
+      prompt.trim(),
+      {
+        name: project.name,
+        description: project.description || "",
+        components: project.components || [],
+        readme,
+        existingTasks,
+      },
+      settings.aiModel
+    );
 
     return NextResponse.json(task);
   } catch (err) {

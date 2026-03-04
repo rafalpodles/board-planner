@@ -44,7 +44,8 @@ interface ProjectContext {
 
 export async function generateTask(
   prompt: string,
-  context: ProjectContext
+  context: ProjectContext,
+  model: string = "gpt-4o-mini"
 ): Promise<GeneratedTask> {
   const client = getClient();
 
@@ -94,7 +95,7 @@ Write clear, actionable descriptions. Focus on the "what" and "why", not the "ho
 When analyzing duplicates and dependencies, consider the semantic meaning, not just keyword matching.`;
 
   const response = await client.chat.completions.create({
-    model: "gpt-4o-mini",
+    model,
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: prompt },

@@ -26,6 +26,8 @@ export default function ProjectSettingsPage() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState("");
+  const [aiModel, setAiModel] = useState("");
+  const [aiModelSaving, setAiModelSaving] = useState(false);
 
   useEffect(() => {
     api
@@ -38,6 +40,10 @@ export default function ProjectSettingsPage() {
       })
       .catch(() => toast("Failed to load project", "error"))
       .finally(() => setLoading(false));
+    api
+      .get("/api/settings")
+      .then((s: { aiModel: string }) => setAiModel(s.aiModel))
+      .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
@@ -181,6 +187,41 @@ export default function ProjectSettingsPage() {
           />
           <Button type="button" variant="secondary" onClick={addComponent}>
             Add
+          </Button>
+        </div>
+      </div>
+
+      {/* AI Model */}
+      <div className="mb-8">
+        <h2 className="font-semibold mb-3">AI Model</h2>
+        <p className="text-sm text-text-muted mb-3">
+          OpenAI model used for AI task generation (e.g. gpt-4o-mini, gpt-4o, gpt-4.1-mini).
+        </p>
+        <div className="flex gap-2">
+          <Input
+            value={aiModel}
+            onChange={(e) => setAiModel(e.target.value)}
+            placeholder="gpt-4o-mini"
+          />
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={aiModelSaving}
+            onClick={async () => {
+              if (!aiModel.trim()) return;
+              setAiModelSaving(true);
+              try {
+                const res = await api.put("/api/settings", { aiModel: aiModel.trim() });
+                setAiModel(res.aiModel);
+                toast("AI model saved", "success");
+              } catch {
+                toast("Failed to save AI model", "error");
+              } finally {
+                setAiModelSaving(false);
+              }
+            }}
+          >
+            {aiModelSaving ? "Saving..." : "Save"}
           </Button>
         </div>
       </div>
