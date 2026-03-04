@@ -53,6 +53,24 @@ export interface IUser {
   createdAt: Date;
 }
 
+export interface IApiToken {
+  _id: Types.ObjectId;
+  user: Types.ObjectId | IUser;
+  name: string;
+  tokenHash: string;
+  prefix: string;
+  lastUsedAt: Date | null;
+  createdAt: Date;
+}
+
+export interface ApiApiToken {
+  _id: string;
+  name: string;
+  prefix: string;
+  lastUsedAt: string | null;
+  createdAt: string;
+}
+
 export interface ILabel {
   _id: Types.ObjectId;
   name: string;

@@ -1,6 +1,7 @@
 import bcrypt from "bcryptjs";
 import { connectDB } from "./db";
 import { User } from "@/models/user";
+import { ApiToken } from "@/models/apiToken";
 import { IUser } from "@/types";
 
 export function parseBasicAuth(
@@ -41,10 +42,44 @@ export async function verifyCredentials(
   return valid ? user : null;
 }
 
+async function verifyBearerToken(token: string): Promise<IUser | null> {
+  await connectDB();
+
+  // Extract prefix for efficient lookup (first 11 chars: "cp_" + 8 hex)
+  const prefix = token.substring(0, 11);
+
+  // Find candidate tokens by prefix
+  const candidates = await ApiToken.find({ prefix }).lean();
+
+  for (const candidate of candidates) {
+    const valid = await bcrypt.compare(token, candidate.tokenHash);
+    if (valid) {
+      // Update lastUsedAt (fire-and-forget)
+      ApiToken.findByIdAndUpdate(candidate._id, { lastUsedAt: new Date() }).catch(() => {});
+
+      const user = await User.findById(candidate.user);
+      return user;
+    }
+  }
+
+  return null;
+}
+
 export async function getAuthUser(
   request: Request
 ): Promise<IUser | null> {
-  const creds = parseBasicAuth(request.headers.get("authorization"));
+  const authHeader = request.headers.get("authorization");
+
+  // Try Bearer token first
+  if (authHeader?.startsWith("Bearer ")) {
+    const token = authHeader.slice(7);
+    if (token.startsWith("cp_")) {
+      return verifyBearerToken(token);
+    }
+  }
+
+  // Fall back to Basic Auth
+  const creds = parseBasicAuth(authHeader);
   if (!creds) {
     return null;
   }

@@ -266,6 +266,13 @@ export function Navbar() {
                       Users
                     </Link>
                   )}
+                  <Link
+                    href="/tokens"
+                    onClick={() => setOpen(false)}
+                    className="block px-4 py-2 text-sm text-text-muted hover:text-text hover:bg-bg-hover"
+                  >
+                    API Tokens
+                  </Link>
                   <button
                     onClick={() => {
                       toggleTheme();
