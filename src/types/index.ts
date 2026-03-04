@@ -248,6 +248,41 @@ export interface ApiActivityLog {
   createdAt: string;
 }
 
+// Project audit log
+export type ProjectAuditAction =
+  | "settings_updated"
+  | "component_added"
+  | "component_removed"
+  | "label_added"
+  | "label_removed"
+  | "template_added"
+  | "template_removed"
+  | "template_updated"
+  | "member_added"
+  | "member_removed"
+  | "task_created"
+  | "task_deleted"
+  | "bulk_delete"
+  | "bulk_move";
+
+export interface IProjectAuditLog {
+  _id: Types.ObjectId;
+  project: Types.ObjectId;
+  user: Types.ObjectId | IUser;
+  action: ProjectAuditAction;
+  detail: string;
+  createdAt: Date;
+}
+
+export interface ApiProjectAuditLog {
+  _id: string;
+  project: string;
+  user: { _id: string; username: string; fullName: string } | string;
+  action: ProjectAuditAction;
+  detail: string;
+  createdAt: string;
+}
+
 // Parsed markdown task for import
 export interface ParsedTask {
   title: string;

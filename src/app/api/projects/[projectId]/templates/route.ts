@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
 import { Project } from "@/models/project";
+import { logProjectAudit } from "@/lib/projectAudit";
 
 export const GET = withProjectAccess(async (_request, { params }) => {
   const { projectId } = await params;
@@ -15,7 +16,7 @@ export const GET = withProjectAccess(async (_request, { params }) => {
   return NextResponse.json(project.taskTemplates || []);
 });
 
-export const POST = withProjectAccess(async (request, { params }) => {
+export const POST = withProjectAccess(async (request, { params, user }) => {
   const { projectId } = await params;
   await connectDB();
 
@@ -48,10 +49,12 @@ export const POST = withProjectAccess(async (request, { params }) => {
   project.taskTemplates = templates;
   await project.save();
 
+  logProjectAudit(projectId, user._id, "template_added", name.trim());
+
   return NextResponse.json(project.taskTemplates, { status: 201 });
 });
 
-export const PUT = withProjectAccess(async (request, { params }) => {
+export const PUT = withProjectAccess(async (request, { params, user }) => {
   const { projectId } = await params;
   await connectDB();
 
@@ -80,10 +83,13 @@ export const PUT = withProjectAccess(async (request, { params }) => {
   }
 
   await project.save();
+
+  logProjectAudit(projectId, user._id, "template_updated", template.name);
+
   return NextResponse.json(project.taskTemplates);
 });
 
-export const DELETE = withProjectAccess(async (request, { params }) => {
+export const DELETE = withProjectAccess(async (request, { params, user }) => {
   const { projectId } = await params;
   await connectDB();
 
@@ -97,10 +103,13 @@ export const DELETE = withProjectAccess(async (request, { params }) => {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
+  const removed = (project.taskTemplates || []).find((t) => t._id.toString() === templateId);
   project.taskTemplates = (project.taskTemplates || []).filter(
     (t) => t._id.toString() !== templateId
   );
   await project.save();
+
+  if (removed) logProjectAudit(projectId, user._id, "template_removed", removed.name);
 
   return NextResponse.json(project.taskTemplates);
 });

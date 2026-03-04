@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
 import { Project } from "@/models/project";
+import { logProjectAudit } from "@/lib/projectAudit";
 
 export const GET = withProjectAccess(async (_request, { params }) => {
   const { projectId } = await params;
@@ -15,7 +16,7 @@ export const GET = withProjectAccess(async (_request, { params }) => {
   return NextResponse.json(project.labels || []);
 });
 
-export const POST = withProjectAccess(async (request, { params }) => {
+export const POST = withProjectAccess(async (request, { params, user }) => {
   const { projectId } = await params;
   await connectDB();
 
@@ -38,10 +39,12 @@ export const POST = withProjectAccess(async (request, { params }) => {
   project.labels = labels;
   await project.save();
 
+  logProjectAudit(projectId, user._id, "label_added", name.trim());
+
   return NextResponse.json(project.labels, { status: 201 });
 });
 
-export const DELETE = withProjectAccess(async (request, { params }) => {
+export const DELETE = withProjectAccess(async (request, { params, user }) => {
   const { projectId } = await params;
   await connectDB();
 
@@ -55,10 +58,13 @@ export const DELETE = withProjectAccess(async (request, { params }) => {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
+  const removed = (project.labels || []).find((l) => l._id.toString() === labelId);
   project.labels = (project.labels || []).filter(
     (l) => l._id.toString() !== labelId
   );
   await project.save();
+
+  if (removed) logProjectAudit(projectId, user._id, "label_removed", removed.name);
 
   return NextResponse.json(project.labels);
 });

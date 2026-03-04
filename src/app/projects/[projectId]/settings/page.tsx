@@ -3,7 +3,7 @@
 import { useEffect, useState, FormEvent } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
-import { ApiProject, ApiLabel, ApiTaskTemplate, DIFFICULTIES, CATEGORIES, Difficulty, Category } from "@/types";
+import { ApiProject, ApiLabel, ApiTaskTemplate, ApiProjectAuditLog, DIFFICULTIES, CATEGORIES, Difficulty, Category } from "@/types";
 import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
 import { Button } from "@/components/ui/Button";
@@ -32,6 +32,8 @@ export default function ProjectSettingsPage() {
   const [aiModelSaving, setAiModelSaving] = useState(false);
   const [newTemplateName, setNewTemplateName] = useState("");
   const [editingTemplate, setEditingTemplate] = useState<ApiTaskTemplate | null>(null);
+  const [auditLogs, setAuditLogs] = useState<ApiProjectAuditLog[]>([]);
+  const [showAudit, setShowAudit] = useState(false);
 
   useEffect(() => {
     api
@@ -453,6 +455,59 @@ export default function ProjectSettingsPage() {
             {aiModelSaving ? "Saving..." : "Save"}
           </Button>
         </div>
+      </div>
+
+      {/* Audit Log */}
+      <div className="mb-8">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="font-semibold">Audit Log</h2>
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            onClick={async () => {
+              if (!showAudit && auditLogs.length === 0) {
+                try {
+                  const logs = await api.get(`/api/projects/${projectId}/audit`);
+                  setAuditLogs(logs);
+                } catch {
+                  toast("Failed to load audit log", "error");
+                }
+              }
+              setShowAudit((v) => !v);
+            }}
+          >
+            {showAudit ? "Hide" : "Show"}
+          </Button>
+        </div>
+
+        {showAudit && (
+          <div className="space-y-1 max-h-[300px] overflow-y-auto">
+            {auditLogs.length === 0 ? (
+              <p className="text-sm text-text-muted">No audit entries</p>
+            ) : (
+              auditLogs.map((log) => (
+                <div
+                  key={log._id}
+                  className="flex items-start gap-2 text-xs py-1.5 border-b border-border/50 last:border-b-0"
+                >
+                  <span className="text-text-muted whitespace-nowrap">
+                    {new Date(log.createdAt).toLocaleString()}
+                  </span>
+                  <span className="font-medium whitespace-nowrap">
+                    {typeof log.user === "object" ? log.user.username : "system"}
+                  </span>
+                  <span className="text-text-muted">
+                    {log.action.replace(/_/g, " ")}
+                  </span>
+                  {log.detail && (
+                    <span className="text-text truncate">{log.detail}</span>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        )}
       </div>
 
       {/* Danger Zone */}

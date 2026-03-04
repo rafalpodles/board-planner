@@ -5,6 +5,8 @@ import { Project } from "@/models/project";
 import { Task } from "@/models/task";
 import { Comment } from "@/models/comment";
 import { ActivityLog } from "@/models/activityLog";
+import { ProjectAuditLog } from "@/models/projectAuditLog";
+import { logProjectAudit } from "@/lib/projectAudit";
 
 export const GET = withProjectAccess(async (_request, { params }) => {
   await connectDB();
@@ -22,7 +24,7 @@ export const GET = withProjectAccess(async (_request, { params }) => {
   return NextResponse.json(project);
 });
 
-export const PUT = withAdmin(async (request, { params }) => {
+export const PUT = withAdmin(async (request, { params, user }) => {
   await connectDB();
   const { projectId } = await params;
   const body = await request.json();
@@ -42,6 +44,9 @@ export const PUT = withAdmin(async (request, { params }) => {
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
+
+  const changedFields = Object.keys(updates).join(", ");
+  logProjectAudit(projectId, user._id, "settings_updated", `Changed: ${changedFields}`);
 
   return NextResponse.json(project);
 });
@@ -65,7 +70,8 @@ export const DELETE = withAdmin(async (_request, { params }) => {
   // Delete all tasks in this project
   await Task.deleteMany({ project: projectId });
 
-  // Delete the project itself
+  // Delete project audit logs and the project itself
+  await ProjectAuditLog.deleteMany({ project: projectId });
   await Project.findByIdAndDelete(projectId);
 
   return NextResponse.json({ message: "Project deleted" });
