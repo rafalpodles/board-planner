@@ -17,6 +17,7 @@ export default function ProjectSettingsPage() {
   const [project, setProject] = useState<ApiProject | null>(null);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [githubRepo, setGithubRepo] = useState("");
   const [newComponent, setNewComponent] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -31,6 +32,7 @@ export default function ProjectSettingsPage() {
         setProject(p);
         setName(p.name);
         setDescription(p.description);
+        setGithubRepo(p.githubRepo || "");
       })
       .catch(console.error)
       .finally(() => setLoading(false));
@@ -46,6 +48,7 @@ export default function ProjectSettingsPage() {
       const updated = await api.put(`/api/projects/${projectId}`, {
         name,
         description,
+        githubRepo,
       });
       setProject(updated);
     } catch (err) {
@@ -124,6 +127,12 @@ export default function ProjectSettingsPage() {
           label="Description"
           value={description}
           onChange={(e) => setDescription(e.target.value)}
+        />
+        <Input
+          label="GitHub Repository"
+          value={githubRepo}
+          onChange={(e) => setGithubRepo(e.target.value)}
+          placeholder="owner/repo (e.g. rafalpodles/claude-planner)"
         />
 
         {error && <p className="text-sm text-danger">{error}</p>}

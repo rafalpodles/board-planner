@@ -26,7 +26,7 @@ export const PUT = withAuth(async (request, { params }) => {
   const { projectId } = await params;
   const body = await request.json();
 
-  const allowed = ["name", "description", "key"];
+  const allowed = ["name", "description", "key", "githubRepo"];
   const updates: Record<string, unknown> = {};
   for (const field of allowed) {
     if (body[field] !== undefined) {

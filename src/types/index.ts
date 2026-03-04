@@ -51,6 +51,7 @@ export interface IProject {
   key: string;
   description: string;
   components: string[];
+  githubRepo: string;
   taskCounter: number;
   owner: Types.ObjectId | IUser;
   createdAt: Date;
@@ -97,6 +98,7 @@ export interface ApiProject {
   key: string;
   description: string;
   components: string[];
+  githubRepo: string;
   taskCounter: number;
   owner: ApiUser | string;
   createdAt: string;

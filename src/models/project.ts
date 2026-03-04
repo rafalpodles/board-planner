@@ -23,6 +23,11 @@ const projectSchema = new Schema<IProject>(
       type: [String],
       default: [],
     },
+    githubRepo: {
+      type: String,
+      default: "",
+      trim: true,
+    },
     taskCounter: {
       type: Number,
       default: 0,
