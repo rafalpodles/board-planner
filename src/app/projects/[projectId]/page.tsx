@@ -281,6 +281,7 @@ export default function KanbanPage() {
         category: task.category,
         component: task.component,
         checklist: task.checklist,
+        dueDate: task.dueDate,
         status: "planned",
       });
       toast("Task duplicated", "success");

@@ -56,6 +56,9 @@ export function TaskForm({
       ? task.assignee._id
       : ""
   );
+  const [dueDate, setDueDate] = useState(
+    task?.dueDate ? task.dueDate.substring(0, 10) : ""
+  );
   const [checklist, setChecklist] = useState<{ text: string; done: boolean }[]>(
     task?.checklist || []
   );
@@ -131,6 +134,7 @@ export function TaskForm({
       category,
       status,
       assignee: assignee || null,
+      dueDate: dueDate || null,
       checklist,
       labels: selectedLabels,
     };
@@ -296,16 +300,27 @@ export function TaskForm({
         />
       </div>
 
-      <Select
-        label="Assignee"
-        value={assignee}
-        onChange={(e) => setAssignee(e.target.value)}
-        options={users.map((u) => ({
-          value: u._id,
-          label: `${u.fullName} (${u.username})`,
-        }))}
-        placeholder="Unassigned"
-      />
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <Select
+          label="Assignee"
+          value={assignee}
+          onChange={(e) => setAssignee(e.target.value)}
+          options={users.map((u) => ({
+            value: u._id,
+            label: `${u.fullName} (${u.username})`,
+          }))}
+          placeholder="Unassigned"
+        />
+        <div>
+          <label className="block text-sm font-medium mb-1">Due Date</label>
+          <input
+            type="date"
+            value={dueDate}
+            onChange={(e) => setDueDate(e.target.value)}
+            className="w-full bg-bg-input border border-border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+          />
+        </div>
+      </div>
 
       {projectLabels.length > 0 && (
         <div>

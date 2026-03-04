@@ -109,6 +109,7 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
     category: body.category ?? "user-story",
     status: body.status ?? "planned",
     assignee: assigneeId,
+    dueDate: body.dueDate || null,
     checklist: Array.isArray(body.checklist)
       ? body.checklist
       : parseChecklistString(

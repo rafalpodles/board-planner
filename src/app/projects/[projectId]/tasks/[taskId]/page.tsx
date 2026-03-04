@@ -85,6 +85,7 @@ export default function TaskDetailPage() {
         category: task!.category,
         component: task!.component,
         checklist: task!.checklist,
+        dueDate: task!.dueDate,
         status: "planned",
       });
       toast("Task duplicated", "success");
@@ -234,6 +235,22 @@ export default function TaskDetailPage() {
                   <span>{task.assignee.fullName}</span>
                 </div>
               )}
+              {task.dueDate && (() => {
+                const due = new Date(task.dueDate);
+                const now = new Date();
+                now.setHours(0, 0, 0, 0);
+                const diff = Math.ceil((due.getTime() - now.getTime()) / 86400000);
+                const color = diff < 0 ? "text-danger" : diff <= 2 ? "text-warning" : "text-text";
+                return (
+                  <div>
+                    <span className="text-text-muted">Due: </span>
+                    <span className={color}>
+                      {due.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })}
+                      {diff < 0 && " (overdue)"}
+                    </span>
+                  </div>
+                );
+              })()}
               <div>
                 <span className="text-text-muted">Created: </span>
                 <span>{new Date(task.createdAt).toLocaleDateString()}</span>

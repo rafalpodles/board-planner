@@ -193,6 +193,7 @@ export interface ITask {
   category: Category;
   status: TaskStatus;
   assignee: Types.ObjectId | IUser | null;
+  dueDate: Date | null;
   checklist: IChecklistItem[];
   linkedPRs: ILinkedPR[];
   labels: Types.ObjectId[];
@@ -284,6 +285,7 @@ export interface ApiTask {
   category: Category;
   status: TaskStatus;
   assignee: ApiUser | null;
+  dueDate: string | null;
   checklist: ApiChecklistItem[];
   linkedPRs: ApiLinkedPR[];
   labels: string[];
@@ -313,12 +315,13 @@ export interface ApiComment {
 }
 
 // Sort options for board columns
-export type SortField = "updatedAt" | "createdAt" | "difficulty" | "category" | "title";
+export type SortField = "updatedAt" | "createdAt" | "dueDate" | "difficulty" | "category" | "title";
 export type SortDir = "asc" | "desc";
 
 export const SORT_OPTIONS: { value: SortField; label: string; defaultDir: SortDir }[] = [
   { value: "updatedAt", label: "Last updated", defaultDir: "desc" },
   { value: "createdAt", label: "Created", defaultDir: "desc" },
+  { value: "dueDate", label: "Due date", defaultDir: "asc" },
   { value: "difficulty", label: "Difficulty", defaultDir: "asc" },
   { value: "category", label: "Category", defaultDir: "asc" },
   { value: "title", label: "Title", defaultDir: "asc" },

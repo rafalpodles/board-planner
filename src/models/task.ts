@@ -45,6 +45,10 @@ const taskSchema = new Schema<ITask>(
       ref: "User",
       default: null,
     },
+    dueDate: {
+      type: Date,
+      default: null,
+    },
     checklist: {
       type: [{
         text: { type: String, required: true },

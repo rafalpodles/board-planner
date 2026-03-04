@@ -159,16 +159,31 @@ export function TaskCard({
         </div>
       )}
 
-      {task.assignee && typeof task.assignee === "object" && (
-        <div className="flex items-center">
+      <div className="flex items-center justify-between">
+        {task.assignee && typeof task.assignee === "object" ? (
           <span className="text-xs text-text-muted flex items-center gap-1">
             <span className="w-5 h-5 rounded-full bg-primary/30 flex items-center justify-center text-[10px] font-medium">
               {task.assignee.fullName?.charAt(0).toUpperCase() || "?"}
             </span>
             <span>{task.assignee.fullName || task.assignee.username}</span>
           </span>
-        </div>
-      )}
+        ) : <span />}
+        {task.dueDate && (() => {
+          const due = new Date(task.dueDate);
+          const now = new Date();
+          now.setHours(0, 0, 0, 0);
+          const diff = Math.ceil((due.getTime() - now.getTime()) / 86400000);
+          const color = diff < 0 ? "text-danger" : diff <= 2 ? "text-warning" : "text-text-muted";
+          return (
+            <span className={`text-[10px] ${color} flex items-center gap-0.5`}>
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+              {due.toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+            </span>
+          );
+        })()}
+      </div>
     </div>
   );
 }
