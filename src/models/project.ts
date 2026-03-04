@@ -73,6 +73,10 @@ const projectSchema = new Schema<IProject>(
       default: "",
       trim: true,
     },
+    githubToken: {
+      type: String,
+      default: "",
+    },
     taskCounter: {
       type: Number,
       default: 0,

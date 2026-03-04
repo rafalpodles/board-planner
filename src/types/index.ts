@@ -125,10 +125,31 @@ export interface IProject {
   webhooks: IWebhook[];
   notificationChannels: INotificationChannel[];
   githubRepo: string;
+  githubToken: string;
   taskCounter: number;
   owner: Types.ObjectId | IUser;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export interface ILinkedPR {
+  _id: Types.ObjectId;
+  number: number;
+  title: string;
+  state: "open" | "closed" | "merged";
+  url: string;
+  mergedAt: Date | null;
+  updatedAt: Date;
+}
+
+export interface ApiLinkedPR {
+  _id: string;
+  number: number;
+  title: string;
+  state: "open" | "closed" | "merged";
+  url: string;
+  mergedAt: string | null;
+  updatedAt: string;
 }
 
 export interface IChecklistItem {
@@ -155,6 +176,7 @@ export interface ITask {
   status: TaskStatus;
   assignee: Types.ObjectId | IUser | null;
   checklist: IChecklistItem[];
+  linkedPRs: ILinkedPR[];
   labels: Types.ObjectId[];
   pinned: boolean;
   blockedBy: (Types.ObjectId | ITask)[];
@@ -218,6 +240,7 @@ export interface ApiProject {
   webhooks: ApiWebhook[];
   notificationChannels: ApiNotificationChannel[];
   githubRepo: string;
+  githubTokenSet: boolean;
   taskCounter: number;
   owner: ApiUser | string;
   createdAt: string;
@@ -244,6 +267,7 @@ export interface ApiTask {
   status: TaskStatus;
   assignee: ApiUser | null;
   checklist: ApiChecklistItem[];
+  linkedPRs: ApiLinkedPR[];
   labels: string[];
   pinned: boolean;
   blockedBy: ApiTaskLink[];

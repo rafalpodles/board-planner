@@ -52,6 +52,17 @@ const taskSchema = new Schema<ITask>(
       }],
       default: [],
     },
+    linkedPRs: {
+      type: [{
+        number: { type: Number, required: true },
+        title: { type: String, required: true },
+        state: { type: String, enum: ["open", "closed", "merged"], default: "open" },
+        url: { type: String, required: true },
+        mergedAt: { type: Date, default: null },
+        updatedAt: { type: Date, default: Date.now },
+      }],
+      default: [],
+    },
     labels: {
       type: [{ type: Schema.Types.ObjectId }],
       default: [],

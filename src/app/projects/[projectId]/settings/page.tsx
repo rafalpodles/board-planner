@@ -38,6 +38,9 @@ export default function ProjectSettingsPage() {
   const [newChannelUrl, setNewChannelUrl] = useState("");
   const [auditLogs, setAuditLogs] = useState<ApiProjectAuditLog[]>([]);
   const [showAudit, setShowAudit] = useState(false);
+  const [githubToken, setGithubToken] = useState("");
+  const [githubTokenSaving, setGithubTokenSaving] = useState(false);
+  const [githubSyncing, setGithubSyncing] = useState(false);
 
   useEffect(() => {
     api
@@ -322,6 +325,83 @@ export default function ProjectSettingsPage() {
           {saving ? "Saving..." : "Save Changes"}
         </Button>
       </form>
+
+      {/* GitHub Integration */}
+      {project.githubRepo && (
+        <div className="mb-8">
+          <h2 className="font-semibold mb-3">GitHub Integration</h2>
+          <div className="space-y-3">
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                Personal Access Token
+                {project.githubTokenSet && (
+                  <span className="text-xs text-text-muted ml-2">(configured)</span>
+                )}
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="password"
+                  value={githubToken}
+                  onChange={(e) => setGithubToken(e.target.value)}
+                  placeholder={project.githubTokenSet ? "Enter new token to replace..." : "ghp_... (fine-grained or classic)"}
+                  className="flex-1 bg-bg-input border border-border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+                <Button
+                  size="sm"
+                  disabled={!githubToken.trim() || githubTokenSaving}
+                  onClick={async () => {
+                    setGithubTokenSaving(true);
+                    try {
+                      await api.put(`/api/projects/${projectId}`, { githubToken: githubToken.trim() });
+                      setProject((p) => p ? { ...p, githubTokenSet: true } : p);
+                      setGithubToken("");
+                      toast("Token saved", "success");
+                    } catch {
+                      toast("Failed to save token", "error");
+                    } finally {
+                      setGithubTokenSaving(false);
+                    }
+                  }}
+                >
+                  {githubTokenSaving ? "Saving..." : "Save Token"}
+                </Button>
+              </div>
+              <p className="text-xs text-text-muted mt-1">
+                Needs <code>repo</code> scope (read access to pull requests).
+              </p>
+            </div>
+
+            {project.githubTokenSet && (
+              <div>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={githubSyncing}
+                  onClick={async () => {
+                    setGithubSyncing(true);
+                    try {
+                      const result = await api.post(`/api/projects/${projectId}/github/sync`, {});
+                      toast(
+                        `Synced: ${result.prsLinked} PRs linked to ${result.tasksLinked} tasks${result.autoTransitioned > 0 ? `, ${result.autoTransitioned} auto-transitioned` : ""}`,
+                        "success"
+                      );
+                    } catch (err) {
+                      toast(err instanceof Error ? err.message : "Sync failed", "error");
+                    } finally {
+                      setGithubSyncing(false);
+                    }
+                  }}
+                >
+                  {githubSyncing ? "Syncing..." : "Sync PRs Now"}
+                </Button>
+                <p className="text-xs text-text-muted mt-1">
+                  Fetches PRs and matches them to tasks by key in branch name or PR title.
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Components */}
       <div className="mb-8">

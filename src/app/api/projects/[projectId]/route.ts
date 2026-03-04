@@ -21,7 +21,12 @@ export const GET = withProjectAccess(async (_request, { params }) => {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
-  return NextResponse.json(project);
+  // Strip token, expose only boolean flag
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const obj: any = project.toObject();
+  obj.githubTokenSet = !!obj.githubToken;
+  delete obj.githubToken;
+  return NextResponse.json(obj);
 });
 
 export const PUT = withAdmin(async (request, { params, user }) => {
@@ -29,7 +34,7 @@ export const PUT = withAdmin(async (request, { params, user }) => {
   const { projectId } = await params;
   const body = await request.json();
 
-  const allowed = ["name", "description", "key", "githubRepo"];
+  const allowed = ["name", "description", "key", "githubRepo", "githubToken"];
   const updates: Record<string, unknown> = {};
   for (const field of allowed) {
     if (body[field] !== undefined) {
