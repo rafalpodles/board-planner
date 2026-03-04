@@ -88,6 +88,11 @@ const taskSchema = new Schema<ITask>(
       ref: "Sprint",
       default: null,
     },
+    customFieldValues: {
+      type: Map,
+      of: Schema.Types.Mixed,
+      default: new Map(),
+    },
     recurrence: {
       type: {
         frequency: { type: String, enum: ["daily", "weekly", "monthly"], required: true },

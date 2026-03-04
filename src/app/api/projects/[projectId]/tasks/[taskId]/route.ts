@@ -49,7 +49,7 @@ export const PUT = withProjectAccess(async (request, { params, user }) => {
   // Whitelist allowed fields to prevent overwriting protected fields
   const allowed = [
     "title", "description", "difficulty", "component", "category",
-    "status", "assignee", "dueDate", "checklist", "labels", "order", "pinned", "sprint", "recurrence",
+    "status", "assignee", "dueDate", "checklist", "labels", "order", "pinned", "sprint", "customFieldValues", "recurrence",
   ];
   const updates: Record<string, unknown> = {};
   for (const field of allowed) {

@@ -601,6 +601,7 @@ export default function KanbanPage() {
           projectLabels={project.labels || []}
           taskTemplates={project.taskTemplates || []}
           sprints={sprints}
+          customFields={project.customFields || []}
           onSaved={() => {
             setShowNewTask(false);
             loadData();

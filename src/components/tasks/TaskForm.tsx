@@ -13,6 +13,7 @@ import {
   ApiLabel,
   ApiTaskTemplate,
   ApiSprint,
+  ApiCustomField,
   ApiChecklistItem,
   RecurrenceFrequency,
   TaskStatus,
@@ -34,6 +35,7 @@ interface TaskFormProps {
   projectLabels?: ApiLabel[];
   taskTemplates?: ApiTaskTemplate[];
   sprints?: ApiSprint[];
+  customFields?: ApiCustomField[];
   onSaved: () => void;
   onCancel: () => void;
 }
@@ -46,6 +48,7 @@ export function TaskForm({
   projectLabels = [],
   taskTemplates = [],
   sprints = [],
+  customFields = [],
   onSaved,
   onCancel,
 }: TaskFormProps) {
@@ -71,6 +74,9 @@ export function TaskForm({
     task?.labels || []
   );
   const [sprint, setSprint] = useState(task?.sprint || "");
+  const [customFieldValues, setCustomFieldValues] = useState<Record<string, unknown>>(
+    task?.customFieldValues || {}
+  );
   const [recurrenceFreq, setRecurrenceFreq] = useState<RecurrenceFrequency | "">(
     task?.recurrence?.frequency || ""
   );
@@ -152,6 +158,7 @@ export function TaskForm({
       recurrence: recurrenceFreq
         ? { frequency: recurrenceFreq, interval: recurrenceInterval }
         : null,
+      customFieldValues,
     };
 
     try {
@@ -379,6 +386,61 @@ export function TaskForm({
             .map((s) => ({ value: s._id, label: `${s.name}${s.status === "active" ? " (Active)" : ""}` }))}
           placeholder="No sprint (backlog)"
         />
+      )}
+
+      {customFields.length > 0 && (
+        <div className="space-y-3">
+          <label className="block text-sm font-medium">Custom Fields</label>
+          {customFields.map((field) => {
+            const val = customFieldValues[field._id];
+            if (field.fieldType === "checkbox") {
+              return (
+                <label key={field._id} className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={!!val}
+                    onChange={(e) =>
+                      setCustomFieldValues((prev) => ({ ...prev, [field._id]: e.target.checked }))
+                    }
+                    className="rounded border-border"
+                  />
+                  {field.name}
+                  {field.required && <span className="text-danger">*</span>}
+                </label>
+              );
+            }
+            if (field.fieldType === "dropdown") {
+              return (
+                <Select
+                  key={field._id}
+                  label={field.name}
+                  value={(val as string) || ""}
+                  onChange={(e) =>
+                    setCustomFieldValues((prev) => ({ ...prev, [field._id]: e.target.value }))
+                  }
+                  options={field.options.map((o) => ({ value: o, label: o }))}
+                  placeholder="Select..."
+                  required={field.required}
+                />
+              );
+            }
+            return (
+              <Input
+                key={field._id}
+                label={field.name}
+                type={field.fieldType === "number" ? "number" : field.fieldType === "date" ? "date" : "text"}
+                value={(val as string) ?? ""}
+                onChange={(e) =>
+                  setCustomFieldValues((prev) => ({
+                    ...prev,
+                    [field._id]: field.fieldType === "number" ? (e.target.value ? Number(e.target.value) : "") : e.target.value,
+                  }))
+                }
+                required={field.required}
+              />
+            );
+          })}
+        </div>
       )}
 
       {projectLabels.length > 0 && (

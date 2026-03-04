@@ -134,6 +134,27 @@ export interface ApiNotificationChannel {
   enabled: boolean;
 }
 
+// Custom field types
+export type CustomFieldType = "text" | "number" | "date" | "dropdown" | "checkbox";
+
+export const CUSTOM_FIELD_TYPES: CustomFieldType[] = ["text", "number", "date", "dropdown", "checkbox"];
+
+export interface ICustomField {
+  _id: Types.ObjectId;
+  name: string;
+  fieldType: CustomFieldType;
+  options: string[];
+  required: boolean;
+}
+
+export interface ApiCustomField {
+  _id: string;
+  name: string;
+  fieldType: CustomFieldType;
+  options: string[];
+  required: boolean;
+}
+
 export interface IProject {
   _id: Types.ObjectId;
   name: string;
@@ -142,6 +163,7 @@ export interface IProject {
   components: string[];
   labels: ILabel[];
   taskTemplates: ITaskTemplate[];
+  customFields: ICustomField[];
   webhooks: IWebhook[];
   notificationChannels: INotificationChannel[];
   githubRepo: string;
@@ -247,6 +269,7 @@ export interface ITask {
   blockedBy: (Types.ObjectId | ITask)[];
   watchers: Types.ObjectId[];
   sprint: Types.ObjectId | ISprint | null;
+  customFieldValues: Map<string, unknown>;
   recurrence: IRecurrence | null;
   recurringParentId: Types.ObjectId | null;
   order: number;
@@ -307,6 +330,7 @@ export interface ApiProject {
   components: string[];
   labels: ApiLabel[];
   taskTemplates: ApiTaskTemplate[];
+  customFields: ApiCustomField[];
   webhooks: ApiWebhook[];
   notificationChannels: ApiNotificationChannel[];
   githubRepo: string;
@@ -350,6 +374,7 @@ export interface ApiTask {
   blocking: ApiTaskLink[];
   watchers: string[];
   sprint: string | null;
+  customFieldValues: Record<string, unknown>;
   recurrence: ApiRecurrence | null;
   recurringParentId: string | null;
   order: number;

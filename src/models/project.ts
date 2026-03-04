@@ -1,5 +1,5 @@
 import mongoose, { Schema, Model } from "mongoose";
-import { IProject, DIFFICULTIES, CATEGORIES, WEBHOOK_EVENTS, NOTIFICATION_CHANNEL_TYPES } from "@/types";
+import { IProject, DIFFICULTIES, CATEGORIES, WEBHOOK_EVENTS, NOTIFICATION_CHANNEL_TYPES, CUSTOM_FIELD_TYPES } from "@/types";
 
 const labelSchema = new Schema(
   {
@@ -17,6 +17,15 @@ const taskTemplateSchema = new Schema(
     category: { type: String, enum: CATEGORIES, default: "user-story" },
     component: { type: String, default: "" },
     acceptanceCriteria: { type: String, default: "" },
+  }
+);
+
+const customFieldSchema = new Schema(
+  {
+    name: { type: String, required: true, trim: true },
+    fieldType: { type: String, enum: CUSTOM_FIELD_TYPES, required: true },
+    options: { type: [String], default: [] },
+    required: { type: Boolean, default: false },
   }
 );
 
@@ -48,6 +57,10 @@ const projectSchema = new Schema<IProject>(
     },
     taskTemplates: {
       type: [taskTemplateSchema],
+      default: [],
+    },
+    customFields: {
+      type: [customFieldSchema],
       default: [],
     },
     webhooks: {

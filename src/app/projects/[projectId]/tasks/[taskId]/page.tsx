@@ -6,7 +6,7 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
-import { ApiTask, ApiProject, ApiSprint, ApiLabel, TASK_STATUSES, STATUS_LABELS } from "@/types";
+import { ApiTask, ApiProject, ApiSprint, ApiLabel, ApiCustomField, TASK_STATUSES, STATUS_LABELS } from "@/types";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -207,6 +207,7 @@ export default function TaskDetailPage() {
             components={project.components}
             projectLabels={project.labels || []}
             sprints={sprints}
+            customFields={project.customFields || []}
             onSaved={() => {
               setEditing(false);
               loadData();
@@ -287,6 +288,32 @@ export default function TaskDetailPage() {
                     >
                       {label.name}
                     </span>
+                  ))}
+                </div>
+              ) : null;
+            })()}
+
+            {/* Custom Fields */}
+            {(() => {
+              const fields = project.customFields || [];
+              const vals = task.customFieldValues || {};
+              const filled = fields.filter((f: ApiCustomField) => {
+                const v = vals[f._id];
+                return v !== undefined && v !== "" && v !== null;
+              });
+              return filled.length > 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                  {filled.map((f: ApiCustomField) => (
+                    <div key={f._id}>
+                      <span className="text-text-muted">{f.name}: </span>
+                      <span>
+                        {f.fieldType === "checkbox"
+                          ? vals[f._id] ? "Yes" : "No"
+                          : f.fieldType === "date" && vals[f._id]
+                            ? new Date(vals[f._id] as string).toLocaleDateString()
+                            : String(vals[f._id])}
+                      </span>
+                    </div>
                   ))}
                 </div>
               ) : null;

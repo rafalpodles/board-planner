@@ -126,6 +126,7 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
         ),
     labels: Array.isArray(body.labels) ? body.labels : [],
     sprint: body.sprint || null,
+    customFieldValues: body.customFieldValues || {},
     recurrence: body.recurrence || null,
     order: body.order ?? 0,
     createdBy: user._id,

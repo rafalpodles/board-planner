@@ -3,7 +3,7 @@
 import { useEffect, useState, FormEvent } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
-import { ApiProject, ApiLabel, ApiTaskTemplate, ApiWebhook, ApiNotificationChannel, ApiProjectAuditLog, DIFFICULTIES, CATEGORIES, WEBHOOK_EVENTS, NOTIFICATION_CHANNEL_TYPES, Difficulty, Category, WebhookEvent, NotificationChannelType } from "@/types";
+import { ApiProject, ApiLabel, ApiCustomField, ApiTaskTemplate, ApiWebhook, ApiNotificationChannel, ApiProjectAuditLog, DIFFICULTIES, CATEGORIES, WEBHOOK_EVENTS, NOTIFICATION_CHANNEL_TYPES, CUSTOM_FIELD_TYPES, Difficulty, Category, CustomFieldType, WebhookEvent, NotificationChannelType } from "@/types";
 import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
 import { Button } from "@/components/ui/Button";
@@ -30,6 +30,10 @@ export default function ProjectSettingsPage() {
   const [newLabelColor, setNewLabelColor] = useState("#3b82f6");
   const [aiModel, setAiModel] = useState("");
   const [aiModelSaving, setAiModelSaving] = useState(false);
+  const [newFieldName, setNewFieldName] = useState("");
+  const [newFieldType, setNewFieldType] = useState<CustomFieldType>("text");
+  const [newFieldOptions, setNewFieldOptions] = useState("");
+  const [newFieldRequired, setNewFieldRequired] = useState(false);
   const [newTemplateName, setNewTemplateName] = useState("");
   const [editingTemplate, setEditingTemplate] = useState<ApiTaskTemplate | null>(null);
   const [newWebhookUrl, setNewWebhookUrl] = useState("");
@@ -126,6 +130,33 @@ export default function ProjectSettingsPage() {
       setProject((p) => (p ? { ...p, labels } : p));
     } catch {
       toast("Failed to remove label", "error");
+    }
+  }
+
+  async function addCustomField() {
+    if (!newFieldName.trim()) return;
+    try {
+      const fields: ApiCustomField[] = await api.post(`/api/projects/${projectId}/custom-fields`, {
+        name: newFieldName.trim(),
+        fieldType: newFieldType,
+        options: newFieldType === "dropdown" ? newFieldOptions.split(",").map((o) => o.trim()).filter(Boolean) : [],
+        required: newFieldRequired,
+      });
+      setProject((p) => (p ? { ...p, customFields: fields } : p));
+      setNewFieldName("");
+      setNewFieldOptions("");
+      setNewFieldRequired(false);
+    } catch {
+      toast("Failed to add custom field", "error");
+    }
+  }
+
+  async function removeCustomField(fieldId: string) {
+    try {
+      const fields: ApiCustomField[] = await api.del(`/api/projects/${projectId}/custom-fields/${fieldId}`);
+      setProject((p) => (p ? { ...p, customFields: fields } : p));
+    } catch {
+      toast("Failed to remove custom field", "error");
     }
   }
 
@@ -489,6 +520,87 @@ export default function ProjectSettingsPage() {
           <Button type="button" variant="secondary" onClick={addLabel}>
             Add
           </Button>
+        </div>
+      </div>
+
+      {/* Custom Fields */}
+      <div className="mb-8">
+        <h2 className="font-semibold mb-3">Custom Fields</h2>
+        <p className="text-sm text-text-muted mb-3">
+          Define extra fields that appear on all tasks in this project.
+        </p>
+
+        <div className="space-y-2 mb-3">
+          {(project.customFields || []).map((field) => (
+            <div
+              key={field._id}
+              className="flex items-center justify-between border border-border rounded-lg px-3 py-2"
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium">{field.name}</span>
+                <span className="text-xs bg-bg-input px-2 py-0.5 rounded text-text-muted">
+                  {field.fieldType}
+                </span>
+                {field.required && (
+                  <span className="text-xs text-warning">required</span>
+                )}
+                {field.fieldType === "dropdown" && field.options.length > 0 && (
+                  <span className="text-xs text-text-muted">
+                    [{field.options.join(", ")}]
+                  </span>
+                )}
+              </div>
+              <button
+                onClick={() => removeCustomField(field._id)}
+                className="text-xs text-text-muted hover:text-danger px-2 py-1"
+              >
+                Delete
+              </button>
+            </div>
+          ))}
+          {(project.customFields || []).length === 0 && (
+            <p className="text-sm text-text-muted">No custom fields</p>
+          )}
+        </div>
+
+        <div className="space-y-2">
+          <div className="flex gap-2">
+            <Input
+              value={newFieldName}
+              onChange={(e) => setNewFieldName(e.target.value)}
+              placeholder="Field name..."
+            />
+            <select
+              value={newFieldType}
+              onChange={(e) => setNewFieldType(e.target.value as CustomFieldType)}
+              className="text-sm bg-bg-input border border-border rounded-lg px-3 py-2"
+            >
+              {CUSTOM_FIELD_TYPES.map((t) => (
+                <option key={t} value={t}>{t}</option>
+              ))}
+            </select>
+          </div>
+          {newFieldType === "dropdown" && (
+            <Input
+              value={newFieldOptions}
+              onChange={(e) => setNewFieldOptions(e.target.value)}
+              placeholder="Options (comma-separated)..."
+            />
+          )}
+          <div className="flex items-center gap-4">
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={newFieldRequired}
+                onChange={(e) => setNewFieldRequired(e.target.checked)}
+                className="rounded border-border"
+              />
+              Required
+            </label>
+            <Button type="button" variant="secondary" size="sm" onClick={addCustomField}>
+              Add Field
+            </Button>
+          </div>
         </div>
       </div>
 
