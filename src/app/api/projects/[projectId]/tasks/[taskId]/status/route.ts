@@ -6,6 +6,8 @@ import { TASK_STATUSES, TaskStatus } from "@/types";
 import { logActivity } from "@/lib/activity";
 import { dispatchWebhooks } from "@/lib/webhooks";
 import { dispatchNotifications } from "@/lib/notifications";
+import { createNotifications, collectRecipients } from "@/lib/in-app-notifications";
+import { Project } from "@/models/project";
 
 export const PATCH = withProjectAccess(async (request, { params, user }) => {
   const { projectId, taskId } = await params;
@@ -52,6 +54,20 @@ export const PATCH = withProjectAccess(async (request, { params, user }) => {
     };
     dispatchWebhooks(projectId, "status_changed", eventPayload);
     dispatchNotifications(projectId, "status_changed", eventPayload);
+
+    // In-app notifications
+    const project = await Project.findById(projectId, "key").lean();
+    const taskKey = project ? `${project.key}-${task.taskNumber}` : `#${task.taskNumber}`;
+    const recipients = collectRecipients(task);
+    createNotifications({
+      type: "status_changed",
+      taskId,
+      projectId,
+      actorId: String(user._id),
+      title: `${taskKey} → ${status}`,
+      body: task.title,
+      recipientIds: recipients,
+    });
   }
 
   return NextResponse.json(task);

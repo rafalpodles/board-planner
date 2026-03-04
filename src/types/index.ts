@@ -348,6 +348,35 @@ export interface ApiProjectAuditLog {
   createdAt: string;
 }
 
+// In-app notification types
+export type NotificationType = "task_assigned" | "status_changed" | "comment_added" | "mentioned";
+
+export interface INotification {
+  _id: Types.ObjectId;
+  recipient: Types.ObjectId;
+  type: NotificationType;
+  task: Types.ObjectId | ITask;
+  project: Types.ObjectId | IProject;
+  actor: Types.ObjectId | IUser;
+  title: string;
+  body: string;
+  read: boolean;
+  createdAt: Date;
+}
+
+export interface ApiNotification {
+  _id: string;
+  recipient: string;
+  type: NotificationType;
+  task: { _id: string; taskNumber: number; title: string } | string;
+  project: { _id: string; key: string; name: string } | string;
+  actor: { _id: string; username: string; fullName: string } | string;
+  title: string;
+  body: string;
+  read: boolean;
+  createdAt: string;
+}
+
 // Parsed markdown task for import
 export interface ParsedTask {
   title: string;

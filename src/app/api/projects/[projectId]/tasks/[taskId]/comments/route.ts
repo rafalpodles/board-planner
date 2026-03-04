@@ -6,6 +6,8 @@ import { Task } from "@/models/task";
 import { logActivity } from "@/lib/activity";
 import { dispatchWebhooks } from "@/lib/webhooks";
 import { dispatchNotifications } from "@/lib/notifications";
+import { createNotifications, collectRecipients, resolveMentions } from "@/lib/in-app-notifications";
+import { Project } from "@/models/project";
 
 export const GET = withProjectAccess(async (_request, { params }) => {
   const { projectId, taskId } = await params;
@@ -72,6 +74,34 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
   };
   dispatchWebhooks(projectId, "comment_added", eventPayload);
   dispatchNotifications(projectId, "comment_added", eventPayload);
+
+  // In-app notifications for comment
+  const project = await Project.findById(projectId, "key").lean();
+  const taskKey = project ? `${project.key}-${task.taskNumber}` : `#${task.taskNumber}`;
+  const recipients = collectRecipients(task);
+  createNotifications({
+    type: "comment_added",
+    taskId,
+    projectId,
+    actorId: String(user._id),
+    title: `New comment on ${taskKey}`,
+    body: body.trim().substring(0, 120),
+    recipientIds: recipients,
+  });
+
+  // @mention notifications
+  const mentionedIds = await resolveMentions(body);
+  if (mentionedIds.length > 0) {
+    createNotifications({
+      type: "mentioned",
+      taskId,
+      projectId,
+      actorId: String(user._id),
+      title: `You were mentioned in ${taskKey}`,
+      body: body.trim().substring(0, 120),
+      recipientIds: mentionedIds,
+    });
+  }
 
   return NextResponse.json(populated, { status: 201 });
 });

@@ -7,6 +7,8 @@ import { ActivityLog } from "@/models/activityLog";
 import { User } from "@/models/user";
 import { logActivity } from "@/lib/activity";
 import { parseChecklistString } from "@/lib/checklist";
+import { createNotifications, collectRecipients } from "@/lib/in-app-notifications";
+import { Project } from "@/models/project";
 
 const populateFields = [
   { path: "assignee", select: "username fullName" },
@@ -128,6 +130,24 @@ export const PUT = withProjectAccess(async (request, { params, user }) => {
   }
 
   await Promise.all(activities);
+
+  // In-app notification: assignee changed
+  if (updates.assignee !== undefined && task.assignee) {
+    const newAssigneeId = typeof task.assignee === "object" && "_id" in task.assignee
+      ? String(task.assignee._id)
+      : String(task.assignee);
+    const project = await Project.findById(projectId, "key").lean();
+    const taskKey = project ? `${project.key}-${task.taskNumber}` : `#${task.taskNumber}`;
+    createNotifications({
+      type: "task_assigned",
+      taskId,
+      projectId,
+      actorId: String(user._id),
+      title: `${taskKey} assigned to you`,
+      body: task.title,
+      recipientIds: [newAssigneeId],
+    });
+  }
 
   return NextResponse.json(task);
 });
