@@ -83,6 +83,11 @@ const taskSchema = new Schema<ITask>(
       type: [{ type: Schema.Types.ObjectId, ref: "User" }],
       default: [],
     },
+    sprint: {
+      type: Schema.Types.ObjectId,
+      ref: "Sprint",
+      default: null,
+    },
     recurrence: {
       type: {
         frequency: { type: String, enum: ["daily", "weekly", "monthly"], required: true },

@@ -6,7 +6,7 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
-import { ApiTask, ApiProject, ApiLabel, TASK_STATUSES, STATUS_LABELS } from "@/types";
+import { ApiTask, ApiProject, ApiSprint, ApiLabel, TASK_STATUSES, STATUS_LABELS } from "@/types";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -31,16 +31,19 @@ export default function TaskDetailPage() {
   const [editing, setEditing] = useState(true);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [sprints, setSprints] = useState<ApiSprint[]>([]);
   const [loading, setLoading] = useState(true);
 
   async function loadData() {
     try {
-      const [t, p] = await Promise.all([
+      const [t, p, s] = await Promise.all([
         api.get(`/api/projects/${projectId}/tasks/${taskId}`),
         api.get(`/api/projects/${projectId}`),
+        api.get(`/api/projects/${projectId}/sprints`),
       ]);
       setTask(t);
       setProject(p);
+      setSprints(s);
     } catch {
       toast("Failed to load task", "error");
     } finally {
@@ -203,6 +206,7 @@ export default function TaskDetailPage() {
             task={task}
             components={project.components}
             projectLabels={project.labels || []}
+            sprints={sprints}
             onSaved={() => {
               setEditing(false);
               loadData();

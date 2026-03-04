@@ -173,6 +173,61 @@ server.tool(
   }
 );
 
+// --- Sprint tools ---
+
+server.tool(
+  "list_sprints",
+  "List all sprints in a project",
+  { project: z.string().describe("Project key (e.g. 'CP')") },
+  async ({ project }) => {
+    const proj = await client.getProjectByKey(project) as { _id: string };
+    const sprints = await client.listSprints(proj._id);
+    return { content: [{ type: "text", text: JSON.stringify(sprints, null, 2) }] };
+  }
+);
+
+server.tool(
+  "create_sprint",
+  "Create a new sprint in a project",
+  {
+    project: z.string().describe("Project key (e.g. 'CP')"),
+    name: z.string().describe("Sprint name"),
+    startDate: z.string().describe("Start date (YYYY-MM-DD)"),
+    endDate: z.string().describe("End date (YYYY-MM-DD)"),
+    goal: z.string().optional().describe("Sprint goal"),
+  },
+  async ({ project, name, startDate, endDate, goal }) => {
+    const proj = await client.getProjectByKey(project) as { _id: string };
+    const sprint = await client.createSprint(proj._id, { name, startDate, endDate, goal });
+    return { content: [{ type: "text", text: JSON.stringify(sprint, null, 2) }] };
+  }
+);
+
+server.tool(
+  "update_sprint",
+  "Update an existing sprint (name, dates, goal, status)",
+  {
+    project: z.string().describe("Project key (e.g. 'CP')"),
+    sprintId: z.string().describe("Sprint ID"),
+    name: z.string().optional(),
+    startDate: z.string().optional(),
+    endDate: z.string().optional(),
+    goal: z.string().optional(),
+    status: z.string().optional().describe("planned, active, or completed"),
+  },
+  async ({ project, sprintId, ...data }) => {
+    const proj = await client.getProjectByKey(project) as { _id: string };
+    const updates: Record<string, unknown> = {};
+    if (data.name !== undefined) updates.name = data.name;
+    if (data.startDate !== undefined) updates.startDate = data.startDate;
+    if (data.endDate !== undefined) updates.endDate = data.endDate;
+    if (data.goal !== undefined) updates.goal = data.goal;
+    if (data.status !== undefined) updates.status = data.status;
+    const sprint = await client.updateSprint(proj._id, sprintId, updates);
+    return { content: [{ type: "text", text: JSON.stringify(sprint, null, 2) }] };
+  }
+);
+
 // --- Comment tools ---
 
 server.tool(

@@ -184,6 +184,43 @@ export interface ApiChecklistItem {
   done: boolean;
 }
 
+// Sprint statuses
+export type SprintStatus = "planned" | "active" | "completed";
+
+export const SPRINT_STATUSES: SprintStatus[] = ["planned", "active", "completed"];
+
+export const SPRINT_STATUS_LABELS: Record<SprintStatus, string> = {
+  planned: "Planned",
+  active: "Active",
+  completed: "Completed",
+};
+
+export interface ISprint {
+  _id: Types.ObjectId;
+  project: Types.ObjectId | IProject;
+  name: string;
+  startDate: Date;
+  endDate: Date;
+  goal: string;
+  status: SprintStatus;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface ApiSprint {
+  _id: string;
+  project: string;
+  name: string;
+  startDate: string;
+  endDate: string;
+  goal: string;
+  status: SprintStatus;
+  taskCount?: number;
+  doneCount?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type RecurrenceFrequency = "daily" | "weekly" | "monthly";
 
 export interface IRecurrence {
@@ -209,6 +246,7 @@ export interface ITask {
   pinned: boolean;
   blockedBy: (Types.ObjectId | ITask)[];
   watchers: Types.ObjectId[];
+  sprint: Types.ObjectId | ISprint | null;
   recurrence: IRecurrence | null;
   recurringParentId: Types.ObjectId | null;
   order: number;
@@ -311,6 +349,7 @@ export interface ApiTask {
   blockedBy: ApiTaskLink[];
   blocking: ApiTaskLink[];
   watchers: string[];
+  sprint: string | null;
   recurrence: ApiRecurrence | null;
   recurringParentId: string | null;
   order: number;

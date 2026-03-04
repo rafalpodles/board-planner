@@ -55,6 +55,13 @@ export const GET = withProjectAccess(async (request, { params }) => {
     filter.labels = label;
   }
 
+  const sprint = url.searchParams.get("sprint");
+  if (sprint === "backlog") {
+    filter.sprint = null;
+  } else if (sprint) {
+    filter.sprint = sprint;
+  }
+
   const search = url.searchParams.get("search");
   if (search) {
     const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -118,6 +125,7 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
             : (body.acceptanceCriteria ?? "")
         ),
     labels: Array.isArray(body.labels) ? body.labels : [],
+    sprint: body.sprint || null,
     recurrence: body.recurrence || null,
     order: body.order ?? 0,
     createdBy: user._id,

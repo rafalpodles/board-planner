@@ -78,6 +78,19 @@ export class ApiClient {
     return this.request("POST", `/api/projects/${projectId}/tasks/${taskId}/comments`, { body });
   }
 
+  // Sprints
+  async listSprints(projectId: string): Promise<unknown[]> {
+    return this.request("GET", `/api/projects/${projectId}/sprints`) as Promise<unknown[]>;
+  }
+
+  async createSprint(projectId: string, data: Record<string, unknown>): Promise<unknown> {
+    return this.request("POST", `/api/projects/${projectId}/sprints`, data);
+  }
+
+  async updateSprint(projectId: string, sprintId: string, data: Record<string, unknown>): Promise<unknown> {
+    return this.request("PUT", `/api/projects/${projectId}/sprints/${sprintId}`, data);
+  }
+
   // Users
   async listUsers(): Promise<unknown[]> {
     return this.request("GET", "/api/users") as Promise<unknown[]>;

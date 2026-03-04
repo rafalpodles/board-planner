@@ -12,6 +12,7 @@ import {
   ApiUser,
   ApiLabel,
   ApiTaskTemplate,
+  ApiSprint,
   ApiChecklistItem,
   RecurrenceFrequency,
   TaskStatus,
@@ -32,6 +33,7 @@ interface TaskFormProps {
   components: string[];
   projectLabels?: ApiLabel[];
   taskTemplates?: ApiTaskTemplate[];
+  sprints?: ApiSprint[];
   onSaved: () => void;
   onCancel: () => void;
 }
@@ -43,6 +45,7 @@ export function TaskForm({
   components,
   projectLabels = [],
   taskTemplates = [],
+  sprints = [],
   onSaved,
   onCancel,
 }: TaskFormProps) {
@@ -67,6 +70,7 @@ export function TaskForm({
   const [selectedLabels, setSelectedLabels] = useState<string[]>(
     task?.labels || []
   );
+  const [sprint, setSprint] = useState(task?.sprint || "");
   const [recurrenceFreq, setRecurrenceFreq] = useState<RecurrenceFrequency | "">(
     task?.recurrence?.frequency || ""
   );
@@ -144,6 +148,7 @@ export function TaskForm({
       dueDate: dueDate || null,
       checklist,
       labels: selectedLabels,
+      sprint: sprint || null,
       recurrence: recurrenceFreq
         ? { frequency: recurrenceFreq, interval: recurrenceInterval }
         : null,
@@ -363,6 +368,18 @@ export function TaskForm({
           </div>
         )}
       </div>
+
+      {sprints.length > 0 && (
+        <Select
+          label="Sprint"
+          value={sprint}
+          onChange={(e) => setSprint(e.target.value)}
+          options={sprints
+            .filter((s) => s.status !== "completed")
+            .map((s) => ({ value: s._id, label: `${s.name}${s.status === "active" ? " (Active)" : ""}` }))}
+          placeholder="No sprint (backlog)"
+        />
+      )}
 
       {projectLabels.length > 0 && (
         <div>
