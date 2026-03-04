@@ -2,6 +2,7 @@
 
 import { useState, useEffect, FormEvent } from "react";
 import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { ApiComment } from "@/types";
@@ -183,8 +184,8 @@ export function Comments({ projectId, taskId }: CommentsProps) {
                 </div>
               </div>
             ) : (
-              <div className="text-sm prose prose-invert prose-sm max-w-none">
-                <Markdown>{comment.body}</Markdown>
+              <div className="text-sm prose prose-invert prose-sm max-w-none overflow-x-auto">
+                <Markdown remarkPlugins={[remarkGfm]}>{comment.body}</Markdown>
               </div>
             )}
           </div>

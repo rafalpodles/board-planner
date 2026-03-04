@@ -48,3 +48,16 @@ body {
 .animate-slide-in {
   animation: slide-in 0.2s ease-out;
 }
+
+/* Markdown table styles for dark theme */
+.prose table {
+  border-collapse: collapse;
+}
+.prose th,
+.prose td {
+  border: 1px solid var(--color-border);
+  padding: 0.5rem 0.75rem;
+}
+.prose th {
+  background-color: var(--color-bg-input);
+}

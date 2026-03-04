@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { useApi } from "@/hooks/use-api";
 import { ApiTask, ApiProject, TASK_STATUSES, STATUS_LABELS } from "@/types";
 import { Badge } from "@/components/ui/Badge";
@@ -202,8 +203,8 @@ export default function TaskDetailPage() {
             {task.description && (
               <div>
                 <h2 className="font-semibold mb-2">Description</h2>
-                <div className="text-sm text-text-muted prose prose-invert prose-sm max-w-none">
-                  <Markdown components={markdownComponents}>{task.description}</Markdown>
+                <div className="text-sm text-text-muted prose prose-invert prose-sm max-w-none overflow-x-auto">
+                  <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{task.description}</Markdown>
                 </div>
               </div>
             )}
@@ -212,8 +213,8 @@ export default function TaskDetailPage() {
             {task.acceptanceCriteria && (
               <div>
                 <h2 className="font-semibold mb-2">Acceptance Criteria</h2>
-                <div className="text-sm text-text-muted prose prose-invert prose-sm max-w-none">
-                  <Markdown components={markdownComponents}>{task.acceptanceCriteria}</Markdown>
+                <div className="text-sm text-text-muted prose prose-invert prose-sm max-w-none overflow-x-auto">
+                  <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{task.acceptanceCriteria}</Markdown>
                 </div>
               </div>
             )}
