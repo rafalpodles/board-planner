@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   ApiTask,
   DIFFICULTIES,
@@ -20,25 +20,77 @@ interface Filters {
   difficulty: string;
 }
 
+interface PersistedState {
+  filters: Omit<Filters, "search">;
+  myTasks: boolean;
+  sortField: SortField;
+  sortDir: SortDir;
+  showFilters: boolean;
+}
+
+function loadPersistedState(projectId: string): Partial<PersistedState> {
+  try {
+    const raw = localStorage.getItem(`board-filters:${projectId}`);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function savePersistedState(projectId: string, state: PersistedState) {
+  try {
+    localStorage.setItem(`board-filters:${projectId}`, JSON.stringify(state));
+  } catch {
+    // localStorage full or unavailable
+  }
+}
+
 interface BoardFiltersProps {
   tasks: ApiTask[];
   components: string[];
+  projectId: string;
   currentUsername?: string;
   onFilter: (filtered: ApiTask[]) => void;
 }
 
-export function BoardFilters({ tasks, components, currentUsername, onFilter }: BoardFiltersProps) {
+export function BoardFilters({ tasks, components, projectId, currentUsername, onFilter }: BoardFiltersProps) {
+  const [initialized, setInitialized] = useState(false);
+  const persisted = initialized ? undefined : loadPersistedState(projectId);
+
   const [filters, setFilters] = useState<Filters>({
     search: "",
-    assignee: "",
-    component: "",
-    category: "",
-    difficulty: "",
+    assignee: persisted?.filters?.assignee ?? "",
+    component: persisted?.filters?.component ?? "",
+    category: persisted?.filters?.category ?? "",
+    difficulty: persisted?.filters?.difficulty ?? "",
   });
-  const [myTasks, setMyTasks] = useState(false);
-  const [sortField, setSortField] = useState<SortField>("updatedAt");
-  const [sortDir, setSortDir] = useState<SortDir>("desc");
-  const [showFilters, setShowFilters] = useState(false);
+  const [myTasks, setMyTasks] = useState(persisted?.myTasks ?? false);
+  const [sortField, setSortField] = useState<SortField>(persisted?.sortField ?? "updatedAt");
+  const [sortDir, setSortDir] = useState<SortDir>(persisted?.sortDir ?? "desc");
+  const [showFilters, setShowFilters] = useState(persisted?.showFilters ?? false);
+
+  // Mark as initialized after first render
+  useEffect(() => { setInitialized(true); }, []);
+
+  // Persist filter state on change
+  const persistState = useCallback(() => {
+    savePersistedState(projectId, {
+      filters: {
+        assignee: filters.assignee,
+        component: filters.component,
+        category: filters.category,
+        difficulty: filters.difficulty,
+      },
+      myTasks,
+      sortField,
+      sortDir,
+      showFilters,
+    });
+  }, [projectId, filters, myTasks, sortField, sortDir, showFilters]);
+
+  useEffect(() => {
+    if (initialized) persistState();
+  }, [initialized, persistState]);
 
   const assignees = Array.from(
     new Map(
@@ -117,6 +169,8 @@ export function BoardFilters({ tasks, components, currentUsername, onFilter }: B
   function clearFilters() {
     setMyTasks(false);
     setFilters({ search: "", assignee: "", component: "", category: "", difficulty: "" });
+    setSortField("updatedAt");
+    setSortDir("desc");
   }
 
   return (

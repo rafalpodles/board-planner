@@ -286,6 +286,7 @@ export default function KanbanPage() {
       <BoardFilters
         tasks={tasks}
         components={project.components}
+        projectId={projectId}
         currentUsername={user?.username}
         onFilter={setFilteredTasks}
       />
