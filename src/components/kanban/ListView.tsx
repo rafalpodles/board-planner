@@ -1,15 +1,16 @@
 "use client";
 
-import { ApiTask, STATUS_LABELS } from "@/types";
+import { ApiTask, STATUS_LABELS, TASK_STATUSES, TaskStatus } from "@/types";
 import { Badge } from "@/components/ui/Badge";
 
 interface ListViewProps {
   tasks: ApiTask[];
   projectKey: string;
   onTaskClick: (taskId: string) => void;
+  onStatusChange?: (taskId: string, status: string) => void;
 }
 
-export function ListView({ tasks, projectKey, onTaskClick }: ListViewProps) {
+export function ListView({ tasks, projectKey, onTaskClick, onStatusChange }: ListViewProps) {
   function timeAgo(dateStr: string) {
     const diff = Date.now() - new Date(dateStr).getTime();
     const mins = Math.floor(diff / 60_000);
@@ -54,9 +55,25 @@ export function ListView({ tasks, projectKey, onTaskClick }: ListViewProps) {
                 {task.title}
               </td>
               <td className="px-3 py-2 hidden sm:table-cell">
-                <Badge variant="status" value={task.status}>
-                  {STATUS_LABELS[task.status]}
-                </Badge>
+                {onStatusChange ? (
+                  <select
+                    value={task.status}
+                    onChange={(e) => {
+                      e.stopPropagation();
+                      onStatusChange(task._id, e.target.value);
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                    className="text-xs bg-bg-input border border-border rounded px-1.5 py-1 text-text focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+                  >
+                    {TASK_STATUSES.map((s: TaskStatus) => (
+                      <option key={s} value={s}>{STATUS_LABELS[s]}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <Badge variant="status" value={task.status}>
+                    {STATUS_LABELS[task.status]}
+                  </Badge>
+                )}
               </td>
               <td className="px-3 py-2 hidden md:table-cell text-text-muted">
                 {task.assignee && typeof task.assignee === "object"

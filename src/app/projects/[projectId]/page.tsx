@@ -457,6 +457,7 @@ export default function KanbanPage() {
           onTaskClick={(taskId) =>
             router.push(`/projects/${projectId}/tasks/${taskId}`)
           }
+          onStatusChange={handleStatusChange}
         />
       )}
 
