@@ -83,6 +83,7 @@ export interface IComment {
   author: Types.ObjectId | IUser;
   body: string;
   createdAt: Date;
+  updatedAt: Date;
 }
 
 // API response types (serialized, no ObjectId)
@@ -140,6 +141,7 @@ export interface ApiComment {
   author: ApiUser | string;
   body: string;
   createdAt: string;
+  updatedAt: string;
 }
 
 // Sort options for board columns

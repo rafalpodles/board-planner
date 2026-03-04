@@ -1,26 +1,25 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { IComment } from "@/types";
 
-const commentSchema = new Schema<IComment>({
-  task: {
-    type: Schema.Types.ObjectId,
-    ref: "Task",
-    required: true,
+const commentSchema = new Schema<IComment>(
+  {
+    task: {
+      type: Schema.Types.ObjectId,
+      ref: "Task",
+      required: true,
+    },
+    author: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
+    body: {
+      type: String,
+      required: true,
+    },
   },
-  author: {
-    type: Schema.Types.ObjectId,
-    ref: "User",
-    required: true,
-  },
-  body: {
-    type: String,
-    required: true,
-  },
-  createdAt: {
-    type: Date,
-    default: Date.now,
-  },
-});
+  { timestamps: true }
+);
 
 commentSchema.index({ task: 1, createdAt: 1 });
 
