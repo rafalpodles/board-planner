@@ -1,11 +1,12 @@
 "use client";
 
-import { ApiTask, TASK_STATUSES, TaskStatus } from "@/types";
+import { ApiTask, ApiLabel, TASK_STATUSES, TaskStatus } from "@/types";
 import { Column } from "./Column";
 
 interface BoardProps {
   tasks: ApiTask[];
   projectKey: string;
+  projectLabels?: ApiLabel[];
   selectedTasks?: Set<string>;
   onStatusChange: (taskId: string, status: string) => void;
   onTaskDrop?: (taskId: string, status: string, dropIndex: number) => void;
@@ -17,6 +18,7 @@ interface BoardProps {
 export function Board({
   tasks,
   projectKey,
+  projectLabels,
   selectedTasks,
   onStatusChange,
   onTaskDrop,
@@ -45,6 +47,7 @@ export function Board({
               status={status}
               tasks={grouped[status]}
               projectKey={projectKey}
+              projectLabels={projectLabels}
               selectedTasks={selectedTasks}
               onStatusChange={onStatusChange}
               onTaskDrop={onTaskDrop}

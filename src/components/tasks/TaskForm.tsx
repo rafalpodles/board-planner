@@ -10,6 +10,7 @@ import { useToast } from "@/components/ui/Toast";
 import {
   ApiTask,
   ApiUser,
+  ApiLabel,
   TaskStatus,
   Difficulty,
   Category,
@@ -25,6 +26,7 @@ interface TaskFormProps {
   projectKey?: string;
   task?: ApiTask;
   components: string[];
+  projectLabels?: ApiLabel[];
   onSaved: () => void;
   onCancel: () => void;
 }
@@ -34,6 +36,7 @@ export function TaskForm({
   projectKey,
   task,
   components,
+  projectLabels = [],
   onSaved,
   onCancel,
 }: TaskFormProps) {
@@ -50,6 +53,9 @@ export function TaskForm({
   );
   const [acceptanceCriteria, setAcceptanceCriteria] = useState(
     task?.acceptanceCriteria || ""
+  );
+  const [selectedLabels, setSelectedLabels] = useState<string[]>(
+    task?.labels || []
   );
   const [users, setUsers] = useState<ApiUser[]>([]);
   const [error, setError] = useState("");
@@ -120,6 +126,7 @@ export function TaskForm({
       status,
       assignee: assignee || null,
       acceptanceCriteria,
+      labels: selectedLabels,
     };
 
     try {
@@ -273,6 +280,38 @@ export function TaskForm({
         }))}
         placeholder="Unassigned"
       />
+
+      {projectLabels.length > 0 && (
+        <div>
+          <label className="block text-sm font-medium mb-1">Labels</label>
+          <div className="flex flex-wrap gap-2">
+            {projectLabels.map((label) => {
+              const isSelected = selectedLabels.includes(label._id);
+              return (
+                <button
+                  key={label._id}
+                  type="button"
+                  onClick={() =>
+                    setSelectedLabels((prev) =>
+                      isSelected
+                        ? prev.filter((id) => id !== label._id)
+                        : [...prev, label._id]
+                    )
+                  }
+                  className={`text-xs px-2.5 py-1 rounded-full border transition-colors font-medium ${
+                    isSelected
+                      ? "text-white border-transparent"
+                      : "border-border text-text-muted hover:border-primary/50"
+                  }`}
+                  style={isSelected ? { backgroundColor: label.color } : undefined}
+                >
+                  {label.name}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <Textarea
         label="Description"

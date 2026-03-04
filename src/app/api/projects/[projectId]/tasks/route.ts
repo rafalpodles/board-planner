@@ -47,6 +47,11 @@ export const GET = withProjectAccess(async (request, { params }) => {
     filter.category = category;
   }
 
+  const label = url.searchParams.get("label");
+  if (label) {
+    filter.labels = label;
+  }
+
   const search = url.searchParams.get("search");
   if (search) {
     const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -102,6 +107,7 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
     status: body.status ?? "planned",
     assignee: assigneeId,
     acceptanceCriteria: body.acceptanceCriteria ?? "",
+    labels: Array.isArray(body.labels) ? body.labels : [],
     order: body.order ?? 0,
     createdBy: user._id,
   });

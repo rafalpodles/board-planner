@@ -3,7 +3,7 @@
 import { useEffect, useState, FormEvent } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
-import { ApiProject } from "@/types";
+import { ApiProject, ApiLabel } from "@/types";
 import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
 import { Button } from "@/components/ui/Button";
@@ -26,6 +26,8 @@ export default function ProjectSettingsPage() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState("");
+  const [newLabelName, setNewLabelName] = useState("");
+  const [newLabelColor, setNewLabelColor] = useState("#3b82f6");
   const [aiModel, setAiModel] = useState("");
   const [aiModelSaving, setAiModelSaving] = useState(false);
 
@@ -89,6 +91,30 @@ export default function ProjectSettingsPage() {
       );
     } catch {
       toast("Failed to remove component", "error");
+    }
+  }
+
+  async function addLabel() {
+    if (!newLabelName.trim()) return;
+    try {
+      const labels: ApiLabel[] = await api.post(`/api/projects/${projectId}/labels`, {
+        name: newLabelName.trim(),
+        color: newLabelColor,
+      });
+      setProject((p) => (p ? { ...p, labels } : p));
+      setNewLabelName("");
+      setNewLabelColor("#3b82f6");
+    } catch {
+      toast("Failed to add label", "error");
+    }
+  }
+
+  async function removeLabel(labelId: string) {
+    try {
+      const labels: ApiLabel[] = await api.del(`/api/projects/${projectId}/labels`, { labelId });
+      setProject((p) => (p ? { ...p, labels } : p));
+    } catch {
+      toast("Failed to remove label", "error");
     }
   }
 
@@ -186,6 +212,54 @@ export default function ProjectSettingsPage() {
             }}
           />
           <Button type="button" variant="secondary" onClick={addComponent}>
+            Add
+          </Button>
+        </div>
+      </div>
+
+      {/* Labels */}
+      <div className="mb-8">
+        <h2 className="font-semibold mb-3">Labels</h2>
+        <div className="flex flex-wrap gap-2 mb-3">
+          {(project.labels || []).map((label) => (
+            <span
+              key={label._id}
+              className="inline-flex items-center gap-1 text-sm px-3 py-1 rounded-full text-white"
+              style={{ backgroundColor: label.color }}
+            >
+              {label.name}
+              <button
+                onClick={() => removeLabel(label._id)}
+                className="hover:opacity-70 ml-1 min-w-[24px] min-h-[24px] flex items-center justify-center"
+              >
+                &times;
+              </button>
+            </span>
+          ))}
+          {(project.labels || []).length === 0 && (
+            <p className="text-sm text-text-muted">No labels</p>
+          )}
+        </div>
+
+        <div className="flex gap-2 items-end">
+          <Input
+            value={newLabelName}
+            onChange={(e) => setNewLabelName(e.target.value)}
+            placeholder="Label name..."
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                addLabel();
+              }
+            }}
+          />
+          <input
+            type="color"
+            value={newLabelColor}
+            onChange={(e) => setNewLabelColor(e.target.value)}
+            className="w-10 h-10 rounded border border-border cursor-pointer bg-transparent"
+          />
+          <Button type="button" variant="secondary" onClick={addLabel}>
             Add
           </Button>
         </div>

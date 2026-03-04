@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   ApiTask,
+  ApiLabel,
   DIFFICULTIES,
   CATEGORIES,
   SORT_OPTIONS,
@@ -18,6 +19,7 @@ interface Filters {
   component: string;
   category: string;
   difficulty: string;
+  label: string;
 }
 
 interface PersistedState {
@@ -48,12 +50,13 @@ function savePersistedState(projectId: string, state: PersistedState) {
 interface BoardFiltersProps {
   tasks: ApiTask[];
   components: string[];
+  labels?: ApiLabel[];
   projectId: string;
   currentUsername?: string;
   onFilter: (filtered: ApiTask[]) => void;
 }
 
-export function BoardFilters({ tasks, components, projectId, currentUsername, onFilter }: BoardFiltersProps) {
+export function BoardFilters({ tasks, components, labels = [], projectId, currentUsername, onFilter }: BoardFiltersProps) {
   const [initialized, setInitialized] = useState(false);
   const persisted = initialized ? undefined : loadPersistedState(projectId);
 
@@ -63,6 +66,7 @@ export function BoardFilters({ tasks, components, projectId, currentUsername, on
     component: persisted?.filters?.component ?? "",
     category: persisted?.filters?.category ?? "",
     difficulty: persisted?.filters?.difficulty ?? "",
+    label: (persisted?.filters as Record<string, string>)?.label ?? "",
   });
   const [myTasks, setMyTasks] = useState(persisted?.myTasks ?? false);
   const [sortField, setSortField] = useState<SortField>(persisted?.sortField ?? "updatedAt");
@@ -80,6 +84,7 @@ export function BoardFilters({ tasks, components, projectId, currentUsername, on
         component: filters.component,
         category: filters.category,
         difficulty: filters.difficulty,
+        label: filters.label,
       },
       myTasks,
       sortField,
@@ -103,7 +108,7 @@ export function BoardFilters({ tasks, components, projectId, currentUsername, on
     ).values()
   );
 
-  const hasActiveFilters = myTasks || filters.assignee || filters.component || filters.category || filters.difficulty;
+  const hasActiveFilters = myTasks || filters.assignee || filters.component || filters.category || filters.difficulty || filters.label;
 
   useEffect(() => {
     let result = tasks;
@@ -137,6 +142,9 @@ export function BoardFilters({ tasks, components, projectId, currentUsername, on
     if (filters.difficulty) {
       result = result.filter((t) => t.difficulty === filters.difficulty);
     }
+    if (filters.label) {
+      result = result.filter((t) => (t.labels || []).includes(filters.label));
+    }
 
     // Sort
     const difficultyOrder: Record<string, number> = { S: 0, M: 1, L: 2, XL: 3 };
@@ -164,11 +172,11 @@ export function BoardFilters({ tasks, components, projectId, currentUsername, on
 
     onFilter(result);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters, tasks, sortField, sortDir, myTasks, currentUsername]);
+  }, [filters, tasks, sortField, sortDir, myTasks, currentUsername, labels]);
 
   function clearFilters() {
     setMyTasks(false);
-    setFilters({ search: "", assignee: "", component: "", category: "", difficulty: "" });
+    setFilters({ search: "", assignee: "", component: "", category: "", difficulty: "", label: "" });
     setSortField("updatedAt");
     setSortDir("desc");
   }
@@ -298,6 +306,19 @@ export function BoardFilters({ tasks, components, projectId, currentUsername, on
               <option key={d} value={d}>{d}</option>
             ))}
           </select>
+
+          {labels.length > 0 && (
+            <select
+              value={filters.label}
+              onChange={(e) => setFilters((f) => ({ ...f, label: e.target.value }))}
+              className="text-xs bg-bg-input border border-border rounded-lg px-2 py-1.5 text-text-muted focus:outline-none focus:ring-1 focus:ring-primary"
+            >
+              <option value="">All labels</option>
+              {labels.map((l) => (
+                <option key={l._id} value={l._id}>{l.name}</option>
+              ))}
+            </select>
+          )}
         </div>
       )}
     </div>

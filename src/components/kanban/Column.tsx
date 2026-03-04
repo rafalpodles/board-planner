@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ApiTask, TaskStatus, STATUS_LABELS } from "@/types";
+import { ApiTask, ApiLabel, TaskStatus, STATUS_LABELS } from "@/types";
 import { TaskCard } from "./TaskCard";
 
 const statusBorderColors: Record<TaskStatus, string> = {
@@ -17,6 +17,7 @@ interface ColumnProps {
   status: TaskStatus;
   tasks: ApiTask[];
   projectKey: string;
+  projectLabels?: ApiLabel[];
   selectedTasks?: Set<string>;
   onStatusChange: (taskId: string, status: string) => void;
   onTaskDrop?: (taskId: string, status: string, dropIndex: number) => void;
@@ -29,6 +30,7 @@ export function Column({
   status,
   tasks,
   projectKey,
+  projectLabels,
   selectedTasks,
   onStatusChange,
   onTaskDrop,
@@ -101,6 +103,7 @@ export function Column({
               <TaskCard
                 task={task}
                 projectKey={projectKey}
+                projectLabels={projectLabels}
                 selected={selectedTasks?.has(task._id)}
                 selectionActive={(selectedTasks?.size ?? 0) > 0}
                 onSelect={onTaskSelect}

@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useApi } from "@/hooks/use-api";
-import { ApiTask, ApiProject, TASK_STATUSES, STATUS_LABELS } from "@/types";
+import { ApiTask, ApiProject, ApiLabel, TASK_STATUSES, STATUS_LABELS } from "@/types";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -162,6 +162,7 @@ export default function TaskDetailPage() {
             projectKey={project.key}
             task={task}
             components={project.components}
+            projectLabels={project.labels || []}
             onSaved={() => {
               setEditing(false);
               loadData();
@@ -199,6 +200,26 @@ export default function TaskDetailPage() {
                 <span>{new Date(task.createdAt).toLocaleDateString()}</span>
               </div>
             </div>
+
+            {/* Labels */}
+            {(() => {
+              const taskLabels = (project.labels || []).filter((l: ApiLabel) =>
+                (task.labels || []).includes(l._id)
+              );
+              return taskLabels.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {taskLabels.map((label: ApiLabel) => (
+                    <span
+                      key={label._id}
+                      className="text-xs px-2 py-0.5 rounded-full text-white font-medium"
+                      style={{ backgroundColor: label.color }}
+                    >
+                      {label.name}
+                    </span>
+                  ))}
+                </div>
+              ) : null;
+            })()}
 
             {/* Description */}
             {task.description && (

@@ -1,11 +1,12 @@
 "use client";
 
-import { ApiTask } from "@/types";
+import { ApiTask, ApiLabel } from "@/types";
 import { Badge } from "@/components/ui/Badge";
 
 interface TaskCardProps {
   task: ApiTask;
   projectKey: string;
+  projectLabels?: ApiLabel[];
   selected?: boolean;
   selectionActive?: boolean;
   onSelect?: (taskId: string) => void;
@@ -16,12 +17,16 @@ interface TaskCardProps {
 export function TaskCard({
   task,
   projectKey,
+  projectLabels = [],
   selected = false,
   selectionActive = false,
   onSelect,
   onClick,
   onContextMenu,
 }: TaskCardProps) {
+  const taskLabels = projectLabels.filter((l) =>
+    (task.labels || []).includes(l._id)
+  );
   return (
     <div
       draggable
@@ -81,6 +86,20 @@ export function TaskCard({
       {task.component && (
         <div className="mb-2">
           <Badge className="text-[10px]">{task.component}</Badge>
+        </div>
+      )}
+
+      {taskLabels.length > 0 && (
+        <div className="flex flex-wrap gap-1 mb-2">
+          {taskLabels.map((label) => (
+            <span
+              key={label._id}
+              className="text-[10px] px-1.5 py-0.5 rounded-full text-white font-medium"
+              style={{ backgroundColor: label.color }}
+            >
+              {label.name}
+            </span>
+          ))}
         </div>
       )}
 

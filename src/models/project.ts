@@ -1,6 +1,13 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { IProject } from "@/types";
 
+const labelSchema = new Schema(
+  {
+    name: { type: String, required: true, trim: true },
+    color: { type: String, required: true, default: "#3b82f6" },
+  }
+);
+
 const projectSchema = new Schema<IProject>(
   {
     name: {
@@ -21,6 +28,10 @@ const projectSchema = new Schema<IProject>(
     },
     components: {
       type: [String],
+      default: [],
+    },
+    labels: {
+      type: [labelSchema],
       default: [],
     },
     githubRepo: {

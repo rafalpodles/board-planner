@@ -50,12 +50,19 @@ export interface IUser {
   createdAt: Date;
 }
 
+export interface ILabel {
+  _id: Types.ObjectId;
+  name: string;
+  color: string;
+}
+
 export interface IProject {
   _id: Types.ObjectId;
   name: string;
   key: string;
   description: string;
   components: string[];
+  labels: ILabel[];
   githubRepo: string;
   taskCounter: number;
   owner: Types.ObjectId | IUser;
@@ -75,6 +82,7 @@ export interface ITask {
   status: TaskStatus;
   assignee: Types.ObjectId | IUser | null;
   acceptanceCriteria: string;
+  labels: Types.ObjectId[];
   blockedBy: (Types.ObjectId | ITask)[];
   order: number;
   createdBy: Types.ObjectId | IUser;
@@ -107,12 +115,19 @@ export interface ApiUser {
   createdAt: string;
 }
 
+export interface ApiLabel {
+  _id: string;
+  name: string;
+  color: string;
+}
+
 export interface ApiProject {
   _id: string;
   name: string;
   key: string;
   description: string;
   components: string[];
+  labels: ApiLabel[];
   githubRepo: string;
   taskCounter: number;
   owner: ApiUser | string;
@@ -140,6 +155,7 @@ export interface ApiTask {
   status: TaskStatus;
   assignee: ApiUser | null;
   acceptanceCriteria: string;
+  labels: string[];
   blockedBy: ApiTaskLink[];
   blocking: ApiTaskLink[];
   order: number;

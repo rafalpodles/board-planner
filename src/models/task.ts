@@ -49,6 +49,10 @@ const taskSchema = new Schema<ITask>(
       type: String,
       default: "",
     },
+    labels: {
+      type: [{ type: Schema.Types.ObjectId }],
+      default: [],
+    },
     blockedBy: {
       type: [{ type: Schema.Types.ObjectId, ref: "Task" }],
       default: [],

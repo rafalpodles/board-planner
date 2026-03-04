@@ -352,6 +352,7 @@ export default function KanbanPage() {
       <BoardFilters
         tasks={tasks}
         components={project.components}
+        labels={project.labels || []}
         projectId={projectId}
         currentUsername={user?.username}
         onFilter={setFilteredTasks}
@@ -429,6 +430,7 @@ export default function KanbanPage() {
         <Board
           tasks={filteredTasks}
           projectKey={project.key}
+          projectLabels={project.labels || []}
           selectedTasks={selectedTasks}
           onStatusChange={handleStatusChange}
           onTaskDrop={handleTaskDrop}
@@ -485,6 +487,7 @@ export default function KanbanPage() {
           projectId={projectId}
           projectKey={project.key}
           components={project.components}
+          projectLabels={project.labels || []}
           onSaved={() => {
             setShowNewTask(false);
             loadData();
