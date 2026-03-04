@@ -13,6 +13,7 @@ import { TaskForm } from "@/components/tasks/TaskForm";
 import { ImportDialog } from "@/components/import-export/ImportDialog";
 import { ExportDialog } from "@/components/import-export/ExportDialog";
 import { TaskContextMenu } from "@/components/kanban/TaskContextMenu";
+import { ListView } from "@/components/kanban/ListView";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
@@ -37,6 +38,10 @@ export default function KanbanPage() {
   const [contextMenu, setContextMenu] = useState<{ taskId: string; x: number; y: number } | null>(null);
   const [confirmContextDelete, setConfirmContextDelete] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const [viewMode, setViewMode] = useState<"board" | "list">(() => {
+    if (typeof window === "undefined") return "board";
+    return (localStorage.getItem(`view-mode:${projectId}`) as "board" | "list") || "board";
+  });
 
   // Tick every 60s so the activity indicator transitions from Working → Idle
   useEffect(() => {
@@ -266,6 +271,26 @@ export default function KanbanPage() {
           <Button
             size="sm"
             variant="ghost"
+            onClick={() => {
+              const next = viewMode === "board" ? "list" : "board";
+              setViewMode(next);
+              localStorage.setItem(`view-mode:${projectId}`, next);
+            }}
+            title={viewMode === "board" ? "Switch to list view" : "Switch to board view"}
+          >
+            {viewMode === "board" ? (
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+              </svg>
+            ) : (
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
+              </svg>
+            )}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
             onClick={loadData}
             title="Refresh board"
           >
@@ -359,17 +384,27 @@ export default function KanbanPage() {
         </div>
       )}
 
-      <Board
-        tasks={filteredTasks}
-        projectKey={project.key}
-        selectedTasks={selectedTasks}
-        onStatusChange={handleStatusChange}
-        onTaskClick={(taskId) =>
-          router.push(`/projects/${projectId}/tasks/${taskId}`)
-        }
-        onTaskSelect={handleTaskSelect}
-        onTaskContextMenu={(taskId, x, y) => setContextMenu({ taskId, x, y })}
-      />
+      {viewMode === "board" ? (
+        <Board
+          tasks={filteredTasks}
+          projectKey={project.key}
+          selectedTasks={selectedTasks}
+          onStatusChange={handleStatusChange}
+          onTaskClick={(taskId) =>
+            router.push(`/projects/${projectId}/tasks/${taskId}`)
+          }
+          onTaskSelect={handleTaskSelect}
+          onTaskContextMenu={(taskId, x, y) => setContextMenu({ taskId, x, y })}
+        />
+      ) : (
+        <ListView
+          tasks={filteredTasks}
+          projectKey={project.key}
+          onTaskClick={(taskId) =>
+            router.push(`/projects/${projectId}/tasks/${taskId}`)
+          }
+        />
+      )}
 
       {contextMenu && (() => {
         const task = tasks.find((t) => t._id === contextMenu.taskId);
