@@ -17,6 +17,7 @@ import { ListView } from "@/components/kanban/ListView";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
+import { ShortcutHelp } from "@/components/ui/ShortcutHelp";
 
 export default function KanbanPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -42,6 +43,8 @@ export default function KanbanPage() {
     if (typeof window === "undefined") return "board";
     return (localStorage.getItem(`view-mode:${projectId}`) as "board" | "list") || "board";
   });
+  const [showShortcutHelp, setShowShortcutHelp] = useState(false);
+  const [focusedTaskIndex, setFocusedTaskIndex] = useState(-1);
 
   // Tick every 60s so the activity indicator transitions from Working → Idle
   useEffect(() => {
@@ -97,17 +100,67 @@ export default function KanbanPage() {
       const tag = (e.target as HTMLElement).tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
 
-      if (e.key === "n" && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      const noMod = !e.metaKey && !e.ctrlKey && !e.altKey;
+
+      if (e.key === "n" && noMod) {
         e.preventDefault();
         setShowNewTask(true);
+        return;
       }
       if (e.key === "Escape") {
         setSelectedTasks(new Set());
+        setFocusedTaskIndex(-1);
+        return;
+      }
+      if (e.key === "?" && noMod) {
+        e.preventDefault();
+        setShowShortcutHelp((v) => !v);
+        return;
+      }
+      if (e.key === "/" && noMod) {
+        e.preventDefault();
+        const searchInput = document.querySelector<HTMLInputElement>('input[placeholder*="Search"]');
+        searchInput?.focus();
+        return;
+      }
+      if (e.key === "v" && noMod) {
+        e.preventDefault();
+        setViewMode((prev) => {
+          const next = prev === "board" ? "list" : "board";
+          localStorage.setItem(`view-mode:${projectId}`, next);
+          return next;
+        });
+        return;
+      }
+      if (e.key === "r" && noMod) {
+        e.preventDefault();
+        loadData();
+        return;
+      }
+      // J/K navigation in list view
+      if (e.key === "j" && noMod) {
+        e.preventDefault();
+        setFocusedTaskIndex((prev) => {
+          const max = filteredTasks.length - 1;
+          return Math.min(prev + 1, max);
+        });
+        return;
+      }
+      if (e.key === "k" && noMod) {
+        e.preventDefault();
+        setFocusedTaskIndex((prev) => Math.max(prev - 1, 0));
+        return;
+      }
+      if (e.key === "Enter" && noMod && focusedTaskIndex >= 0 && focusedTaskIndex < filteredTasks.length) {
+        e.preventDefault();
+        const task = filteredTasks[focusedTaskIndex];
+        router.push(`/projects/${projectId}/tasks/${task._id}`);
+        return;
       }
     }
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [filteredTasks, focusedTaskIndex, projectId, router, loadData]);
 
   function handleTaskSelect(taskId: string) {
     setSelectedTasks((prev) => {
@@ -454,6 +507,7 @@ export default function KanbanPage() {
         <ListView
           tasks={filteredTasks}
           projectKey={project.key}
+          focusedIndex={focusedTaskIndex}
           onTaskClick={(taskId) =>
             router.push(`/projects/${projectId}/tasks/${taskId}`)
           }
@@ -530,6 +584,11 @@ export default function KanbanPage() {
         open={showExport}
         onClose={() => setShowExport(false)}
         projectId={projectId}
+      />
+
+      <ShortcutHelp
+        open={showShortcutHelp}
+        onClose={() => setShowShortcutHelp(false)}
       />
 
       <ConfirmDialog

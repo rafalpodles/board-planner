@@ -1,16 +1,25 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { ApiTask, STATUS_LABELS, TASK_STATUSES, TaskStatus } from "@/types";
 import { Badge } from "@/components/ui/Badge";
 
 interface ListViewProps {
   tasks: ApiTask[];
   projectKey: string;
+  focusedIndex?: number;
   onTaskClick: (taskId: string) => void;
   onStatusChange?: (taskId: string, status: string) => void;
 }
 
-export function ListView({ tasks, projectKey, onTaskClick, onStatusChange }: ListViewProps) {
+export function ListView({ tasks, projectKey, focusedIndex = -1, onTaskClick, onStatusChange }: ListViewProps) {
+  const rowRefs = useRef<(HTMLTableRowElement | null)[]>([]);
+
+  useEffect(() => {
+    if (focusedIndex >= 0 && rowRefs.current[focusedIndex]) {
+      rowRefs.current[focusedIndex]?.scrollIntoView({ block: "nearest" });
+    }
+  }, [focusedIndex]);
   function timeAgo(dateStr: string) {
     const diff = Date.now() - new Date(dateStr).getTime();
     const mins = Math.floor(diff / 60_000);
@@ -42,11 +51,14 @@ export function ListView({ tasks, projectKey, onTaskClick, onStatusChange }: Lis
           </tr>
         </thead>
         <tbody>
-          {tasks.map((task) => (
+          {tasks.map((task, index) => (
             <tr
               key={task._id}
+              ref={(el) => { rowRefs.current[index] = el; }}
               onClick={() => onTaskClick(task._id)}
-              className="border-b border-border last:border-b-0 hover:bg-bg-input/50 cursor-pointer transition-colors"
+              className={`border-b border-border last:border-b-0 hover:bg-bg-input/50 cursor-pointer transition-colors ${
+                index === focusedIndex ? "ring-2 ring-primary ring-inset bg-primary/5" : ""
+              }`}
             >
               <td className="px-3 py-2 font-mono text-xs text-text-muted whitespace-nowrap">
                 {projectKey}-{task.taskNumber}
