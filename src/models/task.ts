@@ -91,7 +91,7 @@ const taskSchema = new Schema<ITask>(
     customFieldValues: {
       type: Map,
       of: Schema.Types.Mixed,
-      default: new Map(),
+      default: () => new Map(),
     },
     recurrence: {
       type: {

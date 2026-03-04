@@ -9,6 +9,7 @@ import { logActivity } from "@/lib/activity";
 import { dispatchWebhooks } from "@/lib/webhooks";
 import { dispatchNotifications } from "@/lib/notifications";
 import { parseChecklistString } from "@/lib/checklist";
+import { validateCustomFieldValues, sanitizeCustomFieldValues } from "@/lib/custom-fields";
 
 const populateFields = [
   { path: "assignee", select: "username fullName" },
@@ -126,7 +127,14 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
         ),
     labels: Array.isArray(body.labels) ? body.labels : [],
     sprint: body.sprint || null,
-    customFieldValues: body.customFieldValues || {},
+    customFieldValues: (() => {
+      const raw = body.customFieldValues || {};
+      if (typeof raw !== "object" || Array.isArray(raw)) return {};
+      const defs = project.customFields || [];
+      const sanitized = sanitizeCustomFieldValues(raw, defs);
+      const result = validateCustomFieldValues(sanitized, defs);
+      return result.valid ? sanitized : {};
+    })(),
     recurrence: body.recurrence || null,
     order: body.order ?? 0,
     createdBy: user._id,

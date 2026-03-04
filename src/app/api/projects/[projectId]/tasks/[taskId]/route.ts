@@ -9,6 +9,7 @@ import { logActivity } from "@/lib/activity";
 import { parseChecklistString } from "@/lib/checklist";
 import { createNotifications, collectRecipients } from "@/lib/in-app-notifications";
 import { Project } from "@/models/project";
+import { validateCustomFieldValues, sanitizeCustomFieldValues } from "@/lib/custom-fields";
 
 const populateFields = [
   { path: "assignee", select: "username fullName" },
@@ -64,6 +65,23 @@ export const PUT = withProjectAccess(async (request, { params, user }) => {
       ? body.acceptanceCriteria.join("\n")
       : body.acceptanceCriteria;
     updates.checklist = parseChecklistString(acText);
+  }
+
+  // Validate customFieldValues if provided
+  if (updates.customFieldValues !== undefined) {
+    const raw = updates.customFieldValues;
+    if (typeof raw !== "object" || Array.isArray(raw) || raw === null) {
+      updates.customFieldValues = {};
+    } else {
+      const project = await Project.findById(projectId, "customFields").lean();
+      const defs = project?.customFields || [];
+      const sanitized = sanitizeCustomFieldValues(raw as Record<string, unknown>, defs);
+      const result = validateCustomFieldValues(sanitized, defs);
+      if (!result.valid) {
+        return NextResponse.json({ error: result.error }, { status: 400 });
+      }
+      updates.customFieldValues = sanitized;
+    }
   }
 
   // Read old values before updating for activity log
