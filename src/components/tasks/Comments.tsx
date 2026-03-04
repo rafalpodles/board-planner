@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, FormEvent } from "react";
+import { useState, useEffect, useRef, useCallback, FormEvent, KeyboardEvent } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useApi } from "@/hooks/use-api";
@@ -10,6 +10,23 @@ import { Button } from "@/components/ui/Button";
 import { Textarea } from "@/components/ui/Textarea";
 import { useToast } from "@/components/ui/Toast";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+
+interface MentionUser {
+  _id: string;
+  username: string;
+  fullName: string;
+}
+
+function MentionMarkdown({ children }: { children: string }) {
+  // Replace @username patterns with styled spans before passing to Markdown
+  const processed = children.replace(
+    /@([a-zA-Z0-9_-]+)/g,
+    '**`@$1`**'
+  );
+  return (
+    <Markdown remarkPlugins={[remarkGfm]}>{processed}</Markdown>
+  );
+}
 
 interface CommentsProps {
   projectId: string;
@@ -25,6 +42,13 @@ export function Comments({ projectId, taskId }: CommentsProps) {
   const [editLoading, setEditLoading] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [mentionUsers, setMentionUsers] = useState<MentionUser[]>([]);
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const [mentionTarget, setMentionTarget] = useState<"new" | "edit">("new");
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const editTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const mentionDropdownRef = useRef<HTMLDivElement>(null);
   const api = useApi();
   const { user } = useAuth();
   const { toast } = useToast();
@@ -42,6 +66,7 @@ export function Comments({ projectId, taskId }: CommentsProps) {
 
   useEffect(() => {
     loadComments();
+    api.get("/api/users/list").then(setMentionUsers).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId]);
 
@@ -134,6 +159,108 @@ export function Comments({ projectId, taskId }: CommentsProps) {
     return comment.author.username === user.username;
   }
 
+  const filteredMentionUsers = mentionQuery !== null
+    ? mentionUsers.filter(
+        (u) =>
+          u.username.toLowerCase().includes(mentionQuery.toLowerCase()) ||
+          u.fullName.toLowerCase().includes(mentionQuery.toLowerCase())
+      ).slice(0, 5)
+    : [];
+
+  const detectMention = useCallback(
+    (value: string, cursorPos: number, target: "new" | "edit") => {
+      const textBeforeCursor = value.substring(0, cursorPos);
+      const match = textBeforeCursor.match(/@([a-zA-Z0-9_-]*)$/);
+      if (match) {
+        setMentionQuery(match[1]);
+        setMentionIndex(0);
+        setMentionTarget(target);
+      } else {
+        setMentionQuery(null);
+      }
+    },
+    []
+  );
+
+  const insertMention = useCallback(
+    (username: string) => {
+      const isEdit = mentionTarget === "edit";
+      const currentValue = isEdit ? editBody : body;
+      const textarea = isEdit ? editTextareaRef.current : textareaRef.current;
+      const cursorPos = textarea?.selectionStart ?? currentValue.length;
+
+      const textBeforeCursor = currentValue.substring(0, cursorPos);
+      const atIndex = textBeforeCursor.lastIndexOf("@");
+      if (atIndex === -1) return;
+
+      const newValue =
+        currentValue.substring(0, atIndex) +
+        `@${username} ` +
+        currentValue.substring(cursorPos);
+
+      if (isEdit) {
+        setEditBody(newValue);
+      } else {
+        setBody(newValue);
+      }
+      setMentionQuery(null);
+
+      // Restore cursor position after state update
+      requestAnimationFrame(() => {
+        if (textarea) {
+          const newPos = atIndex + username.length + 2; // @username + space
+          textarea.selectionStart = textarea.selectionEnd = newPos;
+          textarea.focus();
+        }
+      });
+    },
+    [mentionTarget, body, editBody]
+  );
+
+  function handleMentionKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
+    if (mentionQuery === null || filteredMentionUsers.length === 0) return;
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setMentionIndex((i) => Math.min(i + 1, filteredMentionUsers.length - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setMentionIndex((i) => Math.max(i - 1, 0));
+    } else if (e.key === "Enter" || e.key === "Tab") {
+      e.preventDefault();
+      insertMention(filteredMentionUsers[mentionIndex].username);
+    } else if (e.key === "Escape") {
+      setMentionQuery(null);
+    }
+  }
+
+  function MentionDropdown() {
+    if (mentionQuery === null || filteredMentionUsers.length === 0) return null;
+    return (
+      <div
+        ref={mentionDropdownRef}
+        className="absolute bottom-full mb-1 left-0 bg-bg-card border border-border rounded-lg shadow-lg py-1 z-20 min-w-[200px] max-h-[160px] overflow-y-auto"
+      >
+        {filteredMentionUsers.map((u, i) => (
+          <button
+            key={u._id}
+            type="button"
+            className={`w-full text-left px-3 py-1.5 text-sm hover:bg-bg-hover flex items-center gap-2 ${
+              i === mentionIndex ? "bg-bg-hover" : ""
+            }`}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              insertMention(u.username);
+            }}
+          >
+            <span className="font-medium">{u.username}</span>
+            <span className="text-text-muted text-xs">{u.fullName}</span>
+          </button>
+        ))}
+      </div>
+    );
+  }
+
   function formatDate(dateStr: string) {
     return new Date(dateStr).toLocaleString();
   }
@@ -187,12 +314,22 @@ export function Comments({ projectId, taskId }: CommentsProps) {
 
             {editingId === comment._id ? (
               <div className="space-y-2">
-                <Textarea
-                  value={editBody}
-                  onChange={(e) => setEditBody(e.target.value)}
-                  rows={3}
-                  autoFocus
-                />
+                <div className="relative">
+                  {mentionTarget === "edit" && <MentionDropdown />}
+                  <textarea
+                    ref={editTextareaRef}
+                    value={editBody}
+                    onChange={(e) => {
+                      setEditBody(e.target.value);
+                      detectMention(e.target.value, e.target.selectionStart, "edit");
+                    }}
+                    onKeyDown={handleMentionKeyDown}
+                    onBlur={() => setTimeout(() => setMentionQuery(null), 150)}
+                    rows={3}
+                    autoFocus
+                    className="w-full rounded-lg border border-border bg-bg-input px-3 py-2 text-text min-h-[88px] placeholder:text-text-muted/50 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent resize-y"
+                  />
+                </div>
                 <div className="flex gap-2">
                   <Button
                     size="sm"
@@ -215,7 +352,7 @@ export function Comments({ projectId, taskId }: CommentsProps) {
               </div>
             ) : (
               <div className="text-sm prose prose-invert prose-sm max-w-none overflow-x-auto">
-                <Markdown remarkPlugins={[remarkGfm]}>{comment.body}</Markdown>
+                <MentionMarkdown>{comment.body}</MentionMarkdown>
               </div>
             )}
 
@@ -263,12 +400,22 @@ export function Comments({ projectId, taskId }: CommentsProps) {
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-2">
-        <Textarea
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-          placeholder="Add a comment..."
-          rows={3}
-        />
+        <div className="relative">
+          <MentionDropdown />
+          <textarea
+            ref={textareaRef}
+            value={body}
+            onChange={(e) => {
+              setBody(e.target.value);
+              detectMention(e.target.value, e.target.selectionStart, "new");
+            }}
+            onKeyDown={handleMentionKeyDown}
+            onBlur={() => setTimeout(() => setMentionQuery(null), 150)}
+            placeholder="Add a comment... (use @ to mention)"
+            rows={3}
+            className="w-full rounded-lg border border-border bg-bg-input px-3 py-2 text-text min-h-[88px] placeholder:text-text-muted/50 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent resize-y"
+          />
+        </div>
         <Button type="submit" size="sm" disabled={loading || !body.trim()}>
           {loading ? "Posting..." : "Add Comment"}
         </Button>
