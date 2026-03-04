@@ -1,10 +1,22 @@
 import mongoose, { Schema, Model } from "mongoose";
-import { IProject } from "@/types";
+import { IProject, DIFFICULTIES, CATEGORIES } from "@/types";
 
 const labelSchema = new Schema(
   {
     name: { type: String, required: true, trim: true },
     color: { type: String, required: true, default: "#3b82f6" },
+  }
+);
+
+const taskTemplateSchema = new Schema(
+  {
+    name: { type: String, required: true, trim: true },
+    title: { type: String, default: "" },
+    description: { type: String, default: "" },
+    difficulty: { type: String, enum: DIFFICULTIES, default: "M" },
+    category: { type: String, enum: CATEGORIES, default: "user-story" },
+    component: { type: String, default: "" },
+    acceptanceCriteria: { type: String, default: "" },
   }
 );
 
@@ -32,6 +44,10 @@ const projectSchema = new Schema<IProject>(
     },
     labels: {
       type: [labelSchema],
+      default: [],
+    },
+    taskTemplates: {
+      type: [taskTemplateSchema],
       default: [],
     },
     githubRepo: {

@@ -3,7 +3,7 @@
 import { useEffect, useState, FormEvent } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
-import { ApiProject, ApiLabel } from "@/types";
+import { ApiProject, ApiLabel, ApiTaskTemplate, DIFFICULTIES, CATEGORIES, Difficulty, Category } from "@/types";
 import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
 import { Button } from "@/components/ui/Button";
@@ -30,6 +30,8 @@ export default function ProjectSettingsPage() {
   const [newLabelColor, setNewLabelColor] = useState("#3b82f6");
   const [aiModel, setAiModel] = useState("");
   const [aiModelSaving, setAiModelSaving] = useState(false);
+  const [newTemplateName, setNewTemplateName] = useState("");
+  const [editingTemplate, setEditingTemplate] = useState<ApiTaskTemplate | null>(null);
 
   useEffect(() => {
     api
@@ -115,6 +117,42 @@ export default function ProjectSettingsPage() {
       setProject((p) => (p ? { ...p, labels } : p));
     } catch {
       toast("Failed to remove label", "error");
+    }
+  }
+
+  async function addTemplate() {
+    if (!newTemplateName.trim()) return;
+    try {
+      const templates: ApiTaskTemplate[] = await api.post(`/api/projects/${projectId}/templates`, {
+        name: newTemplateName.trim(),
+      });
+      setProject((p) => (p ? { ...p, taskTemplates: templates } : p));
+      setNewTemplateName("");
+    } catch {
+      toast("Failed to add template", "error");
+    }
+  }
+
+  async function removeTemplate(templateId: string) {
+    try {
+      const templates: ApiTaskTemplate[] = await api.del(`/api/projects/${projectId}/templates`, { templateId });
+      setProject((p) => (p ? { ...p, taskTemplates: templates } : p));
+    } catch {
+      toast("Failed to remove template", "error");
+    }
+  }
+
+  async function saveTemplate(template: ApiTaskTemplate) {
+    try {
+      const templates: ApiTaskTemplate[] = await api.put(`/api/projects/${projectId}/templates`, {
+        templateId: template._id,
+        ...template,
+      });
+      setProject((p) => (p ? { ...p, taskTemplates: templates } : p));
+      setEditingTemplate(null);
+      toast("Template saved", "success");
+    } catch {
+      toast("Failed to save template", "error");
     }
   }
 
@@ -260,6 +298,123 @@ export default function ProjectSettingsPage() {
             className="w-10 h-10 rounded border border-border cursor-pointer bg-transparent"
           />
           <Button type="button" variant="secondary" onClick={addLabel}>
+            Add
+          </Button>
+        </div>
+      </div>
+
+      {/* Task Templates */}
+      <div className="mb-8">
+        <h2 className="font-semibold mb-3">Task Templates</h2>
+        <p className="text-sm text-text-muted mb-3">
+          Pre-defined templates to quickly create tasks with common settings.
+        </p>
+
+        <div className="space-y-2 mb-3">
+          {(project.taskTemplates || []).map((tpl) => (
+            <div key={tpl._id} className="border border-border rounded-lg p-3">
+              {editingTemplate?._id === tpl._id ? (
+                <div className="space-y-3">
+                  <Input
+                    label="Name"
+                    value={editingTemplate.name}
+                    onChange={(e) => setEditingTemplate({ ...editingTemplate, name: e.target.value })}
+                  />
+                  <Input
+                    label="Title template"
+                    value={editingTemplate.title}
+                    onChange={(e) => setEditingTemplate({ ...editingTemplate, title: e.target.value })}
+                    placeholder="Pre-filled title"
+                  />
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Difficulty</label>
+                      <select
+                        value={editingTemplate.difficulty}
+                        onChange={(e) => setEditingTemplate({ ...editingTemplate, difficulty: e.target.value as Difficulty })}
+                        className="w-full text-sm bg-bg-input border border-border rounded-lg px-3 py-2"
+                      >
+                        {DIFFICULTIES.map((d) => <option key={d} value={d}>{d}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Category</label>
+                      <select
+                        value={editingTemplate.category}
+                        onChange={(e) => setEditingTemplate({ ...editingTemplate, category: e.target.value as Category })}
+                        className="w-full text-sm bg-bg-input border border-border rounded-lg px-3 py-2"
+                      >
+                        {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  <Input
+                    label="Component"
+                    value={editingTemplate.component}
+                    onChange={(e) => setEditingTemplate({ ...editingTemplate, component: e.target.value })}
+                  />
+                  <Textarea
+                    label="Description"
+                    value={editingTemplate.description}
+                    onChange={(e) => setEditingTemplate({ ...editingTemplate, description: e.target.value })}
+                    rows={3}
+                  />
+                  <Textarea
+                    label="Acceptance Criteria"
+                    value={editingTemplate.acceptanceCriteria}
+                    onChange={(e) => setEditingTemplate({ ...editingTemplate, acceptanceCriteria: e.target.value })}
+                    rows={3}
+                  />
+                  <div className="flex gap-2">
+                    <Button size="sm" onClick={() => saveTemplate(editingTemplate)}>Save</Button>
+                    <Button size="sm" variant="secondary" onClick={() => setEditingTemplate(null)}>Cancel</Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="font-medium text-sm">{tpl.name}</span>
+                    <span className="text-xs text-text-muted ml-2">
+                      {tpl.category} &middot; {tpl.difficulty}
+                      {tpl.component ? ` · ${tpl.component}` : ""}
+                    </span>
+                  </div>
+                  <div className="flex gap-1">
+                    <button
+                      onClick={() => setEditingTemplate({ ...tpl })}
+                      className="text-xs text-text-muted hover:text-text px-2 py-1"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => removeTemplate(tpl._id)}
+                      className="text-xs text-text-muted hover:text-danger px-2 py-1"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+          {(project.taskTemplates || []).length === 0 && (
+            <p className="text-sm text-text-muted">No templates</p>
+          )}
+        </div>
+
+        <div className="flex gap-2">
+          <Input
+            value={newTemplateName}
+            onChange={(e) => setNewTemplateName(e.target.value)}
+            placeholder="Template name..."
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                addTemplate();
+              }
+            }}
+          />
+          <Button type="button" variant="secondary" onClick={addTemplate}>
             Add
           </Button>
         </div>

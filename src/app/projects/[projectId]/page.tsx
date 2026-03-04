@@ -510,6 +510,7 @@ export default function KanbanPage() {
           projectKey={project.key}
           components={project.components}
           projectLabels={project.labels || []}
+          taskTemplates={project.taskTemplates || []}
           onSaved={() => {
             setShowNewTask(false);
             loadData();

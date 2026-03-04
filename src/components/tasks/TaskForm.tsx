@@ -11,6 +11,7 @@ import {
   ApiTask,
   ApiUser,
   ApiLabel,
+  ApiTaskTemplate,
   TaskStatus,
   Difficulty,
   Category,
@@ -27,6 +28,7 @@ interface TaskFormProps {
   task?: ApiTask;
   components: string[];
   projectLabels?: ApiLabel[];
+  taskTemplates?: ApiTaskTemplate[];
   onSaved: () => void;
   onCancel: () => void;
 }
@@ -37,6 +39,7 @@ export function TaskForm({
   task,
   components,
   projectLabels = [],
+  taskTemplates = [],
   onSaved,
   onCancel,
 }: TaskFormProps) {
@@ -149,6 +152,26 @@ export function TaskForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
+      {!task && taskTemplates.length > 0 && (
+        <Select
+          label="Template"
+          value=""
+          onChange={(e) => {
+            const tpl = taskTemplates.find((t) => t._id === e.target.value);
+            if (tpl) {
+              if (tpl.title) setTitle(tpl.title);
+              if (tpl.description) setDescription(tpl.description);
+              setDifficulty(tpl.difficulty);
+              setCategory(tpl.category);
+              if (tpl.component) setComponent(tpl.component);
+              if (tpl.acceptanceCriteria) setAcceptanceCriteria(tpl.acceptanceCriteria);
+            }
+          }}
+          options={taskTemplates.map((t) => ({ value: t._id, label: t.name }))}
+          placeholder="Select a template..."
+        />
+      )}
+
       {aiEnabled && !task && (
         <div className="bg-bg-input border border-border rounded-lg p-3 space-y-2">
           <label className="text-sm font-medium">AI Assist</label>

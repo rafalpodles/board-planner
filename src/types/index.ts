@@ -56,6 +56,17 @@ export interface ILabel {
   color: string;
 }
 
+export interface ITaskTemplate {
+  _id: Types.ObjectId;
+  name: string;
+  title: string;
+  description: string;
+  difficulty: Difficulty;
+  category: Category;
+  component: string;
+  acceptanceCriteria: string;
+}
+
 export interface IProject {
   _id: Types.ObjectId;
   name: string;
@@ -63,6 +74,7 @@ export interface IProject {
   description: string;
   components: string[];
   labels: ILabel[];
+  taskTemplates: ITaskTemplate[];
   githubRepo: string;
   taskCounter: number;
   owner: Types.ObjectId | IUser;
@@ -122,6 +134,17 @@ export interface ApiLabel {
   color: string;
 }
 
+export interface ApiTaskTemplate {
+  _id: string;
+  name: string;
+  title: string;
+  description: string;
+  difficulty: Difficulty;
+  category: Category;
+  component: string;
+  acceptanceCriteria: string;
+}
+
 export interface ApiProject {
   _id: string;
   name: string;
@@ -129,6 +152,7 @@ export interface ApiProject {
   description: string;
   components: string[];
   labels: ApiLabel[];
+  taskTemplates: ApiTaskTemplate[];
   githubRepo: string;
   taskCounter: number;
   owner: ApiUser | string;
