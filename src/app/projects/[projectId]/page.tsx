@@ -60,8 +60,8 @@ export default function KanbanPage() {
       setProject(proj);
       setTasks(taskList);
       setNow(Date.now());
-    } catch (err) {
-      console.error(err);
+    } catch {
+      toast("Failed to load board data", "error");
     } finally {
       setLoading(false);
     }
@@ -132,8 +132,7 @@ export default function KanbanPage() {
       );
       setSelectedTasks(new Set());
       toast(`Moved ${selectedTasks.size} task${selectedTasks.size === 1 ? "" : "s"}`, "success");
-    } catch (err) {
-      console.error(err);
+    } catch {
       toast("Failed to move tasks", "error");
     }
   }
@@ -151,8 +150,7 @@ export default function KanbanPage() {
       setSelectedTasks(new Set());
       setConfirmBulkDelete(false);
       toast(`Deleted ${count} task${count === 1 ? "" : "s"}`, "success");
-    } catch (err) {
-      console.error(err);
+    } catch {
       toast("Failed to delete tasks", "error");
     } finally {
       setBulkDeleting(false);
@@ -170,8 +168,7 @@ export default function KanbanPage() {
           t._id === taskId ? { ...t, status: status as ApiTask["status"] } : t
         )
       );
-    } catch (err) {
-      console.error(err);
+    } catch {
       toast("Failed to update status", "error");
     }
   }
@@ -191,8 +188,7 @@ export default function KanbanPage() {
       });
       toast("Task duplicated", "success");
       loadData();
-    } catch (err) {
-      console.error(err);
+    } catch {
       toast("Failed to duplicate task", "error");
     }
   }
@@ -202,8 +198,7 @@ export default function KanbanPage() {
       await api.del(`/api/projects/${projectId}/tasks/${taskId}`);
       setTasks((prev) => prev.filter((t) => t._id !== taskId));
       toast("Task deleted", "success");
-    } catch (err) {
-      console.error(err);
+    } catch {
       toast("Failed to delete task", "error");
     } finally {
       setConfirmContextDelete(null);

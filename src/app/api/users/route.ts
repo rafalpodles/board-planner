@@ -14,16 +14,6 @@ export const GET = withAuth(async () => {
 export async function POST(request: Request) {
   await connectDB();
 
-  const userCount = await User.countDocuments();
-  const isBootstrap = userCount === 0;
-
-  if (!isBootstrap) {
-    const authUser = await getAuthUser(request);
-    if (!authUser) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-  }
-
   const body = await request.json();
   const { username, password, fullName } = body;
 
@@ -34,20 +24,37 @@ export async function POST(request: Request) {
     );
   }
 
-  const existing = await User.findOne({ username: username.toLowerCase() });
-  if (existing) {
-    return NextResponse.json(
-      { error: "Username already exists" },
-      { status: 409 }
-    );
+  const userCount = await User.countDocuments();
+  const isBootstrap = userCount === 0;
+
+  if (!isBootstrap) {
+    const authUser = await getAuthUser(request);
+    if (!authUser) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
   }
 
   const hashedPassword = await bcrypt.hash(password, 10);
-  const user = await User.create({
-    username,
-    password: hashedPassword,
-    fullName,
-  });
 
-  return NextResponse.json(user, { status: 201 });
+  try {
+    const user = await User.create({
+      username: username.toLowerCase(),
+      password: hashedPassword,
+      fullName,
+    });
+    return NextResponse.json(user, { status: 201 });
+  } catch (err: unknown) {
+    if (
+      err &&
+      typeof err === "object" &&
+      "code" in err &&
+      (err as { code: number }).code === 11000
+    ) {
+      return NextResponse.json(
+        { error: "Username already exists" },
+        { status: 409 }
+      );
+    }
+    throw err;
+  }
 }

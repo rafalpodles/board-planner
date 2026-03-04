@@ -62,7 +62,7 @@ export function TaskForm({
   const { toast } = useToast();
 
   useEffect(() => {
-    api.get("/api/users").then(setUsers).catch(console.error);
+    api.get("/api/users").then(setUsers).catch(() => toast("Failed to load users", "error"));
     if (!task) {
       api
         .get(`/api/projects/${projectId}/ai/generate-task`)

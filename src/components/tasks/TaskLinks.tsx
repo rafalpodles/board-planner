@@ -43,7 +43,7 @@ export function TaskLinks({
             }))
         );
       })
-      .catch(console.error);
+      .catch(() => toast("Failed to load tasks", "error"));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showPicker]);
 

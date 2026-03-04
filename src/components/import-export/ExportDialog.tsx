@@ -5,6 +5,7 @@ import { useApi } from "@/hooks/use-api";
 import { Modal } from "@/components/ui/Modal";
 import { Textarea } from "@/components/ui/Textarea";
 import { Button } from "@/components/ui/Button";
+import { useToast } from "@/components/ui/Toast";
 
 interface ExportDialogProps {
   open: boolean;
@@ -21,6 +22,7 @@ export function ExportDialog({
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
   const api = useApi();
+  const { toast } = useToast();
 
   useEffect(() => {
     if (open) {
@@ -29,7 +31,7 @@ export function ExportDialog({
       api
         .post(`/api/projects/${projectId}/tasks/export`, {})
         .then((data) => setMarkdown(data.markdown))
-        .catch(console.error)
+        .catch(() => toast("Failed to export tasks", "error"))
         .finally(() => setLoading(false));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

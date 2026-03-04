@@ -6,6 +6,7 @@ import { useApi } from "@/hooks/use-api";
 import { ApiComment } from "@/types";
 import { Button } from "@/components/ui/Button";
 import { Textarea } from "@/components/ui/Textarea";
+import { useToast } from "@/components/ui/Toast";
 
 interface CommentsProps {
   projectId: string;
@@ -17,6 +18,7 @@ export function Comments({ projectId, taskId }: CommentsProps) {
   const [body, setBody] = useState("");
   const [loading, setLoading] = useState(false);
   const api = useApi();
+  const { toast } = useToast();
 
   async function loadComments() {
     try {
@@ -25,7 +27,7 @@ export function Comments({ projectId, taskId }: CommentsProps) {
       );
       setComments(data);
     } catch {
-      // ignore
+      toast("Failed to load comments", "error");
     }
   }
 
@@ -47,7 +49,7 @@ export function Comments({ projectId, taskId }: CommentsProps) {
       setBody("");
       await loadComments();
     } catch {
-      // ignore
+      toast("Failed to post comment", "error");
     } finally {
       setLoading(false);
     }

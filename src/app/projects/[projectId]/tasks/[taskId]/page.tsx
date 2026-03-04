@@ -37,8 +37,8 @@ export default function TaskDetailPage() {
       ]);
       setTask(t);
       setProject(p);
-    } catch (err) {
-      console.error(err);
+    } catch {
+      toast("Failed to load task", "error");
     } finally {
       setLoading(false);
     }
@@ -67,8 +67,7 @@ export default function TaskDetailPage() {
       setTask((prev) =>
         prev ? { ...prev, status: newStatus as ApiTask["status"] } : prev
       );
-    } catch (err) {
-      console.error(err);
+    } catch {
       toast("Failed to update status", "error");
     }
   }
@@ -86,8 +85,7 @@ export default function TaskDetailPage() {
       });
       toast("Task duplicated", "success");
       router.push(`/projects/${projectId}/tasks/${created._id}`);
-    } catch (err) {
-      console.error(err);
+    } catch {
       toast("Failed to duplicate task", "error");
     }
   }
@@ -98,8 +96,7 @@ export default function TaskDetailPage() {
       await api.del(`/api/projects/${projectId}/tasks/${taskId}`);
       toast("Task deleted", "success");
       router.push(`/projects/${projectId}`);
-    } catch (err) {
-      console.error(err);
+    } catch {
       toast("Failed to delete task", "error");
       setDeleting(false);
       setConfirmDelete(false);

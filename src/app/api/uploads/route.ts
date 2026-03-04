@@ -6,6 +6,23 @@ import { withAuth } from "@/lib/middleware";
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 
+const ALLOWED_MIME_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+  "image/svg+xml",
+  "application/pdf",
+  "text/plain",
+  "text/markdown",
+  "text/csv",
+  "application/json",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+]);
+
 export const POST = withAuth(async (request) => {
   await connectDB();
 
@@ -14,6 +31,13 @@ export const POST = withAuth(async (request) => {
 
   if (!file) {
     return NextResponse.json({ error: "No file provided" }, { status: 400 });
+  }
+
+  if (!ALLOWED_MIME_TYPES.has(file.type)) {
+    return NextResponse.json(
+      { error: `File type "${file.type}" is not allowed.` },
+      { status: 400 }
+    );
   }
 
   if (file.size > MAX_FILE_SIZE) {

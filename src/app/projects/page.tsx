@@ -6,18 +6,20 @@ import { useApi } from "@/hooks/use-api";
 import { ApiProject } from "@/types";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
+import { useToast } from "@/components/ui/Toast";
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<ApiProject[]>([]);
   const [loading, setLoading] = useState(true);
   const api = useApi();
   const router = useRouter();
+  const { toast } = useToast();
 
   useEffect(() => {
     api
       .get("/api/projects")
       .then(setProjects)
-      .catch(console.error)
+      .catch(() => toast("Failed to load projects", "error"))
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

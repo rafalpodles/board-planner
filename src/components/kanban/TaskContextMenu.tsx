@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { TASK_STATUSES, STATUS_LABELS, TaskStatus } from "@/types";
 
 interface TaskContextMenuProps {
@@ -23,6 +23,7 @@ export function TaskContextMenu({
   onClose,
 }: TaskContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState({ left: x, top: y });
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -42,10 +43,24 @@ export function TaskContextMenu({
   }, [onClose]);
 
   // Adjust position to stay within viewport
+  useEffect(() => {
+    if (!ref.current) return;
+    const rect = ref.current.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    let left = x;
+    let top = y;
+    if (left + rect.width > vw) left = vw - rect.width - 8;
+    if (top + rect.height > vh) top = vh - rect.height - 8;
+    if (left < 0) left = 8;
+    if (top < 0) top = 8;
+    if (left !== x || top !== y) setPosition({ left, top });
+  }, [x, y]);
+
   const style: React.CSSProperties = {
     position: "fixed",
-    left: x,
-    top: y,
+    left: position.left,
+    top: position.top,
     zIndex: 100,
   };
 

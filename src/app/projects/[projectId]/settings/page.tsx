@@ -8,11 +8,13 @@ import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { useToast } from "@/components/ui/Toast";
 
 export default function ProjectSettingsPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const router = useRouter();
   const api = useApi();
+  const { toast } = useToast();
 
   const [project, setProject] = useState<ApiProject | null>(null);
   const [name, setName] = useState("");
@@ -34,7 +36,7 @@ export default function ProjectSettingsPage() {
         setDescription(p.description);
         setGithubRepo(p.githubRepo || "");
       })
-      .catch(console.error)
+      .catch(() => toast("Failed to load project", "error"))
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
@@ -68,8 +70,8 @@ export default function ProjectSettingsPage() {
         p ? { ...p, components: [...p.components, newComponent.trim()] } : p
       );
       setNewComponent("");
-    } catch (err) {
-      console.error(err);
+    } catch {
+      toast("Failed to add component", "error");
     }
   }
 
@@ -79,8 +81,8 @@ export default function ProjectSettingsPage() {
       setProject((p) =>
         p ? { ...p, components: p.components.filter((c) => c !== comp) } : p
       );
-    } catch (err) {
-      console.error(err);
+    } catch {
+      toast("Failed to remove component", "error");
     }
   }
 
@@ -89,8 +91,8 @@ export default function ProjectSettingsPage() {
     try {
       await api.del(`/api/projects/${projectId}`);
       router.replace("/projects");
-    } catch (err) {
-      console.error(err);
+    } catch {
+      toast("Failed to delete project", "error");
       setDeleting(false);
       setConfirmDelete(false);
     }

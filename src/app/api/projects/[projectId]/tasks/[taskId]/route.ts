@@ -41,17 +41,29 @@ export const PUT = withAuth(async (request, { params }) => {
 
   const body = await request.json();
 
+  // Whitelist allowed fields to prevent overwriting protected fields
+  const allowed = [
+    "title", "description", "difficulty", "component", "category",
+    "status", "assignee", "acceptanceCriteria", "order",
+  ];
+  const updates: Record<string, unknown> = {};
+  for (const field of allowed) {
+    if (body[field] !== undefined) {
+      updates[field] = body[field];
+    }
+  }
+
   // Resolve assignee username to ObjectId if provided as string
-  if (body.assignee && typeof body.assignee === "string") {
+  if (updates.assignee && typeof updates.assignee === "string") {
     const assigneeUser = await User.findOne({
-      username: body.assignee.toLowerCase(),
+      username: (updates.assignee as string).toLowerCase(),
     });
-    body.assignee = assigneeUser ? assigneeUser._id : null;
+    updates.assignee = assigneeUser ? assigneeUser._id : null;
   }
 
   const task = await Task.findOneAndUpdate(
     { _id: taskId, project: projectId },
-    { $set: body },
+    { $set: updates },
     { new: true, runValidators: true }
   ).populate(populateFields);
 
