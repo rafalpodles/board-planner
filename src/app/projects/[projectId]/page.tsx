@@ -469,7 +469,18 @@ export default function KanbanPage() {
             x={contextMenu.x}
             y={contextMenu.y}
             currentStatus={task.status}
+            isPinned={task.pinned}
             onStatusChange={(status) => handleStatusChange(contextMenu.taskId, status)}
+            onPin={async () => {
+              const newPinned = !task.pinned;
+              setTasks((prev) => prev.map((t) => t._id === contextMenu.taskId ? { ...t, pinned: newPinned } : t));
+              try {
+                await api.put(`/api/projects/${projectId}/tasks/${contextMenu.taskId}`, { pinned: newPinned });
+              } catch {
+                toast("Failed to toggle pin", "error");
+                loadData();
+              }
+            }}
             onDuplicate={() => handleContextDuplicate(contextMenu.taskId)}
             onDelete={() => {
               setConfirmContextDelete(contextMenu.taskId);

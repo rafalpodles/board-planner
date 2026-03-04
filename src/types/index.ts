@@ -83,6 +83,7 @@ export interface ITask {
   assignee: Types.ObjectId | IUser | null;
   acceptanceCriteria: string;
   labels: Types.ObjectId[];
+  pinned: boolean;
   blockedBy: (Types.ObjectId | ITask)[];
   order: number;
   createdBy: Types.ObjectId | IUser;
@@ -156,6 +157,7 @@ export interface ApiTask {
   assignee: ApiUser | null;
   acceptanceCriteria: string;
   labels: string[];
+  pinned: boolean;
   blockedBy: ApiTaskLink[];
   blocking: ApiTaskLink[];
   order: number;

@@ -94,7 +94,7 @@ export function Column({
       </div>
 
       <div data-column-body className="flex-1 overflow-y-auto overscroll-y-contain p-2 space-y-2">
-        {tasks.map((task, i) => (
+        {[...tasks].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)).map((task, i) => (
           <div key={task._id}>
             {dropIndex === i && (
               <div className="h-0.5 bg-primary rounded-full mx-1 -mt-1 mb-1" />

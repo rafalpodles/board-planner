@@ -53,6 +53,10 @@ const taskSchema = new Schema<ITask>(
       type: [{ type: Schema.Types.ObjectId }],
       default: [],
     },
+    pinned: {
+      type: Boolean,
+      default: false,
+    },
     blockedBy: {
       type: [{ type: Schema.Types.ObjectId, ref: "Task" }],
       default: [],

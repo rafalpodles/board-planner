@@ -7,7 +7,9 @@ interface TaskContextMenuProps {
   x: number;
   y: number;
   currentStatus: TaskStatus;
+  isPinned?: boolean;
   onStatusChange: (status: string) => void;
+  onPin?: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
   onClose: () => void;
@@ -17,7 +19,9 @@ export function TaskContextMenu({
   x,
   y,
   currentStatus,
+  isPinned,
   onStatusChange,
+  onPin,
   onDuplicate,
   onDelete,
   onClose,
@@ -83,6 +87,14 @@ export function TaskContextMenu({
         </button>
       ))}
       <div className="border-t border-border my-1" />
+      {onPin && (
+        <button
+          onClick={() => { onPin(); onClose(); }}
+          className="w-full text-left px-3 py-1.5 hover:bg-bg-input transition-colors"
+        >
+          {isPinned ? "Unpin" : "Pin to top"}
+        </button>
+      )}
       <button
         onClick={() => { onDuplicate(); onClose(); }}
         className="w-full text-left px-3 py-1.5 hover:bg-bg-input transition-colors"
