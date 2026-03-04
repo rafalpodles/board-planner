@@ -11,7 +11,7 @@ export default function ProjectsLayout({
   return (
     <AuthGuard>
       <Navbar />
-      <main className="max-w-[1600px] mx-auto px-4 py-6">{children}</main>
+      <main className="max-w-[1920px] mx-auto px-4 py-6">{children}</main>
     </AuthGuard>
   );
 }

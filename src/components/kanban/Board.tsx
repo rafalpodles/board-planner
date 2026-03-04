@@ -40,7 +40,7 @@ export function Board({
         className="overflow-x-auto pb-4 overscroll-x-contain"
         style={{ WebkitOverflowScrolling: "touch" }}
       >
-        <div className="grid grid-cols-6 gap-4 min-w-[1200px]">
+        <div className="grid gap-4 min-w-[1400px]" style={{ gridTemplateColumns: `repeat(${TASK_STATUSES.length}, minmax(0, 1fr))` }}>
           {TASK_STATUSES.map((status) => (
             <Column
               key={status}
