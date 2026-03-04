@@ -4,6 +4,7 @@ import { withProjectAccess } from "@/lib/middleware";
 import { Comment } from "@/models/comment";
 import { Task } from "@/models/task";
 import { logActivity } from "@/lib/activity";
+import { dispatchWebhooks } from "@/lib/webhooks";
 
 export const GET = withProjectAccess(async (_request, { params }) => {
   const { projectId, taskId } = await params;
@@ -58,6 +59,16 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
     // Auto-watch task on comment
     Task.findByIdAndUpdate(taskId, { $addToSet: { watchers: user._id } }),
   ]);
+
+  dispatchWebhooks(projectId, "comment_added", {
+    project: { key: "", name: "" },
+    task: {
+      taskKey: `${task.taskNumber}`,
+      title: task.title,
+      status: task.status,
+    },
+    data: { commentBody: body.trim().substring(0, 200) },
+  });
 
   return NextResponse.json(populated, { status: 201 });
 });

@@ -67,6 +67,28 @@ export interface ITaskTemplate {
   acceptanceCriteria: string;
 }
 
+export type WebhookEvent = "task_created" | "status_changed" | "comment_added";
+
+export const WEBHOOK_EVENTS: WebhookEvent[] = [
+  "task_created",
+  "status_changed",
+  "comment_added",
+];
+
+export interface IWebhook {
+  _id: Types.ObjectId;
+  url: string;
+  events: WebhookEvent[];
+  enabled: boolean;
+}
+
+export interface ApiWebhook {
+  _id: string;
+  url: string;
+  events: WebhookEvent[];
+  enabled: boolean;
+}
+
 export interface IProject {
   _id: Types.ObjectId;
   name: string;
@@ -75,6 +97,7 @@ export interface IProject {
   components: string[];
   labels: ILabel[];
   taskTemplates: ITaskTemplate[];
+  webhooks: IWebhook[];
   githubRepo: string;
   taskCounter: number;
   owner: Types.ObjectId | IUser;
@@ -154,6 +177,7 @@ export interface ApiProject {
   components: string[];
   labels: ApiLabel[];
   taskTemplates: ApiTaskTemplate[];
+  webhooks: ApiWebhook[];
   githubRepo: string;
   taskCounter: number;
   owner: ApiUser | string;

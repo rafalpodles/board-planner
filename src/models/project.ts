@@ -1,5 +1,5 @@
 import mongoose, { Schema, Model } from "mongoose";
-import { IProject, DIFFICULTIES, CATEGORIES } from "@/types";
+import { IProject, DIFFICULTIES, CATEGORIES, WEBHOOK_EVENTS } from "@/types";
 
 const labelSchema = new Schema(
   {
@@ -48,6 +48,14 @@ const projectSchema = new Schema<IProject>(
     },
     taskTemplates: {
       type: [taskTemplateSchema],
+      default: [],
+    },
+    webhooks: {
+      type: [{
+        url: { type: String, required: true, trim: true },
+        events: { type: [{ type: String, enum: WEBHOOK_EVENTS }], default: WEBHOOK_EVENTS },
+        enabled: { type: Boolean, default: true },
+      }],
       default: [],
     },
     githubRepo: {
