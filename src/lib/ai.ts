@@ -20,6 +20,18 @@ export interface GeneratedTask {
   category: "bug" | "doc" | "user-story" | "idea";
   acceptanceCriteria: string;
   component: string;
+  duplicateOf: number | null;
+  duplicateReason: string;
+  suggestedBlockedBy: number[];
+  suggestedBlocking: number[];
+  dependencyReason: string;
+}
+
+export interface ExistingTaskSummary {
+  taskNumber: number;
+  title: string;
+  status: string;
+  description: string;
 }
 
 interface ProjectContext {
@@ -27,6 +39,7 @@ interface ProjectContext {
   description: string;
   components: string[];
   readme?: string;
+  existingTasks?: ExistingTaskSummary[];
 }
 
 export async function generateTask(
@@ -44,11 +57,21 @@ export async function generateTask(
     ? `\n\nProject README (truncated):\n${context.readme}`
     : "";
 
+  const existingTasksSection =
+    context.existingTasks && context.existingTasks.length > 0
+      ? `\n\nExisting tasks in this project:\n${context.existingTasks
+          .map(
+            (t) =>
+              `- #${t.taskNumber} [${t.status}] ${t.title}${t.description ? `: ${t.description.slice(0, 100)}` : ""}`
+          )
+          .join("\n")}`
+      : "";
+
   const systemPrompt = `You are a project management assistant. Given a brief task description, generate a well-structured task/user story for a software project.
 
 Project: ${context.name}
 ${context.description ? `Project description: ${context.description}` : ""}
-${componentList}${readmeSection}
+${componentList}${readmeSection}${existingTasksSection}
 
 You must respond with a JSON object with these exact fields:
 - title: concise imperative task title (max 80 chars)
@@ -61,8 +84,14 @@ You must respond with a JSON object with these exact fields:
 - category: one of "bug", "doc", "user-story", "idea"
 - acceptanceCriteria: markdown checklist of acceptance criteria (use "- [ ]" format)
 - component: best matching component from the available list, or empty string if none match
+- duplicateOf: task number (integer) if this task is a duplicate or very similar to an existing task, or null if not a duplicate
+- duplicateReason: brief explanation if duplicate detected, or empty string
+- suggestedBlockedBy: array of existing task numbers (integers) that should be completed before this new task can start (dependencies). Empty array if none.
+- suggestedBlocking: array of existing task numbers (integers) that this new task would block (i.e. those tasks depend on this work). Empty array if none.
+- dependencyReason: brief explanation of why these dependencies exist, or empty string if no dependencies
 
-Write clear, actionable descriptions. Focus on the "what" and "why", not the "how" in detail.`;
+Write clear, actionable descriptions. Focus on the "what" and "why", not the "how" in detail.
+When analyzing duplicates and dependencies, consider the semantic meaning, not just keyword matching.`;
 
   const response = await client.chat.completions.create({
     model: "gpt-4o-mini",
@@ -72,7 +101,7 @@ Write clear, actionable descriptions. Focus on the "what" and "why", not the "ho
     ],
     response_format: { type: "json_object" },
     temperature: 0.7,
-    max_tokens: 1000,
+    max_tokens: 1500,
   });
 
   const content = response.choices[0]?.message?.content;
@@ -95,6 +124,19 @@ Write clear, actionable descriptions. Focus on the "what" and "why", not the "ho
   if (!context.components.includes(parsed.component)) {
     parsed.component = "";
   }
+
+  // Sanitize new fields
+  if (typeof parsed.duplicateOf !== "number") {
+    parsed.duplicateOf = null;
+  }
+  parsed.duplicateReason = parsed.duplicateReason || "";
+  parsed.suggestedBlockedBy = Array.isArray(parsed.suggestedBlockedBy)
+    ? parsed.suggestedBlockedBy.filter((n) => typeof n === "number")
+    : [];
+  parsed.suggestedBlocking = Array.isArray(parsed.suggestedBlocking)
+    ? parsed.suggestedBlocking.filter((n) => typeof n === "number")
+    : [];
+  parsed.dependencyReason = parsed.dependencyReason || "";
 
   return parsed;
 }

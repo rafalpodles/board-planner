@@ -160,6 +160,7 @@ export default function TaskDetailPage() {
         {editing ? (
           <TaskForm
             projectId={projectId}
+            projectKey={project.key}
             task={task}
             components={project.components}
             onSaved={() => {

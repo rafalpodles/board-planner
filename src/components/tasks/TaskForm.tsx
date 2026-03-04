@@ -22,6 +22,7 @@ import type { GeneratedTask } from "@/lib/ai";
 
 interface TaskFormProps {
   projectId: string;
+  projectKey?: string;
   task?: ApiTask;
   components: string[];
   onSaved: () => void;
@@ -30,6 +31,7 @@ interface TaskFormProps {
 
 export function TaskForm({
   projectId,
+  projectKey,
   task,
   components,
   onSaved,
@@ -55,6 +57,7 @@ export function TaskForm({
   const [aiPrompt, setAiPrompt] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [aiEnabled, setAiEnabled] = useState(false);
+  const [aiInsights, setAiInsights] = useState<GeneratedTask | null>(null);
   const api = useApi();
   const { toast } = useToast();
 
@@ -94,6 +97,7 @@ export function TaskForm({
       setCategory(result.category || "user-story");
       setComponent(result.component || "");
       setAcceptanceCriteria(result.acceptanceCriteria || "");
+      setAiInsights(result);
       toast("Fields filled by AI — review and save", "success");
     } catch {
       toast("AI generation failed", "error");
@@ -168,6 +172,53 @@ export function TaskForm({
           <p className="text-xs text-text-muted">
             AI will fill all fields below. You can edit before saving.
           </p>
+        </div>
+      )}
+
+      {aiInsights && (
+        <div className="space-y-2">
+          {aiInsights.duplicateOf && (
+            <div className="bg-danger/10 border border-danger/30 rounded-lg p-3">
+              <p className="text-sm font-medium text-danger">
+                Possible duplicate of {projectKey}-{aiInsights.duplicateOf}
+              </p>
+              {aiInsights.duplicateReason && (
+                <p className="text-xs text-text-muted mt-1">
+                  {aiInsights.duplicateReason}
+                </p>
+              )}
+            </div>
+          )}
+
+          {(aiInsights.suggestedBlockedBy.length > 0 ||
+            aiInsights.suggestedBlocking.length > 0) && (
+            <div className="bg-warning/10 border border-warning/30 rounded-lg p-3 space-y-1">
+              <p className="text-sm font-medium text-warning">
+                Suggested dependencies
+              </p>
+              {aiInsights.suggestedBlockedBy.length > 0 && (
+                <p className="text-xs text-text-muted">
+                  Blocked by:{" "}
+                  {aiInsights.suggestedBlockedBy
+                    .map((n) => `${projectKey}-${n}`)
+                    .join(", ")}
+                </p>
+              )}
+              {aiInsights.suggestedBlocking.length > 0 && (
+                <p className="text-xs text-text-muted">
+                  Would block:{" "}
+                  {aiInsights.suggestedBlocking
+                    .map((n) => `${projectKey}-${n}`)
+                    .join(", ")}
+                </p>
+              )}
+              {aiInsights.dependencyReason && (
+                <p className="text-xs text-text-muted mt-1">
+                  {aiInsights.dependencyReason}
+                </p>
+              )}
+            </div>
+          )}
         </div>
       )}
 

@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withAuth } from "@/lib/middleware";
 import { Project } from "@/models/project";
-import { isAIEnabled, generateTask } from "@/lib/ai";
+import { Task } from "@/models/task";
+import { isAIEnabled, generateTask, ExistingTaskSummary } from "@/lib/ai";
 
 async function fetchReadme(githubRepo: string): Promise<string | undefined> {
   if (!githubRepo) return undefined;
@@ -58,7 +59,23 @@ export const POST = withAuth(async (request, { params }) => {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
-  const readme = await fetchReadme(project.githubRepo || "");
+  const [readme, tasks] = await Promise.all([
+    fetchReadme(project.githubRepo || ""),
+    Task.find(
+      { project: projectId, status: { $ne: "done" } },
+      "taskNumber title status description"
+    )
+      .sort({ taskNumber: -1 })
+      .limit(50)
+      .lean(),
+  ]);
+
+  const existingTasks: ExistingTaskSummary[] = tasks.map((t) => ({
+    taskNumber: t.taskNumber,
+    title: t.title,
+    status: t.status,
+    description: t.description || "",
+  }));
 
   try {
     const task = await generateTask(prompt.trim(), {
@@ -66,6 +83,7 @@ export const POST = withAuth(async (request, { params }) => {
       description: project.description || "",
       components: project.components || [],
       readme,
+      existingTasks,
     });
 
     return NextResponse.json(task);

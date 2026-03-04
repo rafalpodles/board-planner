@@ -410,6 +410,7 @@ export default function KanbanPage() {
       >
         <TaskForm
           projectId={projectId}
+          projectKey={project.key}
           components={project.components}
           onSaved={() => {
             setShowNewTask(false);
