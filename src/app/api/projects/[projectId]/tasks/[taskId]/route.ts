@@ -55,6 +55,11 @@ export const PUT = withProjectAccess(async (request, { params, user }) => {
     }
   }
 
+  // Coerce acceptanceCriteria array to string (AI may send arrays)
+  if (Array.isArray(updates.acceptanceCriteria)) {
+    updates.acceptanceCriteria = (updates.acceptanceCriteria as string[]).join("\n");
+  }
+
   // Read old values before updating for activity log
   const oldTask = await Task.findOne({ _id: taskId, project: projectId })
     .populate("assignee", "username fullName")

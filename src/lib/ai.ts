@@ -126,6 +126,11 @@ When analyzing duplicates and dependencies, consider the semantic meaning, not j
     parsed.component = "";
   }
 
+  // Coerce acceptanceCriteria array to string (LLM sometimes returns arrays)
+  if (Array.isArray(parsed.acceptanceCriteria)) {
+    parsed.acceptanceCriteria = (parsed.acceptanceCriteria as unknown as string[]).join("\n");
+  }
+
   // Sanitize new fields
   if (typeof parsed.duplicateOf !== "number") {
     parsed.duplicateOf = null;

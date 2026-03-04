@@ -108,7 +108,9 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
     category: body.category ?? "user-story",
     status: body.status ?? "planned",
     assignee: assigneeId,
-    acceptanceCriteria: body.acceptanceCriteria ?? "",
+    acceptanceCriteria: Array.isArray(body.acceptanceCriteria)
+      ? body.acceptanceCriteria.join("\n")
+      : (body.acceptanceCriteria ?? ""),
     labels: Array.isArray(body.labels) ? body.labels : [],
     order: body.order ?? 0,
     createdBy: user._id,
