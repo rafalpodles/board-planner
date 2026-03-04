@@ -20,7 +20,17 @@ interface Filters {
   category: string;
   difficulty: string;
   label: string;
+  dateRange: string;
 }
+
+const DATE_PRESETS = [
+  { value: "", label: "Any time" },
+  { value: "today", label: "Today" },
+  { value: "this_week", label: "This week" },
+  { value: "last_7", label: "Last 7 days" },
+  { value: "last_30", label: "Last 30 days" },
+  { value: "stale_14", label: "Stale (>14d)" },
+] as const;
 
 interface PersistedState {
   filters: Omit<Filters, "search">;
@@ -67,6 +77,7 @@ export function BoardFilters({ tasks, components, labels = [], projectId, curren
     category: persisted?.filters?.category ?? "",
     difficulty: persisted?.filters?.difficulty ?? "",
     label: (persisted?.filters as Record<string, string>)?.label ?? "",
+    dateRange: (persisted?.filters as Record<string, string>)?.dateRange ?? "",
   });
   const [myTasks, setMyTasks] = useState(persisted?.myTasks ?? false);
   const [sortField, setSortField] = useState<SortField>(persisted?.sortField ?? "updatedAt");
@@ -85,6 +96,7 @@ export function BoardFilters({ tasks, components, labels = [], projectId, curren
         category: filters.category,
         difficulty: filters.difficulty,
         label: filters.label,
+        dateRange: filters.dateRange,
       },
       myTasks,
       sortField,
@@ -108,7 +120,7 @@ export function BoardFilters({ tasks, components, labels = [], projectId, curren
     ).values()
   );
 
-  const hasActiveFilters = myTasks || filters.assignee || filters.component || filters.category || filters.difficulty || filters.label;
+  const hasActiveFilters = myTasks || filters.assignee || filters.component || filters.category || filters.difficulty || filters.label || filters.dateRange;
 
   useEffect(() => {
     let result = tasks;
@@ -145,6 +157,34 @@ export function BoardFilters({ tasks, components, labels = [], projectId, curren
     if (filters.label) {
       result = result.filter((t) => (t.labels || []).includes(filters.label));
     }
+    if (filters.dateRange) {
+      const now = Date.now();
+      const DAY = 86_400_000;
+      const startOfToday = new Date();
+      startOfToday.setHours(0, 0, 0, 0);
+
+      result = result.filter((t) => {
+        const updated = new Date(t.updatedAt).getTime();
+        const created = new Date(t.createdAt).getTime();
+        switch (filters.dateRange) {
+          case "today":
+            return created >= startOfToday.getTime() || updated >= startOfToday.getTime();
+          case "this_week": {
+            const day = startOfToday.getDay();
+            const weekStart = startOfToday.getTime() - (day === 0 ? 6 : day - 1) * DAY;
+            return created >= weekStart || updated >= weekStart;
+          }
+          case "last_7":
+            return created >= now - 7 * DAY || updated >= now - 7 * DAY;
+          case "last_30":
+            return created >= now - 30 * DAY || updated >= now - 30 * DAY;
+          case "stale_14":
+            return updated < now - 14 * DAY && t.status !== "done";
+          default:
+            return true;
+        }
+      });
+    }
 
     // Sort
     const difficultyOrder: Record<string, number> = { S: 0, M: 1, L: 2, XL: 3 };
@@ -176,7 +216,7 @@ export function BoardFilters({ tasks, components, labels = [], projectId, curren
 
   function clearFilters() {
     setMyTasks(false);
-    setFilters({ search: "", assignee: "", component: "", category: "", difficulty: "", label: "" });
+    setFilters({ search: "", assignee: "", component: "", category: "", difficulty: "", label: "", dateRange: "" });
     setSortField("updatedAt");
     setSortDir("desc");
   }
@@ -319,6 +359,16 @@ export function BoardFilters({ tasks, components, labels = [], projectId, curren
               ))}
             </select>
           )}
+
+          <select
+            value={filters.dateRange}
+            onChange={(e) => setFilters((f) => ({ ...f, dateRange: e.target.value }))}
+            className="text-xs bg-bg-input border border-border rounded-lg px-2 py-1.5 text-text-muted focus:outline-none focus:ring-1 focus:ring-primary"
+          >
+            {DATE_PRESETS.map((p) => (
+              <option key={p.value} value={p.value}>{p.label}</option>
+            ))}
+          </select>
         </div>
       )}
     </div>
