@@ -1,6 +1,14 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { IComment } from "@/types";
 
+const reactionSchema = new Schema(
+  {
+    emoji: { type: String, required: true },
+    user: { type: Schema.Types.ObjectId, ref: "User", required: true },
+  },
+  { _id: false }
+);
+
 const commentSchema = new Schema<IComment>(
   {
     task: {
@@ -16,6 +24,10 @@ const commentSchema = new Schema<IComment>(
     body: {
       type: String,
       required: true,
+    },
+    reactions: {
+      type: [reactionSchema],
+      default: [],
     },
   },
   { timestamps: true }

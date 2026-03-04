@@ -17,7 +17,8 @@ export const GET = withProjectAccess(async (_request, { params }) => {
 
   const comments = await Comment.find({ task: taskId })
     .sort({ createdAt: 1 })
-    .populate({ path: "author", select: "username fullName" });
+    .populate("author", "username fullName")
+    .populate("reactions.user", "username fullName");
 
   return NextResponse.json(comments);
 });

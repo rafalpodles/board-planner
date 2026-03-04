@@ -5,7 +5,7 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
-import { ApiComment } from "@/types";
+import { ApiComment, ApiReaction } from "@/types";
 import { Button } from "@/components/ui/Button";
 import { Textarea } from "@/components/ui/Textarea";
 import { useToast } from "@/components/ui/Toast";
@@ -99,6 +99,36 @@ export function Comments({ projectId, taskId }: CommentsProps) {
     }
   }
 
+  const REACTION_EMOJIS = ["\u{1F44D}", "\u{1F44E}", "\u{2764}\uFE0F", "\u{1F440}", "\u{1F389}", "\u{1F604}"];
+
+  async function toggleReaction(commentId: string, emoji: string) {
+    try {
+      await api.patch(
+        `/api/projects/${projectId}/tasks/${taskId}/comments/${commentId}`,
+        { emoji }
+      );
+      await loadComments();
+    } catch {
+      toast("Failed to react", "error");
+    }
+  }
+
+  function groupReactions(reactions: ApiReaction[]) {
+    const grouped: Record<string, { count: number; users: string[]; hasOwn: boolean }> = {};
+    for (const r of reactions) {
+      if (!grouped[r.emoji]) {
+        grouped[r.emoji] = { count: 0, users: [], hasOwn: false };
+      }
+      grouped[r.emoji].count++;
+      const username = typeof r.user === "object" ? r.user.username : r.user;
+      grouped[r.emoji].users.push(typeof r.user === "object" ? r.user.fullName : "Unknown");
+      if (user && username === user.username) {
+        grouped[r.emoji].hasOwn = true;
+      }
+    }
+    return grouped;
+  }
+
   function isOwnComment(comment: ApiComment): boolean {
     if (!user || typeof comment.author !== "object") return false;
     return comment.author.username === user.username;
@@ -188,6 +218,43 @@ export function Comments({ projectId, taskId }: CommentsProps) {
                 <Markdown remarkPlugins={[remarkGfm]}>{comment.body}</Markdown>
               </div>
             )}
+
+            {/* Reactions */}
+            <div className="flex items-center gap-1 mt-2 flex-wrap">
+              {Object.entries(groupReactions(comment.reactions || [])).map(
+                ([emoji, { count, users, hasOwn }]) => (
+                  <button
+                    key={emoji}
+                    onClick={() => toggleReaction(comment._id, emoji)}
+                    title={users.join(", ")}
+                    className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs border transition-colors cursor-pointer ${
+                      hasOwn
+                        ? "border-primary bg-primary/15 text-primary"
+                        : "border-border bg-bg hover:border-primary/50"
+                    }`}
+                  >
+                    <span>{emoji}</span>
+                    <span>{count}</span>
+                  </button>
+                )
+              )}
+              <div className="relative group/react">
+                <button className="text-text-muted hover:text-text text-xs px-1.5 py-0.5 rounded-full border border-transparent hover:border-border transition-colors cursor-pointer">
+                  +
+                </button>
+                <div className="absolute left-0 bottom-full mb-1 hidden group-hover/react:flex bg-bg-card border border-border rounded-lg shadow-lg p-1 gap-0.5 z-10">
+                  {REACTION_EMOJIS.map((emoji) => (
+                    <button
+                      key={emoji}
+                      onClick={() => toggleReaction(comment._id, emoji)}
+                      className="hover:bg-bg-hover rounded p-1 text-sm cursor-pointer"
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
           </div>
         ))}
         {comments.length === 0 && (

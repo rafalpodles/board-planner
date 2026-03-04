@@ -82,11 +82,17 @@ export interface ITask {
   updatedAt: Date;
 }
 
+export interface IReaction {
+  emoji: string;
+  user: Types.ObjectId | IUser;
+}
+
 export interface IComment {
   _id: Types.ObjectId;
   task: Types.ObjectId | ITask;
   author: Types.ObjectId | IUser;
   body: string;
+  reactions: IReaction[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -142,11 +148,17 @@ export interface ApiTask {
   updatedAt: string;
 }
 
+export interface ApiReaction {
+  emoji: string;
+  user: ApiUser | string;
+}
+
 export interface ApiComment {
   _id: string;
   task: string;
   author: ApiUser | string;
   body: string;
+  reactions: ApiReaction[];
   createdAt: string;
   updatedAt: string;
 }

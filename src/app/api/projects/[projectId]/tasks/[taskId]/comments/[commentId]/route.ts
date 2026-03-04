@@ -44,6 +44,47 @@ export const PUT = withProjectAccess(async (request, { params, user }) => {
   return NextResponse.json(populated);
 });
 
+const ALLOWED_EMOJIS = ["👍", "👎", "❤️", "👀", "🎉", "😄"];
+
+export const PATCH = withProjectAccess(async (request, { params, user }) => {
+  const { projectId, taskId, commentId } = await params;
+  await connectDB();
+
+  const task = await Task.findOne({ _id: taskId, project: projectId });
+  if (!task) {
+    return NextResponse.json({ error: "Task not found" }, { status: 404 });
+  }
+
+  const comment = await Comment.findOne({ _id: commentId, task: taskId });
+  if (!comment) {
+    return NextResponse.json({ error: "Comment not found" }, { status: 404 });
+  }
+
+  const { emoji } = await request.json();
+  if (!emoji || !ALLOWED_EMOJIS.includes(emoji)) {
+    return NextResponse.json({ error: "Invalid emoji" }, { status: 400 });
+  }
+
+  const userId = user._id.toString();
+  const existing = comment.reactions.findIndex(
+    (r) => r.emoji === emoji && r.user.toString() === userId
+  );
+
+  if (existing >= 0) {
+    comment.reactions.splice(existing, 1);
+  } else {
+    comment.reactions.push({ emoji, user: user._id });
+  }
+
+  await comment.save();
+
+  const populated = await Comment.findById(comment._id)
+    .populate("author", "username fullName")
+    .populate("reactions.user", "username fullName");
+
+  return NextResponse.json(populated);
+});
+
 export const DELETE = withProjectAccess(async (_request, { params, user }) => {
   const { projectId, taskId, commentId } = await params;
   await connectDB();
