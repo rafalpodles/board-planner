@@ -3,11 +3,13 @@
 import Link from "next/link";
 import Image from "next/image";
 import { useAuth } from "@/hooks/use-auth";
+import { useTheme } from "@/components/ThemeProvider";
 import { useRouter } from "next/navigation";
 import { useState, useRef, useEffect } from "react";
 
 export function Navbar() {
   const { user, isAdmin, logout } = useAuth();
+  const { theme, toggle: toggleTheme } = useTheme();
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -60,6 +62,15 @@ export function Navbar() {
                     Users
                   </Link>
                 )}
+                <button
+                  onClick={() => {
+                    toggleTheme();
+                    setOpen(false);
+                  }}
+                  className="block w-full text-left px-4 py-2 text-sm text-text-muted hover:text-text hover:bg-bg-hover cursor-pointer"
+                >
+                  {theme === "dark" ? "Light mode" : "Dark mode"}
+                </button>
                 <button
                   onClick={() => {
                     setOpen(false);
