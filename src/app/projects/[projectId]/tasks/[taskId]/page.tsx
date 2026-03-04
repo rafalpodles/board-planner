@@ -251,6 +251,17 @@ export default function TaskDetailPage() {
                   </div>
                 );
               })()}
+              {task.recurrence && (
+                <div>
+                  <span className="text-text-muted">Repeats: </span>
+                  <span>
+                    Every {task.recurrence.interval > 1 ? `${task.recurrence.interval} ` : ""}
+                    {task.recurrence.frequency === "daily" ? (task.recurrence.interval > 1 ? "days" : "day") :
+                     task.recurrence.frequency === "weekly" ? (task.recurrence.interval > 1 ? "weeks" : "week") :
+                     (task.recurrence.interval > 1 ? "months" : "month")}
+                  </span>
+                </div>
+              )}
               <div>
                 <span className="text-text-muted">Created: </span>
                 <span>{new Date(task.createdAt).toLocaleDateString()}</span>

@@ -56,7 +56,7 @@ export const PATCH = withProjectAccess(async (request, { params, user }) => {
     dispatchNotifications(projectId, "status_changed", eventPayload);
 
     // In-app notifications
-    const project = await Project.findById(projectId, "key").lean();
+    const project = await Project.findById(projectId, "key name").lean();
     const taskKey = project ? `${project.key}-${task.taskNumber}` : `#${task.taskNumber}`;
     const recipients = collectRecipients(task);
     createNotifications({
@@ -68,7 +68,77 @@ export const PATCH = withProjectAccess(async (request, { params, user }) => {
       body: task.title,
       recipientIds: recipients,
     });
+
+    // Auto-create next recurring task when moved to done
+    if (status === "done" && oldTask.recurrence) {
+      createNextRecurrence(oldTask, projectId, String(user._id)).catch((err) =>
+        console.error("Failed to create recurring task:", err)
+      );
+    }
   }
 
   return NextResponse.json(task);
 });
+
+async function createNextRecurrence(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  oldTask: any,
+  projectId: string,
+  userId: string
+): Promise<void> {
+  const project = await Project.findOneAndUpdate(
+    { _id: projectId },
+    { $inc: { taskCounter: 1 } },
+    { new: true }
+  );
+  if (!project) return;
+
+  const { frequency, interval } = oldTask.recurrence;
+  const baseDate = oldTask.dueDate ? new Date(oldTask.dueDate) : new Date();
+  const nextDue = new Date(baseDate);
+
+  switch (frequency) {
+    case "daily":
+      nextDue.setDate(nextDue.getDate() + interval);
+      break;
+    case "weekly":
+      nextDue.setDate(nextDue.getDate() + 7 * interval);
+      break;
+    case "monthly":
+      nextDue.setMonth(nextDue.getMonth() + interval);
+      break;
+  }
+
+  // Reset checklist items to undone
+  const checklist = (oldTask.checklist || []).map(
+    (item: { text: string }) => ({ text: item.text, done: false })
+  );
+
+  await Task.create({
+    project: projectId,
+    taskNumber: project.taskCounter,
+    title: oldTask.title,
+    description: oldTask.description || "",
+    difficulty: oldTask.difficulty || "M",
+    component: oldTask.component || "",
+    category: oldTask.category || "user-story",
+    status: "planned",
+    assignee: oldTask.assignee,
+    dueDate: nextDue,
+    checklist,
+    labels: oldTask.labels || [],
+    recurrence: oldTask.recurrence,
+    recurringParentId: oldTask._id,
+    order: 0,
+    createdBy: userId,
+  });
+
+  await logActivity(
+    String(oldTask._id),
+    userId,
+    "updated",
+    "recurrence",
+    "",
+    `Next occurrence created: ${project.key}-${project.taskCounter}`
+  );
+}

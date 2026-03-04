@@ -13,6 +13,7 @@ import {
   ApiLabel,
   ApiTaskTemplate,
   ApiChecklistItem,
+  RecurrenceFrequency,
   TaskStatus,
   Difficulty,
   Category,
@@ -65,6 +66,12 @@ export function TaskForm({
   const [newChecklistItem, setNewChecklistItem] = useState("");
   const [selectedLabels, setSelectedLabels] = useState<string[]>(
     task?.labels || []
+  );
+  const [recurrenceFreq, setRecurrenceFreq] = useState<RecurrenceFrequency | "">(
+    task?.recurrence?.frequency || ""
+  );
+  const [recurrenceInterval, setRecurrenceInterval] = useState(
+    task?.recurrence?.interval || 1
   );
   const [users, setUsers] = useState<ApiUser[]>([]);
   const [error, setError] = useState("");
@@ -137,6 +144,9 @@ export function TaskForm({
       dueDate: dueDate || null,
       checklist,
       labels: selectedLabels,
+      recurrence: recurrenceFreq
+        ? { frequency: recurrenceFreq, interval: recurrenceInterval }
+        : null,
     };
 
     try {
@@ -320,6 +330,38 @@ export function TaskForm({
             className="w-full bg-bg-input border border-border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
           />
         </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <Select
+          label="Repeats"
+          value={recurrenceFreq}
+          onChange={(e) => setRecurrenceFreq(e.target.value as RecurrenceFrequency | "")}
+          options={[
+            { value: "daily", label: "Daily" },
+            { value: "weekly", label: "Weekly" },
+            { value: "monthly", label: "Monthly" },
+          ]}
+          placeholder="No recurrence"
+        />
+        {recurrenceFreq && (
+          <div>
+            <label className="block text-sm font-medium mb-1">Every</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min={1}
+                max={365}
+                value={recurrenceInterval}
+                onChange={(e) => setRecurrenceInterval(Math.max(1, parseInt(e.target.value) || 1))}
+                className="w-20 bg-bg-input border border-border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+              <span className="text-sm text-text-muted">
+                {recurrenceFreq === "daily" ? "day(s)" : recurrenceFreq === "weekly" ? "week(s)" : "month(s)"}
+              </span>
+            </div>
+          </div>
+        )}
       </div>
 
       {projectLabels.length > 0 && (

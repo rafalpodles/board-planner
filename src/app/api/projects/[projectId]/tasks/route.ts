@@ -118,6 +118,7 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
             : (body.acceptanceCriteria ?? "")
         ),
     labels: Array.isArray(body.labels) ? body.labels : [],
+    recurrence: body.recurrence || null,
     order: body.order ?? 0,
     createdBy: user._id,
   });

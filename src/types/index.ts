@@ -184,6 +184,13 @@ export interface ApiChecklistItem {
   done: boolean;
 }
 
+export type RecurrenceFrequency = "daily" | "weekly" | "monthly";
+
+export interface IRecurrence {
+  frequency: RecurrenceFrequency;
+  interval: number;
+}
+
 export interface ITask {
   _id: Types.ObjectId;
   project: Types.ObjectId | IProject;
@@ -202,6 +209,8 @@ export interface ITask {
   pinned: boolean;
   blockedBy: (Types.ObjectId | ITask)[];
   watchers: Types.ObjectId[];
+  recurrence: IRecurrence | null;
+  recurringParentId: Types.ObjectId | null;
   order: number;
   createdBy: Types.ObjectId | IUser;
   createdAt: Date;
@@ -277,6 +286,11 @@ export interface ApiTaskLink {
   status: TaskStatus;
 }
 
+export interface ApiRecurrence {
+  frequency: RecurrenceFrequency;
+  interval: number;
+}
+
 export interface ApiTask {
   _id: string;
   project: string;
@@ -297,6 +311,8 @@ export interface ApiTask {
   blockedBy: ApiTaskLink[];
   blocking: ApiTaskLink[];
   watchers: string[];
+  recurrence: ApiRecurrence | null;
+  recurringParentId: string | null;
   order: number;
   createdBy: ApiUser | string;
   createdAt: string;
