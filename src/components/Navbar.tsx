@@ -29,10 +29,20 @@ export function Navbar() {
   return (
     <nav className="border-b border-border bg-bg-card sticky top-0 z-40">
       <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between">
-        <Link href="/projects" className="font-bold text-lg flex items-center gap-2">
-          <Image src="/logo.svg" alt="ClaudePlanner" width={24} height={24} />
-          ClaudePlanner
-        </Link>
+        <div className="flex items-center gap-4">
+          <Link href="/projects" className="font-bold text-lg flex items-center gap-2">
+            <Image src="/logo.svg" alt="ClaudePlanner" width={24} height={24} />
+            ClaudePlanner
+          </Link>
+          {user && (
+            <Link
+              href="/my-tasks"
+              className="text-sm text-text-muted hover:text-text transition-colors"
+            >
+              My Tasks
+            </Link>
+          )}
+        </div>
 
         {user && (
           <div className="relative" ref={menuRef}>
