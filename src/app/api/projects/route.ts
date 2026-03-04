@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { withAuth } from "@/lib/middleware";
+import { withAuth, withAdmin } from "@/lib/middleware";
 import { Project } from "@/models/project";
 
 export const GET = withAuth(async (_request, { user }) => {
@@ -9,7 +9,7 @@ export const GET = withAuth(async (_request, { user }) => {
   const filter =
     user.role === "admin"
       ? {}
-      : { _id: { $in: user.allowedProjects } };
+      : { _id: { $in: user.allowedProjects || [] } };
 
   const projects = await Project.find(filter)
     .populate("owner", "username fullName")
@@ -17,7 +17,7 @@ export const GET = withAuth(async (_request, { user }) => {
   return NextResponse.json(projects);
 });
 
-export const POST = withAuth(async (request, { user }) => {
+export const POST = withAdmin(async (request, { user }) => {
   await connectDB();
   const body = await request.json();
   const { name, key, description } = body;

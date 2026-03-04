@@ -16,9 +16,9 @@ export const Settings: Model<ISettings> =
   mongoose.models.Settings || mongoose.model<ISettings>("Settings", settingsSchema);
 
 export async function getSettings(): Promise<ISettings> {
-  let settings = await Settings.findOne();
-  if (!settings) {
-    settings = await Settings.create({});
-  }
-  return settings;
+  return Settings.findOneAndUpdate(
+    {},
+    { $setOnInsert: { aiModel: "gpt-4o-mini" } },
+    { upsert: true, new: true }
+  ) as Promise<ISettings>;
 }

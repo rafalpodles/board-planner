@@ -30,7 +30,7 @@ function actionIcon(action: string) {
     case "updated":
       return "✎";
     case "comment_added":
-      return "💬";
+      return "#";
     case "comment_edited":
       return "✎";
     case "comment_deleted":

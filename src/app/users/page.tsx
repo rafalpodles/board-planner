@@ -13,7 +13,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useToast } from "@/components/ui/Toast";
 
 export default function UsersPage() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, isLoading: authLoading } = useAuth();
   const router = useRouter();
   const [users, setUsers] = useState<ApiUser[]>([]);
   const [projects, setProjects] = useState<ApiProject[]>([]);
@@ -41,6 +41,7 @@ export default function UsersPage() {
   const { toast } = useToast();
 
   useEffect(() => {
+    if (authLoading) return;
     if (!isAdmin) {
       router.replace("/projects");
       return;
@@ -54,7 +55,7 @@ export default function UsersPage() {
       .catch(() => toast("Failed to load data", "error"))
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAdmin]);
+  }, [isAdmin, authLoading]);
 
   async function handleCreate(e: FormEvent) {
     e.preventDefault();
@@ -95,8 +96,8 @@ export default function UsersPage() {
       const data = await api.get("/api/users");
       setUsers(data);
       toast("User updated", "success");
-    } catch {
-      toast("Failed to update user", "error");
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Failed to update user", "error");
     } finally {
       setEditSaving(false);
     }
@@ -111,8 +112,8 @@ export default function UsersPage() {
       const data = await api.get("/api/users");
       setUsers(data);
       toast("User deleted", "success");
-    } catch {
-      toast("Failed to delete user", "error");
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Failed to delete user", "error");
     } finally {
       setDeleting(false);
     }

@@ -41,10 +41,11 @@ export function withProjectAccess(handler: AuthenticatedHandler) {
     const params = await context.params;
     const projectId = params.projectId;
     if (!projectId) {
-      return handler(request, context);
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const hasAccess = user.allowedProjects.some(
+    const allowedProjects = user.allowedProjects || [];
+    const hasAccess = allowedProjects.some(
       (p) => p.toString() === projectId
     );
     if (!hasAccess) {

@@ -7,6 +7,7 @@ import { ApiProject } from "@/types";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
+import { useAuth } from "@/hooks/use-auth";
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<ApiProject[]>([]);
@@ -14,6 +15,7 @@ export default function ProjectsPage() {
   const api = useApi();
   const router = useRouter();
   const { toast } = useToast();
+  const { isAdmin } = useAuth();
 
   useEffect(() => {
     api
@@ -36,17 +38,21 @@ export default function ProjectsPage() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold">Projects</h1>
-        <Button onClick={() => router.push("/projects/new")}>
-          New Project
-        </Button>
+        {isAdmin && (
+          <Button onClick={() => router.push("/projects/new")}>
+            New Project
+          </Button>
+        )}
       </div>
 
       {projects.length === 0 ? (
         <div className="text-center py-12 text-text-muted">
           <p className="mb-4">No projects yet</p>
-          <Button onClick={() => router.push("/projects/new")}>
-            Create your first project
-          </Button>
+          {isAdmin && (
+            <Button onClick={() => router.push("/projects/new")}>
+              Create your first project
+            </Button>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">

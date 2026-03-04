@@ -3,6 +3,7 @@ import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
 import { Task } from "@/models/task";
 import { Comment } from "@/models/comment";
+import { ActivityLog } from "@/models/activityLog";
 import { User } from "@/models/user";
 import { logActivity } from "@/lib/activity";
 
@@ -80,18 +81,19 @@ export const PUT = withProjectAccess(async (request, { params, user }) => {
     return NextResponse.json({ error: "Task not found" }, { status: 404 });
   }
 
-  // Log field changes
+  // Log field changes (parallel)
+  const activities: Promise<void>[] = [];
   const trackFields = ["title", "difficulty", "component", "category", "status", "acceptanceCriteria"];
   for (const field of trackFields) {
     const oldVal = String(oldTask[field as keyof typeof oldTask] ?? "");
     const newVal = String(task[field as keyof typeof task] ?? "");
     if (oldVal !== newVal) {
       const action = field === "status" ? "status_changed" as const : "updated" as const;
-      await logActivity(taskId, user._id, action, field, oldVal, newVal);
+      activities.push(logActivity(taskId, user._id, action, field, oldVal, newVal));
     }
   }
 
-  // Log assignee change separately (need to resolve names)
+  // Log assignee change
   if (updates.assignee !== undefined) {
     const oldAssignee = oldTask.assignee && typeof oldTask.assignee === "object"
       ? (oldTask.assignee as { username: string }).username
@@ -100,9 +102,11 @@ export const PUT = withProjectAccess(async (request, { params, user }) => {
       ? (task.assignee as { username: string }).username
       : "";
     if (oldAssignee !== newAssignee) {
-      await logActivity(taskId, user._id, "updated", "assignee", oldAssignee, newAssignee);
+      activities.push(logActivity(taskId, user._id, "updated", "assignee", oldAssignee, newAssignee));
     }
   }
+
+  await Promise.all(activities);
 
   return NextResponse.json(task);
 });
@@ -120,8 +124,11 @@ export const DELETE = withProjectAccess(async (_request, { params }) => {
     return NextResponse.json({ error: "Task not found" }, { status: 404 });
   }
 
-  // Delete associated comments
-  await Comment.deleteMany({ task: taskId });
+  // Delete associated comments and activity logs
+  await Promise.all([
+    Comment.deleteMany({ task: taskId }),
+    ActivityLog.deleteMany({ task: taskId }),
+  ]);
 
   return NextResponse.json({ message: "Task deleted" });
 });

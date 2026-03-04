@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { withProjectAccess } from "@/lib/middleware";
+import { withProjectAccess, withAdmin } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { Task } from "@/models/task";
 import { Comment } from "@/models/comment";
+import { ActivityLog } from "@/models/activityLog";
 
 export const GET = withProjectAccess(async (_request, { params }) => {
   await connectDB();
@@ -21,7 +22,7 @@ export const GET = withProjectAccess(async (_request, { params }) => {
   return NextResponse.json(project);
 });
 
-export const PUT = withProjectAccess(async (request, { params }) => {
+export const PUT = withAdmin(async (request, { params }) => {
   await connectDB();
   const { projectId } = await params;
   const body = await request.json();
@@ -45,7 +46,7 @@ export const PUT = withProjectAccess(async (request, { params }) => {
   return NextResponse.json(project);
 });
 
-export const DELETE = withProjectAccess(async (_request, { params }) => {
+export const DELETE = withAdmin(async (_request, { params }) => {
   await connectDB();
   const { projectId } = await params;
 
@@ -54,9 +55,12 @@ export const DELETE = withProjectAccess(async (_request, { params }) => {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
-  // Delete all comments on tasks in this project
+  // Delete all comments and activity logs on tasks in this project
   const taskIds = await Task.find({ project: projectId }).distinct("_id");
-  await Comment.deleteMany({ task: { $in: taskIds } });
+  await Promise.all([
+    Comment.deleteMany({ task: { $in: taskIds } }),
+    ActivityLog.deleteMany({ task: { $in: taskIds } }),
+  ]);
 
   // Delete all tasks in this project
   await Task.deleteMany({ project: projectId });

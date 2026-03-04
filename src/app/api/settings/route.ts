@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { withAuth } from "@/lib/middleware";
+import { withAuth, withAdmin } from "@/lib/middleware";
 import { getSettings, Settings } from "@/models/settings";
 
 export const GET = withAuth(async () => {
@@ -9,7 +9,7 @@ export const GET = withAuth(async () => {
   return NextResponse.json({ aiModel: settings.aiModel });
 });
 
-export const PUT = withAuth(async (request) => {
+export const PUT = withAdmin(async (request) => {
   await connectDB();
 
   const body = await request.json();
@@ -22,13 +22,11 @@ export const PUT = withAuth(async (request) => {
     );
   }
 
-  let settings = await Settings.findOne();
-  if (!settings) {
-    settings = await Settings.create({ aiModel: aiModel.trim() });
-  } else {
-    settings.aiModel = aiModel.trim();
-    await settings.save();
-  }
+  const settings = await Settings.findOneAndUpdate(
+    {},
+    { $set: { aiModel: aiModel.trim() } },
+    { upsert: true, new: true }
+  );
 
   return NextResponse.json({ aiModel: settings.aiModel });
 });
