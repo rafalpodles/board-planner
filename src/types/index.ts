@@ -36,12 +36,17 @@ export const STATUS_LABELS: Record<TaskStatus, string> = {
   done: "Done",
 };
 
+// User roles
+export type UserRole = "admin" | "member";
+
 // Document interfaces (what Mongoose returns)
 export interface IUser {
   _id: Types.ObjectId;
   username: string;
   password: string;
   fullName: string;
+  role: UserRole;
+  allowedProjects: Types.ObjectId[];
   createdAt: Date;
 }
 
@@ -91,6 +96,8 @@ export interface ApiUser {
   _id: string;
   username: string;
   fullName: string;
+  role: UserRole;
+  allowedProjects: string[];
   createdAt: string;
 }
 

@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { withAuth } from "@/lib/middleware";
+import { withProjectAccess } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { Task } from "@/models/task";
 import { Comment } from "@/models/comment";
 
-export const GET = withAuth(async (_request, { params }) => {
+export const GET = withProjectAccess(async (_request, { params }) => {
   await connectDB();
   const { projectId } = await params;
 
@@ -21,7 +21,7 @@ export const GET = withAuth(async (_request, { params }) => {
   return NextResponse.json(project);
 });
 
-export const PUT = withAuth(async (request, { params }) => {
+export const PUT = withProjectAccess(async (request, { params }) => {
   await connectDB();
   const { projectId } = await params;
   const body = await request.json();
@@ -45,7 +45,7 @@ export const PUT = withAuth(async (request, { params }) => {
   return NextResponse.json(project);
 });
 
-export const DELETE = withAuth(async (_request, { params }) => {
+export const DELETE = withProjectAccess(async (_request, { params }) => {
   await connectDB();
   const { projectId } = await params;
 

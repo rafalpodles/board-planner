@@ -12,6 +12,8 @@ export async function GET(request: Request) {
     _id: user._id,
     username: user.username,
     fullName: user.fullName,
+    role: user.role || "member",
+    allowedProjects: user.allowedProjects || [],
     createdAt: user.createdAt,
   });
 }

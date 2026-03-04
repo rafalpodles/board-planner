@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { withAuth } from "@/lib/middleware";
+import { withProjectAccess } from "@/lib/middleware";
 import { ActivityLog } from "@/models/activityLog";
 
-export const GET = withAuth(async (_request, { params }) => {
+export const GET = withProjectAccess(async (_request, { params }) => {
   const { taskId } = await params;
   await connectDB();
 

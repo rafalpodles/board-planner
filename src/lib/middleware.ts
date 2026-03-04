@@ -21,3 +21,36 @@ export function withAuth(handler: AuthenticatedHandler) {
     return handler(request, { ...context, user });
   };
 }
+
+export function withAdmin(handler: AuthenticatedHandler) {
+  return withAuth(async (request, context) => {
+    if (context.user.role !== "admin") {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    return handler(request, context);
+  });
+}
+
+export function withProjectAccess(handler: AuthenticatedHandler) {
+  return withAuth(async (request, context) => {
+    const { user } = context;
+    if (user.role === "admin") {
+      return handler(request, context);
+    }
+
+    const params = await context.params;
+    const projectId = params.projectId;
+    if (!projectId) {
+      return handler(request, context);
+    }
+
+    const hasAccess = user.allowedProjects.some(
+      (p) => p.toString() === projectId
+    );
+    if (!hasAccess) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    return handler(request, context);
+  });
+}

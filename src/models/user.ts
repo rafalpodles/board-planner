@@ -18,6 +18,15 @@ const userSchema = new Schema<IUser>({
     required: true,
     trim: true,
   },
+  role: {
+    type: String,
+    enum: ["admin", "member"],
+    default: "member",
+  },
+  allowedProjects: {
+    type: [{ type: Schema.Types.ObjectId, ref: "Project" }],
+    default: [],
+  },
   createdAt: {
     type: Date,
     default: Date.now,

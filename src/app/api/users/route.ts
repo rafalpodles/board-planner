@@ -2,10 +2,10 @@ import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
 import { getAuthUser } from "@/lib/auth";
-import { withAuth } from "@/lib/middleware";
+import { withAdmin } from "@/lib/middleware";
 import { User } from "@/models/user";
 
-export const GET = withAuth(async () => {
+export const GET = withAdmin(async () => {
   await connectDB();
   const users = await User.find().sort({ createdAt: 1 });
   return NextResponse.json(users);
@@ -29,8 +29,8 @@ export async function POST(request: Request) {
 
   if (!isBootstrap) {
     const authUser = await getAuthUser(request);
-    if (!authUser) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!authUser || authUser.role !== "admin") {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
   }
 
@@ -41,6 +41,7 @@ export async function POST(request: Request) {
       username: username.toLowerCase(),
       password: hashedPassword,
       fullName,
+      role: isBootstrap ? "admin" : "member",
     });
     return NextResponse.json(user, { status: 201 });
   } catch (err: unknown) {

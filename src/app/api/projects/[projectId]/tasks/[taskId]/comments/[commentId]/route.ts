@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { withAuth } from "@/lib/middleware";
+import { withProjectAccess } from "@/lib/middleware";
 import { Comment } from "@/models/comment";
 import { Task } from "@/models/task";
 import { logActivity } from "@/lib/activity";
 
-export const PUT = withAuth(async (request, { params, user }) => {
+export const PUT = withProjectAccess(async (request, { params, user }) => {
   const { projectId, taskId, commentId } = await params;
   await connectDB();
 
@@ -44,7 +44,7 @@ export const PUT = withAuth(async (request, { params, user }) => {
   return NextResponse.json(populated);
 });
 
-export const DELETE = withAuth(async (_request, { params, user }) => {
+export const DELETE = withProjectAccess(async (_request, { params, user }) => {
   const { projectId, taskId, commentId } = await params;
   await connectDB();
 

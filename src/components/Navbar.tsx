@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import { useState, useRef, useEffect } from "react";
 
 export function Navbar() {
-  const { user, logout } = useAuth();
+  const { user, isAdmin, logout } = useAuth();
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -51,13 +51,15 @@ export function Navbar() {
 
             {open && (
               <div className="absolute right-0 mt-1 w-40 bg-bg-card border border-border rounded-lg shadow-lg py-1 z-50">
-                <Link
-                  href="/users"
-                  onClick={() => setOpen(false)}
-                  className="block px-4 py-2 text-sm text-text-muted hover:text-text hover:bg-bg-hover"
-                >
-                  Users
-                </Link>
+                {isAdmin && (
+                  <Link
+                    href="/users"
+                    onClick={() => setOpen(false)}
+                    className="block px-4 py-2 text-sm text-text-muted hover:text-text hover:bg-bg-hover"
+                  >
+                    Users
+                  </Link>
+                )}
                 <button
                   onClick={() => {
                     setOpen(false);

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { withAuth } from "@/lib/middleware";
+import { withProjectAccess } from "@/lib/middleware";
 import { Task } from "@/models/task";
 import { Project } from "@/models/project";
 import { User } from "@/models/user";
@@ -13,7 +13,7 @@ const populateFields = [
   { path: "blockedBy", select: "taskNumber title status" },
 ];
 
-export const GET = withAuth(async (request, { params }) => {
+export const GET = withProjectAccess(async (request, { params }) => {
   const { projectId } = await params;
   await connectDB();
 
@@ -63,7 +63,7 @@ export const GET = withAuth(async (request, { params }) => {
   return NextResponse.json(tasks);
 });
 
-export const POST = withAuth(async (request, { params, user }) => {
+export const POST = withProjectAccess(async (request, { params, user }) => {
   const { projectId } = await params;
   await connectDB();
 

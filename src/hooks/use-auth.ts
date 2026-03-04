@@ -11,6 +11,7 @@ import { ApiUser } from "@/types";
 
 interface AuthState {
   user: ApiUser | null;
+  isAdmin: boolean;
   isLoading: boolean;
   error: string | null;
   login: (username: string, password: string) => Promise<boolean>;
@@ -90,7 +91,9 @@ export function useAuthProvider(): AuthState {
     setUser(null);
   }, []);
 
-  return { user, isLoading, error, login, logout, getAuthHeader };
+  const isAdmin = user?.role === "admin";
+
+  return { user, isAdmin, isLoading, error, login, logout, getAuthHeader };
 }
 
 export function useAuth(): AuthState {

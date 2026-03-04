@@ -3,9 +3,15 @@ import { connectDB } from "@/lib/db";
 import { withAuth } from "@/lib/middleware";
 import { Project } from "@/models/project";
 
-export const GET = withAuth(async () => {
+export const GET = withAuth(async (_request, { user }) => {
   await connectDB();
-  const projects = await Project.find()
+
+  const filter =
+    user.role === "admin"
+      ? {}
+      : { _id: { $in: user.allowedProjects } };
+
+  const projects = await Project.find(filter)
     .populate("owner", "username fullName")
     .sort({ createdAt: -1 });
   return NextResponse.json(projects);

@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { withAuth } from "@/lib/middleware";
+import { withProjectAccess } from "@/lib/middleware";
 import { Task } from "@/models/task";
 import { TASK_STATUSES, TaskStatus } from "@/types";
 import { logActivity } from "@/lib/activity";
 
-export const PATCH = withAuth(async (request, { params, user }) => {
+export const PATCH = withProjectAccess(async (request, { params, user }) => {
   const { projectId, taskId } = await params;
   await connectDB();
 

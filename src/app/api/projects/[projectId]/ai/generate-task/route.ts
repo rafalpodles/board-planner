@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { withAuth } from "@/lib/middleware";
+import { withProjectAccess } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { Task } from "@/models/task";
 import { isAIEnabled, generateTask, ExistingTaskSummary } from "@/lib/ai";
@@ -30,11 +30,11 @@ async function fetchReadme(githubRepo: string): Promise<string | undefined> {
   }
 }
 
-export const GET = withAuth(async () => {
+export const GET = withProjectAccess(async () => {
   return NextResponse.json({ enabled: isAIEnabled() });
 });
 
-export const POST = withAuth(async (request, { params }) => {
+export const POST = withProjectAccess(async (request, { params }) => {
   const { projectId } = await params;
 
   if (!isAIEnabled()) {
