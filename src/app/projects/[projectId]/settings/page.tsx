@@ -3,7 +3,7 @@
 import { useEffect, useState, FormEvent } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
-import { ApiProject, ApiLabel, ApiTaskTemplate, ApiWebhook, ApiProjectAuditLog, DIFFICULTIES, CATEGORIES, WEBHOOK_EVENTS, Difficulty, Category, WebhookEvent } from "@/types";
+import { ApiProject, ApiLabel, ApiTaskTemplate, ApiWebhook, ApiNotificationChannel, ApiProjectAuditLog, DIFFICULTIES, CATEGORIES, WEBHOOK_EVENTS, NOTIFICATION_CHANNEL_TYPES, Difficulty, Category, WebhookEvent, NotificationChannelType } from "@/types";
 import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
 import { Button } from "@/components/ui/Button";
@@ -33,6 +33,9 @@ export default function ProjectSettingsPage() {
   const [newTemplateName, setNewTemplateName] = useState("");
   const [editingTemplate, setEditingTemplate] = useState<ApiTaskTemplate | null>(null);
   const [newWebhookUrl, setNewWebhookUrl] = useState("");
+  const [newChannelType, setNewChannelType] = useState<NotificationChannelType>("slack");
+  const [newChannelName, setNewChannelName] = useState("");
+  const [newChannelUrl, setNewChannelUrl] = useState("");
   const [auditLogs, setAuditLogs] = useState<ApiProjectAuditLog[]>([]);
   const [showAudit, setShowAudit] = useState(false);
 
@@ -206,6 +209,59 @@ export default function ProjectSettingsPage() {
       setProject((p) => (p ? { ...p, webhooks } : p));
     } catch {
       toast("Failed to update webhook", "error");
+    }
+  }
+
+  async function addNotificationChannel() {
+    if (!newChannelName.trim() || !newChannelUrl.trim()) return;
+    try {
+      const channels: ApiNotificationChannel[] = await api.post(`/api/projects/${projectId}/notifications`, {
+        type: newChannelType,
+        name: newChannelName.trim(),
+        webhookUrl: newChannelUrl.trim(),
+      });
+      setProject((p) => (p ? { ...p, notificationChannels: channels } : p));
+      setNewChannelName("");
+      setNewChannelUrl("");
+      toast("Notification channel added", "success");
+    } catch {
+      toast("Failed to add notification channel", "error");
+    }
+  }
+
+  async function removeNotificationChannel(channelId: string) {
+    try {
+      const channels: ApiNotificationChannel[] = await api.del(`/api/projects/${projectId}/notifications`, { channelId });
+      setProject((p) => (p ? { ...p, notificationChannels: channels } : p));
+    } catch {
+      toast("Failed to remove notification channel", "error");
+    }
+  }
+
+  async function toggleNotificationChannel(channelId: string, enabled: boolean) {
+    try {
+      const channels: ApiNotificationChannel[] = await api.put(`/api/projects/${projectId}/notifications`, {
+        channelId,
+        enabled,
+      });
+      setProject((p) => (p ? { ...p, notificationChannels: channels } : p));
+    } catch {
+      toast("Failed to update notification channel", "error");
+    }
+  }
+
+  async function toggleChannelEvent(channelId: string, event: WebhookEvent, currentEvents: WebhookEvent[]) {
+    const events = currentEvents.includes(event)
+      ? currentEvents.filter((e) => e !== event)
+      : [...currentEvents, event];
+    try {
+      const channels: ApiNotificationChannel[] = await api.put(`/api/projects/${projectId}/notifications`, {
+        channelId,
+        events,
+      });
+      setProject((p) => (p ? { ...p, notificationChannels: channels } : p));
+    } catch {
+      toast("Failed to update notification channel", "error");
     }
   }
 
@@ -578,6 +634,109 @@ export default function ProjectSettingsPage() {
           <Button type="button" variant="secondary" onClick={addWebhook}>
             Add
           </Button>
+        </div>
+      </div>
+
+      {/* Notification Channels (Slack/Discord) */}
+      <div className="mb-8">
+        <h2 className="font-semibold mb-3">Notifications (Slack / Discord)</h2>
+        <p className="text-sm text-text-muted mb-3">
+          Send formatted notifications to Slack or Discord channels when events occur.
+        </p>
+
+        <div className="space-y-3 mb-3">
+          {(project.notificationChannels || []).map((ch) => (
+            <div key={ch._id} className="border border-border rounded-lg p-3">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <span className={`text-xs font-medium px-2 py-0.5 rounded ${
+                    ch.type === "slack"
+                      ? "bg-purple-500/10 text-purple-500"
+                      : "bg-indigo-500/10 text-indigo-500"
+                  }`}>
+                    {ch.type === "slack" ? "Slack" : "Discord"}
+                  </span>
+                  <span className="text-sm font-medium">{ch.name}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => toggleNotificationChannel(ch._id, !ch.enabled)}
+                    className={`text-xs px-2 py-0.5 rounded ${
+                      ch.enabled
+                        ? "bg-green-500/10 text-green-500"
+                        : "bg-bg-input text-text-muted"
+                    }`}
+                  >
+                    {ch.enabled ? "Active" : "Disabled"}
+                  </button>
+                  <button
+                    onClick={() => removeNotificationChannel(ch._id)}
+                    className="text-xs text-text-muted hover:text-danger"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+              <code className="text-xs bg-bg-input px-2 py-0.5 rounded truncate block mb-2 text-text-muted">
+                {ch.webhookUrl}
+              </code>
+              <div className="flex flex-wrap gap-1">
+                {WEBHOOK_EVENTS.map((evt) => (
+                  <button
+                    key={evt}
+                    onClick={() => toggleChannelEvent(ch._id, evt, ch.events)}
+                    className={`text-xs px-2 py-0.5 rounded border transition-colors ${
+                      ch.events.includes(evt)
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-border text-text-muted"
+                    }`}
+                  >
+                    {evt.replace(/_/g, " ")}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+          {(project.notificationChannels || []).length === 0 && (
+            <p className="text-sm text-text-muted">No notification channels configured</p>
+          )}
+        </div>
+
+        <div className="space-y-2">
+          <div className="flex gap-2">
+            <select
+              value={newChannelType}
+              onChange={(e) => setNewChannelType(e.target.value as NotificationChannelType)}
+              className="text-sm bg-bg-input border border-border rounded-lg px-3 py-2"
+            >
+              {NOTIFICATION_CHANNEL_TYPES.map((t) => (
+                <option key={t} value={t}>
+                  {t === "slack" ? "Slack" : "Discord"}
+                </option>
+              ))}
+            </select>
+            <Input
+              value={newChannelName}
+              onChange={(e) => setNewChannelName(e.target.value)}
+              placeholder="Channel name..."
+            />
+          </div>
+          <div className="flex gap-2">
+            <Input
+              value={newChannelUrl}
+              onChange={(e) => setNewChannelUrl(e.target.value)}
+              placeholder={newChannelType === "slack" ? "https://hooks.slack.com/services/..." : "https://discord.com/api/webhooks/..."}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  addNotificationChannel();
+                }
+              }}
+            />
+            <Button type="button" variant="secondary" onClick={addNotificationChannel}>
+              Add
+            </Button>
+          </div>
         </div>
       </div>
 

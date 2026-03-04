@@ -1,5 +1,5 @@
 import mongoose, { Schema, Model } from "mongoose";
-import { IProject, DIFFICULTIES, CATEGORIES, WEBHOOK_EVENTS } from "@/types";
+import { IProject, DIFFICULTIES, CATEGORIES, WEBHOOK_EVENTS, NOTIFICATION_CHANNEL_TYPES } from "@/types";
 
 const labelSchema = new Schema(
   {
@@ -53,6 +53,16 @@ const projectSchema = new Schema<IProject>(
     webhooks: {
       type: [{
         url: { type: String, required: true, trim: true },
+        events: { type: [{ type: String, enum: WEBHOOK_EVENTS }], default: WEBHOOK_EVENTS },
+        enabled: { type: Boolean, default: true },
+      }],
+      default: [],
+    },
+    notificationChannels: {
+      type: [{
+        type: { type: String, enum: NOTIFICATION_CHANNEL_TYPES, required: true },
+        name: { type: String, required: true, trim: true },
+        webhookUrl: { type: String, required: true, trim: true },
         events: { type: [{ type: String, enum: WEBHOOK_EVENTS }], default: WEBHOOK_EVENTS },
         enabled: { type: Boolean, default: true },
       }],

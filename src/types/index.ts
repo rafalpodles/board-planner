@@ -89,6 +89,28 @@ export interface ApiWebhook {
   enabled: boolean;
 }
 
+export type NotificationChannelType = "slack" | "discord";
+
+export const NOTIFICATION_CHANNEL_TYPES: NotificationChannelType[] = ["slack", "discord"];
+
+export interface INotificationChannel {
+  _id: Types.ObjectId;
+  type: NotificationChannelType;
+  name: string;
+  webhookUrl: string;
+  events: WebhookEvent[];
+  enabled: boolean;
+}
+
+export interface ApiNotificationChannel {
+  _id: string;
+  type: NotificationChannelType;
+  name: string;
+  webhookUrl: string;
+  events: WebhookEvent[];
+  enabled: boolean;
+}
+
 export interface IProject {
   _id: Types.ObjectId;
   name: string;
@@ -98,6 +120,7 @@ export interface IProject {
   labels: ILabel[];
   taskTemplates: ITaskTemplate[];
   webhooks: IWebhook[];
+  notificationChannels: INotificationChannel[];
   githubRepo: string;
   taskCounter: number;
   owner: Types.ObjectId | IUser;
@@ -178,6 +201,7 @@ export interface ApiProject {
   labels: ApiLabel[];
   taskTemplates: ApiTaskTemplate[];
   webhooks: ApiWebhook[];
+  notificationChannels: ApiNotificationChannel[];
   githubRepo: string;
   taskCounter: number;
   owner: ApiUser | string;

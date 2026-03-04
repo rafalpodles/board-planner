@@ -7,6 +7,7 @@ import { User } from "@/models/user";
 import { TASK_STATUSES, TaskStatus } from "@/types";
 import { logActivity } from "@/lib/activity";
 import { dispatchWebhooks } from "@/lib/webhooks";
+import { dispatchNotifications } from "@/lib/notifications";
 
 const populateFields = [
   { path: "assignee", select: "username fullName" },
@@ -117,14 +118,16 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
 
   await logActivity(task._id, user._id, "created");
 
-  dispatchWebhooks(projectId, "task_created", {
+  const eventPayload = {
     project: { key: project.key, name: project.name },
     task: {
       taskKey: `${project.key}-${task.taskNumber}`,
       title: task.title,
       status: task.status,
     },
-  });
+  };
+  dispatchWebhooks(projectId, "task_created", eventPayload);
+  dispatchNotifications(projectId, "task_created", eventPayload);
 
   return NextResponse.json(populated, { status: 201 });
 });

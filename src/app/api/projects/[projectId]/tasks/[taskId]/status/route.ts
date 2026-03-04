@@ -5,6 +5,7 @@ import { Task } from "@/models/task";
 import { TASK_STATUSES, TaskStatus } from "@/types";
 import { logActivity } from "@/lib/activity";
 import { dispatchWebhooks } from "@/lib/webhooks";
+import { dispatchNotifications } from "@/lib/notifications";
 
 export const PATCH = withProjectAccess(async (request, { params, user }) => {
   const { projectId, taskId } = await params;
@@ -40,7 +41,7 @@ export const PATCH = withProjectAccess(async (request, { params, user }) => {
   if (oldTask.status !== status) {
     await logActivity(taskId, user._id, "status_changed", "status", oldTask.status, status);
 
-    dispatchWebhooks(projectId, "status_changed", {
+    const eventPayload = {
       project: { key: "", name: "" },
       task: {
         taskKey: `${oldTask.taskNumber}`,
@@ -48,7 +49,9 @@ export const PATCH = withProjectAccess(async (request, { params, user }) => {
         status,
       },
       data: { oldStatus: oldTask.status, newStatus: status },
-    });
+    };
+    dispatchWebhooks(projectId, "status_changed", eventPayload);
+    dispatchNotifications(projectId, "status_changed", eventPayload);
   }
 
   return NextResponse.json(task);
