@@ -106,6 +106,18 @@ export const PUT = withProjectAccess(async (request, { params, user }) => {
     }
   }
 
+  // Auto-watch on assign
+  if (updates.assignee && task.assignee) {
+    const assigneeId = typeof task.assignee === "object" && "_id" in task.assignee
+      ? task.assignee._id
+      : task.assignee;
+    if (assigneeId) {
+      activities.push(
+        Task.findByIdAndUpdate(taskId, { $addToSet: { watchers: assigneeId } }).then(() => {})
+      );
+    }
+  }
+
   await Promise.all(activities);
 
   return NextResponse.json(task);

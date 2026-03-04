@@ -97,6 +97,7 @@ export interface ITask {
   labels: Types.ObjectId[];
   pinned: boolean;
   blockedBy: (Types.ObjectId | ITask)[];
+  watchers: Types.ObjectId[];
   order: number;
   createdBy: Types.ObjectId | IUser;
   createdAt: Date;
@@ -184,6 +185,7 @@ export interface ApiTask {
   pinned: boolean;
   blockedBy: ApiTaskLink[];
   blocking: ApiTaskLink[];
+  watchers: string[];
   order: number;
   createdBy: ApiUser | string;
   createdAt: string;

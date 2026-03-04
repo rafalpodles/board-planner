@@ -53,7 +53,11 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
     select: "username fullName",
   });
 
-  await logActivity(taskId, user._id, "comment_added");
+  await Promise.all([
+    logActivity(taskId, user._id, "comment_added"),
+    // Auto-watch task on comment
+    Task.findByIdAndUpdate(taskId, { $addToSet: { watchers: user._id } }),
+  ]);
 
   return NextResponse.json(populated, { status: 201 });
 });

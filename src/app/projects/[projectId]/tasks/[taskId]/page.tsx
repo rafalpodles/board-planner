@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useApi } from "@/hooks/use-api";
+import { useAuth } from "@/hooks/use-auth";
 import { ApiTask, ApiProject, ApiLabel, TASK_STATUSES, STATUS_LABELS } from "@/types";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -22,6 +23,7 @@ export default function TaskDetailPage() {
   }>();
   const router = useRouter();
   const api = useApi();
+  const { user: currentUser } = useAuth();
   const { toast } = useToast();
 
   const [task, setTask] = useState<ApiTask | null>(null);
@@ -153,6 +155,43 @@ export default function TaskDetailPage() {
                 </option>
               ))}
             </select>
+            <button
+              onClick={async () => {
+                try {
+                  const res = await api.post(
+                    `/api/projects/${projectId}/tasks/${taskId}/watch`,
+                    {}
+                  );
+                  setTask((prev) => {
+                    if (!prev || !currentUser) return prev;
+                    const watchers = res.watching
+                      ? [...(prev.watchers || []), currentUser._id]
+                      : (prev.watchers || []).filter((w: string) => w !== currentUser._id);
+                    return { ...prev, watchers };
+                  });
+                  toast(res.watching ? "Watching task" : "Unwatched task", "success");
+                } catch {
+                  toast("Failed to toggle watch", "error");
+                }
+              }}
+              className={`text-xs px-2.5 py-1 rounded border transition-colors ${
+                currentUser && (task.watchers || []).includes(currentUser._id)
+                  ? "border-primary bg-primary/10 text-primary"
+                  : "border-border text-text-muted hover:text-text hover:border-border"
+              }`}
+              title={
+                currentUser && (task.watchers || []).includes(currentUser._id)
+                  ? "Stop watching"
+                  : "Watch for changes"
+              }
+            >
+              {currentUser && (task.watchers || []).includes(currentUser._id)
+                ? "Watching"
+                : "Watch"}
+              {(task.watchers || []).length > 0 && (
+                <span className="ml-1 opacity-60">({(task.watchers || []).length})</span>
+              )}
+            </button>
           </div>
         </div>
 

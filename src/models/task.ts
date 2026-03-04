@@ -61,6 +61,10 @@ const taskSchema = new Schema<ITask>(
       type: [{ type: Schema.Types.ObjectId, ref: "Task" }],
       default: [],
     },
+    watchers: {
+      type: [{ type: Schema.Types.ObjectId, ref: "User" }],
+      default: [],
+    },
     order: {
       type: Number,
       default: 0,
