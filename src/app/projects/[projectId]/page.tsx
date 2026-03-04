@@ -14,6 +14,7 @@ import { ImportDialog } from "@/components/import-export/ImportDialog";
 import { ExportDialog } from "@/components/import-export/ExportDialog";
 import { TaskContextMenu } from "@/components/kanban/TaskContextMenu";
 import { ListView } from "@/components/kanban/ListView";
+import { TimelineView } from "@/components/kanban/TimelineView";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
@@ -39,9 +40,9 @@ export default function KanbanPage() {
   const [contextMenu, setContextMenu] = useState<{ taskId: string; x: number; y: number } | null>(null);
   const [confirmContextDelete, setConfirmContextDelete] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
-  const [viewMode, setViewMode] = useState<"board" | "list">(() => {
+  const [viewMode, setViewMode] = useState<"board" | "list" | "timeline">(() => {
     if (typeof window === "undefined") return "board";
-    return (localStorage.getItem(`view-mode:${projectId}`) as "board" | "list") || "board";
+    return (localStorage.getItem(`view-mode:${projectId}`) as "board" | "list" | "timeline") || "board";
   });
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
   const [focusedTaskIndex, setFocusedTaskIndex] = useState(-1);
@@ -126,7 +127,7 @@ export default function KanbanPage() {
       if (e.key === "v" && noMod) {
         e.preventDefault();
         setViewMode((prev) => {
-          const next = prev === "board" ? "list" : "board";
+          const next = prev === "board" ? "list" : prev === "list" ? "timeline" : "board";
           localStorage.setItem(`view-mode:${projectId}`, next);
           return next;
         });
@@ -365,15 +366,19 @@ export default function KanbanPage() {
             size="sm"
             variant="ghost"
             onClick={() => {
-              const next = viewMode === "board" ? "list" : "board";
+              const next = viewMode === "board" ? "list" : viewMode === "list" ? "timeline" : "board";
               setViewMode(next);
               localStorage.setItem(`view-mode:${projectId}`, next);
             }}
-            title={viewMode === "board" ? "Switch to list view" : "Switch to board view"}
+            title={viewMode === "board" ? "Switch to list view (V)" : viewMode === "list" ? "Switch to timeline view (V)" : "Switch to board view (V)"}
           >
             {viewMode === "board" ? (
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+              </svg>
+            ) : viewMode === "list" ? (
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
               </svg>
             ) : (
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -504,7 +509,7 @@ export default function KanbanPage() {
           onTaskSelect={handleTaskSelect}
           onTaskContextMenu={(taskId, x, y) => setContextMenu({ taskId, x, y })}
         />
-      ) : (
+      ) : viewMode === "list" ? (
         <ListView
           tasks={filteredTasks}
           projectKey={project.key}
@@ -513,6 +518,14 @@ export default function KanbanPage() {
             router.push(`/projects/${projectId}/tasks/${taskId}`)
           }
           onStatusChange={handleStatusChange}
+        />
+      ) : (
+        <TimelineView
+          tasks={filteredTasks}
+          projectKey={project.key}
+          onTaskClick={(taskId) =>
+            router.push(`/projects/${projectId}/tasks/${taskId}`)
+          }
         />
       )}
 

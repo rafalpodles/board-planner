@@ -12,7 +12,7 @@ const SHORTCUTS = [
   { key: "J / K", description: "Navigate tasks (list view)" },
   { key: "Enter", description: "Open focused task" },
   { key: "/", description: "Focus search" },
-  { key: "V", description: "Toggle board/list view" },
+  { key: "V", description: "Cycle view: board → list → timeline" },
   { key: "R", description: "Refresh board" },
   { key: "Esc", description: "Close dialogs / clear selection" },
   { key: "⌘K", description: "Quick search" },
