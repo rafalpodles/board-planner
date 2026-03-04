@@ -34,6 +34,37 @@ export const POST = withProjectAccess(async (request, { params }) => {
     return NextResponse.json({ error: "Task not found" }, { status: 404 });
   }
 
+  // Check for circular dependency:
+  // If we add "taskId is blocked by blockedByTaskId",
+  // we need to verify that taskId doesn't already block blockedByTaskId
+  // (directly or transitively). In other words, check if blockedByTaskId
+  // can reach taskId by following blockedBy links.
+  const visited = new Set<string>();
+  const queue = [taskId];
+
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    if (current === blockedByTaskId) {
+      return NextResponse.json(
+        { error: "Circular dependency detected — this link would create a cycle" },
+        { status: 400 }
+      );
+    }
+    if (visited.has(current)) continue;
+    visited.add(current);
+
+    // Find tasks that are blocked by `current` (i.e. current is in their blockedBy)
+    const dependents = await Task.find(
+      { blockedBy: current, project: projectId },
+      "_id"
+    ).lean();
+    for (const dep of dependents) {
+      if (!visited.has(dep._id.toString())) {
+        queue.push(dep._id.toString());
+      }
+    }
+  }
+
   // Add if not already present
   await Task.findByIdAndUpdate(taskId, {
     $addToSet: { blockedBy: blockedByTaskId },
