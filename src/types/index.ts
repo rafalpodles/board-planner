@@ -48,6 +48,8 @@ export interface IUser {
   username: string;
   password: string;
   fullName: string;
+  email: string;
+  emailNotifications: boolean;
   role: UserRole;
   allowedProjects: Types.ObjectId[];
   createdAt: Date;
@@ -226,6 +228,8 @@ export interface ApiUser {
   _id: string;
   username: string;
   fullName: string;
+  email: string;
+  emailNotifications: boolean;
   role: UserRole;
   allowedProjects: string[];
   createdAt: string;

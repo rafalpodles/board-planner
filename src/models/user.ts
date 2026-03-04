@@ -18,6 +18,16 @@ const userSchema = new Schema<IUser>({
     required: true,
     trim: true,
   },
+  email: {
+    type: String,
+    default: "",
+    trim: true,
+    lowercase: true,
+  },
+  emailNotifications: {
+    type: Boolean,
+    default: false,
+  },
   role: {
     type: String,
     enum: ["admin", "member"],

@@ -259,6 +259,13 @@ export function Navbar() {
 
               {open && (
                 <div className="absolute right-0 mt-1 w-40 bg-bg-card border border-border rounded-lg shadow-lg py-1 z-50">
+                  <Link
+                    href="/profile"
+                    onClick={() => setOpen(false)}
+                    className="block px-4 py-2 text-sm text-text-muted hover:text-text hover:bg-bg-hover"
+                  >
+                    Profile
+                  </Link>
                   {isAdmin && (
                     <Link
                       href="/users"

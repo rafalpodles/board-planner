@@ -2,6 +2,7 @@ import { Notification } from "@/models/notification";
 import { User } from "@/models/user";
 import { NotificationType } from "@/types";
 import { Types } from "mongoose";
+import { sendEmail, isEmailConfigured } from "@/lib/email";
 
 interface NotifyParams {
   type: NotificationType;
@@ -47,6 +48,41 @@ export async function createNotifications({
   } catch (err) {
     console.error("Failed to create in-app notifications:", err);
   }
+
+  // Fire-and-forget email notifications
+  if (isEmailConfigured()) {
+    sendEmailNotifications(unique, title, body || "").catch((err) =>
+      console.error("Failed to send email notifications:", err)
+    );
+  }
+}
+
+async function sendEmailNotifications(
+  recipientIds: string[],
+  subject: string,
+  body: string
+): Promise<void> {
+  const users = await User.find(
+    {
+      _id: { $in: recipientIds.map((id) => new Types.ObjectId(id)) },
+      emailNotifications: true,
+      email: { $ne: "" },
+    },
+    "email fullName"
+  ).lean();
+
+  for (const user of users) {
+    sendEmail({
+      to: user.email,
+      subject: `[ClaudePlanner] ${subject}`,
+      text: body ? `${subject}\n\n${body}` : subject,
+      html: `<p><strong>${escapeHtml(subject)}</strong></p>${body ? `<p>${escapeHtml(body)}</p>` : ""}`,
+    }).catch(() => {});
+  }
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 /**
