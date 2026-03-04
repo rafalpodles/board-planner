@@ -8,6 +8,7 @@ import { User } from "@/models/user";
 const populateFields = [
   { path: "assignee", select: "username fullName" },
   { path: "createdBy", select: "username fullName" },
+  { path: "blockedBy", select: "taskNumber title status" },
 ];
 
 export const GET = withAuth(async (_request, { params }) => {
@@ -21,7 +22,17 @@ export const GET = withAuth(async (_request, { params }) => {
     return NextResponse.json({ error: "Task not found" }, { status: 404 });
   }
 
-  return NextResponse.json(task);
+  // Find tasks that this task is blocking (reverse lookup)
+  const blocking = await Task.find(
+    { blockedBy: taskId, project: projectId },
+    "taskNumber title status"
+  );
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const taskObj: any = task.toObject();
+  taskObj.blocking = blocking;
+
+  return NextResponse.json(taskObj);
 });
 
 export const PUT = withAuth(async (request, { params }) => {

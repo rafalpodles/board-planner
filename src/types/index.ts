@@ -70,6 +70,7 @@ export interface ITask {
   status: TaskStatus;
   assignee: Types.ObjectId | IUser | null;
   acceptanceCriteria: string;
+  blockedBy: (Types.ObjectId | ITask)[];
   order: number;
   createdBy: Types.ObjectId | IUser;
   createdAt: Date;
@@ -105,6 +106,13 @@ export interface ApiProject {
   updatedAt: string;
 }
 
+export interface ApiTaskLink {
+  _id: string;
+  taskNumber: number;
+  title: string;
+  status: TaskStatus;
+}
+
 export interface ApiTask {
   _id: string;
   project: string;
@@ -118,6 +126,8 @@ export interface ApiTask {
   status: TaskStatus;
   assignee: ApiUser | null;
   acceptanceCriteria: string;
+  blockedBy: ApiTaskLink[];
+  blocking: ApiTaskLink[];
   order: number;
   createdBy: ApiUser | string;
   createdAt: string;

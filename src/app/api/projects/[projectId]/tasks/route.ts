@@ -9,6 +9,7 @@ import { TASK_STATUSES, TaskStatus } from "@/types";
 const populateFields = [
   { path: "assignee", select: "username fullName" },
   { path: "createdBy", select: "username fullName" },
+  { path: "blockedBy", select: "taskNumber title status" },
 ];
 
 export const GET = withAuth(async (request, { params }) => {

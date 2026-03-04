@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { TaskForm } from "@/components/tasks/TaskForm";
 import { Comments } from "@/components/tasks/Comments";
+import { TaskLinks } from "@/components/tasks/TaskLinks";
 import { useToast } from "@/components/ui/Toast";
 
 export default function TaskDetailPage() {
@@ -220,6 +221,17 @@ export default function TaskDetailPage() {
             )}
           </>
         )}
+
+        {/* Dependencies */}
+        <div>
+          <h2 className="font-semibold mb-2">Dependencies</h2>
+          <TaskLinks
+            projectId={projectId}
+            projectKey={project.key}
+            task={task}
+            onChanged={loadData}
+          />
+        </div>
 
         {/* Actions */}
         <div className="flex gap-3">

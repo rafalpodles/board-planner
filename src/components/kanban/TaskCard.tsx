@@ -84,6 +84,14 @@ export function TaskCard({
         </div>
       )}
 
+      {task.blockedBy && task.blockedBy.length > 0 && (
+        <div className="mb-2">
+          <span className="text-[10px] text-warning bg-warning/10 px-1.5 py-0.5 rounded font-medium">
+            Blocked ({task.blockedBy.length})
+          </span>
+        </div>
+      )}
+
       {task.assignee && typeof task.assignee === "object" && (
         <div className="flex items-center">
           <span className="text-xs text-text-muted flex items-center gap-1">
