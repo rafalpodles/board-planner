@@ -7,6 +7,7 @@ const statusColors: Record<TaskStatus, string> = {
   todo: "bg-status-todo/20 text-status-todo",
   in_progress: "bg-status-in-progress/20 text-status-in-progress",
   in_review: "bg-status-in-review/20 text-status-in-review",
+  needs_human_review: "bg-status-needs-human-review/20 text-status-needs-human-review",
   ready_to_test: "bg-status-ready-to-test/20 text-status-ready-to-test",
   done: "bg-status-done/20 text-status-done",
 };

@@ -53,7 +53,7 @@ server.tool(
   "List tasks in a project with optional filters",
   {
     project: z.string().describe("Project key (e.g. 'CP')"),
-    status: z.string().optional().describe("Filter by status (comma-separated): planned, todo, in_progress, in_review, ready_to_test, done"),
+    status: z.string().optional().describe("Filter by status (comma-separated): planned, todo, in_progress, in_review, needs_human_review, ready_to_test, done"),
     assignee: z.string().optional().describe("Filter by assignee username"),
     component: z.string().optional().describe("Filter by component name"),
     category: z.string().optional().describe("Filter by category: bug, doc, user-story, idea"),
@@ -161,7 +161,7 @@ server.tool(
 
 server.tool(
   "change_task_status",
-  "Change the status of a task. Valid: planned, todo, in_progress, in_review, ready_to_test, done",
+  "Change the status of a task. Valid: planned, todo, in_progress, in_review, needs_human_review, ready_to_test, done",
   {
     taskKey: z.string().describe("Task key (e.g. 'CP-1')"),
     status: z.string().describe("New status"),

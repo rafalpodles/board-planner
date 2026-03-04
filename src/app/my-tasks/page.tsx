@@ -21,11 +21,12 @@ interface MyTask {
 
 const statusOrder: Record<string, number> = {
   in_progress: 0,
-  in_review: 1,
-  todo: 2,
-  ready_to_test: 3,
-  planned: 4,
-  done: 5,
+  needs_human_review: 1,
+  in_review: 2,
+  todo: 3,
+  ready_to_test: 4,
+  planned: 5,
+  done: 6,
 };
 
 export default function MyTasksPage() {
@@ -143,6 +144,8 @@ function statusColor(status: string): string {
       return "bg-status-in-progress/20 text-status-in-progress";
     case "in_review":
       return "bg-status-in-review/20 text-status-in-review";
+    case "needs_human_review":
+      return "bg-status-needs-human-review/20 text-status-needs-human-review";
     case "todo":
       return "bg-status-todo/20 text-status-todo";
     case "ready_to_test":

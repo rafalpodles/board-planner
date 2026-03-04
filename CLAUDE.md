@@ -13,7 +13,8 @@ claudeplanner_project_key: CP
 - `planned` — idea/backlog, NOT approved for work. Claude never touches these.
 - `todo` — approved for work. Claude picks these up automatically.
 - `in_progress` — actively being worked on.
-- `in_review` — code complete, awaiting code review.
+- `in_review` — code complete, awaiting automated/self code review.
+- `needs_human_review` — implementation requires human review before proceeding. Used when Claude encounters ambiguous requirements, architectural decisions that need human judgment, or changes with significant impact that should be verified by a human before moving forward. Claude moves tasks here and **stops working on them** until a human reviews and advances the status.
 - `ready_to_test` — review passed, ready for final verification and merge.
 - `done` — merged to `main`, task complete.
 

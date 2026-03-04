@@ -20,6 +20,7 @@
   --color-status-todo: #3b82f6;
   --color-status-in-progress: #f59e0b;
   --color-status-in-review: #a855f7;
+  --color-status-needs-human-review: #f43f5e;
   --color-status-ready-to-test: #06b6d4;
   --color-status-done: #22c55e;
 

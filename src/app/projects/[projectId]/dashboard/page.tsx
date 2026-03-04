@@ -22,6 +22,7 @@ const STATUS_COLORS: Record<string, string> = {
   todo: "#3b82f6",
   in_progress: "#f59e0b",
   in_review: "#8b5cf6",
+  needs_human_review: "#f43f5e",
   ready_to_test: "#06b6d4",
   done: "#22c55e",
 };
