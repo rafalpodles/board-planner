@@ -8,6 +8,7 @@ import { useTheme } from "@/components/ThemeProvider";
 import { useRouter } from "next/navigation";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { ApiNotification } from "@/types";
+import { CommandPalette } from "@/components/CommandPalette";
 
 function timeAgo(dateStr: string): string {
   const seconds = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
@@ -129,12 +130,13 @@ export function Navbar() {
               </Link>
               <Link
                 href="/search"
-                className="text-text-muted hover:text-text transition-colors"
-                title="Search"
+                className="text-text-muted hover:text-text transition-colors flex items-center gap-1"
+                title="Search (Cmd+K)"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                 </svg>
+                <kbd className="hidden sm:inline text-[10px] text-text-muted bg-bg-input border border-border px-1 py-0.5 rounded font-mono">⌘K</kbd>
               </Link>
             </>
           )}
@@ -298,6 +300,7 @@ export function Navbar() {
           </div>
         )}
       </div>
+      <CommandPalette />
     </nav>
   );
 }

@@ -15,6 +15,7 @@ const SHORTCUTS = [
   { key: "V", description: "Toggle board/list view" },
   { key: "R", description: "Refresh board" },
   { key: "Esc", description: "Close dialogs / clear selection" },
+  { key: "⌘K", description: "Quick search" },
   { key: "?", description: "Show this help" },
 ];
 
