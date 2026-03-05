@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useApi } from "@/hooks/use-api";
 import { useToast } from "@/components/ui/Toast";
 import { Badge } from "@/components/ui/Badge";
@@ -34,7 +34,6 @@ export default function MyTasksPage() {
   const [loading, setLoading] = useState(true);
   const [hideDone, setHideDone] = useState(true);
   const api = useApi();
-  const router = useRouter();
   const { toast } = useToast();
 
   useEffect(() => {
@@ -92,24 +91,22 @@ export default function MyTasksPage() {
         <div className="space-y-6">
           {Object.values(grouped).map(({ project, tasks: projectTasks }) => (
             <div key={project._id}>
-              <button
-                onClick={() => router.push(`/projects/${project._id}`)}
-                className="text-sm font-medium text-text-muted hover:text-text mb-2 flex items-center gap-2 cursor-pointer"
+              <Link
+                href={`/projects/${project._id}`}
+                className="text-sm font-medium text-text-muted hover:text-text mb-2 flex items-center gap-2"
               >
                 <span className="font-mono text-xs bg-bg-input px-2 py-0.5 rounded">
                   {project.key}
                 </span>
                 {project.name}
-              </button>
+              </Link>
 
               <div className="space-y-1">
                 {projectTasks.map((task) => (
-                  <button
+                  <Link
                     key={task._id}
-                    onClick={() =>
-                      router.push(`/projects/${project._id}/tasks/${task._id}`)
-                    }
-                    className="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg border border-border bg-bg-card hover:border-primary/50 transition-colors cursor-pointer"
+                    href={`/projects/${project._id}/tasks/${task._id}`}
+                    className="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg border border-border bg-bg-card hover:border-primary/50 transition-colors block"
                   >
                     <span className="text-xs font-mono text-text-muted w-16 flex-shrink-0">
                       {project.key}-{task.taskNumber}
@@ -127,7 +124,7 @@ export default function MyTasksPage() {
                         {task.difficulty}
                       </Badge>
                     </div>
-                  </button>
+                  </Link>
                 ))}
               </div>
             </div>

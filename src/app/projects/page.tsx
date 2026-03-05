@@ -1,10 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useApi } from "@/hooks/use-api";
 import { ApiProject } from "@/types";
-import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
 import { useAuth } from "@/hooks/use-auth";
@@ -13,7 +12,6 @@ export default function ProjectsPage() {
   const [projects, setProjects] = useState<ApiProject[]>([]);
   const [loading, setLoading] = useState(true);
   const api = useApi();
-  const router = useRouter();
   const { toast } = useToast();
   const { isAdmin } = useAuth();
 
@@ -39,9 +37,9 @@ export default function ProjectsPage() {
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold">Projects</h1>
         {isAdmin && (
-          <Button onClick={() => router.push("/projects/new")}>
-            New Project
-          </Button>
+          <Link href="/projects/new">
+            <Button>New Project</Button>
+          </Link>
         )}
       </div>
 
@@ -49,17 +47,18 @@ export default function ProjectsPage() {
         <div className="text-center py-12 text-text-muted">
           <p className="mb-4">No projects yet</p>
           {isAdmin && (
-            <Button onClick={() => router.push("/projects/new")}>
-              Create your first project
-            </Button>
+            <Link href="/projects/new">
+              <Button>Create your first project</Button>
+            </Link>
           )}
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {projects.map((project) => (
-            <Card
+            <Link
               key={project._id}
-              onClick={() => router.push(`/projects/${project._id}`)}
+              href={`/projects/${project._id}`}
+              className="rounded-xl border border-border bg-bg-card p-4 cursor-pointer hover:border-primary/50 transition-colors block"
             >
               <div className="flex items-start justify-between mb-2">
                 <h2 className="font-semibold text-lg">{project.name}</h2>
@@ -84,7 +83,7 @@ export default function ProjectsPage() {
                   ))}
                 </div>
               )}
-            </Card>
+            </Link>
           ))}
         </div>
       )}

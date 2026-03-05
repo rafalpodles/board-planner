@@ -2,6 +2,7 @@
 
 import { Suspense, useState, useEffect, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
+import Link from "next/link";
 import { useApi } from "@/hooks/use-api";
 import { ApiTask, STATUS_LABELS } from "@/types";
 import { Badge } from "@/components/ui/Badge";
@@ -115,10 +116,10 @@ function SearchContent() {
           </h2>
           <div className="border border-border rounded-lg overflow-hidden">
             {group.tasks.map((task, i) => (
-              <div
+              <Link
                 key={task._id}
-                onClick={() => router.push(`/projects/${group.projectId}/tasks/${task._id}`)}
-                className={`flex items-center gap-3 px-4 py-3 hover:bg-bg-input/50 cursor-pointer transition-colors
+                href={`/projects/${group.projectId}/tasks/${task._id}`}
+                className={`flex items-center gap-3 px-4 py-3 hover:bg-bg-input/50 transition-colors block
                   ${i > 0 ? "border-t border-border" : ""}`}
               >
                 <span className="text-xs font-mono text-text-muted whitespace-nowrap">
@@ -133,7 +134,7 @@ function SearchContent() {
                 <Badge variant="difficulty" value={task.difficulty}>
                   {task.difficulty}
                 </Badge>
-              </div>
+              </Link>
             ))}
           </div>
         </div>

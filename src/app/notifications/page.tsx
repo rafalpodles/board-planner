@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useApi } from "@/hooks/use-api";
 import { ApiNotification } from "@/types";
 import { Button } from "@/components/ui/Button";
@@ -26,7 +26,6 @@ const TYPE_LABELS: Record<string, string> = {
 
 export default function NotificationsPage() {
   const api = useApi();
-  const router = useRouter();
   const [notifications, setNotifications] = useState<ApiNotification[]>([]);
   const [loading, setLoading] = useState(true);
   const [hasMore, setHasMore] = useState(true);
@@ -66,16 +65,19 @@ export default function NotificationsPage() {
     }
   }
 
-  async function handleClick(n: ApiNotification) {
+  function getNotificationHref(n: ApiNotification) {
+    const projectId = typeof n.project === "object" ? n.project._id : n.project;
+    const taskId = typeof n.task === "object" ? n.task._id : n.task;
+    return `/projects/${projectId}/tasks/${taskId}`;
+  }
+
+  function markAsRead(n: ApiNotification) {
     if (!n.read) {
       api.patch("/api/notifications/read", { id: n._id }).catch(() => {});
       setNotifications((prev) =>
         prev.map((item) => (item._id === n._id ? { ...item, read: true } : item))
       );
     }
-    const projectId = typeof n.project === "object" ? n.project._id : n.project;
-    const taskId = typeof n.task === "object" ? n.task._id : n.task;
-    router.push(`/projects/${projectId}/tasks/${taskId}`);
   }
 
   if (loading) {
@@ -102,10 +104,11 @@ export default function NotificationsPage() {
       ) : (
         <div className="space-y-1">
           {notifications.map((n) => (
-            <button
+            <Link
               key={n._id}
-              onClick={() => handleClick(n)}
-              className={`w-full text-left px-4 py-3 rounded-lg hover:bg-bg-hover transition-colors flex items-start gap-3 ${
+              href={getNotificationHref(n)}
+              onClick={() => markAsRead(n)}
+              className={`w-full text-left px-4 py-3 rounded-lg hover:bg-bg-hover transition-colors flex items-start gap-3 block ${
                 !n.read ? "bg-primary/5" : ""
               }`}
             >
@@ -131,7 +134,7 @@ export default function NotificationsPage() {
                   )}
                 </p>
               </div>
-            </button>
+            </Link>
           ))}
 
           {hasMore && (

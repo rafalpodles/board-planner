@@ -95,8 +95,13 @@ export function Navbar() {
     }
   }
 
-  async function handleNotificationClick(n: ApiNotification) {
-    // Mark as read
+  function getNotificationHref(n: ApiNotification) {
+    const projectId = typeof n.project === "object" ? n.project._id : n.project;
+    const taskId = typeof n.task === "object" ? n.task._id : n.task;
+    return `/projects/${projectId}/tasks/${taskId}`;
+  }
+
+  function handleNotificationClick(n: ApiNotification) {
     if (!n.read) {
       api.patch("/api/notifications/read", { id: n._id }).catch(() => {});
       setUnreadCount((c) => Math.max(0, c - 1));
@@ -105,11 +110,6 @@ export function Navbar() {
       );
     }
     setBellOpen(false);
-
-    // Navigate to task
-    const projectId = typeof n.project === "object" ? n.project._id : n.project;
-    const taskId = typeof n.task === "object" ? n.task._id : n.task;
-    router.push(`/projects/${projectId}/tasks/${taskId}`);
   }
 
   return (
@@ -195,10 +195,11 @@ export function Navbar() {
                       </p>
                     ) : (
                       notifications.map((n) => (
-                        <button
+                        <Link
                           key={n._id}
+                          href={getNotificationHref(n)}
                           onClick={() => handleNotificationClick(n)}
-                          className={`w-full text-left px-3 py-2.5 hover:bg-bg-hover transition-colors flex items-start gap-2.5 border-b border-border/50 last:border-0 ${
+                          className={`w-full text-left px-3 py-2.5 hover:bg-bg-hover transition-colors flex items-start gap-2.5 border-b border-border/50 last:border-0 block ${
                             !n.read ? "bg-primary/5" : ""
                           }`}
                         >
@@ -232,7 +233,7 @@ export function Navbar() {
                           {!n.read && (
                             <span className="w-2 h-2 rounded-full bg-primary shrink-0 mt-1.5" />
                           )}
-                        </button>
+                        </Link>
                       ))
                     )}
                   </div>
