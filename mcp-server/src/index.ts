@@ -4,15 +4,21 @@ import { z } from "zod";
 import { ApiClient } from "./api-client.js";
 
 const CLAUDEPLANNER_URL = process.env.CLAUDEPLANNER_URL || "http://localhost:3000";
+const CLAUDEPLANNER_TOKEN = process.env.CLAUDEPLANNER_TOKEN;
 const CLAUDEPLANNER_USERNAME = process.env.CLAUDEPLANNER_USERNAME;
 const CLAUDEPLANNER_PASSWORD = process.env.CLAUDEPLANNER_PASSWORD;
 
-if (!CLAUDEPLANNER_USERNAME || !CLAUDEPLANNER_PASSWORD) {
-  console.error("CLAUDEPLANNER_USERNAME and CLAUDEPLANNER_PASSWORD environment variables are required");
+if (!CLAUDEPLANNER_TOKEN && (!CLAUDEPLANNER_USERNAME || !CLAUDEPLANNER_PASSWORD)) {
+  console.error("CLAUDEPLANNER_TOKEN or CLAUDEPLANNER_USERNAME+CLAUDEPLANNER_PASSWORD environment variables are required");
   process.exit(1);
 }
 
-const client = new ApiClient(CLAUDEPLANNER_URL, CLAUDEPLANNER_USERNAME, CLAUDEPLANNER_PASSWORD);
+const client = new ApiClient(
+  CLAUDEPLANNER_URL,
+  CLAUDEPLANNER_TOKEN
+    ? { token: CLAUDEPLANNER_TOKEN }
+    : { username: CLAUDEPLANNER_USERNAME!, password: CLAUDEPLANNER_PASSWORD! }
+);
 
 const server = new McpServer({
   name: "claudeplanner",

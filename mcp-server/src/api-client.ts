@@ -2,9 +2,11 @@ export class ApiClient {
   private baseUrl: string;
   private authHeader: string;
 
-  constructor(baseUrl: string, username: string, password: string) {
+  constructor(baseUrl: string, auth: { token: string } | { username: string; password: string }) {
     this.baseUrl = baseUrl.replace(/\/$/, "");
-    this.authHeader = `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
+    this.authHeader = "token" in auth
+      ? `Bearer ${auth.token}`
+      : `Basic ${Buffer.from(`${auth.username}:${auth.password}`).toString("base64")}`;
   }
 
   private async request(method: string, path: string, body?: unknown): Promise<unknown> {
