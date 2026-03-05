@@ -1,7 +1,7 @@
 "use client";
 
 import { useAuth } from "./use-auth";
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 
 interface ApiOptions {
   body?: unknown;
@@ -63,12 +63,14 @@ export function useApi() {
     [getAuthHeader]
   );
 
-  return {
-    get: (url: string) => request("GET", url),
-    post: (url: string, body: unknown) => request("POST", url, { body }),
-    put: (url: string, body: unknown) => request("PUT", url, { body }),
-    patch: (url: string, body: unknown) => request("PATCH", url, { body }),
-    del: (url: string, body?: unknown) => request("DELETE", url, { body }),
-    upload,
-  };
+  const get = useCallback((url: string) => request("GET", url), [request]);
+  const post = useCallback((url: string, body: unknown) => request("POST", url, { body }), [request]);
+  const put = useCallback((url: string, body: unknown) => request("PUT", url, { body }), [request]);
+  const patch = useCallback((url: string, body: unknown) => request("PATCH", url, { body }), [request]);
+  const del = useCallback((url: string, body?: unknown) => request("DELETE", url, { body }), [request]);
+
+  return useMemo(
+    () => ({ get, post, put, patch, del, upload }),
+    [get, post, put, patch, del, upload]
+  );
 }

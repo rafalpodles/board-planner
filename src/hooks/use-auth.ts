@@ -6,6 +6,7 @@ import {
   useState,
   useEffect,
   useCallback,
+  useMemo,
 } from "react";
 import { ApiUser } from "@/types";
 
@@ -93,7 +94,10 @@ export function useAuthProvider(): AuthState {
 
   const isAdmin = user?.role === "admin";
 
-  return { user, isAdmin, isLoading, error, login, logout, getAuthHeader };
+  return useMemo(
+    () => ({ user, isAdmin, isLoading, error, login, logout, getAuthHeader }),
+    [user, isAdmin, isLoading, error, login, logout, getAuthHeader]
+  );
 }
 
 export function useAuth(): AuthState {
