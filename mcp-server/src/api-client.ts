@@ -95,6 +95,6 @@ export class ApiClient {
 
   // Users
   async listUsers(): Promise<unknown[]> {
-    return this.request("GET", "/api/users") as Promise<unknown[]>;
+    return this.request("GET", "/api/users/list") as Promise<unknown[]>;
   }
 }

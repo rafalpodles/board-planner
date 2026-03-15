@@ -44,6 +44,12 @@ const userSchema = new Schema<IUser>({
   },
 });
 
+// Ensure email uniqueness (but allow multiple empty strings)
+userSchema.index(
+  { email: 1 },
+  { unique: true, sparse: true, partialFilterExpression: { email: { $ne: "" } } }
+);
+
 // Remove password from JSON output
 userSchema.set("toJSON", {
   transform: (_doc, ret) => {

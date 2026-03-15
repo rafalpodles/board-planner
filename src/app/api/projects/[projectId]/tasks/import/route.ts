@@ -49,44 +49,40 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
     users.map((u) => [u.username, u._id])
   );
 
-  const created = [];
+  // Increment counter once for all tasks
+  const project = await Project.findOneAndUpdate(
+    { _id: projectId },
+    { $inc: { taskCounter: parsed.length } },
+    { new: true }
+  );
 
-  for (const parsedTask of parsed) {
-    // Auto-increment taskNumber atomically
-    const project = await Project.findOneAndUpdate(
-      { _id: projectId },
-      { $inc: { taskCounter: 1 } },
-      { new: true }
+  if (!project) {
+    return NextResponse.json(
+      { error: "Project not found" },
+      { status: 404 }
     );
-
-    if (!project) {
-      return NextResponse.json(
-        { error: "Project not found" },
-        { status: 404 }
-      );
-    }
-
-    const assigneeId = parsedTask.assignee
-      ? usernameToId.get(parsedTask.assignee.toLowerCase()) ?? null
-      : null;
-
-    const task = await Task.create({
-      project: projectId,
-      taskNumber: project.taskCounter,
-      title: parsedTask.title,
-      description: parsedTask.description ?? "",
-      difficulty: parsedTask.difficulty ?? "M",
-      component: parsedTask.component ?? "",
-      category: parsedTask.category,
-      status: parsedTask.status ?? "planned",
-      assignee: assigneeId,
-      checklist: parseChecklistString(parsedTask.acceptanceCriteria ?? ""),
-      order: 0,
-      createdBy: user._id,
-    });
-
-    created.push(task);
   }
+
+  const startNumber = project.taskCounter - parsed.length + 1;
+
+  const tasksToInsert = parsed.map((parsedTask, i) => ({
+    project: projectId,
+    taskNumber: startNumber + i,
+    title: parsedTask.title,
+    description: parsedTask.description ?? "",
+    difficulty: parsedTask.difficulty ?? "M",
+    component: parsedTask.component ?? "",
+    category: parsedTask.category,
+    status: parsedTask.status ?? "planned",
+    assignee: parsedTask.assignee
+      ? usernameToId.get(parsedTask.assignee.toLowerCase()) ?? null
+      : null,
+    checklist: parseChecklistString(parsedTask.acceptanceCriteria ?? ""),
+    order: 0,
+    createdBy: user._id,
+  }));
+
+  const created = await Task.insertMany(tasksToInsert);
 
   // Populate all created tasks
   const populatedTasks = await Task.find({

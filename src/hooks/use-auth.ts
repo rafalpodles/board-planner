@@ -35,7 +35,7 @@ export function useAuthProvider(): AuthState {
 
   const getAuthHeader = useCallback((): string | null => {
     if (typeof window === "undefined") return null;
-    const creds = localStorage.getItem("auth_credentials");
+    const creds = sessionStorage.getItem("auth_credentials");
     return creds ? `Basic ${creds}` : null;
   }, []);
 
@@ -75,7 +75,7 @@ export function useAuthProvider(): AuthState {
       });
 
       if (res.ok) {
-        localStorage.setItem("auth_credentials", encoded);
+        sessionStorage.setItem("auth_credentials", encoded);
         const data = await res.json();
         setUser(data);
         return true;
@@ -88,7 +88,7 @@ export function useAuthProvider(): AuthState {
   );
 
   const logout = useCallback(() => {
-    localStorage.removeItem("auth_credentials");
+    sessionStorage.removeItem("auth_credentials");
     setUser(null);
   }, []);
 

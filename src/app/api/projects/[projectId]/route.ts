@@ -6,6 +6,8 @@ import { Task } from "@/models/task";
 import { Comment } from "@/models/comment";
 import { ActivityLog } from "@/models/activityLog";
 import { ProjectAuditLog } from "@/models/projectAuditLog";
+import { Sprint } from "@/models/sprint";
+import { Notification } from "@/models/notification";
 import { logProjectAudit } from "@/lib/projectAudit";
 
 export const GET = withProjectAccess(async (_request, { params }) => {
@@ -82,8 +84,10 @@ export const DELETE = withAdmin(async (_request, { params }) => {
     ActivityLog.deleteMany({ task: { $in: taskIds } }),
   ]);
 
-  // Delete all tasks in this project
+  // Delete all tasks, sprints, notifications in this project
   await Task.deleteMany({ project: projectId });
+  await Sprint.deleteMany({ project: projectId });
+  await Notification.deleteMany({ project: projectId });
 
   // Delete project audit logs and the project itself
   await ProjectAuditLog.deleteMany({ project: projectId });

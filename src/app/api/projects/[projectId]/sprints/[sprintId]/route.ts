@@ -3,7 +3,7 @@ import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
 import { Sprint } from "@/models/sprint";
 import { Task } from "@/models/task";
-import { SprintStatus } from "@/types";
+import { SprintStatus, SPRINT_STATUSES } from "@/types";
 
 export const GET = withProjectAccess(async (_request, { params }) => {
   const { projectId, sprintId } = await params;
@@ -34,6 +34,10 @@ export const PUT = withProjectAccess(async (request, { params }) => {
         ? new Date(body[field])
         : body[field];
     }
+  }
+
+  if (updates.status && !SPRINT_STATUSES.includes(updates.status as SprintStatus)) {
+    return NextResponse.json({ error: "Invalid sprint status" }, { status: 400 });
   }
 
   // If activating, deactivate other active sprints in this project

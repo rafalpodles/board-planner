@@ -1,5 +1,6 @@
 import { Project } from "@/models/project";
 import { WebhookEvent, NotificationChannelType, STATUS_LABELS } from "@/types";
+import { isAllowedWebhookUrl } from "./url-validation";
 
 interface NotificationPayload {
   project: { key: string; name: string };
@@ -207,11 +208,11 @@ export async function dispatchNotifications(
     );
     if (active.length === 0) return;
 
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.RAILWAY_PUBLIC_DOMAIN
-      ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
-      : "http://localhost:3000";
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL
+      || (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : "http://localhost:3000");
 
     for (const channel of active) {
+      if (!isAllowedWebhookUrl(channel.webhookUrl)) continue;
       const body = JSON.stringify(formatPayload(channel.type, event, payload, appUrl));
 
       fetch(channel.webhookUrl, {

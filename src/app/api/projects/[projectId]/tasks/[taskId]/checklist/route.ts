@@ -35,9 +35,27 @@ export const PUT = withProjectAccess(async (request, { params }) => {
 
   // Full reorder — replace entire checklist array
   if (Array.isArray(newOrder)) {
+    // Validate each item has the expected shape
+    const valid = newOrder.every(
+      (item: unknown) =>
+        typeof item === "object" && item !== null &&
+        typeof (item as Record<string, unknown>).text === "string" &&
+        typeof (item as Record<string, unknown>).done === "boolean"
+    );
+    if (!valid) {
+      return NextResponse.json(
+        { error: "Each checklist item must have text (string) and done (boolean)" },
+        { status: 400 }
+      );
+    }
+    const sanitized = newOrder.map((item: { text: string; done: boolean; _id?: string }) => ({
+      text: item.text,
+      done: item.done,
+      ...(item._id ? { _id: item._id } : {}),
+    }));
     const task = await Task.findOneAndUpdate(
       { _id: taskId, project: projectId },
-      { $set: { checklist: newOrder } },
+      { $set: { checklist: sanitized } },
       { new: true }
     );
     if (!task) {

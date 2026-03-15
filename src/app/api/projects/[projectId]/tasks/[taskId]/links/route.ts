@@ -34,11 +34,22 @@ export const POST = withProjectAccess(async (request, { params }) => {
     return NextResponse.json({ error: "Task not found" }, { status: 404 });
   }
 
-  // Check for circular dependency:
-  // If we add "taskId is blocked by blockedByTaskId",
-  // we need to verify that taskId doesn't already block blockedByTaskId
-  // (directly or transitively). In other words, check if blockedByTaskId
-  // can reach taskId by following blockedBy links.
+  // Check for circular dependency using in-memory BFS (single query)
+  const allTasks = await Task.find(
+    { project: projectId, blockedBy: { $exists: true, $ne: [] } },
+    "_id blockedBy"
+  ).lean();
+
+  // Build reverse graph: task → tasks that depend on it
+  const dependentsMap = new Map<string, string[]>();
+  for (const t of allTasks) {
+    for (const blocker of t.blockedBy) {
+      const key = blocker.toString();
+      if (!dependentsMap.has(key)) dependentsMap.set(key, []);
+      dependentsMap.get(key)!.push(t._id.toString());
+    }
+  }
+
   const visited = new Set<string>();
   const queue = [taskId];
 
@@ -53,15 +64,9 @@ export const POST = withProjectAccess(async (request, { params }) => {
     if (visited.has(current)) continue;
     visited.add(current);
 
-    // Find tasks that are blocked by `current` (i.e. current is in their blockedBy)
-    const dependents = await Task.find(
-      { blockedBy: current, project: projectId },
-      "_id"
-    ).lean();
-    for (const dep of dependents) {
-      if (!visited.has(dep._id.toString())) {
-        queue.push(dep._id.toString());
-      }
+    const deps = dependentsMap.get(current) || [];
+    for (const dep of deps) {
+      if (!visited.has(dep)) queue.push(dep);
     }
   }
 
@@ -75,7 +80,7 @@ export const POST = withProjectAccess(async (request, { params }) => {
 
 // Remove a blockedBy link
 export const DELETE = withProjectAccess(async (request, { params }) => {
-  const { taskId } = await params;
+  const { projectId, taskId } = await params;
   await connectDB();
 
   const { blockedByTaskId } = await request.json();
@@ -87,9 +92,15 @@ export const DELETE = withProjectAccess(async (request, { params }) => {
     );
   }
 
-  await Task.findByIdAndUpdate(taskId, {
-    $pull: { blockedBy: blockedByTaskId },
-  });
+  const task = await Task.findOneAndUpdate(
+    { _id: taskId, project: projectId },
+    { $pull: { blockedBy: blockedByTaskId } },
+    { new: true }
+  );
+
+  if (!task) {
+    return NextResponse.json({ error: "Task not found" }, { status: 404 });
+  }
 
   return NextResponse.json({ message: "Link removed" });
 });

@@ -25,6 +25,12 @@ export async function connectDB(): Promise<typeof mongoose> {
     global.mongooseCache = cached;
   }
 
+  // Reset cache if connection was lost
+  if (cached.conn && mongoose.connection.readyState === 0) {
+    cached.conn = null;
+    cached.promise = null;
+  }
+
   if (cached.conn) {
     return cached.conn;
   }

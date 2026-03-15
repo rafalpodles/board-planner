@@ -60,7 +60,7 @@ export function TaskForm({
   const [status, setStatus] = useState<TaskStatus>(task?.status || "planned");
   const [assignee, setAssignee] = useState(
     task?.assignee && typeof task.assignee === "object"
-      ? task.assignee._id
+      ? task.assignee.username
       : ""
   );
   const [dueDate, setDueDate] = useState(
@@ -111,8 +111,7 @@ export function TaskForm({
       const result = await api.upload("/api/uploads", formData);
       return result.markdown;
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    []
+    [api]
   );
 
   async function handleAiGenerate() {
@@ -328,7 +327,7 @@ export function TaskForm({
           value={assignee}
           onChange={(e) => setAssignee(e.target.value)}
           options={users.map((u) => ({
-            value: u._id,
+            value: u.username,
             label: `${u.fullName} (${u.username})`,
           }))}
           placeholder="Unassigned"
