@@ -339,7 +339,7 @@ export function TaskForm({
             type="date"
             value={dueDate}
             onChange={(e) => setDueDate(e.target.value)}
-            className="w-full bg-bg-input border border-border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+            className="w-full bg-bg-input border border-border rounded px-3 py-1.5 text-sm min-h-[44px] focus:outline-none focus:ring-1 focus:ring-primary"
           />
         </div>
       </div>
@@ -366,7 +366,7 @@ export function TaskForm({
                 max={365}
                 value={recurrenceInterval}
                 onChange={(e) => setRecurrenceInterval(Math.max(1, parseInt(e.target.value) || 1))}
-                className="w-20 bg-bg-input border border-border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                className="w-16 sm:w-20 bg-bg-input border border-border rounded px-3 py-1.5 text-sm min-h-[44px] focus:outline-none focus:ring-1 focus:ring-primary"
               />
               <span className="text-sm text-text-muted">
                 {recurrenceFreq === "daily" ? "day(s)" : recurrenceFreq === "weekly" ? "week(s)" : "month(s)"}

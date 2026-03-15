@@ -2,14 +2,21 @@
 
 import { useEffect, useRef } from "react";
 
+const SIZE_CLASSES = {
+  sm: "sm:max-w-md",
+  md: "sm:max-w-lg",
+  lg: "sm:max-w-2xl",
+} as const;
+
 interface ModalProps {
   open: boolean;
   onClose: () => void;
   title: string;
   children: React.ReactNode;
+  size?: keyof typeof SIZE_CLASSES;
 }
 
-export function Modal({ open, onClose, title, children }: ModalProps) {
+export function Modal({ open, onClose, title, children, size = "md" }: ModalProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -42,9 +49,9 @@ export function Modal({ open, onClose, title, children }: ModalProps) {
         if (e.target === overlayRef.current) onClose();
       }}
     >
-      <div className="w-full sm:max-w-lg max-h-[90vh] overflow-y-auto
-        bg-bg-card border border-border rounded-t-2xl sm:rounded-2xl p-6
-        animate-in slide-in-from-bottom sm:slide-in-from-bottom-0">
+      <div className={`w-full ${SIZE_CLASSES[size]} max-h-[90vh] overflow-y-auto
+        bg-bg-card border border-border rounded-t-2xl sm:rounded-2xl p-4 sm:p-6 sm:mx-4
+        animate-in slide-in-from-bottom sm:slide-in-from-bottom-0`}>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold">{title}</h2>
           <button

@@ -583,6 +583,7 @@ export default function KanbanPage() {
         open={showNewTask}
         onClose={() => setShowNewTask(false)}
         title="New Task"
+        size="lg"
       >
         <TaskForm
           projectId={projectId}
