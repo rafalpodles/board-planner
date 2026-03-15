@@ -50,10 +50,20 @@ export const PUT = withAdmin(async (request, { params, user }) => {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
-  const changedFields = Object.keys(updates).join(", ");
-  logProjectAudit(projectId, user._id, "settings_updated", `Changed: ${changedFields}`);
+  const changedFields = Object.keys(updates)
+    .filter((f) => f !== "githubToken")
+    .join(", ");
+  const auditDetail = updates.githubToken !== undefined
+    ? `Changed: ${changedFields ? changedFields + ", " : ""}GitHub token`
+    : `Changed: ${changedFields}`;
+  logProjectAudit(projectId, user._id, "settings_updated", auditDetail);
 
-  return NextResponse.json(project);
+  // Strip token from response
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const obj: any = project.toObject();
+  obj.githubTokenSet = !!obj.githubToken;
+  delete obj.githubToken;
+  return NextResponse.json(obj);
 });
 
 export const DELETE = withAdmin(async (_request, { params }) => {

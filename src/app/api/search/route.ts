@@ -48,7 +48,8 @@ export const GET = withAuth(async (request, { user }) => {
   }
 
   // Text search on title and description
-  const regex = { $regex: q, $options: "i" };
+  const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const regex = { $regex: escaped, $options: "i" };
   filter.$or = [{ title: regex }, { description: regex }];
 
   const tasks = await Task.find(filter)
