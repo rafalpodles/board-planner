@@ -1,5 +1,21 @@
 # ClaudePlanner
 
+## Documentation — Notion
+
+All project documentation is stored in **Notion**. Use the Notion MCP tools to read and write docs.
+
+### After completing a new feature
+
+After every completed feature, create or update documentation in Notion:
+- What the feature does (user-facing description)
+- Key implementation details (architecture decisions, services involved)
+- Any API changes or new endpoints
+- Configuration or environment changes required
+
+Search Notion first to check if a relevant page already exists before creating a new one.
+
+---
+
 ## ClaudePlanner integration
 claudeplanner_project_key: CP
 
@@ -69,13 +85,70 @@ Claude automatically picks up tasks in `todo` status (assigned to `claude` or un
 - Next.js 16 (App Router) + TypeScript
 - MongoDB (Railway) + Mongoose ODM
 - Tailwind CSS 4
-- Basic Auth
+- Basic Auth + Bearer token (API tokens)
 - MCP Server (separate package in `mcp-server/`)
+
+## Project structure
+```
+src/
+  app/
+    api/              # ~40 REST API routes
+    projects/         # Project pages (kanban, task detail, settings)
+    login/, profile/, users/, tokens/, notifications/, search/, my-tasks/
+  components/
+    kanban/           # Board, Column, TaskCard, ListView, TimelineView
+    tasks/            # TaskForm, Comments, TaskLinks, ActivityTimeline
+    import-export/    # Markdown import/export
+    ui/               # Button, Modal, Badge, Toast, etc.
+    Navbar.tsx, CommandPalette.tsx, AuthGuard.tsx, AuthProvider.tsx
+  hooks/
+    use-api.ts        # HTTP client with auth headers
+    use-auth.ts       # Auth state management
+  lib/
+    auth.ts           # Basic Auth + Bearer token verification
+    db.ts             # MongoDB connection (cached)
+    middleware.ts     # withAuth, withAdmin, withProjectAccess
+    ai.ts             # OpenAI task generation
+    notifications.ts  # Slack/Discord webhooks
+    in-app-notifications.ts
+    github.ts         # GitHub PR linking
+    custom-fields.ts  # Custom field validation
+    webhooks.ts, activity.ts, projectAudit.ts, markdown.ts, checklist.ts
+  models/             # Mongoose schemas
+    user.ts, task.ts, project.ts, comment.ts, sprint.ts,
+    apiToken.ts, notification.ts, activityLog.ts, projectAuditLog.ts, settings.ts
+  types/index.ts      # Shared TypeScript types
+mcp-server/           # Standalone MCP server (stdio transport)
+  src/index.ts        # Tools: list/get/create/update tasks, sprints, comments, projects
+  src/api-client.ts   # HTTP client to backend API
+```
+
+## Key patterns
+- **Auth**: `getAuthUser(req)` tries Bearer token first, then Basic Auth
+- **Middleware**: `withAuth` → `withAdmin` → `withProjectAccess` (composable)
+- **Task numbers**: Auto-increment per project via atomic `$inc` on `Project.taskCounter`
+- **Task keys**: `PROJECT_KEY-NUMBER` (e.g., `CP-5`), used in MCP and GitHub matching
+- **Activity logging**: Fire-and-forget, doesn't block the main request
+- **Notifications**: In-app + optional Slack/Discord webhooks + optional email
+- **Recurrence**: When task → done with recurrence config, auto-creates next task
+- **GitHub PR linking**: Matches PRs by branch/title pattern `CP-5` (case-insensitive)
+
+## Environment variables
+```
+MONGODB_URI=              # Required — MongoDB connection string
+OPENAI_API_KEY=           # Optional — AI task generation
+SMTP_HOST=                # Optional — Email notifications
+SMTP_PORT=587
+SMTP_USER=
+SMTP_PASS=
+SMTP_FROM=
+NEXT_PUBLIC_APP_URL=      # Frontend URL for links
+```
 
 ## Build
 ```bash
-npm run build        # Next.js app
-cd mcp-server && npm run build  # MCP server
+npm run build                    # Next.js app
+cd mcp-server && npm run build   # MCP server
 ```
 
 ## Deploy
