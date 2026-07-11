@@ -68,24 +68,34 @@ interface BoardFiltersProps {
 
 export function BoardFilters({ tasks, components, labels = [], projectId, currentUsername, onFilter }: BoardFiltersProps) {
   const [initialized, setInitialized] = useState(false);
-  const persisted = initialized ? undefined : loadPersistedState(projectId);
 
   const [filters, setFilters] = useState<Filters>({
     search: "",
-    assignee: persisted?.filters?.assignee ?? "",
-    component: persisted?.filters?.component ?? "",
-    category: persisted?.filters?.category ?? "",
-    difficulty: persisted?.filters?.difficulty ?? "",
-    label: (persisted?.filters as Record<string, string>)?.label ?? "",
-    dateRange: (persisted?.filters as Record<string, string>)?.dateRange ?? "",
+    assignee: "",
+    component: "",
+    category: "",
+    difficulty: "",
+    label: "",
+    dateRange: "",
   });
-  const [myTasks, setMyTasks] = useState(persisted?.myTasks ?? false);
-  const [sortField, setSortField] = useState<SortField>(persisted?.sortField ?? "updatedAt");
-  const [sortDir, setSortDir] = useState<SortDir>(persisted?.sortDir ?? "desc");
-  const [showFilters, setShowFilters] = useState(persisted?.showFilters ?? false);
+  const [myTasks, setMyTasks] = useState(false);
+  const [sortField, setSortField] = useState<SortField>("updatedAt");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [showFilters, setShowFilters] = useState(false);
 
-  // Mark as initialized after first render
-  useEffect(() => { setInitialized(true); }, []);
+  // Load persisted filter state after mount. Reading localStorage during render
+  // produces an SSR/client hydration mismatch, so defer it to an effect.
+  useEffect(() => {
+    const persisted = loadPersistedState(projectId);
+    if (persisted.filters) {
+      setFilters((f) => ({ ...f, ...persisted.filters }));
+    }
+    if (persisted.myTasks !== undefined) setMyTasks(persisted.myTasks);
+    if (persisted.sortField) setSortField(persisted.sortField);
+    if (persisted.sortDir) setSortDir(persisted.sortDir);
+    if (persisted.showFilters !== undefined) setShowFilters(persisted.showFilters);
+    setInitialized(true);
+  }, [projectId]);
 
   // Persist filter state on change
   const persistState = useCallback(() => {
