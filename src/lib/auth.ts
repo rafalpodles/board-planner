@@ -3,6 +3,8 @@ import { Types } from "mongoose";
 import { connectDB } from "./db";
 import { User } from "@/models/user";
 import { ApiToken } from "@/models/apiToken";
+import { OAuthToken } from "@/models/oauthToken";
+import { sha256 } from "./oauth";
 import { IUser } from "@/types";
 
 export function parseBasicAuth(
@@ -84,6 +86,16 @@ async function verifyBearerToken(token: string): Promise<IUser | null> {
   return null;
 }
 
+async function verifyOAuthAccessToken(token: string): Promise<IUser | null> {
+  await connectDB();
+
+  const record = await OAuthToken.findOne({ accessTokenHash: sha256(token) });
+  if (!record) return null;
+  if (record.accessExpiresAt.getTime() < Date.now()) return null;
+
+  return User.findById(record.user);
+}
+
 export async function getAuthUser(
   request: Request
 ): Promise<IUser | null> {
@@ -92,6 +104,9 @@ export async function getAuthUser(
   // Try Bearer token first
   if (authHeader?.startsWith("Bearer ")) {
     const token = authHeader.slice(7);
+    if (token.startsWith("cpat_")) {
+      return verifyOAuthAccessToken(token);
+    }
     if (token.startsWith("cp_")) {
       return verifyBearerToken(token);
     }

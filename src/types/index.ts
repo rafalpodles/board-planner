@@ -75,6 +75,39 @@ export interface ApiApiToken {
   createdAt: string;
 }
 
+export interface IOAuthClient {
+  _id: Types.ObjectId;
+  clientId: string;
+  clientName: string;
+  redirectUris: string[];
+  createdAt: Date;
+}
+
+export interface IOAuthCode {
+  _id: Types.ObjectId;
+  codeHash: string;
+  clientId: string;
+  user: Types.ObjectId | IUser;
+  redirectUri: string;
+  codeChallenge: string;
+  scope: string;
+  used: boolean;
+  expiresAt: Date;
+  createdAt: Date;
+}
+
+export interface IOAuthToken {
+  _id: Types.ObjectId;
+  accessTokenHash: string;
+  refreshTokenHash: string;
+  clientId: string;
+  user: Types.ObjectId | IUser;
+  scope: string;
+  accessExpiresAt: Date;
+  refreshExpiresAt: Date;
+  createdAt: Date;
+}
+
 export interface ILabel {
   _id: Types.ObjectId;
   name: string;
