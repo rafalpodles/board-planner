@@ -117,7 +117,7 @@ server.tool(
       const users = await client.listUsers() as { _id: string; username: string }[];
       const user = users.find(u => u.username === assignee.toLowerCase());
       if (!user) throw new Error(`User "${assignee}" not found`);
-      data.assignee = user._id;
+      data.assignee = user.username;
     }
 
     const created = await client.createTask(proj._id, data);
@@ -154,7 +154,7 @@ server.tool(
         const users = await client.listUsers() as { _id: string; username: string }[];
         const user = users.find(u => u.username === assignee.toLowerCase());
         if (!user) throw new Error(`User "${assignee}" not found`);
-        data.assignee = user._id;
+        data.assignee = user.username;
       } else {
         data.assignee = null;
       }
