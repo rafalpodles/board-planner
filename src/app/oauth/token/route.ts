@@ -24,7 +24,12 @@ function tokenError(error: string, description: string, status = 400) {
   return NextResponse.json({ error, error_description: description }, { status, headers: CORS });
 }
 
-async function issueTokens(clientId: string, userId: Types.ObjectId, scope: string) {
+async function issueTokens(
+  clientId: string,
+  userId: Types.ObjectId,
+  scope: string,
+  allowedProjects: Types.ObjectId[]
+) {
   const accessToken = randomToken("cpat_");
   const refreshToken = randomToken("cprt_");
   const now = Date.now();
@@ -35,6 +40,7 @@ async function issueTokens(clientId: string, userId: Types.ObjectId, scope: stri
     clientId,
     user: userId,
     scope,
+    allowedProjects,
     accessExpiresAt: new Date(now + ACCESS_TOKEN_TTL_SECONDS * 1000),
     refreshExpiresAt: new Date(now + REFRESH_TOKEN_TTL_SECONDS * 1000),
   });
@@ -83,7 +89,7 @@ export async function POST(req: Request) {
     rec.used = true;
     await rec.save();
 
-    return issueTokens(rec.clientId, rec.user as Types.ObjectId, rec.scope);
+    return issueTokens(rec.clientId, rec.user as Types.ObjectId, rec.scope, rec.allowedProjects);
   }
 
   if (grantType === "refresh_token") {
@@ -105,7 +111,7 @@ export async function POST(req: Request) {
     // Rotate: revoke the old token, issue a fresh pair.
     await OAuthToken.deleteOne({ _id: rec._id });
 
-    return issueTokens(rec.clientId, rec.user as Types.ObjectId, rec.scope);
+    return issueTokens(rec.clientId, rec.user as Types.ObjectId, rec.scope, rec.allowedProjects);
   }
 
   return tokenError("unsupported_grant_type", `grant_type '${grantType}' is not supported`);

@@ -83,6 +83,19 @@ export interface IOAuthClient {
   createdAt: Date;
 }
 
+export interface IOAuthConsent {
+  _id: Types.ObjectId;
+  ticketHash: string;
+  clientId: string;
+  user: Types.ObjectId | IUser;
+  redirectUri: string;
+  codeChallenge: string;
+  state: string;
+  scope: string;
+  expiresAt: Date;
+  createdAt: Date;
+}
+
 export interface IOAuthCode {
   _id: Types.ObjectId;
   codeHash: string;
@@ -91,6 +104,7 @@ export interface IOAuthCode {
   redirectUri: string;
   codeChallenge: string;
   scope: string;
+  allowedProjects: Types.ObjectId[];
   used: boolean;
   expiresAt: Date;
   createdAt: Date;
@@ -103,6 +117,7 @@ export interface IOAuthToken {
   clientId: string;
   user: Types.ObjectId | IUser;
   scope: string;
+  allowedProjects: Types.ObjectId[];
   accessExpiresAt: Date;
   refreshExpiresAt: Date;
   createdAt: Date;

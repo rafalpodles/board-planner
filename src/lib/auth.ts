@@ -93,7 +93,11 @@ async function verifyOAuthAccessToken(token: string): Promise<IUser | null> {
   if (!record) return null;
   if (record.accessExpiresAt.getTime() < Date.now()) return null;
 
-  return User.findById(record.user);
+  const user = await User.findById(record.user);
+  if (!user) return null;
+
+  const scope = record.allowedProjects || [];
+  return scope.length > 0 ? applyTokenScope(user, scope) : user;
 }
 
 export async function getAuthUser(

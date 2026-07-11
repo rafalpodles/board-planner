@@ -9,6 +9,10 @@ const oauthCodeSchema = new Schema<IOAuthCode>(
     redirectUri: { type: String, required: true },
     codeChallenge: { type: String, required: true },
     scope: { type: String, default: "mcp" },
+    allowedProjects: {
+      type: [{ type: Schema.Types.ObjectId, ref: "Project" }],
+      default: [],
+    },
     used: { type: Boolean, default: false },
     expiresAt: { type: Date, required: true },
   },

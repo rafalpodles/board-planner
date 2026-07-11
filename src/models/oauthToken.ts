@@ -8,6 +8,10 @@ const oauthTokenSchema = new Schema<IOAuthToken>(
     clientId: { type: String, required: true },
     user: { type: Schema.Types.ObjectId, ref: "User", required: true },
     scope: { type: String, default: "mcp" },
+    allowedProjects: {
+      type: [{ type: Schema.Types.ObjectId, ref: "Project" }],
+      default: [],
+    },
     accessExpiresAt: { type: Date, required: true },
     refreshExpiresAt: { type: Date, required: true },
   },
