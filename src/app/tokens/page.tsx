@@ -2,16 +2,37 @@
 
 import { useEffect, useState } from "react";
 import { useApi } from "@/hooks/use-api";
+import { useAuth } from "@/hooks/use-auth";
 import { ApiApiToken, ApiProject } from "@/types";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { useToast } from "@/components/ui/Toast";
 
+interface OAuthConnection {
+  _id: string;
+  clientId: string;
+  clientName: string;
+  allowedProjects: string[];
+  createdAt: string;
+}
+
+interface OAuthClientRow {
+  _id: string;
+  clientId: string;
+  clientName: string;
+  redirectUris: string[];
+  createdAt: string;
+  tokenCount: number;
+}
+
 export default function TokensPage() {
   const api = useApi();
+  const { isAdmin } = useAuth();
   const { toast } = useToast();
   const [tokens, setTokens] = useState<ApiApiToken[]>([]);
   const [projects, setProjects] = useState<ApiProject[]>([]);
+  const [connections, setConnections] = useState<OAuthConnection[]>([]);
+  const [oauthClients, setOauthClients] = useState<OAuthClientRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [name, setName] = useState("");
   const [scope, setScope] = useState<string[]>([]);
@@ -20,15 +41,25 @@ export default function TokensPage() {
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    Promise.all([api.get("/api/tokens"), api.get("/api/projects")])
-      .then(([t, p]: [ApiApiToken[], ApiProject[]]) => {
+    Promise.all([api.get("/api/tokens"), api.get("/api/projects"), api.get("/api/oauth/connections")])
+      .then(([t, p, c]: [ApiApiToken[], ApiProject[], OAuthConnection[]]) => {
         setTokens(t);
         setProjects(p);
+        setConnections(c);
       })
       .catch(() => toast("Failed to load tokens", "error"))
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    api
+      .get("/api/oauth/clients")
+      .then(setOauthClients)
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin]);
 
   function toggleScope(projectId: string) {
     setScope((prev) =>
@@ -77,6 +108,35 @@ export default function TokensPage() {
       toast("Token revoked", "success");
     } catch {
       toast("Failed to revoke token", "error");
+    }
+  }
+
+  async function handleRevokeConnection(id: string) {
+    try {
+      await api.del("/api/oauth/connections", { id });
+      setConnections((prev) => prev.filter((c) => c._id !== id));
+      toast("Connection revoked", "success");
+    } catch {
+      toast("Failed to revoke connection", "error");
+    }
+  }
+
+  async function handleDeleteClient(row: OAuthClientRow) {
+    if (
+      row.tokenCount > 0 &&
+      !window.confirm(
+        `“${row.clientName || row.clientId}” has ${row.tokenCount} active connection(s). Deleting it revokes them. Continue?`
+      )
+    ) {
+      return;
+    }
+    try {
+      await api.del("/api/oauth/clients", { id: row._id });
+      setOauthClients((prev) => prev.filter((c) => c._id !== row._id));
+      setConnections((prev) => prev.filter((c) => c.clientId !== row.clientId));
+      toast("Client deleted", "success");
+    } catch {
+      toast("Failed to delete client", "error");
     }
   }
 
@@ -222,6 +282,82 @@ export default function TokensPage() {
               </Button>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* OAuth connections */}
+      <div className="mt-8">
+        <h2 className="text-lg font-semibold mb-1">Connected apps (OAuth)</h2>
+        <p className="text-sm text-text-muted mb-3">
+          Remote MCP connectors you authorized. Revoke to cut off access immediately.
+        </p>
+        {connections.length === 0 ? (
+          <p className="text-text-muted text-sm py-4">No active connections.</p>
+        ) : (
+          <div className="space-y-2">
+            {connections.map((c) => (
+              <div
+                key={c._id}
+                className="flex items-center justify-between bg-bg-card border border-border rounded-lg px-4 py-3"
+              >
+                <div>
+                  <p className="text-sm font-medium">
+                    {c.clientName || "Unnamed app"}
+                    <span className="ml-2 text-xs font-normal text-text-muted">
+                      {c.allowedProjects.length > 0
+                        ? `· ${projectKeys(c.allowedProjects)}`
+                        : "· All projects"}
+                    </span>
+                  </p>
+                  <p className="text-xs text-text-muted">
+                    Connected {new Date(c.createdAt).toLocaleDateString()}
+                  </p>
+                </div>
+                <Button size="sm" variant="danger" onClick={() => handleRevokeConnection(c._id)}>
+                  Revoke
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* OAuth clients (admin) */}
+      {isAdmin && (
+        <div className="mt-8">
+          <h2 className="text-lg font-semibold mb-1">OAuth clients</h2>
+          <p className="text-sm text-text-muted mb-3">
+            Apps registered via Dynamic Client Registration. Deleting a client revokes all its connections.
+          </p>
+          {oauthClients.length === 0 ? (
+            <p className="text-text-muted text-sm py-4">No registered clients.</p>
+          ) : (
+            <div className="space-y-2">
+              {oauthClients.map((c) => (
+                <div
+                  key={c._id}
+                  className="flex items-center justify-between bg-bg-card border border-border rounded-lg px-4 py-3"
+                >
+                  <div>
+                    <p className="text-sm font-medium">
+                      {c.clientName || "Unnamed client"}
+                      <span className="ml-2 text-xs font-normal text-text-muted">
+                        {`· ${c.tokenCount} connection(s)`}
+                      </span>
+                    </p>
+                    <p className="text-xs text-text-muted">
+                      <code>{c.clientId.substring(0, 16)}...</code>
+                      {" · "}
+                      Registered {new Date(c.createdAt).toLocaleDateString()}
+                    </p>
+                  </div>
+                  <Button size="sm" variant="danger" onClick={() => handleDeleteClient(c)}>
+                    Delete
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
