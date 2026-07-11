@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isValidObjectId } from "mongoose";
 import { getAuthUser } from "./auth";
 import { IUser } from "@/types";
 
@@ -34,14 +35,15 @@ export function withAdmin(handler: AuthenticatedHandler) {
 export function withProjectAccess(handler: AuthenticatedHandler) {
   return withAuth(async (request, context) => {
     const { user } = context;
-    if (user.role === "admin") {
-      return handler(request, context);
-    }
 
     const params = await context.params;
     const projectId = params.projectId;
-    if (!projectId) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    if (!projectId || !isValidObjectId(projectId)) {
+      return NextResponse.json({ error: "Invalid project id" }, { status: 400 });
+    }
+
+    if (user.role === "admin") {
+      return handler(request, context);
     }
 
     const allowedProjects = user.allowedProjects || [];

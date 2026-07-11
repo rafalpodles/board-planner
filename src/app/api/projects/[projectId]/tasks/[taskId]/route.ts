@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
 import { Task } from "@/models/task";
@@ -19,6 +20,9 @@ const populateFields = [
 
 export const GET = withProjectAccess(async (_request, { params }) => {
   const { projectId, taskId } = await params;
+  if (!isValidObjectId(taskId)) {
+    return NextResponse.json({ error: "Invalid task id" }, { status: 400 });
+  }
   await connectDB();
 
   const task = await Task.findOne({ _id: taskId, project: projectId })
@@ -43,6 +47,9 @@ export const GET = withProjectAccess(async (_request, { params }) => {
 
 export const PUT = withProjectAccess(async (request, { params, user }) => {
   const { projectId, taskId } = await params;
+  if (!isValidObjectId(taskId)) {
+    return NextResponse.json({ error: "Invalid task id" }, { status: 400 });
+  }
   await connectDB();
 
   const body = await request.json();
@@ -172,6 +179,9 @@ export const PUT = withProjectAccess(async (request, { params, user }) => {
 
 export const DELETE = withProjectAccess(async (_request, { params }) => {
   const { projectId, taskId } = await params;
+  if (!isValidObjectId(taskId)) {
+    return NextResponse.json({ error: "Invalid task id" }, { status: 400 });
+  }
   await connectDB();
 
   const task = await Task.findOneAndDelete({

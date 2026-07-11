@@ -5,6 +5,7 @@ import { Project } from "@/models/project";
 import { Task } from "@/models/task";
 import { fetchPullRequests, matchPRsToTasks, parseRepoString } from "@/lib/github";
 import { logActivity } from "@/lib/activity";
+import { decryptSecret } from "@/lib/encryption";
 
 export const POST = withProjectAccess(async (_request, { params, user }) => {
   const { projectId } = await params;
@@ -30,8 +31,8 @@ export const POST = withProjectAccess(async (_request, { params, user }) => {
     );
   }
 
-  // Fetch PRs from GitHub
-  const rawPRs = await fetchPullRequests(parsed.owner, parsed.repo, project.githubToken);
+  // Fetch PRs from GitHub (token is encrypted at rest)
+  const rawPRs = await fetchPullRequests(parsed.owner, parsed.repo, decryptSecret(project.githubToken));
   const matchedPRs = matchPRsToTasks(rawPRs, project.key);
 
   // Group by task number

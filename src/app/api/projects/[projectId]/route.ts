@@ -9,6 +9,7 @@ import { ProjectAuditLog } from "@/models/projectAuditLog";
 import { Sprint } from "@/models/sprint";
 import { Notification } from "@/models/notification";
 import { logProjectAudit } from "@/lib/projectAudit";
+import { encryptSecret } from "@/lib/encryption";
 
 export const GET = withProjectAccess(async (_request, { params }) => {
   await connectDB();
@@ -42,6 +43,11 @@ export const PUT = withAdmin(async (request, { params, user }) => {
     if (body[field] !== undefined) {
       updates[field] = body[field];
     }
+  }
+
+  // Encrypt the GitHub token at rest (no-op if ENCRYPTION_KEY is unset).
+  if (typeof updates.githubToken === "string" && updates.githubToken) {
+    updates.githubToken = encryptSecret(updates.githubToken);
   }
 
   const project = await Project.findByIdAndUpdate(projectId, updates, {
