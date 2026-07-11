@@ -61,6 +61,7 @@ export interface IApiToken {
   name: string;
   tokenHash: string;
   prefix: string;
+  allowedProjects: Types.ObjectId[];
   lastUsedAt: Date | null;
   createdAt: Date;
 }
@@ -69,6 +70,7 @@ export interface ApiApiToken {
   _id: string;
   name: string;
   prefix: string;
+  allowedProjects: string[];
   lastUsedAt: string | null;
   createdAt: string;
 }

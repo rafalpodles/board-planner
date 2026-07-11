@@ -1,4 +1,5 @@
 import bcrypt from "bcryptjs";
+import { Types } from "mongoose";
 import { connectDB } from "./db";
 import { User } from "@/models/user";
 import { ApiToken } from "@/models/apiToken";
@@ -42,6 +43,21 @@ export async function verifyCredentials(
   return valid ? user : null;
 }
 
+// A token scoped to specific projects downgrades its bearer to member-level
+// access limited to (scope ∩ owner's current access), enforced at every auth
+// so all existing project-access checks honor it. Empty scope = full inherit.
+function applyTokenScope(user: IUser, scope: Types.ObjectId[]): IUser {
+  const effective =
+    user.role === "admin"
+      ? scope
+      : (user.allowedProjects || []).filter((p) =>
+          scope.some((s) => s.toString() === p.toString())
+        );
+  user.role = "member";
+  user.allowedProjects = effective;
+  return user;
+}
+
 async function verifyBearerToken(token: string): Promise<IUser | null> {
   await connectDB();
 
@@ -58,7 +74,10 @@ async function verifyBearerToken(token: string): Promise<IUser | null> {
       ApiToken.findByIdAndUpdate(candidate._id, { lastUsedAt: new Date() }).catch(() => {});
 
       const user = await User.findById(candidate.user);
-      return user;
+      if (!user) return null;
+
+      const scope = candidate.allowedProjects || [];
+      return scope.length > 0 ? applyTokenScope(user, scope) : user;
     }
   }
 

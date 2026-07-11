@@ -7,6 +7,10 @@ const apiTokenSchema = new Schema<IApiToken>(
     name: { type: String, required: true, trim: true },
     tokenHash: { type: String, required: true },
     prefix: { type: String, required: true },
+    allowedProjects: {
+      type: [{ type: Schema.Types.ObjectId, ref: "Project" }],
+      default: [],
+    },
     lastUsedAt: { type: Date, default: null },
   },
   { timestamps: { createdAt: true, updatedAt: false } }

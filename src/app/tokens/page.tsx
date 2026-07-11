@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useApi } from "@/hooks/use-api";
-import { ApiApiToken } from "@/types";
+import { ApiApiToken, ApiProject } from "@/types";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { useToast } from "@/components/ui/Toast";
@@ -11,35 +11,60 @@ export default function TokensPage() {
   const api = useApi();
   const { toast } = useToast();
   const [tokens, setTokens] = useState<ApiApiToken[]>([]);
+  const [projects, setProjects] = useState<ApiProject[]>([]);
   const [loading, setLoading] = useState(true);
   const [name, setName] = useState("");
+  const [scope, setScope] = useState<string[]>([]);
   const [creating, setCreating] = useState(false);
   const [newToken, setNewToken] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    api
-      .get("/api/tokens")
-      .then(setTokens)
+    Promise.all([api.get("/api/tokens"), api.get("/api/projects")])
+      .then(([t, p]: [ApiApiToken[], ApiProject[]]) => {
+        setTokens(t);
+        setProjects(p);
+      })
       .catch(() => toast("Failed to load tokens", "error"))
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  function toggleScope(projectId: string) {
+    setScope((prev) =>
+      prev.includes(projectId) ? prev.filter((id) => id !== projectId) : [...prev, projectId]
+    );
+  }
+
+  function projectKeys(ids: string[]): string {
+    const keys = ids
+      .map((id) => projects.find((p) => p._id === id)?.key)
+      .filter(Boolean);
+    return keys.length > 0 ? keys.join(", ") : `${ids.length} project(s)`;
+  }
+
   async function handleCreate() {
     if (!name.trim()) return;
     setCreating(true);
     try {
-      const result = await api.post("/api/tokens", { name: name.trim() });
+      const result = await api.post("/api/tokens", { name: name.trim(), allowedProjects: scope });
       setNewToken(result.token);
       setTokens((prev) => [
-        { _id: result._id, name: result.name, prefix: result.prefix, lastUsedAt: null, createdAt: result.createdAt },
+        {
+          _id: result._id,
+          name: result.name,
+          prefix: result.prefix,
+          allowedProjects: result.allowedProjects || [],
+          lastUsedAt: null,
+          createdAt: result.createdAt,
+        },
         ...prev,
       ]);
       setName("");
+      setScope([]);
       toast("Token created", "success");
-    } catch {
-      toast("Failed to create token", "error");
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Failed to create token", "error");
     } finally {
       setCreating(false);
     }
@@ -91,6 +116,36 @@ export default function TokensPage() {
             {creating ? "Creating..." : "Create"}
           </Button>
         </div>
+
+        <div className="mt-4">
+          <label className="block text-sm font-medium mb-2">Project access</label>
+          {projects.length === 0 ? (
+            <p className="text-sm text-text-muted">No projects available.</p>
+          ) : (
+            <div className="space-y-2 max-h-48 overflow-y-auto">
+              {projects.map((p) => (
+                <label
+                  key={p._id}
+                  className="flex items-center gap-2 cursor-pointer text-sm"
+                >
+                  <input
+                    type="checkbox"
+                    checked={scope.includes(p._id)}
+                    onChange={() => toggleScope(p._id)}
+                    className="rounded border-border"
+                  />
+                  <span>{p.name}</span>
+                  <span className="text-text-muted font-mono text-xs">{p.key}</span>
+                </label>
+              ))}
+            </div>
+          )}
+          <p className="text-xs text-text-muted mt-2">
+            {scope.length === 0
+              ? "No projects selected — token gets your full access (all projects)."
+              : "Token is limited to the selected projects (read/write tasks, comments, sprints) and cannot perform admin actions."}
+          </p>
+        </div>
       </div>
 
       {/* Show new token once */}
@@ -138,7 +193,14 @@ export default function TokensPage() {
               className="flex items-center justify-between bg-bg-card border border-border rounded-lg px-4 py-3"
             >
               <div>
-                <p className="text-sm font-medium">{token.name}</p>
+                <p className="text-sm font-medium">
+                  {token.name}
+                  <span className="ml-2 text-xs font-normal text-text-muted">
+                    {token.allowedProjects && token.allowedProjects.length > 0
+                      ? `\u00b7 ${projectKeys(token.allowedProjects)}`
+                      : "\u00b7 All projects"}
+                  </span>
+                </p>
                 <p className="text-xs text-text-muted">
                   <code>{token.prefix}...</code>
                   {" \u00b7 "}
