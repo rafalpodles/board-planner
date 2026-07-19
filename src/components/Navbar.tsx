@@ -9,17 +9,8 @@ import { useRouter } from "next/navigation";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { ApiNotification } from "@/types";
 import { CommandPalette } from "@/components/CommandPalette";
-
-function timeAgo(dateStr: string): string {
-  const seconds = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
-  if (seconds < 60) return "just now";
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-}
+import { timeAgo } from "@/lib/time";
+import { usePollWhileVisible } from "@/hooks/use-poll-while-visible";
 
 const TYPE_ICONS: Record<string, string> = {
   task_assigned: "M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z",
@@ -67,12 +58,7 @@ export function Navbar() {
     }
   }, [api]);
 
-  useEffect(() => {
-    if (!user) return;
-    fetchUnreadCount();
-    const interval = setInterval(fetchUnreadCount, 30000);
-    return () => clearInterval(interval);
-  }, [user, fetchUnreadCount]);
+  usePollWhileVisible(fetchUnreadCount, 30_000, !!user);
 
   // Load notifications when bell opens
   useEffect(() => {
@@ -96,8 +82,9 @@ export function Navbar() {
   }
 
   function getNotificationHref(n: ApiNotification) {
-    const projectId = typeof n.project === "object" ? n.project._id : n.project;
-    const taskId = typeof n.task === "object" ? n.task._id : n.task;
+    const projectId = n.project && typeof n.project === "object" ? n.project._id : n.project;
+    const taskId = n.task && typeof n.task === "object" ? n.task._id : n.task;
+    if (!projectId || !taskId) return "/notifications";
     return `/projects/${projectId}/tasks/${taskId}`;
   }
 

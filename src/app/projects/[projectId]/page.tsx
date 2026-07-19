@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
+import { usePollWhileVisible } from "@/hooks/use-poll-while-visible";
 import { ApiProject, ApiTask, ApiSprint, TASK_STATUSES, STATUS_LABELS } from "@/types";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Board } from "@/components/kanban/Board";
@@ -51,10 +52,8 @@ export default function KanbanPage() {
   const [focusedTaskIndex, setFocusedTaskIndex] = useState(-1);
 
   // Tick every 60s so the activity indicator transitions from Working → Idle
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 60_000);
-    return () => clearInterval(timer);
-  }, []);
+  const tick = useCallback(() => setNow(Date.now()), []);
+  usePollWhileVisible(tick, 60_000);
 
   const activityStatus = useMemo(() => {
     if (tasks.length === 0) return null;
@@ -83,11 +82,7 @@ export default function KanbanPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, selectedSprint]);
 
-  useEffect(() => {
-    loadData();
-    const interval = setInterval(loadData, 10_000);
-    return () => clearInterval(interval);
-  }, [loadData]);
+  usePollWhileVisible(loadData, 10_000);
 
   // Update browser tab title with task counts
   useEffect(() => {

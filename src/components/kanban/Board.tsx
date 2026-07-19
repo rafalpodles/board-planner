@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { ApiTask, ApiLabel, TASK_STATUSES, TaskStatus } from "@/types";
 import { Column } from "./Column";
 
@@ -26,12 +27,16 @@ export function Board({
   onTaskSelect,
   onTaskContextMenu,
 }: BoardProps) {
-  const grouped = TASK_STATUSES.reduce(
-    (acc, status) => {
-      acc[status] = tasks.filter((t) => t.status === status);
-      return acc;
-    },
-    {} as Record<TaskStatus, ApiTask[]>
+  const grouped = useMemo(
+    () =>
+      TASK_STATUSES.reduce(
+        (acc, status) => {
+          acc[status] = tasks.filter((t) => t.status === status);
+          return acc;
+        },
+        {} as Record<TaskStatus, ApiTask[]>
+      ),
+    [tasks]
   );
 
   return (

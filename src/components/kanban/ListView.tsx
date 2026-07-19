@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ApiTask, STATUS_LABELS, TASK_STATUSES, TaskStatus } from "@/types";
 import { Badge } from "@/components/ui/Badge";
+import { timeAgo } from "@/lib/time";
 
 type SortKey = "taskNumber" | "title" | "status" | "assignee" | "difficulty" | "category" | "component" | "dueDate" | "updatedAt";
 
@@ -39,8 +40,8 @@ export function ListView({ tasks, projectKey, focusedIndex = -1, onTaskClick, on
     }
   }
 
-  function sortedTasks() {
-    const sorted = [...tasks].sort((a, b) => {
+  const sorted = useMemo(() => {
+    return [...tasks].sort((a, b) => {
       let cmp = 0;
       switch (sortKey) {
         case "taskNumber":
@@ -79,19 +80,7 @@ export function ListView({ tasks, projectKey, focusedIndex = -1, onTaskClick, on
       }
       return sortDir === "asc" ? cmp : -cmp;
     });
-    return sorted;
-  }
-
-  function timeAgo(dateStr: string) {
-    const diff = Date.now() - new Date(dateStr).getTime();
-    const mins = Math.floor(diff / 60_000);
-    if (mins < 1) return "just now";
-    if (mins < 60) return `${mins}m ago`;
-    const hours = Math.floor(mins / 60);
-    if (hours < 24) return `${hours}h ago`;
-    const days = Math.floor(hours / 24);
-    return `${days}d ago`;
-  }
+  }, [tasks, sortKey, sortDir]);
 
   function SortHeader({ label, column, className }: { label: string; column: SortKey; className?: string }) {
     const active = sortKey === column;
@@ -120,7 +109,6 @@ export function ListView({ tasks, projectKey, focusedIndex = -1, onTaskClick, on
     return null;
   }
 
-  const sorted = sortedTasks();
 
   return (
     <div className="border border-border rounded-lg overflow-hidden">

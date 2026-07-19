@@ -3,22 +3,11 @@
 import { useState, useEffect } from "react";
 import { useApi } from "@/hooks/use-api";
 import { ApiActivityLog, STATUS_LABELS, TaskStatus } from "@/types";
+import { timeAgo } from "@/lib/time";
 
 interface ActivityTimelineProps {
   projectId: string;
   taskId: string;
-}
-
-function timeAgo(dateStr: string) {
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diff / 60_000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 30) return `${days}d ago`;
-  return new Date(dateStr).toLocaleDateString();
 }
 
 function actionIcon(action: string) {
