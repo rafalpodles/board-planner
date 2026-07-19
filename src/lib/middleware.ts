@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { isValidObjectId } from "mongoose";
-import { getAuthUser } from "./auth";
+import { getAuthUser, RateLimitError } from "./auth";
 import { IUser } from "@/types";
 
 type AuthenticatedHandler = (
@@ -13,7 +13,15 @@ export function withAuth(handler: AuthenticatedHandler) {
     request: Request,
     context: { params: Promise<Record<string, string>> }
   ) => {
-    const user = await getAuthUser(request);
+    let user: IUser | null;
+    try {
+      user = await getAuthUser(request);
+    } catch (e) {
+      if (e instanceof RateLimitError) {
+        return NextResponse.json({ error: e.message }, { status: 429 });
+      }
+      throw e;
+    }
 
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

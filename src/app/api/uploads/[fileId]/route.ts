@@ -2,6 +2,9 @@ import mongoose from "mongoose";
 import { connectDB } from "@/lib/db";
 import { withAuth } from "@/lib/middleware";
 
+// SVG excluded: served as attachment so scripts never run in the app's origin
+const INLINE_SAFE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+
 export const GET = withAuth(async (_request, { params }) => {
   const { fileId } = await params;
   await connectDB();
@@ -48,6 +51,8 @@ export const GET = withAuth(async (_request, { params }) => {
       "Content-Type": contentType,
       "Content-Length": buffer.length.toString(),
       "Cache-Control": "public, max-age=31536000, immutable",
+      "X-Content-Type-Options": "nosniff",
+      "Content-Disposition": INLINE_SAFE_TYPES.has(contentType) ? "inline" : "attachment",
     },
   });
 });

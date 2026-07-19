@@ -5,7 +5,22 @@ import { User } from "@/models/user";
 import { ApiToken } from "@/models/apiToken";
 import { OAuthToken } from "@/models/oauthToken";
 import { sha256 } from "./oauth";
+import { isRateLimited, recordFailedAttempt, clearAttempts } from "./rate-limit";
 import { IUser } from "@/types";
+
+export class RateLimitError extends Error {
+  constructor() {
+    super("Too many failed attempts. Try again later.");
+  }
+}
+
+export function getClientIp(request: Request): string {
+  const xff = request.headers.get("x-forwarded-for");
+  if (!xff) return "unknown";
+  // Rightmost entry is appended by the closest proxy; leftmost is client-controlled
+  const parts = xff.split(",");
+  return parts[parts.length - 1].trim() || "unknown";
+}
 
 export function parseBasicAuth(
   header: string | null
@@ -122,5 +137,16 @@ export async function getAuthUser(
     return null;
   }
 
-  return verifyCredentials(creds.username, creds.password);
+  const rateKey = `${getClientIp(request)}:${creds.username.toLowerCase()}`;
+  if (isRateLimited(rateKey)) {
+    throw new RateLimitError();
+  }
+
+  const user = await verifyCredentials(creds.username, creds.password);
+  if (user) {
+    clearAttempts(rateKey);
+  } else {
+    recordFailedAttempt(rateKey);
+  }
+  return user;
 }
