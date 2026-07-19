@@ -5,17 +5,7 @@ import Link from "next/link";
 import { useApi } from "@/hooks/use-api";
 import { ApiNotification } from "@/types";
 import { Button } from "@/components/ui/Button";
-
-function timeAgo(dateStr: string): string {
-  const seconds = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
-  if (seconds < 60) return "just now";
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-}
+import { timeAgo } from "@/lib/time";
 
 const TYPE_LABELS: Record<string, string> = {
   task_assigned: "Assigned",
@@ -66,8 +56,9 @@ export default function NotificationsPage() {
   }
 
   function getNotificationHref(n: ApiNotification) {
-    const projectId = typeof n.project === "object" ? n.project._id : n.project;
-    const taskId = typeof n.task === "object" ? n.task._id : n.task;
+    const projectId = n.project && typeof n.project === "object" ? n.project._id : n.project;
+    const taskId = n.task && typeof n.task === "object" ? n.task._id : n.task;
+    if (!projectId || !taskId) return "/notifications";
     return `/projects/${projectId}/tasks/${taskId}`;
   }
 
