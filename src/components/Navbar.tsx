@@ -115,16 +115,16 @@ export function Navbar() {
   return (
     <nav className="border-b border-border bg-bg-card sticky top-0 z-40">
       <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between">
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3 sm:gap-4">
           <Link href="/projects" className="font-bold text-lg flex items-center gap-2">
             <Image src="/logo.svg" alt="ClaudePlanner" width={24} height={24} />
-            ClaudePlanner
+            <span className="hidden sm:inline">ClaudePlanner</span>
           </Link>
           {user && (
             <>
               <Link
                 href="/my-tasks"
-                className="text-sm text-text-muted hover:text-text transition-colors"
+                className="text-sm text-text-muted hover:text-text transition-colors whitespace-nowrap"
               >
                 My Tasks
               </Link>
@@ -162,7 +162,7 @@ export function Navbar() {
               </button>
 
               {bellOpen && (
-                <div className="absolute right-0 mt-1 w-80 bg-bg-card border border-border rounded-lg shadow-lg z-50 overflow-hidden">
+                <div className="fixed left-2 right-2 top-14 sm:absolute sm:left-auto sm:right-0 sm:top-full sm:mt-1 sm:w-80 bg-bg-card border border-border rounded-lg shadow-lg z-50 overflow-hidden">
                   <div className="flex items-center justify-between px-3 py-2 border-b border-border">
                     <span className="text-sm font-medium">Notifications</span>
                     <div className="flex items-center gap-2">
@@ -247,9 +247,9 @@ export function Navbar() {
                 onClick={() => setOpen((v) => !v)}
                 className="text-sm text-text-muted hover:text-text min-h-[44px] flex items-center gap-1 cursor-pointer"
               >
-                {user.fullName}
+                <span className="truncate max-w-[6rem] sm:max-w-none">{user.fullName}</span>
                 <svg
-                  className={`w-4 h-4 transition-transform ${open ? "rotate-180" : ""}`}
+                  className={`w-4 h-4 shrink-0 transition-transform ${open ? "rotate-180" : ""}`}
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
