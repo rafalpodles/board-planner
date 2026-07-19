@@ -1,25 +1,20 @@
 import { NextResponse } from "next/server";
-import { getAuthUser } from "@/lib/auth";
-import { isRateLimited, recordFailedAttempt, clearAttempts } from "@/lib/rate-limit";
+import { getAuthUser, RateLimitError } from "@/lib/auth";
 
 export async function GET(request: Request) {
-  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
-
-  if (isRateLimited(ip)) {
-    return NextResponse.json(
-      { error: "Too many failed attempts. Try again later." },
-      { status: 429 }
-    );
+  let user;
+  try {
+    user = await getAuthUser(request);
+  } catch (e) {
+    if (e instanceof RateLimitError) {
+      return NextResponse.json({ error: e.message }, { status: 429 });
+    }
+    throw e;
   }
-
-  const user = await getAuthUser(request);
 
   if (!user) {
-    recordFailedAttempt(ip);
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-
-  clearAttempts(ip);
 
   return NextResponse.json({
     _id: user._id,
