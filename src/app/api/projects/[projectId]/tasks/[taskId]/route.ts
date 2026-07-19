@@ -9,6 +9,7 @@ import { User } from "@/models/user";
 import { logActivity } from "@/lib/activity";
 import { parseChecklistString } from "@/lib/checklist";
 import { createNotifications, collectRecipients } from "@/lib/in-app-notifications";
+import { Notification } from "@/models/notification";
 import { Project } from "@/models/project";
 import { validateCustomFieldValues, sanitizeCustomFieldValues } from "@/lib/custom-fields";
 
@@ -193,10 +194,11 @@ export const DELETE = withProjectAccess(async (_request, { params }) => {
     return NextResponse.json({ error: "Task not found" }, { status: 404 });
   }
 
-  // Delete associated comments and activity logs
   await Promise.all([
     Comment.deleteMany({ task: taskId }),
     ActivityLog.deleteMany({ task: taskId }),
+    Notification.deleteMany({ task: taskId }),
+    Task.updateMany({ blockedBy: taskId }, { $pull: { blockedBy: taskId } }),
   ]);
 
   return NextResponse.json({ message: "Task deleted" });

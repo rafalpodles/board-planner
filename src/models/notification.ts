@@ -22,5 +22,11 @@ const notificationSchema = new Schema<INotification>(
 // Compound index for efficient queries: user's unread notifications sorted by date
 notificationSchema.index({ recipient: 1, read: 1, createdAt: -1 });
 
+// Read notifications expire after 90 days; unread ones are kept forever
+notificationSchema.index(
+  { createdAt: 1 },
+  { expireAfterSeconds: 90 * 24 * 60 * 60, partialFilterExpression: { read: true } }
+);
+
 export const Notification: Model<INotification> =
   mongoose.models.Notification || mongoose.model<INotification>("Notification", notificationSchema);

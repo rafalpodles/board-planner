@@ -120,6 +120,8 @@ const taskSchema = new Schema<ITask>(
 
 taskSchema.index({ project: 1, taskNumber: 1 }, { unique: true });
 taskSchema.index({ project: 1, status: 1 });
+taskSchema.index({ assignee: 1 });
+taskSchema.index({ sprint: 1 });
 
 export const Task: Model<ITask> =
   mongoose.models.Task || mongoose.model<ITask>("Task", taskSchema);
