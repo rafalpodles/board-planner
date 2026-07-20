@@ -41,8 +41,7 @@ export function isAllowedWebhookUrl(urlString: string): boolean {
   }
 }
 
-// MCP server URLs follow the webhook rules, except localhost is allowed
-// outside production (local stubs and self-hosted dev servers).
+// Webhook rules, plus localhost outside production (local/self-hosted MCP servers)
 export function isAllowedMcpServerUrl(urlString: string): boolean {
   if (process.env.NODE_ENV !== "production") {
     try {

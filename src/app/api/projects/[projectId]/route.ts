@@ -58,10 +58,16 @@ export const PUT = withAdmin(async (request, { params, user }) => {
     if (!existing) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
-    pmResult.value.mcpServers = mergeMcpServerTokens(
-      pmResult.value.mcpServers ?? [],
-      existing.pm?.mcpServers
-    );
+    if (body.pm.mcpServers === undefined) {
+      // Clients unaware of mcpServers must not wipe the configured list
+      pmResult.value.mcpServers = existing.pm?.mcpServers ?? [];
+    } else {
+      const merged = mergeMcpServerTokens(pmResult.value.mcpServers ?? [], existing.pm?.mcpServers);
+      if (!merged.valid) {
+        return NextResponse.json({ error: merged.error }, { status: 400 });
+      }
+      pmResult.value.mcpServers = merged.value;
+    }
     updates.pm = pmResult.value;
   }
 

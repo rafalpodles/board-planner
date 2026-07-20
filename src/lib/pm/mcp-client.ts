@@ -141,11 +141,11 @@ async function readSseResponse(res: Response, id: number): Promise<JsonRpcMessag
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
       let sep;
-      while ((sep = buffer.indexOf("\n\n")) !== -1) {
-        const rawEvent = buffer.slice(0, sep);
-        buffer = buffer.slice(sep + 2);
+      while ((sep = buffer.match(/\r?\n\r?\n/))) {
+        const rawEvent = buffer.slice(0, sep.index);
+        buffer = buffer.slice((sep.index ?? 0) + sep[0].length);
         const data = rawEvent
-          .split("\n")
+          .split(/\r?\n/)
           .filter((line) => line.startsWith("data:"))
           .map((line) => line.slice(5).trim())
           .join("\n");

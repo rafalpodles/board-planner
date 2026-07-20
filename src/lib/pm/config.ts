@@ -1,5 +1,5 @@
 import { IPmConfig, IPmMcpServer, PM_MCP_AUTH_TYPES, PmMcpAuthType } from "@/types";
-import { encryptSecret } from "@/lib/encryption";
+import { encryptSecret, decryptSecret } from "@/lib/encryption";
 import { isAllowedMcpServerUrl } from "@/lib/url-validation";
 
 const MAX_MODEL_LENGTH = 100;
@@ -131,19 +131,29 @@ export function validatePmConfig(
   };
 }
 
-// Tokens are write-only: an empty incoming token keeps the stored one
-// (matched by server name); a new token is encrypted at rest.
 export function mergeMcpServerTokens(
   incoming: IPmMcpServer[],
   existing: IPmMcpServer[] | undefined
-): IPmMcpServer[] {
+): { valid: true; value: IPmMcpServer[] } | { valid: false; error: string } {
   const stored = new Map((existing ?? []).map((s) => [s.name, s.authToken]));
-  return incoming.map((server) => ({
-    ...server,
-    authToken: server.authToken
+  const merged: IPmMcpServer[] = [];
+  for (const server of incoming) {
+    const authToken = server.authToken
       ? encryptSecret(server.authToken)
-      : stored.get(server.name) ?? "",
-  }));
+      : stored.get(server.name) ?? "";
+    if (server.authType === "bearer" && !authToken) {
+      return {
+        valid: false,
+        error: `MCP server "${server.name}" uses bearer auth but has no token — provide one (renaming a server requires re-entering its token)`,
+      };
+    }
+    merged.push({ ...server, authToken });
+  }
+  return { valid: true, value: merged };
+}
+
+export function resolveMcpAuthToken(server: Pick<IPmMcpServer, "authType" | "authToken">): string | undefined {
+  return server.authType === "bearer" && server.authToken ? decryptSecret(server.authToken) : undefined;
 }
 
 export function sanitizeMcpServers(

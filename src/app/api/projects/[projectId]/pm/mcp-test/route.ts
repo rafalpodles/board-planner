@@ -2,38 +2,37 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withAdmin } from "@/lib/middleware";
 import { Project } from "@/models/project";
-import { decryptSecret } from "@/lib/encryption";
 import { isAllowedMcpServerUrl } from "@/lib/url-validation";
 import { McpClient } from "@/lib/pm/mcp-client";
 import { isReadSafe } from "@/lib/pm/mcp-tools";
+import { resolveMcpAuthToken } from "@/lib/pm/config";
 
 export const POST = withAdmin(async (request, { params }) => {
   await connectDB();
   const { projectId } = await params;
   const body = await request.json();
 
-  let url: string;
-  let token: string | undefined;
+  const url = String(body.url ?? "").trim();
+  if (!url || !isAllowedMcpServerUrl(url)) {
+    return NextResponse.json({ error: "url must be a public https URL" }, { status: 400 });
+  }
 
-  if (typeof body.name === "string" && body.name) {
-    const project = await Project.findById(projectId);
-    if (!project) {
-      return NextResponse.json({ error: "Project not found" }, { status: 404 });
+  let token: string | undefined;
+  if (body.authType === "bearer") {
+    if (typeof body.authToken === "string" && body.authToken) {
+      token = body.authToken;
+    } else if (typeof body.name === "string" && body.name) {
+      // Fallback to the stored token so a saved server can be re-tested without retyping it
+      const project = await Project.findById(projectId).select("pm.mcpServers");
+      if (!project) {
+        return NextResponse.json({ error: "Project not found" }, { status: 404 });
+      }
+      const server = (project.pm?.mcpServers ?? []).find((s) => s.name === body.name);
+      if (!server) {
+        return NextResponse.json({ error: `No MCP server named "${body.name}" — provide a token` }, { status: 404 });
+      }
+      token = resolveMcpAuthToken(server);
     }
-    const server = (project.pm?.mcpServers ?? []).find((s) => s.name === body.name);
-    if (!server) {
-      return NextResponse.json({ error: `No MCP server named "${body.name}"` }, { status: 404 });
-    }
-    url = server.url;
-    token = server.authType === "bearer" && server.authToken ? decryptSecret(server.authToken) : undefined;
-  } else {
-    url = String(body.url ?? "").trim();
-    if (!url || !isAllowedMcpServerUrl(url)) {
-      return NextResponse.json({ error: "url must be a public https URL" }, { status: 400 });
-    }
-    token = body.authType === "bearer" && typeof body.authToken === "string" && body.authToken
-      ? body.authToken
-      : undefined;
   }
 
   try {

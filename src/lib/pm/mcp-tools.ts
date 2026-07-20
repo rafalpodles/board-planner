@@ -1,11 +1,12 @@
 import { IPmMcpServer } from "@/types";
-import { decryptSecret } from "@/lib/encryption";
+import { resolveMcpAuthToken } from "./config";
 import { McpClient, McpToolDef } from "./mcp-client";
 import { OrToolDefinition } from "./openrouter";
 
 export const MAX_MCP_CALLS_PER_TURN = 20;
 const MCP_RESULT_MAX_CHARS = 8000;
 const READ_SAFE_NAME_RE = /^(search|list|get|read|fetch|query|describe|find)/i;
+const WRITE_VERB_RE = /(create|update|delete|write|append|replace|insert|remove|set|patch|post|send|move|archive|upload|edit)/i;
 
 export interface McpRuntimeTool {
   exposedName: string;
@@ -25,7 +26,7 @@ export function isReadSafe(tool: McpToolDef): boolean {
   if (typeof tool.annotations?.readOnlyHint === "boolean") {
     return tool.annotations.readOnlyHint;
   }
-  return READ_SAFE_NAME_RE.test(tool.name);
+  return READ_SAFE_NAME_RE.test(tool.name) && !WRITE_VERB_RE.test(tool.name);
 }
 
 function sanitizeName(raw: string): string {
@@ -39,8 +40,7 @@ export async function discoverMcpTools(servers: IPmMcpServer[]): Promise<McpRunt
 
   const results = await Promise.allSettled(
     enabled.map(async (server) => {
-      const token = server.authType === "bearer" && server.authToken ? decryptSecret(server.authToken) : undefined;
-      const client = new McpClient(server.url, token);
+      const client = new McpClient(server.url, resolveMcpAuthToken(server));
       await client.initialize();
       const tools = await client.listTools();
       return { server, client, tools };
@@ -61,9 +61,11 @@ export async function discoverMcpTools(servers: IPmMcpServer[]): Promise<McpRunt
       const readSafe = isReadSafe(tool);
       if (!readSafe && !server.allowWrites) continue;
 
-      let exposedName = sanitizeName(`mcp_${server.name}_${tool.name}`).slice(0, 64);
+      const base = sanitizeName(`mcp_${server.name}_${tool.name}`).slice(0, 64);
+      let exposedName = base;
       for (let suffix = 2; runtime.tools.has(exposedName); suffix++) {
-        exposedName = `${exposedName.slice(0, 61)}_${suffix}`;
+        const tag = `_${suffix}`;
+        exposedName = base.slice(0, 64 - tag.length) + tag;
       }
       runtime.tools.set(exposedName, {
         exposedName,

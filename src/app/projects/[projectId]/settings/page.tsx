@@ -19,6 +19,8 @@ interface McpServerDraft {
   toolAllowlist: string;
   enabled: boolean;
   hasAuthToken: boolean;
+  testing?: boolean;
+  testResult?: string;
 }
 
 export default function ProjectSettingsPage() {
@@ -65,8 +67,6 @@ export default function ProjectSettingsPage() {
   const [newPmLinkUrl, setNewPmLinkUrl] = useState("");
   const [pmSaving, setPmSaving] = useState(false);
   const [pmMcpServers, setPmMcpServers] = useState<McpServerDraft[]>([]);
-  const [mcpTestResults, setMcpTestResults] = useState<Record<number, string>>({});
-  const [mcpTesting, setMcpTesting] = useState<number | null>(null);
 
   useEffect(() => {
     api
@@ -113,29 +113,20 @@ export default function ProjectSettingsPage() {
 
   async function testMcpServer(index: number) {
     const server = pmMcpServers[index];
-    setMcpTesting(index);
-    setMcpTestResults((prev) => ({ ...prev, [index]: "" }));
+    updateMcpServer(index, { testing: true, testResult: "" });
     try {
-      // A saved server with an untouched token is tested by name (uses the stored token)
-      const body =
-        server.hasAuthToken && !server.authToken && server.name.trim()
-          ? { name: server.name.trim() }
-          : { url: server.url.trim(), authType: server.authType, authToken: server.authToken };
-      const res = await api.post(`/api/projects/${projectId}/pm/mcp-test`, body);
+      const res = await api.post(`/api/projects/${projectId}/pm/mcp-test`, {
+        name: server.name.trim(),
+        url: server.url.trim(),
+        authType: server.authType,
+        authToken: server.authToken,
+      });
       const names = (res.tools || [])
         .map((t: { name: string; readSafe: boolean }) => `${t.name}${t.readSafe ? "" : " (write)"}`)
         .join(", ");
-      setMcpTestResults((prev) => ({
-        ...prev,
-        [index]: `✓ Connected — ${res.count} tools: ${names || "(none)"}`,
-      }));
+      updateMcpServer(index, { testing: false, testResult: `✓ Connected — ${res.count} tools: ${names || "(none)"}` });
     } catch (err) {
-      setMcpTestResults((prev) => ({
-        ...prev,
-        [index]: `✗ ${err instanceof Error ? err.message : "Connection failed"}`,
-      }));
-    } finally {
-      setMcpTesting(null);
+      updateMcpServer(index, { testing: false, testResult: `✗ ${err instanceof Error ? err.message : "Connection failed"}` });
     }
   }
 
@@ -947,10 +938,7 @@ export default function ProjectSettingsPage() {
                       />
                       <button
                         type="button"
-                        onClick={() => {
-                          setPmMcpServers((prev) => prev.filter((_, idx) => idx !== i));
-                          setMcpTestResults((prev) => ({ ...prev, [i]: "" }));
-                        }}
+                        onClick={() => setPmMcpServers((prev) => prev.filter((_, idx) => idx !== i))}
                         className="text-danger hover:opacity-80 cursor-pointer"
                         aria-label="Remove MCP server"
                       >
@@ -1003,14 +991,14 @@ export default function ProjectSettingsPage() {
                         type="button"
                         variant="secondary"
                         size="sm"
-                        disabled={mcpTesting === i || !server.url.trim()}
+                        disabled={server.testing || !server.url.trim()}
                         onClick={() => testMcpServer(i)}
                       >
-                        {mcpTesting === i ? "Testing..." : "Test connection"}
+                        {server.testing ? "Testing..." : "Test connection"}
                       </Button>
                     </div>
-                    {mcpTestResults[i] && (
-                      <p className="text-xs text-text-muted whitespace-pre-wrap">{mcpTestResults[i]}</p>
+                    {server.testResult && (
+                      <p className="text-xs text-text-muted whitespace-pre-wrap">{server.testResult}</p>
                     )}
                   </div>
                 ))}
@@ -1053,18 +1041,20 @@ export default function ProjectSettingsPage() {
                       contextNotes: pmNotes,
                       links: pmLinks,
                       dailyTurnCap: pmDailyCap.trim() ? Number(pmDailyCap) : 0,
-                      mcpServers: pmMcpServers.map((s) => ({
-                        name: s.name.trim(),
-                        url: s.url.trim(),
-                        authType: s.authType,
-                        authToken: s.authToken,
-                        allowWrites: s.allowWrites,
-                        toolAllowlist: s.toolAllowlist
-                          .split(",")
-                          .map((t) => t.trim())
-                          .filter(Boolean),
-                        enabled: s.enabled,
-                      })),
+                      mcpServers: pmMcpServers
+                        .filter((s) => s.name.trim() || s.url.trim())
+                        .map((s) => ({
+                          name: s.name.trim(),
+                          url: s.url.trim(),
+                          authType: s.authType,
+                          authToken: s.authToken,
+                          allowWrites: s.allowWrites,
+                          toolAllowlist: s.toolAllowlist
+                            .split(",")
+                            .map((t) => t.trim())
+                            .filter(Boolean),
+                          enabled: s.enabled,
+                        })),
                     },
                   });
                   setProject(updated);
