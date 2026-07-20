@@ -48,6 +48,7 @@ export default function ProjectSettingsPage() {
   const [pmEnabled, setPmEnabled] = useState(false);
   const [pmModel, setPmModel] = useState("");
   const [pmNotes, setPmNotes] = useState("");
+  const [pmDailyCap, setPmDailyCap] = useState("");
   const [pmLinks, setPmLinks] = useState<{ label: string; url: string }[]>([]);
   const [newPmLinkLabel, setNewPmLinkLabel] = useState("");
   const [newPmLinkUrl, setNewPmLinkUrl] = useState("");
@@ -64,6 +65,7 @@ export default function ProjectSettingsPage() {
         setPmEnabled(p.pm?.enabled || false);
         setPmModel(p.pm?.model || "");
         setPmNotes(p.pm?.contextNotes || "");
+        setPmDailyCap(p.pm?.dailyTurnCap ? String(p.pm.dailyTurnCap) : "");
         setPmLinks(p.pm?.links?.map((l) => ({ label: l.label, url: l.url })) || []);
       })
       .catch(() => toast("Failed to load project", "error"))
@@ -794,6 +796,17 @@ export default function ProjectSettingsPage() {
               />
             </div>
             <div>
+              <label className="block text-sm font-medium mb-1">Daily turn cap</label>
+              <Input
+                type="number"
+                min={0}
+                max={1000}
+                value={pmDailyCap}
+                onChange={(e) => setPmDailyCap(e.target.value)}
+                placeholder="Leave empty for the server default"
+              />
+            </div>
+            <div>
               <label className="block text-sm font-medium mb-1">Project context</label>
               <textarea
                 value={pmNotes}
@@ -857,7 +870,13 @@ export default function ProjectSettingsPage() {
                 setPmSaving(true);
                 try {
                   const updated = await api.put(`/api/projects/${projectId}`, {
-                    pm: { enabled: pmEnabled, model: pmModel.trim(), contextNotes: pmNotes, links: pmLinks },
+                    pm: {
+                      enabled: pmEnabled,
+                      model: pmModel.trim(),
+                      contextNotes: pmNotes,
+                      links: pmLinks,
+                      dailyTurnCap: pmDailyCap.trim() ? Number(pmDailyCap) : 0,
+                    },
                   });
                   setProject(updated);
                   toast("PM settings saved", "success");

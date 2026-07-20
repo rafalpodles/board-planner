@@ -74,6 +74,7 @@ export async function POST(
     );
   }
 
+  const dailyCap = project.pm.dailyTurnCap || DAILY_TURN_CAP;
   const startOfDay = new Date();
   startOfDay.setHours(0, 0, 0, 0);
   const turnsToday = await PmMessage.countDocuments({
@@ -81,9 +82,9 @@ export async function POST(
     role: "user",
     createdAt: { $gte: startOfDay },
   });
-  if (turnsToday >= DAILY_TURN_CAP) {
+  if (turnsToday >= dailyCap) {
     return NextResponse.json(
-      { error: `Daily PM turn cap (${DAILY_TURN_CAP}) reached for this project` },
+      { error: `Daily PM turn cap (${dailyCap}) reached for this project` },
       { status: 429 }
     );
   }

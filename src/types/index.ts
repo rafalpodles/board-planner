@@ -215,6 +215,7 @@ export interface IPmConfig {
   model: string;
   contextNotes: string;
   links: IPmLink[];
+  dailyTurnCap?: number;
 }
 
 export interface IProject {
@@ -428,6 +429,7 @@ export interface ApiPmConfig {
   model: string;
   contextNotes: string;
   links: IPmLink[];
+  dailyTurnCap?: number;
 }
 
 export interface ApiPmAction {

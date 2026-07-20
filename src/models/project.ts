@@ -85,6 +85,7 @@ const projectSchema = new Schema<IProject>(
       enabled: { type: Boolean, default: false },
       model: { type: String, default: "" },
       contextNotes: { type: String, default: "" },
+      dailyTurnCap: { type: Number, default: 0 },
       links: {
         type: [{
           label: { type: String, required: true, trim: true },
