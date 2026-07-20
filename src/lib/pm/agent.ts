@@ -109,7 +109,7 @@ export async function runPmTurn(opts: {
     pmUserId: String(pmUser._id),
   };
 
-  const mcp = await discoverMcpTools(project.pm.mcpServers ?? []);
+  const mcp = await discoverMcpTools(String(project._id), project.pm.mcpServers ?? []);
   const toolDefinitions = [...pmToolDefinitions(), ...[...mcp.tools.values()].map((t) => t.definition)];
 
   const messages: OrChatMessage[] = [

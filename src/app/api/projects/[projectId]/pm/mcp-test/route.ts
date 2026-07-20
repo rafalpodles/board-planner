@@ -4,8 +4,7 @@ import { withAdmin } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { isAllowedMcpServerUrl } from "@/lib/url-validation";
 import { McpClient } from "@/lib/pm/mcp-client";
-import { isReadSafe } from "@/lib/pm/mcp-tools";
-import { resolveMcpAuthToken } from "@/lib/pm/config";
+import { isReadSafe, resolveServerToken } from "@/lib/pm/mcp-tools";
 
 export const POST = withAdmin(async (request, { params }) => {
   await connectDB();
@@ -18,20 +17,21 @@ export const POST = withAdmin(async (request, { params }) => {
   }
 
   let token: string | undefined;
-  if (body.authType === "bearer") {
-    if (typeof body.authToken === "string" && body.authToken) {
-      token = body.authToken;
-    } else if (typeof body.name === "string" && body.name) {
-      // Fallback to the stored token so a saved server can be re-tested without retyping it
-      const project = await Project.findById(projectId).select("pm.mcpServers");
-      if (!project) {
-        return NextResponse.json({ error: "Project not found" }, { status: 404 });
-      }
-      const server = (project.pm?.mcpServers ?? []).find((s) => s.name === body.name);
-      if (!server) {
-        return NextResponse.json({ error: `No MCP server named "${body.name}" — provide a token` }, { status: 404 });
-      }
-      token = resolveMcpAuthToken(server);
+  if (body.authType === "bearer" && typeof body.authToken === "string" && body.authToken) {
+    token = body.authToken;
+  } else if ((body.authType === "bearer" || body.authType === "oauth") && typeof body.name === "string" && body.name) {
+    // Fallback to stored credentials so a saved server can be tested without retyping
+    const project = await Project.findById(projectId).select("pm.mcpServers");
+    if (!project) {
+      return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    }
+    const server = (project.pm?.mcpServers ?? []).find((s) => s.name === body.name);
+    if (!server) {
+      return NextResponse.json({ error: `No MCP server named "${body.name}" — provide a token` }, { status: 404 });
+    }
+    token = await resolveServerToken(projectId, server);
+    if (server.authType === "oauth" && !token) {
+      return NextResponse.json({ error: "OAuth connection not established — click Connect first" }, { status: 400 });
     }
   }
 
