@@ -32,9 +32,20 @@ export const POST = withAdmin(async (request, { params, user }) => {
     return NextResponse.json({ error: `Server "${name}" does not use OAuth auth` }, { status: 400 });
   }
 
-  const redirectUri = getPmOauthRedirectUri();
+  const redirectUri = getPmOauthRedirectUri(request);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const oauth: any = server.oauth ?? {};
+
+  // The app's public URL changed since registration (e.g. localhost → production):
+  // a dynamically registered client is bound to the old callback, so re-register.
+  if (oauth.redirectUri && oauth.redirectUri !== redirectUri && oauth.registrationEndpoint) {
+    oauth.clientId = "";
+    oauth.clientSecret = "";
+    oauth.accessToken = "";
+    oauth.refreshToken = "";
+    oauth.expiresAt = null;
+    oauth.status = "unconfigured";
+  }
 
   try {
     if (!oauth.authorizationEndpoint || !oauth.tokenEndpoint) {
@@ -66,6 +77,7 @@ export const POST = withAdmin(async (request, { params, user }) => {
   }
 
   oauth.status = oauth.status === "connected" ? "connected" : "unconfigured";
+  oauth.redirectUri = redirectUri;
   server.oauth = oauth;
   project.markModified("pm.mcpServers");
   await project.save();

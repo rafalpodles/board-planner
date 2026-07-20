@@ -147,6 +147,7 @@ const EMPTY_OAUTH = {
   authorizationEndpoint: "",
   tokenEndpoint: "",
   registrationEndpoint: "",
+  redirectUri: "",
   scopes: [] as string[],
   tokenAuthMethod: "none",
   accessToken: "",

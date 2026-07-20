@@ -106,6 +106,7 @@ const projectSchema = new Schema<IProject>(
               authorizationEndpoint: { type: String, default: "" },
               tokenEndpoint: { type: String, default: "" },
               registrationEndpoint: { type: String, default: "" },
+              redirectUri: { type: String, default: "" },
               scopes: { type: [String], default: [] },
               tokenAuthMethod: { type: String, default: "none" },
               accessToken: { type: String, default: "" },

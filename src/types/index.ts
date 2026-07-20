@@ -222,6 +222,7 @@ export interface IPmMcpOauth {
   authorizationEndpoint: string;
   tokenEndpoint: string;
   registrationEndpoint: string;
+  redirectUri: string;
   scopes: string[];
   tokenAuthMethod: string;
   accessToken: string;

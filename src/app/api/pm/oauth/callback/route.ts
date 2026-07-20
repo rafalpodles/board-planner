@@ -3,12 +3,14 @@ import { connectDB } from "@/lib/db";
 import { Project } from "@/models/project";
 import { PmOauthState } from "@/models/pmOauthState";
 import { decryptSecret, encryptSecret } from "@/lib/encryption";
-import { exchangeCode, getPmOauthRedirectUri } from "@/lib/pm/mcp-oauth";
+import { exchangeCode, getPmOauthRedirectUri, requestBaseUrl } from "@/lib/pm/mcp-oauth";
 
 export const maxDuration = 60;
 
-function settingsRedirect(projectId: string | null, result: string): NextResponse {
-  const base = (process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000").replace(/\/$/, "");
+function settingsRedirect(request: Request, projectId: string | null, result: string): NextResponse {
+  const base = (
+    requestBaseUrl(request) || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"
+  ).replace(/\/$/, "");
   const target = projectId
     ? `${base}/projects/${projectId}/settings?mcp_oauth=${encodeURIComponent(result)}`
     : `${base}/projects?mcp_oauth=${encodeURIComponent(result)}`;
@@ -26,21 +28,21 @@ export async function GET(request: Request) {
 
   const pending = state ? await PmOauthState.findOneAndDelete({ state }) : null;
   if (!pending) {
-    return settingsRedirect(null, "error:invalid_state");
+    return settingsRedirect(request, null, "error:invalid_state");
   }
   const projectId = String(pending.project);
 
   if (providerError) {
-    return settingsRedirect(projectId, `error:${providerError.slice(0, 40)}`);
+    return settingsRedirect(request, projectId, `error:${providerError.slice(0, 40)}`);
   }
   if (!code) {
-    return settingsRedirect(projectId, "error:missing_code");
+    return settingsRedirect(request, projectId, "error:missing_code");
   }
 
   const project = await Project.findById(pending.project);
   const server = (project?.pm?.mcpServers ?? []).find((s) => s.name === pending.serverName);
   if (!project || !server || server.authType !== "oauth" || !server.oauth?.tokenEndpoint) {
-    return settingsRedirect(projectId, "error:connection_gone");
+    return settingsRedirect(request, projectId, "error:connection_gone");
   }
 
   try {
@@ -51,7 +53,7 @@ export async function GET(request: Request) {
       tokenAuthMethod: server.oauth.tokenAuthMethod || "none",
       code,
       codeVerifier: pending.codeVerifier,
-      redirectUri: getPmOauthRedirectUri(),
+      redirectUri: server.oauth.redirectUri || getPmOauthRedirectUri(request),
       resource: server.url,
     });
     server.oauth.accessToken = encryptSecret(tokens.accessToken);
@@ -60,9 +62,9 @@ export async function GET(request: Request) {
     server.oauth.status = "connected";
     project.markModified("pm.mcpServers");
     await project.save();
-    return settingsRedirect(projectId, "ok");
+    return settingsRedirect(request, projectId, "ok");
   } catch (err) {
     console.error("PM OAuth token exchange failed:", err);
-    return settingsRedirect(projectId, "error:token_exchange");
+    return settingsRedirect(request, projectId, "error:token_exchange");
   }
 }

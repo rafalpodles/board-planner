@@ -146,19 +146,68 @@ export default function ProjectSettingsPage() {
     }
   }
 
+  async function savePmSettings(options?: { silent?: boolean }): Promise<boolean> {
+    setPmSaving(true);
+    try {
+      const updated = await api.put(`/api/projects/${projectId}`, {
+        pm: {
+          enabled: pmEnabled,
+          model: pmModel.trim(),
+          contextNotes: pmNotes,
+          links: pmLinks,
+          dailyTurnCap: pmDailyCap.trim() ? Number(pmDailyCap) : 0,
+          mcpServers: pmMcpServers
+            .filter((s) => s.name.trim() || s.url.trim())
+            .map((s) => ({
+              name: s.name.trim(),
+              url: s.url.trim(),
+              authType: s.authType,
+              authToken: s.authToken,
+              oauthClientId: s.oauthClientId.trim(),
+              oauthClientSecret: s.oauthClientSecret,
+              allowWrites: s.allowWrites,
+              toolAllowlist: s.toolAllowlist
+                .split(",")
+                .map((t) => t.trim())
+                .filter(Boolean),
+              enabled: s.enabled,
+            })),
+        },
+      });
+      setProject(updated);
+      syncMcpServersFrom(updated);
+      if (!options?.silent) toast("PM settings saved", "success");
+      return true;
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Failed to save PM settings", "error");
+      return false;
+    } finally {
+      setPmSaving(false);
+    }
+  }
+
   async function connectMcpOauth(index: number) {
-    const server = pmMcpServers[index];
+    const serverName = pmMcpServers[index].name.trim();
+    const failByName = (msg: string) =>
+      setPmMcpServers((prev) =>
+        prev.map((s) =>
+          s.name.trim() === serverName ? { ...s, connecting: false, testResult: msg } : s
+        )
+      );
     updateMcpServer(index, { connecting: true, testResult: "" });
+    // Persist the current draft first so Connect works without a manual save
+    const saved = await savePmSettings({ silent: true });
+    if (!saved) {
+      failByName("");
+      return;
+    }
     try {
       const res = await api.post(`/api/projects/${projectId}/pm/mcp-oauth/start`, {
-        name: server.name.trim(),
+        name: serverName,
       });
       window.location.href = res.authorizationUrl;
     } catch (err) {
-      updateMcpServer(index, {
-        connecting: false,
-        testResult: `✗ ${err instanceof Error ? err.message : "OAuth start failed"}`,
-      });
+      failByName(`✗ ${err instanceof Error ? err.message : "OAuth start failed"}`);
     }
   }
 
@@ -1136,43 +1185,7 @@ export default function ProjectSettingsPage() {
               type="button"
               variant="secondary"
               disabled={pmSaving}
-              onClick={async () => {
-                setPmSaving(true);
-                try {
-                  const updated = await api.put(`/api/projects/${projectId}`, {
-                    pm: {
-                      enabled: pmEnabled,
-                      model: pmModel.trim(),
-                      contextNotes: pmNotes,
-                      links: pmLinks,
-                      dailyTurnCap: pmDailyCap.trim() ? Number(pmDailyCap) : 0,
-                      mcpServers: pmMcpServers
-                        .filter((s) => s.name.trim() || s.url.trim())
-                        .map((s) => ({
-                          name: s.name.trim(),
-                          url: s.url.trim(),
-                          authType: s.authType,
-                          authToken: s.authToken,
-                          oauthClientId: s.oauthClientId.trim(),
-                          oauthClientSecret: s.oauthClientSecret,
-                          allowWrites: s.allowWrites,
-                          toolAllowlist: s.toolAllowlist
-                            .split(",")
-                            .map((t) => t.trim())
-                            .filter(Boolean),
-                          enabled: s.enabled,
-                        })),
-                    },
-                  });
-                  setProject(updated);
-                  syncMcpServersFrom(updated);
-                  toast("PM settings saved", "success");
-                } catch (err) {
-                  toast(err instanceof Error ? err.message : "Failed to save PM settings", "error");
-                } finally {
-                  setPmSaving(false);
-                }
-              }}
+              onClick={() => savePmSettings()}
             >
               {pmSaving ? "Saving..." : "Save PM Settings"}
             </Button>
