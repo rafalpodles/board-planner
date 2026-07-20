@@ -81,6 +81,18 @@ const projectSchema = new Schema<IProject>(
       }],
       default: [],
     },
+    pm: {
+      enabled: { type: Boolean, default: false },
+      model: { type: String, default: "" },
+      contextNotes: { type: String, default: "" },
+      links: {
+        type: [{
+          label: { type: String, required: true, trim: true },
+          url: { type: String, required: true, trim: true },
+        }],
+        default: [],
+      },
+    },
     githubRepo: {
       type: String,
       default: "",
