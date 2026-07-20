@@ -2,6 +2,7 @@
 
 import { AuthGuard } from "@/components/AuthGuard";
 import { Navbar } from "@/components/Navbar";
+import { PmChatWidget } from "@/components/pm/PmChatWidget";
 
 export default function ProjectsLayout({
   children,
@@ -12,6 +13,7 @@ export default function ProjectsLayout({
     <AuthGuard>
       <Navbar />
       <main className="max-w-[1920px] mx-auto px-4 py-6">{children}</main>
+      <PmChatWidget />
     </AuthGuard>
   );
 }
