@@ -8,6 +8,7 @@ import { ActivityLog } from "@/models/activityLog";
 import { ProjectAuditLog } from "@/models/projectAuditLog";
 import { Sprint } from "@/models/sprint";
 import { Notification } from "@/models/notification";
+import { PmMessage } from "@/models/pmMessage";
 import { logProjectAudit } from "@/lib/projectAudit";
 import { encryptSecret } from "@/lib/encryption";
 import { validatePmConfig, isPmAvailable } from "@/lib/pm/config";
@@ -105,6 +106,7 @@ export const DELETE = withAdmin(async (_request, { params }) => {
   await Task.deleteMany({ project: projectId });
   await Sprint.deleteMany({ project: projectId });
   await Notification.deleteMany({ project: projectId });
+  await PmMessage.deleteMany({ project: projectId });
 
   // Delete project audit logs and the project itself
   await ProjectAuditLog.deleteMany({ project: projectId });
