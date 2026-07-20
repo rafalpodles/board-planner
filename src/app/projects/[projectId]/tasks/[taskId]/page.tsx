@@ -2,8 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import Markdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { MarkdownContent } from "@/components/ui/MarkdownContent";
 import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { ApiTask, ApiProject, ApiSprint, ApiLabel, ApiCustomField, TASK_STATUSES, STATUS_LABELS } from "@/types";
@@ -110,19 +109,6 @@ export default function TaskDetailPage() {
       setConfirmDelete(false);
     }
   }
-
-  const markdownComponents = {
-    img: ({ src, alt, ...props }: React.ImgHTMLAttributes<HTMLImageElement>) => (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
-        src={src}
-        alt={alt || ""}
-        {...props}
-        className="rounded-lg max-w-full h-auto border border-border"
-        loading="lazy"
-      />
-    ),
-  };
 
   if (loading || !task || !project) {
     return (
@@ -324,7 +310,7 @@ export default function TaskDetailPage() {
               <div>
                 <h2 className="font-semibold mb-2">Description</h2>
                 <div className="text-sm text-text-muted prose prose-invert prose-sm max-w-none overflow-x-auto">
-                  <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{task.description}</Markdown>
+                  <MarkdownContent>{task.description}</MarkdownContent>
                 </div>
               </div>
             )}
