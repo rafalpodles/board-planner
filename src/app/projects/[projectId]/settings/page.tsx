@@ -10,6 +10,19 @@ import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useToast } from "@/components/ui/Toast";
 
+interface McpServerDraft {
+  name: string;
+  url: string;
+  authType: "none" | "bearer";
+  authToken: string;
+  allowWrites: boolean;
+  toolAllowlist: string;
+  enabled: boolean;
+  hasAuthToken: boolean;
+  testing?: boolean;
+  testResult?: string;
+}
+
 export default function ProjectSettingsPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const router = useRouter();
@@ -53,6 +66,7 @@ export default function ProjectSettingsPage() {
   const [newPmLinkLabel, setNewPmLinkLabel] = useState("");
   const [newPmLinkUrl, setNewPmLinkUrl] = useState("");
   const [pmSaving, setPmSaving] = useState(false);
+  const [pmMcpServers, setPmMcpServers] = useState<McpServerDraft[]>([]);
 
   useEffect(() => {
     api
@@ -67,6 +81,7 @@ export default function ProjectSettingsPage() {
         setPmNotes(p.pm?.contextNotes || "");
         setPmDailyCap(p.pm?.dailyTurnCap ? String(p.pm.dailyTurnCap) : "");
         setPmLinks(p.pm?.links?.map((l) => ({ label: l.label, url: l.url })) || []);
+        syncMcpServersFrom(p);
       })
       .catch(() => toast("Failed to load project", "error"))
       .finally(() => setLoading(false));
@@ -76,6 +91,44 @@ export default function ProjectSettingsPage() {
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
+
+  function updateMcpServer(index: number, patch: Partial<McpServerDraft>) {
+    setPmMcpServers((prev) => prev.map((s, i) => (i === index ? { ...s, ...patch } : s)));
+  }
+
+  function syncMcpServersFrom(p: ApiProject) {
+    setPmMcpServers(
+      p.pm?.mcpServers?.map((s) => ({
+        name: s.name,
+        url: s.url,
+        authType: s.authType,
+        authToken: "",
+        allowWrites: s.allowWrites,
+        toolAllowlist: (s.toolAllowlist || []).join(", "),
+        enabled: s.enabled,
+        hasAuthToken: s.hasAuthToken,
+      })) || []
+    );
+  }
+
+  async function testMcpServer(index: number) {
+    const server = pmMcpServers[index];
+    updateMcpServer(index, { testing: true, testResult: "" });
+    try {
+      const res = await api.post(`/api/projects/${projectId}/pm/mcp-test`, {
+        name: server.name.trim(),
+        url: server.url.trim(),
+        authType: server.authType,
+        authToken: server.authToken,
+      });
+      const names = (res.tools || [])
+        .map((t: { name: string; readSafe: boolean }) => `${t.name}${t.readSafe ? "" : " (write)"}`)
+        .join(", ");
+      updateMcpServer(index, { testing: false, testResult: `✓ Connected — ${res.count} tools: ${names || "(none)"}` });
+    } catch (err) {
+      updateMcpServer(index, { testing: false, testResult: `✗ ${err instanceof Error ? err.message : "Connection failed"}` });
+    }
+  }
 
   async function handleSave(e: FormEvent) {
     e.preventDefault();
@@ -862,6 +915,118 @@ export default function ProjectSettingsPage() {
                 </Button>
               </div>
             </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">MCP connections</label>
+              <p className="text-xs text-text-muted mb-2">
+                External MCP servers the PM agent can read at turn start (e.g. a self-hosted Notion
+                MCP). Writes are off unless explicitly allowed per server.
+              </p>
+              <div className="space-y-3 mb-2">
+                {pmMcpServers.map((server, i) => (
+                  <div key={i} className="border border-border rounded-lg p-3 space-y-2">
+                    <div className="flex gap-2 items-center">
+                      <Input
+                        value={server.name}
+                        onChange={(e) => updateMcpServer(i, { name: e.target.value })}
+                        placeholder="name (slug, e.g. notion)"
+                        className="max-w-[180px]"
+                      />
+                      <Input
+                        value={server.url}
+                        onChange={(e) => updateMcpServer(i, { url: e.target.value })}
+                        placeholder="https://mcp.example.com/mcp"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setPmMcpServers((prev) => prev.filter((_, idx) => idx !== i))}
+                        className="text-danger hover:opacity-80 cursor-pointer"
+                        aria-label="Remove MCP server"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                    <div className="flex gap-2 items-center">
+                      <select
+                        value={server.authType}
+                        onChange={(e) =>
+                          updateMcpServer(i, { authType: e.target.value as "none" | "bearer" })
+                        }
+                        className="bg-bg-input border border-border rounded px-2 py-1.5 text-sm"
+                      >
+                        <option value="none">No auth</option>
+                        <option value="bearer">Bearer token</option>
+                      </select>
+                      {server.authType === "bearer" && (
+                        <Input
+                          type="password"
+                          value={server.authToken}
+                          onChange={(e) => updateMcpServer(i, { authToken: e.target.value })}
+                          placeholder={server.hasAuthToken ? "Token set — leave empty to keep" : "Token"}
+                        />
+                      )}
+                    </div>
+                    <Input
+                      value={server.toolAllowlist}
+                      onChange={(e) => updateMcpServer(i, { toolAllowlist: e.target.value })}
+                      placeholder="Tool allowlist, comma-separated (empty = all)"
+                    />
+                    <div className="flex gap-4 items-center text-sm">
+                      <label className="flex items-center gap-1.5 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={server.enabled}
+                          onChange={(e) => updateMcpServer(i, { enabled: e.target.checked })}
+                        />
+                        Enabled
+                      </label>
+                      <label className="flex items-center gap-1.5 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={server.allowWrites}
+                          onChange={(e) => updateMcpServer(i, { allowWrites: e.target.checked })}
+                        />
+                        Allow writes
+                      </label>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        disabled={server.testing || !server.url.trim()}
+                        onClick={() => testMcpServer(i)}
+                      >
+                        {server.testing ? "Testing..." : "Test connection"}
+                      </Button>
+                    </div>
+                    {server.testResult && (
+                      <p className="text-xs text-text-muted whitespace-pre-wrap">{server.testResult}</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={pmMcpServers.length >= 5}
+                onClick={() =>
+                  setPmMcpServers((prev) => [
+                    ...prev,
+                    {
+                      name: "",
+                      url: "",
+                      authType: "none",
+                      authToken: "",
+                      allowWrites: false,
+                      toolAllowlist: "",
+                      enabled: true,
+                      hasAuthToken: false,
+                    },
+                  ])
+                }
+              >
+                Add MCP server
+              </Button>
+            </div>
             <Button
               type="button"
               variant="secondary"
@@ -876,9 +1041,24 @@ export default function ProjectSettingsPage() {
                       contextNotes: pmNotes,
                       links: pmLinks,
                       dailyTurnCap: pmDailyCap.trim() ? Number(pmDailyCap) : 0,
+                      mcpServers: pmMcpServers
+                        .filter((s) => s.name.trim() || s.url.trim())
+                        .map((s) => ({
+                          name: s.name.trim(),
+                          url: s.url.trim(),
+                          authType: s.authType,
+                          authToken: s.authToken,
+                          allowWrites: s.allowWrites,
+                          toolAllowlist: s.toolAllowlist
+                            .split(",")
+                            .map((t) => t.trim())
+                            .filter(Boolean),
+                          enabled: s.enabled,
+                        })),
                     },
                   });
                   setProject(updated);
+                  syncMcpServersFrom(updated);
                   toast("PM settings saved", "success");
                 } catch (err) {
                   toast(err instanceof Error ? err.message : "Failed to save PM settings", "error");

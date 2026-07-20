@@ -1,10 +1,15 @@
-import { IPmConfig } from "@/types";
+import { IPmConfig, IPmMcpServer, PM_MCP_AUTH_TYPES, PmMcpAuthType } from "@/types";
+import { encryptSecret, decryptSecret } from "@/lib/encryption";
+import { isAllowedMcpServerUrl } from "@/lib/url-validation";
 
 const MAX_MODEL_LENGTH = 100;
 const MAX_NOTES_LENGTH = 5000;
 const MAX_LINKS = 20;
 const MAX_LABEL_LENGTH = 100;
 const MAX_URL_LENGTH = 500;
+const MAX_MCP_SERVERS = 5;
+const MAX_MCP_ALLOWLIST = 50;
+const MCP_NAME_RE = /^[a-z0-9-]{1,32}$/;
 
 export function validatePmConfig(
   raw: unknown
@@ -64,6 +69,55 @@ export function validatePmConfig(
     cleanLinks.push({ label, url });
   }
 
+  const mcpServers = pm.mcpServers ?? [];
+  if (!Array.isArray(mcpServers) || mcpServers.length > MAX_MCP_SERVERS) {
+    return { valid: false, error: `pm.mcpServers must be an array of up to ${MAX_MCP_SERVERS} items` };
+  }
+  const cleanServers: IPmMcpServer[] = [];
+  const seenNames = new Set<string>();
+  for (const server of mcpServers) {
+    if (typeof server !== "object" || server === null) {
+      return { valid: false, error: "pm.mcpServers entries must be objects" };
+    }
+    const name = String(server.name ?? "").trim();
+    if (!MCP_NAME_RE.test(name)) {
+      return { valid: false, error: "MCP server name must be a slug: [a-z0-9-], 1-32 chars" };
+    }
+    if (seenNames.has(name)) {
+      return { valid: false, error: `Duplicate MCP server name: ${name}` };
+    }
+    seenNames.add(name);
+    const url = String(server.url ?? "").trim();
+    if (!url || url.length > MAX_URL_LENGTH || !isAllowedMcpServerUrl(url)) {
+      return { valid: false, error: `MCP server URL must be a public https URL up to ${MAX_URL_LENGTH} chars (${name})` };
+    }
+    const authType = server.authType ?? "none";
+    if (!PM_MCP_AUTH_TYPES.includes(authType)) {
+      return { valid: false, error: `MCP server authType must be one of: ${PM_MCP_AUTH_TYPES.join(", ")}` };
+    }
+    const authToken = server.authToken ?? "";
+    if (typeof authToken !== "string" || authToken.length > 500) {
+      return { valid: false, error: `MCP server authToken must be a string up to 500 chars (${name})` };
+    }
+    const toolAllowlist = server.toolAllowlist ?? [];
+    if (
+      !Array.isArray(toolAllowlist) ||
+      toolAllowlist.length > MAX_MCP_ALLOWLIST ||
+      toolAllowlist.some((t: unknown) => typeof t !== "string" || !String(t).trim() || String(t).length > 100)
+    ) {
+      return { valid: false, error: `MCP server toolAllowlist must be up to ${MAX_MCP_ALLOWLIST} non-empty tool names (${name})` };
+    }
+    cleanServers.push({
+      name,
+      url,
+      authType: authType as PmMcpAuthType,
+      authToken,
+      allowWrites: server.allowWrites === true,
+      toolAllowlist: toolAllowlist.map((t: string) => t.trim()),
+      enabled: server.enabled !== false,
+    });
+  }
+
   return {
     valid: true,
     value: {
@@ -72,8 +126,48 @@ export function validatePmConfig(
       contextNotes,
       links: cleanLinks,
       dailyTurnCap,
+      mcpServers: cleanServers,
     },
   };
+}
+
+export function mergeMcpServerTokens(
+  incoming: IPmMcpServer[],
+  existing: IPmMcpServer[] | undefined
+): { valid: true; value: IPmMcpServer[] } | { valid: false; error: string } {
+  const stored = new Map((existing ?? []).map((s) => [s.name, s.authToken]));
+  const merged: IPmMcpServer[] = [];
+  for (const server of incoming) {
+    const authToken = server.authToken
+      ? encryptSecret(server.authToken)
+      : stored.get(server.name) ?? "";
+    if (server.authType === "bearer" && !authToken) {
+      return {
+        valid: false,
+        error: `MCP server "${server.name}" uses bearer auth but has no token — provide one (renaming a server requires re-entering its token)`,
+      };
+    }
+    merged.push({ ...server, authToken });
+  }
+  return { valid: true, value: merged };
+}
+
+export function resolveMcpAuthToken(server: Pick<IPmMcpServer, "authType" | "authToken">): string | undefined {
+  return server.authType === "bearer" && server.authToken ? decryptSecret(server.authToken) : undefined;
+}
+
+export function sanitizeMcpServers(
+  servers: IPmMcpServer[] | undefined
+): Array<Omit<IPmMcpServer, "authToken"> & { hasAuthToken: boolean }> {
+  return (servers ?? []).map((s) => ({
+    name: s.name,
+    url: s.url,
+    authType: s.authType,
+    allowWrites: s.allowWrites,
+    toolAllowlist: s.toolAllowlist,
+    enabled: s.enabled,
+    hasAuthToken: !!s.authToken,
+  }));
 }
 
 export function isPmAvailable(): boolean {

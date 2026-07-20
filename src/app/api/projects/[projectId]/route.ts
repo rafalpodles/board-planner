@@ -11,7 +11,7 @@ import { Notification } from "@/models/notification";
 import { PmMessage } from "@/models/pmMessage";
 import { logProjectAudit } from "@/lib/projectAudit";
 import { encryptSecret } from "@/lib/encryption";
-import { validatePmConfig, isPmAvailable } from "@/lib/pm/config";
+import { validatePmConfig, isPmAvailable, mergeMcpServerTokens, sanitizeMcpServers } from "@/lib/pm/config";
 
 export const GET = withProjectAccess(async (_request, { params }) => {
   await connectDB();
@@ -31,6 +31,7 @@ export const GET = withProjectAccess(async (_request, { params }) => {
   const obj: any = project.toObject();
   obj.githubTokenSet = !!obj.githubToken;
   delete obj.githubToken;
+  if (obj.pm) obj.pm.mcpServers = sanitizeMcpServers(obj.pm.mcpServers);
   obj.pmAvailable = isPmAvailable();
   return NextResponse.json(obj);
 });
@@ -52,6 +53,20 @@ export const PUT = withAdmin(async (request, { params, user }) => {
     const pmResult = validatePmConfig(body.pm);
     if (!pmResult.valid) {
       return NextResponse.json({ error: pmResult.error }, { status: 400 });
+    }
+    const existing = await Project.findById(projectId).select("pm.mcpServers");
+    if (!existing) {
+      return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    }
+    if (body.pm.mcpServers === undefined) {
+      // Clients unaware of mcpServers must not wipe the configured list
+      pmResult.value.mcpServers = existing.pm?.mcpServers ?? [];
+    } else {
+      const merged = mergeMcpServerTokens(pmResult.value.mcpServers ?? [], existing.pm?.mcpServers);
+      if (!merged.valid) {
+        return NextResponse.json({ error: merged.error }, { status: 400 });
+      }
+      pmResult.value.mcpServers = merged.value;
     }
     updates.pm = pmResult.value;
   }
@@ -82,6 +97,7 @@ export const PUT = withAdmin(async (request, { params, user }) => {
   const obj: any = project.toObject();
   obj.githubTokenSet = !!obj.githubToken;
   delete obj.githubToken;
+  if (obj.pm) obj.pm.mcpServers = sanitizeMcpServers(obj.pm.mcpServers);
   obj.pmAvailable = isPmAvailable();
   return NextResponse.json(obj);
 });

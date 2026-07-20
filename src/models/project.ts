@@ -93,6 +93,18 @@ const projectSchema = new Schema<IProject>(
         }],
         default: [],
       },
+      mcpServers: {
+        type: [{
+          name: { type: String, required: true, trim: true },
+          url: { type: String, required: true, trim: true },
+          authType: { type: String, enum: ["none", "bearer"], default: "none" },
+          authToken: { type: String, default: "" },
+          allowWrites: { type: Boolean, default: false },
+          toolAllowlist: { type: [String], default: [] },
+          enabled: { type: Boolean, default: true },
+        }],
+        default: [],
+      },
     },
     githubRepo: {
       type: String,

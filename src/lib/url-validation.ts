@@ -40,3 +40,22 @@ export function isAllowedWebhookUrl(urlString: string): boolean {
     return false;
   }
 }
+
+// Webhook rules, plus localhost outside production (local/self-hosted MCP servers)
+export function isAllowedMcpServerUrl(urlString: string): boolean {
+  if (process.env.NODE_ENV !== "production") {
+    try {
+      const url = new URL(urlString);
+      const host = url.hostname.toLowerCase();
+      if (
+        (url.protocol === "http:" || url.protocol === "https:") &&
+        (host === "localhost" || host === "127.0.0.1")
+      ) {
+        return true;
+      }
+    } catch {
+      return false;
+    }
+  }
+  return isAllowedWebhookUrl(urlString);
+}
