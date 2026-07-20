@@ -26,6 +26,15 @@ export function validatePmConfig(
   if (typeof contextNotes !== "string" || contextNotes.length > MAX_NOTES_LENGTH) {
     return { valid: false, error: `pm.contextNotes must be a string up to ${MAX_NOTES_LENGTH} chars` };
   }
+  const dailyTurnCap = pm.dailyTurnCap ?? 0;
+  if (
+    typeof dailyTurnCap !== "number" ||
+    !Number.isInteger(dailyTurnCap) ||
+    dailyTurnCap < 0 ||
+    dailyTurnCap > 1000
+  ) {
+    return { valid: false, error: "pm.dailyTurnCap must be an integer 0-1000 (0 = server default)" };
+  }
   const links = pm.links ?? [];
   if (!Array.isArray(links) || links.length > MAX_LINKS) {
     return { valid: false, error: `pm.links must be an array of up to ${MAX_LINKS} items` };
@@ -62,6 +71,7 @@ export function validatePmConfig(
       model: model.trim(),
       contextNotes,
       links: cleanLinks,
+      dailyTurnCap,
     },
   };
 }
