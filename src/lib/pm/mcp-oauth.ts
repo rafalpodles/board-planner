@@ -281,7 +281,17 @@ export function refreshTokens(opts: {
   });
 }
 
-export function getPmOauthRedirectUri(): string {
-  const base = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+export function requestBaseUrl(request?: Request): string | null {
+  if (!request) return null;
+  const host = request.headers.get("x-forwarded-host") || request.headers.get("host");
+  if (!host) return null;
+  const proto =
+    request.headers.get("x-forwarded-proto") || (host.startsWith("localhost") ? "http" : "https");
+  return `${proto}://${host}`;
+}
+
+export function getPmOauthRedirectUri(request?: Request): string {
+  const base =
+    requestBaseUrl(request) || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
   return `${base.replace(/\/$/, "")}/api/pm/oauth/callback`;
 }
