@@ -137,6 +137,9 @@ mcp-server/           # Standalone MCP server (stdio transport)
 ```
 MONGODB_URI=              # Required — MongoDB connection string
 OPENAI_API_KEY=           # Optional — AI task generation
+OPENROUTER_API_KEY=       # Optional — PM agent (chat-driven project manager)
+PM_MODEL=                 # Optional — PM agent model (default: moonshotai/kimi-k2.6)
+PM_DAILY_TURN_CAP=        # Optional — PM agent turns per project per day (default: 100)
 SMTP_HOST=                # Optional — Email notifications
 SMTP_PORT=587
 SMTP_USER=
