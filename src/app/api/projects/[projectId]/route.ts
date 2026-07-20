@@ -11,7 +11,7 @@ import { Notification } from "@/models/notification";
 import { PmMessage } from "@/models/pmMessage";
 import { logProjectAudit } from "@/lib/projectAudit";
 import { encryptSecret } from "@/lib/encryption";
-import { validatePmConfig, isPmAvailable } from "@/lib/pm/config";
+import { validatePmConfig, isPmAvailable, mergeMcpServerTokens, sanitizeMcpServers } from "@/lib/pm/config";
 
 export const GET = withProjectAccess(async (_request, { params }) => {
   await connectDB();
@@ -31,6 +31,7 @@ export const GET = withProjectAccess(async (_request, { params }) => {
   const obj: any = project.toObject();
   obj.githubTokenSet = !!obj.githubToken;
   delete obj.githubToken;
+  if (obj.pm) obj.pm.mcpServers = sanitizeMcpServers(obj.pm.mcpServers);
   obj.pmAvailable = isPmAvailable();
   return NextResponse.json(obj);
 });
@@ -53,6 +54,14 @@ export const PUT = withAdmin(async (request, { params, user }) => {
     if (!pmResult.valid) {
       return NextResponse.json({ error: pmResult.error }, { status: 400 });
     }
+    const existing = await Project.findById(projectId).select("pm.mcpServers");
+    if (!existing) {
+      return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    }
+    pmResult.value.mcpServers = mergeMcpServerTokens(
+      pmResult.value.mcpServers ?? [],
+      existing.pm?.mcpServers
+    );
     updates.pm = pmResult.value;
   }
 
@@ -82,6 +91,7 @@ export const PUT = withAdmin(async (request, { params, user }) => {
   const obj: any = project.toObject();
   obj.githubTokenSet = !!obj.githubToken;
   delete obj.githubToken;
+  if (obj.pm) obj.pm.mcpServers = sanitizeMcpServers(obj.pm.mcpServers);
   obj.pmAvailable = isPmAvailable();
   return NextResponse.json(obj);
 });

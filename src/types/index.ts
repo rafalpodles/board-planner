@@ -210,12 +210,26 @@ export interface IPmLink {
   url: string;
 }
 
+export const PM_MCP_AUTH_TYPES = ["none", "bearer"] as const;
+export type PmMcpAuthType = (typeof PM_MCP_AUTH_TYPES)[number];
+
+export interface IPmMcpServer {
+  name: string;
+  url: string;
+  authType: PmMcpAuthType;
+  authToken: string;
+  allowWrites: boolean;
+  toolAllowlist: string[];
+  enabled: boolean;
+}
+
 export interface IPmConfig {
   enabled: boolean;
   model: string;
   contextNotes: string;
   links: IPmLink[];
   dailyTurnCap?: number;
+  mcpServers?: IPmMcpServer[];
 }
 
 export interface IProject {
@@ -424,12 +438,23 @@ export interface ApiProject {
   updatedAt: string;
 }
 
+export interface ApiPmMcpServer {
+  name: string;
+  url: string;
+  authType: PmMcpAuthType;
+  allowWrites: boolean;
+  toolAllowlist: string[];
+  enabled: boolean;
+  hasAuthToken: boolean;
+}
+
 export interface ApiPmConfig {
   enabled: boolean;
   model: string;
   contextNotes: string;
   links: IPmLink[];
   dailyTurnCap?: number;
+  mcpServers?: ApiPmMcpServer[];
 }
 
 export interface ApiPmAction {

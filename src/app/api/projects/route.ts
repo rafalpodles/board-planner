@@ -12,6 +12,7 @@ export const GET = withAuth(async (_request, { user }) => {
       : { _id: { $in: user.allowedProjects || [] } };
 
   const projects = await Project.find(filter)
+    .select("-githubToken -pm.mcpServers.authToken")
     .populate("owner", "username fullName")
     .sort({ createdAt: -1 });
   return NextResponse.json(projects);
