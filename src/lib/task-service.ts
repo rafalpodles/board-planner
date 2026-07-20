@@ -2,11 +2,12 @@ import { connectDB } from "@/lib/db";
 import { Task } from "@/models/task";
 import { Project } from "@/models/project";
 import { User } from "@/models/user";
+import { Comment } from "@/models/comment";
 import { ITask, TASK_STATUSES, TaskStatus } from "@/types";
 import { logActivity } from "@/lib/activity";
 import { dispatchWebhooks } from "@/lib/webhooks";
 import { dispatchNotifications } from "@/lib/notifications";
-import { createNotifications, collectRecipients } from "@/lib/in-app-notifications";
+import { createNotifications, collectRecipients, resolveMentions } from "@/lib/in-app-notifications";
 import { parseChecklistString } from "@/lib/checklist";
 import { validateCustomFieldValues, sanitizeCustomFieldValues } from "@/lib/custom-fields";
 
@@ -299,6 +300,83 @@ export async function updateTask(
   }
 
   return { ok: true, data: task as ITask };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function addComment(
+  projectId: string,
+  taskId: string,
+  bodyText: string,
+  actor: { id: string; username: string }
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+): Promise<TaskServiceResult<any>> {
+  await connectDB();
+
+  const task = await Task.findOne({ _id: taskId, project: projectId });
+  if (!task) {
+    return { ok: false, error: "Task not found", status: 404 };
+  }
+
+  if (!bodyText || typeof bodyText !== "string" || !bodyText.trim()) {
+    return { ok: false, error: "Comment body is required", status: 400 };
+  }
+
+  const comment = await Comment.create({
+    task: taskId,
+    author: actor.id,
+    body: bodyText.trim(),
+  });
+
+  const populated = await Comment.findById(comment._id).populate({
+    path: "author",
+    select: "username fullName",
+  });
+
+  await Promise.all([
+    logActivity(taskId, actor.id, "comment_added"),
+    // Auto-watch task on comment
+    Task.findByIdAndUpdate(taskId, { $addToSet: { watchers: actor.id } }),
+  ]);
+
+  const eventPayload = {
+    project: { key: "", name: "" },
+    task: {
+      taskKey: `${task.taskNumber}`,
+      title: task.title,
+      status: task.status,
+    },
+    data: { commentBody: bodyText.trim().substring(0, 200), author: actor.username },
+  };
+  dispatchWebhooks(projectId, "comment_added", eventPayload);
+  dispatchNotifications(projectId, "comment_added", eventPayload);
+
+  const project = await Project.findById(projectId, "key").lean();
+  const taskKey = project ? `${project.key}-${task.taskNumber}` : `#${task.taskNumber}`;
+  const recipients = collectRecipients(task);
+  createNotifications({
+    type: "comment_added",
+    taskId,
+    projectId,
+    actorId: actor.id,
+    title: `New comment on ${taskKey}`,
+    body: bodyText.trim().substring(0, 120),
+    recipientIds: recipients,
+  });
+
+  const mentionedIds = await resolveMentions(bodyText);
+  if (mentionedIds.length > 0) {
+    createNotifications({
+      type: "mentioned",
+      taskId,
+      projectId,
+      actorId: actor.id,
+      title: `You were mentioned in ${taskKey}`,
+      body: bodyText.trim().substring(0, 120),
+      recipientIds: mentionedIds,
+    });
+  }
+
+  return { ok: true, data: populated };
 }
 
 export async function assignTask(
