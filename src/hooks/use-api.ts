@@ -63,6 +63,19 @@ export function useApi() {
     [getAuthHeader]
   );
 
+  // Raw streaming POST (SSE): returns the Response so callers can read the body
+  const stream = useCallback(
+    async (url: string, body: unknown): Promise<Response> => {
+      const authHeader = getAuthHeader();
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (authHeader) {
+        headers["Authorization"] = authHeader;
+      }
+      return fetch(url, { method: "POST", headers, body: JSON.stringify(body) });
+    },
+    [getAuthHeader]
+  );
+
   const get = useCallback((url: string) => request("GET", url), [request]);
   const post = useCallback((url: string, body: unknown) => request("POST", url, { body }), [request]);
   const put = useCallback((url: string, body: unknown) => request("PUT", url, { body }), [request]);
@@ -70,7 +83,7 @@ export function useApi() {
   const del = useCallback((url: string, body?: unknown) => request("DELETE", url, { body }), [request]);
 
   return useMemo(
-    () => ({ get, post, put, patch, del, upload }),
-    [get, post, put, patch, del, upload]
+    () => ({ get, post, put, patch, del, upload, stream }),
+    [get, post, put, patch, del, upload, stream]
   );
 }

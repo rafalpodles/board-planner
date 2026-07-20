@@ -416,6 +416,11 @@ export default function KanbanPage() {
               </svg>
             </Button>
           </Link>
+          {project.pm?.enabled && (
+            <Link href={`/projects/${projectId}/pm`} title="PM Agent">
+              <Button size="sm" variant="ghost">PM</Button>
+            </Link>
+          )}
           {isAdmin && (
             <Link href={`/projects/${projectId}/settings`}>
               <Button size="sm" variant="ghost">Settings</Button>

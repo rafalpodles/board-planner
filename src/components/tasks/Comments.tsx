@@ -1,8 +1,6 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback, FormEvent, KeyboardEvent } from "react";
-import Markdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { ApiComment, ApiReaction } from "@/types";
@@ -10,22 +8,12 @@ import { Button } from "@/components/ui/Button";
 import { Textarea } from "@/components/ui/Textarea";
 import { useToast } from "@/components/ui/Toast";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { MarkdownContent } from "@/components/ui/MarkdownContent";
 
 interface MentionUser {
   _id: string;
   username: string;
   fullName: string;
-}
-
-function MentionMarkdown({ children }: { children: string }) {
-  // Replace @username patterns with styled spans before passing to Markdown
-  const processed = children.replace(
-    /@([a-zA-Z0-9_-]+)/g,
-    '**`@$1`**'
-  );
-  return (
-    <Markdown remarkPlugins={[remarkGfm]}>{processed}</Markdown>
-  );
 }
 
 interface CommentsProps {
@@ -352,7 +340,7 @@ export function Comments({ projectId, taskId }: CommentsProps) {
               </div>
             ) : (
               <div className="text-sm prose prose-invert prose-sm max-w-none overflow-x-auto">
-                <MentionMarkdown>{comment.body}</MentionMarkdown>
+                <MarkdownContent mentions>{comment.body}</MarkdownContent>
               </div>
             )}
 
