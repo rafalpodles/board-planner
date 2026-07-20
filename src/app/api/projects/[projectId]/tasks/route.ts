@@ -2,14 +2,8 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
 import { Task } from "@/models/task";
-import { Project } from "@/models/project";
-import { User } from "@/models/user";
 import { TASK_STATUSES, TaskStatus } from "@/types";
-import { logActivity } from "@/lib/activity";
-import { dispatchWebhooks } from "@/lib/webhooks";
-import { dispatchNotifications } from "@/lib/notifications";
-import { parseChecklistString } from "@/lib/checklist";
-import { validateCustomFieldValues, sanitizeCustomFieldValues } from "@/lib/custom-fields";
+import { createTask } from "@/lib/task-service";
 
 const populateFields = [
   { path: "assignee", select: "username fullName" },
@@ -85,75 +79,10 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
 
   const body = await request.json();
 
-  // Auto-increment taskNumber atomically
-  const project = await Project.findOneAndUpdate(
-    { _id: projectId },
-    { $inc: { taskCounter: 1 } },
-    { new: true }
-  );
-
-  if (!project) {
-    return NextResponse.json({ error: "Project not found" }, { status: 404 });
+  const result = await createTask(projectId, String(user._id), body);
+  if (!result.ok) {
+    return NextResponse.json({ error: result.error }, { status: result.status });
   }
 
-  // Resolve assignee username to ObjectId
-  let assigneeId = null;
-  if (body.assignee) {
-    const assigneeUser = await User.findOne({
-      username: body.assignee.toLowerCase(),
-    });
-    if (assigneeUser) {
-      assigneeId = assigneeUser._id;
-    }
-  }
-
-  const task = await Task.create({
-    project: projectId,
-    taskNumber: project.taskCounter,
-    title: body.title,
-    description: body.description ?? "",
-    difficulty: body.difficulty ?? "M",
-    component: body.component ?? "",
-    category: body.category ?? "user-story",
-    status: body.status ?? "planned",
-    assignee: assigneeId,
-    dueDate: body.dueDate || null,
-    checklist: Array.isArray(body.checklist)
-      ? body.checklist
-      : parseChecklistString(
-          Array.isArray(body.acceptanceCriteria)
-            ? body.acceptanceCriteria.join("\n")
-            : (body.acceptanceCriteria ?? "")
-        ),
-    labels: Array.isArray(body.labels) ? body.labels : [],
-    sprint: body.sprint || null,
-    customFieldValues: (() => {
-      const raw = body.customFieldValues || {};
-      if (typeof raw !== "object" || Array.isArray(raw)) return {};
-      const defs = project.customFields || [];
-      const sanitized = sanitizeCustomFieldValues(raw, defs);
-      const result = validateCustomFieldValues(sanitized, defs);
-      return result.valid ? sanitized : {};
-    })(),
-    recurrence: body.recurrence || null,
-    order: body.order ?? 0,
-    createdBy: user._id,
-  });
-
-  const populated = await Task.findById(task._id).populate(populateFields);
-
-  await logActivity(task._id, user._id, "created");
-
-  const eventPayload = {
-    project: { key: project.key, name: project.name },
-    task: {
-      taskKey: `${project.key}-${task.taskNumber}`,
-      title: task.title,
-      status: task.status,
-    },
-  };
-  dispatchWebhooks(projectId, "task_created", eventPayload);
-  dispatchNotifications(projectId, "task_created", eventPayload);
-
-  return NextResponse.json(populated, { status: 201 });
+  return NextResponse.json(result.data, { status: 201 });
 });
