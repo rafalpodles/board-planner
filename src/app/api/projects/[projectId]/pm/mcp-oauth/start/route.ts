@@ -38,7 +38,8 @@ export const POST = withAdmin(async (request, { params, user }) => {
 
   // The app's public URL changed since registration (e.g. localhost → production):
   // a dynamically registered client is bound to the old callback, so re-register.
-  if (oauth.redirectUri && oauth.redirectUri !== redirectUri && oauth.registrationEndpoint) {
+  // Covers legacy registrations too, where oauth.redirectUri was never stored.
+  if (oauth.clientId && oauth.registrationEndpoint && oauth.redirectUri !== redirectUri) {
     oauth.clientId = "";
     oauth.clientSecret = "";
     oauth.accessToken = "";
