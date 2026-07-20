@@ -13,14 +13,18 @@ import { useToast } from "@/components/ui/Toast";
 interface McpServerDraft {
   name: string;
   url: string;
-  authType: "none" | "bearer";
+  authType: "none" | "bearer" | "oauth";
   authToken: string;
   allowWrites: boolean;
   toolAllowlist: string;
   enabled: boolean;
   hasAuthToken: boolean;
+  oauthStatus?: string;
+  oauthClientId: string;
+  oauthClientSecret: string;
   testing?: boolean;
   testResult?: string;
+  connecting?: boolean;
 }
 
 export default function ProjectSettingsPage() {
@@ -69,6 +73,15 @@ export default function ProjectSettingsPage() {
   const [pmMcpServers, setPmMcpServers] = useState<McpServerDraft[]>([]);
 
   useEffect(() => {
+    const oauthResult = new URLSearchParams(window.location.search).get("mcp_oauth");
+    if (oauthResult) {
+      if (oauthResult === "ok") {
+        toast("MCP OAuth connection established", "success");
+      } else {
+        toast(`MCP OAuth failed: ${oauthResult.replace(/^error:/, "")}`, "error");
+      }
+      window.history.replaceState(null, "", window.location.pathname);
+    }
     api
       .get(`/api/projects/${projectId}`)
       .then((p: ApiProject) => {
@@ -107,6 +120,9 @@ export default function ProjectSettingsPage() {
         toolAllowlist: (s.toolAllowlist || []).join(", "),
         enabled: s.enabled,
         hasAuthToken: s.hasAuthToken,
+        oauthStatus: s.oauthStatus,
+        oauthClientId: s.oauthClientId || "",
+        oauthClientSecret: "",
       })) || []
     );
   }
@@ -127,6 +143,35 @@ export default function ProjectSettingsPage() {
       updateMcpServer(index, { testing: false, testResult: `✓ Connected — ${res.count} tools: ${names || "(none)"}` });
     } catch (err) {
       updateMcpServer(index, { testing: false, testResult: `✗ ${err instanceof Error ? err.message : "Connection failed"}` });
+    }
+  }
+
+  async function connectMcpOauth(index: number) {
+    const server = pmMcpServers[index];
+    updateMcpServer(index, { connecting: true, testResult: "" });
+    try {
+      const res = await api.post(`/api/projects/${projectId}/pm/mcp-oauth/start`, {
+        name: server.name.trim(),
+      });
+      window.location.href = res.authorizationUrl;
+    } catch (err) {
+      updateMcpServer(index, {
+        connecting: false,
+        testResult: `✗ ${err instanceof Error ? err.message : "OAuth start failed"}`,
+      });
+    }
+  }
+
+  async function disconnectMcpOauth(index: number) {
+    const server = pmMcpServers[index];
+    try {
+      await api.post(`/api/projects/${projectId}/pm/mcp-oauth/disconnect`, {
+        name: server.name.trim(),
+      });
+      updateMcpServer(index, { oauthStatus: "unconfigured" });
+      toast("OAuth connection removed", "success");
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Disconnect failed", "error");
     }
   }
 
@@ -949,12 +994,13 @@ export default function ProjectSettingsPage() {
                       <select
                         value={server.authType}
                         onChange={(e) =>
-                          updateMcpServer(i, { authType: e.target.value as "none" | "bearer" })
+                          updateMcpServer(i, { authType: e.target.value as "none" | "bearer" | "oauth" })
                         }
                         className="bg-bg-input border border-border rounded px-2 py-1.5 text-sm"
                       >
                         <option value="none">No auth</option>
                         <option value="bearer">Bearer token</option>
+                        <option value="oauth">OAuth</option>
                       </select>
                       {server.authType === "bearer" && (
                         <Input
@@ -964,7 +1010,64 @@ export default function ProjectSettingsPage() {
                           placeholder={server.hasAuthToken ? "Token set — leave empty to keep" : "Token"}
                         />
                       )}
+                      {server.authType === "oauth" && (
+                        <>
+                          <span
+                            className={`text-xs px-2 py-0.5 rounded-full border ${
+                              server.oauthStatus === "connected"
+                                ? "border-success text-success"
+                                : server.oauthStatus === "needs_reauth"
+                                  ? "border-danger text-danger"
+                                  : "border-border text-text-muted"
+                            }`}
+                          >
+                            {server.oauthStatus === "connected"
+                              ? "Connected"
+                              : server.oauthStatus === "needs_reauth"
+                                ? "Needs re-auth"
+                                : "Not connected"}
+                          </span>
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            disabled={server.connecting || !server.name.trim()}
+                            onClick={() => connectMcpOauth(i)}
+                          >
+                            {server.connecting
+                              ? "Redirecting..."
+                              : server.oauthStatus === "connected"
+                                ? "Reconnect"
+                                : "Connect"}
+                          </Button>
+                          {server.oauthStatus === "connected" && (
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => disconnectMcpOauth(i)}
+                            >
+                              Disconnect
+                            </Button>
+                          )}
+                        </>
+                      )}
                     </div>
+                    {server.authType === "oauth" && (
+                      <div className="flex gap-2 items-center">
+                        <Input
+                          value={server.oauthClientId}
+                          onChange={(e) => updateMcpServer(i, { oauthClientId: e.target.value })}
+                          placeholder="Client ID (optional — auto-registered when supported)"
+                        />
+                        <Input
+                          type="password"
+                          value={server.oauthClientSecret}
+                          onChange={(e) => updateMcpServer(i, { oauthClientSecret: e.target.value })}
+                          placeholder="Client secret (optional)"
+                        />
+                      </div>
+                    )}
                     <Input
                       value={server.toolAllowlist}
                       onChange={(e) => updateMcpServer(i, { toolAllowlist: e.target.value })}
@@ -1020,6 +1123,8 @@ export default function ProjectSettingsPage() {
                       toolAllowlist: "",
                       enabled: true,
                       hasAuthToken: false,
+                      oauthClientId: "",
+                      oauthClientSecret: "",
                     },
                   ])
                 }
@@ -1048,6 +1153,8 @@ export default function ProjectSettingsPage() {
                           url: s.url.trim(),
                           authType: s.authType,
                           authToken: s.authToken,
+                          oauthClientId: s.oauthClientId.trim(),
+                          oauthClientSecret: s.oauthClientSecret,
                           allowWrites: s.allowWrites,
                           toolAllowlist: s.toolAllowlist
                             .split(",")

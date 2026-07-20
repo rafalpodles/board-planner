@@ -107,6 +107,12 @@ export function validatePmConfig(
     ) {
       return { valid: false, error: `MCP server toolAllowlist must be up to ${MAX_MCP_ALLOWLIST} non-empty tool names (${name})` };
     }
+    const oauthClientId = String(server.oauthClientId ?? "").trim();
+    const oauthClientSecret = String(server.oauthClientSecret ?? "");
+    if (oauthClientId.length > 200 || oauthClientSecret.length > 500) {
+      return { valid: false, error: `MCP server manual OAuth client credentials too long (${name})` };
+    }
+
     cleanServers.push({
       name,
       url,
@@ -115,7 +121,11 @@ export function validatePmConfig(
       allowWrites: server.allowWrites === true,
       toolAllowlist: toolAllowlist.map((t: string) => t.trim()),
       enabled: server.enabled !== false,
-    });
+      // Transient manual-override fields, consumed by mergeMcpServerTokens
+      ...(oauthClientId ? { oauthClientId } : {}),
+      ...(oauthClientSecret ? { oauthClientSecret } : {}),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
   }
 
   return {
@@ -131,23 +141,59 @@ export function validatePmConfig(
   };
 }
 
+const EMPTY_OAUTH = {
+  clientId: "",
+  clientSecret: "",
+  authorizationEndpoint: "",
+  tokenEndpoint: "",
+  registrationEndpoint: "",
+  scopes: [] as string[],
+  tokenAuthMethod: "none",
+  accessToken: "",
+  refreshToken: "",
+  expiresAt: null,
+  status: "unconfigured" as const,
+};
+
 export function mergeMcpServerTokens(
   incoming: IPmMcpServer[],
   existing: IPmMcpServer[] | undefined
 ): { valid: true; value: IPmMcpServer[] } | { valid: false; error: string } {
-  const stored = new Map((existing ?? []).map((s) => [s.name, s.authToken]));
+  const stored = new Map((existing ?? []).map((s) => [s.name, s]));
   const merged: IPmMcpServer[] = [];
   for (const server of incoming) {
+    const prior = stored.get(server.name);
     const authToken = server.authToken
       ? encryptSecret(server.authToken)
-      : stored.get(server.name) ?? "";
+      : prior?.authToken ?? "";
     if (server.authType === "bearer" && !authToken) {
       return {
         valid: false,
         error: `MCP server "${server.name}" uses bearer auth but has no token — provide one (renaming a server requires re-entering its token)`,
       };
     }
-    merged.push({ ...server, authToken });
+
+    // OAuth state is server-managed: preserve it across saves, but drop tokens
+    // when the URL changes (they were issued for a different resource).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const transient = server as any;
+    let oauth = prior?.oauth ? { ...prior.oauth } : undefined;
+    if (server.authType === "oauth") {
+      oauth = oauth ?? { ...EMPTY_OAUTH };
+      if (prior && prior.url !== server.url) {
+        oauth = { ...EMPTY_OAUTH, clientId: oauth.clientId, clientSecret: oauth.clientSecret };
+      }
+      if (transient.oauthClientId) {
+        oauth.clientId = transient.oauthClientId;
+      }
+      if (transient.oauthClientSecret) {
+        oauth.clientSecret = encryptSecret(transient.oauthClientSecret);
+      }
+    }
+    delete transient.oauthClientId;
+    delete transient.oauthClientSecret;
+
+    merged.push({ ...server, authToken, oauth });
   }
   return { valid: true, value: merged };
 }
@@ -158,7 +204,11 @@ export function resolveMcpAuthToken(server: Pick<IPmMcpServer, "authType" | "aut
 
 export function sanitizeMcpServers(
   servers: IPmMcpServer[] | undefined
-): Array<Omit<IPmMcpServer, "authToken"> & { hasAuthToken: boolean }> {
+): Array<Omit<IPmMcpServer, "authToken" | "oauth"> & {
+  hasAuthToken: boolean;
+  oauthStatus?: string;
+  oauthClientId?: string;
+}> {
   return (servers ?? []).map((s) => ({
     name: s.name,
     url: s.url,
@@ -167,6 +217,9 @@ export function sanitizeMcpServers(
     toolAllowlist: s.toolAllowlist,
     enabled: s.enabled,
     hasAuthToken: !!s.authToken,
+    ...(s.authType === "oauth"
+      ? { oauthStatus: s.oauth?.status ?? "unconfigured", oauthClientId: s.oauth?.clientId ?? "" }
+      : {}),
   }));
 }
 

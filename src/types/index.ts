@@ -210,17 +210,45 @@ export interface IPmLink {
   url: string;
 }
 
-export const PM_MCP_AUTH_TYPES = ["none", "bearer"] as const;
+export const PM_MCP_AUTH_TYPES = ["none", "bearer", "oauth"] as const;
 export type PmMcpAuthType = (typeof PM_MCP_AUTH_TYPES)[number];
+
+export const PM_MCP_OAUTH_STATUSES = ["unconfigured", "connected", "needs_reauth"] as const;
+export type PmMcpOauthStatus = (typeof PM_MCP_OAUTH_STATUSES)[number];
+
+export interface IPmMcpOauth {
+  clientId: string;
+  clientSecret: string;
+  authorizationEndpoint: string;
+  tokenEndpoint: string;
+  registrationEndpoint: string;
+  scopes: string[];
+  tokenAuthMethod: string;
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: Date | null;
+  status: PmMcpOauthStatus;
+}
 
 export interface IPmMcpServer {
   name: string;
   url: string;
   authType: PmMcpAuthType;
   authToken: string;
+  oauth?: IPmMcpOauth;
   allowWrites: boolean;
   toolAllowlist: string[];
   enabled: boolean;
+}
+
+export interface IPmOauthState {
+  _id: Types.ObjectId;
+  state: string;
+  project: Types.ObjectId;
+  serverName: string;
+  codeVerifier: string;
+  initiatedBy: Types.ObjectId;
+  createdAt: Date;
 }
 
 export interface IPmConfig {
@@ -446,6 +474,8 @@ export interface ApiPmMcpServer {
   toolAllowlist: string[];
   enabled: boolean;
   hasAuthToken: boolean;
+  oauthStatus?: PmMcpOauthStatus;
+  oauthClientId?: string;
 }
 
 export interface ApiPmConfig {
