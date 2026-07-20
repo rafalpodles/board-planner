@@ -10,6 +10,7 @@ import { Sprint } from "@/models/sprint";
 import { Notification } from "@/models/notification";
 import { logProjectAudit } from "@/lib/projectAudit";
 import { encryptSecret } from "@/lib/encryption";
+import { validatePmConfig, isPmAvailable } from "@/lib/pm/config";
 
 export const GET = withProjectAccess(async (_request, { params }) => {
   await connectDB();
@@ -29,6 +30,7 @@ export const GET = withProjectAccess(async (_request, { params }) => {
   const obj: any = project.toObject();
   obj.githubTokenSet = !!obj.githubToken;
   delete obj.githubToken;
+  obj.pmAvailable = isPmAvailable();
   return NextResponse.json(obj);
 });
 
@@ -43,6 +45,14 @@ export const PUT = withAdmin(async (request, { params, user }) => {
     if (body[field] !== undefined) {
       updates[field] = body[field];
     }
+  }
+
+  if (body.pm !== undefined) {
+    const pmResult = validatePmConfig(body.pm);
+    if (!pmResult.valid) {
+      return NextResponse.json({ error: pmResult.error }, { status: 400 });
+    }
+    updates.pm = pmResult.value;
   }
 
   // Encrypt the GitHub token at rest (no-op if ENCRYPTION_KEY is unset).
@@ -71,6 +81,7 @@ export const PUT = withAdmin(async (request, { params, user }) => {
   const obj: any = project.toObject();
   obj.githubTokenSet = !!obj.githubToken;
   delete obj.githubToken;
+  obj.pmAvailable = isPmAvailable();
   return NextResponse.json(obj);
 });
 

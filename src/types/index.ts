@@ -205,6 +205,18 @@ export interface ApiCustomField {
   required: boolean;
 }
 
+export interface IPmLink {
+  label: string;
+  url: string;
+}
+
+export interface IPmConfig {
+  enabled: boolean;
+  model: string;
+  contextNotes: string;
+  links: IPmLink[];
+}
+
 export interface IProject {
   _id: Types.ObjectId;
   name: string;
@@ -219,9 +231,27 @@ export interface IProject {
   githubRepo: string;
   githubToken: string;
   taskCounter: number;
+  pm?: IPmConfig;
   owner: Types.ObjectId | IUser;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export interface IPmAction {
+  tool: string;
+  taskKey?: string;
+  summary: string;
+  at: Date;
+}
+
+export interface IPmMessage {
+  _id: Types.ObjectId;
+  project: Types.ObjectId;
+  role: "user" | "assistant";
+  content: string;
+  actions: IPmAction[];
+  triggeredBy: Types.ObjectId | IUser | null;
+  createdAt: Date;
 }
 
 export interface ILinkedPR {
@@ -386,9 +416,35 @@ export interface ApiProject {
   githubRepo: string;
   githubTokenSet: boolean;
   taskCounter: number;
+  pm?: ApiPmConfig;
+  pmAvailable?: boolean;
   owner: ApiUser | string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ApiPmConfig {
+  enabled: boolean;
+  model: string;
+  contextNotes: string;
+  links: IPmLink[];
+}
+
+export interface ApiPmAction {
+  tool: string;
+  taskKey?: string;
+  summary: string;
+  at: string;
+}
+
+export interface ApiPmMessage {
+  _id: string;
+  project: string;
+  role: "user" | "assistant";
+  content: string;
+  actions: ApiPmAction[];
+  triggeredBy: ApiUser | string | null;
+  createdAt: string;
 }
 
 export interface ApiTaskLink {

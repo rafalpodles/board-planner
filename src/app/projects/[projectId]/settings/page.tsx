@@ -45,6 +45,13 @@ export default function ProjectSettingsPage() {
   const [githubToken, setGithubToken] = useState("");
   const [githubTokenSaving, setGithubTokenSaving] = useState(false);
   const [githubSyncing, setGithubSyncing] = useState(false);
+  const [pmEnabled, setPmEnabled] = useState(false);
+  const [pmModel, setPmModel] = useState("");
+  const [pmNotes, setPmNotes] = useState("");
+  const [pmLinks, setPmLinks] = useState<{ label: string; url: string }[]>([]);
+  const [newPmLinkLabel, setNewPmLinkLabel] = useState("");
+  const [newPmLinkUrl, setNewPmLinkUrl] = useState("");
+  const [pmSaving, setPmSaving] = useState(false);
 
   useEffect(() => {
     api
@@ -54,6 +61,10 @@ export default function ProjectSettingsPage() {
         setName(p.name);
         setDescription(p.description);
         setGithubRepo(p.githubRepo || "");
+        setPmEnabled(p.pm?.enabled || false);
+        setPmModel(p.pm?.model || "");
+        setPmNotes(p.pm?.contextNotes || "");
+        setPmLinks(p.pm?.links?.map((l) => ({ label: l.label, url: l.url })) || []);
       })
       .catch(() => toast("Failed to load project", "error"))
       .finally(() => setLoading(false));
@@ -754,6 +765,113 @@ export default function ProjectSettingsPage() {
             {aiModelSaving ? "Saving..." : "Save"}
           </Button>
         </div>
+      </div>
+
+      {/* PM Agent */}
+      <div className="mb-8">
+        <h2 className="font-semibold mb-3">PM Agent</h2>
+        {!project.pmAvailable ? (
+          <p className="text-sm text-text-muted">
+            Set the <code>OPENROUTER_API_KEY</code> environment variable on the server to enable
+            the PM agent (optionally <code>PM_MODEL</code> for the default model).
+          </p>
+        ) : (
+          <div className="space-y-3">
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <input
+                type="checkbox"
+                checked={pmEnabled}
+                onChange={(e) => setPmEnabled(e.target.checked)}
+              />
+              Enable the PM agent for this project
+            </label>
+            <div>
+              <label className="block text-sm font-medium mb-1">Model override</label>
+              <Input
+                value={pmModel}
+                onChange={(e) => setPmModel(e.target.value)}
+                placeholder="Leave empty to use the server default (PM_MODEL)"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Project context</label>
+              <textarea
+                value={pmNotes}
+                onChange={(e) => setPmNotes(e.target.value)}
+                rows={5}
+                maxLength={5000}
+                placeholder="What this project is, conventions, priorities — injected into the PM's system prompt."
+                className="w-full bg-bg-input border border-border rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Documentation links</label>
+              {pmLinks.length > 0 && (
+                <ul className="mb-2 space-y-1">
+                  {pmLinks.map((link, i) => (
+                    <li key={i} className="flex items-center gap-2 text-sm">
+                      <span className="font-medium">{link.label}</span>
+                      <span className="text-text-muted truncate flex-1">{link.url}</span>
+                      <button
+                        type="button"
+                        onClick={() => setPmLinks((prev) => prev.filter((_, idx) => idx !== i))}
+                        className="text-danger hover:opacity-80 cursor-pointer"
+                      >
+                        ✕
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div className="flex gap-2">
+                <Input
+                  value={newPmLinkLabel}
+                  onChange={(e) => setNewPmLinkLabel(e.target.value)}
+                  placeholder="Label"
+                />
+                <Input
+                  value={newPmLinkUrl}
+                  onChange={(e) => setNewPmLinkUrl(e.target.value)}
+                  placeholder="https://..."
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={!newPmLinkLabel.trim() || !newPmLinkUrl.trim()}
+                  onClick={() => {
+                    setPmLinks((prev) => [...prev, { label: newPmLinkLabel.trim(), url: newPmLinkUrl.trim() }]);
+                    setNewPmLinkLabel("");
+                    setNewPmLinkUrl("");
+                  }}
+                >
+                  Add
+                </Button>
+              </div>
+            </div>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={pmSaving}
+              onClick={async () => {
+                setPmSaving(true);
+                try {
+                  const updated = await api.put(`/api/projects/${projectId}`, {
+                    pm: { enabled: pmEnabled, model: pmModel.trim(), contextNotes: pmNotes, links: pmLinks },
+                  });
+                  setProject(updated);
+                  toast("PM settings saved", "success");
+                } catch (err) {
+                  toast(err instanceof Error ? err.message : "Failed to save PM settings", "error");
+                } finally {
+                  setPmSaving(false);
+                }
+              }}
+            >
+              {pmSaving ? "Saving..." : "Save PM Settings"}
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Webhooks */}
