@@ -6,6 +6,7 @@ import { Project } from "@/models/project";
 import { User } from "@/models/user";
 import { parseTasksFromMarkdown } from "@/lib/markdown";
 import { parseChecklistString } from "@/lib/checklist";
+import { DEFAULT_PRIORITY } from "@/types";
 
 export const POST = withProjectAccess(async (request, { params, user }) => {
   const { projectId } = await params;
@@ -71,7 +72,7 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
     title: parsedTask.title,
     description: parsedTask.description ?? "",
     difficulty: parsedTask.difficulty ?? "M",
-    priority: parsedTask.priority ?? "medium",
+    priority: parsedTask.priority ?? DEFAULT_PRIORITY,
     component: parsedTask.component ?? "",
     category: parsedTask.category,
     status: parsedTask.status ?? "planned",

@@ -32,6 +32,7 @@ export const TASK_STATUSES: TaskStatus[] = [
 export const DIFFICULTIES: Difficulty[] = ["S", "M", "L", "XL"];
 export const CATEGORIES: Category[] = ["bug", "doc", "user-story", "idea"];
 export const PRIORITIES: Priority[] = ["low", "medium", "high", "urgent"];
+export const DEFAULT_PRIORITY: Priority = "medium";
 
 export const PRIORITY_LABELS: Record<Priority, string> = {
   low: "Low",

@@ -80,11 +80,11 @@ export function TaskCard({
             </svg>
           )}
           {projectKey}-{task.taskNumber}
-        </span>
-        <div className="flex flex-wrap justify-end gap-1">
-          <Badge variant="priority" value={task.priority}>
+          <Badge variant="priority" value={task.priority} className="text-[10px] px-1.5">
             {PRIORITY_LABELS[task.priority] ?? task.priority}
           </Badge>
+        </span>
+        <div className="flex flex-wrap justify-end gap-1">
           <Badge variant="difficulty" value={task.difficulty}>
             {task.difficulty}
           </Badge>
