@@ -45,6 +45,11 @@ export const GET = withProjectAccess(async (request, { params }) => {
     filter.category = category;
   }
 
+  const priority = url.searchParams.get("priority");
+  if (priority) {
+    filter.priority = priority;
+  }
+
   const label = url.searchParams.get("label");
   if (label) {
     filter.labels = label;

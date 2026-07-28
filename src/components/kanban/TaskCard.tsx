@@ -1,6 +1,6 @@
 "use client";
 
-import { ApiTask, ApiLabel } from "@/types";
+import { ApiTask, ApiLabel, PRIORITY_LABELS } from "@/types";
 import { Badge } from "@/components/ui/Badge";
 
 interface TaskCardProps {
@@ -81,7 +81,10 @@ export function TaskCard({
           )}
           {projectKey}-{task.taskNumber}
         </span>
-        <div className="flex gap-1">
+        <div className="flex flex-wrap justify-end gap-1">
+          <Badge variant="priority" value={task.priority}>
+            {PRIORITY_LABELS[task.priority] ?? task.priority}
+          </Badge>
           <Badge variant="difficulty" value={task.difficulty}>
             {task.difficulty}
           </Badge>

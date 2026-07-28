@@ -1,7 +1,7 @@
 import { Types } from "mongoose";
 import { Task } from "@/models/task";
 import { Comment } from "@/models/comment";
-import { TASK_STATUSES } from "@/types";
+import { TASK_STATUSES, PRIORITIES } from "@/types";
 import {
   createTask,
   updateTask,
@@ -54,6 +54,7 @@ function compactTask(ctx: PmToolContext, t: any) {
     status: t.status,
     assignee: t.assignee && typeof t.assignee === "object" ? t.assignee.username : null,
     difficulty: t.difficulty,
+    priority: t.priority,
   };
 }
 
@@ -67,7 +68,7 @@ export const PM_TOOLS: Record<string, PmTool> = {
     definition: {
       name: "list_tasks",
       description:
-        "List tasks in the project (compact: key, title, status, assignee, difficulty). Use get_task for full details.",
+        "List tasks in the project (compact: key, title, status, assignee, difficulty, priority). Use get_task for full details.",
       parameters: {
         type: "object",
         properties: {
@@ -202,6 +203,7 @@ export const PM_TOOLS: Record<string, PmTool> = {
           title: { type: "string" },
           description: { type: "string" },
           difficulty: { type: "string", enum: ["S", "M", "L", "XL"] },
+          priority: { type: "string", enum: [...PRIORITIES], description: "Default: medium" },
           category: { type: "string", enum: ["bug", "doc", "user-story", "idea"] },
           component: { type: "string" },
           acceptanceCriteria: { type: "string", description: "Markdown checklist, e.g. '- [ ] item'" },
@@ -217,6 +219,7 @@ export const PM_TOOLS: Record<string, PmTool> = {
         title,
         description: str(args.description),
         difficulty: args.difficulty,
+        priority: args.priority,
         category: args.category,
         component: str(args.component),
         acceptanceCriteria: str(args.acceptanceCriteria),
@@ -237,7 +240,7 @@ export const PM_TOOLS: Record<string, PmTool> = {
     definition: {
       name: "update_task",
       description:
-        "Update a task's content fields (title, description, difficulty, category, component, acceptanceCriteria, dueDate). Use change_status / assign_task for status and assignee.",
+        "Update a task's content fields (title, description, difficulty, priority, category, component, acceptanceCriteria, dueDate). Use change_status / assign_task for status and assignee.",
       parameters: {
         type: "object",
         properties: {
@@ -245,6 +248,7 @@ export const PM_TOOLS: Record<string, PmTool> = {
           title: { type: "string" },
           description: { type: "string" },
           difficulty: { type: "string", enum: ["S", "M", "L", "XL"] },
+          priority: { type: "string", enum: [...PRIORITIES] },
           category: { type: "string", enum: ["bug", "doc", "user-story", "idea"] },
           component: { type: "string" },
           acceptanceCriteria: { type: "string" },
@@ -256,7 +260,7 @@ export const PM_TOOLS: Record<string, PmTool> = {
     async execute(args, ctx) {
       const resolved = await resolveTask(ctx, args.taskKey);
       if ("error" in resolved) return { result: { error: resolved.error } };
-      const allowed = ["title", "description", "difficulty", "category", "component", "acceptanceCriteria", "dueDate"];
+      const allowed = ["title", "description", "difficulty", "priority", "category", "component", "acceptanceCriteria", "dueDate"];
       const body: Record<string, unknown> = {};
       for (const field of allowed) {
         if (args[field] !== undefined) body[field] = args[field];

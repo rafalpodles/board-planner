@@ -6,11 +6,15 @@ import {
   ApiLabel,
   DIFFICULTIES,
   CATEGORIES,
+  PRIORITIES,
+  PRIORITY_LABELS,
+  PRIORITY_ORDER,
   SORT_OPTIONS,
   SortField,
   SortDir,
   Difficulty,
   Category,
+  Priority,
 } from "@/types";
 
 interface Filters {
@@ -19,6 +23,7 @@ interface Filters {
   component: string;
   category: string;
   difficulty: string;
+  priority: string;
   label: string;
   dateRange: string;
 }
@@ -75,6 +80,7 @@ export function BoardFilters({ tasks, components, labels = [], projectId, curren
     component: "",
     category: "",
     difficulty: "",
+    priority: "",
     label: "",
     dateRange: "",
   });
@@ -105,6 +111,7 @@ export function BoardFilters({ tasks, components, labels = [], projectId, curren
         component: filters.component,
         category: filters.category,
         difficulty: filters.difficulty,
+        priority: filters.priority,
         label: filters.label,
         dateRange: filters.dateRange,
       },
@@ -130,7 +137,7 @@ export function BoardFilters({ tasks, components, labels = [], projectId, curren
     ).values()
   );
 
-  const hasActiveFilters = myTasks || filters.assignee || filters.component || filters.category || filters.difficulty || filters.label || filters.dateRange;
+  const hasActiveFilters = myTasks || filters.assignee || filters.component || filters.category || filters.difficulty || filters.priority || filters.label || filters.dateRange;
 
   useEffect(() => {
     let result = tasks;
@@ -163,6 +170,9 @@ export function BoardFilters({ tasks, components, labels = [], projectId, curren
     }
     if (filters.difficulty) {
       result = result.filter((t) => t.difficulty === filters.difficulty);
+    }
+    if (filters.priority) {
+      result = result.filter((t) => t.priority === filters.priority);
     }
     if (filters.label) {
       result = result.filter((t) => (t.labels || []).includes(filters.label));
@@ -207,6 +217,9 @@ export function BoardFilters({ tasks, components, labels = [], projectId, curren
         case "createdAt":
           cmp = new Date(a[sortField]).getTime() - new Date(b[sortField]).getTime();
           break;
+        case "priority":
+          cmp = (PRIORITY_ORDER[a.priority] ?? 99) - (PRIORITY_ORDER[b.priority] ?? 99);
+          break;
         case "difficulty":
           cmp = (difficultyOrder[a.difficulty] ?? 0) - (difficultyOrder[b.difficulty] ?? 0);
           break;
@@ -226,7 +239,7 @@ export function BoardFilters({ tasks, components, labels = [], projectId, curren
 
   function clearFilters() {
     setMyTasks(false);
-    setFilters({ search: "", assignee: "", component: "", category: "", difficulty: "", label: "", dateRange: "" });
+    setFilters({ search: "", assignee: "", component: "", category: "", difficulty: "", priority: "", label: "", dateRange: "" });
     setSortField("updatedAt");
     setSortDir("desc");
   }
@@ -343,6 +356,17 @@ export function BoardFilters({ tasks, components, labels = [], projectId, curren
             <option value="">All categories</option>
             {CATEGORIES.map((c: Category) => (
               <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
+
+          <select
+            value={filters.priority}
+            onChange={(e) => setFilters((f) => ({ ...f, priority: e.target.value }))}
+            className="text-xs bg-bg-input border border-border rounded-lg px-2 py-1.5 text-text-muted focus:outline-none focus:ring-1 focus:ring-primary"
+          >
+            <option value="">All priorities</option>
+            {PRIORITIES.map((p: Priority) => (
+              <option key={p} value={p}>{PRIORITY_LABELS[p]}</option>
             ))}
           </select>
 
