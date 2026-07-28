@@ -3,7 +3,7 @@ import { Task } from "@/models/task";
 import { Project } from "@/models/project";
 import { User } from "@/models/user";
 import { Comment } from "@/models/comment";
-import { ITask, TASK_STATUSES, TaskStatus } from "@/types";
+import { ITask, TASK_STATUSES, TaskStatus, DEFAULT_PRIORITY } from "@/types";
 import { logActivity } from "@/lib/activity";
 import { dispatchWebhooks } from "@/lib/webhooks";
 import { dispatchNotifications } from "@/lib/notifications";
@@ -57,7 +57,7 @@ export async function createTask(
     title: body.title,
     description: body.description ?? "",
     difficulty: body.difficulty ?? "M",
-    priority: body.priority ?? "medium",
+    priority: body.priority ?? DEFAULT_PRIORITY,
     component: body.component ?? "",
     category: body.category ?? "user-story",
     status: body.status ?? "planned",
@@ -429,7 +429,7 @@ async function createNextRecurrence(
     title: oldTask.title,
     description: oldTask.description || "",
     difficulty: oldTask.difficulty || "M",
-    priority: oldTask.priority || "medium",
+    priority: oldTask.priority || DEFAULT_PRIORITY,
     component: oldTask.component || "",
     category: oldTask.category || "user-story",
     status: "planned",
