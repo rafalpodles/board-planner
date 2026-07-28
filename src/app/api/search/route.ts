@@ -2,7 +2,13 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withAuth } from "@/lib/middleware";
 import { Task } from "@/models/task";
+import { DEFAULT_PRIORITY } from "@/types";
 import "@/models/project";
+
+// Lean queries skip schema defaults, so tasks predating the priority field need it applied here
+function withPriorityDefault<T extends { priority?: string }>(tasks: T[]): T[] {
+  return tasks.map((t) => ({ ...t, priority: t.priority ?? DEFAULT_PRIORITY }));
+}
 
 export const GET = withAuth(async (request, { user }) => {
   await connectDB();
@@ -44,7 +50,7 @@ export const GET = withAuth(async (request, { user }) => {
         (t.project as { key: string }).key === projectKey
     );
 
-    return NextResponse.json(matched);
+    return NextResponse.json(withPriorityDefault(matched));
   }
 
   // Text search on title and description
@@ -59,5 +65,5 @@ export const GET = withAuth(async (request, { user }) => {
     .limit(50)
     .lean();
 
-  return NextResponse.json(tasks);
+  return NextResponse.json(withPriorityDefault(tasks));
 });

@@ -18,10 +18,13 @@ import {
   RecurrenceFrequency,
   TaskStatus,
   Difficulty,
+  Priority,
   Category,
   TASK_STATUSES,
   STATUS_LABELS,
   DIFFICULTIES,
+  PRIORITIES,
+  PRIORITY_LABELS,
   CATEGORIES,
 } from "@/types";
 import { parseChecklistString } from "@/lib/checklist";
@@ -55,6 +58,7 @@ export function TaskForm({
   const [title, setTitle] = useState(task?.title || "");
   const [description, setDescription] = useState(task?.description || "");
   const [difficulty, setDifficulty] = useState<Difficulty>(task?.difficulty || "M");
+  const [priority, setPriority] = useState<Priority>(task?.priority || "medium");
   const [component, setComponent] = useState(task?.component || "");
   const [category, setCategory] = useState<Category>(task?.category || "user-story");
   const [status, setStatus] = useState<TaskStatus>(task?.status || "planned");
@@ -146,6 +150,7 @@ export function TaskForm({
       title,
       description,
       difficulty,
+      priority,
       component,
       category,
       status,
@@ -287,7 +292,7 @@ export function TaskForm({
         required
       />
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <Select
           label="Status"
           value={status}
@@ -302,6 +307,12 @@ export function TaskForm({
           value={difficulty}
           onChange={(e) => setDifficulty(e.target.value as Difficulty)}
           options={DIFFICULTIES.map((d) => ({ value: d, label: d }))}
+        />
+        <Select
+          label="Priority"
+          value={priority}
+          onChange={(e) => setPriority(e.target.value as Priority)}
+          options={PRIORITIES.map((p) => ({ value: p, label: PRIORITY_LABELS[p] }))}
         />
       </div>
 

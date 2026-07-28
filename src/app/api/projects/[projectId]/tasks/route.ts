@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
 import { Task } from "@/models/task";
-import { TASK_STATUSES, TaskStatus } from "@/types";
+import { TASK_STATUSES, TaskStatus, DEFAULT_PRIORITY } from "@/types";
 import { createTask } from "@/lib/task-service";
 
 const populateFields = [
@@ -43,6 +43,13 @@ export const GET = withProjectAccess(async (request, { params }) => {
   const category = url.searchParams.get("category");
   if (category) {
     filter.category = category;
+  }
+
+  const priority = url.searchParams.get("priority");
+  if (priority) {
+    // $in with null also matches tasks predating the priority field, which default to medium
+    filter.priority =
+      priority === DEFAULT_PRIORITY ? { $in: [DEFAULT_PRIORITY, null] } : priority;
   }
 
   const label = url.searchParams.get("label");

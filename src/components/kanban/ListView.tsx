@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ApiTask, STATUS_LABELS, TASK_STATUSES, TaskStatus } from "@/types";
+import { ApiTask, PRIORITY_LABELS, PRIORITY_ORDER, STATUS_LABELS, TASK_STATUSES, TaskStatus } from "@/types";
 import { Badge } from "@/components/ui/Badge";
 import { timeAgo } from "@/lib/time";
 
-type SortKey = "taskNumber" | "title" | "status" | "assignee" | "difficulty" | "category" | "component" | "dueDate" | "updatedAt";
+type SortKey = "taskNumber" | "title" | "status" | "assignee" | "priority" | "difficulty" | "category" | "component" | "dueDate" | "updatedAt";
 
 interface ListViewProps {
   tasks: ApiTask[];
@@ -59,6 +59,9 @@ export function ListView({ tasks, projectKey, focusedIndex = -1, onTaskClick, on
           cmp = aName.localeCompare(bName);
           break;
         }
+        case "priority":
+          cmp = (PRIORITY_ORDER[a.priority] ?? 99) - (PRIORITY_ORDER[b.priority] ?? 99);
+          break;
         case "difficulty":
           cmp = (DIFFICULTY_ORDER[a.difficulty] ?? 99) - (DIFFICULTY_ORDER[b.difficulty] ?? 99);
           break;
@@ -120,6 +123,7 @@ export function ListView({ tasks, projectKey, focusedIndex = -1, onTaskClick, on
               <SortHeader label="Title" column="title" />
               <SortHeader label="Status" column="status" className="hidden sm:table-cell" />
               <SortHeader label="Assignee" column="assignee" className="hidden md:table-cell" />
+              <SortHeader label="Priority" column="priority" className="hidden md:table-cell" />
               <SortHeader label="Difficulty" column="difficulty" className="hidden lg:table-cell" />
               <SortHeader label="Category" column="category" className="hidden lg:table-cell" />
               <SortHeader label="Component" column="component" className="hidden xl:table-cell" />
@@ -183,6 +187,11 @@ export function ListView({ tasks, projectKey, focusedIndex = -1, onTaskClick, on
                     {task.assignee && typeof task.assignee === "object"
                       ? task.assignee.fullName
                       : "—"}
+                  </td>
+                  <td className="px-3 py-2 hidden md:table-cell">
+                    <Badge variant="priority" value={task.priority}>
+                      {PRIORITY_LABELS[task.priority] ?? task.priority}
+                    </Badge>
                   </td>
                   <td className="px-3 py-2 hidden lg:table-cell">
                     <Badge variant="difficulty" value={task.difficulty}>
