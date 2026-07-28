@@ -2,6 +2,8 @@ const BASE_URL = () => process.env.OPENROUTER_BASE_URL || "https://openrouter.ai
 
 export const DEFAULT_PM_MODEL = () => process.env.PM_MODEL || "moonshotai/kimi-k2.6";
 
+const MAX_TOKENS = () => Number(process.env.PM_MAX_TOKENS) || 8192;
+
 export interface OrToolDefinition {
   name: string;
   description: string;
@@ -46,6 +48,7 @@ export async function chatCompletion(opts: {
       body: JSON.stringify({
         model: opts.model,
         messages: opts.messages,
+        max_tokens: MAX_TOKENS(),
         tools: opts.tools.map((t) => ({
           type: "function",
           function: { name: t.name, description: t.description, parameters: t.parameters },
