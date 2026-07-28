@@ -63,14 +63,16 @@ server.tool(
     assignee: z.string().optional().describe("Filter by assignee username"),
     component: z.string().optional().describe("Filter by component name"),
     category: z.string().optional().describe("Filter by category: bug, doc, user-story, idea"),
+    priority: z.string().optional().describe("Filter by priority: low, medium, high, urgent"),
   },
-  async ({ project, status, assignee, component, category }) => {
+  async ({ project, status, assignee, component, category, priority }) => {
     const proj = await client.getProjectByKey(project) as { _id: string };
     const filters: Record<string, string> = {};
     if (status) filters.status = status;
     if (assignee) filters.assignee = assignee;
     if (component) filters.component = component;
     if (category) filters.category = category;
+    if (priority) filters.priority = priority;
 
     const tasks = await client.listTasks(proj._id, filters);
     return { content: [{ type: "text", text: JSON.stringify(tasks, null, 2) }] };
@@ -96,18 +98,20 @@ server.tool(
     title: z.string().describe("Task title"),
     description: z.string().optional().describe("Task description"),
     difficulty: z.string().optional().describe("Difficulty: S, M, L, or XL"),
+    priority: z.string().optional().describe("Priority: low, medium, high, or urgent (default: medium)"),
     component: z.string().optional().describe("Component name"),
     category: z.string().optional().describe("Category: bug, doc, user-story, idea"),
     assignee: z.string().optional().describe("Assignee username"),
     status: z.string().optional().describe("Initial status (default: planned)"),
     acceptanceCriteria: z.string().optional().describe("Acceptance criteria (markdown checklist, converted to structured checklist items)"),
   },
-  async ({ project, title, description, difficulty, component, category, assignee, status, acceptanceCriteria }) => {
+  async ({ project, title, description, difficulty, priority, component, category, assignee, status, acceptanceCriteria }) => {
     const proj = await client.getProjectByKey(project) as { _id: string };
     const data: Record<string, unknown> = { title };
 
     if (description) data.description = description;
     if (difficulty) data.difficulty = difficulty;
+    if (priority) data.priority = priority;
     if (component) data.component = component;
     if (category) data.category = category;
     if (status) data.status = status;
@@ -133,18 +137,20 @@ server.tool(
     title: z.string().optional(),
     description: z.string().optional(),
     difficulty: z.string().optional(),
+    priority: z.string().optional().describe("Priority: low, medium, high, or urgent"),
     component: z.string().optional(),
     category: z.string().optional(),
     assignee: z.string().optional().describe("Assignee username. Empty string to unassign."),
     acceptanceCriteria: z.string().optional().describe("Acceptance criteria (markdown checklist, converted to structured checklist items)"),
   },
-  async ({ taskKey, title, description, difficulty, component, category, assignee, acceptanceCriteria }) => {
+  async ({ taskKey, title, description, difficulty, priority, component, category, assignee, acceptanceCriteria }) => {
     const { projectId, task } = await resolveTaskKey(taskKey);
     const data: Record<string, unknown> = {};
 
     if (title !== undefined) data.title = title;
     if (description !== undefined) data.description = description;
     if (difficulty !== undefined) data.difficulty = difficulty;
+    if (priority !== undefined) data.priority = priority;
     if (component !== undefined) data.component = component;
     if (category !== undefined) data.category = category;
     if (acceptanceCriteria !== undefined) data.acceptanceCriteria = acceptanceCriteria;

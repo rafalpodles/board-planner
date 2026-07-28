@@ -280,6 +280,7 @@ export default function KanbanPage() {
         title: `Copy of ${task.title}`,
         description: task.description,
         difficulty: task.difficulty,
+        priority: task.priority,
         category: task.category,
         component: task.component,
         checklist: task.checklist,

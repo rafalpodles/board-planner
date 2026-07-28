@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { MarkdownContent } from "@/components/ui/MarkdownContent";
 import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
-import { ApiTask, ApiProject, ApiSprint, ApiLabel, ApiCustomField, TASK_STATUSES, STATUS_LABELS } from "@/types";
+import { ApiTask, ApiProject, ApiSprint, ApiLabel, ApiCustomField, TASK_STATUSES, STATUS_LABELS, PRIORITY_LABELS } from "@/types";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -206,7 +206,10 @@ export default function TaskDetailPage() {
 
             {/* Meta */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
+                <Badge variant="priority" value={task.priority}>
+                  {PRIORITY_LABELS[task.priority] ?? task.priority}
+                </Badge>
                 <Badge variant="difficulty" value={task.difficulty}>
                   {task.difficulty}
                 </Badge>

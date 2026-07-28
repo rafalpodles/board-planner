@@ -71,6 +71,7 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
     title: parsedTask.title,
     description: parsedTask.description ?? "",
     difficulty: parsedTask.difficulty ?? "M",
+    priority: parsedTask.priority ?? "medium",
     component: parsedTask.component ?? "",
     category: parsedTask.category,
     status: parsedTask.status ?? "planned",

@@ -6,6 +6,9 @@ export type Difficulty = "S" | "M" | "L" | "XL";
 // Task categories
 export type Category = "bug" | "doc" | "user-story" | "idea";
 
+// Task priority
+export type Priority = "low" | "medium" | "high" | "urgent";
+
 // Task statuses for Kanban columns
 export type TaskStatus =
   | "planned"
@@ -28,6 +31,22 @@ export const TASK_STATUSES: TaskStatus[] = [
 
 export const DIFFICULTIES: Difficulty[] = ["S", "M", "L", "XL"];
 export const CATEGORIES: Category[] = ["bug", "doc", "user-story", "idea"];
+export const PRIORITIES: Priority[] = ["low", "medium", "high", "urgent"];
+
+export const PRIORITY_LABELS: Record<Priority, string> = {
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  urgent: "Urgent",
+};
+
+// Ascending = most urgent first
+export const PRIORITY_ORDER: Record<string, number> = {
+  urgent: 0,
+  high: 1,
+  medium: 2,
+  low: 3,
+};
 
 export const STATUS_LABELS: Record<TaskStatus, string> = {
   planned: "Planned",
@@ -381,6 +400,7 @@ export interface ITask {
   title: string;
   description: string;
   difficulty: Difficulty;
+  priority: Priority;
   component: string;
   category: Category;
   status: TaskStatus;
@@ -525,6 +545,7 @@ export interface ApiTask {
   title: string;
   description: string;
   difficulty: Difficulty;
+  priority: Priority;
   component: string;
   category: Category;
   status: TaskStatus;
@@ -563,13 +584,14 @@ export interface ApiComment {
 }
 
 // Sort options for board columns
-export type SortField = "updatedAt" | "createdAt" | "dueDate" | "difficulty" | "category" | "title";
+export type SortField = "updatedAt" | "createdAt" | "dueDate" | "priority" | "difficulty" | "category" | "title";
 export type SortDir = "asc" | "desc";
 
 export const SORT_OPTIONS: { value: SortField; label: string; defaultDir: SortDir }[] = [
   { value: "updatedAt", label: "Last updated", defaultDir: "desc" },
   { value: "createdAt", label: "Created", defaultDir: "desc" },
   { value: "dueDate", label: "Due date", defaultDir: "asc" },
+  { value: "priority", label: "Priority", defaultDir: "asc" },
   { value: "difficulty", label: "Difficulty", defaultDir: "asc" },
   { value: "category", label: "Category", defaultDir: "asc" },
   { value: "title", label: "Title", defaultDir: "asc" },
@@ -676,6 +698,7 @@ export interface ParsedTask {
   category: Category;
   component?: string;
   difficulty?: Difficulty;
+  priority?: Priority;
   status?: TaskStatus;
   assignee?: string;
   description?: string;

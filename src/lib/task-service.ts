@@ -57,6 +57,7 @@ export async function createTask(
     title: body.title,
     description: body.description ?? "",
     difficulty: body.difficulty ?? "M",
+    priority: body.priority ?? "medium",
     component: body.component ?? "",
     category: body.category ?? "user-story",
     status: body.status ?? "planned",
@@ -184,7 +185,7 @@ export async function updateTask(
 
   // Whitelist allowed fields to prevent overwriting protected fields
   const allowed = [
-    "title", "description", "difficulty", "component", "category",
+    "title", "description", "difficulty", "priority", "component", "category",
     "status", "assignee", "dueDate", "checklist", "labels", "order", "pinned", "sprint", "customFieldValues", "recurrence",
   ];
   const updates: Record<string, unknown> = {};
@@ -245,7 +246,7 @@ export async function updateTask(
 
   // Log field changes (parallel)
   const activities: Promise<void>[] = [];
-  const trackFields = ["title", "difficulty", "component", "category", "status"];
+  const trackFields = ["title", "difficulty", "priority", "component", "category", "status"];
   for (const field of trackFields) {
     const oldVal = String(oldTask[field as keyof typeof oldTask] ?? "");
     const newVal = String(task[field as keyof typeof task] ?? "");
@@ -428,6 +429,7 @@ async function createNextRecurrence(
     title: oldTask.title,
     description: oldTask.description || "",
     difficulty: oldTask.difficulty || "M",
+    priority: oldTask.priority || "medium",
     component: oldTask.component || "",
     category: oldTask.category || "user-story",
     status: "planned",

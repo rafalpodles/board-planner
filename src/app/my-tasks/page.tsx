@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useApi } from "@/hooks/use-api";
 import { useToast } from "@/components/ui/Toast";
 import { Badge } from "@/components/ui/Badge";
-import { STATUS_LABELS, TaskStatus } from "@/types";
+import { STATUS_LABELS, PRIORITY_LABELS, Priority, TaskStatus } from "@/types";
 
 interface MyTask {
   _id: string;
@@ -13,6 +13,7 @@ interface MyTask {
   title: string;
   status: TaskStatus;
   difficulty: string;
+  priority: Priority;
   category: string;
   component: string;
   updatedAt: string;
@@ -120,6 +121,9 @@ export default function MyTasksPage() {
                     </span>
                     <span className="text-sm flex-1 truncate">{task.title}</span>
                     <div className="flex gap-1 flex-shrink-0">
+                      <Badge variant="priority" value={task.priority}>
+                        {PRIORITY_LABELS[task.priority] ?? task.priority}
+                      </Badge>
                       <Badge variant="difficulty" value={task.difficulty}>
                         {task.difficulty}
                       </Badge>
