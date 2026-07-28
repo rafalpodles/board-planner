@@ -3,9 +3,11 @@ import {
   ParsedTask,
   Category,
   Difficulty,
+  Priority,
   TaskStatus,
   CATEGORIES,
   DIFFICULTIES,
+  PRIORITIES,
   TASK_STATUSES,
   ITask,
   IUser,
@@ -38,6 +40,9 @@ export function parseTasksFromMarkdown(md: string): ParsedTask[] {
     if (data.difficulty && DIFFICULTIES.includes(data.difficulty as Difficulty)) {
       task.difficulty = data.difficulty as Difficulty;
     }
+    if (data.priority && PRIORITIES.includes(data.priority as Priority)) {
+      task.priority = data.priority as Priority;
+    }
     if (data.status && TASK_STATUSES.includes(data.status as TaskStatus)) {
       task.status = data.status as TaskStatus;
     }
@@ -67,6 +72,7 @@ interface TaskForExport {
   category: string;
   component?: string;
   difficulty?: string;
+  priority?: string;
   status?: string;
   assignee?: { username: string } | string | null;
   description?: string;
@@ -82,6 +88,7 @@ export function exportTasksToMarkdown(tasks: (ITask | TaskForExport)[]): string 
       };
       if (task.component) fm.component = task.component;
       if (task.difficulty) fm.difficulty = task.difficulty;
+      if (task.priority) fm.priority = task.priority;
       if (task.status) fm.status = task.status;
       if (task.assignee) {
         const assignee = task.assignee as IUser | { username: string } | string;

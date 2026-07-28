@@ -1,6 +1,6 @@
 "use client";
 
-import { TaskStatus, Difficulty, Category } from "@/types";
+import { TaskStatus, Difficulty, Category, Priority } from "@/types";
 
 const statusColors: Record<TaskStatus, string> = {
   planned: "bg-status-planned/20 text-status-planned",
@@ -19,6 +19,13 @@ const difficultyColors: Record<Difficulty, string> = {
   XL: "bg-difficulty-xl/20 text-difficulty-xl",
 };
 
+const priorityColors: Record<Priority, string> = {
+  low: "bg-priority-low/20 text-priority-low",
+  medium: "bg-priority-medium/20 text-priority-medium",
+  high: "bg-priority-high/20 text-priority-high",
+  urgent: "bg-priority-urgent/20 text-priority-urgent",
+};
+
 const categoryColors: Record<Category, string> = {
   bug: "bg-danger/20 text-danger",
   doc: "bg-primary/20 text-primary",
@@ -28,7 +35,7 @@ const categoryColors: Record<Category, string> = {
 
 interface BadgeProps {
   children: React.ReactNode;
-  variant?: "status" | "difficulty" | "category" | "default";
+  variant?: "status" | "difficulty" | "priority" | "category" | "default";
   value?: string;
   className?: string;
 }
@@ -45,6 +52,8 @@ export function Badge({
     colorClass = statusColors[value as TaskStatus];
   } else if (variant === "difficulty" && value && value in difficultyColors) {
     colorClass = difficultyColors[value as Difficulty];
+  } else if (variant === "priority" && value && value in priorityColors) {
+    colorClass = priorityColors[value as Priority];
   } else if (variant === "category" && value && value in categoryColors) {
     colorClass = categoryColors[value as Category];
   }

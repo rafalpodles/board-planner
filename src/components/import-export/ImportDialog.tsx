@@ -78,6 +78,8 @@ export function ImportDialog({
                 <strong>Optional:</strong>{" "}
                 <code className="bg-bg-card px-1 rounded">difficulty</code>{" "}
                 (S | M | L | XL),{" "}
+                <code className="bg-bg-card px-1 rounded">priority</code>{" "}
+                (low | medium | high | urgent),{" "}
                 <code className="bg-bg-card px-1 rounded">status</code>,{" "}
                 <code className="bg-bg-card px-1 rounded">assignee</code>,{" "}
                 <code className="bg-bg-card px-1 rounded">component</code>
@@ -107,6 +109,7 @@ preference detection.
 title: Fix login redirect loop
 category: bug
 difficulty: S
+priority: urgent
 ---
 
 ## Description

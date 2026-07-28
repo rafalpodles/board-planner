@@ -4,7 +4,7 @@ import { Suspense, useState, useEffect, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useApi } from "@/hooks/use-api";
-import { ApiTask, STATUS_LABELS } from "@/types";
+import { ApiTask, STATUS_LABELS, PRIORITY_LABELS } from "@/types";
 import { Badge } from "@/components/ui/Badge";
 
 interface GroupedResult {
@@ -130,6 +130,9 @@ function SearchContent() {
                 </span>
                 <Badge variant="status" value={task.status}>
                   {STATUS_LABELS[task.status]}
+                </Badge>
+                <Badge variant="priority" value={task.priority}>
+                  {PRIORITY_LABELS[task.priority] ?? task.priority}
                 </Badge>
                 <Badge variant="difficulty" value={task.difficulty}>
                   {task.difficulty}

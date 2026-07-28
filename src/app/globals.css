@@ -28,6 +28,11 @@
   --color-difficulty-m: #3b82f6;
   --color-difficulty-l: #f59e0b;
   --color-difficulty-xl: #ef4444;
+
+  --color-priority-low: #6b7280;
+  --color-priority-medium: #3b82f6;
+  --color-priority-high: #f59e0b;
+  --color-priority-urgent: #ef4444;
 }
 
 body {
