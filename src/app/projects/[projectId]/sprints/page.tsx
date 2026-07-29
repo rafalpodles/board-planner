@@ -7,8 +7,22 @@ import { ApiSprint, SprintStatus, SPRINT_STATUS_LABELS } from "@/types";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
+import { Select } from "@/components/ui/Select";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useToast } from "@/components/ui/Toast";
+import {
+  addDays,
+  daysBetween,
+  nextSprintDates,
+  nextSprintName,
+  overlappingSprint,
+} from "@/lib/sprint-defaults";
+
+const DURATION_OPTIONS = [
+  { value: "7", label: "1 week" },
+  { value: "14", label: "2 weeks" },
+  { value: "21", label: "3 weeks" },
+];
 
 export default function SprintsPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -55,17 +69,34 @@ export default function SprintsPage() {
       setGoal(sprint.goal);
     } else {
       setEditing(null);
-      setName("");
-      // Default: start today, end in 2 weeks
-      const today = new Date();
-      const twoWeeks = new Date(today);
-      twoWeeks.setDate(twoWeeks.getDate() + 14);
-      setStartDate(today.toISOString().substring(0, 10));
-      setEndDate(twoWeeks.toISOString().substring(0, 10));
+      const dates = nextSprintDates(sprints, new Date());
+      setName(nextSprintName(sprints));
+      setStartDate(dates.startDate);
+      setEndDate(dates.endDate);
       setGoal("");
     }
     setShowForm(true);
   }
+
+  function handleStartDateChange(value: string) {
+    const duration = daysBetween(startDate, endDate);
+    setStartDate(value);
+    if (value && duration > 0) setEndDate(addDays(value, duration));
+  }
+
+  function handleDurationChange(days: string) {
+    if (!days || !startDate) return;
+    setEndDate(addDays(startDate, Number(days)));
+  }
+
+  const duration = startDate && endDate ? daysBetween(startDate, endDate) : 0;
+  const durationValue = DURATION_OPTIONS.some((o) => o.value === String(duration))
+    ? String(duration)
+    : "";
+  const overlap =
+    startDate && endDate
+      ? overlappingSprint(sprints, startDate, endDate, editing?._id)
+      : null;
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -275,15 +306,24 @@ export default function SprintsPage() {
             placeholder="Sprint 1"
             required
           />
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-3 gap-4">
             <div>
               <label className="block text-sm font-medium mb-1">Start Date</label>
               <input
                 type="date"
                 value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
+                onChange={(e) => handleStartDateChange(e.target.value)}
                 required
                 className="w-full bg-bg-input border border-border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+            </div>
+            <div>
+              <Select
+                label="Duration"
+                value={durationValue}
+                onChange={(e) => handleDurationChange(e.target.value)}
+                options={DURATION_OPTIONS}
+                placeholder="Custom"
               />
             </div>
             <div>
@@ -297,6 +337,17 @@ export default function SprintsPage() {
               />
             </div>
           </div>
+          {duration > 0 && (
+            <p className="text-xs text-text-muted -mt-2">
+              {duration} {duration === 1 ? "day" : "days"}
+            </p>
+          )}
+          {overlap && (
+            <p className="text-xs text-warning">
+              Overlaps &quot;{overlap.name}&quot; ({overlap.startDate.substring(0, 10)} &ndash;{" "}
+              {overlap.endDate.substring(0, 10)}). You can still save.
+            </p>
+          )}
           <Input
             label="Goal (optional)"
             value={goal}
