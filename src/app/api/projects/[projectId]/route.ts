@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
+import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
-import { withProjectAccess, withAdmin } from "@/lib/middleware";
+import { withProjectAccess, withProjectAdmin, withAdmin, canAdminProject } from "@/lib/middleware";
 import { Project } from "@/models/project";
+import { User } from "@/models/user";
 import { Task } from "@/models/task";
 import { Comment } from "@/models/comment";
 import { ActivityLog } from "@/models/activityLog";
@@ -14,14 +16,13 @@ import { encryptSecret } from "@/lib/encryption";
 import { validatePmConfig, isPmAvailable, mergeMcpServerTokens, sanitizeMcpServers } from "@/lib/pm/config";
 import { PROJECT_ICONS } from "@/types";
 
-export const GET = withProjectAccess(async (_request, { params }) => {
+export const GET = withProjectAccess(async (_request, { params, user }) => {
   await connectDB();
   const { projectId } = await params;
 
-  const project = await Project.findById(projectId).populate(
-    "owner",
-    "username fullName"
-  );
+  const project = await Project.findById(projectId)
+    .populate("owner", "username fullName")
+    .populate("admins", "username fullName");
 
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
@@ -34,10 +35,11 @@ export const GET = withProjectAccess(async (_request, { params }) => {
   delete obj.githubToken;
   if (obj.pm) obj.pm.mcpServers = sanitizeMcpServers(obj.pm.mcpServers);
   obj.pmAvailable = isPmAvailable();
+  obj.canAdmin = canAdminProject(user, project);
   return NextResponse.json(obj);
 });
 
-export const PUT = withAdmin(async (request, { params, user }) => {
+export const PUT = withProjectAdmin(async (request, { params, user }) => {
   await connectDB();
   const { projectId } = await params;
   const body = await request.json();
@@ -58,6 +60,49 @@ export const PUT = withAdmin(async (request, { params, user }) => {
         { status: 400 }
       );
     }
+  }
+
+  if (body.pm !== undefined && user.role !== "admin") {
+    return NextResponse.json(
+      { error: "Only an instance admin can change PM agent settings" },
+      { status: 403 }
+    );
+  }
+
+  if (body.admins !== undefined) {
+    if (
+      !Array.isArray(body.admins) ||
+      body.admins.some((id: unknown) => typeof id !== "string" || !isValidObjectId(id))
+    ) {
+      return NextResponse.json(
+        { error: "admins must be an array of user ids" },
+        { status: 400 }
+      );
+    }
+    const current = await Project.findById(projectId).select("owner");
+    if (!current) {
+      return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    }
+    const ownerId = current.owner.toString();
+    const ids = [...new Set(body.admins as string[])].filter((id) => id !== ownerId);
+    const candidates = await User.find({ _id: { $in: ids } }).select("role allowedProjects");
+    const eligible = new Set(
+      candidates
+        .filter(
+          (u) =>
+            u.role === "admin" ||
+            (u.allowedProjects || []).some((p) => p.toString() === projectId)
+        )
+        .map((u) => u._id.toString())
+    );
+    const rejected = ids.filter((id) => !eligible.has(id));
+    if (rejected.length > 0) {
+      return NextResponse.json(
+        { error: "Only users with access to this project can be project admins" },
+        { status: 400 }
+      );
+    }
+    updates.admins = ids;
   }
 
   if (body.pm !== undefined) {
@@ -96,7 +141,9 @@ export const PUT = withAdmin(async (request, { params, user }) => {
 
   const project = await Project.findByIdAndUpdate(projectId, updates, {
     new: true,
-  }).populate("owner", "username fullName");
+  })
+    .populate("owner", "username fullName")
+    .populate("admins", "username fullName");
 
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
@@ -117,6 +164,7 @@ export const PUT = withAdmin(async (request, { params, user }) => {
   delete obj.githubToken;
   if (obj.pm) obj.pm.mcpServers = sanitizeMcpServers(obj.pm.mcpServers);
   obj.pmAvailable = isPmAvailable();
+  obj.canAdmin = canAdminProject(user, project);
   return NextResponse.json(obj);
 });
 
