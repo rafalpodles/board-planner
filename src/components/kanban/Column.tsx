@@ -20,6 +20,7 @@ interface ColumnProps {
   projectKey: string;
   projectLabels?: ApiLabel[];
   selectedTasks?: Set<string>;
+  selectionMode?: boolean;
   onStatusChange: (taskId: string, status: string) => void;
   onTaskDrop?: (taskId: string, status: string, dropIndex: number) => void;
   onTaskClick: (taskId: string) => void;
@@ -33,6 +34,7 @@ export function Column({
   projectKey,
   projectLabels,
   selectedTasks,
+  selectionMode,
   onStatusChange,
   onTaskDrop,
   onTaskClick,
@@ -106,7 +108,7 @@ export function Column({
                 projectKey={projectKey}
                 projectLabels={projectLabels}
                 selected={selectedTasks?.has(task._id)}
-                selectionActive={(selectedTasks?.size ?? 0) > 0}
+                selectionActive={selectionMode || (selectedTasks?.size ?? 0) > 0}
                 onSelect={onTaskSelect}
                 onClick={() => onTaskClick(task._id)}
                 onContextMenu={onTaskContextMenu}

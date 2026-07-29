@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { usePollWhileVisible } from "@/hooks/use-poll-while-visible";
-import { ApiProject, ApiTask, ApiSprint, TASK_STATUSES, STATUS_LABELS } from "@/types";
+import { ApiProject, ApiTask, ApiSprint } from "@/types";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Board } from "@/components/kanban/Board";
 import { BoardFilters } from "@/components/kanban/BoardFilters";
@@ -37,6 +37,7 @@ export default function KanbanPage() {
   const [showImport, setShowImport] = useState(false);
   const [showExport, setShowExport] = useState(false);
   const [selectedTasks, setSelectedTasks] = useState<Set<string>>(new Set());
+  const [selectionMode, setSelectionMode] = useState(false);
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ taskId: string; x: number; y: number } | null>(null);
@@ -111,6 +112,7 @@ export default function KanbanPage() {
       }
       if (e.key === "Escape") {
         setSelectedTasks(new Set());
+        setSelectionMode(false);
         setFocusedTaskIndex(-1);
         return;
       }
@@ -468,6 +470,22 @@ export default function KanbanPage() {
         labels={project.labels || []}
         projectId={projectId}
         currentUsername={user?.username}
+        extraControls={
+          <button
+            onClick={() => {
+              setSelectionMode((on) => !on);
+              setSelectedTasks(new Set());
+            }}
+            className={`text-xs px-3 py-1.5 rounded-lg border transition-colors
+              ${selectionMode
+                ? "border-primary bg-primary/10 text-primary"
+                : "border-border text-text-muted hover:text-text hover:border-border"
+              }`}
+            title="Select multiple tasks, then right-click one of them"
+          >
+            {selectedTasks.size > 0 ? `Select (${selectedTasks.size})` : "Select"}
+          </button>
+        }
         onFilter={setFilteredTasks}
       />
 
@@ -505,66 +523,13 @@ export default function KanbanPage() {
         </div>
       )}
 
-      {selectedTasks.size > 0 && (
-        <div className="mb-4 flex items-center gap-3 bg-bg-card border border-primary/30 rounded-lg px-4 py-2.5">
-          <span className="text-sm font-medium">
-            {selectedTasks.size} selected
-          </span>
-          <select
-            onChange={(e) => {
-              if (e.target.value) handleBulkMove(e.target.value);
-              e.target.value = "";
-            }}
-            className="text-xs bg-bg-input border border-border rounded px-2 py-1.5 text-text-muted focus:outline-none focus:ring-1 focus:ring-primary"
-            defaultValue=""
-          >
-            <option value="" disabled>Move to...</option>
-            {TASK_STATUSES.map((s) => (
-              <option key={s} value={s}>{STATUS_LABELS[s]}</option>
-            ))}
-          </select>
-          {sprints.length > 0 && (
-            <select
-              onChange={(e) => {
-                if (e.target.value) handleBulkSprint(e.target.value === "backlog" ? null : e.target.value);
-                e.target.value = "";
-              }}
-              className="text-xs bg-bg-input border border-border rounded px-2 py-1.5 text-text-muted focus:outline-none focus:ring-1 focus:ring-primary"
-              defaultValue=""
-            >
-              <option value="" disabled>Move to sprint...</option>
-              {sprints
-                .filter((s) => s.status !== "completed")
-                .map((s) => (
-                  <option key={s._id} value={s._id}>
-                    {s.name}{s.status === "active" ? " (Active)" : ""}
-                  </option>
-                ))}
-              <option value="backlog">Remove from sprint</option>
-            </select>
-          )}
-          <Button
-            size="sm"
-            variant="danger"
-            onClick={() => setConfirmBulkDelete(true)}
-          >
-            Delete
-          </Button>
-          <button
-            onClick={() => setSelectedTasks(new Set())}
-            className="text-xs text-text-muted hover:text-text ml-auto"
-          >
-            Clear selection
-          </button>
-        </div>
-      )}
-
       {viewMode === "board" ? (
         <Board
           tasks={filteredTasks}
           projectKey={project.key}
           projectLabels={project.labels || []}
           selectedTasks={selectedTasks}
+          selectionMode={selectionMode}
           onStatusChange={handleStatusChange}
           onTaskDrop={handleTaskDrop}
           onTaskClick={(taskId) =>
@@ -596,6 +561,8 @@ export default function KanbanPage() {
       {contextMenu && (() => {
         const task = tasks.find((t) => t._id === contextMenu.taskId);
         if (!task) return null;
+        // Right-clicking inside the selection acts on all of it; outside it acts on that task alone
+        const bulk = selectedTasks.has(contextMenu.taskId) ? selectedTasks.size : 1;
         return (
           <TaskContextMenu
             x={contextMenu.x}
@@ -604,8 +571,15 @@ export default function KanbanPage() {
             isPinned={task.pinned}
             sprints={sprints.filter((s) => s.status !== "completed")}
             currentSprint={task.sprint}
-            onStatusChange={(status) => handleStatusChange(contextMenu.taskId, status)}
+            selectedCount={bulk}
+            onStatusChange={(status) =>
+              bulk > 1 ? handleBulkMove(status) : handleStatusChange(contextMenu.taskId, status)
+            }
             onSprintChange={async (sprintId) => {
+              if (bulk > 1) {
+                handleBulkSprint(sprintId);
+                return;
+              }
               const taskId = contextMenu.taskId;
               applySprintChange([taskId], sprintId);
               try {
@@ -631,7 +605,8 @@ export default function KanbanPage() {
             }}
             onDuplicate={() => handleContextDuplicate(contextMenu.taskId)}
             onDelete={() => {
-              setConfirmContextDelete(contextMenu.taskId);
+              if (bulk > 1) setConfirmBulkDelete(true);
+              else setConfirmContextDelete(contextMenu.taskId);
               setContextMenu(null);
             }}
             onClose={() => setContextMenu(null)}
