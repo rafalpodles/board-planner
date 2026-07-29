@@ -4,7 +4,8 @@ import { Types } from "mongoose";
 export type Difficulty = "S" | "M" | "L" | "XL";
 
 // Task categories
-export type Category = "bug" | "doc" | "user-story" | "idea";
+// Project-defined since CP-127; the old fixed values remain the per-project defaults
+export type Category = string;
 
 // Task priority
 export type Priority = "low" | "medium" | "high" | "urgent";
@@ -31,6 +32,13 @@ export const TASK_STATUSES: TaskStatus[] = [
 
 export const DIFFICULTIES: Difficulty[] = ["S", "M", "L", "XL"];
 export const CATEGORIES: Category[] = ["bug", "doc", "user-story", "idea"];
+
+export const DEFAULT_PROJECT_CATEGORIES: { name: string; color: string }[] = [
+  { name: "bug", color: "#ef4444" },
+  { name: "doc", color: "#3b82f6" },
+  { name: "user-story", color: "#22c55e" },
+  { name: "idea", color: "#f59e0b" },
+];
 export const PRIORITIES: Priority[] = ["low", "medium", "high", "urgent"];
 export const DEFAULT_PRIORITY: Priority = "medium";
 
@@ -147,6 +155,18 @@ export interface IOAuthToken {
 
 export interface ILabel {
   _id: Types.ObjectId;
+  name: string;
+  color: string;
+}
+
+export interface IProjectCategory {
+  _id: Types.ObjectId;
+  name: string;
+  color: string;
+}
+
+export interface ApiProjectCategory {
+  _id: string;
   name: string;
   color: string;
 }
@@ -318,6 +338,7 @@ export interface IProject {
   icon: string;
   components: string[];
   labels: ILabel[];
+  categories: IProjectCategory[];
   taskTemplates: ITaskTemplate[];
   customFields: ICustomField[];
   webhooks: IWebhook[];
@@ -532,6 +553,7 @@ export interface ApiProject {
   icon: string;
   components: string[];
   labels: ApiLabel[];
+  categories?: ApiProjectCategory[];
   taskTemplates: ApiTaskTemplate[];
   customFields: ApiCustomField[];
   webhooks: ApiWebhook[];

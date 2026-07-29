@@ -16,7 +16,10 @@ import {
 
 const TASK_SEPARATOR = /\n={3,}\n/;
 
-export function parseTasksFromMarkdown(md: string): ParsedTask[] {
+export function parseTasksFromMarkdown(
+  md: string,
+  validCategories: string[] = CATEGORIES
+): ParsedTask[] {
   const chunks = md.split(TASK_SEPARATOR).filter((c) => c.trim());
 
   return chunks.map((chunk) => {
@@ -25,9 +28,9 @@ export function parseTasksFromMarkdown(md: string): ParsedTask[] {
     if (!data.title) {
       throw new Error("Task frontmatter must include 'title'");
     }
-    if (!data.category || !CATEGORIES.includes(data.category as Category)) {
+    if (!data.category || !validCategories.includes(data.category as Category)) {
       throw new Error(
-        `Task "${data.title}" must have a valid category: ${CATEGORIES.join(", ")}`
+        `Task "${data.title}" must have a valid category: ${validCategories.join(", ")}`
       );
     }
 

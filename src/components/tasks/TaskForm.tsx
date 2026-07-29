@@ -35,6 +35,7 @@ interface TaskFormProps {
   projectKey?: string;
   task?: ApiTask;
   components: string[];
+  categories?: string[];
   projectLabels?: ApiLabel[];
   taskTemplates?: ApiTaskTemplate[];
   sprints?: ApiSprint[];
@@ -48,6 +49,7 @@ export function TaskForm({
   projectKey,
   task,
   components,
+  categories = [],
   projectLabels = [],
   taskTemplates = [],
   sprints = [],
@@ -60,7 +62,9 @@ export function TaskForm({
   const [difficulty, setDifficulty] = useState<Difficulty>(task?.difficulty || "M");
   const [priority, setPriority] = useState<Priority>(task?.priority || "medium");
   const [component, setComponent] = useState(task?.component || "");
-  const [category, setCategory] = useState<Category>(task?.category || "user-story");
+  const [category, setCategory] = useState<Category>(
+    task?.category || (categories.includes("user-story") ? "user-story" : categories[0] || "user-story")
+  );
   const [status, setStatus] = useState<TaskStatus>(task?.status || "planned");
   const [assignee, setAssignee] = useState(
     task?.assignee && typeof task.assignee === "object"
@@ -321,7 +325,7 @@ export function TaskForm({
           label="Category"
           value={category}
           onChange={(e) => setCategory(e.target.value as Category)}
-          options={CATEGORIES.map((c) => ({ value: c, label: c }))}
+          options={(categories.length > 0 ? categories : CATEGORIES).map((c) => ({ value: c, label: c }))}
         />
         <Select
           label="Component"

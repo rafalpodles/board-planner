@@ -21,9 +21,12 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
     );
   }
 
+  const projectForCategories = await Project.findById(projectId, "categories").lean();
+  const categoryNames = (projectForCategories?.categories || []).map((c) => c.name);
+
   let parsed;
   try {
-    parsed = parseTasksFromMarkdown(markdown);
+    parsed = parseTasksFromMarkdown(markdown, categoryNames.length > 0 ? categoryNames : undefined);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Invalid markdown";
     return NextResponse.json({ error: message }, { status: 400 });
