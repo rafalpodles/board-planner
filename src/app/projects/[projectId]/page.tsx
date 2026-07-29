@@ -8,6 +8,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { usePollWhileVisible } from "@/hooks/use-poll-while-visible";
 import { ApiProject, ApiTask, ApiSprint, DEFAULT_PROJECT_ICON } from "@/types";
 import { effectiveColumns } from "@/lib/columns";
+import { subscribeBoardRefresh } from "@/lib/board-refresh";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Board } from "@/components/kanban/Board";
 import { BoardFilters } from "@/components/kanban/BoardFilters";
@@ -85,6 +86,19 @@ export default function KanbanPage() {
   }, [projectId, selectedSprint]);
 
   usePollWhileVisible(loadData, 10_000);
+
+  // Instant refresh when the PM chat reports a write action (poll stays as fallback)
+  useEffect(() => {
+    let debounce: ReturnType<typeof setTimeout> | null = null;
+    const unsubscribe = subscribeBoardRefresh(projectId, () => {
+      if (debounce) clearTimeout(debounce);
+      debounce = setTimeout(loadData, 300);
+    });
+    return () => {
+      if (debounce) clearTimeout(debounce);
+      unsubscribe();
+    };
+  }, [projectId, loadData]);
 
   // Update browser tab title with task counts
   useEffect(() => {
