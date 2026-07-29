@@ -16,7 +16,7 @@ export const GET = withAuth(async (_request, { user }) => {
   }
 
   const tasks = await Task.find(filter)
-    .populate("project", "name key")
+    .populate("project", "name key icon")
     .populate("assignee", "username fullName")
     .sort({ updatedAt: -1 });
 

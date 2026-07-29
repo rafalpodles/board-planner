@@ -298,11 +298,22 @@ export interface IPmConfig {
   autonomy?: IPmAutonomy;
 }
 
+export const DEFAULT_PROJECT_ICON = "📋";
+
+export const PROJECT_ICONS: string[] = [
+  "📋", "🚀", "🐛", "💡", "🎯", "🔧", "📦", "🧪",
+  "🎨", "📊", "🔐", "🌐", "📱", "💻", "⚙️", "🗂️",
+  "📝", "🔍", "🧩", "⚡", "🔥", "✨", "🏗️", "🛠️",
+  "📈", "🗄️", "🤖", "🧠", "🎮", "🛒", "💰", "📚",
+  "🏥", "🎬", "🎵", "✈️", "🏠", "🌱", "⏰", "🏆",
+];
+
 export interface IProject {
   _id: Types.ObjectId;
   name: string;
   key: string;
   description: string;
+  icon: string;
   components: string[];
   labels: ILabel[];
   taskTemplates: ITaskTemplate[];
@@ -515,6 +526,7 @@ export interface ApiProject {
   name: string;
   key: string;
   description: string;
+  icon: string;
   components: string[];
   labels: ApiLabel[];
   taskTemplates: ApiTaskTemplate[];

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useApi } from "@/hooks/use-api";
-import { ApiProject } from "@/types";
+import { ApiProject, DEFAULT_PROJECT_ICON } from "@/types";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
 import { useAuth } from "@/hooks/use-auth";
@@ -60,9 +60,14 @@ export default function ProjectsPage() {
               href={`/projects/${project._id}`}
               className="rounded-xl border border-border bg-bg-card p-4 cursor-pointer hover:border-primary/50 transition-colors block"
             >
-              <div className="flex items-start justify-between mb-2">
-                <h2 className="font-semibold text-lg">{project.name}</h2>
-                <span className="text-xs font-mono bg-bg-input px-2 py-1 rounded">
+              <div className="flex items-start justify-between gap-2 mb-2">
+                <h2 className="font-semibold text-lg flex items-center gap-2 min-w-0">
+                  <span className="text-xl leading-none shrink-0" aria-hidden="true">
+                    {project.icon || DEFAULT_PROJECT_ICON}
+                  </span>
+                  <span className="truncate">{project.name}</span>
+                </h2>
+                <span className="text-xs font-mono bg-bg-input px-2 py-1 rounded shrink-0">
                   {project.key}
                 </span>
               </div>
