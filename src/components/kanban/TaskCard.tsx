@@ -3,6 +3,9 @@
 import { ApiTask, ApiLabel, PRIORITY_LABELS } from "@/types";
 import { Badge } from "@/components/ui/Badge";
 
+// Cards are narrow; the default badge padding makes three of them wrap raggedly
+const COMPACT_BADGE = "text-[10px] px-1.5 whitespace-nowrap";
+
 interface TaskCardProps {
   task: ApiTask;
   projectKey: string;
@@ -67,8 +70,8 @@ export function TaskCard({
         </button>
       )}
 
-      <div className="flex items-start justify-between gap-2 mb-2 pr-6">
-        <span className="text-xs font-mono text-text-muted flex items-center gap-1">
+      <div className="flex flex-wrap items-center gap-1 mb-2 pr-6">
+        <span className="text-xs font-mono text-text-muted flex items-center gap-1 mr-0.5">
           {task.pinned && (
             <svg className="w-3 h-3 text-primary" fill="currentColor" viewBox="0 0 24 24">
               <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2z"/>
@@ -80,18 +83,16 @@ export function TaskCard({
             </svg>
           )}
           {projectKey}-{task.taskNumber}
-          <Badge variant="priority" value={task.priority} className="text-[10px] px-1.5">
-            {PRIORITY_LABELS[task.priority] ?? task.priority}
-          </Badge>
         </span>
-        <div className="flex flex-wrap justify-end gap-1">
-          <Badge variant="difficulty" value={task.difficulty}>
-            {task.difficulty}
-          </Badge>
-          <Badge variant="category" value={task.category}>
-            {task.category}
-          </Badge>
-        </div>
+        <Badge variant="priority" value={task.priority} className={COMPACT_BADGE}>
+          {PRIORITY_LABELS[task.priority] ?? task.priority}
+        </Badge>
+        <Badge variant="difficulty" value={task.difficulty} className={COMPACT_BADGE}>
+          {task.difficulty}
+        </Badge>
+        <Badge variant="category" value={task.category} className={COMPACT_BADGE}>
+          {task.category}
+        </Badge>
       </div>
 
       <h3 className="text-sm font-medium mb-2 line-clamp-2">{task.title}</h3>
