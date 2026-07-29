@@ -1,18 +1,31 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ApiTask, PRIORITY_LABELS, PRIORITY_ORDER, STATUS_LABELS, TASK_STATUSES, TaskStatus } from "@/types";
+import Link from "next/link";
+import { ApiSprint, ApiTask, PRIORITY_LABELS, PRIORITY_ORDER, STATUS_LABELS, TASK_STATUSES, TaskStatus } from "@/types";
 import { Badge } from "@/components/ui/Badge";
 import { timeAgo } from "@/lib/time";
 
-type SortKey = "taskNumber" | "title" | "status" | "assignee" | "priority" | "difficulty" | "category" | "component" | "dueDate" | "updatedAt";
+type SortKey = "taskNumber" | "title" | "status" | "assignee" | "priority" | "sprint" | "difficulty" | "category" | "component" | "dueDate" | "updatedAt";
 
 interface ListViewProps {
   tasks: ApiTask[];
   projectKey: string;
+  projectId?: string;
+  sprints?: ApiSprint[];
   focusedIndex?: number;
   onTaskClick: (taskId: string) => void;
   onStatusChange?: (taskId: string, status: string) => void;
+}
+
+function sprintTiming(sprint: ApiSprint): "active" | "past" | "upcoming" {
+  const now = Date.now();
+  const start = new Date(sprint.startDate).getTime();
+  const end = new Date(sprint.endDate);
+  end.setHours(23, 59, 59, 999);
+  if (now > end.getTime()) return "past";
+  if (now < start) return "upcoming";
+  return "active";
 }
 
 const DIFFICULTY_ORDER: Record<string, number> = { S: 0, M: 1, L: 2, XL: 3 };
@@ -20,10 +33,11 @@ const STATUS_ORDER: Record<string, number> = Object.fromEntries(
   TASK_STATUSES.map((s, i) => [s, i])
 );
 
-export function ListView({ tasks, projectKey, focusedIndex = -1, onTaskClick, onStatusChange }: ListViewProps) {
+export function ListView({ tasks, projectKey, projectId, sprints = [], focusedIndex = -1, onTaskClick, onStatusChange }: ListViewProps) {
   const rowRefs = useRef<(HTMLTableRowElement | null)[]>([]);
   const [sortKey, setSortKey] = useState<SortKey>("taskNumber");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const sprintById = useMemo(() => new Map(sprints.map((s) => [s._id, s])), [sprints]);
 
   useEffect(() => {
     if (focusedIndex >= 0 && rowRefs.current[focusedIndex]) {
@@ -62,6 +76,14 @@ export function ListView({ tasks, projectKey, focusedIndex = -1, onTaskClick, on
         case "priority":
           cmp = (PRIORITY_ORDER[a.priority] ?? 99) - (PRIORITY_ORDER[b.priority] ?? 99);
           break;
+        case "sprint": {
+          const start = (task: ApiTask) => {
+            const sprint = task.sprint ? sprintById.get(task.sprint) : undefined;
+            return sprint ? new Date(sprint.startDate).getTime() : Number.MAX_SAFE_INTEGER;
+          };
+          cmp = start(a) - start(b);
+          break;
+        }
         case "difficulty":
           cmp = (DIFFICULTY_ORDER[a.difficulty] ?? 99) - (DIFFICULTY_ORDER[b.difficulty] ?? 99);
           break;
@@ -83,7 +105,7 @@ export function ListView({ tasks, projectKey, focusedIndex = -1, onTaskClick, on
       }
       return sortDir === "asc" ? cmp : -cmp;
     });
-  }, [tasks, sortKey, sortDir]);
+  }, [tasks, sortKey, sortDir, sprintById]);
 
   function SortHeader({ label, column, className }: { label: string; column: SortKey; className?: string }) {
     const active = sortKey === column;
@@ -124,6 +146,7 @@ export function ListView({ tasks, projectKey, focusedIndex = -1, onTaskClick, on
               <SortHeader label="Status" column="status" className="hidden sm:table-cell" />
               <SortHeader label="Assignee" column="assignee" className="hidden md:table-cell" />
               <SortHeader label="Priority" column="priority" className="hidden md:table-cell" />
+              <SortHeader label="Sprint" column="sprint" className="hidden lg:table-cell" />
               <SortHeader label="Difficulty" column="difficulty" className="hidden lg:table-cell" />
               <SortHeader label="Category" column="category" className="hidden lg:table-cell" />
               <SortHeader label="Component" column="component" className="hidden xl:table-cell" />
@@ -192,6 +215,40 @@ export function ListView({ tasks, projectKey, focusedIndex = -1, onTaskClick, on
                     <Badge variant="priority" value={task.priority}>
                       {PRIORITY_LABELS[task.priority] ?? task.priority}
                     </Badge>
+                  </td>
+                  <td className="px-3 py-2 hidden lg:table-cell text-xs whitespace-nowrap">
+                    {(() => {
+                      const sprint = task.sprint ? sprintById.get(task.sprint) : undefined;
+                      if (!sprint) return <span className="text-text-muted">—</span>;
+                      const timing = sprintTiming(sprint);
+                      const inner = (
+                        <span
+                          className={`inline-flex items-center gap-1.5 ${
+                            timing === "active"
+                              ? "font-medium"
+                              : timing === "past"
+                                ? "text-text-muted/60"
+                                : "text-text-muted"
+                          }`}
+                        >
+                          {timing === "active" && (
+                            <span className="w-1.5 h-1.5 rounded-full bg-success shrink-0" />
+                          )}
+                          {sprint.name}
+                        </span>
+                      );
+                      return projectId ? (
+                        <Link
+                          href={`/projects/${projectId}/sprints`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="hover:underline"
+                        >
+                          {inner}
+                        </Link>
+                      ) : (
+                        inner
+                      );
+                    })()}
                   </td>
                   <td className="px-3 py-2 hidden lg:table-cell">
                     <Badge variant="difficulty" value={task.difficulty}>
