@@ -171,37 +171,40 @@ export default function ProjectSettingsPage() {
   async function savePmSettings(options?: { silent?: boolean }): Promise<boolean> {
     setPmSaving(true);
     try {
-      const updated = await api.put(`/api/projects/${projectId}`, {
-        pm: {
-          enabled: pmEnabled,
-          model: pmModel.trim(),
-          contextNotes: pmNotes,
-          links: pmLinks,
-          dailyTurnCap: pmDailyCap.trim() ? Number(pmDailyCap) : 0,
-          autonomy: {
-            dailyReview: pmDailyReview,
-            reviewHour: Number(pmReviewHour) || 0,
-            timezone: pmTimezone.trim(),
-            handleNeedsHumanReview: pmHandleNhr,
-          },
-          mcpServers: pmMcpServers
-            .filter((s) => s.name.trim() || s.url.trim())
-            .map((s) => ({
-              name: s.name.trim(),
-              url: s.url.trim(),
-              authType: s.authType,
-              authToken: s.authToken,
-              oauthClientId: s.oauthClientId.trim(),
-              oauthClientSecret: s.oauthClientSecret,
-              allowWrites: s.allowWrites,
-              toolAllowlist: s.toolAllowlist
-                .split(",")
-                .map((t) => t.trim())
-                .filter(Boolean),
-              enabled: s.enabled,
-            })),
+      // Instance-owned fields (enabled, model, cap, mcpServers) are 403'd by the
+      // API for project admins — send only what the current role may set
+      const pm: Record<string, unknown> = {
+        contextNotes: pmNotes,
+        links: pmLinks,
+        autonomy: {
+          dailyReview: pmDailyReview,
+          reviewHour: Number(pmReviewHour) || 0,
+          timezone: pmTimezone.trim(),
+          handleNeedsHumanReview: pmHandleNhr,
         },
-      });
+      };
+      if (isAdmin) {
+        pm.enabled = pmEnabled;
+        pm.model = pmModel.trim();
+        pm.dailyTurnCap = pmDailyCap.trim() ? Number(pmDailyCap) : 0;
+        pm.mcpServers = pmMcpServers
+          .filter((s) => s.name.trim() || s.url.trim())
+          .map((s) => ({
+            name: s.name.trim(),
+            url: s.url.trim(),
+            authType: s.authType,
+            authToken: s.authToken,
+            oauthClientId: s.oauthClientId.trim(),
+            oauthClientSecret: s.oauthClientSecret,
+            allowWrites: s.allowWrites,
+            toolAllowlist: s.toolAllowlist
+              .split(",")
+              .map((t) => t.trim())
+              .filter(Boolean),
+            enabled: s.enabled,
+          }));
+      }
+      const updated = await api.put(`/api/projects/${projectId}`, { pm });
       setProject(updated);
       syncMcpServersFrom(updated);
       if (!options?.silent) toast("PM settings saved", "success");
@@ -969,8 +972,8 @@ export default function ProjectSettingsPage() {
       </div>
       )}
 
-      {/* PM Agent — instance-admin only until CP-132 splits it */}
-      {isAdmin && (
+      {/* PM Agent — cost/credential fields are instance-admin, content is project-admin */}
+      {project.canAdmin && (
       <div className="mb-8">
         <h2 className="font-semibold mb-3">PM Agent</h2>
         {!project.pmAvailable ? (
@@ -980,6 +983,15 @@ export default function ProjectSettingsPage() {
           </p>
         ) : (
           <div className="space-y-3">
+            {!isAdmin && (
+              <p className="text-xs text-text-muted">
+                Agent enablement, model, daily turn cap and MCP connections are managed by the
+                instance admin.
+              </p>
+            )}
+            {isAdmin && (
+            <div className="border border-border rounded-lg p-3 space-y-3">
+              <h3 className="text-sm font-medium">Instance admin — cost &amp; credentials</h3>
             <label className="flex items-center gap-2 text-sm cursor-pointer">
               <input
                 type="checkbox"
@@ -1007,6 +1019,8 @@ export default function ProjectSettingsPage() {
                 placeholder="Leave empty for the server default"
               />
             </div>
+            </div>
+            )}
             <div>
               <label className="block text-sm font-medium mb-1">Project context</label>
               <textarea
@@ -1109,8 +1123,11 @@ export default function ProjectSettingsPage() {
                 </Button>
               </div>
             </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">MCP connections</label>
+            {isAdmin && (
+            <div className="border border-border rounded-lg p-3">
+              <label className="block text-sm font-medium mb-1">
+                MCP connections — instance admin
+              </label>
               <p className="text-xs text-text-muted mb-2">
                 External MCP servers the PM agent can read at turn start (e.g. a self-hosted Notion
                 MCP). Writes are off unless explicitly allowed per server.
@@ -1281,6 +1298,7 @@ export default function ProjectSettingsPage() {
                 Add MCP server
               </Button>
             </div>
+            )}
             <Button
               type="button"
               variant="secondary"
