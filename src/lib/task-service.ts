@@ -10,6 +10,7 @@ import { dispatchNotifications } from "@/lib/notifications";
 import { createNotifications, collectRecipients, resolveMentions } from "@/lib/in-app-notifications";
 import { parseChecklistString } from "@/lib/checklist";
 import { validateCustomFieldValues, sanitizeCustomFieldValues } from "@/lib/custom-fields";
+import { onTaskStatusChanged } from "@/lib/pm/triggers";
 
 export const taskPopulateFields = [
   { path: "assignee", select: "username fullName" },
@@ -170,6 +171,14 @@ export async function changeStatus(
         console.error("Failed to create recurring task:", err)
       );
     }
+
+    onTaskStatusChanged({
+      projectId,
+      taskId,
+      oldStatus: oldTask.status,
+      newStatus: status,
+      actorId,
+    }).catch((err) => console.error("PM status trigger failed:", err));
   }
 
   return { ok: true, data: task as ITask };
@@ -281,6 +290,17 @@ export async function updateTask(
   }
 
   await Promise.all(activities);
+
+  // The edit form sends status inside the PUT body, so this path needs the hook too
+  if (updates.status !== undefined && oldTask.status !== task.status) {
+    onTaskStatusChanged({
+      projectId,
+      taskId,
+      oldStatus: oldTask.status,
+      newStatus: task.status,
+      actorId,
+    }).catch((err) => console.error("PM status trigger failed:", err));
+  }
 
   // In-app notification: assignee changed
   if (updates.assignee !== undefined && task.assignee) {

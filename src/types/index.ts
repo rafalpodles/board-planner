@@ -344,6 +344,23 @@ export interface IPmMessage {
   createdAt: Date;
 }
 
+export const PM_TRIGGER_STATES = ["pending", "running", "done", "failed"] as const;
+export type PmTriggerState = (typeof PM_TRIGGER_STATES)[number];
+
+export interface IPmTrigger {
+  _id: Types.ObjectId;
+  project: Types.ObjectId;
+  type: "needs_human_review";
+  taskKey: string;
+  task: Types.ObjectId;
+  state: PmTriggerState;
+  active: boolean;
+  attempts: number;
+  lastError: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export interface ILinkedPR {
   _id: Types.ObjectId;
   number: number;
