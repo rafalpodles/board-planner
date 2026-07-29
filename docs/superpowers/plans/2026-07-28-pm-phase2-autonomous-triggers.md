@@ -376,19 +376,31 @@ Add `trigger: PmMessageTrigger;` to `IPmMessage` and to `ApiPmMessage`.
 
 - [ ] **Step 2: Add the schema field**
 
-In `src/models/pmMessage.ts`, inside the schema after `actions`:
+In `src/models/pmMessage.ts`, declare the subdocument as its own schema above `pmMessageSchema`:
+
+```typescript
+// Separate schema: an inline subdocument with a field named "type" collides with Mongoose's typeKey
+const triggerSchema = new Schema<PmMessageTrigger>(
+  {
+    type: { type: String, enum: PM_TRIGGER_TYPES, default: "chat" },
+    taskKey: { type: String, default: "" },
+  },
+  { _id: false }
+);
+```
+
+then, inside `pmMessageSchema` after `actions`:
 
 ```typescript
     trigger: {
-      type: {
-        type: { type: String, enum: PM_TRIGGER_TYPES, default: "chat" },
-        taskKey: { type: String, default: "" },
-      },
+      type: triggerSchema,
       default: () => ({ type: "chat", taskKey: "" }),
     },
 ```
 
-Import `PM_TRIGGER_TYPES` from `@/types`. The nested `type: { type: ... }` is Mongoose's escape hatch for a field literally named `type` — it is why the outer `type:` wrapper is needed here and nowhere else in this codebase.
+Import `PmMessageTrigger` and `PM_TRIGGER_TYPES` from `@/types`.
+
+An inline subdocument does **not** work here. Declaring it inline makes Mongoose read the nested `type` key as the SchemaType declaration for `trigger` itself, and the build dies with `Invalid schema configuration: 'Default' is not a valid type at path 'trigger.default'`. A separate schema sidesteps the ambiguity; `_id: false` keeps the subdocument from growing its own ObjectId.
 
 - [ ] **Step 3: Thread the trigger through the agent**
 

@@ -325,12 +325,21 @@ export interface IPmAction {
   at: Date;
 }
 
+export const PM_TRIGGER_TYPES = ["chat", "daily_review", "needs_human_review"] as const;
+export type PmTriggerType = (typeof PM_TRIGGER_TYPES)[number];
+
+export interface PmMessageTrigger {
+  type: PmTriggerType;
+  taskKey?: string;
+}
+
 export interface IPmMessage {
   _id: Types.ObjectId;
   project: Types.ObjectId;
   role: "user" | "assistant";
   content: string;
   actions: IPmAction[];
+  trigger: PmMessageTrigger;
   triggeredBy: Types.ObjectId | IUser | null;
   createdAt: Date;
 }
@@ -540,6 +549,7 @@ export interface ApiPmMessage {
   role: "user" | "assistant";
   content: string;
   actions: ApiPmAction[];
+  trigger: PmMessageTrigger;
   triggeredBy: ApiUser | string | null;
   createdAt: string;
 }
