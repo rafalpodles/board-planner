@@ -62,13 +62,6 @@ export const PUT = withProjectAdmin(async (request, { params, user }) => {
     }
   }
 
-  if (body.pm !== undefined && user.role !== "admin") {
-    return NextResponse.json(
-      { error: "Only an instance admin can change PM agent settings" },
-      { status: 403 }
-    );
-  }
-
   if (body.admins !== undefined) {
     if (
       !Array.isArray(body.admins) ||
@@ -106,13 +99,29 @@ export const PUT = withProjectAdmin(async (request, { params, user }) => {
   }
 
   if (body.pm !== undefined) {
+    if (typeof body.pm !== "object" || body.pm === null || Array.isArray(body.pm)) {
+      return NextResponse.json({ error: "pm must be an object" }, { status: 400 });
+    }
+    const existing = await Project.findById(projectId).select("pm");
+    if (!existing) {
+      return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    }
+    if (user.role !== "admin") {
+      const instanceFields = ["enabled", "model", "dailyTurnCap", "mcpServers"];
+      const rejected = instanceFields.filter((f) => body.pm[f] !== undefined);
+      if (rejected.length > 0) {
+        return NextResponse.json(
+          { error: `Only an instance admin can change PM ${rejected.join(", ")}` },
+          { status: 403 }
+        );
+      }
+      body.pm.enabled = existing.pm?.enabled ?? false;
+      body.pm.model = existing.pm?.model ?? "";
+      body.pm.dailyTurnCap = existing.pm?.dailyTurnCap ?? 0;
+    }
     const pmResult = validatePmConfig(body.pm);
     if (!pmResult.valid) {
       return NextResponse.json({ error: pmResult.error }, { status: 400 });
-    }
-    const existing = await Project.findById(projectId).select("pm.mcpServers pm.autonomy");
-    if (!existing) {
-      return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
     if (body.pm.mcpServers === undefined) {
       // Clients unaware of mcpServers must not wipe the configured list
