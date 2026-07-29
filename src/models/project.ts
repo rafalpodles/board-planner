@@ -173,6 +173,20 @@ const projectSchema = new Schema<IProject>(
       type: String,
       default: "",
     },
+    gitlabRepo: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    gitlabHost: {
+      type: String,
+      default: "https://gitlab.com",
+      trim: true,
+    },
+    gitlabToken: {
+      type: String,
+      default: "",
+    },
     taskCounter: {
       type: Number,
       default: 0,

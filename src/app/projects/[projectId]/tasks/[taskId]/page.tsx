@@ -389,11 +389,11 @@ export default function TaskDetailPage() {
         {/* Linked PRs */}
         {task.linkedPRs && task.linkedPRs.length > 0 && (
           <div>
-            <h2 className="font-semibold mb-2">Pull Requests</h2>
+            <h2 className="font-semibold mb-2">Pull / Merge Requests</h2>
             <div className="space-y-1.5">
               {task.linkedPRs.map((pr) => (
                 <a
-                  key={pr.number}
+                  key={`${pr.provider ?? "github"}-${pr.number}`}
                   href={pr.url}
                   target="_blank"
                   rel="noopener noreferrer"
@@ -415,6 +415,11 @@ export default function TaskDetailPage() {
                   <span className="flex-1 truncate">
                     #{pr.number} {pr.title}
                   </span>
+                  {pr.provider === "gitlab" && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded font-medium text-[#fc6d26] bg-[#fc6d26]/10">
+                      GitLab
+                    </span>
+                  )}
                   <span
                     className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
                       pr.state === "merged"

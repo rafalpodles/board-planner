@@ -382,6 +382,9 @@ export interface IProject {
   notificationChannels: INotificationChannel[];
   githubRepo: string;
   githubToken: string;
+  gitlabRepo: string;
+  gitlabHost: string;
+  gitlabToken: string;
   taskCounter: number;
   pm?: IPmConfig;
   owner: Types.ObjectId | IUser;
@@ -435,6 +438,7 @@ export interface IPmTrigger {
 
 export interface ILinkedPR {
   _id: Types.ObjectId;
+  provider?: "github" | "gitlab";
   number: number;
   title: string;
   state: "open" | "closed" | "merged";
@@ -445,6 +449,7 @@ export interface ILinkedPR {
 
 export interface ApiLinkedPR {
   _id: string;
+  provider?: "github" | "gitlab";
   number: number;
   title: string;
   state: "open" | "closed" | "merged";
@@ -598,6 +603,9 @@ export interface ApiProject {
   notificationChannels: ApiNotificationChannel[];
   githubRepo: string;
   githubTokenSet: boolean;
+  gitlabRepo?: string;
+  gitlabHost?: string;
+  gitlabTokenSet?: boolean;
   taskCounter: number;
   pm?: ApiPmConfig;
   pmAvailable?: boolean;
