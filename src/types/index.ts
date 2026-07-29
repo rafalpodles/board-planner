@@ -272,6 +272,22 @@ export interface IPmOauthState {
   createdAt: Date;
 }
 
+export interface IPmAutonomy {
+  dailyReview: boolean;
+  reviewHour: number;
+  timezone: string;
+  handleNeedsHumanReview: boolean;
+  lastDailyReviewDay: string;
+}
+
+export const DEFAULT_PM_AUTONOMY: IPmAutonomy = {
+  dailyReview: false,
+  reviewHour: 9,
+  timezone: "Europe/Warsaw",
+  handleNeedsHumanReview: false,
+  lastDailyReviewDay: "",
+};
+
 export interface IPmConfig {
   enabled: boolean;
   model: string;
@@ -279,6 +295,7 @@ export interface IPmConfig {
   links: IPmLink[];
   dailyTurnCap?: number;
   mcpServers?: IPmMcpServer[];
+  autonomy?: IPmAutonomy;
 }
 
 export interface IProject {
@@ -507,6 +524,7 @@ export interface ApiPmConfig {
   links: IPmLink[];
   dailyTurnCap?: number;
   mcpServers?: ApiPmMcpServer[];
+  autonomy?: IPmAutonomy;
 }
 
 export interface ApiPmAction {
