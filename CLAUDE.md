@@ -132,6 +132,7 @@ mcp-server/           # Standalone MCP server (stdio transport)
 - **Notifications**: In-app + optional Slack/Discord webhooks + optional email
 - **Recurrence**: When task → done with recurrence config, auto-creates next task
 - **GitHub PR linking**: Matches PRs by branch/title pattern `CP-5` (case-insensitive)
+- **PM autonomy**: Opt-in per project (Settings → PM Agent → Autonomy). A daily board review runs at a configured hour in the project's own timezone, claimed atomically via `pm.autonomy.lastDailyReviewDay` so it runs once a day; tasks entering `needs_human_review` are queued in `pmtriggers` and reviewed automatically. Autonomous turns count against `pm.dailyTurnCap` and are attributed to the `pm` user. See `docs/superpowers/specs/2026-07-28-pm-phase2-autonomous-triggers.md`.
 
 ## Environment variables
 ```
