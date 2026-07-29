@@ -13,6 +13,7 @@ import { Notification } from "@/models/notification";
 import { PmMessage } from "@/models/pmMessage";
 import { logProjectAudit } from "@/lib/projectAudit";
 import { encryptSecret } from "@/lib/encryption";
+import { isAllowedMcpServerUrl } from "@/lib/url-validation";
 import { validatePmConfig, isPmAvailable, mergeMcpServerTokens, sanitizeMcpServers } from "@/lib/pm/config";
 import { PROJECT_ICONS } from "@/types";
 
@@ -33,6 +34,8 @@ export const GET = withProjectAccess(async (_request, { params, user }) => {
   const obj: any = project.toObject();
   obj.githubTokenSet = !!obj.githubToken;
   delete obj.githubToken;
+  obj.gitlabTokenSet = !!obj.gitlabToken;
+  delete obj.gitlabToken;
   if (obj.pm) obj.pm.mcpServers = sanitizeMcpServers(obj.pm.mcpServers);
   obj.pmAvailable = isPmAvailable();
   obj.canAdmin = canAdminProject(user, project);
@@ -44,7 +47,7 @@ export const PUT = withProjectAdmin(async (request, { params, user }) => {
   const { projectId } = await params;
   const body = await request.json();
 
-  const allowed = ["name", "description", "key", "icon", "githubRepo", "githubToken"];
+  const allowed = ["name", "description", "key", "icon", "githubRepo", "githubToken", "gitlabRepo", "gitlabHost", "gitlabToken"];
   const updates: Record<string, unknown> = {};
   for (const field of allowed) {
     if (body[field] !== undefined) {
@@ -143,9 +146,24 @@ export const PUT = withProjectAdmin(async (request, { params, user }) => {
     updates.pm = pmResult.value;
   }
 
-  // Encrypt the GitHub token at rest (no-op if ENCRYPTION_KEY is unset).
+  if (updates.gitlabHost !== undefined) {
+    const host = String(updates.gitlabHost).trim().replace(/\/+$/, "");
+    // Same rules as MCP server URLs: public https, localhost allowed outside production
+    if (host && !isAllowedMcpServerUrl(host)) {
+      return NextResponse.json(
+        { error: "gitlabHost must be a public https URL" },
+        { status: 400 }
+      );
+    }
+    updates.gitlabHost = host || "https://gitlab.com";
+  }
+
+  // Encrypt the GitHub/GitLab tokens at rest (no-op if ENCRYPTION_KEY is unset).
   if (typeof updates.githubToken === "string" && updates.githubToken) {
     updates.githubToken = encryptSecret(updates.githubToken);
+  }
+  if (typeof updates.gitlabToken === "string" && updates.gitlabToken) {
+    updates.gitlabToken = encryptSecret(updates.gitlabToken);
   }
 
   const project = await Project.findByIdAndUpdate(projectId, updates, {
@@ -159,7 +177,7 @@ export const PUT = withProjectAdmin(async (request, { params, user }) => {
   }
 
   const changedFields = Object.keys(updates)
-    .filter((f) => f !== "githubToken")
+    .filter((f) => f !== "githubToken" && f !== "gitlabToken")
     .join(", ");
   const auditDetail = updates.githubToken !== undefined
     ? `Changed: ${changedFields ? changedFields + ", " : ""}GitHub token`
@@ -171,6 +189,8 @@ export const PUT = withProjectAdmin(async (request, { params, user }) => {
   const obj: any = project.toObject();
   obj.githubTokenSet = !!obj.githubToken;
   delete obj.githubToken;
+  obj.gitlabTokenSet = !!obj.gitlabToken;
+  delete obj.gitlabToken;
   if (obj.pm) obj.pm.mcpServers = sanitizeMcpServers(obj.pm.mcpServers);
   obj.pmAvailable = isPmAvailable();
   obj.canAdmin = canAdminProject(user, project);
