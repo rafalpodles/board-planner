@@ -1,14 +1,17 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { TASK_STATUSES, STATUS_LABELS, TaskStatus } from "@/types";
+import { ApiSprint, TASK_STATUSES, STATUS_LABELS, TaskStatus } from "@/types";
 
 interface TaskContextMenuProps {
   x: number;
   y: number;
   currentStatus: TaskStatus;
   isPinned?: boolean;
+  sprints?: ApiSprint[];
+  currentSprint?: string | null;
   onStatusChange: (status: string) => void;
+  onSprintChange?: (sprintId: string | null) => void;
   onPin?: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
@@ -20,7 +23,10 @@ export function TaskContextMenu({
   y,
   currentStatus,
   isPinned,
+  sprints = [],
+  currentSprint,
   onStatusChange,
+  onSprintChange,
   onPin,
   onDuplicate,
   onDelete,
@@ -86,6 +92,36 @@ export function TaskContextMenu({
           {STATUS_LABELS[s]}
         </button>
       ))}
+      {onSprintChange && sprints.length > 0 && (
+        <>
+          <div className="border-t border-border my-1" />
+          <div className="px-3 py-1.5 text-xs text-text-muted font-medium">
+            Move to sprint
+          </div>
+          {sprints.map((s) => (
+            <button
+              key={s._id}
+              disabled={s._id === currentSprint}
+              onClick={() => { onSprintChange(s._id); onClose(); }}
+              className="w-full text-left px-3 py-1.5 hover:bg-bg-input transition-colors
+                disabled:opacity-40 disabled:hover:bg-transparent disabled:cursor-default"
+            >
+              {s.name}
+              {s.status === "active" && (
+                <span className="text-xs text-primary ml-1">(Active)</span>
+              )}
+            </button>
+          ))}
+          {currentSprint && (
+            <button
+              onClick={() => { onSprintChange(null); onClose(); }}
+              className="w-full text-left px-3 py-1.5 hover:bg-bg-input transition-colors text-text-muted"
+            >
+              Remove from sprint
+            </button>
+          )}
+        </>
+      )}
       <div className="border-t border-border my-1" />
       {onPin && (
         <button
