@@ -141,6 +141,7 @@ OPENROUTER_API_KEY=       # Optional — PM agent (chat-driven project manager)
 PM_MODEL=                 # Optional — PM agent model (default: moonshotai/kimi-k2.6)
 PM_MAX_TOKENS=            # Optional — PM agent max output tokens per call (default: 8192)
 PM_DAILY_TURN_CAP=        # Optional — PM agent turns per project per day (default: 100)
+PM_SCHEDULER_TICK_MS=     # Optional — PM autonomy scheduler tick (default: 300000)
 SMTP_HOST=                # Optional — Email notifications
 SMTP_PORT=587
 SMTP_USER=
