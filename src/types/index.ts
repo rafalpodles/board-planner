@@ -72,6 +72,8 @@ export interface IUser {
   emailNotifications: boolean;
   role: UserRole;
   allowedProjects: Types.ObjectId[];
+  // Runtime-only, set for project-scoped tokens — a scoped token never gets project-admin
+  tokenScoped?: boolean;
   createdAt: Date;
 }
 
@@ -325,6 +327,7 @@ export interface IProject {
   taskCounter: number;
   pm?: IPmConfig;
   owner: Types.ObjectId | IUser;
+  admins: (Types.ObjectId | IUser)[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -539,8 +542,17 @@ export interface ApiProject {
   pm?: ApiPmConfig;
   pmAvailable?: boolean;
   owner: ApiUser | string;
+  admins?: ApiProjectMember[];
+  canAdmin?: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ApiProjectMember {
+  _id: string;
+  username: string;
+  fullName: string;
+  role?: UserRole;
 }
 
 export interface ApiPmMcpServer {

@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { withAdmin } from "@/lib/middleware";
+import { withProjectAdmin } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { logProjectAudit } from "@/lib/projectAudit";
 
-export const GET = withAdmin(async (_request, { params }) => {
+export const GET = withProjectAdmin(async (_request, { params }) => {
   const { projectId } = await params;
   await connectDB();
 
@@ -16,7 +16,7 @@ export const GET = withAdmin(async (_request, { params }) => {
   return NextResponse.json(project.webhooks || []);
 });
 
-export const POST = withAdmin(async (request, { params, user }) => {
+export const POST = withProjectAdmin(async (request, { params, user }) => {
   const { projectId } = await params;
   await connectDB();
 
@@ -50,7 +50,7 @@ export const POST = withAdmin(async (request, { params, user }) => {
   return NextResponse.json(project.webhooks, { status: 201 });
 });
 
-export const PUT = withAdmin(async (request, { params }) => {
+export const PUT = withProjectAdmin(async (request, { params }) => {
   const { projectId } = await params;
   await connectDB();
 
@@ -79,7 +79,7 @@ export const PUT = withAdmin(async (request, { params }) => {
   return NextResponse.json(project.webhooks);
 });
 
-export const DELETE = withAdmin(async (request, { params, user }) => {
+export const DELETE = withProjectAdmin(async (request, { params, user }) => {
   const { projectId } = await params;
   await connectDB();
 
