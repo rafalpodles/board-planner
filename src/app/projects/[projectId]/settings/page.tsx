@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState, FormEvent } from "react";
+import { useEffect, useRef, useState, FormEvent } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
-import { ApiProject, ApiProjectMember, ApiLabel, ApiCustomField, ApiTaskTemplate, ApiWebhook, ApiNotificationChannel, ApiProjectAuditLog, DIFFICULTIES, CATEGORIES, WEBHOOK_EVENTS, NOTIFICATION_CHANNEL_TYPES, CUSTOM_FIELD_TYPES, PROJECT_ICONS, DEFAULT_PROJECT_ICON, Difficulty, Category, CustomFieldType, WebhookEvent, NotificationChannelType } from "@/types";
+import { ApiProject, ApiProjectMember, ApiLabel, ApiCustomField, ApiTaskTemplate, ApiWebhook, ApiNotificationChannel, ApiProjectAuditLog, DIFFICULTIES, CATEGORIES, COLUMN_ROLES, ColumnRole, WEBHOOK_EVENTS, NOTIFICATION_CHANNEL_TYPES, CUSTOM_FIELD_TYPES, PROJECT_ICONS, DEFAULT_PROJECT_ICON, Difficulty, Category, CustomFieldType, WebhookEvent, NotificationChannelType } from "@/types";
+import { effectiveColumns } from "@/lib/columns";
 import { Input } from "@/components/ui/Input";
 import { EmojiPicker } from "@/components/ui/EmojiPicker";
 import { Textarea } from "@/components/ui/Textarea";
@@ -51,6 +52,12 @@ export default function ProjectSettingsPage() {
   const [newLabelColor, setNewLabelColor] = useState("#3b82f6");
   const [newCategoryName, setNewCategoryName] = useState("");
   const [newCategoryColor, setNewCategoryColor] = useState("#3b82f6");
+  const [columnDrafts, setColumnDrafts] = useState<
+    { id?: string; label: string; color: string; role: ColumnRole; triggersPmReview: boolean }[]
+  >([]);
+  const [newColumnLabel, setNewColumnLabel] = useState("");
+  const [columnsSaving, setColumnsSaving] = useState(false);
+  const columnDragIndex = useRef<number | null>(null);
   const [aiModel, setAiModel] = useState("");
   const [aiModelSaving, setAiModelSaving] = useState(false);
   const [newFieldName, setNewFieldName] = useState("");
@@ -112,6 +119,15 @@ export default function ProjectSettingsPage() {
         setPmTimezone(p.pm?.autonomy?.timezone || "Europe/Warsaw");
         setPmHandleNhr(p.pm?.autonomy?.handleNeedsHumanReview ?? false);
         setPmLinks(p.pm?.links?.map((l) => ({ label: l.label, url: l.url })) || []);
+        setColumnDrafts(
+          effectiveColumns(p.columns).map((c) => ({
+            id: c.id,
+            label: c.label,
+            color: c.color,
+            role: c.role,
+            triggersPmReview: c.triggersPmReview === true,
+          }))
+        );
         syncMcpServersFrom(p);
         if (p.canAdmin) {
           api
@@ -324,6 +340,40 @@ export default function ProjectSettingsPage() {
       setProject((p) => (p ? { ...p, labels } : p));
     } catch {
       toast("Failed to remove label", "error");
+    }
+  }
+
+  function reorderColumns(from: number, to: number) {
+    setColumnDrafts((prev) => {
+      if (to < 0 || to >= prev.length || from === to) return prev;
+      const next = [...prev];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return next;
+    });
+  }
+
+  async function saveColumns() {
+    setColumnsSaving(true);
+    try {
+      const columns = await api.put(`/api/projects/${projectId}/columns`, {
+        columns: columnDrafts,
+      });
+      setProject((p) => (p ? { ...p, columns } : p));
+      setColumnDrafts(
+        columns.map((c: { id: string; label: string; color: string; role: ColumnRole; triggersPmReview: boolean }) => ({
+          id: c.id,
+          label: c.label,
+          color: c.color,
+          role: c.role,
+          triggersPmReview: c.triggersPmReview === true,
+        }))
+      );
+      toast("Columns saved", "success");
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Failed to save columns", "error");
+    } finally {
+      setColumnsSaving(false);
     }
   }
 
@@ -812,6 +862,152 @@ export default function ProjectSettingsPage() {
           </Button>
         </div>
       </div>
+
+      {/* Board Columns */}
+      {project.canAdmin && (
+      <div className="mb-8">
+        <h2 className="font-semibold mb-3">Board Columns</h2>
+        <p className="text-sm text-text-muted mb-3">
+          Rename, recolor, reorder (drag or arrows) and map columns to semantic roles. Automation
+          (Claude Code, PM agent, webhooks) follows the role, not the name. A column with tasks
+          cannot be removed.
+        </p>
+        <div className="space-y-2 mb-3">
+          {columnDrafts.map((col, i) => (
+            <div
+              key={col.id ?? `new-${i}`}
+              draggable
+              onDragStart={() => { columnDragIndex.current = i; }}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => {
+                e.preventDefault();
+                if (columnDragIndex.current !== null) {
+                  reorderColumns(columnDragIndex.current, i);
+                  columnDragIndex.current = null;
+                }
+              }}
+              className="flex flex-wrap items-center gap-2 border border-border rounded-lg px-3 py-2 cursor-grab"
+            >
+              <span className="text-text-muted select-none">⠿</span>
+              <Input
+                value={col.label}
+                onChange={(e) =>
+                  setColumnDrafts((prev) =>
+                    prev.map((c, idx) => (idx === i ? { ...c, label: e.target.value } : c))
+                  )
+                }
+                className="max-w-[180px]"
+              />
+              <input
+                type="color"
+                value={col.color}
+                onChange={(e) =>
+                  setColumnDrafts((prev) =>
+                    prev.map((c, idx) => (idx === i ? { ...c, color: e.target.value } : c))
+                  )
+                }
+                className="w-8 h-8 rounded border border-border cursor-pointer bg-transparent"
+              />
+              <select
+                value={col.role}
+                onChange={(e) =>
+                  setColumnDrafts((prev) =>
+                    prev.map((c, idx) =>
+                      idx === i ? { ...c, role: e.target.value as ColumnRole } : c
+                    )
+                  )
+                }
+                className="text-sm bg-bg-input border border-border rounded px-2 py-1.5"
+              >
+                {COLUMN_ROLES.map((r) => (
+                  <option key={r} value={r}>{r}</option>
+                ))}
+              </select>
+              <label
+                className="flex items-center gap-1 text-xs text-text-muted cursor-pointer"
+                title="Entering this column queues a PM agent review (when PM autonomy is enabled)"
+              >
+                <input
+                  type="checkbox"
+                  checked={col.triggersPmReview}
+                  onChange={(e) =>
+                    setColumnDrafts((prev) =>
+                      prev.map((c, idx) =>
+                        idx === i ? { ...c, triggersPmReview: e.target.checked } : c
+                      )
+                    )
+                  }
+                />
+                PM review
+              </label>
+              <div className="ml-auto flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => reorderColumns(i, i - 1)}
+                  className="text-text-muted hover:text-text px-1"
+                  aria-label="Move column up"
+                >
+                  ↑
+                </button>
+                <button
+                  type="button"
+                  onClick={() => reorderColumns(i, i + 1)}
+                  className="text-text-muted hover:text-text px-1"
+                  aria-label="Move column down"
+                >
+                  ↓
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setColumnDrafts((prev) => prev.filter((_, idx) => idx !== i))
+                  }
+                  className="text-text-muted hover:text-danger px-1"
+                  aria-label="Remove column"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="flex gap-2">
+          <Input
+            value={newColumnLabel}
+            onChange={(e) => setNewColumnLabel(e.target.value)}
+            placeholder="New column label..."
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                if (!newColumnLabel.trim()) return;
+                setColumnDrafts((prev) => [
+                  ...prev,
+                  { label: newColumnLabel.trim(), color: "#6b7280", role: "active", triggersPmReview: false },
+                ]);
+                setNewColumnLabel("");
+              }
+            }}
+          />
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={!newColumnLabel.trim()}
+            onClick={() => {
+              setColumnDrafts((prev) => [
+                ...prev,
+                { label: newColumnLabel.trim(), color: "#6b7280", role: "active", triggersPmReview: false },
+              ]);
+              setNewColumnLabel("");
+            }}
+          >
+            Add
+          </Button>
+          <Button type="button" disabled={columnsSaving || columnDrafts.length === 0} onClick={saveColumns}>
+            {columnsSaving ? "Saving..." : "Save Columns"}
+          </Button>
+        </div>
+      </div>
+      )}
 
       {/* Custom Fields */}
       <div className="mb-8">

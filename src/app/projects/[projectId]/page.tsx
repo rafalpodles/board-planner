@@ -7,6 +7,7 @@ import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { usePollWhileVisible } from "@/hooks/use-poll-while-visible";
 import { ApiProject, ApiTask, ApiSprint, DEFAULT_PROJECT_ICON } from "@/types";
+import { effectiveColumns } from "@/lib/columns";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Board } from "@/components/kanban/Board";
 import { BoardFilters } from "@/components/kanban/BoardFilters";
@@ -493,26 +494,32 @@ export default function KanbanPage() {
         onFilter={setFilteredTasks}
       />
 
-      {tasks.length > 0 && (
+      {tasks.length > 0 && (() => {
+        const doneIds = new Set(
+          effectiveColumns(project.columns).filter((c) => c.role === "done").map((c) => c.id)
+        );
+        const doneCount = tasks.filter((t) => doneIds.has(t.status)).length;
+        return (
         <div className="mb-4">
           <div className="flex items-center justify-between text-xs text-text-muted mb-1">
             <span>
-              {tasks.filter((t) => t.status === "done").length}/{tasks.length} done
+              {doneCount}/{tasks.length} done
             </span>
             <span>
-              {Math.round((tasks.filter((t) => t.status === "done").length / tasks.length) * 100)}%
+              {Math.round((doneCount / tasks.length) * 100)}%
             </span>
           </div>
           <div className="h-1.5 bg-bg-input rounded-full overflow-hidden">
             <div
               className="h-full bg-status-done rounded-full transition-all duration-300"
               style={{
-                width: `${(tasks.filter((t) => t.status === "done").length / tasks.length) * 100}%`,
+                width: `${(doneCount / tasks.length) * 100}%`,
               }}
             />
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {tasks.length === 0 && (
         <div className="flex flex-col items-center justify-center py-16 text-center">
@@ -533,6 +540,7 @@ export default function KanbanPage() {
           projectKey={project.key}
           projectLabels={project.labels || []}
           projectCategories={project.categories || []}
+          columns={project.columns || []}
           selectedTasks={selectedTasks}
           selectionMode={selectionMode}
           onStatusChange={handleStatusChange}
@@ -550,6 +558,7 @@ export default function KanbanPage() {
           projectId={projectId}
           sprints={sprints}
           categories={project.categories || []}
+          columns={project.columns || []}
           focusedIndex={focusedTaskIndex}
           onTaskClick={(taskId) =>
             router.push(`/projects/${projectId}/tasks/${taskId}`)
@@ -560,6 +569,7 @@ export default function KanbanPage() {
         <TimelineView
           tasks={filteredTasks}
           projectKey={project.key}
+          columns={project.columns || []}
           onTaskClick={(taskId) =>
             router.push(`/projects/${projectId}/tasks/${taskId}`)
           }
@@ -578,6 +588,7 @@ export default function KanbanPage() {
             currentStatus={task.status}
             isPinned={task.pinned}
             sprints={sprints.filter((s) => s.status !== "completed")}
+            columns={project.columns || []}
             currentSprint={task.sprint}
             selectedCount={bulk}
             onStatusChange={(status) =>
@@ -642,6 +653,7 @@ export default function KanbanPage() {
           projectKey={project.key}
           components={project.components}
           categories={(project.categories || []).map((c) => c.name)}
+          columns={project.columns || []}
           projectLabels={project.labels || []}
           taskTemplates={project.taskTemplates || []}
           sprints={sprints}

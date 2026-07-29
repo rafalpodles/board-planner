@@ -1,5 +1,5 @@
 import mongoose, { Schema, Model } from "mongoose";
-import { ITask, TASK_STATUSES, DIFFICULTIES, PRIORITIES, DEFAULT_PRIORITY } from "@/types";
+import { ITask, DIFFICULTIES, PRIORITIES, DEFAULT_PRIORITY } from "@/types";
 
 const taskSchema = new Schema<ITask>(
   {
@@ -41,7 +41,6 @@ const taskSchema = new Schema<ITask>(
     },
     status: {
       type: String,
-      enum: TASK_STATUSES,
       default: "planned",
     },
     assignee: {

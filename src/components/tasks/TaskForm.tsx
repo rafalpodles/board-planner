@@ -20,13 +20,13 @@ import {
   Difficulty,
   Priority,
   Category,
-  TASK_STATUSES,
-  STATUS_LABELS,
+  ApiProjectColumn,
   DIFFICULTIES,
   PRIORITIES,
   PRIORITY_LABELS,
   CATEGORIES,
 } from "@/types";
+import { effectiveColumns } from "@/lib/columns";
 import { parseChecklistString } from "@/lib/checklist";
 import type { GeneratedTask } from "@/lib/ai";
 
@@ -36,6 +36,7 @@ interface TaskFormProps {
   task?: ApiTask;
   components: string[];
   categories?: string[];
+  columns?: ApiProjectColumn[];
   projectLabels?: ApiLabel[];
   taskTemplates?: ApiTaskTemplate[];
   sprints?: ApiSprint[];
@@ -50,6 +51,7 @@ export function TaskForm({
   task,
   components,
   categories = [],
+  columns,
   projectLabels = [],
   taskTemplates = [],
   sprints = [],
@@ -65,7 +67,10 @@ export function TaskForm({
   const [category, setCategory] = useState<Category>(
     task?.category || (categories.includes("user-story") ? "user-story" : categories[0] || "user-story")
   );
-  const [status, setStatus] = useState<TaskStatus>(task?.status || "planned");
+  const formColumns = effectiveColumns(columns);
+  const [status, setStatus] = useState<TaskStatus>(
+    task?.status || ((formColumns.find((c) => c.role === "backlog")?.id ?? formColumns[0].id) as TaskStatus)
+  );
   const [assignee, setAssignee] = useState(
     task?.assignee && typeof task.assignee === "object"
       ? task.assignee.username
@@ -301,9 +306,9 @@ export function TaskForm({
           label="Status"
           value={status}
           onChange={(e) => setStatus(e.target.value as TaskStatus)}
-          options={TASK_STATUSES.map((s) => ({
-            value: s,
-            label: STATUS_LABELS[s],
+          options={formColumns.map((c) => ({
+            value: c.id,
+            label: c.label,
           }))}
         />
         <Select

@@ -26,6 +26,7 @@ claudeplanner_project_key: CP
 - When user describes new work, ask if it should be tracked and `create_task` if yes.
 
 ### Task statuses
+Since CP-128, statuses are project-defined **board columns** mapped to semantic roles (`backlog`, `approved`, `active`, `review`, `blocked`, `done`); automation keys on the **role**, not the display name. The ids below are the seeded defaults, which this project uses — the pipeline semantics per role: pick up tasks in an `approved`-role column, work in `active`, review in `review`, deliver to `done`.
 - `planned` — idea/backlog, NOT approved for work. Claude never touches these.
 - `todo` — approved for work. Claude picks these up automatically.
 - `in_progress` — actively being worked on.
