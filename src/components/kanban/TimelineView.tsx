@@ -1,11 +1,13 @@
 "use client";
 
 import { useMemo, useRef, useEffect } from "react";
-import { ApiTask, STATUS_LABELS } from "@/types";
+import { ApiProjectColumn, ApiTask } from "@/types";
+import { effectiveColumns } from "@/lib/columns";
 
 interface TimelineViewProps {
   tasks: ApiTask[];
   projectKey: string;
+  columns?: ApiProjectColumn[];
   onTaskClick: (taskId: string) => void;
 }
 
@@ -40,8 +42,12 @@ function formatMonth(date: Date): string {
   return date.toLocaleDateString(undefined, { month: "short", year: "numeric" });
 }
 
-export function TimelineView({ tasks, projectKey, onTaskClick }: TimelineViewProps) {
+export function TimelineView({ tasks, projectKey, columns, onTaskClick }: TimelineViewProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const columnById = useMemo(
+    () => new Map(effectiveColumns(columns).map((c) => [c.id, c])),
+    [columns]
+  );
 
   const today = useMemo(() => {
     const d = new Date();
@@ -219,7 +225,7 @@ export function TimelineView({ tasks, projectKey, onTaskClick }: TimelineViewPro
             {sortedTasks.map((task, i) => {
               const y = HEADER_HEIGHT + i * ROW_HEIGHT + 8;
               const barHeight = ROW_HEIGHT - 16;
-              const color = STATUS_COLORS[task.status] || STATUS_COLORS.planned;
+              const color = columnById.get(task.status)?.color || STATUS_COLORS[task.status] || STATUS_COLORS.planned;
               const created = new Date(task.createdAt);
 
               if (task.dueDate) {
@@ -239,7 +245,7 @@ export function TimelineView({ tasks, projectKey, onTaskClick }: TimelineViewPro
                       fill={color}
                       opacity={0.8}
                     />
-                    <title>{`${projectKey}-${task.taskNumber}: ${task.title}\n${STATUS_LABELS[task.status]}`}</title>
+                    <title>{`${projectKey}-${task.taskNumber}: ${task.title}\n${columnById.get(task.status)?.label ?? task.status}`}</title>
                   </g>
                 );
               }
@@ -258,7 +264,7 @@ export function TimelineView({ tasks, projectKey, onTaskClick }: TimelineViewPro
                     opacity={0.7}
                     transform={`rotate(45 ${x} ${y + barHeight / 2})`}
                   />
-                  <title>{`${projectKey}-${task.taskNumber}: ${task.title}\n${STATUS_LABELS[task.status]} (no due date)`}</title>
+                  <title>{`${projectKey}-${task.taskNumber}: ${task.title}\n${columnById.get(task.status)?.label ?? task.status} (no due date)`}</title>
                 </g>
               );
             })}

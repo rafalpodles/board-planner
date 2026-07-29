@@ -1,15 +1,28 @@
 import { ColumnRole, DEFAULT_PROJECT_COLUMNS, IProjectColumn } from "@/types";
 
-type ProjectColumn = IProjectColumn | Omit<IProjectColumn, "_id">;
-type HasColumns = { columns?: IProjectColumn[] | null };
+// Structural shape shared by IProjectColumn (server) and ApiProjectColumn (client)
+export type AnyColumn = {
+  id: string;
+  label: string;
+  color: string;
+  role: ColumnRole;
+  order: number;
+  triggersPmReview?: boolean;
+};
 
 // Falls back to the built-in seven for documents created before the seeding migration
-export function getProjectColumns(project: HasColumns | null | undefined): ProjectColumn[] {
-  const columns = project?.columns;
+export function effectiveColumns(columns: AnyColumn[] | null | undefined): AnyColumn[] {
   if (!columns || columns.length === 0) {
     return DEFAULT_PROJECT_COLUMNS;
   }
   return [...columns].sort((a, b) => a.order - b.order);
+}
+
+type ProjectColumn = IProjectColumn | Omit<IProjectColumn, "_id">;
+type HasColumns = { columns?: IProjectColumn[] | null };
+
+export function getProjectColumns(project: HasColumns | null | undefined): ProjectColumn[] {
+  return effectiveColumns(project?.columns) as ProjectColumn[];
 }
 
 export function getColumnIds(project: HasColumns | null | undefined): string[] {

@@ -1,21 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { ApiTask, ApiLabel, ApiProjectCategory, TaskStatus, STATUS_LABELS } from "@/types";
+import { ApiTask, ApiLabel, ApiProjectCategory } from "@/types";
+import { AnyColumn } from "@/lib/columns";
 import { TaskCard } from "./TaskCard";
 
-const statusBorderColors: Record<TaskStatus, string> = {
-  planned: "border-t-status-planned",
-  todo: "border-t-status-todo",
-  in_progress: "border-t-status-in-progress",
-  in_review: "border-t-status-in-review",
-  needs_human_review: "border-t-status-needs-human-review",
-  ready_to_test: "border-t-status-ready-to-test",
-  done: "border-t-status-done",
-};
-
 interface ColumnProps {
-  status: TaskStatus;
+  column: AnyColumn;
   tasks: ApiTask[];
   projectKey: string;
   projectLabels?: ApiLabel[];
@@ -30,7 +21,7 @@ interface ColumnProps {
 }
 
 export function Column({
-  status,
+  column,
   tasks,
   projectKey,
   projectLabels,
@@ -80,19 +71,20 @@ export function Column({
         const taskId = e.dataTransfer.getData("text/plain");
         if (taskId) {
           if (onTaskDrop && dropIndex !== null) {
-            onTaskDrop(taskId, status, dropIndex);
+            onTaskDrop(taskId, column.id, dropIndex);
           } else {
-            onStatusChange(taskId, status);
+            onStatusChange(taskId, column.id);
           }
         }
         setDropIndex(null);
       }}
       className={`bg-bg-card rounded-xl border border-border
-        border-t-2 ${statusBorderColors[status]} flex flex-col max-h-[calc(100vh-12rem)]
+        border-t-2 flex flex-col max-h-[calc(100vh-12rem)]
         transition-colors ${isDragOver ? "bg-primary/5 border-primary/30" : ""}`}
+      style={{ borderTopColor: column.color }}
     >
       <div className="px-3 py-2.5 flex items-center justify-between border-b border-border">
-        <h3 className="text-sm font-medium">{STATUS_LABELS[status]}</h3>
+        <h3 className="text-sm font-medium">{column.label}</h3>
         <span className="text-xs text-text-muted bg-bg-input rounded-full px-2 py-0.5">
           {tasks.length}
         </span>

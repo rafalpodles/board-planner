@@ -173,7 +173,7 @@ server.tool(
 
 server.tool(
   "change_task_status",
-  "Change the status of a task. Valid: planned, todo, in_progress, in_review, needs_human_review, ready_to_test, done",
+  "Change the status of a task. Statuses are the project's column ids (defaults: planned, todo, in_progress, in_review, needs_human_review, ready_to_test, done — see get_project for the actual list with roles)",
   {
     taskKey: z.string().describe("Task key (e.g. 'CP-1')"),
     status: z.string().describe("New status"),

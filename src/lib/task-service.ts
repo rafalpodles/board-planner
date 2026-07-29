@@ -4,7 +4,7 @@ import { Project } from "@/models/project";
 import { User } from "@/models/user";
 import { Comment } from "@/models/comment";
 import { ITask, DEFAULT_PRIORITY } from "@/types";
-import { getColumnIds, defaultStatusFor } from "@/lib/columns";
+import { getColumnIds, defaultStatusFor, roleOf } from "@/lib/columns";
 import { logActivity } from "@/lib/activity";
 import { dispatchWebhooks } from "@/lib/webhooks";
 import { dispatchNotifications } from "@/lib/notifications";
@@ -191,7 +191,7 @@ export async function changeStatus(
       recipientIds: recipients,
     });
 
-    if (status === "done" && oldTask.recurrence) {
+    if (roleOf(projectColumns, status) === "done" && oldTask.recurrence) {
       createNextRecurrence(oldTask, projectId, actorId).catch((err) =>
         console.error("Failed to create recurring task:", err)
       );
