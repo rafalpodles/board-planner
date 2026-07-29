@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo } from "react";
-import { ApiTask, ApiLabel, ApiProjectCategory, TASK_STATUSES, TaskStatus } from "@/types";
+import { ApiTask, ApiLabel, ApiProjectCategory, ApiProjectColumn } from "@/types";
+import { effectiveColumns } from "@/lib/columns";
 import { Column } from "./Column";
 
 interface BoardProps {
@@ -9,6 +10,7 @@ interface BoardProps {
   projectKey: string;
   projectLabels?: ApiLabel[];
   projectCategories?: ApiProjectCategory[];
+  columns?: ApiProjectColumn[];
   selectedTasks?: Set<string>;
   selectionMode?: boolean;
   onStatusChange: (taskId: string, status: string) => void;
@@ -23,6 +25,7 @@ export function Board({
   projectKey,
   projectLabels,
   projectCategories,
+  columns,
   selectedTasks,
   selectionMode,
   onStatusChange,
@@ -31,16 +34,17 @@ export function Board({
   onTaskSelect,
   onTaskContextMenu,
 }: BoardProps) {
+  const boardColumns = useMemo(() => effectiveColumns(columns), [columns]);
   const grouped = useMemo(
     () =>
-      TASK_STATUSES.reduce(
-        (acc, status) => {
-          acc[status] = tasks.filter((t) => t.status === status);
+      boardColumns.reduce(
+        (acc, column) => {
+          acc[column.id] = tasks.filter((t) => t.status === column.id);
           return acc;
         },
-        {} as Record<TaskStatus, ApiTask[]>
+        {} as Record<string, ApiTask[]>
       ),
-    [tasks]
+    [tasks, boardColumns]
   );
 
   return (
@@ -49,12 +53,18 @@ export function Board({
         className="overflow-x-auto pb-4 overscroll-x-contain"
         style={{ WebkitOverflowScrolling: "touch" }}
       >
-        <div className="grid gap-4 min-w-[1400px]" style={{ gridTemplateColumns: `repeat(${TASK_STATUSES.length}, minmax(0, 1fr))` }}>
-          {TASK_STATUSES.map((status) => (
+        <div
+          className="grid gap-4"
+          style={{
+            gridTemplateColumns: `repeat(${boardColumns.length}, minmax(0, 1fr))`,
+            minWidth: `${boardColumns.length * 200}px`,
+          }}
+        >
+          {boardColumns.map((column) => (
             <Column
-              key={status}
-              status={status}
-              tasks={grouped[status]}
+              key={column.id}
+              column={column}
+              tasks={grouped[column.id]}
               projectKey={projectKey}
               projectLabels={projectLabels}
               projectCategories={projectCategories}

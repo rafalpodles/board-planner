@@ -8,6 +8,7 @@ import { runPmTurn } from "./agent";
 import { isOverDailyTurnCap } from "./turn-cap";
 import { acquireTurnLock, releaseTurnLock } from "./turn-lock";
 import { buildNeedsHumanReviewPrompt } from "./autonomy";
+import { getProjectColumns } from "@/lib/columns";
 
 const MAX_TRIGGER_ATTEMPTS = 3;
 
@@ -37,10 +38,15 @@ export async function onTaskStatusChanged(args: {
   newStatus: string;
   actorId: string;
 }): Promise<void> {
-  if (args.newStatus !== "needs_human_review" || args.oldStatus === "needs_human_review") return;
-
-  const project = await Project.findById(args.projectId, "key pm").lean();
+  const project = await Project.findById(args.projectId, "key pm columns").lean();
   if (!project?.pm?.enabled || !project.pm.autonomy?.handleNeedsHumanReview) return;
+
+  const triggerIds = new Set(
+    getProjectColumns(project)
+      .filter((c) => c.triggersPmReview)
+      .map((c) => c.id)
+  );
+  if (!triggerIds.has(args.newStatus) || triggerIds.has(args.oldStatus)) return;
 
   const pmUser = await getPmUser();
   if (String(pmUser._id) === args.actorId) return;

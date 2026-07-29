@@ -5,7 +5,8 @@ import { useParams, useRouter } from "next/navigation";
 import { MarkdownContent } from "@/components/ui/MarkdownContent";
 import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
-import { ApiTask, ApiProject, ApiSprint, ApiLabel, ApiCustomField, TASK_STATUSES, STATUS_LABELS, PRIORITY_LABELS } from "@/types";
+import { ApiTask, ApiProject, ApiSprint, ApiLabel, ApiCustomField, PRIORITY_LABELS } from "@/types";
+import { effectiveColumns } from "@/lib/columns";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -139,9 +140,9 @@ export default function TaskDetailPage() {
               onChange={(e) => handleStatusChange(e.target.value)}
               className="text-xs font-medium bg-bg-input border border-border rounded px-2 py-1 text-text focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
             >
-              {TASK_STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {STATUS_LABELS[s]}
+              {effectiveColumns(project.columns).map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.label}
                 </option>
               ))}
             </select>
@@ -192,6 +193,7 @@ export default function TaskDetailPage() {
             task={task}
             components={project.components}
             categories={(project.categories || []).map((c) => c.name)}
+            columns={project.columns || []}
             projectLabels={project.labels || []}
             sprints={sprints}
             customFields={project.customFields || []}

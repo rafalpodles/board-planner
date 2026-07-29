@@ -1,7 +1,7 @@
 import { Types } from "mongoose";
 import { Task } from "@/models/task";
 import { Comment } from "@/models/comment";
-import { TASK_STATUSES, PRIORITIES } from "@/types";
+import { PRIORITIES } from "@/types";
 import {
   createTask,
   updateTask,
@@ -72,7 +72,7 @@ export const PM_TOOLS: Record<string, PmTool> = {
       parameters: {
         type: "object",
         properties: {
-          status: { type: "string", enum: [...TASK_STATUSES], description: "Optional status filter" },
+          status: { type: "string", description: "Optional status filter — a column id of this project (see the system prompt)" },
           limit: { type: "number", description: "Max results, default 50, cap 100" },
           offset: { type: "number", description: "Skip N results (pagination)" },
         },
@@ -81,9 +81,6 @@ export const PM_TOOLS: Record<string, PmTool> = {
     async execute(args, ctx) {
       const filter: Record<string, unknown> = { project: ctx.projectId };
       if (args.status !== undefined) {
-        if (!TASK_STATUSES.includes(args.status as never)) {
-          return { result: { error: `Invalid status. One of: ${TASK_STATUSES.join(", ")}` } };
-        }
         filter.status = args.status;
       }
       const limit = Math.min(Math.max(Number(args.limit) || 50, 1), 100);
@@ -196,7 +193,7 @@ export const PM_TOOLS: Record<string, PmTool> = {
     definition: {
       name: "create_task",
       description:
-        "Create a new task. Tasks are ALWAYS created in status 'planned' (backlog); a human moves them to todo.",
+        "Create a new task. Tasks are ALWAYS created in the project's backlog-role column; a human approves them onward.",
       parameters: {
         type: "object",
         properties: {
@@ -224,7 +221,8 @@ export const PM_TOOLS: Record<string, PmTool> = {
         component: str(args.component),
         acceptanceCriteria: str(args.acceptanceCriteria),
         assignee: args.assignee,
-        status: "planned", // forced: PM never creates outside the backlog
+        // status omitted on purpose: task-service defaults to the backlog-role
+        // column, and the PM must never create outside the backlog
       });
       if (!result.ok) return { result: { error: result.error } };
       const key = `${ctx.projectKey}-${result.data.taskNumber}`;
@@ -287,7 +285,7 @@ export const PM_TOOLS: Record<string, PmTool> = {
         type: "object",
         properties: {
           taskKey: { type: "string" },
-          status: { type: "string", enum: [...TASK_STATUSES] },
+          status: { type: "string", description: "A column id of this project's board (see the system prompt)" },
         },
         required: ["taskKey", "status"],
       },
