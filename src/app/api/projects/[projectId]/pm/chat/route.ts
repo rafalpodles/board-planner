@@ -3,14 +3,13 @@ import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { getAuthUser, RateLimitError } from "@/lib/auth";
 import { Project } from "@/models/project";
-import { PmMessage } from "@/models/pmMessage";
 import { runPmTurn } from "@/lib/pm/agent";
 import { isPmAvailable } from "@/lib/pm/config";
 import { acquireTurnLock, releaseTurnLock } from "@/lib/pm/turn-lock";
+import { isOverDailyTurnCap } from "@/lib/pm/turn-cap";
 
 export const maxDuration = 300;
 
-const DAILY_TURN_CAP = Number(process.env.PM_DAILY_TURN_CAP) || 100;
 const HEARTBEAT_MS = 15_000;
 
 export async function POST(
@@ -74,17 +73,10 @@ export async function POST(
     );
   }
 
-  const dailyCap = project.pm.dailyTurnCap || DAILY_TURN_CAP;
-  const startOfDay = new Date();
-  startOfDay.setHours(0, 0, 0, 0);
-  const turnsToday = await PmMessage.countDocuments({
-    project: projectId,
-    role: "user",
-    createdAt: { $gte: startOfDay },
-  });
-  if (turnsToday >= dailyCap) {
+  const { over, cap } = await isOverDailyTurnCap(projectId, project.pm);
+  if (over) {
     return NextResponse.json(
-      { error: `Daily PM turn cap (${dailyCap}) reached for this project` },
+      { error: `Daily PM turn cap (${cap}) reached for this project` },
       { status: 429 }
     );
   }

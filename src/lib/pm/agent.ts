@@ -1,7 +1,7 @@
 import { connectDB } from "@/lib/db";
 import { Project } from "@/models/project";
 import { PmMessage } from "@/models/pmMessage";
-import { IPmMessage } from "@/types";
+import { IPmMessage, PmMessageTrigger } from "@/types";
 import { getPmUser } from "./pm-user";
 import { chatCompletion, DEFAULT_PM_MODEL, OrChatMessage } from "./openrouter";
 import { PM_TOOLS, pmToolDefinitions, PmToolContext } from "./tools";
@@ -69,6 +69,7 @@ export async function runPmTurn(opts: {
   projectId: string;
   userMessage: string;
   triggeredByUserId: string;
+  trigger?: PmMessageTrigger;
   onEvent?: (event: PmTurnEvent) => void;
 }): Promise<PmTurnResult> {
   await connectDB();
@@ -79,6 +80,7 @@ export async function runPmTurn(opts: {
 
   const pmUser = await getPmUser();
   const model = project.pm.model || DEFAULT_PM_MODEL();
+  const trigger = opts.trigger ?? { type: "chat" as const };
 
   const history = await PmMessage.find({ project: opts.projectId })
     .sort({ createdAt: -1 })
@@ -91,6 +93,7 @@ export async function runPmTurn(opts: {
     role: "user",
     content: opts.userMessage,
     actions: [],
+    trigger,
     triggeredBy: opts.triggeredByUserId,
   });
 
@@ -100,6 +103,7 @@ export async function runPmTurn(opts: {
     role: "assistant",
     content: "",
     actions: [],
+    trigger,
     triggeredBy: opts.triggeredByUserId,
   });
 
