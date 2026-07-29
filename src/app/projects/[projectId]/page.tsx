@@ -545,6 +545,8 @@ export default function KanbanPage() {
         <ListView
           tasks={filteredTasks}
           projectKey={project.key}
+          projectId={projectId}
+          sprints={sprints}
           focusedIndex={focusedTaskIndex}
           onTaskClick={(taskId) =>
             router.push(`/projects/${projectId}/tasks/${taskId}`)
