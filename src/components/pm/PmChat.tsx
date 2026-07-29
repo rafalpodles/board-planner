@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState, KeyboardEvent } from "react";
 import Link from "next/link";
 import { useApi } from "@/hooks/use-api";
+import { emitBoardRefresh } from "@/lib/board-refresh";
 import { usePollWhileVisible } from "@/hooks/use-poll-while-visible";
 import { ApiPmMessage, ApiProject, ApiTask } from "@/types";
 import { Button } from "@/components/ui/Button";
@@ -93,6 +94,7 @@ export function PmChat({
         setWorkingStatus("");
         setLiveActions([]);
         refreshTaskMap();
+        emitBoardRefresh(projectId);
       }
     } catch {
       // keep polling
@@ -176,6 +178,7 @@ export function PmChat({
           if (eventLine === "action") {
             setLiveActions((prev) => [...prev, data]);
             setWorkingStatus(data.summary);
+            emitBoardRefresh(projectId);
           } else if (eventLine === "done" || eventLine === "error") {
             finished = true;
             if (eventLine === "error" && data.error) {
@@ -195,6 +198,7 @@ export function PmChat({
 
       await loadMessages();
       refreshTaskMap();
+      emitBoardRefresh(projectId);
       setWorking(false);
       setWorkingStatus("");
       setLiveActions([]);
