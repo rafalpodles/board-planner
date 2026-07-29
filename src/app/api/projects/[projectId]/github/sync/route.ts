@@ -54,6 +54,7 @@ export const POST = withProjectAccess(async (_request, { params, user }) => {
 
     // Update linkedPRs array
     const prDocs = prs.map((pr) => ({
+      provider: "github" as const,
       number: pr.number,
       title: pr.title,
       state: pr.state,
@@ -62,7 +63,9 @@ export const POST = withProjectAccess(async (_request, { params, user }) => {
       updatedAt: pr.updatedAt,
     }));
 
-    task.linkedPRs = prDocs as typeof task.linkedPRs;
+    // Replace only this provider's entries; GitLab links stay untouched
+    const others = (task.linkedPRs || []).filter((pr) => (pr.provider ?? "github") !== "github");
+    task.linkedPRs = [...others, ...prDocs] as typeof task.linkedPRs;
     linked += prs.length;
 
     // Auto-transition: merged PR + task in_review → ready_to_test.

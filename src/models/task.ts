@@ -61,6 +61,7 @@ const taskSchema = new Schema<ITask>(
     },
     linkedPRs: {
       type: [{
+        provider: { type: String, enum: ["github", "gitlab"], default: "github" },
         number: { type: Number, required: true },
         title: { type: String, required: true },
         state: { type: String, enum: ["open", "closed", "merged"], default: "open" },
