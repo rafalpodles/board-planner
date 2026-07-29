@@ -49,13 +49,17 @@ function refId(ref: Types.ObjectId | IUser): string {
 
 export function canAdminProject(
   user: IUser,
-  project: Pick<IProject, "owner" | "admins">
+  project: Pick<IProject, "_id" | "owner" | "admins">
 ): boolean {
   if (user.role === "admin") return true;
   if (user.tokenScoped) return false;
   const uid = user._id.toString();
   if (project.owner && refId(project.owner) === uid) return true;
-  return (project.admins || []).some((a) => refId(a) === uid);
+  const listed = (project.admins || []).some((a) => refId(a) === uid);
+  if (!listed) return false;
+  // A listed admin whose project access was later revoked loses admin rights too
+  const projectId = project._id.toString();
+  return (user.allowedProjects || []).some((p) => p.toString() === projectId);
 }
 
 export function withProjectAdmin(handler: AuthenticatedHandler) {
