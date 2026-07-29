@@ -72,6 +72,7 @@ function applyTokenScope(user: IUser, scope: Types.ObjectId[]): IUser {
         );
   user.role = "member";
   user.allowedProjects = effective;
+  user.tokenScoped = true;
   return user;
 }
 

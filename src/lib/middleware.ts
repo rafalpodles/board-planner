@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
-import { isValidObjectId } from "mongoose";
+import { isValidObjectId, Types } from "mongoose";
 import { getAuthUser, RateLimitError } from "./auth";
-import { IUser } from "@/types";
+import { connectDB } from "./db";
+import { Project } from "@/models/project";
+import { IProject, IUser } from "@/types";
 
 type AuthenticatedHandler = (
   request: Request,
@@ -36,6 +38,52 @@ export function withAdmin(handler: AuthenticatedHandler) {
     if (context.user.role !== "admin") {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
+    return handler(request, context);
+  });
+}
+
+function refId(ref: Types.ObjectId | IUser): string {
+  const populated = (ref as { _id?: Types.ObjectId })._id;
+  return (populated ?? ref).toString();
+}
+
+export function canAdminProject(
+  user: IUser,
+  project: Pick<IProject, "owner" | "admins">
+): boolean {
+  if (user.role === "admin") return true;
+  if (user.tokenScoped) return false;
+  const uid = user._id.toString();
+  if (project.owner && refId(project.owner) === uid) return true;
+  return (project.admins || []).some((a) => refId(a) === uid);
+}
+
+export function withProjectAdmin(handler: AuthenticatedHandler) {
+  return withAuth(async (request, context) => {
+    const { user } = context;
+
+    const params = await context.params;
+    const projectId = params.projectId;
+    if (!projectId || !isValidObjectId(projectId)) {
+      return NextResponse.json({ error: "Invalid project id" }, { status: 400 });
+    }
+
+    if (user.role === "admin") {
+      return handler(request, context);
+    }
+    if (user.tokenScoped) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    await connectDB();
+    const project = await Project.findById(projectId).select("owner admins");
+    if (!project) {
+      return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    }
+    if (!canAdminProject(user, project)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     return handler(request, context);
   });
 }
