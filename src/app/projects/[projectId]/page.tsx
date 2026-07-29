@@ -485,6 +485,7 @@ export default function KanbanPage() {
       <BoardFilters
         tasks={tasks}
         components={project.components}
+        projectKey={project.key}
         labels={project.labels || []}
         categories={(project.categories || []).map((c) => c.name)}
         projectId={projectId}

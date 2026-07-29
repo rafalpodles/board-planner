@@ -67,13 +67,14 @@ interface BoardFiltersProps {
   components: string[];
   labels?: ApiLabel[];
   categories?: string[];
+  projectKey?: string;
   projectId: string;
   currentUsername?: string;
   extraControls?: React.ReactNode;
   onFilter: (filtered: ApiTask[]) => void;
 }
 
-export function BoardFilters({ tasks, components, labels = [], categories = [], projectId, currentUsername, extraControls, onFilter }: BoardFiltersProps) {
+export function BoardFilters({ tasks, components, labels = [], categories = [], projectKey, projectId, currentUsername, extraControls, onFilter }: BoardFiltersProps) {
   const [initialized, setInitialized] = useState(false);
 
   const [filters, setFilters] = useState<Filters>({
@@ -145,8 +146,13 @@ export function BoardFilters({ tasks, components, labels = [], categories = [], 
     let result = tasks;
 
     if (filters.search) {
-      const q = filters.search.toLowerCase();
-      result = result.filter((t) => t.title.toLowerCase().includes(q));
+      const q = filters.search.toLowerCase().trim();
+      result = result.filter((t) => {
+        if (t.title.toLowerCase().includes(q)) return true;
+        // Task-key search: "cp-128", "CP-128" and bare "128" all match CP-128
+        const key = `${projectKey ?? ""}-${t.taskNumber}`.toLowerCase();
+        return key.includes(q) || String(t.taskNumber).startsWith(q);
+      });
     }
     if (myTasks && currentUsername) {
       result = result.filter(
@@ -243,7 +249,7 @@ export function BoardFilters({ tasks, components, labels = [], categories = [], 
 
     onFilter(result);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters, tasks, sortField, sortDir, myTasks, currentUsername, labels]);
+  }, [filters, tasks, sortField, sortDir, myTasks, currentUsername, labels, projectKey]);
 
   function clearFilters() {
     setMyTasks(false);
