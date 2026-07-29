@@ -42,7 +42,7 @@ export function TaskCard({
         onContextMenu?.(task._id, e.clientX, e.clientY);
       }}
       onClick={(e) => {
-        if (e.ctrlKey || e.metaKey) {
+        if (selectionActive || e.ctrlKey || e.metaKey) {
           e.preventDefault();
           onSelect?.(task._id);
         } else {
