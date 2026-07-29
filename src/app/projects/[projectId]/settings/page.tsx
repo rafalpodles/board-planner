@@ -49,6 +49,8 @@ export default function ProjectSettingsPage() {
   const [error, setError] = useState("");
   const [newLabelName, setNewLabelName] = useState("");
   const [newLabelColor, setNewLabelColor] = useState("#3b82f6");
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [newCategoryColor, setNewCategoryColor] = useState("#3b82f6");
   const [aiModel, setAiModel] = useState("");
   const [aiModelSaving, setAiModelSaving] = useState(false);
   const [newFieldName, setNewFieldName] = useState("");
@@ -322,6 +324,30 @@ export default function ProjectSettingsPage() {
       setProject((p) => (p ? { ...p, labels } : p));
     } catch {
       toast("Failed to remove label", "error");
+    }
+  }
+
+  async function addCategory() {
+    if (!newCategoryName.trim()) return;
+    try {
+      const categories = await api.post(`/api/projects/${projectId}/categories`, {
+        name: newCategoryName.trim(),
+        color: newCategoryColor,
+      });
+      setProject((p) => (p ? { ...p, categories } : p));
+      setNewCategoryName("");
+      setNewCategoryColor("#3b82f6");
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Failed to add category", "error");
+    }
+  }
+
+  async function removeCategory(name: string) {
+    try {
+      const categories = await api.del(`/api/projects/${projectId}/categories`, { name });
+      setProject((p) => (p ? { ...p, categories } : p));
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Failed to remove category", "error");
     }
   }
 
@@ -737,6 +763,56 @@ export default function ProjectSettingsPage() {
         </div>
       </div>
 
+      {/* Categories */}
+      <div className="mb-8">
+        <h2 className="font-semibold mb-3">Categories</h2>
+        <p className="text-sm text-text-muted mb-3">
+          Task types available in this project. A category in use by tasks cannot be removed.
+        </p>
+        <div className="flex flex-wrap gap-2 mb-3">
+          {(project.categories || []).map((cat) => (
+            <span
+              key={cat._id}
+              className="inline-flex items-center gap-1 text-sm px-3 py-1 rounded-full"
+              style={{ backgroundColor: `${cat.color}33`, color: cat.color }}
+            >
+              {cat.name}
+              <button
+                onClick={() => removeCategory(cat.name)}
+                className="hover:opacity-70 ml-1 min-w-[24px] min-h-[24px] flex items-center justify-center"
+              >
+                &times;
+              </button>
+            </span>
+          ))}
+          {(project.categories || []).length === 0 && (
+            <p className="text-sm text-text-muted">No categories</p>
+          )}
+        </div>
+        <div className="flex gap-2 items-end">
+          <Input
+            value={newCategoryName}
+            onChange={(e) => setNewCategoryName(e.target.value)}
+            placeholder="Category name..."
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                addCategory();
+              }
+            }}
+          />
+          <input
+            type="color"
+            value={newCategoryColor}
+            onChange={(e) => setNewCategoryColor(e.target.value)}
+            className="w-10 h-10 rounded border border-border cursor-pointer bg-transparent"
+          />
+          <Button type="button" variant="secondary" onClick={addCategory}>
+            Add
+          </Button>
+        </div>
+      </div>
+
       {/* Custom Fields */}
       <div className="mb-8">
         <h2 className="font-semibold mb-3">Custom Fields</h2>
@@ -859,7 +935,7 @@ export default function ProjectSettingsPage() {
                         onChange={(e) => setEditingTemplate({ ...editingTemplate, category: e.target.value as Category })}
                         className="w-full text-sm bg-bg-input border border-border rounded-lg px-3 py-2"
                       >
-                        {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                        {(project.categories?.map((x) => x.name) || CATEGORIES).map((c) => <option key={c} value={c}>{c}</option>)}
                       </select>
                     </div>
                   </div>

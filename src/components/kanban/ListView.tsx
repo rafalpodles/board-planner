@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { ApiSprint, ApiTask, PRIORITY_LABELS, PRIORITY_ORDER, STATUS_LABELS, TASK_STATUSES, TaskStatus } from "@/types";
+import { ApiProjectCategory, ApiSprint, ApiTask, PRIORITY_LABELS, PRIORITY_ORDER, STATUS_LABELS, TASK_STATUSES, TaskStatus } from "@/types";
 import { Badge } from "@/components/ui/Badge";
 import { timeAgo } from "@/lib/time";
 
@@ -13,6 +13,7 @@ interface ListViewProps {
   projectKey: string;
   projectId?: string;
   sprints?: ApiSprint[];
+  categories?: ApiProjectCategory[];
   focusedIndex?: number;
   onTaskClick: (taskId: string) => void;
   onStatusChange?: (taskId: string, status: string) => void;
@@ -33,7 +34,7 @@ const STATUS_ORDER: Record<string, number> = Object.fromEntries(
   TASK_STATUSES.map((s, i) => [s, i])
 );
 
-export function ListView({ tasks, projectKey, projectId, sprints = [], focusedIndex = -1, onTaskClick, onStatusChange }: ListViewProps) {
+export function ListView({ tasks, projectKey, projectId, sprints = [], categories = [], focusedIndex = -1, onTaskClick, onStatusChange }: ListViewProps) {
   const rowRefs = useRef<(HTMLTableRowElement | null)[]>([]);
   const [sortKey, setSortKey] = useState<SortKey>("taskNumber");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
@@ -256,7 +257,11 @@ export function ListView({ tasks, projectKey, projectId, sprints = [], focusedIn
                     </Badge>
                   </td>
                   <td className="px-3 py-2 hidden lg:table-cell">
-                    <Badge variant="category" value={task.category}>
+                    <Badge
+                      variant="category"
+                      value={task.category}
+                      color={categories.find((c) => c.name === task.category)?.color}
+                    >
                       {task.category}
                     </Badge>
                   </td>

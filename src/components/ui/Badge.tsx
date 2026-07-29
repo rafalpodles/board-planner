@@ -37,6 +37,8 @@ interface BadgeProps {
   children: React.ReactNode;
   variant?: "status" | "difficulty" | "priority" | "category" | "default";
   value?: string;
+  // Explicit colour (hex) for project-defined categories; overrides the built-in maps
+  color?: string;
   className?: string;
 }
 
@@ -44,6 +46,7 @@ export function Badge({
   children,
   variant = "default",
   value,
+  color,
   className = "",
 }: BadgeProps) {
   let colorClass = "bg-bg-input text-text-muted";
@@ -56,6 +59,17 @@ export function Badge({
     colorClass = priorityColors[value as Priority];
   } else if (variant === "category" && value && value in categoryColors) {
     colorClass = categoryColors[value as Category];
+  }
+
+  if (color) {
+    return (
+      <span
+        className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${className}`}
+        style={{ backgroundColor: `${color}33`, color }}
+      >
+        {children}
+      </span>
+    );
   }
 
   return (

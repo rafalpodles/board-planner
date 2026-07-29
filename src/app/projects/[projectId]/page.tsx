@@ -471,6 +471,7 @@ export default function KanbanPage() {
         tasks={tasks}
         components={project.components}
         labels={project.labels || []}
+        categories={(project.categories || []).map((c) => c.name)}
         projectId={projectId}
         currentUsername={user?.username}
         extraControls={
@@ -531,6 +532,7 @@ export default function KanbanPage() {
           tasks={filteredTasks}
           projectKey={project.key}
           projectLabels={project.labels || []}
+          projectCategories={project.categories || []}
           selectedTasks={selectedTasks}
           selectionMode={selectionMode}
           onStatusChange={handleStatusChange}
@@ -547,6 +549,7 @@ export default function KanbanPage() {
           projectKey={project.key}
           projectId={projectId}
           sprints={sprints}
+          categories={project.categories || []}
           focusedIndex={focusedTaskIndex}
           onTaskClick={(taskId) =>
             router.push(`/projects/${projectId}/tasks/${taskId}`)
@@ -638,6 +641,7 @@ export default function KanbanPage() {
           projectId={projectId}
           projectKey={project.key}
           components={project.components}
+          categories={(project.categories || []).map((c) => c.name)}
           projectLabels={project.labels || []}
           taskTemplates={project.taskTemplates || []}
           sprints={sprints}

@@ -86,6 +86,7 @@ export const POST = withProjectAccess(async (request, { params }) => {
         name: project.name,
         description: project.description || "",
         components: project.components || [],
+        categories: (project.categories || []).map((c) => c.name),
         readme,
         existingTasks,
       },

@@ -191,6 +191,7 @@ export default function TaskDetailPage() {
             projectKey={project.key}
             task={task}
             components={project.components}
+            categories={(project.categories || []).map((c) => c.name)}
             projectLabels={project.labels || []}
             sprints={sprints}
             customFields={project.customFields || []}
@@ -213,7 +214,11 @@ export default function TaskDetailPage() {
                 <Badge variant="difficulty" value={task.difficulty}>
                   {task.difficulty}
                 </Badge>
-                <Badge variant="category" value={task.category}>
+                <Badge
+                  variant="category"
+                  value={task.category}
+                  color={(project.categories || []).find((c) => c.name === task.category)?.color}
+                >
                   {task.category}
                 </Badge>
               </div>

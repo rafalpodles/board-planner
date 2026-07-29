@@ -62,7 +62,7 @@ server.tool(
     status: z.string().optional().describe("Filter by status (comma-separated): planned, todo, in_progress, in_review, needs_human_review, ready_to_test, done"),
     assignee: z.string().optional().describe("Filter by assignee username"),
     component: z.string().optional().describe("Filter by component name"),
-    category: z.string().optional().describe("Filter by category: bug, doc, user-story, idea"),
+    category: z.string().optional().describe("Filter by category (project-defined; defaults: bug, doc, user-story, idea)"),
     priority: z.string().optional().describe("Filter by priority: low, medium, high, urgent"),
   },
   async ({ project, status, assignee, component, category, priority }) => {
@@ -100,7 +100,7 @@ server.tool(
     difficulty: z.string().optional().describe("Difficulty: S, M, L, or XL"),
     priority: z.string().optional().describe("Priority: low, medium, high, or urgent (default: medium)"),
     component: z.string().optional().describe("Component name"),
-    category: z.string().optional().describe("Category: bug, doc, user-story, idea"),
+    category: z.string().optional().describe("Category — one of the project's configured categories (defaults: bug, doc, user-story, idea)"),
     assignee: z.string().optional().describe("Assignee username"),
     status: z.string().optional().describe("Initial status (default: planned)"),
     acceptanceCriteria: z.string().optional().describe("Acceptance criteria (markdown checklist, converted to structured checklist items)"),
