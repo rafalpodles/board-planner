@@ -75,6 +75,11 @@ export default function ProjectSettingsPage() {
   const [githubToken, setGithubToken] = useState("");
   const [githubTokenSaving, setGithubTokenSaving] = useState(false);
   const [githubSyncing, setGithubSyncing] = useState(false);
+  const [gitlabRepo, setGitlabRepo] = useState("");
+  const [gitlabHost, setGitlabHost] = useState("https://gitlab.com");
+  const [gitlabToken, setGitlabToken] = useState("");
+  const [gitlabSaving, setGitlabSaving] = useState(false);
+  const [gitlabSyncing, setGitlabSyncing] = useState(false);
   const [pmEnabled, setPmEnabled] = useState(false);
   const [pmModel, setPmModel] = useState("");
   const [pmNotes, setPmNotes] = useState("");
@@ -110,6 +115,8 @@ export default function ProjectSettingsPage() {
         setDescription(p.description);
         setIcon(p.icon || "");
         setGithubRepo(p.githubRepo || "");
+        setGitlabRepo(p.gitlabRepo || "");
+        setGitlabHost(p.gitlabHost || "https://gitlab.com");
         setPmEnabled(p.pm?.enabled || false);
         setPmModel(p.pm?.model || "");
         setPmNotes(p.pm?.contextNotes || "");
@@ -722,6 +729,120 @@ export default function ProjectSettingsPage() {
             )}
           </div>
         </div>
+      )}
+
+      {/* GitLab Integration */}
+      {project.canAdmin && (
+      <div className="mb-8">
+        <h2 className="font-semibold mb-3">GitLab Integration</h2>
+        <p className="text-sm text-text-muted mb-3">
+          Link merge requests by task key in branch name or MR title (like the GitHub integration).
+        </p>
+        <div className="space-y-3">
+          <Input
+            label="GitLab Project"
+            value={gitlabRepo}
+            onChange={(e) => setGitlabRepo(e.target.value)}
+            placeholder="group/project"
+          />
+          <Input
+            label="GitLab Host"
+            value={gitlabHost}
+            onChange={(e) => setGitlabHost(e.target.value)}
+            placeholder="https://gitlab.com (or your self-hosted instance)"
+          />
+          <div>
+            <label className="block text-sm font-medium mb-1">
+              Access Token
+              {project.gitlabTokenSet && (
+                <span className="text-xs text-text-muted ml-2">(configured)</span>
+              )}
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="password"
+                value={gitlabToken}
+                onChange={(e) => setGitlabToken(e.target.value)}
+                placeholder={project.gitlabTokenSet ? "Enter new token to replace..." : "glpat-... (needs read_api scope)"}
+                className="flex-1 bg-bg-input border border-border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              disabled={gitlabSaving}
+              onClick={async () => {
+                setGitlabSaving(true);
+                try {
+                  const payload: Record<string, string> = {
+                    gitlabRepo: gitlabRepo.trim(),
+                    gitlabHost: gitlabHost.trim(),
+                  };
+                  if (gitlabToken.trim()) payload.gitlabToken = gitlabToken.trim();
+                  const updated = await api.put(`/api/projects/${projectId}`, payload);
+                  setProject(updated);
+                  setGitlabToken("");
+                  toast("GitLab settings saved", "success");
+                } catch (err) {
+                  toast(err instanceof Error ? err.message : "Failed to save GitLab settings", "error");
+                } finally {
+                  setGitlabSaving(false);
+                }
+              }}
+            >
+              {gitlabSaving ? "Saving..." : "Save"}
+            </Button>
+            {project.gitlabTokenSet && project.gitlabRepo && (
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={gitlabSyncing}
+                onClick={async () => {
+                  setGitlabSyncing(true);
+                  try {
+                    const result = await api.post(`/api/projects/${projectId}/gitlab/sync`, {});
+                    toast(
+                      `Synced: ${result.prsLinked} MRs linked to ${result.tasksLinked} tasks${result.autoTransitioned > 0 ? `, ${result.autoTransitioned} auto-transitioned` : ""}`,
+                      "success"
+                    );
+                  } catch (err) {
+                    toast(err instanceof Error ? err.message : "Sync failed", "error");
+                  } finally {
+                    setGitlabSyncing(false);
+                  }
+                }}
+              >
+                {gitlabSyncing ? "Syncing..." : "Sync MRs Now"}
+              </Button>
+            )}
+            {(project.gitlabTokenSet || project.gitlabRepo) && (
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={async () => {
+                  try {
+                    const updated = await api.put(`/api/projects/${projectId}`, {
+                      gitlabRepo: "",
+                      gitlabHost: "https://gitlab.com",
+                      gitlabToken: "",
+                    });
+                    setProject(updated);
+                    setGitlabRepo("");
+                    setGitlabHost("https://gitlab.com");
+                    setGitlabToken("");
+                    toast("GitLab disconnected", "success");
+                  } catch {
+                    toast("Failed to disconnect GitLab", "error");
+                  }
+                }}
+              >
+                Disconnect
+              </Button>
+            )}
+          </div>
+        </div>
+      </div>
       )}
 
       {/* Components */}

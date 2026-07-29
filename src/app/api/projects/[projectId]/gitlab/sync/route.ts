@@ -1,0 +1,96 @@
+import { NextResponse } from "next/server";
+import { connectDB } from "@/lib/db";
+import { withProjectAccess } from "@/lib/middleware";
+import { Project } from "@/models/project";
+import { Task } from "@/models/task";
+import { fetchMergeRequests, matchMRsToTasks, parseGitlabRepo } from "@/lib/gitlab";
+import { logActivity } from "@/lib/activity";
+import { decryptSecret } from "@/lib/encryption";
+import { getProjectColumns } from "@/lib/columns";
+
+export const POST = withProjectAccess(async (_request, { params, user }) => {
+  const { projectId } = await params;
+  await connectDB();
+
+  const project = await Project.findById(projectId).lean();
+  if (!project) {
+    return NextResponse.json({ error: "Project not found" }, { status: 404 });
+  }
+
+  if (!project.gitlabRepo || !project.gitlabToken) {
+    return NextResponse.json(
+      { error: "GitLab repo and token must be configured in project settings" },
+      { status: 400 }
+    );
+  }
+
+  const projectPath = parseGitlabRepo(project.gitlabRepo);
+  if (!projectPath) {
+    return NextResponse.json(
+      { error: "Invalid GitLab repo format. Use 'group/project'." },
+      { status: 400 }
+    );
+  }
+
+  const host = project.gitlabHost || "https://gitlab.com";
+  const rawMRs = await fetchMergeRequests(host, projectPath, decryptSecret(project.gitlabToken));
+  const matchedMRs = matchMRsToTasks(rawMRs, project.key);
+
+  const mrsByTask = new Map<number, typeof matchedMRs>();
+  for (const mr of matchedMRs) {
+    const existing = mrsByTask.get(mr.matchedTaskNumber) || [];
+    existing.push(mr);
+    mrsByTask.set(mr.matchedTaskNumber, existing);
+  }
+
+  let linked = 0;
+  let autoTransitioned = 0;
+
+  for (const [taskNumber, mrs] of mrsByTask) {
+    const task = await Task.findOne({ project: projectId, taskNumber });
+    if (!task) continue;
+
+    const mrDocs = mrs.map((mr) => ({
+      provider: "gitlab" as const,
+      number: mr.number,
+      title: mr.title,
+      state: mr.state,
+      url: mr.url,
+      mergedAt: mr.mergedAt,
+      updatedAt: mr.updatedAt,
+    }));
+
+    // Replace only this provider's entries; GitHub links stay untouched
+    const others = (task.linkedPRs || []).filter((pr) => (pr.provider ?? "github") !== "gitlab");
+    task.linkedPRs = [...others, ...mrDocs] as typeof task.linkedPRs;
+    linked += mrs.length;
+
+    // Auto-transition: merged MR + task in_review → ready_to_test.
+    // Keyed to the seeded column ids; projects that removed either column opt out.
+    const hasMerged = mrs.some((mr) => mr.state === "merged");
+    const columnIds = new Set(getProjectColumns(project).map((c) => c.id));
+    if (hasMerged && task.status === "in_review" && columnIds.has("ready_to_test")) {
+      const oldStatus = task.status;
+      task.status = "ready_to_test";
+      autoTransitioned++;
+      await logActivity(
+        String(task._id),
+        user._id,
+        "status_changed",
+        "status",
+        oldStatus,
+        "ready_to_test"
+      );
+    }
+
+    await task.save();
+  }
+
+  return NextResponse.json({
+    synced: true,
+    prsFound: matchedMRs.length,
+    tasksLinked: mrsByTask.size,
+    prsLinked: linked,
+    autoTransitioned,
+  });
+});

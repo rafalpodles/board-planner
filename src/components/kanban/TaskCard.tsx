@@ -152,7 +152,7 @@ export function TaskCard({
         <div className="mb-2 flex items-center gap-1.5">
           {task.linkedPRs.map((pr) => (
             <span
-              key={pr.number}
+              key={`${pr.provider ?? "github"}-${pr.number}`}
               className={`text-[10px] px-1.5 py-0.5 rounded font-medium inline-flex items-center gap-1 ${
                 pr.state === "merged"
                   ? "text-[#8b5cf6] bg-[#8b5cf6]/10"
