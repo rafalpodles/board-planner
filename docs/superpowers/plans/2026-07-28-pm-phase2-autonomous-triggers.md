@@ -1004,7 +1004,7 @@ This day-claim is also what satisfies CP-121's "scheduled turns must be idempote
 
 - [ ] **Step 4: Start it**
 
-In `src/instrumentation.ts`, inside the `if (process.env.NEXT_RUNTIME === "nodejs")` block, after the corrupted-date fixup and inside the same `try`:
+Use the **root** `instrumentation.ts`, not `src/instrumentation.ts`. Both files exist in this repo; Next.js resolves the root one and `src/instrumentation.ts` is dead code, so an edit there compiles, ships and silently does nothing. Inside the `if (process.env.NEXT_RUNTIME === "nodejs")` block, after the `connectDB()` log and inside the same `try`:
 
 ```typescript
       const { startPmScheduler } = await import("@/lib/pm/scheduler");
