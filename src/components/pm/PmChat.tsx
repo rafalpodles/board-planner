@@ -118,6 +118,7 @@ export function PmChat({
         role: "user",
         content: message,
         actions: [],
+        trigger: { type: "chat" },
         triggeredBy: null,
         createdAt: new Date().toISOString(),
       },
@@ -296,6 +297,13 @@ export function PmChat({
             >
               {m.role === "assistant" && (
                 <p className="text-[11px] font-medium text-text-muted mb-1">PM Agent</p>
+              )}
+              {m.trigger && m.trigger.type !== "chat" && (
+                <span className="inline-flex items-center text-[10px] text-text-muted bg-bg-input rounded-full px-2 py-0.5 mb-1">
+                  {m.trigger.type === "daily_review"
+                    ? "Scheduled review"
+                    : `Auto review: ${m.trigger.taskKey}`}
+                </span>
               )}
               <div className="text-sm prose-sm break-words">
                 <MarkdownContent>{m.content || "…"}</MarkdownContent>

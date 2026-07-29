@@ -1,5 +1,14 @@
 import mongoose, { Schema, Model } from "mongoose";
-import { IPmMessage } from "@/types";
+import { IPmMessage, PmMessageTrigger, PM_TRIGGER_TYPES } from "@/types";
+
+// Separate schema: an inline subdocument with a field named "type" collides with Mongoose's typeKey
+const triggerSchema = new Schema<PmMessageTrigger>(
+  {
+    type: { type: String, enum: PM_TRIGGER_TYPES, default: "chat" },
+    taskKey: { type: String, default: "" },
+  },
+  { _id: false }
+);
 
 const pmMessageSchema = new Schema<IPmMessage>(
   {
@@ -14,6 +23,10 @@ const pmMessageSchema = new Schema<IPmMessage>(
         at: { type: Date, default: Date.now },
       }],
       default: [],
+    },
+    trigger: {
+      type: triggerSchema,
+      default: () => ({ type: "chat", taskKey: "" }),
     },
     triggeredBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
   },
