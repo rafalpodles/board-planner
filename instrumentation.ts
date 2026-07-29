@@ -4,6 +4,10 @@ export async function register() {
     try {
       await connectDB();
       console.log("MongoDB connected successfully");
+
+      const { startPmScheduler } = await import("@/lib/pm/scheduler");
+      startPmScheduler();
+      console.log("PM scheduler started");
     } catch (err) {
       // Don't crash the server on a transient boot-time DB hiccup;
       // route handlers reconnect lazily via connectDB().

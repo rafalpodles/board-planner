@@ -232,13 +232,16 @@ In `src/app/api/projects/[projectId]/route.ts:57`, widen the existing projection
 ```
 
 ```typescript
-    if (pmResult.value.autonomy) {
+    if (body.pm.autonomy === undefined && existing.pm?.autonomy) {
+      // Clients unaware of autonomy must not silently disable the scheduled review
+      pmResult.value.autonomy = existing.pm.autonomy;
+    } else if (pmResult.value.autonomy) {
       pmResult.value.autonomy.lastDailyReviewDay =
         existing.pm?.autonomy?.lastDailyReviewDay ?? "";
     }
 ```
 
-Without this, every settings save would reset the marker and the daily review would fire a second time that day.
+Two failure modes, both found during Task 1's verification: without the `else if` branch every settings save resets the marker and the daily review fires a second time that day; without the first branch a client that omits `autonomy` (a script, a stale cached page) silently turns the scheduled review off. The first branch mirrors the `mcpServers` guard already in this route, for the same reason.
 
 - [ ] **Step 6: Add the settings UI**
 
@@ -373,19 +376,31 @@ Add `trigger: PmMessageTrigger;` to `IPmMessage` and to `ApiPmMessage`.
 
 - [ ] **Step 2: Add the schema field**
 
-In `src/models/pmMessage.ts`, inside the schema after `actions`:
+In `src/models/pmMessage.ts`, declare the subdocument as its own schema above `pmMessageSchema`:
+
+```typescript
+// Separate schema: an inline subdocument with a field named "type" collides with Mongoose's typeKey
+const triggerSchema = new Schema<PmMessageTrigger>(
+  {
+    type: { type: String, enum: PM_TRIGGER_TYPES, default: "chat" },
+    taskKey: { type: String, default: "" },
+  },
+  { _id: false }
+);
+```
+
+then, inside `pmMessageSchema` after `actions`:
 
 ```typescript
     trigger: {
-      type: {
-        type: { type: String, enum: PM_TRIGGER_TYPES, default: "chat" },
-        taskKey: { type: String, default: "" },
-      },
+      type: triggerSchema,
       default: () => ({ type: "chat", taskKey: "" }),
     },
 ```
 
-Import `PM_TRIGGER_TYPES` from `@/types`. The nested `type: { type: ... }` is Mongoose's escape hatch for a field literally named `type` — it is why the outer `type:` wrapper is needed here and nowhere else in this codebase.
+Import `PmMessageTrigger` and `PM_TRIGGER_TYPES` from `@/types`.
+
+An inline subdocument does **not** work here. Declaring it inline makes Mongoose read the nested `type` key as the SchemaType declaration for `trigger` itself, and the build dies with `Invalid schema configuration: 'Default' is not a valid type at path 'trigger.default'`. A separate schema sidesteps the ambiguity; `_id: false` keeps the subdocument from growing its own ObjectId.
 
 - [ ] **Step 3: Thread the trigger through the agent**
 
@@ -989,7 +1004,7 @@ This day-claim is also what satisfies CP-121's "scheduled turns must be idempote
 
 - [ ] **Step 4: Start it**
 
-In `src/instrumentation.ts`, inside the `if (process.env.NEXT_RUNTIME === "nodejs")` block, after the corrupted-date fixup and inside the same `try`:
+Use the **root** `instrumentation.ts`, not `src/instrumentation.ts`. Both files exist in this repo; Next.js resolves the root one and `src/instrumentation.ts` is dead code, so an edit there compiles, ships and silently does nothing. Inside the `if (process.env.NEXT_RUNTIME === "nodejs")` block, after the `connectDB()` log and inside the same `try`:
 
 ```typescript
       const { startPmScheduler } = await import("@/lib/pm/scheduler");

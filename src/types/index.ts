@@ -272,6 +272,22 @@ export interface IPmOauthState {
   createdAt: Date;
 }
 
+export interface IPmAutonomy {
+  dailyReview: boolean;
+  reviewHour: number;
+  timezone: string;
+  handleNeedsHumanReview: boolean;
+  lastDailyReviewDay: string;
+}
+
+export const DEFAULT_PM_AUTONOMY: IPmAutonomy = {
+  dailyReview: false,
+  reviewHour: 9,
+  timezone: "Europe/Warsaw",
+  handleNeedsHumanReview: false,
+  lastDailyReviewDay: "",
+};
+
 export interface IPmConfig {
   enabled: boolean;
   model: string;
@@ -279,6 +295,7 @@ export interface IPmConfig {
   links: IPmLink[];
   dailyTurnCap?: number;
   mcpServers?: IPmMcpServer[];
+  autonomy?: IPmAutonomy;
 }
 
 export interface IProject {
@@ -308,14 +325,40 @@ export interface IPmAction {
   at: Date;
 }
 
+export const PM_TRIGGER_TYPES = ["chat", "daily_review", "needs_human_review"] as const;
+export type PmTriggerType = (typeof PM_TRIGGER_TYPES)[number];
+
+export interface PmMessageTrigger {
+  type: PmTriggerType;
+  taskKey?: string;
+}
+
 export interface IPmMessage {
   _id: Types.ObjectId;
   project: Types.ObjectId;
   role: "user" | "assistant";
   content: string;
   actions: IPmAction[];
+  trigger: PmMessageTrigger;
   triggeredBy: Types.ObjectId | IUser | null;
   createdAt: Date;
+}
+
+export const PM_TRIGGER_STATES = ["pending", "running", "done", "failed"] as const;
+export type PmTriggerState = (typeof PM_TRIGGER_STATES)[number];
+
+export interface IPmTrigger {
+  _id: Types.ObjectId;
+  project: Types.ObjectId;
+  type: "needs_human_review";
+  taskKey: string;
+  task: Types.ObjectId;
+  state: PmTriggerState;
+  active: boolean;
+  attempts: number;
+  lastError: string;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface ILinkedPR {
@@ -507,6 +550,7 @@ export interface ApiPmConfig {
   links: IPmLink[];
   dailyTurnCap?: number;
   mcpServers?: ApiPmMcpServer[];
+  autonomy?: IPmAutonomy;
 }
 
 export interface ApiPmAction {
@@ -522,6 +566,7 @@ export interface ApiPmMessage {
   role: "user" | "assistant";
   content: string;
   actions: ApiPmAction[];
+  trigger: PmMessageTrigger;
   triggeredBy: ApiUser | string | null;
   createdAt: string;
 }
