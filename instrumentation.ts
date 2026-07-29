@@ -5,6 +5,16 @@ export async function register() {
       await connectDB();
       console.log("MongoDB connected successfully");
 
+      const { Project } = await import("@/models/project");
+      const { DEFAULT_PROJECT_CATEGORIES } = await import("@/types");
+      const seeded = await Project.updateMany(
+        { categories: { $exists: false } },
+        { $set: { categories: DEFAULT_PROJECT_CATEGORIES } }
+      );
+      if (seeded.modifiedCount > 0) {
+        console.log(`Seeded default categories on ${seeded.modifiedCount} project(s)`);
+      }
+
       const { startPmScheduler } = await import("@/lib/pm/scheduler");
       startPmScheduler();
       console.log("PM scheduler started");

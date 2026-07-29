@@ -38,6 +38,7 @@ function buildSystemPrompt(project: any, mcp: McpRuntime): string {
     `- Use task keys like ${project.key}-12 when referring to tasks.`,
     `- Be concise. Answer in the language the user writes in.`,
     `- You can execute at most ${MAX_WRITE_ACTIONS} write actions per turn; plan accordingly.`,
+    `- Task categories in this project: ${(project.categories || []).map((c: { name: string }) => c.name).join(", ") || "bug, doc, user-story, idea"}.`,
   ];
   if (mcp.serverNames.length > 0) {
     lines.push(

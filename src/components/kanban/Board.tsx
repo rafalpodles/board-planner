@@ -1,13 +1,14 @@
 "use client";
 
 import { useMemo } from "react";
-import { ApiTask, ApiLabel, TASK_STATUSES, TaskStatus } from "@/types";
+import { ApiTask, ApiLabel, ApiProjectCategory, TASK_STATUSES, TaskStatus } from "@/types";
 import { Column } from "./Column";
 
 interface BoardProps {
   tasks: ApiTask[];
   projectKey: string;
   projectLabels?: ApiLabel[];
+  projectCategories?: ApiProjectCategory[];
   selectedTasks?: Set<string>;
   selectionMode?: boolean;
   onStatusChange: (taskId: string, status: string) => void;
@@ -21,6 +22,7 @@ export function Board({
   tasks,
   projectKey,
   projectLabels,
+  projectCategories,
   selectedTasks,
   selectionMode,
   onStatusChange,
@@ -55,6 +57,7 @@ export function Board({
               tasks={grouped[status]}
               projectKey={projectKey}
               projectLabels={projectLabels}
+              projectCategories={projectCategories}
               selectedTasks={selectedTasks}
               selectionMode={selectionMode}
               onStatusChange={onStatusChange}

@@ -66,13 +66,14 @@ interface BoardFiltersProps {
   tasks: ApiTask[];
   components: string[];
   labels?: ApiLabel[];
+  categories?: string[];
   projectId: string;
   currentUsername?: string;
   extraControls?: React.ReactNode;
   onFilter: (filtered: ApiTask[]) => void;
 }
 
-export function BoardFilters({ tasks, components, labels = [], projectId, currentUsername, extraControls, onFilter }: BoardFiltersProps) {
+export function BoardFilters({ tasks, components, labels = [], categories = [], projectId, currentUsername, extraControls, onFilter }: BoardFiltersProps) {
   const [initialized, setInitialized] = useState(false);
 
   const [filters, setFilters] = useState<Filters>({
@@ -363,7 +364,7 @@ export function BoardFilters({ tasks, components, labels = [], projectId, curren
             className="text-xs bg-bg-input border border-border rounded-lg px-2 py-1.5 text-text-muted focus:outline-none focus:ring-1 focus:ring-primary"
           >
             <option value="">All categories</option>
-            {CATEGORIES.map((c: Category) => (
+            {(categories.length > 0 ? categories : CATEGORIES).map((c: Category) => (
               <option key={c} value={c}>{c}</option>
             ))}
           </select>

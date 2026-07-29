@@ -1,7 +1,14 @@
 import mongoose, { Schema, Model } from "mongoose";
-import { IProject, DIFFICULTIES, CATEGORIES, WEBHOOK_EVENTS, NOTIFICATION_CHANNEL_TYPES, CUSTOM_FIELD_TYPES } from "@/types";
+import { IProject, DIFFICULTIES, DEFAULT_PROJECT_CATEGORIES, WEBHOOK_EVENTS, NOTIFICATION_CHANNEL_TYPES, CUSTOM_FIELD_TYPES } from "@/types";
 
 const labelSchema = new Schema(
+  {
+    name: { type: String, required: true, trim: true },
+    color: { type: String, required: true, default: "#3b82f6" },
+  }
+);
+
+const categorySchema = new Schema(
   {
     name: { type: String, required: true, trim: true },
     color: { type: String, required: true, default: "#3b82f6" },
@@ -14,7 +21,7 @@ const taskTemplateSchema = new Schema(
     title: { type: String, default: "" },
     description: { type: String, default: "" },
     difficulty: { type: String, enum: DIFFICULTIES, default: "M" },
-    category: { type: String, enum: CATEGORIES, default: "user-story" },
+    category: { type: String, default: "user-story" },
     component: { type: String, default: "" },
     acceptanceCriteria: { type: String, default: "" },
   }
@@ -59,6 +66,11 @@ const projectSchema = new Schema<IProject>(
     labels: {
       type: [labelSchema],
       default: [],
+    },
+    categories: {
+      type: [categorySchema],
+      default: () =>
+        DEFAULT_PROJECT_CATEGORIES.map((c) => ({ ...c })) as unknown as IProject["categories"],
     },
     taskTemplates: {
       type: [taskTemplateSchema],

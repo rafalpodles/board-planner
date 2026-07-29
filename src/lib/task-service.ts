@@ -42,6 +42,18 @@ export async function createTask(
     return { ok: false, error: "Project not found", status: 404 };
   }
 
+  const categoryNames = (project.categories || []).map((c) => c.name);
+  const category =
+    body.category ??
+    (categoryNames.includes("user-story") ? "user-story" : categoryNames[0] ?? "user-story");
+  if (categoryNames.length > 0 && !categoryNames.includes(category)) {
+    return {
+      ok: false,
+      error: `Invalid category "${category}" — project categories: ${categoryNames.join(", ")}`,
+      status: 400,
+    };
+  }
+
   let assigneeId = null;
   if (body.assignee) {
     const assigneeUser = await User.findOne({
@@ -60,7 +72,7 @@ export async function createTask(
     difficulty: body.difficulty ?? "M",
     priority: body.priority ?? DEFAULT_PRIORITY,
     component: body.component ?? "",
-    category: body.category ?? "user-story",
+    category,
     status: body.status ?? "planned",
     assignee: assigneeId,
     dueDate: body.dueDate || null,
@@ -201,6 +213,18 @@ export async function updateTask(
   for (const field of allowed) {
     if (body[field] !== undefined) {
       updates[field] = body[field];
+    }
+  }
+
+  if (updates.category !== undefined) {
+    const proj = await Project.findById(projectId, "categories").lean();
+    const names = (proj?.categories || []).map((c) => c.name);
+    if (names.length > 0 && !names.includes(String(updates.category))) {
+      return {
+        ok: false,
+        error: `Invalid category "${updates.category}" — project categories: ${names.join(", ")}`,
+        status: 400,
+      };
     }
   }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { ApiTask, ApiLabel, PRIORITY_LABELS } from "@/types";
+import { ApiTask, ApiLabel, ApiProjectCategory, PRIORITY_LABELS } from "@/types";
 import { Badge } from "@/components/ui/Badge";
 
 // Cards are narrow; the default badge padding makes three of them wrap raggedly
@@ -10,6 +10,7 @@ interface TaskCardProps {
   task: ApiTask;
   projectKey: string;
   projectLabels?: ApiLabel[];
+  projectCategories?: ApiProjectCategory[];
   selected?: boolean;
   selectionActive?: boolean;
   onSelect?: (taskId: string) => void;
@@ -21,6 +22,7 @@ export function TaskCard({
   task,
   projectKey,
   projectLabels = [],
+  projectCategories = [],
   selected = false,
   selectionActive = false,
   onSelect,
@@ -90,7 +92,12 @@ export function TaskCard({
         <Badge variant="difficulty" value={task.difficulty} className={COMPACT_BADGE}>
           {task.difficulty}
         </Badge>
-        <Badge variant="category" value={task.category} className={COMPACT_BADGE}>
+        <Badge
+          variant="category"
+          value={task.category}
+          color={projectCategories.find((c) => c.name === task.category)?.color}
+          className={COMPACT_BADGE}
+        >
           {task.category}
         </Badge>
       </div>
