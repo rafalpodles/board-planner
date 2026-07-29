@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { usePollWhileVisible } from "@/hooks/use-poll-while-visible";
-import { ApiProject, ApiTask, ApiSprint } from "@/types";
+import { ApiProject, ApiTask, ApiSprint, DEFAULT_PROJECT_ICON } from "@/types";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Board } from "@/components/kanban/Board";
 import { BoardFilters } from "@/components/kanban/BoardFilters";
@@ -362,7 +362,10 @@ export default function KanbanPage() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
               </svg>
             </Link>
-            <h1 className="text-2xl font-bold">{project.name}</h1>
+            <h1 className="text-2xl font-bold flex items-center gap-2">
+              <span aria-hidden="true">{project.icon || DEFAULT_PROJECT_ICON}</span>
+              {project.name}
+            </h1>
           </div>
           <div className="flex items-center gap-2 ml-7">
             <p className="text-sm text-text-muted">{project.key}</p>

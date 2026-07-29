@@ -12,6 +12,7 @@ import { PmMessage } from "@/models/pmMessage";
 import { logProjectAudit } from "@/lib/projectAudit";
 import { encryptSecret } from "@/lib/encryption";
 import { validatePmConfig, isPmAvailable, mergeMcpServerTokens, sanitizeMcpServers } from "@/lib/pm/config";
+import { PROJECT_ICONS } from "@/types";
 
 export const GET = withProjectAccess(async (_request, { params }) => {
   await connectDB();
@@ -41,11 +42,21 @@ export const PUT = withAdmin(async (request, { params, user }) => {
   const { projectId } = await params;
   const body = await request.json();
 
-  const allowed = ["name", "description", "key", "githubRepo", "githubToken"];
+  const allowed = ["name", "description", "key", "icon", "githubRepo", "githubToken"];
   const updates: Record<string, unknown> = {};
   for (const field of allowed) {
     if (body[field] !== undefined) {
       updates[field] = body[field];
+    }
+  }
+
+  if (updates.icon !== undefined) {
+    const icon = updates.icon;
+    if (typeof icon !== "string" || (icon !== "" && !PROJECT_ICONS.includes(icon))) {
+      return NextResponse.json(
+        { error: "icon must be empty or one of the supported project icons" },
+        { status: 400 }
+      );
     }
   }
 
