@@ -232,13 +232,16 @@ In `src/app/api/projects/[projectId]/route.ts:57`, widen the existing projection
 ```
 
 ```typescript
-    if (pmResult.value.autonomy) {
+    if (body.pm.autonomy === undefined && existing.pm?.autonomy) {
+      // Clients unaware of autonomy must not silently disable the scheduled review
+      pmResult.value.autonomy = existing.pm.autonomy;
+    } else if (pmResult.value.autonomy) {
       pmResult.value.autonomy.lastDailyReviewDay =
         existing.pm?.autonomy?.lastDailyReviewDay ?? "";
     }
 ```
 
-Without this, every settings save would reset the marker and the daily review would fire a second time that day.
+Two failure modes, both found during Task 1's verification: without the `else if` branch every settings save resets the marker and the daily review fires a second time that day; without the first branch a client that omits `autonomy` (a script, a stale cached page) silently turns the scheduled review off. The first branch mirrors the `mcpServers` guard already in this route, for the same reason.
 
 - [ ] **Step 6: Add the settings UI**
 

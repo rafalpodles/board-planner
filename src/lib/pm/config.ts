@@ -1,6 +1,14 @@
-import { IPmConfig, IPmMcpServer, PM_MCP_AUTH_TYPES, PmMcpAuthType } from "@/types";
+import {
+  IPmAutonomy,
+  IPmConfig,
+  IPmMcpServer,
+  DEFAULT_PM_AUTONOMY,
+  PM_MCP_AUTH_TYPES,
+  PmMcpAuthType,
+} from "@/types";
 import { encryptSecret, decryptSecret } from "@/lib/encryption";
 import { isAllowedMcpServerUrl } from "@/lib/url-validation";
+import { isValidTimezone } from "./autonomy";
 
 const MAX_MODEL_LENGTH = 100;
 const MAX_NOTES_LENGTH = 5000;
@@ -128,6 +136,27 @@ export function validatePmConfig(
     } as any);
   }
 
+  const rawAutonomy = pm.autonomy ?? {};
+  if (typeof rawAutonomy !== "object" || rawAutonomy === null || Array.isArray(rawAutonomy)) {
+    return { valid: false, error: "pm.autonomy must be an object" };
+  }
+  const reviewHour = rawAutonomy.reviewHour ?? DEFAULT_PM_AUTONOMY.reviewHour;
+  if (!Number.isInteger(reviewHour) || reviewHour < 0 || reviewHour > 23) {
+    return { valid: false, error: "pm.autonomy.reviewHour must be an integer 0-23" };
+  }
+  const timezone = String(rawAutonomy.timezone ?? DEFAULT_PM_AUTONOMY.timezone).trim();
+  if (!isValidTimezone(timezone)) {
+    return { valid: false, error: `pm.autonomy.timezone is not a valid IANA timezone: ${timezone}` };
+  }
+  // Server-managed: the PUT body must never set it, the route carries the stored value across
+  const autonomy: IPmAutonomy = {
+    dailyReview: rawAutonomy.dailyReview === true,
+    reviewHour,
+    timezone,
+    handleNeedsHumanReview: rawAutonomy.handleNeedsHumanReview === true,
+    lastDailyReviewDay: "",
+  };
+
   return {
     valid: true,
     value: {
@@ -137,6 +166,7 @@ export function validatePmConfig(
       links: cleanLinks,
       dailyTurnCap,
       mcpServers: cleanServers,
+      autonomy,
     },
   };
 }

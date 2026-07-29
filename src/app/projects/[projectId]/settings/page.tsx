@@ -66,6 +66,10 @@ export default function ProjectSettingsPage() {
   const [pmModel, setPmModel] = useState("");
   const [pmNotes, setPmNotes] = useState("");
   const [pmDailyCap, setPmDailyCap] = useState("");
+  const [pmDailyReview, setPmDailyReview] = useState(false);
+  const [pmReviewHour, setPmReviewHour] = useState("9");
+  const [pmTimezone, setPmTimezone] = useState("Europe/Warsaw");
+  const [pmHandleNhr, setPmHandleNhr] = useState(false);
   const [pmLinks, setPmLinks] = useState<{ label: string; url: string }[]>([]);
   const [newPmLinkLabel, setNewPmLinkLabel] = useState("");
   const [newPmLinkUrl, setNewPmLinkUrl] = useState("");
@@ -93,6 +97,10 @@ export default function ProjectSettingsPage() {
         setPmModel(p.pm?.model || "");
         setPmNotes(p.pm?.contextNotes || "");
         setPmDailyCap(p.pm?.dailyTurnCap ? String(p.pm.dailyTurnCap) : "");
+        setPmDailyReview(p.pm?.autonomy?.dailyReview ?? false);
+        setPmReviewHour(String(p.pm?.autonomy?.reviewHour ?? 9));
+        setPmTimezone(p.pm?.autonomy?.timezone || "Europe/Warsaw");
+        setPmHandleNhr(p.pm?.autonomy?.handleNeedsHumanReview ?? false);
         setPmLinks(p.pm?.links?.map((l) => ({ label: l.label, url: l.url })) || []);
         syncMcpServersFrom(p);
       })
@@ -156,6 +164,12 @@ export default function ProjectSettingsPage() {
           contextNotes: pmNotes,
           links: pmLinks,
           dailyTurnCap: pmDailyCap.trim() ? Number(pmDailyCap) : 0,
+          autonomy: {
+            dailyReview: pmDailyReview,
+            reviewHour: Number(pmReviewHour) || 0,
+            timezone: pmTimezone.trim(),
+            handleNeedsHumanReview: pmHandleNhr,
+          },
           mcpServers: pmMcpServers
             .filter((s) => s.name.trim() || s.url.trim())
             .map((s) => ({
@@ -963,6 +977,52 @@ export default function ProjectSettingsPage() {
                 placeholder="What this project is, conventions, priorities — injected into the PM's system prompt."
                 className="w-full bg-bg-input border border-border rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
               />
+            </div>
+            <div className="border-t border-border pt-3 space-y-3">
+              <h3 className="text-sm font-medium">Autonomy</h3>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={pmDailyReview}
+                  onChange={(e) => setPmDailyReview(e.target.checked)}
+                  className="rounded border-border"
+                />
+                Daily board review
+              </label>
+              {pmDailyReview && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pl-6">
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Review hour</label>
+                    <Input
+                      type="number"
+                      min={0}
+                      max={23}
+                      value={pmReviewHour}
+                      onChange={(e) => setPmReviewHour(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Timezone</label>
+                    <Input
+                      value={pmTimezone}
+                      onChange={(e) => setPmTimezone(e.target.value)}
+                      placeholder="Europe/Warsaw"
+                    />
+                  </div>
+                </div>
+              )}
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={pmHandleNhr}
+                  onChange={(e) => setPmHandleNhr(e.target.checked)}
+                  className="rounded border-border"
+                />
+                Review tasks entering &quot;Needs Human Review&quot;
+              </label>
+              <p className="text-xs text-text-muted">
+                Autonomous turns count against the daily turn cap and post into the PM chat thread.
+              </p>
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">Documentation links</label>

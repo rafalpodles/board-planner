@@ -54,7 +54,7 @@ export const PUT = withAdmin(async (request, { params, user }) => {
     if (!pmResult.valid) {
       return NextResponse.json({ error: pmResult.error }, { status: 400 });
     }
-    const existing = await Project.findById(projectId).select("pm.mcpServers");
+    const existing = await Project.findById(projectId).select("pm.mcpServers pm.autonomy");
     if (!existing) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
@@ -67,6 +67,13 @@ export const PUT = withAdmin(async (request, { params, user }) => {
         return NextResponse.json({ error: merged.error }, { status: 400 });
       }
       pmResult.value.mcpServers = merged.value;
+    }
+    if (body.pm.autonomy === undefined && existing.pm?.autonomy) {
+      // Clients unaware of autonomy must not silently disable the scheduled review
+      pmResult.value.autonomy = existing.pm.autonomy;
+    } else if (pmResult.value.autonomy) {
+      pmResult.value.autonomy.lastDailyReviewDay =
+        existing.pm?.autonomy?.lastDailyReviewDay ?? "";
     }
     updates.pm = pmResult.value;
   }
