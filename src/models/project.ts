@@ -47,6 +47,11 @@ const projectSchema = new Schema<IProject>(
       type: String,
       default: "",
     },
+    icon: {
+      type: String,
+      default: "",
+      trim: true,
+    },
     components: {
       type: [String],
       default: [],

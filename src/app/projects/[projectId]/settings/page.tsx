@@ -3,8 +3,9 @@
 import { useEffect, useState, FormEvent } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
-import { ApiProject, ApiLabel, ApiCustomField, ApiTaskTemplate, ApiWebhook, ApiNotificationChannel, ApiProjectAuditLog, DIFFICULTIES, CATEGORIES, WEBHOOK_EVENTS, NOTIFICATION_CHANNEL_TYPES, CUSTOM_FIELD_TYPES, Difficulty, Category, CustomFieldType, WebhookEvent, NotificationChannelType } from "@/types";
+import { ApiProject, ApiLabel, ApiCustomField, ApiTaskTemplate, ApiWebhook, ApiNotificationChannel, ApiProjectAuditLog, DIFFICULTIES, CATEGORIES, WEBHOOK_EVENTS, NOTIFICATION_CHANNEL_TYPES, CUSTOM_FIELD_TYPES, PROJECT_ICONS, DEFAULT_PROJECT_ICON, Difficulty, Category, CustomFieldType, WebhookEvent, NotificationChannelType } from "@/types";
 import { Input } from "@/components/ui/Input";
+import { EmojiPicker } from "@/components/ui/EmojiPicker";
 import { Textarea } from "@/components/ui/Textarea";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -36,6 +37,7 @@ export default function ProjectSettingsPage() {
   const [project, setProject] = useState<ApiProject | null>(null);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [icon, setIcon] = useState("");
   const [githubRepo, setGithubRepo] = useState("");
   const [newComponent, setNewComponent] = useState("");
   const [loading, setLoading] = useState(true);
@@ -92,6 +94,7 @@ export default function ProjectSettingsPage() {
         setProject(p);
         setName(p.name);
         setDescription(p.description);
+        setIcon(p.icon || "");
         setGithubRepo(p.githubRepo || "");
         setPmEnabled(p.pm?.enabled || false);
         setPmModel(p.pm?.model || "");
@@ -247,6 +250,7 @@ export default function ProjectSettingsPage() {
       const updated = await api.put(`/api/projects/${projectId}`, {
         name,
         description,
+        icon,
         githubRepo,
       });
       setProject(updated);
@@ -512,6 +516,13 @@ export default function ProjectSettingsPage() {
           required
         />
         <Input label="Project Key" value={project.key} disabled />
+        <EmojiPicker
+          label="Project Icon"
+          value={icon}
+          options={PROJECT_ICONS}
+          fallback={DEFAULT_PROJECT_ICON}
+          onChange={setIcon}
+        />
         <Textarea
           label="Description"
           value={description}
