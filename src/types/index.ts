@@ -630,10 +630,11 @@ export interface ApiComment {
 }
 
 // Sort options for board columns
-export type SortField = "updatedAt" | "createdAt" | "dueDate" | "priority" | "difficulty" | "category" | "title";
+export type SortField = "manual" | "updatedAt" | "createdAt" | "dueDate" | "priority" | "difficulty" | "category" | "title";
 export type SortDir = "asc" | "desc";
 
 export const SORT_OPTIONS: { value: SortField; label: string; defaultDir: SortDir }[] = [
+  { value: "manual", label: "Manual order", defaultDir: "asc" },
   { value: "updatedAt", label: "Last updated", defaultDir: "desc" },
   { value: "createdAt", label: "Created", defaultDir: "desc" },
   { value: "dueDate", label: "Due date", defaultDir: "asc" },

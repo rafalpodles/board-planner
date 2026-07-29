@@ -86,8 +86,8 @@ export function BoardFilters({ tasks, components, labels = [], projectId, curren
     dateRange: "",
   });
   const [myTasks, setMyTasks] = useState(false);
-  const [sortField, setSortField] = useState<SortField>("updatedAt");
-  const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [sortField, setSortField] = useState<SortField>("manual");
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [showFilters, setShowFilters] = useState(false);
 
   // Load persisted filter state after mount. Reading localStorage during render
@@ -214,6 +214,12 @@ export function BoardFilters({ tasks, components, labels = [], projectId, curren
     result = [...result].sort((a, b) => {
       let cmp = 0;
       switch (sortField) {
+        // Mirrors the API's own ordering, so drag-and-drop reordering survives
+        case "manual":
+          cmp =
+            (a.order ?? 0) - (b.order ?? 0) ||
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+          break;
         case "updatedAt":
         case "createdAt":
           cmp = new Date(a[sortField]).getTime() - new Date(b[sortField]).getTime();
@@ -241,8 +247,8 @@ export function BoardFilters({ tasks, components, labels = [], projectId, curren
   function clearFilters() {
     setMyTasks(false);
     setFilters({ search: "", assignee: "", component: "", category: "", difficulty: "", priority: "", label: "", dateRange: "" });
-    setSortField("updatedAt");
-    setSortDir("desc");
+    setSortField("manual");
+    setSortDir("asc");
   }
 
   return (
