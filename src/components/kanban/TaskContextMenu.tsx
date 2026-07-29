@@ -10,6 +10,7 @@ interface TaskContextMenuProps {
   isPinned?: boolean;
   sprints?: ApiSprint[];
   currentSprint?: string | null;
+  selectedCount?: number;
   onStatusChange: (status: string) => void;
   onSprintChange?: (sprintId: string | null) => void;
   onPin?: () => void;
@@ -25,6 +26,7 @@ export function TaskContextMenu({
   isPinned,
   sprints = [],
   currentSprint,
+  selectedCount = 1,
   onStatusChange,
   onSprintChange,
   onPin,
@@ -80,10 +82,15 @@ export function TaskContextMenu({
       style={style}
       className="bg-bg-card border border-border rounded-lg shadow-lg py-1 min-w-[160px] text-sm"
     >
+      {selectedCount > 1 && (
+        <div className="px-3 py-1.5 text-xs font-medium text-primary border-b border-border mb-1">
+          {selectedCount} tasks selected
+        </div>
+      )}
       <div className="px-3 py-1.5 text-xs text-text-muted font-medium">
         Move to
       </div>
-      {TASK_STATUSES.filter((s) => s !== currentStatus).map((s) => (
+      {TASK_STATUSES.filter((s) => selectedCount > 1 || s !== currentStatus).map((s) => (
         <button
           key={s}
           onClick={() => { onStatusChange(s); onClose(); }}
@@ -101,7 +108,7 @@ export function TaskContextMenu({
           {sprints.map((s) => (
             <button
               key={s._id}
-              disabled={s._id === currentSprint}
+              disabled={selectedCount === 1 && s._id === currentSprint}
               onClick={() => { onSprintChange(s._id); onClose(); }}
               className="w-full text-left px-3 py-1.5 hover:bg-bg-input transition-colors
                 disabled:opacity-40 disabled:hover:bg-transparent disabled:cursor-default"
@@ -112,7 +119,7 @@ export function TaskContextMenu({
               )}
             </button>
           ))}
-          {currentSprint && (
+          {(currentSprint || selectedCount > 1) && (
             <button
               onClick={() => { onSprintChange(null); onClose(); }}
               className="w-full text-left px-3 py-1.5 hover:bg-bg-input transition-colors text-text-muted"
@@ -123,7 +130,7 @@ export function TaskContextMenu({
         </>
       )}
       <div className="border-t border-border my-1" />
-      {onPin && (
+      {onPin && selectedCount === 1 && (
         <button
           onClick={() => { onPin(); onClose(); }}
           className="w-full text-left px-3 py-1.5 hover:bg-bg-input transition-colors"
@@ -131,17 +138,19 @@ export function TaskContextMenu({
           {isPinned ? "Unpin" : "Pin to top"}
         </button>
       )}
-      <button
-        onClick={() => { onDuplicate(); onClose(); }}
-        className="w-full text-left px-3 py-1.5 hover:bg-bg-input transition-colors"
-      >
-        Duplicate
-      </button>
+      {selectedCount === 1 && (
+        <button
+          onClick={() => { onDuplicate(); onClose(); }}
+          className="w-full text-left px-3 py-1.5 hover:bg-bg-input transition-colors"
+        >
+          Duplicate
+        </button>
+      )}
       <button
         onClick={() => { onDelete(); onClose(); }}
         className="w-full text-left px-3 py-1.5 hover:bg-bg-input transition-colors text-danger"
       >
-        Delete
+        {selectedCount > 1 ? `Delete ${selectedCount} tasks` : "Delete"}
       </button>
     </div>
   );

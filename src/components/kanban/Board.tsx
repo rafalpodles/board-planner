@@ -9,6 +9,7 @@ interface BoardProps {
   projectKey: string;
   projectLabels?: ApiLabel[];
   selectedTasks?: Set<string>;
+  selectionMode?: boolean;
   onStatusChange: (taskId: string, status: string) => void;
   onTaskDrop?: (taskId: string, status: string, dropIndex: number) => void;
   onTaskClick: (taskId: string) => void;
@@ -21,6 +22,7 @@ export function Board({
   projectKey,
   projectLabels,
   selectedTasks,
+  selectionMode,
   onStatusChange,
   onTaskDrop,
   onTaskClick,
@@ -54,6 +56,7 @@ export function Board({
               projectKey={projectKey}
               projectLabels={projectLabels}
               selectedTasks={selectedTasks}
+              selectionMode={selectionMode}
               onStatusChange={onStatusChange}
               onTaskDrop={onTaskDrop}
               onTaskClick={onTaskClick}

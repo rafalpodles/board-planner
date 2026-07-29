@@ -68,10 +68,11 @@ interface BoardFiltersProps {
   labels?: ApiLabel[];
   projectId: string;
   currentUsername?: string;
+  extraControls?: React.ReactNode;
   onFilter: (filtered: ApiTask[]) => void;
 }
 
-export function BoardFilters({ tasks, components, labels = [], projectId, currentUsername, onFilter }: BoardFiltersProps) {
+export function BoardFilters({ tasks, components, labels = [], projectId, currentUsername, extraControls, onFilter }: BoardFiltersProps) {
   const [initialized, setInitialized] = useState(false);
 
   const [filters, setFilters] = useState<Filters>({
@@ -320,6 +321,8 @@ export function BoardFilters({ tasks, components, labels = [], projectId, curren
             Clear
           </button>
         )}
+
+        {extraControls}
       </div>
 
       {showFilters && (
