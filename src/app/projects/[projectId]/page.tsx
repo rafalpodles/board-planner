@@ -197,6 +197,38 @@ export default function KanbanPage() {
     }
   }
 
+  async function handleBulkSprint(sprintId: string | null) {
+    const ids = Array.from(selectedTasks);
+    try {
+      await Promise.all(
+        ids.map((id) =>
+          api.put(`/api/projects/${projectId}/tasks/${id}`, { sprint: sprintId })
+        )
+      );
+      applySprintChange(ids, sprintId);
+      setSelectedTasks(new Set());
+      const target = sprintId
+        ? sprints.find((s) => s._id === sprintId)?.name ?? "sprint"
+        : "backlog";
+      toast(`Moved ${ids.length} task${ids.length === 1 ? "" : "s"} to ${target}`, "success");
+    } catch {
+      toast("Failed to move tasks to sprint", "error");
+    }
+  }
+
+  // Tasks leaving the sprint the board is filtered by must disappear from it
+  function applySprintChange(taskIds: string[], sprintId: string | null) {
+    const affected = new Set(taskIds);
+    setTasks((prev) => {
+      const updated = prev.map((t) =>
+        affected.has(t._id) ? { ...t, sprint: sprintId } : t
+      );
+      if (selectedSprint === "all") return updated;
+      const wanted = selectedSprint === "backlog" ? null : selectedSprint;
+      return updated.filter((t) => !affected.has(t._id) || t.sprint === wanted);
+    });
+  }
+
   async function handleBulkDelete() {
     setBulkDeleting(true);
     try {
@@ -491,6 +523,26 @@ export default function KanbanPage() {
               <option key={s} value={s}>{STATUS_LABELS[s]}</option>
             ))}
           </select>
+          {sprints.length > 0 && (
+            <select
+              onChange={(e) => {
+                if (e.target.value) handleBulkSprint(e.target.value === "backlog" ? null : e.target.value);
+                e.target.value = "";
+              }}
+              className="text-xs bg-bg-input border border-border rounded px-2 py-1.5 text-text-muted focus:outline-none focus:ring-1 focus:ring-primary"
+              defaultValue=""
+            >
+              <option value="" disabled>Move to sprint...</option>
+              {sprints
+                .filter((s) => s.status !== "completed")
+                .map((s) => (
+                  <option key={s._id} value={s._id}>
+                    {s.name}{s.status === "active" ? " (Active)" : ""}
+                  </option>
+                ))}
+              <option value="backlog">Remove from sprint</option>
+            </select>
+          )}
           <Button
             size="sm"
             variant="danger"
@@ -550,7 +602,23 @@ export default function KanbanPage() {
             y={contextMenu.y}
             currentStatus={task.status}
             isPinned={task.pinned}
+            sprints={sprints.filter((s) => s.status !== "completed")}
+            currentSprint={task.sprint}
             onStatusChange={(status) => handleStatusChange(contextMenu.taskId, status)}
+            onSprintChange={async (sprintId) => {
+              const taskId = contextMenu.taskId;
+              applySprintChange([taskId], sprintId);
+              try {
+                await api.put(`/api/projects/${projectId}/tasks/${taskId}`, { sprint: sprintId });
+                const target = sprintId
+                  ? sprints.find((s) => s._id === sprintId)?.name ?? "sprint"
+                  : "backlog";
+                toast(`Moved to ${target}`, "success");
+              } catch {
+                toast("Failed to move task to sprint", "error");
+                loadData();
+              }
+            }}
             onPin={async () => {
               const newPinned = !task.pinned;
               setTasks((prev) => prev.map((t) => t._id === contextMenu.taskId ? { ...t, pinned: newPinned } : t));
