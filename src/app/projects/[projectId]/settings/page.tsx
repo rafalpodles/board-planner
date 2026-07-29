@@ -3,7 +3,8 @@
 import { useEffect, useState, FormEvent } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
-import { ApiProject, ApiLabel, ApiCustomField, ApiTaskTemplate, ApiWebhook, ApiNotificationChannel, ApiProjectAuditLog, DIFFICULTIES, CATEGORIES, WEBHOOK_EVENTS, NOTIFICATION_CHANNEL_TYPES, CUSTOM_FIELD_TYPES, PROJECT_ICONS, DEFAULT_PROJECT_ICON, Difficulty, Category, CustomFieldType, WebhookEvent, NotificationChannelType } from "@/types";
+import { useAuth } from "@/hooks/use-auth";
+import { ApiProject, ApiProjectMember, ApiLabel, ApiCustomField, ApiTaskTemplate, ApiWebhook, ApiNotificationChannel, ApiProjectAuditLog, DIFFICULTIES, CATEGORIES, WEBHOOK_EVENTS, NOTIFICATION_CHANNEL_TYPES, CUSTOM_FIELD_TYPES, PROJECT_ICONS, DEFAULT_PROJECT_ICON, Difficulty, Category, CustomFieldType, WebhookEvent, NotificationChannelType } from "@/types";
 import { Input } from "@/components/ui/Input";
 import { EmojiPicker } from "@/components/ui/EmojiPicker";
 import { Textarea } from "@/components/ui/Textarea";
@@ -32,6 +33,7 @@ export default function ProjectSettingsPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const router = useRouter();
   const api = useApi();
+  const { isAdmin } = useAuth();
   const { toast } = useToast();
 
   const [project, setProject] = useState<ApiProject | null>(null);
@@ -77,6 +79,9 @@ export default function ProjectSettingsPage() {
   const [newPmLinkUrl, setNewPmLinkUrl] = useState("");
   const [pmSaving, setPmSaving] = useState(false);
   const [pmMcpServers, setPmMcpServers] = useState<McpServerDraft[]>([]);
+  const [members, setMembers] = useState<ApiProjectMember[]>([]);
+  const [newAdminId, setNewAdminId] = useState("");
+  const [adminsSaving, setAdminsSaving] = useState(false);
 
   useEffect(() => {
     const oauthResult = new URLSearchParams(window.location.search).get("mcp_oauth");
@@ -106,6 +111,12 @@ export default function ProjectSettingsPage() {
         setPmHandleNhr(p.pm?.autonomy?.handleNeedsHumanReview ?? false);
         setPmLinks(p.pm?.links?.map((l) => ({ label: l.label, url: l.url })) || []);
         syncMcpServersFrom(p);
+        if (p.canAdmin) {
+          api
+            .get(`/api/projects/${projectId}/members`)
+            .then(setMembers)
+            .catch(() => {});
+        }
       })
       .catch(() => toast("Failed to load project", "error"))
       .finally(() => setLoading(false));
@@ -477,6 +488,19 @@ export default function ProjectSettingsPage() {
     }
   }
 
+  async function saveAdmins(nextIds: string[]) {
+    setAdminsSaving(true);
+    try {
+      const updated = await api.put(`/api/projects/${projectId}`, { admins: nextIds });
+      setProject(updated);
+      toast("Project admins updated", "success");
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Failed to update project admins", "error");
+    } finally {
+      setAdminsSaving(false);
+    }
+  }
+
   async function handleDelete() {
     setDeleting(true);
     try {
@@ -508,6 +532,7 @@ export default function ProjectSettingsPage() {
 
       <h1 className="text-2xl font-bold mb-6">Project Settings</h1>
 
+      {project.canAdmin && (
       <form onSubmit={handleSave} className="space-y-4 mb-8">
         <Input
           label="Project Name"
@@ -541,9 +566,10 @@ export default function ProjectSettingsPage() {
           {saving ? "Saving..." : "Save Changes"}
         </Button>
       </form>
+      )}
 
       {/* GitHub Integration */}
-      {project.githubRepo && (
+      {project.canAdmin && project.githubRepo && (
         <div className="mb-8">
           <h2 className="font-semibold mb-3">GitHub Integration</h2>
           <div className="space-y-3">
@@ -906,7 +932,8 @@ export default function ProjectSettingsPage() {
         </div>
       </div>
 
-      {/* AI Model */}
+      {/* AI Model — global instance setting */}
+      {isAdmin && (
       <div className="mb-8">
         <h2 className="font-semibold mb-3">AI Model</h2>
         <p className="text-sm text-text-muted mb-3">
@@ -940,8 +967,10 @@ export default function ProjectSettingsPage() {
           </Button>
         </div>
       </div>
+      )}
 
-      {/* PM Agent */}
+      {/* PM Agent — instance-admin only until CP-132 splits it */}
+      {isAdmin && (
       <div className="mb-8">
         <h2 className="font-semibold mb-3">PM Agent</h2>
         {!project.pmAvailable ? (
@@ -1263,8 +1292,10 @@ export default function ProjectSettingsPage() {
           </div>
         )}
       </div>
+      )}
 
       {/* Webhooks */}
+      {project.canAdmin && (
       <div className="mb-8">
         <h2 className="font-semibold mb-3">Webhooks</h2>
         <p className="text-sm text-text-muted mb-3">
@@ -1336,8 +1367,10 @@ export default function ProjectSettingsPage() {
           </Button>
         </div>
       </div>
+      )}
 
       {/* Notification Channels (Slack/Discord) */}
+      {project.canAdmin && (
       <div className="mb-8">
         <h2 className="font-semibold mb-3">Notifications (Slack / Discord)</h2>
         <p className="text-sm text-text-muted mb-3">
@@ -1439,8 +1472,84 @@ export default function ProjectSettingsPage() {
           </div>
         </div>
       </div>
+      )}
+
+      {/* Project Admins */}
+      {project.canAdmin && (
+      <div className="mb-8">
+        <h2 className="font-semibold mb-3">Project Admins</h2>
+        <p className="text-sm text-text-muted mb-3">
+          Admins can edit project settings, webhooks and notification channels. The owner is
+          always an admin.
+        </p>
+        <div className="space-y-2 mb-3">
+          <div className="flex items-center justify-between border border-border rounded-lg px-3 py-2">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium">
+                {typeof project.owner === "object" ? project.owner.username : "unknown"}
+              </span>
+              <span className="text-xs bg-bg-input px-2 py-0.5 rounded text-text-muted">owner</span>
+            </div>
+          </div>
+          {(project.admins || []).map((admin) => (
+            <div
+              key={admin._id}
+              className="flex items-center justify-between border border-border rounded-lg px-3 py-2"
+            >
+              <span className="text-sm font-medium">{admin.username}</span>
+              <button
+                onClick={() =>
+                  saveAdmins(
+                    (project.admins || [])
+                      .filter((a) => a._id !== admin._id)
+                      .map((a) => a._id)
+                  )
+                }
+                disabled={adminsSaving}
+                className="text-xs text-text-muted hover:text-danger px-2 py-1"
+              >
+                Remove
+              </button>
+            </div>
+          ))}
+        </div>
+        <div className="flex gap-2">
+          <select
+            value={newAdminId}
+            onChange={(e) => setNewAdminId(e.target.value)}
+            className="flex-1 text-sm bg-bg-input border border-border rounded-lg px-3 py-2"
+          >
+            <option value="">Add admin...</option>
+            {members
+              .filter(
+                (m) =>
+                  m.role !== "admin" &&
+                  m._id !== (typeof project.owner === "object" ? project.owner._id : project.owner) &&
+                  !(project.admins || []).some((a) => a._id === m._id)
+              )
+              .map((m) => (
+                <option key={m._id} value={m._id}>
+                  {m.fullName ? `${m.fullName} (${m.username})` : m.username}
+                </option>
+              ))}
+          </select>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={!newAdminId || adminsSaving}
+            onClick={async () => {
+              await saveAdmins([...(project.admins || []).map((a) => a._id), newAdminId]);
+              setNewAdminId("");
+            }}
+          >
+            Add
+          </Button>
+        </div>
+      </div>
+      )}
 
       {/* Audit Log */}
+      {project.canAdmin && (
       <div className="mb-8">
         <div className="flex items-center justify-between mb-3">
           <h2 className="font-semibold">Audit Log</h2>
@@ -1492,14 +1601,17 @@ export default function ProjectSettingsPage() {
           </div>
         )}
       </div>
+      )}
 
       {/* Danger Zone */}
+      {isAdmin && (
       <div className="border-t border-border pt-6">
         <h2 className="font-semibold text-danger mb-3">Danger Zone</h2>
         <Button variant="danger" onClick={() => setConfirmDelete(true)}>
           Delete Project
         </Button>
       </div>
+      )}
 
       <ConfirmDialog
         open={confirmDelete}
