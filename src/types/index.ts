@@ -57,6 +57,42 @@ export const PRIORITY_ORDER: Record<string, number> = {
   low: 3,
 };
 
+// Semantic column roles (CP-128) — automation keys on the role, not the display name
+export const COLUMN_ROLES = ["backlog", "approved", "active", "review", "blocked", "done"] as const;
+export type ColumnRole = (typeof COLUMN_ROLES)[number];
+
+export interface IProjectColumn {
+  _id: Types.ObjectId;
+  id: string;
+  label: string;
+  color: string;
+  role: ColumnRole;
+  order: number;
+  triggersPmReview: boolean;
+}
+
+export interface ApiProjectColumn {
+  _id: string;
+  id: string;
+  label: string;
+  color: string;
+  role: ColumnRole;
+  order: number;
+  triggersPmReview: boolean;
+}
+
+// Column ids intentionally equal the legacy TaskStatus values so existing
+// task documents and the MCP/Claude-Code automation contract stay valid
+export const DEFAULT_PROJECT_COLUMNS: Omit<IProjectColumn, "_id">[] = [
+  { id: "planned", label: "Planned", color: "#6b7280", role: "backlog", order: 0, triggersPmReview: false },
+  { id: "todo", label: "To Do", color: "#3b82f6", role: "approved", order: 1, triggersPmReview: false },
+  { id: "in_progress", label: "In Progress", color: "#f59e0b", role: "active", order: 2, triggersPmReview: false },
+  { id: "in_review", label: "In Review", color: "#a855f7", role: "review", order: 3, triggersPmReview: false },
+  { id: "needs_human_review", label: "Needs Human Review", color: "#f43f5e", role: "review", order: 4, triggersPmReview: true },
+  { id: "ready_to_test", label: "Ready to Test", color: "#06b6d4", role: "review", order: 5, triggersPmReview: false },
+  { id: "done", label: "Done", color: "#22c55e", role: "done", order: 6, triggersPmReview: false },
+];
+
 export const STATUS_LABELS: Record<TaskStatus, string> = {
   planned: "Planned",
   todo: "To Do",
@@ -339,6 +375,7 @@ export interface IProject {
   components: string[];
   labels: ILabel[];
   categories: IProjectCategory[];
+  columns: IProjectColumn[];
   taskTemplates: ITaskTemplate[];
   customFields: ICustomField[];
   webhooks: IWebhook[];
@@ -554,6 +591,7 @@ export interface ApiProject {
   components: string[];
   labels: ApiLabel[];
   categories?: ApiProjectCategory[];
+  columns?: ApiProjectColumn[];
   taskTemplates: ApiTaskTemplate[];
   customFields: ApiCustomField[];
   webhooks: ApiWebhook[];

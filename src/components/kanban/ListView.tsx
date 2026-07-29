@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { ApiProjectCategory, ApiSprint, ApiTask, PRIORITY_LABELS, PRIORITY_ORDER, STATUS_LABELS, TASK_STATUSES, TaskStatus } from "@/types";
+import { ApiProjectCategory, ApiProjectColumn, ApiSprint, ApiTask, PRIORITY_LABELS, PRIORITY_ORDER } from "@/types";
+import { effectiveColumns } from "@/lib/columns";
 import { Badge } from "@/components/ui/Badge";
 import { timeAgo } from "@/lib/time";
 
@@ -14,6 +15,7 @@ interface ListViewProps {
   projectId?: string;
   sprints?: ApiSprint[];
   categories?: ApiProjectCategory[];
+  columns?: ApiProjectColumn[];
   focusedIndex?: number;
   onTaskClick: (taskId: string) => void;
   onStatusChange?: (taskId: string, status: string) => void;
@@ -30,15 +32,18 @@ function sprintTiming(sprint: ApiSprint): "active" | "past" | "upcoming" {
 }
 
 const DIFFICULTY_ORDER: Record<string, number> = { S: 0, M: 1, L: 2, XL: 3 };
-const STATUS_ORDER: Record<string, number> = Object.fromEntries(
-  TASK_STATUSES.map((s, i) => [s, i])
-);
 
-export function ListView({ tasks, projectKey, projectId, sprints = [], categories = [], focusedIndex = -1, onTaskClick, onStatusChange }: ListViewProps) {
+export function ListView({ tasks, projectKey, projectId, sprints = [], categories = [], columns, focusedIndex = -1, onTaskClick, onStatusChange }: ListViewProps) {
   const rowRefs = useRef<(HTMLTableRowElement | null)[]>([]);
   const [sortKey, setSortKey] = useState<SortKey>("taskNumber");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const sprintById = useMemo(() => new Map(sprints.map((s) => [s._id, s])), [sprints]);
+  const listColumns = useMemo(() => effectiveColumns(columns), [columns]);
+  const columnById = useMemo(() => new Map(listColumns.map((c) => [c.id, c])), [listColumns]);
+  const statusOrder = useMemo(
+    () => new Map(listColumns.map((c, i) => [c.id, i])),
+    [listColumns]
+  );
 
   useEffect(() => {
     if (focusedIndex >= 0 && rowRefs.current[focusedIndex]) {
@@ -66,7 +71,7 @@ export function ListView({ tasks, projectKey, projectId, sprints = [], categorie
           cmp = a.title.localeCompare(b.title);
           break;
         case "status":
-          cmp = (STATUS_ORDER[a.status] ?? 99) - (STATUS_ORDER[b.status] ?? 99);
+          cmp = (statusOrder.get(a.status) ?? 99) - (statusOrder.get(b.status) ?? 99);
           break;
         case "assignee": {
           const aName = a.assignee && typeof a.assignee === "object" ? a.assignee.fullName : "";
@@ -106,7 +111,7 @@ export function ListView({ tasks, projectKey, projectId, sprints = [], categorie
       }
       return sortDir === "asc" ? cmp : -cmp;
     });
-  }, [tasks, sortKey, sortDir, sprintById]);
+  }, [tasks, sortKey, sortDir, sprintById, statusOrder]);
 
   function SortHeader({ label, column, className }: { label: string; column: SortKey; className?: string }) {
     const active = sortKey === column;
@@ -197,13 +202,17 @@ export function ListView({ tasks, projectKey, projectId, sprints = [], categorie
                         onClick={(e) => e.stopPropagation()}
                         className="text-xs bg-bg-input border border-border rounded px-1.5 py-1 text-text focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
                       >
-                        {TASK_STATUSES.map((s: TaskStatus) => (
-                          <option key={s} value={s}>{STATUS_LABELS[s]}</option>
+                        {listColumns.map((c) => (
+                          <option key={c.id} value={c.id}>{c.label}</option>
                         ))}
                       </select>
                     ) : (
-                      <Badge variant="status" value={task.status}>
-                        {STATUS_LABELS[task.status]}
+                      <Badge
+                        variant="status"
+                        value={task.status}
+                        color={columnById.get(task.status)?.color}
+                      >
+                        {columnById.get(task.status)?.label ?? task.status}
                       </Badge>
                     )}
                   </td>

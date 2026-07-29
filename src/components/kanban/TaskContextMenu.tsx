@@ -1,14 +1,16 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ApiSprint, TASK_STATUSES, STATUS_LABELS, TaskStatus } from "@/types";
+import { ApiProjectColumn, ApiSprint } from "@/types";
+import { effectiveColumns } from "@/lib/columns";
 
 interface TaskContextMenuProps {
   x: number;
   y: number;
-  currentStatus: TaskStatus;
+  currentStatus: string;
   isPinned?: boolean;
   sprints?: ApiSprint[];
+  columns?: ApiProjectColumn[];
   currentSprint?: string | null;
   selectedCount?: number;
   onStatusChange: (status: string) => void;
@@ -25,6 +27,7 @@ export function TaskContextMenu({
   currentStatus,
   isPinned,
   sprints = [],
+  columns,
   currentSprint,
   selectedCount = 1,
   onStatusChange,
@@ -90,13 +93,13 @@ export function TaskContextMenu({
       <div className="px-3 py-1.5 text-xs text-text-muted font-medium">
         Move to
       </div>
-      {TASK_STATUSES.filter((s) => selectedCount > 1 || s !== currentStatus).map((s) => (
+      {effectiveColumns(columns).filter((c) => selectedCount > 1 || c.id !== currentStatus).map((c) => (
         <button
-          key={s}
-          onClick={() => { onStatusChange(s); onClose(); }}
+          key={c.id}
+          onClick={() => { onStatusChange(c.id); onClose(); }}
           className="w-full text-left px-3 py-1.5 hover:bg-bg-input transition-colors"
         >
-          {STATUS_LABELS[s]}
+          {c.label}
         </button>
       ))}
       {onSprintChange && sprints.length > 0 && (

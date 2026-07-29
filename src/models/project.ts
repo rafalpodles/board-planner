@@ -1,5 +1,5 @@
 import mongoose, { Schema, Model } from "mongoose";
-import { IProject, DIFFICULTIES, DEFAULT_PROJECT_CATEGORIES, WEBHOOK_EVENTS, NOTIFICATION_CHANNEL_TYPES, CUSTOM_FIELD_TYPES } from "@/types";
+import { IProject, DIFFICULTIES, DEFAULT_PROJECT_CATEGORIES, DEFAULT_PROJECT_COLUMNS, COLUMN_ROLES, WEBHOOK_EVENTS, NOTIFICATION_CHANNEL_TYPES, CUSTOM_FIELD_TYPES } from "@/types";
 
 const labelSchema = new Schema(
   {
@@ -12,6 +12,17 @@ const categorySchema = new Schema(
   {
     name: { type: String, required: true, trim: true },
     color: { type: String, required: true, default: "#3b82f6" },
+  }
+);
+
+const columnSchema = new Schema(
+  {
+    id: { type: String, required: true, trim: true },
+    label: { type: String, required: true, trim: true },
+    color: { type: String, required: true, default: "#6b7280" },
+    role: { type: String, enum: COLUMN_ROLES, required: true },
+    order: { type: Number, required: true },
+    triggersPmReview: { type: Boolean, default: false },
   }
 );
 
@@ -71,6 +82,11 @@ const projectSchema = new Schema<IProject>(
       type: [categorySchema],
       default: () =>
         DEFAULT_PROJECT_CATEGORIES.map((c) => ({ ...c })) as unknown as IProject["categories"],
+    },
+    columns: {
+      type: [columnSchema],
+      default: () =>
+        DEFAULT_PROJECT_COLUMNS.map((c) => ({ ...c })) as unknown as IProject["columns"],
     },
     taskTemplates: {
       type: [taskTemplateSchema],

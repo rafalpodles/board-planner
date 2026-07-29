@@ -3,7 +3,8 @@ import { Task } from "@/models/task";
 import { Project } from "@/models/project";
 import { User } from "@/models/user";
 import { Comment } from "@/models/comment";
-import { ITask, TASK_STATUSES, TaskStatus, DEFAULT_PRIORITY } from "@/types";
+import { ITask, DEFAULT_PRIORITY } from "@/types";
+import { getColumnIds, defaultStatusFor, roleOf } from "@/lib/columns";
 import { logActivity } from "@/lib/activity";
 import { dispatchWebhooks } from "@/lib/webhooks";
 import { dispatchNotifications } from "@/lib/notifications";
@@ -54,6 +55,16 @@ export async function createTask(
     };
   }
 
+  const columnIds = getColumnIds(project);
+  const status = body.status ?? defaultStatusFor(project);
+  if (!columnIds.includes(status)) {
+    return {
+      ok: false,
+      error: `Invalid status "${status}" — project columns: ${columnIds.join(", ")}`,
+      status: 400,
+    };
+  }
+
   let assigneeId = null;
   if (body.assignee) {
     const assigneeUser = await User.findOne({
@@ -73,7 +84,7 @@ export async function createTask(
     priority: body.priority ?? DEFAULT_PRIORITY,
     component: body.component ?? "",
     category,
-    status: body.status ?? "planned",
+    status,
     assignee: assigneeId,
     dueDate: body.dueDate || null,
     checklist: Array.isArray(body.checklist)
@@ -124,10 +135,12 @@ export async function changeStatus(
 ): Promise<TaskServiceResult> {
   await connectDB();
 
-  if (!TASK_STATUSES.includes(status as TaskStatus)) {
+  const projectColumns = await Project.findById(projectId, "columns").lean();
+  const columnIds = getColumnIds(projectColumns);
+  if (!columnIds.includes(status)) {
     return {
       ok: false,
-      error: `Invalid status. Must be one of: ${TASK_STATUSES.join(", ")}`,
+      error: `Invalid status. Must be one of: ${columnIds.join(", ")}`,
       status: 400,
     };
   }
@@ -178,7 +191,7 @@ export async function changeStatus(
       recipientIds: recipients,
     });
 
-    if (status === "done" && oldTask.recurrence) {
+    if (roleOf(projectColumns, status) === "done" && oldTask.recurrence) {
       createNextRecurrence(oldTask, projectId, actorId).catch((err) =>
         console.error("Failed to create recurring task:", err)
       );
@@ -216,15 +229,27 @@ export async function updateTask(
     }
   }
 
-  if (updates.category !== undefined) {
-    const proj = await Project.findById(projectId, "categories").lean();
-    const names = (proj?.categories || []).map((c) => c.name);
-    if (names.length > 0 && !names.includes(String(updates.category))) {
-      return {
-        ok: false,
-        error: `Invalid category "${updates.category}" — project categories: ${names.join(", ")}`,
-        status: 400,
-      };
+  if (updates.category !== undefined || updates.status !== undefined) {
+    const proj = await Project.findById(projectId, "categories columns").lean();
+    if (updates.category !== undefined) {
+      const names = (proj?.categories || []).map((c) => c.name);
+      if (names.length > 0 && !names.includes(String(updates.category))) {
+        return {
+          ok: false,
+          error: `Invalid category "${updates.category}" — project categories: ${names.join(", ")}`,
+          status: 400,
+        };
+      }
+    }
+    if (updates.status !== undefined) {
+      const columnIds = getColumnIds(proj);
+      if (!columnIds.includes(String(updates.status))) {
+        return {
+          ok: false,
+          error: `Invalid status "${updates.status}" — project columns: ${columnIds.join(", ")}`,
+          status: 400,
+        };
+      }
     }
   }
 
@@ -476,7 +501,7 @@ async function createNextRecurrence(
     priority: oldTask.priority || DEFAULT_PRIORITY,
     component: oldTask.component || "",
     category: oldTask.category || "user-story",
-    status: "planned",
+    status: defaultStatusFor(project),
     assignee: oldTask.assignee,
     dueDate: nextDue,
     checklist,
