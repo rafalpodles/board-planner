@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useApi } from "@/hooks/use-api";
 import { useToast } from "@/components/ui/Toast";
 import { Badge } from "@/components/ui/Badge";
-import { STATUS_LABELS, PRIORITY_LABELS, Priority, TaskStatus } from "@/types";
+import { STATUS_LABELS, PRIORITY_LABELS, DEFAULT_PROJECT_ICON, Priority, TaskStatus } from "@/types";
 
 interface MyTask {
   _id: string;
@@ -17,7 +17,7 @@ interface MyTask {
   category: string;
   component: string;
   updatedAt: string;
-  project: { _id: string; name: string; key: string };
+  project: { _id: string; name: string; key: string; icon?: string };
 }
 
 const statusOrder: Record<string, number> = {
@@ -96,6 +96,7 @@ export default function MyTasksPage() {
                 href={`/projects/${project._id}`}
                 className="text-sm font-medium text-text-muted hover:text-text mb-2 flex items-center gap-2"
               >
+                <span aria-hidden="true">{project.icon || DEFAULT_PROJECT_ICON}</span>
                 <span className="font-mono text-xs bg-bg-input px-2 py-0.5 rounded">
                   {project.key}
                 </span>
