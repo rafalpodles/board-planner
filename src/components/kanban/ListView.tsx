@@ -79,7 +79,7 @@ export function ListView({ tasks, projectKey, projectId, sprints = [], focusedIn
         case "sprint": {
           const start = (task: ApiTask) => {
             const sprint = task.sprint ? sprintById.get(task.sprint) : undefined;
-            return sprint ? new Date(sprint.startDate).getTime() : Infinity;
+            return sprint ? new Date(sprint.startDate).getTime() : Number.MAX_SAFE_INTEGER;
           };
           cmp = start(a) - start(b);
           break;
