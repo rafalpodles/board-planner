@@ -17,7 +17,7 @@ export interface GeneratedTask {
   title: string;
   description: string;
   difficulty: "S" | "M" | "L" | "XL";
-  category: "bug" | "doc" | "user-story" | "idea";
+  category: string;
   acceptanceCriteria: string;
   component: string;
   duplicateOf: number | null;
@@ -38,6 +38,7 @@ interface ProjectContext {
   name: string;
   description: string;
   components: string[];
+  categories?: string[];
   readme?: string;
   existingTasks?: ExistingTaskSummary[];
 }
@@ -48,6 +49,11 @@ export async function generateTask(
   model: string = "gpt-4o-mini"
 ): Promise<GeneratedTask> {
   const client = getClient();
+
+  const categoryList =
+    context.categories && context.categories.length > 0
+      ? context.categories
+      : ["bug", "doc", "user-story", "idea"];
 
   const componentList =
     context.components.length > 0
@@ -82,7 +88,7 @@ You must respond with a JSON object with these exact fields:
   - M = moderate, a few files, clear approach
   - L = significant, multiple components, some design decisions
   - XL = major feature, architectural changes, many files
-- category: one of "bug", "doc", "user-story", "idea"
+- category: one of ${categoryList.map((c) => `"${c}"`).join(", ")}
 - acceptanceCriteria: markdown checklist of acceptance criteria (use "- [ ]" format)
 - component: best matching component from the available list, or empty string if none match
 - duplicateOf: task number (integer) if this task is a duplicate or very similar to an existing task, or null if not a duplicate
@@ -114,13 +120,13 @@ When analyzing duplicates and dependencies, consider the semantic meaning, not j
 
   // Validate and sanitize
   const validDifficulties = ["S", "M", "L", "XL"];
-  const validCategories = ["bug", "doc", "user-story", "idea"];
+  const validCategories = categoryList;
 
   if (!validDifficulties.includes(parsed.difficulty)) {
     parsed.difficulty = "M";
   }
   if (!validCategories.includes(parsed.category)) {
-    parsed.category = "user-story";
+    parsed.category = validCategories.includes("user-story") ? "user-story" : validCategories[0];
   }
   if (!context.components.includes(parsed.component)) {
     parsed.component = "";
