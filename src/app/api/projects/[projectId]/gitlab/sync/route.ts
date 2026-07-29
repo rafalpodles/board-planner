@@ -33,7 +33,13 @@ export const POST = withProjectAccess(async (_request, { params, user }) => {
   }
 
   const host = project.gitlabHost || "https://gitlab.com";
-  const rawMRs = await fetchMergeRequests(host, projectPath, decryptSecret(project.gitlabToken));
+  let rawMRs;
+  try {
+    rawMRs = await fetchMergeRequests(host, projectPath, decryptSecret(project.gitlabToken));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "GitLab request failed";
+    return NextResponse.json({ error: message }, { status: 502 });
+  }
   const matchedMRs = matchMRsToTasks(rawMRs, project.key);
 
   const mrsByTask = new Map<number, typeof matchedMRs>();
