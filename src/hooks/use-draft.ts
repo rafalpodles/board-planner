@@ -27,12 +27,9 @@ export function useDraft<T extends Record<string, unknown>>(initial: T) {
 
   const discard = useCallback(() => setValue(baseline), [baseline]);
 
-  const commit = useCallback((next?: T) => {
-    setValue((prev) => {
-      const settled = next ?? prev;
-      setBaseline(settled);
-      return settled;
-    });
+  const commit = useCallback((next: T) => {
+    setBaseline(next);
+    setValue(next);
   }, []);
 
   return { value, set, setValue, dirtyKeys, count: dirtyKeys.length, isDirty, discard, commit };

@@ -30,22 +30,31 @@ function toDrafts(columns: Parameters<typeof effectiveColumns>[0]): ColumnDraft[
   }));
 }
 
-export function BoardSection({ projectId, project, patchProject }: SectionProps) {
+export function BoardSection({
+  projectId,
+  project,
+  patchProject,
+  active,
+}: SectionProps & { active: boolean }) {
   const api = useApi();
   const { toast } = useToast();
 
   const draft = useDraft({ columns: toDrafts(project.columns) });
   const [newLabel, setNewLabel] = useState("");
   const [taskCounts, setTaskCounts] = useState<Record<string, number>>({});
+  const [countsRequested, setCountsRequested] = useState(false);
   const dragIndex = useRef<number | null>(null);
 
+  // /stats runs several aggregations — only pay for it once the section is opened
   useEffect(() => {
+    if (!active || countsRequested) return;
+    setCountsRequested(true);
     api
       .get(`/api/projects/${projectId}/stats`)
       .then((s: { statusBreakdown: Record<string, number> }) => setTaskCounts(s.statusBreakdown || {}))
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId]);
+  }, [active, countsRequested, projectId]);
 
   const columns = draft.value.columns;
 
