@@ -70,6 +70,8 @@ interface TaskFormProps {
   sprints?: ApiSprint[];
   customFields?: ApiCustomField[];
   onSaved: () => void;
+  // When set, the created task is linked as this task's child
+  parentTaskId?: string;
   onCancel: () => void;
 }
 
@@ -85,6 +87,7 @@ export function TaskForm({
   sprints = [],
   customFields = [],
   onSaved,
+  parentTaskId,
   onCancel,
 }: TaskFormProps) {
   const [title, setTitle] = useState(task?.title || "");
@@ -291,7 +294,13 @@ export function TaskForm({
         serverValues.current = { ...(serverValues.current || {}), ...edited };
         setAutoSaveState("saved");
       } else {
-        await api.post(`/api/projects/${projectId}/tasks`, body);
+        const created = await api.post(`/api/projects/${projectId}/tasks`, body);
+        if (parentTaskId) {
+          await api.post(`/api/projects/${projectId}/tasks/${parentTaskId}/links`, {
+            taskId: created._id,
+            type: "parent_of",
+          });
+        }
       }
       toast(task ? "Task updated" : "Task created", "success");
       onSaved();
