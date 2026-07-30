@@ -378,7 +378,7 @@ export default function KanbanPage() {
   }
 
   return (
-    <div className="lg:h-[calc(100vh-6.5rem)] lg:flex lg:flex-col lg:overflow-hidden">
+    <div className="lg:flex-1 lg:min-h-0 lg:flex lg:flex-col lg:overflow-hidden">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-6 lg:shrink-0">
         <div>
           <div className="flex items-center gap-2">
