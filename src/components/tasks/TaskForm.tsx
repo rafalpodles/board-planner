@@ -5,7 +5,7 @@ import { useApi } from "@/hooks/use-api";
 import { emitBoardRefresh } from "@/lib/board-refresh";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
-import { Textarea } from "@/components/ui/Textarea";
+import { MarkdownEditor } from "@/components/ui/MarkdownEditor";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
 import {
@@ -524,12 +524,12 @@ export function TaskForm({
         </div>
       )}
 
-      <Textarea
+      <MarkdownEditor
         label="Description"
         value={description}
-        onChange={(e) => setDescription(e.target.value)}
-        rows={4}
+        onChange={setDescription}
         onFileUpload={handleFileUpload}
+        placeholder="Markdown supported — use the toolbar, or Cmd/Ctrl+B and Cmd/Ctrl+I"
       />
 
       <div>
