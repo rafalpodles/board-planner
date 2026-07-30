@@ -66,6 +66,15 @@ body {
   animation: slide-in 0.2s ease-out;
 }
 
+/* Scrolls, but without a visible bar */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 /* Typography plugin ships a fixed light/dark palette; bind it to the theme tokens
    so prose follows [data-theme] instead of needing prose-invert */
 .prose {
