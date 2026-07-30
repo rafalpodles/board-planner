@@ -11,6 +11,8 @@ interface MarkdownEditorProps {
   onFileUpload?: (file: File) => Promise<string>;
   placeholder?: string;
   minHeight?: number;
+  // Show the rendered text first; click to edit, blur to go back
+  previewFirst?: boolean;
 }
 
 type Action =
@@ -85,10 +87,20 @@ export function MarkdownEditor({
   onFileUpload,
   placeholder,
   minHeight = 400,
+  previewFirst = false,
 }: MarkdownEditorProps) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const pendingSelection = useRef<[number, number] | null>(null);
-  const [preview, setPreview] = useState(false);
+  // Nothing to render means nothing to preview, so an empty field opens for typing
+  const [preview, setPreview] = useState(() => previewFirst && value.trim().length > 0);
+  const focusOnEdit = useRef(false);
+
+  useEffect(() => {
+    if (preview || !focusOnEdit.current) return;
+    focusOnEdit.current = false;
+    textareaRef.current?.focus();
+  }, [preview]);
 
   // The caret has to be restored after the new value has actually rendered,
   // otherwise the browser parks it at the end and formats cannot be chained
@@ -136,6 +148,21 @@ export function MarkdownEditor({
     [value, onChange]
   );
 
+  function handlePreviewClick(e: React.MouseEvent<HTMLDivElement>) {
+    // Links and GFM task-list checkboxes stay clickable instead of being
+    // swallowed as "start editing"
+    if ((e.target as HTMLElement).closest("a, input, button")) return;
+    focusOnEdit.current = true;
+    setPreview(false);
+  }
+
+  function handleBlur(e: React.FocusEvent<HTMLTextAreaElement>) {
+    // Focus moving to the attach-file button (or any control of this editor) is
+    // not leaving the field — collapsing here would unmount it before its click
+    if (containerRef.current?.contains(e.relatedTarget)) return;
+    if (value.trim()) setPreview(true);
+  }
+
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (!(e.metaKey || e.ctrlKey)) return;
     const key = e.key.toLowerCase();
@@ -149,7 +176,7 @@ export function MarkdownEditor({
   }
 
   return (
-    <div className="w-full">
+    <div ref={containerRef} className="w-full">
       {label && <label className="block text-sm font-medium text-text-muted mb-1">{label}</label>}
 
       <div className="flex items-center gap-0.5 flex-wrap border border-border border-b-0 rounded-t-lg bg-bg-card px-1.5 py-1">
@@ -183,7 +210,11 @@ export function MarkdownEditor({
 
       {preview ? (
         <div
-          className="w-full rounded-b-lg border border-border bg-bg-input px-3 py-2 overflow-y-auto prose prose-sm max-w-none"
+          onClick={previewFirst ? handlePreviewClick : undefined}
+          title={previewFirst ? "Click to edit" : undefined}
+          className={`w-full rounded-b-lg border border-border bg-bg-input px-3 py-2 overflow-y-auto prose prose-sm max-w-none ${
+            previewFirst ? "cursor-text hover:border-primary/50 transition-colors" : ""
+          }`}
           style={{ minHeight }}
         >
           {value.trim() ? (
@@ -198,6 +229,7 @@ export function MarkdownEditor({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={handleKeyDown}
+          onBlur={previewFirst ? handleBlur : undefined}
           onFileUpload={onFileUpload}
           placeholder={placeholder}
           className="rounded-t-none"
