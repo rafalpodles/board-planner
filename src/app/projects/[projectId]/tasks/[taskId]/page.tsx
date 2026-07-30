@@ -13,6 +13,7 @@ import { Comments } from "@/components/tasks/Comments";
 import { TaskLinks } from "@/components/tasks/TaskLinks";
 import { useToast } from "@/components/ui/Toast";
 import { ActivityTimeline } from "@/components/tasks/ActivityTimeline";
+import { GitlabActivity } from "@/components/tasks/GitlabActivity";
 
 export default function TaskDetailPage() {
   const { projectId, taskId } = useParams<{
@@ -238,6 +239,8 @@ export default function TaskDetailPage() {
             </div>
           </div>
         )}
+
+        <GitlabActivity projectId={projectId} taskId={taskId} />
 
         {/* Dependencies */}
         <div>
