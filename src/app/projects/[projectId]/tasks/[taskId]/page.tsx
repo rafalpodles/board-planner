@@ -58,17 +58,7 @@ export default function TaskDetailPage() {
 
   // The board was not the only view going stale on a PM write — this page never reloaded
   // at all, so the form kept editing a task that had moved underneath it
-  useEffect(() => {
-    let debounce: ReturnType<typeof setTimeout> | null = null;
-    const unsubscribe = subscribeBoardRefresh(projectId, () => {
-      if (debounce) clearTimeout(debounce);
-      debounce = setTimeout(loadData, 300);
-    });
-    return () => {
-      if (debounce) clearTimeout(debounce);
-      unsubscribe();
-    };
-  }, [projectId, loadData]);
+  useEffect(() => subscribeBoardRefresh(projectId, loadData), [projectId, loadData]);
 
   async function handleStatusChange(newStatus: string) {
     try {
