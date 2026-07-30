@@ -2,6 +2,7 @@
 
 import { ApiTask, ApiLabel, ApiProjectCategory, PRIORITY_LABELS } from "@/types";
 import { Badge } from "@/components/ui/Badge";
+import { categoryColor, categoryTint } from "@/lib/category-colors";
 
 // Cards are narrow; the default badge padding makes three of them wrap raggedly
 const COMPACT_BADGE = "text-[10px] px-1.5 whitespace-nowrap";
@@ -32,16 +33,23 @@ export function TaskCard({
   const taskLabels = projectLabels.filter((l) =>
     (task.labels || []).includes(l._id)
   );
+  const catColor = categoryColor(projectCategories, task.category);
+  const tinted = !selected && !!catColor;
   return (
     <div
       draggable
+      style={tinted ? categoryTint(catColor) : undefined}
       onDragStart={(e) => {
         e.dataTransfer.setData("text/plain", task._id);
         e.dataTransfer.effectAllowed = "move";
       }}
       className={`bg-bg rounded-lg border p-3 cursor-grab
         transition-colors group active:cursor-grabbing relative
-        ${selected ? "border-primary bg-primary/5" : "border-border hover:border-primary/50"}`}
+        ${selected
+          ? "border-primary bg-primary/5"
+          : tinted
+            ? "cat-card hover:ring-2 hover:ring-primary/40"
+            : "border-border hover:border-primary/50"}`}
       onContextMenu={(e) => {
         e.preventDefault();
         onContextMenu?.(task._id, e.clientX, e.clientY);
@@ -95,7 +103,7 @@ export function TaskCard({
         <Badge
           variant="category"
           value={task.category}
-          color={projectCategories.find((c) => c.name === task.category)?.color}
+          color={catColor}
           className={COMPACT_BADGE}
         >
           {task.category}
