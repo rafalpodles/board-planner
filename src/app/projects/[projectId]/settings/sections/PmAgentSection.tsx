@@ -215,8 +215,19 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
     );
   }
 
+  const lockedByInstance = !!project.pm?.lockedByInstance;
+
   return (
     <>
+      {lockedByInstance && (
+        <div className="mb-4 flex gap-3 rounded-xl border border-danger/40 bg-danger/10 px-4 py-3 text-sm">
+          <span aria-hidden="true">⛔</span>
+          <p>
+            <strong className="font-semibold">An instance admin has locked this agent off.</strong> It
+            will not run for this project, and the switch below cannot override it.
+          </p>
+        </div>
+      )}
       {isAdmin ? (
         <SettingsCard title="Availability & cost" contract="draft" instanceScoped>
           <label className="flex cursor-pointer items-start gap-3">
@@ -234,13 +245,6 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
             </span>
           </label>
           <div className="grid gap-4 sm:grid-cols-2">
-            <Input
-              label="Model"
-              value={draft.value.model}
-              dirty={draft.isDirty("model")}
-              onChange={(e) => draft.set("model", e.target.value)}
-              placeholder="Leave empty to use the server default (PM_MODEL)"
-            />
             <div>
               <Input
                 label="Turns per day"
