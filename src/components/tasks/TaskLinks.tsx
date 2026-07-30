@@ -12,6 +12,7 @@ const DEPENDENCY_LABELS: { value: DependencyType; label: string }[] = [
   { value: "blocked_by", label: "Blocked by" },
   { value: "relates", label: "Relates to" },
   { value: "duplicates", label: "Duplicates" },
+  { value: "parent_of", label: "Parent of" },
 ];
 
 interface TaskLinksProps {
@@ -98,6 +99,8 @@ export function TaskLinks({
   ];
   const duplicates = relations.filter((r) => r.type === "duplicates");
   const duplicatedBy = relatedFrom.filter((r) => r.type === "duplicates");
+  const children = relations.filter((r) => r.type === "parent_of");
+  const parents = relatedFrom.filter((r) => r.type === "parent_of");
   const linkedIds = new Set([
     ...blockedBy.map((t) => t._id),
     ...relations.map((r) => r.task._id),
@@ -118,7 +121,9 @@ export function TaskLinks({
     blocking.length === 0 &&
     relatesTo.length === 0 &&
     duplicates.length === 0 &&
-    duplicatedBy.length === 0;
+    duplicatedBy.length === 0 &&
+    children.length === 0 &&
+    parents.length === 0;
 
   if (isEmpty && !showPicker) {
     return (
@@ -192,6 +197,8 @@ export function TaskLinks({
         { heading: "Relates to", items: relatesTo, removable: true, type: "relates" as DependencyType },
         { heading: "Duplicates", items: duplicates, removable: true, type: "duplicates" as DependencyType },
         { heading: "Duplicated by", items: duplicatedBy, removable: false, type: "duplicates" as DependencyType },
+        { heading: "Children", items: children, removable: true, type: "parent_of" as DependencyType },
+        { heading: "Parent", items: parents, removable: false, type: "parent_of" as DependencyType },
       ] as const).map((section) =>
         section.items.length === 0 ? null : (
           <div key={section.heading}>

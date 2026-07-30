@@ -42,6 +42,49 @@ export const POST = withProjectAccess(async (request, { params }) => {
     return NextResponse.json({ error: "Task not found" }, { status: 404 });
   }
 
+  // "parent_of" is the one relation with a direction that must stay acyclic,
+  // and a task gets a single parent so the hierarchy stays a tree
+  if (type === "parent_of") {
+    const parented = await Task.find(
+      { project: projectId, "relations.type": "parent_of" },
+      "_id relations"
+    ).lean();
+    const childrenOf = new Map<string, string[]>();
+    for (const t of parented) {
+      childrenOf.set(
+        t._id.toString(),
+        (t.relations || [])
+          .filter((r) => r.type === "parent_of")
+          .map((r) => r.task.toString())
+      );
+    }
+    const queue = [targetTaskId];
+    const seen = new Set<string>();
+    while (queue.length) {
+      const current = queue.shift()!;
+      if (current === taskId) {
+        return NextResponse.json(
+          { error: "That would make the task its own descendant" },
+          { status: 400 }
+        );
+      }
+      if (seen.has(current)) continue;
+      seen.add(current);
+      queue.push(...(childrenOf.get(current) || []));
+    }
+
+    await Task.updateMany(
+      { project: projectId, relations: { $elemMatch: { task: targetTaskId, type: "parent_of" } } },
+      { $pull: { relations: { task: targetTaskId, type: "parent_of" } } }
+    );
+    await Task.updateOne({ _id: taskId }, { $pull: { relations: { task: targetTaskId } } });
+    await Task.updateOne(
+      { _id: taskId },
+      { $push: { relations: { task: targetTaskId, type: "parent_of" } } }
+    );
+    return NextResponse.json({ message: "Dependency added" });
+  }
+
   // Non-blocking kinds carry no ordering, so a cycle among them is meaningless.
   // One pair of tasks holds one relation, so picking a different type replaces it.
   if (type !== "blocked_by") {

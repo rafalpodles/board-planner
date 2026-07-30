@@ -664,7 +664,7 @@ export interface ApiPmMessage {
   createdAt: string;
 }
 
-export const RELATION_TYPES = ["relates", "duplicates"] as const;
+export const RELATION_TYPES = ["relates", "duplicates", "parent_of"] as const;
 export type RelationType = (typeof RELATION_TYPES)[number];
 
 // Every dependency kind the UI can add, including the one stored as blockedBy
