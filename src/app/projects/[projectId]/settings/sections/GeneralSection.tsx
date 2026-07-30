@@ -91,14 +91,7 @@ export function GeneralSection({ projectId, project, replaceProject, isAdmin }: 
   return (
     <>
       <SettingsCard title="Identity" contract="draft">
-        <div className="grid gap-4 sm:grid-cols-[96px_1fr_130px]">
-          <EmojiPicker
-            label="Icon"
-            value={identity.value.icon}
-            options={PROJECT_ICONS}
-            fallback={DEFAULT_PROJECT_ICON}
-            onChange={(v) => identity.set("icon", v)}
-          />
+        <div className="grid gap-4 sm:grid-cols-[1fr_140px]">
           <Input
             label="Name"
             value={identity.value.name}
@@ -111,6 +104,13 @@ export function GeneralSection({ projectId, project, replaceProject, isAdmin }: 
             <p className="mt-1 text-xs text-text-muted">Task keys use it. Can&apos;t change.</p>
           </div>
         </div>
+        <EmojiPicker
+          label="Icon"
+          value={identity.value.icon}
+          options={PROJECT_ICONS}
+          fallback={DEFAULT_PROJECT_ICON}
+          onChange={(v) => identity.set("icon", v)}
+        />
         <Textarea
           label="Description"
           value={identity.value.description}

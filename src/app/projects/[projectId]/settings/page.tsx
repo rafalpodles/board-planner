@@ -177,10 +177,10 @@ export default function ProjectSettingsPage() {
     return visible[0]?.id ?? "";
   }, [visible, section]);
 
-  const goToSection = useCallback((id: string) => {
+  const goToSection = useCallback((id: string, scroll = true) => {
     setSection(id);
     window.history.replaceState(null, "", `${window.location.pathname}?section=${id}`);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    if (scroll) window.scrollTo({ top: 0, behavior: "smooth" });
   }, []);
 
   const badges = useMemo(() => {
@@ -295,7 +295,7 @@ export default function ProjectSettingsPage() {
                   const q = e.target.value.trim().toLowerCase();
                   if (!q) return;
                   const first = visible.find((s) => `${s.label} ${s.keywords}`.toLowerCase().includes(q));
-                  if (first) setSection(first.id);
+                  if (first) goToSection(first.id, false);
                 }}
                 placeholder="Search settings..."
                 aria-label="Search settings"

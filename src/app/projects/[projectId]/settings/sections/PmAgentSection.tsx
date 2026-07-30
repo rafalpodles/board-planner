@@ -292,12 +292,13 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
             )}
           </div>
           <div className="mt-2 flex gap-2">
-            <Input
-              value={newLinkLabel}
-              onChange={(e) => setNewLinkLabel(e.target.value)}
-              placeholder="Label"
-              className="max-w-[180px]"
-            />
+            <div className="w-[160px] shrink-0">
+              <Input
+                value={newLinkLabel}
+                onChange={(e) => setNewLinkLabel(e.target.value)}
+                placeholder="Label"
+              />
+            </div>
             <Input
               value={newLinkUrl}
               onChange={(e) => setNewLinkUrl(e.target.value)}
@@ -388,12 +389,13 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
             {servers.map((server, i) => (
               <div key={i} className="space-y-2 rounded-lg border border-border p-3">
                 <div className="flex items-center gap-2">
-                  <Input
-                    value={server.name}
-                    onChange={(e) => updateServer(i, { name: e.target.value })}
-                    placeholder="name (slug, e.g. notion)"
-                    className="max-w-[180px]"
-                  />
+                  <div className="w-[180px] shrink-0">
+                    <Input
+                      value={server.name}
+                      onChange={(e) => updateServer(i, { name: e.target.value })}
+                      placeholder="name (slug, e.g. notion)"
+                    />
+                  </div>
                   <Input
                     value={server.url}
                     onChange={(e) => updateServer(i, { url: e.target.value })}
