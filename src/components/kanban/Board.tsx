@@ -48,13 +48,13 @@ export function Board({
   );
 
   return (
-    <div className="relative">
+    <div className="relative lg:h-full">
       <div
-        className="overflow-x-auto pb-4 overscroll-x-contain"
+        className="overflow-x-auto pb-4 overscroll-x-contain lg:h-full"
         style={{ WebkitOverflowScrolling: "touch" }}
       >
         <div
-          className="grid gap-4"
+          className="grid gap-4 lg:h-full"
           style={{
             gridTemplateColumns: `repeat(${boardColumns.length}, minmax(0, 1fr))`,
             minWidth: `${boardColumns.length * 200}px`,
