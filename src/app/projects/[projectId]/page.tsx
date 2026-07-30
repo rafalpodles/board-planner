@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useApi } from "@/hooks/use-api";
@@ -63,6 +63,7 @@ export default function KanbanPage() {
   const [editTaskId, setEditTaskId] = useState<string | null>(null);
   const [showImport, setShowImport] = useState(false);
   const [showExport, setShowExport] = useState(false);
+  const loadSeq = useRef(0);
   const [selectedTasks, setSelectedTasks] = useState<Set<string>>(new Set());
   const [selectionMode, setSelectionMode] = useState(false);
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
@@ -91,6 +92,7 @@ export default function KanbanPage() {
   }, [tasks, now]);
 
   const loadData = useCallback(async () => {
+    const seq = ++loadSeq.current;
     try {
       const sprintParam = selectedSprint !== "all" ? `?sprint=${selectedSprint}` : "";
       const [proj, taskList, sprintList] = await Promise.all([
@@ -98,6 +100,8 @@ export default function KanbanPage() {
         api.get(`/api/projects/${projectId}/tasks${sprintParam}`),
         api.get(`/api/projects/${projectId}/sprints`),
       ]);
+      // A slower earlier request must not overwrite what a later one already applied
+      if (seq !== loadSeq.current) return;
       setProject(proj);
       setTasks(withIncomingRelations(taskList));
       setSprints(sprintList);
@@ -112,18 +116,9 @@ export default function KanbanPage() {
 
   usePollWhileVisible(loadData, 10_000);
 
-  // Instant refresh when the PM chat reports a write action (poll stays as fallback)
-  useEffect(() => {
-    let debounce: ReturnType<typeof setTimeout> | null = null;
-    const unsubscribe = subscribeBoardRefresh(projectId, () => {
-      if (debounce) clearTimeout(debounce);
-      debounce = setTimeout(loadData, 300);
-    });
-    return () => {
-      if (debounce) clearTimeout(debounce);
-      unsubscribe();
-    };
-  }, [projectId, loadData]);
+  // Instant refresh when the PM chat reports a write action (poll stays as fallback).
+  // Bursts are coalesced inside subscribeBoardRefresh.
+  useEffect(() => subscribeBoardRefresh(projectId, loadData), [projectId, loadData]);
 
   // Update browser tab title with task counts
   useEffect(() => {
