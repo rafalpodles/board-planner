@@ -8,7 +8,11 @@ interface TimelineViewProps {
   tasks: ApiTask[];
   projectKey: string;
   columns?: ApiProjectColumn[];
+  selectedTasks?: Set<string>;
+  selectionMode?: boolean;
   onTaskClick: (taskId: string) => void;
+  onTaskSelect?: (taskId: string) => void;
+  onTaskContextMenu?: (taskId: string, x: number, y: number) => void;
 }
 
 const ROW_HEIGHT = 36;
@@ -42,8 +46,24 @@ function formatMonth(date: Date): string {
   return date.toLocaleDateString(undefined, { month: "short", year: "numeric" });
 }
 
-export function TimelineView({ tasks, projectKey, columns, onTaskClick }: TimelineViewProps) {
+export function TimelineView({ tasks, projectKey, columns, selectedTasks, selectionMode, onTaskClick, onTaskSelect, onTaskContextMenu }: TimelineViewProps) {
+  const selectionActive = selectionMode || (selectedTasks?.size ?? 0) > 0;
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const activate = (taskId: string, e: { ctrlKey: boolean; metaKey: boolean; preventDefault: () => void }) => {
+    if (selectionActive || e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      onTaskSelect?.(taskId);
+    } else {
+      onTaskClick(taskId);
+    }
+  };
+
+  const contextMenu = (taskId: string, e: React.MouseEvent) => {
+    if (!onTaskContextMenu) return;
+    e.preventDefault();
+    onTaskContextMenu(taskId, e.clientX, e.clientY);
+  };
   const columnById = useMemo(
     () => new Map(effectiveColumns(columns).map((c) => [c.id, c])),
     [columns]
@@ -124,19 +144,40 @@ export function TimelineView({ tasks, projectKey, columns, onTaskClick }: Timeli
           <div className="h-[50px] border-b border-border flex items-end px-3 pb-1">
             <span className="text-xs font-medium text-text-muted">Task</span>
           </div>
-          {sortedTasks.map((task) => (
-            <div
-              key={task._id}
-              className="flex items-center gap-2 px-3 border-b border-border/50 cursor-pointer hover:bg-bg-hover transition-colors"
-              style={{ height: ROW_HEIGHT }}
-              onClick={() => onTaskClick(task._id)}
-            >
-              <span className="text-[10px] font-mono text-text-muted whitespace-nowrap">
-                {projectKey}-{task.taskNumber}
-              </span>
-              <span className="text-xs truncate flex-1">{task.title}</span>
-            </div>
-          ))}
+          {sortedTasks.map((task) => {
+            const selected = selectedTasks?.has(task._id) ?? false;
+            return (
+              <div
+                key={task._id}
+                className={`flex items-center gap-2 px-3 border-b border-border/50 cursor-pointer transition-colors ${
+                  selected ? "bg-primary/10" : "hover:bg-bg-hover"
+                }`}
+                style={{ height: ROW_HEIGHT }}
+                onClick={(e) => activate(task._id, e)}
+                onContextMenu={(e) => contextMenu(task._id, e)}
+              >
+                {selectionActive && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onTaskSelect?.(task._id);
+                    }}
+                    className={`shrink-0 w-4 h-4 rounded border flex items-center justify-center transition-colors text-[9px]
+                      ${selected
+                        ? "bg-primary border-primary text-white"
+                        : "border-border bg-bg-input text-transparent hover:border-primary/50"
+                      }`}
+                  >
+                    {selected && "✓"}
+                  </button>
+                )}
+                <span className="text-[10px] font-mono text-text-muted whitespace-nowrap">
+                  {projectKey}-{task.taskNumber}
+                </span>
+                <span className="text-xs truncate flex-1">{task.title}</span>
+              </div>
+            );
+          })}
         </div>
 
         {/* Timeline area */}
@@ -235,7 +276,12 @@ export function TimelineView({ tasks, projectKey, columns, onTaskClick }: Timeli
                 const barWidth = Math.max(8, endX - startX);
 
                 return (
-                  <g key={task._id} className="cursor-pointer" onClick={() => onTaskClick(task._id)}>
+                  <g
+                    key={task._id}
+                    className="cursor-pointer"
+                    onClick={(e) => activate(task._id, e)}
+                    onContextMenu={(e) => contextMenu(task._id, e)}
+                  >
                     <rect
                       x={startX}
                       y={y}
@@ -244,6 +290,8 @@ export function TimelineView({ tasks, projectKey, columns, onTaskClick }: Timeli
                       rx={4}
                       fill={color}
                       opacity={0.8}
+                      className={selectedTasks?.has(task._id) ? "stroke-primary" : ""}
+                      strokeWidth={selectedTasks?.has(task._id) ? 2 : 0}
                     />
                     <title>{`${projectKey}-${task.taskNumber}: ${task.title}\n${columnById.get(task.status)?.label ?? task.status}`}</title>
                   </g>
@@ -253,7 +301,12 @@ export function TimelineView({ tasks, projectKey, columns, onTaskClick }: Timeli
               // No due date — show as diamond marker
               const x = Math.max(0, diffDays(created, timelineStart)) * DAY_WIDTH + DAY_WIDTH / 2;
               return (
-                <g key={task._id} className="cursor-pointer" onClick={() => onTaskClick(task._id)}>
+                <g
+                  key={task._id}
+                  className="cursor-pointer"
+                  onClick={(e) => activate(task._id, e)}
+                  onContextMenu={(e) => contextMenu(task._id, e)}
+                >
                   <rect
                     x={x - 6}
                     y={y + barHeight / 2 - 6}
@@ -263,6 +316,8 @@ export function TimelineView({ tasks, projectKey, columns, onTaskClick }: Timeli
                     fill={color}
                     opacity={0.7}
                     transform={`rotate(45 ${x} ${y + barHeight / 2})`}
+                    className={selectedTasks?.has(task._id) ? "stroke-primary" : ""}
+                    strokeWidth={selectedTasks?.has(task._id) ? 2 : 0}
                   />
                   <title>{`${projectKey}-${task.taskNumber}: ${task.title}\n${columnById.get(task.status)?.label ?? task.status} (no due date)`}</title>
                 </g>
