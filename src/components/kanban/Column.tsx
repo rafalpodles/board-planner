@@ -79,7 +79,7 @@ export function Column({
         setDropIndex(null);
       }}
       className={`bg-bg-card rounded-xl border border-border
-        border-t-2 flex flex-col max-h-[calc(100vh-12rem)]
+        border-t-2 flex flex-col max-h-[calc(100vh-12rem)] lg:max-h-full lg:h-full
         transition-colors ${isDragOver ? "bg-primary/5 border-primary/30" : ""}`}
       style={{ borderTopColor: column.color }}
     >
