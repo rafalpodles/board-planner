@@ -122,9 +122,10 @@ const projectSchema = new Schema<IProject>(
       autonomy: {
         dailyReview: { type: Boolean, default: false },
         reviewHour: { type: Number, default: 9, min: 0, max: 23 },
+        reviewIntervalHours: { type: Number, default: 24, min: 1, max: 24 },
         timezone: { type: String, default: "Europe/Warsaw" },
         handleNeedsHumanReview: { type: Boolean, default: false },
-        lastDailyReviewDay: { type: String, default: "" },
+        lastReviewSlot: { type: String, default: "" },
       },
       links: {
         type: [{

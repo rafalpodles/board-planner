@@ -140,8 +140,7 @@ export const PUT = withProjectAdmin(async (request, { params, user }) => {
       // Clients unaware of autonomy must not silently disable the scheduled review
       pmResult.value.autonomy = existing.pm.autonomy;
     } else if (pmResult.value.autonomy) {
-      pmResult.value.autonomy.lastDailyReviewDay =
-        existing.pm?.autonomy?.lastDailyReviewDay ?? "";
+      pmResult.value.autonomy.lastReviewSlot = existing.pm?.autonomy?.lastReviewSlot ?? "";
     }
     updates.pm = pmResult.value;
   }

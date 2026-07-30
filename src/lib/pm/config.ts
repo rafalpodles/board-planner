@@ -144,6 +144,10 @@ export function validatePmConfig(
   if (!Number.isInteger(reviewHour) || reviewHour < 0 || reviewHour > 23) {
     return { valid: false, error: "pm.autonomy.reviewHour must be an integer 0-23" };
   }
+  const intervalHours = rawAutonomy.reviewIntervalHours ?? DEFAULT_PM_AUTONOMY.reviewIntervalHours;
+  if (!Number.isInteger(intervalHours) || intervalHours < 1 || intervalHours > 24) {
+    return { valid: false, error: "pm.autonomy.reviewIntervalHours must be an integer 1-24" };
+  }
   const timezone = String(rawAutonomy.timezone ?? DEFAULT_PM_AUTONOMY.timezone).trim();
   if (!isValidTimezone(timezone)) {
     return { valid: false, error: `pm.autonomy.timezone is not a valid IANA timezone: ${timezone}` };
@@ -152,9 +156,10 @@ export function validatePmConfig(
   const autonomy: IPmAutonomy = {
     dailyReview: rawAutonomy.dailyReview === true,
     reviewHour,
+    reviewIntervalHours: intervalHours,
     timezone,
     handleNeedsHumanReview: rawAutonomy.handleNeedsHumanReview === true,
-    lastDailyReviewDay: "",
+    lastReviewSlot: "",
   };
 
   return {
