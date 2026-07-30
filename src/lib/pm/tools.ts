@@ -10,6 +10,7 @@ import {
   addComment,
 } from "@/lib/task-service";
 import { OrToolDefinition } from "./openrouter";
+import { buildBoardDigest } from "./board-review";
 
 export interface PmToolContext {
   projectId: string;
@@ -152,6 +153,20 @@ export const PM_TOOLS: Record<string, PmTool> = {
       for (const row of rows) byStatus[row._id] = row.count;
       const total = rows.reduce((sum, r) => sum + r.count, 0);
       return { result: { total, byStatus } };
+    },
+  },
+
+  get_board_digest: {
+    write: false,
+    definition: {
+      name: "get_board_digest",
+      description:
+        "Scan the open board for tasks missing acceptance criteria or a description, tasks sitting in the same column for a long time, and likely duplicates by title. Heuristic — confirm with get_task before acting.",
+      parameters: { type: "object", properties: {} },
+    },
+    async execute(_args, ctx) {
+      const digest = await buildBoardDigest(ctx.projectId);
+      return { result: digest ?? { error: "Project not found" } };
     },
   },
 
