@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/components/ui/Toast";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { ApiProject } from "@/types";
 import { effectiveColumns } from "@/lib/columns";
 import { SettingsProvider, useDirtyRegistry } from "@/components/settings/settings-context";
@@ -127,6 +128,7 @@ export default function ProjectSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [section, setSection] = useState("");
   const [query, setQuery] = useState("");
+  const [confirmLeave, setConfirmLeave] = useState(false);
 
   const { register, unregister, pending, total } = useDirtyRegistry();
 
@@ -151,9 +153,12 @@ export default function ProjectSettingsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
-  const patchProject = useCallback((patch: Partial<ApiProject>) => {
-    setProject((p) => (p ? { ...p, ...patch } : p));
-  }, []);
+  const patchProject = useCallback(
+    (patch: Partial<ApiProject> | ((prev: ApiProject) => Partial<ApiProject>)) => {
+      setProject((p) => (p ? { ...p, ...(typeof patch === "function" ? patch(p) : patch) } : p));
+    },
+    []
+  );
 
   const replaceProject = useCallback((next: ApiProject) => setProject(next), []);
 
@@ -270,7 +275,7 @@ export default function ProjectSettingsPage() {
     <>
       <div className="mx-auto max-w-[1160px] px-4 pb-32 sm:px-6">
         <button
-          onClick={() => router.push(`/projects/${projectId}`)}
+          onClick={() => (total > 0 ? setConfirmLeave(true) : router.push(`/projects/${projectId}`))}
           className="mb-2 flex min-h-[44px] items-center text-sm text-text-muted hover:text-text"
         >
           &larr; Back to board
@@ -335,13 +340,12 @@ export default function ProjectSettingsPage() {
             )}
           </nav>
 
-          <div
+          <nav
             className="sticky top-0 z-30 -mx-4 mb-4 flex gap-2 overflow-x-auto border-b border-border bg-bg/95 px-4 py-3 backdrop-blur md:hidden"
-            role="tablist"
             aria-label="Settings sections"
           >
             {visible.map((s) => navButton(s, true))}
-          </div>
+          </nav>
 
           <main>
             {activeMeta && (
@@ -355,7 +359,7 @@ export default function ProjectSettingsPage() {
               {visible.map((s) => (
                 <div key={s.id} className={s.id === active ? "" : "hidden"}>
                   {s.id === "general" && <GeneralSection {...sectionProps} />}
-                  {s.id === "board" && <BoardSection {...sectionProps} />}
+                  {s.id === "board" && <BoardSection {...sectionProps} active={active === "board"} />}
                   {s.id === "fields" && <TaskFieldsSection {...sectionProps} />}
                   {s.id === "integrations" && <IntegrationsSection {...sectionProps} />}
                   {s.id === "pm" && <PmAgentSection {...sectionProps} />}
@@ -369,6 +373,15 @@ export default function ProjectSettingsPage() {
       </div>
 
       <SaveBar pending={pending} total={total} onGoToSection={goToSection} />
+
+      <ConfirmDialog
+        open={confirmLeave}
+        onClose={() => setConfirmLeave(false)}
+        onConfirm={() => router.push(`/projects/${projectId}`)}
+        title="Leave without saving?"
+        message={`You have ${total === 1 ? "1 unsaved change" : `${total} unsaved changes`}. Leaving now discards them.`}
+        confirmLabel="Discard and leave"
+      />
     </>
   );
 }

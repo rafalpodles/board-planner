@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 export interface DirtyGroup {
   id: string;
@@ -45,7 +45,7 @@ export function SettingsProvider({
   unregister,
   children,
 }: SettingsContextValue & { children: React.ReactNode }) {
-  const [value] = useState(() => ({ register, unregister }));
+  const value = useMemo(() => ({ register, unregister }), [register, unregister]);
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;
 }
 
@@ -54,11 +54,11 @@ export function useDirtyGroup(
   handlers: { save: () => Promise<void>; discard: () => void }
 ) {
   const ctx = useContext(SettingsContext);
-  if (!ctx) throw new Error("useDirtyGroup must be used inside SettingsProvider");
-  const { register, unregister } = ctx;
-
   const latest = useRef(handlers);
   latest.current = handlers;
+
+  if (!ctx) throw new Error("useDirtyGroup must be used inside SettingsProvider");
+  const { register, unregister } = ctx;
 
   const { id, section, label, count } = group;
 

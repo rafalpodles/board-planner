@@ -66,8 +66,9 @@ export function TaskFieldsSection({ projectId, project, patchProject }: SectionP
   async function addComponent() {
     if (!newComponent.trim()) return;
     try {
-      await api.post(`/api/projects/${projectId}/components`, { name: newComponent.trim() });
-      patchProject({ components: [...project.components, newComponent.trim()] });
+      const added = newComponent.trim();
+      await api.post(`/api/projects/${projectId}/components`, { name: added });
+      patchProject((p) => ({ components: [...p.components, added] }));
       setNewComponent("");
     } catch (err) {
       fail(err, "Failed to add component");
@@ -77,7 +78,7 @@ export function TaskFieldsSection({ projectId, project, patchProject }: SectionP
   async function removeComponent(comp: string) {
     try {
       await api.del(`/api/projects/${projectId}/components`, { name: comp });
-      patchProject({ components: project.components.filter((c) => c !== comp) });
+      patchProject((p) => ({ components: p.components.filter((c) => c !== comp) }));
     } catch (err) {
       fail(err, "Failed to remove component");
     }
