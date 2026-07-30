@@ -6,6 +6,7 @@ import { useApi } from "@/hooks/use-api";
 import { ApiNotification } from "@/types";
 import { Button } from "@/components/ui/Button";
 import { timeAgo } from "@/lib/time";
+import { taskPath } from "@/lib/urls";
 
 const TYPE_LABELS: Record<string, string> = {
   task_assigned: "Assigned",
@@ -56,10 +57,12 @@ export default function NotificationsPage() {
   }
 
   function getNotificationHref(n: ApiNotification) {
-    const projectId = n.project && typeof n.project === "object" ? n.project._id : n.project;
-    const taskId = n.task && typeof n.task === "object" ? n.task._id : n.task;
-    if (!projectId || !taskId) return "/notifications";
-    return `/projects/${projectId}/tasks/${taskId}`;
+    const projectRef =
+      n.project && typeof n.project === "object" ? n.project.key : n.project;
+    const taskRef =
+      n.task && typeof n.task === "object" ? n.task.taskNumber : n.task;
+    if (!projectRef || !taskRef) return "/notifications";
+    return taskPath(projectRef, taskRef);
   }
 
   function markAsRead(n: ApiNotification) {

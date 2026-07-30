@@ -6,6 +6,7 @@ import { useApi } from "@/hooks/use-api";
 import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
 import { Button } from "@/components/ui/Button";
+import { projectPath } from "@/lib/urls";
 
 export default function NewProjectPage() {
   const [name, setName] = useState("");
@@ -27,7 +28,7 @@ export default function NewProjectPage() {
         key: key.toUpperCase(),
         description,
       });
-      router.push(`/projects/${project._id}`);
+      router.push(projectPath(project.key));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create project");
     } finally {

@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
 import { subscribeBoardRefresh } from "@/lib/board-refresh";
+import { useCanonicalUrl } from "@/hooks/use-canonical-url";
+import { projectPath, taskPath } from "@/lib/urls";
 import { useAuth } from "@/hooks/use-auth";
 import { ApiTask, ApiProject, ApiSprint } from "@/types";
 import { effectiveColumns } from "@/lib/columns";
@@ -56,6 +58,8 @@ export default function TaskDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId]);
 
+  useCanonicalUrl(project?.key, task?.taskNumber);
+
   // The board was not the only view going stale on a PM write — this page never reloaded
   // at all, so the form kept editing a task that had moved underneath it
   useEffect(() => subscribeBoardRefresh(projectId, loadData), [projectId, loadData]);
@@ -87,7 +91,7 @@ export default function TaskDetailPage() {
         status: "planned",
       });
       toast("Task duplicated", "success");
-      router.push(`/projects/${projectId}/tasks/${created._id}`);
+      router.push(taskPath(projectId, created.taskNumber));
     } catch {
       toast("Failed to duplicate task", "error");
     }
@@ -98,7 +102,7 @@ export default function TaskDetailPage() {
     try {
       await api.del(`/api/projects/${projectId}/tasks/${taskId}`);
       toast("Task deleted", "success");
-      router.push(`/projects/${projectId}`);
+      router.push(projectPath(projectId));
     } catch {
       toast("Failed to delete task", "error");
       setDeleting(false);
@@ -117,7 +121,7 @@ export default function TaskDetailPage() {
   return (
     <div className="max-w-2xl mx-auto">
       <button
-        onClick={() => router.push(`/projects/${projectId}`)}
+        onClick={() => router.push(projectPath(projectId))}
         className="text-sm text-text-muted hover:text-text mb-4 inline-block min-h-[44px] flex items-center"
       >
         &larr; Back to board
@@ -192,7 +196,7 @@ export default function TaskDetailPage() {
           sprints={sprints}
           customFields={project.customFields || []}
           onSaved={loadData}
-          onCancel={() => router.push(`/projects/${projectId}`)}
+          onCancel={() => router.push(projectPath(projectId))}
         />
 
         {/* Linked PRs */}
