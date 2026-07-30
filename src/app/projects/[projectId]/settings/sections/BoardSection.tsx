@@ -162,7 +162,9 @@ export function BoardSection({
             </label>
             <span className="flex-1" />
             {col.id && taskCounts[col.id] !== undefined && (
-              <span className="text-xs text-text-muted">{taskCounts[col.id]} tasks</span>
+              <span className="text-xs text-text-muted">
+                {taskCounts[col.id]} {taskCounts[col.id] === 1 ? "task" : "tasks"}
+              </span>
             )}
             <div className="flex items-center gap-1">
               <button
