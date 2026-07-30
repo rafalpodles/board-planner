@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ApiProjectCategory, ApiProjectColumn, ApiSprint, ApiTask, PRIORITY_LABELS, PRIORITY_ORDER } from "@/types";
 import { effectiveColumns } from "@/lib/columns";
 import { Badge } from "@/components/ui/Badge";
+import { categoryColor, categoryTint } from "@/lib/category-colors";
 import { timeAgo } from "@/lib/time";
 
 type SortKey = "taskNumber" | "title" | "status" | "assignee" | "priority" | "sprint" | "difficulty" | "category" | "component" | "dueDate" | "updatedAt";
@@ -178,10 +179,13 @@ export function ListView({ tasks, projectKey, projectId, sprints = [], categorie
               })() : null;
 
               const selected = selectedTasks?.has(task._id) ?? false;
+              const catColor = categoryColor(categories, task.category);
+              const tinted = !selected && index !== focusedIndex && !!catColor;
 
               return (
                 <tr
                   key={task._id}
+                  style={tinted ? categoryTint(catColor) : undefined}
                   ref={(el) => { rowRefs.current[index] = el; }}
                   onClick={(e) => {
                     if (selectionActive || e.ctrlKey || e.metaKey) {
@@ -196,9 +200,11 @@ export function ListView({ tasks, projectKey, projectId, sprints = [], categorie
                     e.preventDefault();
                     onTaskContextMenu(task._id, e.clientX, e.clientY);
                   }}
-                  className={`border-b border-border last:border-b-0 hover:bg-bg-input/50 cursor-pointer transition-colors ${
-                    selected ? "bg-primary/10" : ""
-                  } ${index === focusedIndex ? "ring-2 ring-primary ring-inset bg-primary/5" : ""}`}
+                  className={`border-b border-border last:border-b-0 cursor-pointer transition-colors ${
+                    tinted ? "cat-row" : "hover:bg-bg-input/50"
+                  } ${selected ? "bg-primary/10" : ""} ${
+                    index === focusedIndex ? "ring-2 ring-primary ring-inset bg-primary/5" : ""
+                  }`}
                 >
                   {selectionActive && (
                     <td className="px-3 py-2">
@@ -306,7 +312,7 @@ export function ListView({ tasks, projectKey, projectId, sprints = [], categorie
                     <Badge
                       variant="category"
                       value={task.category}
-                      color={categories.find((c) => c.name === task.category)?.color}
+                      color={catColor}
                     >
                       {task.category}
                     </Badge>

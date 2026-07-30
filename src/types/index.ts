@@ -37,7 +37,7 @@ export const DEFAULT_PROJECT_CATEGORIES: { name: string; color: string }[] = [
   { name: "bug", color: "#ef4444" },
   { name: "doc", color: "#3b82f6" },
   { name: "user-story", color: "#22c55e" },
-  { name: "idea", color: "#f59e0b" },
+  { name: "idea", color: "#8b5cf6" },
 ];
 export const PRIORITIES: Priority[] = ["low", "medium", "high", "urgent"];
 export const DEFAULT_PRIORITY: Priority = "medium";
