@@ -2,12 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { MarkdownContent } from "@/components/ui/MarkdownContent";
 import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
-import { ApiTask, ApiProject, ApiSprint, ApiLabel, ApiCustomField, PRIORITY_LABELS } from "@/types";
+import { ApiTask, ApiProject, ApiSprint } from "@/types";
 import { effectiveColumns } from "@/lib/columns";
-import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { TaskForm } from "@/components/tasks/TaskForm";
@@ -28,7 +26,6 @@ export default function TaskDetailPage() {
 
   const [task, setTask] = useState<ApiTask | null>(null);
   const [project, setProject] = useState<ApiProject | null>(null);
-  const [editing, setEditing] = useState(true);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [sprints, setSprints] = useState<ApiSprint[]>([]);
@@ -55,15 +52,6 @@ export default function TaskDetailPage() {
     loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId]);
-
-  useEffect(() => {
-    if (!editing) return;
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setEditing(false);
-    }
-    document.addEventListener("keydown", handleKey);
-    return () => document.removeEventListener("keydown", handleKey);
-  }, [editing]);
 
   async function handleStatusChange(newStatus: string) {
     try {
@@ -186,205 +174,19 @@ export default function TaskDetailPage() {
           </div>
         </div>
 
-        {editing ? (
-          <TaskForm
-            projectId={projectId}
-            projectKey={project.key}
-            task={task}
-            components={project.components}
-            categories={(project.categories || []).map((c) => c.name)}
-            columns={project.columns || []}
-            projectLabels={project.labels || []}
-            sprints={sprints}
-            customFields={project.customFields || []}
-            onSaved={() => {
-              setEditing(false);
-              loadData();
-            }}
-            onCancel={() => setEditing(false)}
-          />
-        ) : (
-          <>
-            <h1 className="text-2xl font-bold">{task.title}</h1>
-
-            {/* Meta */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-              <div className="flex flex-wrap gap-2">
-                <Badge variant="priority" value={task.priority}>
-                  {PRIORITY_LABELS[task.priority] ?? task.priority}
-                </Badge>
-                <Badge variant="difficulty" value={task.difficulty}>
-                  {task.difficulty}
-                </Badge>
-                <Badge
-                  variant="category"
-                  value={task.category}
-                  color={(project.categories || []).find((c) => c.name === task.category)?.color}
-                >
-                  {task.category}
-                </Badge>
-              </div>
-              {task.component && (
-                <div>
-                  <span className="text-text-muted">Component: </span>
-                  <span>{task.component}</span>
-                </div>
-              )}
-              {task.assignee && typeof task.assignee === "object" && (
-                <div>
-                  <span className="text-text-muted">Assignee: </span>
-                  <span>{task.assignee.fullName}</span>
-                </div>
-              )}
-              {task.dueDate && (() => {
-                const due = new Date(task.dueDate);
-                const now = new Date();
-                now.setHours(0, 0, 0, 0);
-                const diff = Math.ceil((due.getTime() - now.getTime()) / 86400000);
-                const color = diff < 0 ? "text-danger" : diff <= 2 ? "text-warning" : "text-text";
-                return (
-                  <div>
-                    <span className="text-text-muted">Due: </span>
-                    <span className={color}>
-                      {due.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })}
-                      {diff < 0 && " (overdue)"}
-                    </span>
-                  </div>
-                );
-              })()}
-              {task.recurrence && (
-                <div>
-                  <span className="text-text-muted">Repeats: </span>
-                  <span>
-                    Every {task.recurrence.interval > 1 ? `${task.recurrence.interval} ` : ""}
-                    {task.recurrence.frequency === "daily" ? (task.recurrence.interval > 1 ? "days" : "day") :
-                     task.recurrence.frequency === "weekly" ? (task.recurrence.interval > 1 ? "weeks" : "week") :
-                     (task.recurrence.interval > 1 ? "months" : "month")}
-                  </span>
-                </div>
-              )}
-              <div>
-                <span className="text-text-muted">Created: </span>
-                <span>{new Date(task.createdAt).toLocaleDateString()}</span>
-              </div>
-            </div>
-
-            {/* Labels */}
-            {(() => {
-              const taskLabels = (project.labels || []).filter((l: ApiLabel) =>
-                (task.labels || []).includes(l._id)
-              );
-              return taskLabels.length > 0 ? (
-                <div className="flex flex-wrap gap-1.5">
-                  {taskLabels.map((label: ApiLabel) => (
-                    <span
-                      key={label._id}
-                      className="text-xs px-2 py-0.5 rounded-full text-white font-medium"
-                      style={{ backgroundColor: label.color }}
-                    >
-                      {label.name}
-                    </span>
-                  ))}
-                </div>
-              ) : null;
-            })()}
-
-            {/* Custom Fields */}
-            {(() => {
-              const fields = project.customFields || [];
-              const vals = task.customFieldValues || {};
-              const filled = fields.filter((f: ApiCustomField) => {
-                const v = vals[f._id];
-                return v !== undefined && v !== "" && v !== null;
-              });
-              return filled.length > 0 ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                  {filled.map((f: ApiCustomField) => (
-                    <div key={f._id}>
-                      <span className="text-text-muted">{f.name}: </span>
-                      <span>
-                        {f.fieldType === "checkbox"
-                          ? vals[f._id] ? "Yes" : "No"
-                          : f.fieldType === "date" && vals[f._id]
-                            ? new Date(vals[f._id] as string).toLocaleDateString()
-                            : String(vals[f._id])}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              ) : null;
-            })()}
-
-            {/* Description */}
-            {task.description && (
-              <div>
-                <h2 className="font-semibold mb-2">Description</h2>
-                <div className="text-sm text-text-muted prose prose-invert prose-sm max-w-none overflow-x-auto">
-                  <MarkdownContent>{task.description}</MarkdownContent>
-                </div>
-              </div>
-            )}
-
-            {/* Checklist */}
-            {task.checklist && task.checklist.length > 0 && (
-              <div>
-                <div className="flex items-center gap-2 mb-2">
-                  <h2 className="font-semibold">Checklist</h2>
-                  <span className="text-xs text-text-muted">
-                    {task.checklist.filter((i) => i.done).length}/{task.checklist.length}
-                  </span>
-                </div>
-                <div className="space-y-1">
-                  {task.checklist.map((item) => (
-                    <label
-                      key={item._id}
-                      className="flex items-center gap-2 text-sm cursor-pointer group"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={item.done}
-                        onChange={async () => {
-                          // Optimistic update
-                          setTask((prev) =>
-                            prev
-                              ? {
-                                  ...prev,
-                                  checklist: prev.checklist.map((i) =>
-                                    i._id === item._id
-                                      ? { ...i, done: !i.done }
-                                      : i
-                                  ),
-                                }
-                              : prev
-                          );
-                          try {
-                            await api.put(
-                              `/api/projects/${projectId}/tasks/${taskId}/checklist`,
-                              { itemId: item._id, done: !item.done }
-                            );
-                          } catch {
-                            loadData();
-                            toast("Failed to update checklist", "error");
-                          }
-                        }}
-                        className="rounded border-border"
-                      />
-                      <span
-                        className={
-                          item.done
-                            ? "line-through text-text-muted"
-                            : "text-text"
-                        }
-                      >
-                        {item.text}
-                      </span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
-          </>
-        )}
+        <TaskForm
+          projectId={projectId}
+          projectKey={project.key}
+          task={task}
+          components={project.components}
+          categories={(project.categories || []).map((c) => c.name)}
+          columns={project.columns || []}
+          projectLabels={project.labels || []}
+          sprints={sprints}
+          customFields={project.customFields || []}
+          onSaved={loadData}
+          onCancel={() => router.push(`/projects/${projectId}`)}
+        />
 
         {/* Linked PRs */}
         {task.linkedPRs && task.linkedPRs.length > 0 && (
@@ -450,11 +252,6 @@ export default function TaskDetailPage() {
 
         {/* Actions */}
         <div className="flex gap-3">
-          {!editing && (
-            <Button size="sm" onClick={() => setEditing(true)}>
-              Edit
-            </Button>
-          )}
           <Button size="sm" variant="secondary" onClick={handleDuplicate}>
             Duplicate
           </Button>
