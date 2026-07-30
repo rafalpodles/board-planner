@@ -115,11 +115,13 @@ export function BoardSection({ projectId, project, patchProject }: SectionProps)
             className="flex cursor-grab flex-wrap items-center gap-2 rounded-lg border border-border bg-bg-input/30 px-3 py-2"
           >
             <span className="select-none text-text-muted">⠿</span>
-            <Input
-              value={col.label}
-              onChange={(e) => update(i, { label: e.target.value })}
-              className="max-w-[190px] min-h-[38px] py-1.5"
-            />
+            <div className="w-[180px] shrink-0">
+              <Input
+                value={col.label}
+                onChange={(e) => update(i, { label: e.target.value })}
+                className="min-h-[38px] py-1.5"
+              />
+            </div>
             <input
               type="color"
               value={col.color}
@@ -150,8 +152,8 @@ export function BoardSection({ projectId, project, patchProject }: SectionProps)
               PM review
             </label>
             <span className="flex-1" />
-            {col.id && (
-              <span className="text-xs text-text-muted">{taskCounts[col.id] ?? 0} tasks</span>
+            {col.id && taskCounts[col.id] !== undefined && (
+              <span className="text-xs text-text-muted">{taskCounts[col.id]} tasks</span>
             )}
             <div className="flex items-center gap-1">
               <button
