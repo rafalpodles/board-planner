@@ -19,6 +19,6 @@ export async function getSettings(): Promise<ISettings> {
   return Settings.findOneAndUpdate(
     {},
     { $setOnInsert: { aiModel: "gpt-4o-mini" } },
-    { upsert: true, new: true }
+    { upsert: true, returnDocument: "after" }
   ) as Promise<ISettings>;
 }

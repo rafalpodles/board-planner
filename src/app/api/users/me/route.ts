@@ -23,7 +23,7 @@ export const PUT = withAuth(async (request, { user }) => {
   const updated = await User.findByIdAndUpdate(
     user._id,
     { $set: updates },
-    { new: true }
+    { returnDocument: "after" }
   );
 
   return NextResponse.json(updated);
