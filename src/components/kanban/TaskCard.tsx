@@ -145,13 +145,32 @@ export function TaskCard({
         </div>
       )}
 
-      {task.blockedBy && task.blockedBy.length > 0 && (
-        <div className="mb-2">
-          <span className="text-[10px] text-warning bg-warning/10 px-1.5 py-0.5 rounded font-medium">
-            Blocked ({task.blockedBy.length})
-          </span>
-        </div>
-      )}
+      {(() => {
+        const blocked = task.blockedBy?.length ?? 0;
+        const allRelations = [...(task.relations || []), ...(task.relatedFrom || [])];
+        const relates = allRelations.filter((r) => r.type === "relates").length;
+        const duplicates = allRelations.filter((r) => r.type === "duplicates").length;
+        if (blocked + relates + duplicates === 0) return null;
+        return (
+          <div className="mb-2 flex flex-wrap gap-1">
+            {blocked > 0 && (
+              <span className="text-[10px] text-warning bg-warning/10 px-1.5 py-0.5 rounded font-medium">
+                Blocked ({blocked})
+              </span>
+            )}
+            {relates > 0 && (
+              <span className="text-[10px] text-primary bg-primary/10 px-1.5 py-0.5 rounded font-medium">
+                Relates ({relates})
+              </span>
+            )}
+            {duplicates > 0 && (
+              <span className="text-[10px] text-text-muted bg-bg-input px-1.5 py-0.5 rounded font-medium">
+                Duplicate ({duplicates})
+              </span>
+            )}
+          </div>
+        );
+      })()}
 
       {task.checklist && task.checklist.length > 0 && (
         <div className="mb-2 flex items-center gap-1.5">

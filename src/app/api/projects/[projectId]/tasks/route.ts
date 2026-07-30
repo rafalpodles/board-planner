@@ -9,6 +9,7 @@ const populateFields = [
   { path: "assignee", select: "username fullName" },
   { path: "createdBy", select: "username fullName" },
   { path: "blockedBy", select: "taskNumber title status" },
+  { path: "relations.task", select: "taskNumber title status" },
 ];
 
 export const GET = withProjectAccess(async (request, { params }) => {

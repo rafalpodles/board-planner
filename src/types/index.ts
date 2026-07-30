@@ -532,6 +532,7 @@ export interface ITask {
   labels: Types.ObjectId[];
   pinned: boolean;
   blockedBy: (Types.ObjectId | ITask)[];
+  relations: ITaskRelation[];
   watchers: Types.ObjectId[];
   sprint: Types.ObjectId | ISprint | null;
   customFieldValues: Map<string, unknown>;
@@ -663,6 +664,23 @@ export interface ApiPmMessage {
   createdAt: string;
 }
 
+export const RELATION_TYPES = ["relates", "duplicates"] as const;
+export type RelationType = (typeof RELATION_TYPES)[number];
+
+// Every dependency kind the UI can add, including the one stored as blockedBy
+export const DEPENDENCY_TYPES = ["blocked_by", ...RELATION_TYPES] as const;
+export type DependencyType = (typeof DEPENDENCY_TYPES)[number];
+
+export interface ITaskRelation {
+  task: Types.ObjectId | ITask;
+  type: RelationType;
+}
+
+export interface ApiTaskRelation {
+  task: ApiTaskLink;
+  type: RelationType;
+}
+
 export interface ApiTaskLink {
   _id: string;
   taskNumber: number;
@@ -695,6 +713,8 @@ export interface ApiTask {
   pinned: boolean;
   blockedBy: ApiTaskLink[];
   blocking: ApiTaskLink[];
+  relations: ApiTaskRelation[];
+  relatedFrom: ApiTaskRelation[];
   watchers: string[];
   sprint: string | null;
   customFieldValues: Record<string, unknown>;
