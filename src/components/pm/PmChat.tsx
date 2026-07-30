@@ -38,6 +38,7 @@ export function PmChat({
   const [workingStatus, setWorkingStatus] = useState("");
   const [liveActions, setLiveActions] = useState<{ tool: string; taskKey?: string; summary: string }[]>([]);
   const [recovering, setRecovering] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const [errorState, setErrorState] = useState("");
   const [lastFailedInput, setLastFailedInput] = useState("");
   const [loading, setLoading] = useState(true);
@@ -91,6 +92,7 @@ export function PmChat({
       if (last && last.role === "assistant" && last.content) {
         setRecovering(false);
         setWorking(false);
+        setStopping(false);
         setWorkingStatus("");
         setLiveActions([]);
         refreshTaskMap();
@@ -102,13 +104,25 @@ export function PmChat({
   }, [loadMessages, refreshTaskMap]);
   usePollWhileVisible(recoveryPoll, 3000, recovering);
 
+  async function interrupt() {
+    setStopping(true);
+    setWorkingStatus("Stopping…");
+    try {
+      await api.post(`/api/projects/${projectId}/pm/interrupt`, {});
+    } catch {
+      // 404 = the turn finished on its own between click and request; the stream
+      // is about to deliver the real answer, so there is nothing to report
+    }
+  }
+
   async function send(text: string) {
     const message = text.trim();
     if (!message || working) return;
     setErrorState("");
     setInput("");
+    setStopping(false);
     setWorking(true);
-    setWorkingStatus("PM myśli…");
+    setWorkingStatus("PM is thinking…");
     setLiveActions([]);
 
     // Optimistic user message
@@ -131,7 +145,7 @@ export function PmChat({
       response = await api.stream(`/api/projects/${projectId}/pm/chat`, { message });
     } catch {
       setWorking(false);
-      setErrorState("Nie udało się połączyć z serwerem.");
+      setErrorState("Could not reach the server.");
       setLastFailedInput(message);
       return;
     }
@@ -141,15 +155,15 @@ export function PmChat({
       setWorking(false);
       if (response.status === 409) {
         setWorkingStatus("");
-        setErrorState("PM już pracuje nad odpowiedzią w tym projekcie — poczekaj chwilę.");
+        setErrorState("A PM turn is already running for this project — hold on.");
         setRecovering(true);
         setWorking(true);
       } else if (response.status === 429) {
-        setErrorState(err.error || "Limit tur na dziś wyczerpany.");
+        setErrorState(err.error || "Daily turn limit reached.");
       } else if (response.status === 503) {
-        setErrorState("PM nie jest skonfigurowany na serwerze (brak OPENROUTER_API_KEY).");
+        setErrorState("PM is not configured on the server (OPENROUTER_API_KEY missing).");
       } else {
-        setErrorState(err.error || "Błąd żądania.");
+        setErrorState(err.error || "Request failed.");
         setLastFailedInput(message);
       }
       return;
@@ -192,7 +206,7 @@ export function PmChat({
       if (!finished) {
         // Stream ended without done/error — recover via polling
         setRecovering(true);
-        setWorkingStatus("Połączenie przerwane — odzyskuję odpowiedź…");
+        setWorkingStatus("Connection lost — recovering the answer…");
         return;
       }
 
@@ -200,11 +214,12 @@ export function PmChat({
       refreshTaskMap();
       emitBoardRefresh(projectId);
       setWorking(false);
+      setStopping(false);
       setWorkingStatus("");
       setLiveActions([]);
     } catch {
       setRecovering(true);
-      setWorkingStatus("Połączenie przerwane — odzyskuję odpowiedź…");
+      setWorkingStatus("Connection lost — recovering the answer…");
     }
   }
 
@@ -262,11 +277,11 @@ export function PmChat({
         <h1 className="text-xl font-bold">PM Agent</h1>
         <p className="text-sm text-text-muted">
           {!project?.pmAvailable
-            ? "PM nie jest skonfigurowany na serwerze (brak OPENROUTER_API_KEY)."
-            : "PM agent jest wyłączony dla tego projektu — włącz go w ustawieniach."}
+            ? "PM is not configured on the server (OPENROUTER_API_KEY missing)."
+            : "The PM agent is disabled for this project — enable it in settings."}
         </p>
         <Link href={`/projects/${projectId}/settings`} className="text-primary text-sm hover:underline">
-          Przejdź do ustawień
+          Go to settings
         </Link>
       </div>
     );
@@ -287,7 +302,7 @@ export function PmChat({
         )}
         {messages.length === 0 && !working && (
           <p className="text-sm text-text-muted text-center py-10">
-            Porozmawiaj z PM-em: poproś o rozpisanie feature&apos;a, refinement tasków albo zapytaj o stan projektu.
+            Talk to the PM: ask it to break a feature into tasks, refine a backlog or report on project state.
           </p>
         )}
         {messages.map((m) => (
@@ -323,7 +338,7 @@ export function PmChat({
               <p className="text-[11px] font-medium text-text-muted mb-1">PM Agent</p>
               <div className="flex items-center gap-2 text-sm text-text-muted">
                 <div className="animate-spin rounded-full h-3.5 w-3.5 border-2 border-primary border-t-transparent shrink-0" />
-                {workingStatus || "PM pracuje…"}
+                {workingStatus || "PM is working…"}
               </div>
               <ActionChips actions={liveActions} />
             </div>
@@ -337,7 +352,7 @@ export function PmChat({
           <span>{errorState}</span>
           {lastFailedInput && (
             <Button size="sm" variant="secondary" onClick={() => { setErrorState(""); send(lastFailedInput); }}>
-              Ponów
+              Retry
             </Button>
           )}
         </div>
@@ -348,14 +363,30 @@ export function PmChat({
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Napisz do PM-a… (Enter wysyła, Shift+Enter nowa linia)"
+          placeholder="Message the PM… (Enter sends, Shift+Enter for a new line)"
           rows={2}
           disabled={working}
           className="flex-1 bg-bg-input border border-border rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary resize-none disabled:opacity-60"
         />
-        <Button onClick={() => send(input)} disabled={working || !input.trim()}>
-          Wyślij
-        </Button>
+        {working ? (
+          <button
+            onClick={interrupt}
+            disabled={stopping}
+            title={stopping ? "Stopping the PM turn…" : "Stop the PM turn"}
+            aria-label="Stop the PM turn"
+            className="h-9 w-9 shrink-0 flex items-center justify-center rounded border border-border
+              bg-bg-input text-text-muted hover:text-danger hover:border-danger/50 transition-colors
+              cursor-pointer disabled:opacity-50 disabled:cursor-default"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        ) : (
+          <Button onClick={() => send(input)} disabled={!input.trim()}>
+            Send
+          </Button>
+        )}
       </div>
     </div>
   );

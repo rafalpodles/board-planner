@@ -23,12 +23,14 @@ export type OrChatMessage = Record<string, any>;
 export type OrCompletionResult =
   | { type: "text"; content: string }
   | { type: "tool_calls"; content: string; calls: OrToolCall[]; assistantMessage: OrChatMessage }
+  | { type: "aborted" }
   | { type: "error"; error: string };
 
 export async function chatCompletion(opts: {
   model: string;
   messages: OrChatMessage[];
   tools: OrToolDefinition[];
+  signal?: AbortSignal;
 }): Promise<OrCompletionResult> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
@@ -55,8 +57,10 @@ export async function chatCompletion(opts: {
         })),
         tool_choice: "auto",
       }),
+      signal: opts.signal,
     });
   } catch (err) {
+    if (opts.signal?.aborted) return { type: "aborted" };
     return { type: "error", error: `OpenRouter request failed: ${err instanceof Error ? err.message : String(err)}` };
   }
 
@@ -70,6 +74,7 @@ export async function chatCompletion(opts: {
   try {
     data = await response.json();
   } catch {
+    if (opts.signal?.aborted) return { type: "aborted" };
     return { type: "error", error: "OpenRouter returned a non-JSON response" };
   }
 
