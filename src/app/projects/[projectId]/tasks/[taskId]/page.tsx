@@ -1,13 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
+import { subscribeBoardRefresh } from "@/lib/board-refresh";
+import { useCanonicalUrl } from "@/hooks/use-canonical-url";
+import { projectPath, taskPath } from "@/lib/urls";
 import { useAuth } from "@/hooks/use-auth";
 import { ApiTask, ApiProject, ApiSprint } from "@/types";
 import { effectiveColumns } from "@/lib/columns";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { Modal } from "@/components/ui/Modal";
 import { TaskForm } from "@/components/tasks/TaskForm";
 import { Comments } from "@/components/tasks/Comments";
 import { TaskLinks } from "@/components/tasks/TaskLinks";
@@ -28,11 +32,12 @@ export default function TaskDetailPage() {
   const [task, setTask] = useState<ApiTask | null>(null);
   const [project, setProject] = useState<ApiProject | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [addingChild, setAddingChild] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [sprints, setSprints] = useState<ApiSprint[]>([]);
   const [loading, setLoading] = useState(true);
 
-  async function loadData() {
+  const loadData = useCallback(async () => {
     try {
       const [t, p, s] = await Promise.all([
         api.get(`/api/projects/${projectId}/tasks/${taskId}`),
@@ -47,12 +52,19 @@ export default function TaskDetailPage() {
     } finally {
       setLoading(false);
     }
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, taskId]);
 
   useEffect(() => {
     loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId]);
+
+  useCanonicalUrl(project?.key, task?.taskNumber);
+
+  // The board was not the only view going stale on a PM write — this page never reloaded
+  // at all, so the form kept editing a task that had moved underneath it
+  useEffect(() => subscribeBoardRefresh(projectId, loadData), [projectId, loadData]);
 
   async function handleStatusChange(newStatus: string) {
     try {
@@ -81,7 +93,7 @@ export default function TaskDetailPage() {
         status: "planned",
       });
       toast("Task duplicated", "success");
-      router.push(`/projects/${projectId}/tasks/${created._id}`);
+      router.push(taskPath(projectId, created.taskNumber));
     } catch {
       toast("Failed to duplicate task", "error");
     }
@@ -92,7 +104,7 @@ export default function TaskDetailPage() {
     try {
       await api.del(`/api/projects/${projectId}/tasks/${taskId}`);
       toast("Task deleted", "success");
-      router.push(`/projects/${projectId}`);
+      router.push(projectPath(projectId));
     } catch {
       toast("Failed to delete task", "error");
       setDeleting(false);
@@ -111,7 +123,7 @@ export default function TaskDetailPage() {
   return (
     <div className="max-w-2xl mx-auto">
       <button
-        onClick={() => router.push(`/projects/${projectId}`)}
+        onClick={() => router.push(projectPath(projectId))}
         className="text-sm text-text-muted hover:text-text mb-4 inline-block min-h-[44px] flex items-center"
       >
         &larr; Back to board
@@ -186,7 +198,7 @@ export default function TaskDetailPage() {
           sprints={sprints}
           customFields={project.customFields || []}
           onSaved={loadData}
-          onCancel={() => router.push(`/projects/${projectId}`)}
+          onCancel={() => router.push(projectPath(projectId))}
         />
 
         {/* Linked PRs */}
@@ -244,7 +256,12 @@ export default function TaskDetailPage() {
 
         {/* Dependencies */}
         <div>
-          <h2 className="font-semibold mb-2">Dependencies</h2>
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="font-semibold">Dependencies</h2>
+            <Button size="sm" variant="secondary" onClick={() => setAddingChild(true)}>
+              Add child
+            </Button>
+          </div>
           <TaskLinks
             projectId={projectId}
             projectKey={project.key}
@@ -273,6 +290,30 @@ export default function TaskDetailPage() {
           <ActivityTimeline projectId={projectId} taskId={taskId} />
         </div>
       </div>
+
+      <Modal
+        open={addingChild}
+        onClose={() => setAddingChild(false)}
+        title={`New child of ${project.key}-${task.taskNumber}`}
+        size="lg"
+      >
+        <TaskForm
+          projectId={projectId}
+          projectKey={project.key}
+          parentTaskId={task._id}
+          components={project.components}
+          categories={(project.categories || []).map((c) => c.name)}
+          columns={project.columns || []}
+          projectLabels={project.labels || []}
+          sprints={sprints}
+          customFields={project.customFields || []}
+          onSaved={() => {
+            setAddingChild(false);
+            loadData();
+          }}
+          onCancel={() => setAddingChild(false)}
+        />
+      </Modal>
 
       <ConfirmDialog
         open={confirmDelete}

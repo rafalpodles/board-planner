@@ -1,13 +1,15 @@
 "use client";
 
 import { useMemo, useRef, useEffect } from "react";
-import { ApiProjectColumn, ApiTask } from "@/types";
+import { ApiProjectCategory, ApiProjectColumn, ApiTask } from "@/types";
 import { effectiveColumns } from "@/lib/columns";
+import { categoryColor, categoryTint } from "@/lib/category-colors";
 
 interface TimelineViewProps {
   tasks: ApiTask[];
   projectKey: string;
   columns?: ApiProjectColumn[];
+  categories?: ApiProjectCategory[];
   selectedTasks?: Set<string>;
   selectionMode?: boolean;
   onTaskClick: (taskId: string) => void;
@@ -46,7 +48,7 @@ function formatMonth(date: Date): string {
   return date.toLocaleDateString(undefined, { month: "short", year: "numeric" });
 }
 
-export function TimelineView({ tasks, projectKey, columns, selectedTasks, selectionMode, onTaskClick, onTaskSelect, onTaskContextMenu }: TimelineViewProps) {
+export function TimelineView({ tasks, projectKey, columns, categories, selectedTasks, selectionMode, onTaskClick, onTaskSelect, onTaskContextMenu }: TimelineViewProps) {
   const selectionActive = selectionMode || (selectedTasks?.size ?? 0) > 0;
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -146,13 +148,15 @@ export function TimelineView({ tasks, projectKey, columns, selectedTasks, select
           </div>
           {sortedTasks.map((task) => {
             const selected = selectedTasks?.has(task._id) ?? false;
+            const catColor = categoryColor(categories, task.category);
+            const tinted = !selected && !!catColor;
             return (
               <div
                 key={task._id}
                 className={`flex items-center gap-2 px-3 border-b border-border/50 cursor-pointer transition-colors ${
-                  selected ? "bg-primary/10" : "hover:bg-bg-hover"
+                  selected ? "bg-primary/10" : tinted ? "cat-row" : "hover:bg-bg-hover"
                 }`}
-                style={{ height: ROW_HEIGHT }}
+                style={{ height: ROW_HEIGHT, ...(tinted ? categoryTint(catColor) : {}) }}
                 onClick={(e) => activate(task._id, e)}
                 onContextMenu={(e) => contextMenu(task._id, e)}
               >

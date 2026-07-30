@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useApi } from "@/hooks/use-api";
@@ -23,6 +23,32 @@ import { Modal } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
 import { ShortcutHelp } from "@/components/ui/ShortcutHelp";
 import { SprintSelector } from "@/components/kanban/SprintSelector";
+import { useCanonicalUrl } from "@/hooks/use-canonical-url";
+import { taskPath } from "@/lib/urls";
+
+// "relates" is symmetric and "duplicates" has a readable inverse, so a card should
+// show a relation regardless of which side created it. Every task is already loaded,
+// so the reverse side is derived here instead of costing another request.
+function withIncomingRelations(tasks: ApiTask[]): ApiTask[] {
+  const incoming = new Map<string, ApiTask["relatedFrom"]>();
+  for (const task of tasks) {
+    for (const relation of task.relations || []) {
+      const targetId = relation.task?._id;
+      if (!targetId) continue;
+      const entry = {
+        type: relation.type,
+        task: {
+          _id: task._id,
+          taskNumber: task.taskNumber,
+          title: task.title,
+          status: task.status,
+        },
+      };
+      incoming.set(targetId, [...(incoming.get(targetId) || []), entry]);
+    }
+  }
+  return tasks.map((task) => ({ ...task, relatedFrom: incoming.get(task._id) || [] }));
+}
 
 export default function KanbanPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -39,6 +65,7 @@ export default function KanbanPage() {
   const [editTaskId, setEditTaskId] = useState<string | null>(null);
   const [showImport, setShowImport] = useState(false);
   const [showExport, setShowExport] = useState(false);
+  const loadSeq = useRef(0);
   const [selectedTasks, setSelectedTasks] = useState<Set<string>>(new Set());
   const [selectionMode, setSelectionMode] = useState(false);
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
@@ -67,6 +94,7 @@ export default function KanbanPage() {
   }, [tasks, now]);
 
   const loadData = useCallback(async () => {
+    const seq = ++loadSeq.current;
     try {
       const sprintParam = selectedSprint !== "all" ? `?sprint=${selectedSprint}` : "";
       const [proj, taskList, sprintList] = await Promise.all([
@@ -74,8 +102,10 @@ export default function KanbanPage() {
         api.get(`/api/projects/${projectId}/tasks${sprintParam}`),
         api.get(`/api/projects/${projectId}/sprints`),
       ]);
+      // A slower earlier request must not overwrite what a later one already applied
+      if (seq !== loadSeq.current) return;
       setProject(proj);
-      setTasks(taskList);
+      setTasks(withIncomingRelations(taskList));
       setSprints(sprintList);
       setNow(Date.now());
     } catch {
@@ -86,20 +116,13 @@ export default function KanbanPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, selectedSprint]);
 
+  useCanonicalUrl(project?.key);
+
   usePollWhileVisible(loadData, 10_000);
 
-  // Instant refresh when the PM chat reports a write action (poll stays as fallback)
-  useEffect(() => {
-    let debounce: ReturnType<typeof setTimeout> | null = null;
-    const unsubscribe = subscribeBoardRefresh(projectId, () => {
-      if (debounce) clearTimeout(debounce);
-      debounce = setTimeout(loadData, 300);
-    });
-    return () => {
-      if (debounce) clearTimeout(debounce);
-      unsubscribe();
-    };
-  }, [projectId, loadData]);
+  // Instant refresh when the PM chat reports a write action (poll stays as fallback).
+  // Bursts are coalesced inside subscribeBoardRefresh.
+  useEffect(() => subscribeBoardRefresh(projectId, loadData), [projectId, loadData]);
 
   // Update browser tab title with task counts
   useEffect(() => {
@@ -174,7 +197,7 @@ export default function KanbanPage() {
       if (e.key === "Enter" && noMod && focusedTaskIndex >= 0 && focusedTaskIndex < filteredTasks.length) {
         e.preventDefault();
         const task = filteredTasks[focusedTaskIndex];
-        router.push(`/projects/${projectId}/tasks/${task._id}`);
+        router.push(taskPath(projectId, task.taskNumber));
         return;
       }
     }
@@ -344,19 +367,6 @@ export default function KanbanPage() {
     }
   }
 
-  async function handleInterrupt(taskId: string) {
-    try {
-      const { task } = await api.post(
-        `/api/projects/${projectId}/tasks/${taskId}/interrupt`,
-        {}
-      );
-      setTasks((prev) => prev.map((t) => (t._id === taskId ? { ...t, status: task.status } : t)));
-      toast("Interrupted — task returned to the queue with a note", "success");
-    } catch {
-      toast("Failed to interrupt work on the task", "error");
-    }
-  }
-
   async function handleContextDelete(taskId: string) {
     try {
       await api.del(`/api/projects/${projectId}/tasks/${taskId}`);
@@ -378,7 +388,7 @@ export default function KanbanPage() {
   }
 
   return (
-    <div className="lg:h-[calc(100vh-6.5rem)] lg:flex lg:flex-col lg:overflow-hidden">
+    <div className="lg:flex-1 lg:min-h-0 lg:flex lg:flex-col lg:overflow-hidden">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-6 lg:shrink-0">
         <div>
           <div className="flex items-center gap-2">
@@ -578,7 +588,6 @@ export default function KanbanPage() {
           onTaskClick={(taskId) => setEditTaskId(taskId)}
           onTaskSelect={handleTaskSelect}
           onTaskContextMenu={(taskId, x, y) => setContextMenu({ taskId, x, y })}
-          onTaskInterrupt={handleInterrupt}
         />
       ) : viewMode === "list" ? (
         <ListView
@@ -601,6 +610,7 @@ export default function KanbanPage() {
           tasks={filteredTasks}
           projectKey={project.key}
           columns={project.columns || []}
+          categories={project.categories || []}
           selectedTasks={selectedTasks}
           selectionMode={selectionMode}
           onTaskClick={(taskId) => setEditTaskId(taskId)}
@@ -628,7 +638,6 @@ export default function KanbanPage() {
             onStatusChange={(status) =>
               bulk > 1 ? handleBulkMove(status) : handleStatusChange(contextMenu.taskId, status)
             }
-            onInterrupt={() => handleInterrupt(contextMenu.taskId)}
             onSprintChange={async (sprintId) => {
               if (bulk > 1) {
                 handleBulkSprint(sprintId);
@@ -713,7 +722,7 @@ export default function KanbanPage() {
             {editTask && (
               <>
                 <Link
-                  href={`/projects/${projectId}/tasks/${editTask._id}`}
+                  href={taskPath(projectId, editTask.taskNumber)}
                   className="text-xs text-primary hover:underline inline-block mb-3"
                 >
                   Open full task page (comments, dependencies, activity) &rarr;

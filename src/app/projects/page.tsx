@@ -7,6 +7,7 @@ import { ApiProject, DEFAULT_PROJECT_ICON } from "@/types";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
 import { useAuth } from "@/hooks/use-auth";
+import { projectPath } from "@/lib/urls";
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<ApiProject[]>([]);
@@ -57,7 +58,7 @@ export default function ProjectsPage() {
           {projects.map((project) => (
             <Link
               key={project._id}
-              href={`/projects/${project._id}`}
+              href={projectPath(project.key)}
               className="rounded-xl border border-border bg-bg-card p-4 cursor-pointer hover:border-primary/50 transition-colors block"
             >
               <div className="flex items-start justify-between gap-2 mb-2">

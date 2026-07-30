@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useApi } from "@/hooks/use-api";
 import { ApiTask, STATUS_LABELS, PRIORITY_LABELS } from "@/types";
 import { Badge } from "@/components/ui/Badge";
+import { taskPath } from "@/lib/urls";
 
 interface GroupedResult {
   projectId: string;
@@ -118,7 +119,7 @@ function SearchContent() {
             {group.tasks.map((task, i) => (
               <Link
                 key={task._id}
-                href={`/projects/${group.projectId}/tasks/${task._id}`}
+                href={taskPath(group.projectKey, task.taskNumber)}
                 className={`flex items-center gap-3 px-4 py-3 hover:bg-bg-input/50 transition-colors block
                   ${i > 0 ? "border-t border-border" : ""}`}
               >

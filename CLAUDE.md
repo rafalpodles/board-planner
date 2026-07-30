@@ -84,7 +84,7 @@ Claude automatically picks up tasks in `todo` status (assigned to `claude` or un
 
 ## Tech stack
 - Next.js 16 (App Router) + TypeScript
-- MongoDB (Railway) + Mongoose ODM
+- MongoDB 4.4+ (Railway) + Mongoose ODM — aggregations must avoid 5.0-only operators (`$dateTrunc`, `$dateAdd`/`$dateDiff`, `$setWindowFields`, `$lookup` mixing `localField`/`foreignField` with an inline `pipeline`)
 - Tailwind CSS 4
 - Basic Auth + Bearer token (API tokens)
 - MCP Server (separate package in `mcp-server/`)

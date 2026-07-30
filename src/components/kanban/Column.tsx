@@ -18,7 +18,6 @@ interface ColumnProps {
   onTaskClick: (taskId: string) => void;
   onTaskSelect?: (taskId: string) => void;
   onTaskContextMenu?: (taskId: string, x: number, y: number) => void;
-  onTaskInterrupt?: (taskId: string) => void;
 }
 
 export function Column({
@@ -34,7 +33,6 @@ export function Column({
   onTaskClick,
   onTaskSelect,
   onTaskContextMenu,
-  onTaskInterrupt,
 }: ColumnProps) {
   const [isDragOver, setIsDragOver] = useState(false);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
@@ -81,7 +79,7 @@ export function Column({
         setDropIndex(null);
       }}
       className={`bg-bg-card rounded-xl border border-border
-        border-t-2 flex flex-col max-h-[calc(100vh-12rem)] lg:max-h-full lg:h-full
+        border-t-2 flex flex-col max-h-[calc(100vh-12rem)] lg:max-h-full lg:h-full lg:min-h-0
         transition-colors ${isDragOver ? "bg-primary/5 border-primary/30" : ""}`}
       style={{ borderTopColor: column.color }}
     >
@@ -92,7 +90,7 @@ export function Column({
         </span>
       </div>
 
-      <div data-column-body className="flex-1 overflow-y-auto overscroll-y-contain p-2 space-y-2">
+      <div data-column-body className="flex-1 overflow-y-auto overscroll-y-contain no-scrollbar p-2 space-y-2">
         {[...tasks].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)).map((task, i) => (
           <div key={task._id}>
             {dropIndex === i && (
@@ -109,7 +107,6 @@ export function Column({
                 onSelect={onTaskSelect}
                 onClick={() => onTaskClick(task._id)}
                 onContextMenu={onTaskContextMenu}
-                onInterrupt={column.role === "active" ? onTaskInterrupt : undefined}
               />
             </div>
           </div>

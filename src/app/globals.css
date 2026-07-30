@@ -66,6 +66,40 @@ body {
   animation: slide-in 0.2s ease-out;
 }
 
+/* Scrolls, but without a visible bar */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Category tinting: --cat carries the category colour. Mixing against --color-bg
+   means one rule gives a pale tint in light mode and a dark one in dark mode. */
+.cat-card {
+  border-color: var(--cat);
+  background-color: color-mix(in srgb, var(--cat) 8%, var(--color-bg));
+}
+.cat-card:hover {
+  background-color: color-mix(in srgb, var(--cat) 16%, var(--color-bg));
+}
+
+.cat-row {
+  box-shadow: inset 3px 0 0 var(--cat);
+  background-color: color-mix(in srgb, var(--cat) 5%, var(--color-bg));
+}
+.cat-row:hover {
+  background-color: color-mix(in srgb, var(--cat) 13%, var(--color-bg));
+}
+
+/* --color-text-muted clears AA against the plain background by 0.05, so any tint
+   drops it below 4.5:1 — pull it toward the foreground on tinted surfaces */
+.cat-card .text-text-muted,
+.cat-row .text-text-muted {
+  color: color-mix(in srgb, var(--color-text-muted) 85%, var(--color-text));
+}
+
 /* Typography plugin ships a fixed light/dark palette; bind it to the theme tokens
    so prose follows [data-theme] instead of needing prose-invert */
 .prose {
