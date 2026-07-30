@@ -57,7 +57,7 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
   const project = await Project.findOneAndUpdate(
     { _id: projectId },
     { $inc: { taskCounter: parsed.length } },
-    { new: true }
+    { returnDocument: "after" }
   );
 
   if (!project) {

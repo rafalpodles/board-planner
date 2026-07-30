@@ -36,7 +36,7 @@ export async function createTask(
   const project = await Project.findOneAndUpdate(
     { _id: projectId },
     { $inc: { taskCounter: 1 } },
-    { new: true }
+    { returnDocument: "after" }
   );
 
   if (!project) {
@@ -153,7 +153,7 @@ export async function changeStatus(
   const task = await Task.findOneAndUpdate(
     { _id: taskId, project: projectId },
     { $set: { status } },
-    { new: true }
+    { returnDocument: "after" }
   ).populate([
     { path: "assignee", select: "username fullName" },
     { path: "createdBy", select: "username fullName" },
@@ -295,7 +295,7 @@ export async function updateTask(
   const task = await Task.findOneAndUpdate(
     { _id: taskId, project: projectId },
     { $set: updates },
-    { new: true, runValidators: true }
+    { returnDocument: "after", runValidators: true }
   ).populate(taskPopulateFields);
 
   if (!task) {
@@ -467,7 +467,7 @@ async function createNextRecurrence(
   const project = await Project.findOneAndUpdate(
     { _id: projectId },
     { $inc: { taskCounter: 1 } },
-    { new: true }
+    { returnDocument: "after" }
   );
   if (!project) return;
 
