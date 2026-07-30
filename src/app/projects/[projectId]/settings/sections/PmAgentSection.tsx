@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { Textarea } from "@/components/ui/Textarea";
 import { Button } from "@/components/ui/Button";
-import { reviewHoursOfDay } from "@/lib/pm/autonomy";
+import { firstReviewHour, reviewHoursOfDay } from "@/lib/pm/autonomy";
 import { SettingsCard, EmptyState, ListRow } from "@/components/settings/SettingsCard";
 import { useDirtyGroup } from "@/components/settings/settings-context";
 import { SectionProps } from "./types";
@@ -43,12 +43,6 @@ const REVIEW_INTERVALS = [
   { value: "3", label: "Every 3 hours" },
   { value: "2", label: "Every 2 hours" },
 ];
-
-function inRange(raw: string, max: number): number {
-  const value = Math.floor(Number(raw));
-  if (!Number.isFinite(value) || value < 0) return 0;
-  return Math.min(value, max);
-}
 
 function pmDraftFrom(p: ApiProject) {
   return {
@@ -91,8 +85,8 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
 
   const servers = draft.value.mcpServers;
   const reviewTimes = reviewHoursOfDay(
-    inRange(draft.value.reviewHour, 23),
-    inRange(draft.value.reviewInterval, 24) || 24
+    firstReviewHour({ reviewHour: Number(draft.value.reviewHour) }),
+    Number(draft.value.reviewInterval)
   );
 
   function setTransientAt(index: number, patch: McpTransient) {
@@ -113,7 +107,7 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
       links: v.links,
       autonomy: {
         dailyReview: v.dailyReview,
-        reviewHour: inRange(v.reviewHour, 23),
+        reviewHour: firstReviewHour({ reviewHour: Number(v.reviewHour) }),
         reviewIntervalHours: Number(v.reviewInterval) || 24,
         timezone: v.timezone.trim(),
         handleNeedsHumanReview: v.handleNhr,

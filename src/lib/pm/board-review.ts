@@ -175,7 +175,8 @@ export function digestHeadline(digest: BoardDigest): string {
   const findings = [
     digest.gaps.length && `${digest.gaps.length} missing acceptance criteria or description`,
     digest.stale.length && `${digest.stale.length} stuck in a column`,
-    digest.duplicates.length && `${digest.duplicates.length} possible duplicate`,
+    digest.duplicates.length &&
+      `${digest.duplicates.length} possible duplicate${digest.duplicates.length === 1 ? "" : "s"}`,
   ].filter(Boolean);
   return `Scheduled board review — ${digest.openTotal} open tasks; ${
     findings.length ? findings.join(", ") : "nothing flagged"
