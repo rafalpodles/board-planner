@@ -11,6 +11,7 @@ import { ApiTask, ApiProject, ApiSprint } from "@/types";
 import { effectiveColumns } from "@/lib/columns";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { Modal } from "@/components/ui/Modal";
 import { TaskForm } from "@/components/tasks/TaskForm";
 import { Comments } from "@/components/tasks/Comments";
 import { TaskLinks } from "@/components/tasks/TaskLinks";
@@ -31,6 +32,7 @@ export default function TaskDetailPage() {
   const [task, setTask] = useState<ApiTask | null>(null);
   const [project, setProject] = useState<ApiProject | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [addingChild, setAddingChild] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [sprints, setSprints] = useState<ApiSprint[]>([]);
   const [loading, setLoading] = useState(true);
@@ -254,7 +256,12 @@ export default function TaskDetailPage() {
 
         {/* Dependencies */}
         <div>
-          <h2 className="font-semibold mb-2">Dependencies</h2>
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="font-semibold">Dependencies</h2>
+            <Button size="sm" variant="secondary" onClick={() => setAddingChild(true)}>
+              Add child
+            </Button>
+          </div>
           <TaskLinks
             projectId={projectId}
             projectKey={project.key}
@@ -283,6 +290,30 @@ export default function TaskDetailPage() {
           <ActivityTimeline projectId={projectId} taskId={taskId} />
         </div>
       </div>
+
+      <Modal
+        open={addingChild}
+        onClose={() => setAddingChild(false)}
+        title={`New child of ${project.key}-${task.taskNumber}`}
+        size="lg"
+      >
+        <TaskForm
+          projectId={projectId}
+          projectKey={project.key}
+          parentTaskId={task._id}
+          components={project.components}
+          categories={(project.categories || []).map((c) => c.name)}
+          columns={project.columns || []}
+          projectLabels={project.labels || []}
+          sprints={sprints}
+          customFields={project.customFields || []}
+          onSaved={() => {
+            setAddingChild(false);
+            loadData();
+          }}
+          onCancel={() => setAddingChild(false)}
+        />
+      </Modal>
 
       <ConfirmDialog
         open={confirmDelete}

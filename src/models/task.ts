@@ -87,7 +87,7 @@ const taskSchema = new Schema<ITask>(
       type: [
         {
           task: { type: Schema.Types.ObjectId, ref: "Task", required: true },
-          type: { type: String, enum: ["relates", "duplicates"], required: true },
+          type: { type: String, enum: ["relates", "duplicates", "parent_of"], required: true },
         },
       ],
       default: [],
