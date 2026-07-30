@@ -339,7 +339,7 @@ export function Comments({ projectId, taskId }: CommentsProps) {
                 </div>
               </div>
             ) : (
-              <div className="text-sm prose prose-invert prose-sm max-w-none overflow-x-auto">
+              <div className="text-sm prose prose-sm max-w-none overflow-x-auto">
                 <MarkdownContent mentions>{comment.body}</MarkdownContent>
               </div>
             )}
