@@ -20,6 +20,7 @@ export function useCanonicalUrl(projectKey?: string, taskNumber?: number) {
     if (taskNumber !== undefined && taskId && taskId !== String(taskNumber)) {
       canonical = canonical.replace(`/tasks/${taskId}`, `/tasks/${taskNumber}`);
     }
-    if (canonical !== pathname) router.replace(canonical);
+    if (canonical === pathname) return;
+    router.replace(canonical + window.location.search + window.location.hash);
   }, [pathname, projectId, projectKey, taskId, taskNumber, router]);
 }
