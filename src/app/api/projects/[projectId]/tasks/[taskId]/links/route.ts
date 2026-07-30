@@ -2,36 +2,55 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
 import { Task } from "@/models/task";
+import { DEPENDENCY_TYPES, DependencyType, RelationType } from "@/types";
 
-// Add a blockedBy link
+// Add a dependency. "blocked_by" lands in blockedBy (the relation that drives
+// cycle detection and timeline arrows); the rest go into the typed relations array.
 export const POST = withProjectAccess(async (request, { params }) => {
   const { projectId, taskId } = await params;
   await connectDB();
 
-  const { blockedByTaskId } = await request.json();
+  const body = await request.json();
+  // blockedByTaskId is the pre-CP-143 field name, still accepted
+  const targetTaskId: string | undefined = body.taskId || body.blockedByTaskId;
+  const type: DependencyType = body.type || "blocked_by";
 
-  if (!blockedByTaskId) {
+  if (!targetTaskId) {
+    return NextResponse.json({ error: "taskId is required" }, { status: 400 });
+  }
+  if (!DEPENDENCY_TYPES.includes(type)) {
     return NextResponse.json(
-      { error: "blockedByTaskId is required" },
+      { error: `type must be one of: ${DEPENDENCY_TYPES.join(", ")}` },
       { status: 400 }
     );
   }
 
-  if (blockedByTaskId === taskId) {
+  if (targetTaskId === taskId) {
     return NextResponse.json(
-      { error: "A task cannot block itself" },
+      { error: "A task cannot depend on itself" },
       { status: 400 }
     );
   }
 
   // Verify both tasks exist in the same project
-  const [task, blocker] = await Promise.all([
+  const [task, other] = await Promise.all([
     Task.findOne({ _id: taskId, project: projectId }),
-    Task.findOne({ _id: blockedByTaskId, project: projectId }),
+    Task.findOne({ _id: targetTaskId, project: projectId }),
   ]);
 
-  if (!task || !blocker) {
+  if (!task || !other) {
     return NextResponse.json({ error: "Task not found" }, { status: 404 });
+  }
+
+  // Non-blocking kinds carry no ordering, so a cycle among them is meaningless.
+  // One pair of tasks holds one relation, so picking a different type replaces it.
+  if (type !== "blocked_by") {
+    await Task.updateOne({ _id: taskId }, { $pull: { relations: { task: targetTaskId } } });
+    await Task.updateOne(
+      { _id: taskId },
+      { $push: { relations: { task: targetTaskId, type: type as RelationType } } }
+    );
+    return NextResponse.json({ message: "Dependency added" });
   }
 
   // Check for circular dependency using in-memory BFS (single query)
@@ -55,7 +74,7 @@ export const POST = withProjectAccess(async (request, { params }) => {
 
   while (queue.length > 0) {
     const current = queue.shift()!;
-    if (current === blockedByTaskId) {
+    if (current === targetTaskId) {
       return NextResponse.json(
         { error: "Circular dependency detected — this link would create a cycle" },
         { status: 400 }
@@ -72,29 +91,33 @@ export const POST = withProjectAccess(async (request, { params }) => {
 
   // Add if not already present
   await Task.findByIdAndUpdate(taskId, {
-    $addToSet: { blockedBy: blockedByTaskId },
+    $addToSet: { blockedBy: targetTaskId },
   });
 
-  return NextResponse.json({ message: "Link added" });
+  return NextResponse.json({ message: "Dependency added" });
 });
 
-// Remove a blockedBy link
+// Remove a dependency of any kind
 export const DELETE = withProjectAccess(async (request, { params }) => {
   const { projectId, taskId } = await params;
   await connectDB();
 
-  const { blockedByTaskId } = await request.json();
+  const body = await request.json();
+  const targetTaskId: string | undefined = body.taskId || body.blockedByTaskId;
+  const type: DependencyType = body.type || "blocked_by";
 
-  if (!blockedByTaskId) {
-    return NextResponse.json(
-      { error: "blockedByTaskId is required" },
-      { status: 400 }
-    );
+  if (!targetTaskId) {
+    return NextResponse.json({ error: "taskId is required" }, { status: 400 });
   }
+
+  const update =
+    type === "blocked_by"
+      ? { $pull: { blockedBy: targetTaskId } }
+      : { $pull: { relations: { task: targetTaskId, type } } };
 
   const task = await Task.findOneAndUpdate(
     { _id: taskId, project: projectId },
-    { $pull: { blockedBy: blockedByTaskId } },
+    update,
     { returnDocument: "after" }
   );
 
@@ -102,5 +125,5 @@ export const DELETE = withProjectAccess(async (request, { params }) => {
     return NextResponse.json({ error: "Task not found" }, { status: 404 });
   }
 
-  return NextResponse.json({ message: "Link removed" });
+  return NextResponse.json({ message: "Dependency removed" });
 });
