@@ -17,8 +17,12 @@ interface ListViewProps {
   categories?: ApiProjectCategory[];
   columns?: ApiProjectColumn[];
   focusedIndex?: number;
+  selectedTasks?: Set<string>;
+  selectionMode?: boolean;
   onTaskClick: (taskId: string) => void;
   onStatusChange?: (taskId: string, status: string) => void;
+  onTaskSelect?: (taskId: string) => void;
+  onTaskContextMenu?: (taskId: string, x: number, y: number) => void;
 }
 
 function sprintTiming(sprint: ApiSprint): "active" | "past" | "upcoming" {
@@ -33,7 +37,8 @@ function sprintTiming(sprint: ApiSprint): "active" | "past" | "upcoming" {
 
 const DIFFICULTY_ORDER: Record<string, number> = { S: 0, M: 1, L: 2, XL: 3 };
 
-export function ListView({ tasks, projectKey, projectId, sprints = [], categories = [], columns, focusedIndex = -1, onTaskClick, onStatusChange }: ListViewProps) {
+export function ListView({ tasks, projectKey, projectId, sprints = [], categories = [], columns, focusedIndex = -1, selectedTasks, selectionMode, onTaskClick, onStatusChange, onTaskSelect, onTaskContextMenu }: ListViewProps) {
+  const selectionActive = selectionMode || (selectedTasks?.size ?? 0) > 0;
   const rowRefs = useRef<(HTMLTableRowElement | null)[]>([]);
   const [sortKey, setSortKey] = useState<SortKey>("taskNumber");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
@@ -147,6 +152,7 @@ export function ListView({ tasks, projectKey, projectId, sprints = [], categorie
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-bg-input text-text-muted text-xs border-b border-border">
+              {selectionActive && <th className="w-9 px-3 py-2" />}
               <SortHeader label="Key" column="taskNumber" />
               <SortHeader label="Title" column="title" />
               <SortHeader label="Status" column="status" className="hidden sm:table-cell" />
@@ -171,15 +177,46 @@ export function ListView({ tasks, projectKey, projectId, sprints = [], categorie
                 return { formatted: due.toLocaleDateString(undefined, { month: "short", day: "numeric" }), color };
               })() : null;
 
+              const selected = selectedTasks?.has(task._id) ?? false;
+
               return (
                 <tr
                   key={task._id}
                   ref={(el) => { rowRefs.current[index] = el; }}
-                  onClick={() => onTaskClick(task._id)}
+                  onClick={(e) => {
+                    if (selectionActive || e.ctrlKey || e.metaKey) {
+                      e.preventDefault();
+                      onTaskSelect?.(task._id);
+                    } else {
+                      onTaskClick(task._id);
+                    }
+                  }}
+                  onContextMenu={(e) => {
+                    if (!onTaskContextMenu) return;
+                    e.preventDefault();
+                    onTaskContextMenu(task._id, e.clientX, e.clientY);
+                  }}
                   className={`border-b border-border last:border-b-0 hover:bg-bg-input/50 cursor-pointer transition-colors ${
-                    index === focusedIndex ? "ring-2 ring-primary ring-inset bg-primary/5" : ""
-                  }`}
+                    selected ? "bg-primary/10" : ""
+                  } ${index === focusedIndex ? "ring-2 ring-primary ring-inset bg-primary/5" : ""}`}
                 >
+                  {selectionActive && (
+                    <td className="px-3 py-2">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onTaskSelect?.(task._id);
+                        }}
+                        className={`w-5 h-5 rounded border flex items-center justify-center transition-colors text-[10px]
+                          ${selected
+                            ? "bg-primary border-primary text-white"
+                            : "border-border bg-bg-input text-transparent hover:border-primary/50"
+                          }`}
+                      >
+                        {selected && "✓"}
+                      </button>
+                    </td>
+                  )}
                   <td className="px-3 py-2 font-mono text-xs text-text-muted whitespace-nowrap">
                     {task.pinned && (
                       <svg className="w-3 h-3 text-primary inline mr-1" fill="currentColor" viewBox="0 0 24 24">

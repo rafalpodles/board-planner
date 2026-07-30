@@ -589,15 +589,23 @@ export default function KanbanPage() {
           categories={project.categories || []}
           columns={project.columns || []}
           focusedIndex={focusedTaskIndex}
+          selectedTasks={selectedTasks}
+          selectionMode={selectionMode}
           onTaskClick={(taskId) => setEditTaskId(taskId)}
           onStatusChange={handleStatusChange}
+          onTaskSelect={handleTaskSelect}
+          onTaskContextMenu={(taskId, x, y) => setContextMenu({ taskId, x, y })}
         />
       ) : (
         <TimelineView
           tasks={filteredTasks}
           projectKey={project.key}
           columns={project.columns || []}
+          selectedTasks={selectedTasks}
+          selectionMode={selectionMode}
           onTaskClick={(taskId) => setEditTaskId(taskId)}
+          onTaskSelect={handleTaskSelect}
+          onTaskContextMenu={(taskId, x, y) => setContextMenu({ taskId, x, y })}
         />
       )}
       </div>
