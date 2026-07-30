@@ -493,7 +493,7 @@ export default function KanbanPage() {
               </svg>
             </Button>
           </Link>
-          {project.pm?.enabled && (
+          {project.pm?.enabled && !project.pm?.lockedByInstance && (
             <Link href={`/projects/${projectId}/pm`} title="PM Agent">
               <Button size="sm" variant="ghost">PM</Button>
             </Link>
