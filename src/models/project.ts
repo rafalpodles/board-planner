@@ -188,6 +188,25 @@ const projectSchema = new Schema<IProject>(
       type: String,
       default: "",
     },
+    codaHost: {
+      type: String,
+      default: "https://coda.io",
+      trim: true,
+    },
+    codaDocId: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    codaTableId: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    codaToken: {
+      type: String,
+      default: "",
+    },
     taskCounter: {
       type: Number,
       default: 0,

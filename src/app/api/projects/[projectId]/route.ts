@@ -36,6 +36,8 @@ export const GET = withProjectAccess(async (_request, { params, user }) => {
   delete obj.githubToken;
   obj.gitlabTokenSet = !!obj.gitlabToken;
   delete obj.gitlabToken;
+  obj.codaTokenSet = !!obj.codaToken;
+  delete obj.codaToken;
   if (obj.pm) obj.pm.mcpServers = sanitizeMcpServers(obj.pm.mcpServers);
   obj.pmAvailable = isPmAvailable();
   obj.canAdmin = canAdminProject(user, project);
@@ -47,7 +49,7 @@ export const PUT = withProjectAdmin(async (request, { params, user }) => {
   const { projectId } = await params;
   const body = await request.json();
 
-  const allowed = ["name", "description", "key", "icon", "githubRepo", "githubToken", "gitlabRepo", "gitlabHost", "gitlabToken"];
+  const allowed = ["name", "description", "key", "icon", "githubRepo", "githubToken", "gitlabRepo", "gitlabHost", "gitlabToken", "codaHost", "codaDocId", "codaTableId", "codaToken"];
   const updates: Record<string, unknown> = {};
   for (const field of allowed) {
     if (body[field] !== undefined) {
@@ -157,12 +159,26 @@ export const PUT = withProjectAdmin(async (request, { params, user }) => {
     updates.gitlabHost = host || "https://gitlab.com";
   }
 
+  if (updates.codaHost !== undefined) {
+    const host = String(updates.codaHost).trim().replace(/\/+$/, "");
+    if (host && !isAllowedMcpServerUrl(host)) {
+      return NextResponse.json(
+        { error: "codaHost must be a public https URL" },
+        { status: 400 }
+      );
+    }
+    updates.codaHost = host || "https://coda.io";
+  }
+
   // Encrypt the GitHub/GitLab tokens at rest (no-op if ENCRYPTION_KEY is unset).
   if (typeof updates.githubToken === "string" && updates.githubToken) {
     updates.githubToken = encryptSecret(updates.githubToken);
   }
   if (typeof updates.gitlabToken === "string" && updates.gitlabToken) {
     updates.gitlabToken = encryptSecret(updates.gitlabToken);
+  }
+  if (typeof updates.codaToken === "string" && updates.codaToken) {
+    updates.codaToken = encryptSecret(updates.codaToken);
   }
 
   const project = await Project.findByIdAndUpdate(projectId, updates, {
@@ -190,6 +206,8 @@ export const PUT = withProjectAdmin(async (request, { params, user }) => {
   delete obj.githubToken;
   obj.gitlabTokenSet = !!obj.gitlabToken;
   delete obj.gitlabToken;
+  obj.codaTokenSet = !!obj.codaToken;
+  delete obj.codaToken;
   if (obj.pm) obj.pm.mcpServers = sanitizeMcpServers(obj.pm.mcpServers);
   obj.pmAvailable = isPmAvailable();
   obj.canAdmin = canAdminProject(user, project);
