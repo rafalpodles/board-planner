@@ -24,6 +24,7 @@ export interface PmTurnResult {
   ok: boolean;
   message: IPmMessage | null;
   error?: string;
+  interrupted?: boolean;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -73,6 +74,7 @@ export async function runPmTurn(opts: {
   triggeredByUserId: string;
   trigger?: PmMessageTrigger;
   onEvent?: (event: PmTurnEvent) => void;
+  signal?: AbortSignal;
 }): Promise<PmTurnResult> {
   await connectDB();
 
@@ -136,11 +138,27 @@ export async function runPmTurn(opts: {
     return { ok: true, message: assistantMessage.toObject() as IPmMessage };
   };
 
+  const interrupted = async (): Promise<PmTurnResult> => {
+    const done = assistantMessage.actions.map((a) => a.summary);
+    const where = done.length
+      ? `Executed before stopping: ${done.join("; ")}. Those actions stand — they are not rolled back.`
+      : `No board actions had run yet.`;
+    assistantMessage.content = `⏹ Stopped by user. ${where}`;
+    await assistantMessage.save();
+    return { ok: true, interrupted: true, message: assistantMessage.toObject() as IPmMessage };
+  };
+
   let writeActions = 0;
   let mcpCalls = 0;
 
   for (let step = 0; step < MAX_STEPS; step++) {
-    const completion = await chatCompletion({ model, messages, tools: toolDefinitions });
+    if (opts.signal?.aborted) return interrupted();
+
+    const completion = await chatCompletion({ model, messages, tools: toolDefinitions, signal: opts.signal });
+
+    if (completion.type === "aborted") {
+      return interrupted();
+    }
 
     if (completion.type === "error") {
       assistantMessage.content = `⚠️ ${completion.error}`;
@@ -156,6 +174,10 @@ export async function runPmTurn(opts: {
     messages.push(completion.assistantMessage);
 
     for (const call of completion.calls) {
+      // Stop before starting another write; the abandoned turn never continues the
+      // conversation, so unanswered tool calls cost nothing
+      if (opts.signal?.aborted) return interrupted();
+
       let result: unknown;
       let action: PmTurnEvent | undefined;
 

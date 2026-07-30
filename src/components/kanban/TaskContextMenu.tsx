@@ -16,6 +16,7 @@ interface TaskContextMenuProps {
   onStatusChange: (status: string) => void;
   onSprintChange?: (sprintId: string | null) => void;
   onPin?: () => void;
+  onInterrupt?: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
   onClose: () => void;
@@ -33,6 +34,7 @@ export function TaskContextMenu({
   onStatusChange,
   onSprintChange,
   onPin,
+  onInterrupt,
   onDuplicate,
   onDelete,
   onClose,
@@ -133,6 +135,14 @@ export function TaskContextMenu({
         </>
       )}
       <div className="border-t border-border my-1" />
+      {onInterrupt && selectedCount === 1 && effectiveColumns(columns).find((c) => c.id === currentStatus)?.role === "active" && (
+        <button
+          onClick={() => { onInterrupt(); onClose(); }}
+          className="w-full text-left px-3 py-1.5 hover:bg-bg-input transition-colors text-danger"
+        >
+          Interrupt work
+        </button>
+      )}
       {onPin && selectedCount === 1 && (
         <button
           onClick={() => { onPin(); onClose(); }}

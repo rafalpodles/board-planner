@@ -18,6 +18,7 @@ interface BoardProps {
   onTaskClick: (taskId: string) => void;
   onTaskSelect?: (taskId: string) => void;
   onTaskContextMenu?: (taskId: string, x: number, y: number) => void;
+  onTaskInterrupt?: (taskId: string) => void;
 }
 
 export function Board({
@@ -33,6 +34,7 @@ export function Board({
   onTaskClick,
   onTaskSelect,
   onTaskContextMenu,
+  onTaskInterrupt,
 }: BoardProps) {
   const boardColumns = useMemo(() => effectiveColumns(columns), [columns]);
   const grouped = useMemo(
@@ -75,6 +77,7 @@ export function Board({
               onTaskClick={onTaskClick}
               onTaskSelect={onTaskSelect}
               onTaskContextMenu={onTaskContextMenu}
+            onTaskInterrupt={onTaskInterrupt}
             />
           ))}
         </div>
