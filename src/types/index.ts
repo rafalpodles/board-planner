@@ -333,17 +333,19 @@ export interface IPmOauthState {
 export interface IPmAutonomy {
   dailyReview: boolean;
   reviewHour: number;
+  reviewIntervalHours: number;
   timezone: string;
   handleNeedsHumanReview: boolean;
-  lastDailyReviewDay: string;
+  lastReviewSlot: string;
 }
 
 export const DEFAULT_PM_AUTONOMY: IPmAutonomy = {
   dailyReview: false,
   reviewHour: 9,
+  reviewIntervalHours: 24,
   timezone: "Europe/Warsaw",
   handleNeedsHumanReview: false,
-  lastDailyReviewDay: "",
+  lastReviewSlot: "",
 };
 
 export interface IPmConfig {

@@ -6,8 +6,10 @@ import { useDraft } from "@/hooks/use-draft";
 import { useToast } from "@/components/ui/Toast";
 import { ApiProject } from "@/types";
 import { Input } from "@/components/ui/Input";
+import { Select } from "@/components/ui/Select";
 import { Textarea } from "@/components/ui/Textarea";
 import { Button } from "@/components/ui/Button";
+import { reviewHoursOfDay } from "@/lib/pm/autonomy";
 import { SettingsCard, EmptyState, ListRow } from "@/components/settings/SettingsCard";
 import { useDirtyGroup } from "@/components/settings/settings-context";
 import { SectionProps } from "./types";
@@ -32,6 +34,22 @@ interface McpTransient {
   connecting?: boolean;
 }
 
+const REVIEW_INTERVALS = [
+  { value: "24", label: "Once a day" },
+  { value: "12", label: "Every 12 hours" },
+  { value: "8", label: "Every 8 hours" },
+  { value: "6", label: "Every 6 hours" },
+  { value: "4", label: "Every 4 hours" },
+  { value: "3", label: "Every 3 hours" },
+  { value: "2", label: "Every 2 hours" },
+];
+
+function inRange(raw: string, max: number): number {
+  const value = Math.floor(Number(raw));
+  if (!Number.isFinite(value) || value < 0) return 0;
+  return Math.min(value, max);
+}
+
 function pmDraftFrom(p: ApiProject) {
   return {
     enabled: p.pm?.enabled || false,
@@ -41,6 +59,7 @@ function pmDraftFrom(p: ApiProject) {
     links: (p.pm?.links || []).map((l) => ({ label: l.label, url: l.url })),
     dailyReview: p.pm?.autonomy?.dailyReview ?? false,
     reviewHour: String(p.pm?.autonomy?.reviewHour ?? 9),
+    reviewInterval: String(p.pm?.autonomy?.reviewIntervalHours ?? 24),
     timezone: p.pm?.autonomy?.timezone || "Europe/Warsaw",
     handleNhr: p.pm?.autonomy?.handleNeedsHumanReview ?? false,
     mcpServers: (p.pm?.mcpServers || []).map(
@@ -71,6 +90,10 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
   const [newLinkUrl, setNewLinkUrl] = useState("");
 
   const servers = draft.value.mcpServers;
+  const reviewTimes = reviewHoursOfDay(
+    inRange(draft.value.reviewHour, 23),
+    inRange(draft.value.reviewInterval, 24) || 24
+  );
 
   function setTransientAt(index: number, patch: McpTransient) {
     setTransient((prev) => ({ ...prev, [index]: { ...prev[index], ...patch } }));
@@ -90,7 +113,8 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
       links: v.links,
       autonomy: {
         dailyReview: v.dailyReview,
-        reviewHour: Number(v.reviewHour) || 0,
+        reviewHour: inRange(v.reviewHour, 23),
+        reviewIntervalHours: Number(v.reviewInterval) || 24,
         timezone: v.timezone.trim(),
         handleNeedsHumanReview: v.handleNhr,
       },
@@ -336,30 +360,47 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
             className="mt-1 rounded border-border"
           />
           <span>
-            <span className="text-sm">Review the board once a day</span>
+            <span className="text-sm">Review the board on a schedule</span>
             <span className="mt-0.5 block text-xs text-text-muted">
-              Posts its findings into the PM chat thread.
+              Flags tasks with no acceptance criteria, tasks stuck in one column and likely
+              duplicates, then posts a report into the PM chat thread. It refines task text but
+              never moves or creates tasks.
             </span>
           </span>
         </label>
         {draft.value.dailyReview && (
-          <div className="ml-6 grid gap-4 border-l-2 border-border pl-4 sm:grid-cols-2">
-            <Input
-              label="Review hour"
-              type="number"
-              min={0}
-              max={23}
-              value={draft.value.reviewHour}
-              dirty={draft.isDirty("reviewHour")}
-              onChange={(e) => draft.set("reviewHour", e.target.value)}
-            />
-            <Input
-              label="Timezone"
-              value={draft.value.timezone}
-              dirty={draft.isDirty("timezone")}
-              onChange={(e) => draft.set("timezone", e.target.value)}
-              placeholder="Europe/Warsaw"
-            />
+          <div className="ml-6 space-y-2 border-l-2 border-border pl-4">
+            <div className="grid gap-4 sm:grid-cols-3">
+              <Input
+                label="First review at"
+                type="number"
+                min={0}
+                max={23}
+                value={draft.value.reviewHour}
+                dirty={draft.isDirty("reviewHour")}
+                onChange={(e) => draft.set("reviewHour", e.target.value)}
+              />
+              <Select
+                label="How often"
+                options={REVIEW_INTERVALS}
+                value={draft.value.reviewInterval}
+                dirty={draft.isDirty("reviewInterval")}
+                onChange={(e) => draft.set("reviewInterval", e.target.value)}
+              />
+              <Input
+                label="Timezone"
+                value={draft.value.timezone}
+                dirty={draft.isDirty("timezone")}
+                onChange={(e) => draft.set("timezone", e.target.value)}
+                placeholder="Europe/Warsaw"
+              />
+            </div>
+            <p className="text-xs text-text-muted">
+              {reviewTimes.length === 1 ? "One review a day" : `${reviewTimes.length} reviews a day`}
+              , at {reviewTimes.map((h) => `${String(h).padStart(2, "0")}:00`).join(", ")} in{" "}
+              {draft.value.timezone.trim() || "the project timezone"}. Each one uses a turn from the
+              daily cap.
+            </p>
           </div>
         )}
         <label className="flex cursor-pointer items-start gap-3">

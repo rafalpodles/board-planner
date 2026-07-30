@@ -92,7 +92,7 @@ const SECTIONS: SectionMeta[] = [
     label: "PM agent",
     title: "PM agent",
     blurb: "A chat-driven project manager that can review the board on its own and act on tasks.",
-    keywords: "pm agent autonomy daily review model context notes mcp openrouter turn cap timezone links",
+    keywords: "pm agent autonomy board review frequency interval schedule model context notes mcp openrouter turn cap timezone links",
     access: "projectAdmin",
     icon: <Icon d="M12 7V4M6 7h12a2 2 0 012 2v8a2 2 0 01-2 2H6a2 2 0 01-2-2V9a2 2 0 012-2zM9 13h.01M15 13h.01" />,
   },
