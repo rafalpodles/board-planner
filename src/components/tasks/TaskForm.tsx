@@ -35,6 +35,29 @@ const AUTOSAVE_DEBOUNCE_MS = 700;
 
 type AutoSaveState = "idle" | "saving" | "saved" | "error";
 
+// Mirrors the shape the form submits, so a field-by-field diff against it is meaningful
+function serverSnapshot(task: ApiTask): Record<string, unknown> {
+  return {
+    title: task.title || "",
+    description: task.description || "",
+    difficulty: task.difficulty || "M",
+    priority: task.priority || "medium",
+    component: task.component || "",
+    category: task.category,
+    status: task.status,
+    assignee:
+      (task.assignee && typeof task.assignee === "object" ? task.assignee.username : "") || null,
+    dueDate: (task.dueDate ? task.dueDate.substring(0, 10) : "") || null,
+    checklist: task.checklist || [],
+    labels: task.labels || [],
+    sprint: task.sprint || null,
+    recurrence: task.recurrence
+      ? { frequency: task.recurrence.frequency, interval: task.recurrence.interval }
+      : null,
+    customFieldValues: task.customFieldValues || {},
+  };
+}
+
 interface TaskFormProps {
   projectId: string;
   projectKey?: string;
@@ -175,18 +198,76 @@ export function TaskForm({
     customFieldValues,
   };
 
-  // Auto-save (existing tasks only — a new task has nothing to PATCH until it is created).
-  // Signature-compare against what was last persisted so mounting, or a change that
-  // round-trips back to the saved value, does not fire a write.
-  const signature = JSON.stringify(body);
-  const savedSignature = useRef(signature);
+  // What the server last told us each field holds. A field counts as edited only when it
+  // differs from this, and auto-save sends edited fields alone — so a concurrent change to
+  // a field this form never touched (a PM status move, say) is not written back over.
+  const serverValues = useRef<Record<string, unknown> | null>(task ? serverSnapshot(task) : null);
+  const localValues = useRef(body as Record<string, unknown>);
+  localValues.current = body as Record<string, unknown>;
+
+  function applyServerValue(key: string, value: unknown) {
+    switch (key) {
+      case "title": return setTitle(value as string);
+      case "description": return setDescription(value as string);
+      case "difficulty": return setDifficulty(value as Difficulty);
+      case "priority": return setPriority(value as Priority);
+      case "component": return setComponent(value as string);
+      case "category": return setCategory(value as Category);
+      case "status": return setStatus(value as TaskStatus);
+      case "assignee": return setAssignee((value as string) ?? "");
+      case "dueDate": return setDueDate((value as string) ?? "");
+      case "checklist": return setChecklist(value as { text: string; done: boolean }[]);
+      case "labels": return setSelectedLabels(value as string[]);
+      case "sprint": return setSprint((value as string) ?? "");
+      case "customFieldValues": return setCustomFieldValues(value as Record<string, unknown>);
+      case "recurrence": {
+        const rec = value as { frequency?: RecurrenceFrequency; interval?: number } | null;
+        setRecurrenceFreq(rec?.frequency ?? "");
+        setRecurrenceInterval(rec?.interval ?? 1);
+        return;
+      }
+    }
+  }
+
+  // The task was reloaded from the server: adopt whatever changed underneath us, but only
+  // for fields the user has not edited — their in-progress edits win and stay pending.
   useEffect(() => {
-    if (!task || signature === savedSignature.current) return;
+    if (!task) return;
+    const next = serverSnapshot(task);
+    const previous = serverValues.current;
+    if (!previous) {
+      serverValues.current = next;
+      return;
+    }
+    for (const key of Object.keys(next)) {
+      const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+      if (same(next[key], previous[key])) continue;
+      if (same(localValues.current[key], previous[key])) applyServerValue(key, next[key]);
+    }
+    serverValues.current = next;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [task]);
+
+  // Auto-save (existing tasks only — a new task has nothing to PATCH until it is created).
+  const editedFields = (): Record<string, unknown> => {
+    const base = serverValues.current;
+    if (!base) return {};
+    const edited: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(body)) {
+      if (JSON.stringify(value) !== JSON.stringify(base[key])) edited[key] = value;
+    }
+    return edited;
+  };
+
+  const signature = JSON.stringify(editedFields());
+  useEffect(() => {
+    if (!task || signature === "{}") return;
     const timer = setTimeout(async () => {
+      const edited = JSON.parse(signature) as Record<string, unknown>;
       setAutoSaveState("saving");
       try {
-        await api.put(`/api/projects/${projectId}/tasks/${task._id}`, JSON.parse(signature));
-        savedSignature.current = signature;
+        await api.put(`/api/projects/${projectId}/tasks/${task._id}`, edited);
+        serverValues.current = { ...(serverValues.current || {}), ...edited };
         setAutoSaveState("saved");
         emitBoardRefresh(projectId);
       } catch {
@@ -204,11 +285,10 @@ export function TaskForm({
 
     try {
       if (task) {
-        await api.put(
-          `/api/projects/${projectId}/tasks/${task._id}`,
-          body
-        );
-        savedSignature.current = signature;
+        // Same rule as auto-save: only what this form actually edited goes over the wire
+        const edited = editedFields();
+        await api.put(`/api/projects/${projectId}/tasks/${task._id}`, edited);
+        serverValues.current = { ...(serverValues.current || {}), ...edited };
         setAutoSaveState("saved");
       } else {
         await api.post(`/api/projects/${projectId}/tasks`, body);
