@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
+import { subscribeBoardRefresh } from "@/lib/board-refresh";
 import { useAuth } from "@/hooks/use-auth";
 import { ApiTask, ApiProject, ApiSprint } from "@/types";
 import { effectiveColumns } from "@/lib/columns";
@@ -32,7 +33,7 @@ export default function TaskDetailPage() {
   const [sprints, setSprints] = useState<ApiSprint[]>([]);
   const [loading, setLoading] = useState(true);
 
-  async function loadData() {
+  const loadData = useCallback(async () => {
     try {
       const [t, p, s] = await Promise.all([
         api.get(`/api/projects/${projectId}/tasks/${taskId}`),
@@ -47,12 +48,27 @@ export default function TaskDetailPage() {
     } finally {
       setLoading(false);
     }
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, taskId]);
 
   useEffect(() => {
     loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId]);
+
+  // The board was not the only view going stale on a PM write — this page never reloaded
+  // at all, so the form kept editing a task that had moved underneath it
+  useEffect(() => {
+    let debounce: ReturnType<typeof setTimeout> | null = null;
+    const unsubscribe = subscribeBoardRefresh(projectId, () => {
+      if (debounce) clearTimeout(debounce);
+      debounce = setTimeout(loadData, 300);
+    });
+    return () => {
+      if (debounce) clearTimeout(debounce);
+      unsubscribe();
+    };
+  }, [projectId, loadData]);
 
   async function handleStatusChange(newStatus: string) {
     try {
