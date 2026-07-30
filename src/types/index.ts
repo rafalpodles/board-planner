@@ -387,6 +387,10 @@ export interface IProject {
   gitlabRepo: string;
   gitlabHost: string;
   gitlabToken: string;
+  codaHost: string;
+  codaDocId: string;
+  codaTableId: string;
+  codaToken: string;
   taskCounter: number;
   pm?: IPmConfig;
   owner: Types.ObjectId | IUser;
@@ -609,6 +613,10 @@ export interface ApiProject {
   gitlabRepo?: string;
   gitlabHost?: string;
   gitlabTokenSet?: boolean;
+  codaHost?: string;
+  codaDocId?: string;
+  codaTableId?: string;
+  codaTokenSet?: boolean;
   taskCounter: number;
   pm?: ApiPmConfig;
   pmAvailable?: boolean;
