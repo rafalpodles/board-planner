@@ -95,7 +95,7 @@ export const DELETE = withProjectAccess(async (request, { params }) => {
   const task = await Task.findOneAndUpdate(
     { _id: taskId, project: projectId },
     { $pull: { blockedBy: blockedByTaskId } },
-    { new: true }
+    { returnDocument: "after" }
   );
 
   if (!task) {

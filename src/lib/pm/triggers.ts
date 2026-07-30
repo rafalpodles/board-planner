@@ -146,7 +146,7 @@ export async function drainPmTriggers(): Promise<void> {
     const claimed = await PmTrigger.findOneAndUpdate(
       { state: "pending" },
       { $set: { state: "running", active: true }, $inc: { attempts: 1 } },
-      { sort: { createdAt: 1 }, new: true }
+      { sort: { createdAt: 1 }, returnDocument: "after" }
     );
     if (!claimed) return;
     if (claimed.attempts > MAX_TRIGGER_ATTEMPTS) {
