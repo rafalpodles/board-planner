@@ -255,13 +255,22 @@ export function Navbar() {
                     Profile
                   </Link>
                   {isAdmin && (
-                    <Link
-                      href="/users"
-                      onClick={() => setOpen(false)}
-                      className="block px-4 py-2 text-sm text-text-muted hover:text-text hover:bg-bg-hover"
-                    >
-                      Users
-                    </Link>
+                    <>
+                      <Link
+                        href="/users"
+                        onClick={() => setOpen(false)}
+                        className="block px-4 py-2 text-sm text-text-muted hover:text-text hover:bg-bg-hover"
+                      >
+                        Users
+                      </Link>
+                      <Link
+                        href="/admin/agents"
+                        onClick={() => setOpen(false)}
+                        className="block px-4 py-2 text-sm text-text-muted hover:text-text hover:bg-bg-hover"
+                      >
+                        PM agents
+                      </Link>
+                    </>
                   )}
                   <Link
                     href="/tokens"

@@ -207,7 +207,7 @@ export default function ProjectSettingsPage() {
           (project.notificationChannels?.length || 0) > 0 ||
           (project.webhooks?.length || 0) > 0,
       },
-      pm: { on: !!project.pm?.enabled },
+      pm: { on: !!project.pm?.enabled && !project.pm?.lockedByInstance },
     } as Record<string, { count?: number; on?: boolean }>;
   }, [project]);
 
