@@ -36,6 +36,7 @@ export default function KanbanPage() {
   const [filteredTasks, setFilteredTasks] = useState<ApiTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [showNewTask, setShowNewTask] = useState(false);
+  const [editTaskId, setEditTaskId] = useState<string | null>(null);
   const [showImport, setShowImport] = useState(false);
   const [showExport, setShowExport] = useState(false);
   const [selectedTasks, setSelectedTasks] = useState<Set<string>>(new Set());
@@ -574,9 +575,7 @@ export default function KanbanPage() {
           selectionMode={selectionMode}
           onStatusChange={handleStatusChange}
           onTaskDrop={handleTaskDrop}
-          onTaskClick={(taskId) =>
-            router.push(`/projects/${projectId}/tasks/${taskId}`)
-          }
+          onTaskClick={(taskId) => setEditTaskId(taskId)}
           onTaskSelect={handleTaskSelect}
           onTaskContextMenu={(taskId, x, y) => setContextMenu({ taskId, x, y })}
           onTaskInterrupt={handleInterrupt}
@@ -590,9 +589,7 @@ export default function KanbanPage() {
           categories={project.categories || []}
           columns={project.columns || []}
           focusedIndex={focusedTaskIndex}
-          onTaskClick={(taskId) =>
-            router.push(`/projects/${projectId}/tasks/${taskId}`)
-          }
+          onTaskClick={(taskId) => setEditTaskId(taskId)}
           onStatusChange={handleStatusChange}
         />
       ) : (
@@ -600,9 +597,7 @@ export default function KanbanPage() {
           tasks={filteredTasks}
           projectKey={project.key}
           columns={project.columns || []}
-          onTaskClick={(taskId) =>
-            router.push(`/projects/${projectId}/tasks/${taskId}`)
-          }
+          onTaskClick={(taskId) => setEditTaskId(taskId)}
         />
       )}
       </div>
@@ -697,6 +692,45 @@ export default function KanbanPage() {
           onCancel={() => setShowNewTask(false)}
         />
       </Modal>
+
+      {(() => {
+        const editTask = tasks.find((t) => t._id === editTaskId);
+        return (
+          <Modal
+            open={!!editTask}
+            onClose={() => setEditTaskId(null)}
+            title={editTask ? `${project.key}-${editTask.taskNumber}` : ""}
+            size="lg"
+          >
+            {editTask && (
+              <>
+                <Link
+                  href={`/projects/${projectId}/tasks/${editTask._id}`}
+                  className="text-xs text-primary hover:underline inline-block mb-3"
+                >
+                  Open full task page (comments, dependencies, activity) &rarr;
+                </Link>
+                <TaskForm
+                  projectId={projectId}
+                  projectKey={project.key}
+                  task={editTask}
+                  components={project.components}
+                  categories={(project.categories || []).map((c) => c.name)}
+                  columns={project.columns || []}
+                  projectLabels={project.labels || []}
+                  sprints={sprints}
+                  customFields={project.customFields || []}
+                  onSaved={() => {
+                    setEditTaskId(null);
+                    loadData();
+                  }}
+                  onCancel={() => setEditTaskId(null)}
+                />
+              </>
+            )}
+          </Modal>
+        );
+      })()}
 
       <ImportDialog
         open={showImport}
