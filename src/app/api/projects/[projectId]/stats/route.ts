@@ -83,7 +83,10 @@ export const GET = withProjectAccess(async (_request, { params }) => {
   const weekIndexOf = (date: Date | undefined): number => {
     if (!date) return -1;
     const index = Math.floor((date.getTime() - weekStarts[0]) / WEEK_MS);
-    return index >= 0 && index < WEEKS ? index : -1;
+    if (index < 0) return -1;
+    // The newest window is closed at the top, so a timestamp at or slightly past
+    // `now` — clock skew between the database and this process — still counts
+    return Math.min(index, WEEKS - 1);
   };
 
   const createdPerWeek = new Array(WEEKS).fill(0);
