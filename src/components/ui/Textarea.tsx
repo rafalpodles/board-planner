@@ -5,11 +5,12 @@ import { TextareaHTMLAttributes, forwardRef, useRef, useState, useCallback, Clip
 interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
   label?: string;
   error?: string;
+  dirty?: boolean;
   onFileUpload?: (file: File) => Promise<string>;
 }
 
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
-  ({ label, error, className = "", onFileUpload, onChange, ...props }, ref) => {
+  ({ label, error, dirty, className = "", onFileUpload, onChange, ...props }, ref) => {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [uploading, setUploading] = useState(false);
     const innerRef = useRef<HTMLTextAreaElement | null>(null);
@@ -100,8 +101,9 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
     return (
       <div className="w-full">
         {label && (
-          <label className="block text-sm font-medium text-text-muted mb-1">
+          <label className="flex items-center gap-2 text-sm font-medium text-text-muted mb-1">
             {label}
+            {dirty && <span className="h-1.5 w-1.5 rounded-full bg-warning" title="Unsaved" />}
           </label>
         )}
         <div className="relative">
@@ -110,7 +112,7 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
             className={`w-full rounded-lg border bg-bg-input px-3 py-2 text-text min-h-[88px]
               placeholder:text-text-muted/50
               focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent resize-y
-              ${error ? "border-danger" : "border-border"}
+              ${error ? "border-danger" : dirty ? "border-warning/60" : "border-border"}
               ${className}`}
             onPaste={handlePaste}
             onDrop={handleDrop}
