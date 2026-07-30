@@ -1,4 +1,4 @@
-import { ParsedPR } from "./github";
+import { escapeRegex, ParsedPR } from "./github";
 
 interface GitLabMR {
   iid: number;
@@ -29,7 +29,7 @@ export async function fetchMergeRequests(
 
 // Same matching rules as GitHub PRs: project key + number in branch or title
 export function matchMRsToTasks(mrs: GitLabMR[], projectKey: string): ParsedPR[] {
-  const pattern = new RegExp(`${projectKey}[- ](\\d+)`, "i");
+  const pattern = new RegExp(`${escapeRegex(projectKey)}[- ](\\d+)`, "i");
   const results: ParsedPR[] = [];
 
   for (const mr of mrs) {
@@ -135,9 +135,12 @@ export async function fetchTaskCommits(
   }));
 }
 
-// "CP-5" also matches "cp-5/slug" and "CP 5"
+// "CP-5" also matches "cp-5/slug" and "CP 5". Split on the LAST hyphen so a
+// hyphenated project key ("MY-PROJ-5") keeps its number instead of matching every branch.
 function taskKeyPattern(taskKey: string): RegExp {
-  const [key, number] = taskKey.split("-");
+  const separator = taskKey.lastIndexOf("-");
+  const key = escapeRegex(taskKey.slice(0, separator));
+  const number = taskKey.slice(separator + 1);
   return new RegExp(`${key}[- ]?${number}(?![0-9])`, "i");
 }
 

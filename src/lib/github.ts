@@ -8,6 +8,11 @@ interface GitHubPR {
   updated_at: string;
 }
 
+// Project keys are not format-validated, so a key like "C(" must not blow up the matcher
+export function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 export interface ParsedPR {
   number: number;
   title: string;
@@ -56,7 +61,7 @@ export function matchPRsToTasks(
   prs: GitHubPR[],
   projectKey: string
 ): ParsedPR[] {
-  const pattern = new RegExp(`${projectKey}[- ](\\d+)`, "i");
+  const pattern = new RegExp(`${escapeRegex(projectKey)}[- ](\\d+)`, "i");
 
   const results: ParsedPR[] = [];
 
