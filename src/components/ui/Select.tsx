@@ -7,22 +7,24 @@ interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
   error?: string;
   options: { value: string; label: string }[];
   placeholder?: string;
+  dirty?: boolean;
 }
 
 export const Select = forwardRef<HTMLSelectElement, SelectProps>(
-  ({ label, error, options, placeholder, className = "", ...props }, ref) => {
+  ({ label, error, options, placeholder, dirty, className = "", ...props }, ref) => {
     return (
       <div className="w-full">
         {label && (
-          <label className="block text-sm font-medium text-text-muted mb-1">
+          <label className="flex items-center gap-2 text-sm font-medium text-text-muted mb-1">
             {label}
+            {dirty && <span className="h-1.5 w-1.5 rounded-full bg-warning" title="Unsaved" />}
           </label>
         )}
         <select
           ref={ref}
           className={`w-full rounded-lg border bg-bg-input px-3 py-2 text-text min-h-[44px]
             focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent
-            ${error ? "border-danger" : "border-border"}
+            ${error ? "border-danger" : dirty ? "border-warning/60" : "border-border"}
             ${className}`}
           {...props}
         >
