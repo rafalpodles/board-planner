@@ -24,6 +24,30 @@ import { useToast } from "@/components/ui/Toast";
 import { ShortcutHelp } from "@/components/ui/ShortcutHelp";
 import { SprintSelector } from "@/components/kanban/SprintSelector";
 
+// "relates" is symmetric and "duplicates" has a readable inverse, so a card should
+// show a relation regardless of which side created it. Every task is already loaded,
+// so the reverse side is derived here instead of costing another request.
+function withIncomingRelations(tasks: ApiTask[]): ApiTask[] {
+  const incoming = new Map<string, ApiTask["relatedFrom"]>();
+  for (const task of tasks) {
+    for (const relation of task.relations || []) {
+      const targetId = relation.task?._id;
+      if (!targetId) continue;
+      const entry = {
+        type: relation.type,
+        task: {
+          _id: task._id,
+          taskNumber: task.taskNumber,
+          title: task.title,
+          status: task.status,
+        },
+      };
+      incoming.set(targetId, [...(incoming.get(targetId) || []), entry]);
+    }
+  }
+  return tasks.map((task) => ({ ...task, relatedFrom: incoming.get(task._id) || [] }));
+}
+
 export default function KanbanPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const router = useRouter();
@@ -75,7 +99,7 @@ export default function KanbanPage() {
         api.get(`/api/projects/${projectId}/sprints`),
       ]);
       setProject(proj);
-      setTasks(taskList);
+      setTasks(withIncomingRelations(taskList));
       setSprints(sprintList);
       setNow(Date.now());
     } catch {
@@ -378,7 +402,7 @@ export default function KanbanPage() {
   }
 
   return (
-    <div className="lg:h-[calc(100vh-6.5rem)] lg:flex lg:flex-col lg:overflow-hidden">
+    <div className="lg:flex-1 lg:min-h-0 lg:flex lg:flex-col lg:overflow-hidden">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-6 lg:shrink-0">
         <div>
           <div className="flex items-center gap-2">
