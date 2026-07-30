@@ -48,7 +48,10 @@ export const POST = withProjectAdmin(async (_request, { params }) => {
     );
   }
 
-  const tasks = await Task.find({ project: projectId })
+  const tasks = await Task.find(
+    { project: projectId },
+    "taskNumber title status assignee priority difficulty category dueDate"
+  )
     .sort({ taskNumber: 1 })
     .populate<{ assignee: { fullName?: string; username: string } | null }>(
       "assignee",
