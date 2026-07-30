@@ -23,6 +23,8 @@ import { Modal } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
 import { ShortcutHelp } from "@/components/ui/ShortcutHelp";
 import { SprintSelector } from "@/components/kanban/SprintSelector";
+import { useCanonicalUrl } from "@/hooks/use-canonical-url";
+import { taskPath } from "@/lib/urls";
 
 // "relates" is symmetric and "duplicates" has a readable inverse, so a card should
 // show a relation regardless of which side created it. Every task is already loaded,
@@ -114,6 +116,8 @@ export default function KanbanPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, selectedSprint]);
 
+  useCanonicalUrl(project?.key);
+
   usePollWhileVisible(loadData, 10_000);
 
   // Instant refresh when the PM chat reports a write action (poll stays as fallback).
@@ -193,7 +197,7 @@ export default function KanbanPage() {
       if (e.key === "Enter" && noMod && focusedTaskIndex >= 0 && focusedTaskIndex < filteredTasks.length) {
         e.preventDefault();
         const task = filteredTasks[focusedTaskIndex];
-        router.push(`/projects/${projectId}/tasks/${task._id}`);
+        router.push(taskPath(projectId, task.taskNumber));
         return;
       }
     }
@@ -718,7 +722,7 @@ export default function KanbanPage() {
             {editTask && (
               <>
                 <Link
-                  href={`/projects/${projectId}/tasks/${editTask._id}`}
+                  href={taskPath(projectId, editTask.taskNumber)}
                   className="text-xs text-primary hover:underline inline-block mb-3"
                 >
                   Open full task page (comments, dependencies, activity) &rarr;
