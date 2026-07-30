@@ -5,7 +5,8 @@ import { isOverDailyTurnCap } from "./turn-cap";
 import { acquireTurnLock, releaseTurnLock } from "./turn-lock";
 import { drainPmTriggers } from "./triggers";
 import { getPmUser } from "./pm-user";
-import { buildDailyReviewPrompt, dayKeyInTimezone, shouldRunDailyReview } from "./autonomy";
+import { BOARD_REVIEW_DISALLOWED_TOOLS, buildBoardReviewPrompt, dueReviewSlot } from "./autonomy";
+import { buildBoardDigest, digestHeadline, renderBoardDigest } from "./board-review";
 
 const TICK_MS = Number(process.env.PM_SCHEDULER_TICK_MS) || 5 * 60 * 1000;
 
@@ -33,21 +34,21 @@ export async function pmSchedulerTick(): Promise<void> {
   const pmUser = await getPmUser();
 
   for (const project of projects) {
-    if (!shouldRunDailyReview(now, project.pm?.autonomy)) continue;
+    const slot = dueReviewSlot(now, project.pm?.autonomy);
+    if (!slot) continue;
 
-    const dayKey = dayKeyInTimezone(now, project.pm!.autonomy!.timezone);
-    // Claim the day before running: a crash costs one review instead of a spend loop
+    // Claim the slot before running: a crash costs one review instead of a spend loop
     const claimed = await Project.findOneAndUpdate(
-      { _id: project._id, "pm.autonomy.lastDailyReviewDay": { $ne: dayKey } },
-      { $set: { "pm.autonomy.lastDailyReviewDay": dayKey } }
+      { _id: project._id, "pm.autonomy.lastReviewSlot": { $ne: slot } },
+      { $set: { "pm.autonomy.lastReviewSlot": slot } }
     );
     if (!claimed) continue;
 
-    await runDailyReview(String(project._id), project.key, project.pm!, String(pmUser._id));
+    await runBoardReview(String(project._id), project.key, project.pm!, String(pmUser._id));
   }
 }
 
-async function runDailyReview(
+async function runBoardReview(
   projectId: string,
   projectKey: string,
   pm: { dailyTurnCap?: number },
@@ -55,23 +56,27 @@ async function runDailyReview(
 ): Promise<void> {
   const { over, cap } = await isOverDailyTurnCap(projectId, pm);
   if (over) {
-    console.warn(`PM daily review skipped for ${projectKey}: turn cap (${cap}) reached`);
+    console.warn(`PM board review skipped for ${projectKey}: turn cap (${cap}) reached`);
     return;
   }
   const abort = acquireTurnLock(projectId);
   if (!abort) {
-    console.warn(`PM daily review skipped for ${projectKey}: a turn is already running`);
+    console.warn(`PM board review skipped for ${projectKey}: a turn is already running`);
     return;
   }
   try {
+    const digest = await buildBoardDigest(projectId);
+    if (!digest) return;
     const result = await runPmTurn({
       projectId,
-      userMessage: buildDailyReviewPrompt(projectKey),
+      userMessage: buildBoardReviewPrompt(projectKey, renderBoardDigest(digest)),
+      storedMessage: digestHeadline(digest),
       triggeredByUserId: pmUserId,
       trigger: { type: "daily_review" },
+      disallowedTools: BOARD_REVIEW_DISALLOWED_TOOLS,
       signal: abort.signal,
     });
-    if (!result.ok) console.error(`PM daily review failed for ${projectKey}:`, result.error);
+    if (!result.ok) console.error(`PM board review failed for ${projectKey}:`, result.error);
   } finally {
     releaseTurnLock(projectId);
   }

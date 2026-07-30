@@ -77,6 +77,30 @@ not trigger a review of itself — the hook compares the actor against the `pm` 
 - `PM_SCHEDULER_TICK_MS` (default 300000) controls the tick.
 - With `pm.autonomy` untouched, behaviour is exactly what it was before this change.
 
+## Update 2026-07-30 — reviews several times a day (CP-154)
+
+The once-a-day review became an N-times-a-day one, plus deterministic detection.
+
+- **`pm.autonomy.reviewIntervalHours`** (1-24, default 24 = the old behaviour). Slots start at
+  `reviewHour` and repeat every interval until the day ends in the project timezone, so 9 + 4h
+  gives 09, 13, 17, 21. `lastDailyReviewDay` became **`lastReviewSlot`** holding
+  `YYYY-MM-DDTHH`; the claim is the same atomic `findOneAndUpdate`, one review per slot. The
+  rename orphans the old value, so the first tick after the deploy runs one review for the
+  current slot — the claim still bounds it to one.
+- **`dailyReview` keeps its name** even though it now means "review on a schedule". Renaming
+  the field would read as `false` on every existing project document and silently switch
+  autonomy off. The stored `PmMessage.trigger.type` stays `daily_review` for the same reason.
+- **`src/lib/pm/board-review.ts`** computes the digest the review used to hunt for: tasks in
+  approved/active/review/blocked columns with no acceptance criteria or no description, tasks
+  whose last `status_changed` activity is older than a per-role threshold (7 days approved, 3
+  active/review/blocked), and title pairs with Jaccard similarity ≥ 0.6. Plain `find().lean()`
+  and JS, no aggregation — nothing to break on MongoDB 4.4. Scans the 500 newest open tasks.
+  Also exposed as the read-only `get_board_digest` tool so the same scan is available in chat.
+- **`runPmTurn({ disallowedTools })`** — the review runs without `change_status` and
+  `create_task`: they are dropped from the tool list sent to the model, rejected if called
+  anyway, and named in the system prompt. Decision 5 below was a prompt-only promise; this
+  makes it structural. Refining text (`update_task`, `add_comment`) is still allowed.
+
 ## Out of scope
 
 Multi-instance scheduling (Railway runs one), PM-initiated Slack/e-mail, autonomous status
