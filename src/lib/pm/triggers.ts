@@ -111,7 +111,8 @@ export async function runPmTrigger(trigger: IPmTrigger): Promise<PmTriggerOutcom
 
   // A turn is already running for this project — hand the trigger back untouched
   // so a busy lock never burns a retry, and let the next scheduler tick pick it up
-  if (!acquireTurnLock(projectId)) {
+  const abort = acquireTurnLock(projectId);
+  if (!abort) {
     await settleTrigger(trigger, "pending");
     await PmTrigger.findByIdAndUpdate(trigger._id, { $inc: { attempts: -1 } });
     return "deferred";
@@ -124,6 +125,7 @@ export async function runPmTrigger(trigger: IPmTrigger): Promise<PmTriggerOutcom
       userMessage: buildNeedsHumanReviewPrompt(trigger.taskKey),
       triggeredByUserId: String(pmUser._id),
       trigger: { type: "needs_human_review", taskKey: trigger.taskKey },
+      signal: abort.signal,
     });
     if (result.ok) {
       await notifyWatchers(trigger, String(pmUser._id), result.message?.content ?? "");

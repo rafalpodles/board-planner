@@ -81,7 +81,8 @@ export async function POST(
     );
   }
 
-  if (!acquireTurnLock(projectId)) {
+  const abort = acquireTurnLock(projectId);
+  if (!abort) {
     return NextResponse.json(
       { error: "A PM turn is already in progress for this project" },
       { status: 409 }
@@ -116,9 +117,10 @@ export async function POST(
             userMessage,
             triggeredByUserId,
             onEvent: (event) => sendEvent("action", event),
+            signal: abort.signal,
           });
           if (result.ok) {
-            sendEvent("done", { message: result.message });
+            sendEvent("done", { message: result.message, interrupted: result.interrupted });
           } else {
             sendEvent("error", { error: result.error, message: result.message });
           }
