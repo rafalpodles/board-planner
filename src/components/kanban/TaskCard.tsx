@@ -16,7 +16,6 @@ interface TaskCardProps {
   onSelect?: (taskId: string) => void;
   onClick: () => void;
   onContextMenu?: (taskId: string, x: number, y: number) => void;
-  onInterrupt?: (taskId: string) => void;
 }
 
 export function TaskCard({
@@ -29,7 +28,6 @@ export function TaskCard({
   onSelect,
   onClick,
   onContextMenu,
-  onInterrupt,
 }: TaskCardProps) {
   const taskLabels = projectLabels.filter((l) =>
     (task.labels || []).includes(l._id)
@@ -102,25 +100,6 @@ export function TaskCard({
         >
           {task.category}
         </Badge>
-        {onInterrupt && !selectionActive && !selected && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onInterrupt(task._id);
-            }}
-            title="Interrupt work — the task returns to the queue with a note"
-            className="ml-auto text-text-muted hover:text-danger transition-colors cursor-pointer"
-          >
-            <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
-              <path d="M6.5 6.5h7v7h-7z" />
-              <path
-                fillRule="evenodd"
-                d="M10 2a8 8 0 100 16 8 8 0 000-16zm0 1.5a6.5 6.5 0 110 13 6.5 6.5 0 010-13z"
-                clipRule="evenodd"
-              />
-            </svg>
-          </button>
-        )}
       </div>
 
       <h3 className="text-sm font-medium mb-2 line-clamp-2">{task.title}</h3>

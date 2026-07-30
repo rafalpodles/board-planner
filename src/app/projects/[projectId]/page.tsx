@@ -363,19 +363,6 @@ export default function KanbanPage() {
     }
   }
 
-  async function handleInterrupt(taskId: string) {
-    try {
-      const { task } = await api.post(
-        `/api/projects/${projectId}/tasks/${taskId}/interrupt`,
-        {}
-      );
-      setTasks((prev) => prev.map((t) => (t._id === taskId ? { ...t, status: task.status } : t)));
-      toast("Interrupted — task returned to the queue with a note", "success");
-    } catch {
-      toast("Failed to interrupt work on the task", "error");
-    }
-  }
-
   async function handleContextDelete(taskId: string) {
     try {
       await api.del(`/api/projects/${projectId}/tasks/${taskId}`);
@@ -597,7 +584,6 @@ export default function KanbanPage() {
           onTaskClick={(taskId) => setEditTaskId(taskId)}
           onTaskSelect={handleTaskSelect}
           onTaskContextMenu={(taskId, x, y) => setContextMenu({ taskId, x, y })}
-          onTaskInterrupt={handleInterrupt}
         />
       ) : viewMode === "list" ? (
         <ListView
@@ -647,7 +633,6 @@ export default function KanbanPage() {
             onStatusChange={(status) =>
               bulk > 1 ? handleBulkMove(status) : handleStatusChange(contextMenu.taskId, status)
             }
-            onInterrupt={() => handleInterrupt(contextMenu.taskId)}
             onSprintChange={async (sprintId) => {
               if (bulk > 1) {
                 handleBulkSprint(sprintId);
