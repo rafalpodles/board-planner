@@ -12,6 +12,7 @@ const populateFields = [
   { path: "assignee", select: "username fullName" },
   { path: "createdBy", select: "username fullName" },
   { path: "blockedBy", select: "taskNumber title status" },
+  { path: "relations.task", select: "taskNumber title status" },
 ];
 
 export const GET = withProjectAccess(async (_request, { params }) => {
@@ -28,15 +29,26 @@ export const GET = withProjectAccess(async (_request, { params }) => {
     return NextResponse.json({ error: "Task not found" }, { status: 404 });
   }
 
-  // Find tasks that this task is blocking (reverse lookup)
-  const blocking = await Task.find(
-    { blockedBy: taskId, project: projectId },
-    "taskNumber title status"
-  );
+  // Reverse lookups: who points at this task
+  const [blocking, incoming] = await Promise.all([
+    Task.find({ blockedBy: taskId, project: projectId }, "taskNumber title status"),
+    Task.find(
+      { "relations.task": taskId, project: projectId },
+      "taskNumber title status relations"
+    ),
+  ]);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const taskObj: any = task.toObject();
   taskObj.blocking = blocking;
+  taskObj.relatedFrom = incoming.flatMap((t) =>
+    (t.relations || [])
+      .filter((r) => String(r.task) === String(taskId))
+      .map((r) => ({
+        type: r.type,
+        task: { _id: t._id, taskNumber: t.taskNumber, title: t.title, status: t.status },
+      }))
+  );
 
   return NextResponse.json(taskObj);
 });
@@ -79,6 +91,7 @@ export const DELETE = withProjectAccess(async (_request, { params }) => {
     ActivityLog.deleteMany({ task: taskId }),
     Notification.deleteMany({ task: taskId }),
     Task.updateMany({ blockedBy: taskId }, { $pull: { blockedBy: taskId } }),
+    Task.updateMany({ "relations.task": taskId }, { $pull: { relations: { task: taskId } } }),
   ]);
 
   return NextResponse.json({ message: "Task deleted" });
