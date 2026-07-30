@@ -22,8 +22,9 @@ callers, not a new agent.
 ### Components
 
 1. **`src/lib/pm/autonomy.ts`** — pure and side-effect-free: `hourInTimezone`,
-   `dayKeyInTimezone`, `isValidTimezone` (all built on `Intl`, no dependency),
-   `shouldRunDailyReview`, and the two prompt builders.
+   `dayKeyInTimezone`, `isValidTimezone` (all built on `Intl`, no dependency), the slot
+   helpers (`currentReviewSlot` / `dueReviewSlot`, see the CP-154 update below), and the two
+   prompt builders.
 2. **`src/models/pmTrigger.ts`** — the `pmtriggers` queue.
 3. **`src/lib/pm/triggers.ts`** — `enqueuePmTrigger`, `onTaskStatusChanged` (the hook
    task-service calls), `runPmTrigger`, `drainPmTriggers`, watcher notification.
@@ -33,10 +34,11 @@ callers, not a new agent.
 
 ### Data model
 
-- **`Project.pm.autonomy`**: `{ dailyReview, reviewHour (0-23), timezone (IANA),
-  handleNeedsHumanReview, lastDailyReviewDay ("YYYY-MM-DD") }`. `lastDailyReviewDay` is
-  server-managed — the validator forces it to `""` and the PUT route carries the stored value
-  across, alongside a guard that a body omitting `autonomy` does not wipe it.
+- **`Project.pm.autonomy`**: `{ dailyReview, reviewHour (0-23), reviewIntervalHours (1-24),
+  timezone (IANA), handleNeedsHumanReview, lastReviewSlot ("YYYY-MM-DDTHH") }`.
+  `lastReviewSlot` is server-managed — the validator forces it to `""` and the PUT route
+  carries the stored value across, alongside a guard that a body omitting `autonomy` does not
+  wipe it. The last two fields are the CP-154 shape; see the update below.
 - **`PmMessage.trigger`**: `{ type: "chat" | "daily_review" | "needs_human_review", taskKey }`,
   a separate `Schema` with `_id: false`. Declaring it inline breaks the build — Mongoose reads
   the nested `type` key as the SchemaType for `trigger` itself.
