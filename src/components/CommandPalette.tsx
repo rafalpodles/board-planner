@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
 import { ApiTask, STATUS_LABELS } from "@/types";
 import { Badge } from "@/components/ui/Badge";
+import { taskPath } from "@/lib/urls";
 
 export function CommandPalette() {
   const [open, setOpen] = useState(false);
@@ -72,11 +73,12 @@ export function CommandPalette() {
   }, [query, doSearch]);
 
   function navigateToResult(task: ApiTask) {
-    const projectId =
+    const project = task.project as unknown as { _id: string; key?: string };
+    const projectRef =
       typeof task.project === "object" && task.project !== null
-        ? (task.project as unknown as { _id: string })._id
+        ? project.key ?? project._id
         : task.project;
-    router.push(`/projects/${projectId}/tasks/${task._id}`);
+    router.push(taskPath(projectRef as string, task.taskNumber));
     setOpen(false);
   }
 

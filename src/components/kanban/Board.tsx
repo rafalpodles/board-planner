@@ -18,7 +18,6 @@ interface BoardProps {
   onTaskClick: (taskId: string) => void;
   onTaskSelect?: (taskId: string) => void;
   onTaskContextMenu?: (taskId: string, x: number, y: number) => void;
-  onTaskInterrupt?: (taskId: string) => void;
 }
 
 export function Board({
@@ -34,7 +33,6 @@ export function Board({
   onTaskClick,
   onTaskSelect,
   onTaskContextMenu,
-  onTaskInterrupt,
 }: BoardProps) {
   const boardColumns = useMemo(() => effectiveColumns(columns), [columns]);
   const grouped = useMemo(
@@ -56,7 +54,10 @@ export function Board({
         style={{ WebkitOverflowScrolling: "touch" }}
       >
         <div
-          className="grid gap-4 lg:h-full"
+          // The row must be minmax(0,1fr), not auto: an auto row grows to its tallest
+          // column, so h-full on the columns resolves against that instead of the
+          // viewport and their internal overflow-y never engages.
+          className="grid gap-4 lg:h-full lg:grid-rows-[minmax(0,1fr)]"
           style={{
             gridTemplateColumns: `repeat(${boardColumns.length}, minmax(0, 1fr))`,
             minWidth: `${boardColumns.length * 200}px`,
@@ -77,7 +78,6 @@ export function Board({
               onTaskClick={onTaskClick}
               onTaskSelect={onTaskSelect}
               onTaskContextMenu={onTaskContextMenu}
-            onTaskInterrupt={onTaskInterrupt}
             />
           ))}
         </div>

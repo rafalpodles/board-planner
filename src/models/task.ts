@@ -83,6 +83,15 @@ const taskSchema = new Schema<ITask>(
       type: [{ type: Schema.Types.ObjectId, ref: "Task" }],
       default: [],
     },
+    relations: {
+      type: [
+        {
+          task: { type: Schema.Types.ObjectId, ref: "Task", required: true },
+          type: { type: String, enum: ["relates", "duplicates", "parent_of"], required: true },
+        },
+      ],
+      default: [],
+    },
     watchers: {
       type: [{ type: Schema.Types.ObjectId, ref: "User" }],
       default: [],

@@ -2,6 +2,7 @@
 
 import { ApiTask, ApiLabel, ApiProjectCategory, PRIORITY_LABELS } from "@/types";
 import { Badge } from "@/components/ui/Badge";
+import { categoryColor, categoryTint } from "@/lib/category-colors";
 
 // Cards are narrow; the default badge padding makes three of them wrap raggedly
 const COMPACT_BADGE = "text-[10px] px-1.5 whitespace-nowrap";
@@ -16,7 +17,6 @@ interface TaskCardProps {
   onSelect?: (taskId: string) => void;
   onClick: () => void;
   onContextMenu?: (taskId: string, x: number, y: number) => void;
-  onInterrupt?: (taskId: string) => void;
 }
 
 export function TaskCard({
@@ -29,21 +29,27 @@ export function TaskCard({
   onSelect,
   onClick,
   onContextMenu,
-  onInterrupt,
 }: TaskCardProps) {
   const taskLabels = projectLabels.filter((l) =>
     (task.labels || []).includes(l._id)
   );
+  const catColor = categoryColor(projectCategories, task.category);
+  const tinted = !selected && !!catColor;
   return (
     <div
       draggable
+      style={tinted ? categoryTint(catColor) : undefined}
       onDragStart={(e) => {
         e.dataTransfer.setData("text/plain", task._id);
         e.dataTransfer.effectAllowed = "move";
       }}
       className={`bg-bg rounded-lg border p-3 cursor-grab
         transition-colors group active:cursor-grabbing relative
-        ${selected ? "border-primary bg-primary/5" : "border-border hover:border-primary/50"}`}
+        ${selected
+          ? "border-primary bg-primary/5"
+          : tinted
+            ? "cat-card hover:ring-2 hover:ring-primary/40"
+            : "border-border hover:border-primary/50"}`}
       onContextMenu={(e) => {
         e.preventDefault();
         onContextMenu?.(task._id, e.clientX, e.clientY);
@@ -97,30 +103,11 @@ export function TaskCard({
         <Badge
           variant="category"
           value={task.category}
-          color={projectCategories.find((c) => c.name === task.category)?.color}
+          color={catColor}
           className={COMPACT_BADGE}
         >
           {task.category}
         </Badge>
-        {onInterrupt && !selectionActive && !selected && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onInterrupt(task._id);
-            }}
-            title="Interrupt work — the task returns to the queue with a note"
-            className="ml-auto text-text-muted hover:text-danger transition-colors cursor-pointer"
-          >
-            <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
-              <path d="M6.5 6.5h7v7h-7z" />
-              <path
-                fillRule="evenodd"
-                d="M10 2a8 8 0 100 16 8 8 0 000-16zm0 1.5a6.5 6.5 0 110 13 6.5 6.5 0 010-13z"
-                clipRule="evenodd"
-              />
-            </svg>
-          </button>
-        )}
       </div>
 
       <h3 className="text-sm font-medium mb-2 line-clamp-2">{task.title}</h3>
@@ -145,13 +132,32 @@ export function TaskCard({
         </div>
       )}
 
-      {task.blockedBy && task.blockedBy.length > 0 && (
-        <div className="mb-2">
-          <span className="text-[10px] text-warning bg-warning/10 px-1.5 py-0.5 rounded font-medium">
-            Blocked ({task.blockedBy.length})
-          </span>
-        </div>
-      )}
+      {(() => {
+        const blocked = task.blockedBy?.length ?? 0;
+        const allRelations = [...(task.relations || []), ...(task.relatedFrom || [])];
+        const relates = allRelations.filter((r) => r.type === "relates").length;
+        const duplicates = allRelations.filter((r) => r.type === "duplicates").length;
+        if (blocked + relates + duplicates === 0) return null;
+        return (
+          <div className="mb-2 flex flex-wrap gap-1">
+            {blocked > 0 && (
+              <span className="text-[10px] text-warning bg-warning/10 px-1.5 py-0.5 rounded font-medium">
+                Blocked ({blocked})
+              </span>
+            )}
+            {relates > 0 && (
+              <span className="text-[10px] text-primary bg-primary/10 px-1.5 py-0.5 rounded font-medium">
+                Relates ({relates})
+              </span>
+            )}
+            {duplicates > 0 && (
+              <span className="text-[10px] text-text-muted bg-bg-input px-1.5 py-0.5 rounded font-medium">
+                Duplicate ({duplicates})
+              </span>
+            )}
+          </div>
+        );
+      })()}
 
       {task.checklist && task.checklist.length > 0 && (
         <div className="mb-2 flex items-center gap-1.5">

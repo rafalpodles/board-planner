@@ -37,7 +37,7 @@ export const DEFAULT_PROJECT_CATEGORIES: { name: string; color: string }[] = [
   { name: "bug", color: "#ef4444" },
   { name: "doc", color: "#3b82f6" },
   { name: "user-story", color: "#22c55e" },
-  { name: "idea", color: "#f59e0b" },
+  { name: "idea", color: "#8b5cf6" },
 ];
 export const PRIORITIES: Priority[] = ["low", "medium", "high", "urgent"];
 export const DEFAULT_PRIORITY: Priority = "medium";
@@ -532,6 +532,7 @@ export interface ITask {
   labels: Types.ObjectId[];
   pinned: boolean;
   blockedBy: (Types.ObjectId | ITask)[];
+  relations: ITaskRelation[];
   watchers: Types.ObjectId[];
   sprint: Types.ObjectId | ISprint | null;
   customFieldValues: Map<string, unknown>;
@@ -663,6 +664,23 @@ export interface ApiPmMessage {
   createdAt: string;
 }
 
+export const RELATION_TYPES = ["relates", "duplicates", "parent_of"] as const;
+export type RelationType = (typeof RELATION_TYPES)[number];
+
+// Every dependency kind the UI can add, including the one stored as blockedBy
+export const DEPENDENCY_TYPES = ["blocked_by", ...RELATION_TYPES] as const;
+export type DependencyType = (typeof DEPENDENCY_TYPES)[number];
+
+export interface ITaskRelation {
+  task: Types.ObjectId | ITask;
+  type: RelationType;
+}
+
+export interface ApiTaskRelation {
+  task: ApiTaskLink;
+  type: RelationType;
+}
+
 export interface ApiTaskLink {
   _id: string;
   taskNumber: number;
@@ -695,6 +713,8 @@ export interface ApiTask {
   pinned: boolean;
   blockedBy: ApiTaskLink[];
   blocking: ApiTaskLink[];
+  relations: ApiTaskRelation[];
+  relatedFrom: ApiTaskRelation[];
   watchers: string[];
   sprint: string | null;
   customFieldValues: Record<string, unknown>;
