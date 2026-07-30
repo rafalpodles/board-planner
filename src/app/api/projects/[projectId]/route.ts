@@ -128,6 +128,9 @@ export const PUT = withProjectAdmin(async (request, { params, user }) => {
     if (!pmResult.valid) {
       return NextResponse.json({ error: pmResult.error }, { status: 400 });
     }
+    // validatePmConfig rebuilds pm from a whitelist, so the instance lock would be
+    // dropped by any project-side save. It is settable only from the admin console.
+    pmResult.value.lockedByInstance = existing.pm?.lockedByInstance ?? false;
     if (body.pm.mcpServers === undefined) {
       // Clients unaware of mcpServers must not wipe the configured list
       pmResult.value.mcpServers = existing.pm?.mcpServers ?? [];
