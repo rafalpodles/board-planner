@@ -7,6 +7,7 @@ import { drainPmTriggers } from "./triggers";
 import { getPmUser } from "./pm-user";
 import { BOARD_REVIEW_DISALLOWED_TOOLS, buildBoardReviewPrompt, dueReviewSlot } from "./autonomy";
 import { buildBoardDigest, digestHeadline, renderBoardDigest } from "./board-review";
+import { PM_RUNNABLE_QUERY } from "./availability";
 
 const TICK_MS = Number(process.env.PM_SCHEDULER_TICK_MS) || 5 * 60 * 1000;
 
@@ -26,7 +27,7 @@ export async function pmSchedulerTick(): Promise<void> {
 
   const now = new Date();
   const projects = await Project.find(
-    { "pm.enabled": true, "pm.autonomy.dailyReview": true },
+    { ...PM_RUNNABLE_QUERY, "pm.autonomy.dailyReview": true },
     "key pm"
   ).lean();
   if (projects.length === 0) return;

@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { getAuthUser, RateLimitError } from "@/lib/auth";
 import { Project } from "@/models/project";
@@ -7,6 +6,8 @@ import { runPmTurn } from "@/lib/pm/agent";
 import { isPmAvailable } from "@/lib/pm/config";
 import { acquireTurnLock, releaseTurnLock } from "@/lib/pm/turn-lock";
 import { isOverDailyTurnCap } from "@/lib/pm/turn-cap";
+import { isPmRunnable, pmDisabledReason } from "@/lib/pm/availability";
+import { resolveProjectId } from "@/lib/middleware";
 
 export const maxDuration = 300;
 
@@ -29,8 +30,11 @@ export async function POST(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { projectId } = await params;
-  if (!projectId || !isValidObjectId(projectId)) {
+  // This route authenticates by hand (it streams SSE) and so never passes through
+  // withProjectAccess, which is where key -> id resolution normally happens
+  const { projectId: projectRef } = await params;
+  const projectId = projectRef ? await resolveProjectId(projectRef) : null;
+  if (!projectId) {
     return NextResponse.json({ error: "Invalid project id" }, { status: 400 });
   }
   if (
@@ -53,11 +57,8 @@ export async function POST(
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
-  if (!project.pm?.enabled) {
-    return NextResponse.json(
-      { error: "PM agent is not enabled for this project" },
-      { status: 400 }
-    );
+  if (!isPmRunnable(project.pm)) {
+    return NextResponse.json({ error: pmDisabledReason(project.pm) }, { status: 400 });
   }
 
   let message: unknown;

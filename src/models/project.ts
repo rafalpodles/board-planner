@@ -116,6 +116,8 @@ const projectSchema = new Schema<IProject>(
     },
     pm: {
       enabled: { type: Boolean, default: false },
+      // Instance-admin kill switch: overrides `enabled` and cannot be cleared from project settings
+      lockedByInstance: { type: Boolean, default: false },
       model: { type: String, default: "" },
       contextNotes: { type: String, default: "" },
       dailyTurnCap: { type: Number, default: 0 },
