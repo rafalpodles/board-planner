@@ -296,10 +296,16 @@ export function TaskForm({
       } else {
         const created = await api.post(`/api/projects/${projectId}/tasks`, body);
         if (parentTaskId) {
-          await api.post(`/api/projects/${projectId}/tasks/${parentTaskId}/links`, {
-            taskId: created._id,
-            type: "parent_of",
-          });
+          try {
+            await api.post(`/api/projects/${projectId}/tasks/${parentTaskId}/links`, {
+              taskId: created._id,
+              type: "parent_of",
+            });
+          } catch {
+            // The task exists by now; reporting a plain failure would invite a
+            // second submit and a duplicate
+            toast("Task created, but linking it to the parent failed", "error");
+          }
         }
       }
       toast(task ? "Task updated" : "Task created", "success");
