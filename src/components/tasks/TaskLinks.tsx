@@ -6,6 +6,7 @@ import { useApi } from "@/hooks/use-api";
 import { ApiTask, ApiTaskLink, DependencyType } from "@/types";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
+import { taskPath } from "@/lib/urls";
 
 const DEPENDENCY_LABELS: { value: DependencyType; label: string }[] = [
   { value: "blocked_by", label: "Blocked by" },
@@ -82,8 +83,8 @@ export function TaskLinks({
     }
   }
 
-  function navigateToTask(taskId: string) {
-    router.push(`/projects/${projectId}/tasks/${taskId}`);
+  function navigateToTask(taskNumber: number) {
+    router.push(taskPath(projectId, taskNumber));
   }
 
   const blockedBy = task.blockedBy || [];
@@ -146,7 +147,7 @@ export function TaskLinks({
                 className="flex items-center gap-2 text-sm group"
               >
                 <button
-                  onClick={() => navigateToTask(t._id)}
+                  onClick={() => navigateToTask(t.taskNumber)}
                   className="text-primary hover:underline font-mono text-xs"
                 >
                   {projectKey}-{t.taskNumber}
@@ -174,7 +175,7 @@ export function TaskLinks({
             {blocking.map((t) => (
               <div key={t._id} className="flex items-center gap-2 text-sm">
                 <button
-                  onClick={() => navigateToTask(t._id)}
+                  onClick={() => navigateToTask(t.taskNumber)}
                   className="text-primary hover:underline font-mono text-xs"
                 >
                   {projectKey}-{t.taskNumber}
@@ -199,7 +200,7 @@ export function TaskLinks({
               {section.items.map((r) => (
                 <div key={`${section.heading}-${r.task._id}`} className="flex items-center gap-2 text-sm group">
                   <button
-                    onClick={() => navigateToTask(r.task._id)}
+                    onClick={() => navigateToTask(r.task.taskNumber)}
                     className="text-primary hover:underline font-mono text-xs"
                   >
                     {projectKey}-{r.task.taskNumber}

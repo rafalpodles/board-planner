@@ -609,6 +609,7 @@ export function TaskForm({
         value={description}
         onChange={setDescription}
         onFileUpload={handleFileUpload}
+        previewFirst
         placeholder="Markdown supported — use the toolbar, or Cmd/Ctrl+B and Cmd/Ctrl+I"
       />
 
