@@ -58,7 +58,8 @@ async function runDailyReview(
     console.warn(`PM daily review skipped for ${projectKey}: turn cap (${cap}) reached`);
     return;
   }
-  if (!acquireTurnLock(projectId)) {
+  const abort = acquireTurnLock(projectId);
+  if (!abort) {
     console.warn(`PM daily review skipped for ${projectKey}: a turn is already running`);
     return;
   }
@@ -68,6 +69,7 @@ async function runDailyReview(
       userMessage: buildDailyReviewPrompt(projectKey),
       triggeredByUserId: pmUserId,
       trigger: { type: "daily_review" },
+      signal: abort.signal,
     });
     if (!result.ok) console.error(`PM daily review failed for ${projectKey}:`, result.error);
   } finally {

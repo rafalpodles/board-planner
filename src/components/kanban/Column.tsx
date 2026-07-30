@@ -18,6 +18,7 @@ interface ColumnProps {
   onTaskClick: (taskId: string) => void;
   onTaskSelect?: (taskId: string) => void;
   onTaskContextMenu?: (taskId: string, x: number, y: number) => void;
+  onTaskInterrupt?: (taskId: string) => void;
 }
 
 export function Column({
@@ -33,6 +34,7 @@ export function Column({
   onTaskClick,
   onTaskSelect,
   onTaskContextMenu,
+  onTaskInterrupt,
 }: ColumnProps) {
   const [isDragOver, setIsDragOver] = useState(false);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
@@ -107,6 +109,7 @@ export function Column({
                 onSelect={onTaskSelect}
                 onClick={() => onTaskClick(task._id)}
                 onContextMenu={onTaskContextMenu}
+                onInterrupt={column.role === "active" ? onTaskInterrupt : undefined}
               />
             </div>
           </div>
