@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useCallback, FormEvent, useEffect } from "react";
+import { useState, useCallback, useRef, FormEvent, useEffect } from "react";
 import { useApi } from "@/hooks/use-api";
+import { emitBoardRefresh } from "@/lib/board-refresh";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { Textarea } from "@/components/ui/Textarea";
@@ -29,6 +30,10 @@ import {
 import { effectiveColumns } from "@/lib/columns";
 import { parseChecklistString } from "@/lib/checklist";
 import type { GeneratedTask } from "@/lib/ai";
+
+const AUTOSAVE_DEBOUNCE_MS = 700;
+
+type AutoSaveState = "idle" | "saving" | "saved" | "error";
 
 interface TaskFormProps {
   projectId: string;
@@ -103,6 +108,7 @@ export function TaskForm({
   const [aiLoading, setAiLoading] = useState(false);
   const [aiEnabled, setAiEnabled] = useState(false);
   const [aiInsights, setAiInsights] = useState<GeneratedTask | null>(null);
+  const [autoSaveState, setAutoSaveState] = useState<AutoSaveState>("idle");
   const api = useApi();
   const { toast } = useToast();
 
@@ -150,29 +156,51 @@ export function TaskForm({
     }
   }
 
+  const body = {
+    title,
+    description,
+    difficulty,
+    priority,
+    component,
+    category,
+    status,
+    assignee: assignee || null,
+    dueDate: dueDate || null,
+    checklist,
+    labels: selectedLabels,
+    sprint: sprint || null,
+    recurrence: recurrenceFreq
+      ? { frequency: recurrenceFreq, interval: recurrenceInterval }
+      : null,
+    customFieldValues,
+  };
+
+  // Auto-save (existing tasks only — a new task has nothing to PATCH until it is created).
+  // Signature-compare against what was last persisted so mounting, or a change that
+  // round-trips back to the saved value, does not fire a write.
+  const signature = JSON.stringify(body);
+  const savedSignature = useRef(signature);
+  useEffect(() => {
+    if (!task || signature === savedSignature.current) return;
+    const timer = setTimeout(async () => {
+      setAutoSaveState("saving");
+      try {
+        await api.put(`/api/projects/${projectId}/tasks/${task._id}`, JSON.parse(signature));
+        savedSignature.current = signature;
+        setAutoSaveState("saved");
+        emitBoardRefresh(projectId);
+      } catch {
+        setAutoSaveState("error");
+      }
+    }, AUTOSAVE_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signature, task?._id, projectId]);
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError("");
     setLoading(true);
-
-    const body = {
-      title,
-      description,
-      difficulty,
-      priority,
-      component,
-      category,
-      status,
-      assignee: assignee || null,
-      dueDate: dueDate || null,
-      checklist,
-      labels: selectedLabels,
-      sprint: sprint || null,
-      recurrence: recurrenceFreq
-        ? { frequency: recurrenceFreq, interval: recurrenceInterval }
-        : null,
-      customFieldValues,
-    };
 
     try {
       if (task) {
@@ -180,6 +208,8 @@ export function TaskForm({
           `/api/projects/${projectId}/tasks/${task._id}`,
           body
         );
+        savedSignature.current = signature;
+        setAutoSaveState("saved");
       } else {
         await api.post(`/api/projects/${projectId}/tasks`, body);
       }
@@ -582,13 +612,30 @@ export function TaskForm({
 
       {error && <p className="text-sm text-danger">{error}</p>}
 
-      <div className="flex gap-3">
+      <div className="flex gap-3 items-center">
         <Button type="submit" disabled={loading}>
           {loading ? "Saving..." : task ? "Update Task" : "Create Task"}
         </Button>
         <Button type="button" variant="secondary" onClick={onCancel}>
-          Cancel
+          {task ? "Close" : "Cancel"}
         </Button>
+        {task && autoSaveState !== "idle" && (
+          <span
+            className={`text-xs flex items-center gap-1.5 ${
+              autoSaveState === "error" ? "text-danger" : "text-text-muted"
+            }`}
+            aria-live="polite"
+          >
+            {autoSaveState === "saving" && (
+              <span className="animate-spin rounded-full h-3 w-3 border-2 border-primary border-t-transparent" />
+            )}
+            {autoSaveState === "saving"
+              ? "Saving…"
+              : autoSaveState === "saved"
+                ? "\u2713 Saved"
+                : "Auto-save failed — use Update Task"}
+          </span>
+        )}
       </div>
     </form>
   );
