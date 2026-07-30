@@ -606,6 +606,7 @@ export default function KanbanPage() {
           tasks={filteredTasks}
           projectKey={project.key}
           columns={project.columns || []}
+          categories={project.categories || []}
           selectedTasks={selectedTasks}
           selectionMode={selectionMode}
           onTaskClick={(taskId) => setEditTaskId(taskId)}
