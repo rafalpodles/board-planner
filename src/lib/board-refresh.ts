@@ -25,22 +25,49 @@ export function emitBoardRefresh(projectId: string): void {
   getChannel()?.postMessage({ projectId });
 }
 
+// A PM turn emits once per write action, seconds apart, and each reload refetches the whole
+// board (~210 KB on a 140-task project). Coalescing here rather than in each subscriber:
+// the first event still reloads at once, the rest of the burst collapses into one trailing run.
+const MIN_RELOAD_INTERVAL_MS = 1200;
+
 export function subscribeBoardRefresh(projectId: string, callback: () => void): () => void {
   const matches = (id?: string) => !id || id === projectId;
 
+  let lastRun = 0;
+  let trailing: ReturnType<typeof setTimeout> | null = null;
+
+  const run = () => {
+    lastRun = Date.now();
+    callback();
+  };
+
+  const schedule = () => {
+    const sinceLast = Date.now() - lastRun;
+    if (sinceLast >= MIN_RELOAD_INTERVAL_MS) {
+      run();
+      return;
+    }
+    if (trailing) return;
+    trailing = setTimeout(() => {
+      trailing = null;
+      run();
+    }, MIN_RELOAD_INTERVAL_MS - sinceLast);
+  };
+
   const handler = (e: Event) => {
     const detail = (e as CustomEvent<{ projectId?: string }>).detail;
-    if (matches(detail?.projectId)) callback();
+    if (matches(detail?.projectId)) schedule();
   };
   window.addEventListener(EVENT, handler);
 
   const channel = getChannel();
   const onMessage = (e: MessageEvent<{ projectId?: string }>) => {
-    if (matches(e.data?.projectId)) callback();
+    if (matches(e.data?.projectId)) schedule();
   };
   channel?.addEventListener("message", onMessage);
 
   return () => {
+    if (trailing) clearTimeout(trailing);
     window.removeEventListener(EVENT, handler);
     channel?.removeEventListener("message", onMessage);
   };
