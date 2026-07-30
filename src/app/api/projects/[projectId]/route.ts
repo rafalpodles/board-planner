@@ -167,7 +167,7 @@ export const PUT = withProjectAdmin(async (request, { params, user }) => {
   }
 
   const project = await Project.findByIdAndUpdate(projectId, updates, {
-    new: true,
+    returnDocument: "after",
   })
     .populate("owner", "username fullName")
     .populate("admins", "username fullName");

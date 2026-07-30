@@ -67,7 +67,7 @@ export const PUT = withProjectAccess(async (request, { params }) => {
   const sprint = await Sprint.findOneAndUpdate(
     { _id: sprintId, project: projectId },
     { $set: updates },
-    { new: true, runValidators: true }
+    { returnDocument: "after", runValidators: true }
   );
 
   if (!sprint) {

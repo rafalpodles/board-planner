@@ -25,7 +25,7 @@ export const PUT = withAdmin(async (request) => {
   const settings = await Settings.findOneAndUpdate(
     {},
     { $set: { aiModel: aiModel.trim() } },
-    { upsert: true, new: true }
+    { upsert: true, returnDocument: "after" }
   );
 
   return NextResponse.json({ aiModel: settings.aiModel });

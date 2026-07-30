@@ -31,7 +31,7 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
   const project = await Project.findByIdAndUpdate(
     projectId,
     { $addToSet: { components: name } },
-    { new: true }
+    { returnDocument: "after" }
   ).select("components");
 
   if (!project) {
@@ -58,7 +58,7 @@ export const DELETE = withProjectAccess(async (request, { params, user }) => {
   const project = await Project.findByIdAndUpdate(
     projectId,
     { $pull: { components: name } },
-    { new: true }
+    { returnDocument: "after" }
   ).select("components");
 
   if (!project) {

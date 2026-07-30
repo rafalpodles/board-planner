@@ -16,7 +16,7 @@ export const POST = withProjectAccess(async (request, { params }) => {
   const task = await Task.findOneAndUpdate(
     { _id: taskId, project: projectId },
     { $push: { checklist: { text: text.trim(), done: false } } },
-    { new: true }
+    { returnDocument: "after" }
   );
 
   if (!task) {
@@ -56,7 +56,7 @@ export const PUT = withProjectAccess(async (request, { params }) => {
     const task = await Task.findOneAndUpdate(
       { _id: taskId, project: projectId },
       { $set: { checklist: sanitized } },
-      { new: true }
+      { returnDocument: "after" }
     );
     if (!task) {
       return NextResponse.json({ error: "Task not found" }, { status: 404 });
@@ -98,7 +98,7 @@ export const DELETE = withProjectAccess(async (request, { params }) => {
   const task = await Task.findOneAndUpdate(
     { _id: taskId, project: projectId },
     { $pull: { checklist: { _id: itemId } } },
-    { new: true }
+    { returnDocument: "after" }
   );
 
   if (!task) {
