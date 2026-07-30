@@ -364,8 +364,8 @@ export default function KanbanPage() {
   }
 
   return (
-    <div>
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-6">
+    <div className="lg:h-[calc(100vh-6.5rem)] lg:flex lg:flex-col lg:overflow-hidden">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-6 lg:shrink-0">
         <div>
           <div className="flex items-center gap-2">
             <Link
@@ -549,6 +549,7 @@ export default function KanbanPage() {
         </div>
       )}
 
+      <div className={`lg:flex-1 lg:min-h-0 ${viewMode === "board" ? "lg:overflow-hidden" : "lg:overflow-y-auto"}`}>
       {viewMode === "board" ? (
         <Board
           tasks={filteredTasks}
@@ -590,6 +591,7 @@ export default function KanbanPage() {
           }
         />
       )}
+      </div>
 
       {contextMenu && (() => {
         const task = tasks.find((t) => t._id === contextMenu.taskId);
