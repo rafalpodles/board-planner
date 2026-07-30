@@ -9,6 +9,7 @@ import { isOverDailyTurnCap } from "./turn-cap";
 import { acquireTurnLock, releaseTurnLock } from "./turn-lock";
 import { buildNeedsHumanReviewPrompt } from "./autonomy";
 import { getProjectColumns } from "@/lib/columns";
+import { isPmRunnable } from "./availability";
 
 const MAX_TRIGGER_ATTEMPTS = 3;
 
@@ -39,7 +40,7 @@ export async function onTaskStatusChanged(args: {
   actorId: string;
 }): Promise<void> {
   const project = await Project.findById(args.projectId, "key pm columns").lean();
-  if (!project?.pm?.enabled || !project.pm.autonomy?.handleNeedsHumanReview) return;
+  if (!isPmRunnable(project?.pm) || !project?.pm?.autonomy?.handleNeedsHumanReview) return;
 
   const triggerIds = new Set(
     getProjectColumns(project)
@@ -98,7 +99,7 @@ export type PmTriggerOutcome = "ran" | "deferred";
 export async function runPmTrigger(trigger: IPmTrigger): Promise<PmTriggerOutcome> {
   const projectId = String(trigger.project);
   const project = await Project.findById(projectId, "pm").lean();
-  if (!project?.pm?.enabled || !project.pm.autonomy?.handleNeedsHumanReview) {
+  if (!isPmRunnable(project?.pm) || !project?.pm?.autonomy?.handleNeedsHumanReview) {
     await settleTrigger(trigger, "done");
     return "ran";
   }

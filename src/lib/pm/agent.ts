@@ -3,7 +3,8 @@ import { Project } from "@/models/project";
 import { PmMessage } from "@/models/pmMessage";
 import { IPmMessage, PmMessageTrigger } from "@/types";
 import { getPmUser } from "./pm-user";
-import { chatCompletion, DEFAULT_PM_MODEL, OrChatMessage } from "./openrouter";
+import { chatCompletion, OrChatMessage } from "./openrouter";
+import { isPmRunnable, pmDisabledReason, resolvePmModel } from "./availability";
 import { PM_TOOLS, pmToolDefinitions, PmToolContext } from "./tools";
 import { discoverMcpTools, callMcpTool, McpRuntime, MAX_MCP_CALLS_PER_TURN } from "./mcp-tools";
 import { replayHistory } from "./history";
@@ -91,10 +92,10 @@ export async function runPmTurn(opts: {
 
   const project = await Project.findById(opts.projectId);
   if (!project) return { ok: false, message: null, error: "Project not found" };
-  if (!project.pm?.enabled) return { ok: false, message: null, error: "PM agent is not enabled for this project" };
+  if (!isPmRunnable(project.pm)) return { ok: false, message: null, error: pmDisabledReason(project.pm) };
 
   const pmUser = await getPmUser();
-  const model = project.pm.model || DEFAULT_PM_MODEL();
+  const model = await resolvePmModel(project.pm.model);
   const trigger = opts.trigger ?? { type: "chat" as const };
 
   const history = await PmMessage.find({ project: opts.projectId })

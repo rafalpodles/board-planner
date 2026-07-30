@@ -350,6 +350,7 @@ export const DEFAULT_PM_AUTONOMY: IPmAutonomy = {
 
 export interface IPmConfig {
   enabled: boolean;
+  lockedByInstance?: boolean;
   model: string;
   contextNotes: string;
   links: IPmLink[];
@@ -648,6 +649,7 @@ export interface ApiPmMcpServer {
 
 export interface ApiPmConfig {
   enabled: boolean;
+  lockedByInstance?: boolean;
   model: string;
   contextNotes: string;
   links: IPmLink[];
