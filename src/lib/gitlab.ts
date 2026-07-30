@@ -50,6 +50,97 @@ export function matchMRsToTasks(mrs: GitLabMR[], projectKey: string): ParsedPR[]
   return results;
 }
 
+export interface TaskBranch {
+  name: string;
+  url: string;
+  lastCommitAt: Date | null;
+}
+
+export interface TaskCommit {
+  shortId: string;
+  title: string;
+  authorName: string;
+  url: string;
+  createdAt: Date | null;
+}
+
+interface GitLabBranch {
+  name: string;
+  web_url: string;
+  commit?: { committed_date?: string };
+}
+
+interface GitLabCommitHit {
+  id: string;
+  short_id: string;
+  title: string;
+  author_name: string;
+  created_at: string;
+}
+
+function apiBase(host: string, projectPath: string): string {
+  return `${host.replace(/\/+$/, "")}/api/v4/projects/${encodeURIComponent(projectPath)}`;
+}
+
+async function gitlabGet<T>(url: string, token: string): Promise<T> {
+  const res = await fetch(url, {
+    headers: { "PRIVATE-TOKEN": token },
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!res.ok) {
+    throw new Error(`GitLab API ${res.status}: ${await res.text().catch(() => res.statusText)}`);
+  }
+  return res.json();
+}
+
+// Branch search on GitLab is case-sensitive, so the whole (capped) page is filtered
+// locally with the same key pattern the MR matcher uses
+export async function fetchTaskBranches(
+  host: string,
+  projectPath: string,
+  token: string,
+  taskKey: string
+): Promise<TaskBranch[]> {
+  const branches = await gitlabGet<GitLabBranch[]>(
+    `${apiBase(host, projectPath)}/repository/branches?per_page=100`,
+    token
+  );
+  const pattern = taskKeyPattern(taskKey);
+  return branches
+    .filter((b) => pattern.test(b.name))
+    .map((b) => ({
+      name: b.name,
+      url: b.web_url,
+      lastCommitAt: b.commit?.committed_date ? new Date(b.commit.committed_date) : null,
+    }));
+}
+
+export async function fetchTaskCommits(
+  host: string,
+  projectPath: string,
+  token: string,
+  taskKey: string
+): Promise<TaskCommit[]> {
+  const hits = await gitlabGet<GitLabCommitHit[]>(
+    `${apiBase(host, projectPath)}/search?scope=commits&search=${encodeURIComponent(taskKey)}`,
+    token
+  );
+  const webBase = `${host.replace(/\/+$/, "")}/${projectPath}/-/commit`;
+  return hits.map((c) => ({
+    shortId: c.short_id,
+    title: c.title,
+    authorName: c.author_name,
+    url: `${webBase}/${c.id}`,
+    createdAt: c.created_at ? new Date(c.created_at) : null,
+  }));
+}
+
+// "CP-5" also matches "cp-5/slug" and "CP 5"
+function taskKeyPattern(taskKey: string): RegExp {
+  const [key, number] = taskKey.split("-");
+  return new RegExp(`${key}[- ]?${number}(?![0-9])`, "i");
+}
+
 // Accepts "group/project" or a full URL on the configured host
 export function parseGitlabRepo(gitlabRepo: string): string | null {
   const trimmed = gitlabRepo.trim().replace(/\.git$/, "").replace(/\/+$/, "");
