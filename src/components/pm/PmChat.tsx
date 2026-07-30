@@ -9,6 +9,7 @@ import { ApiPmMessage, ApiProject, ApiTask } from "@/types";
 import { Button } from "@/components/ui/Button";
 import { MarkdownContent } from "@/components/ui/MarkdownContent";
 import { timeAgo } from "@/lib/time";
+import { taskPath } from "@/lib/urls";
 
 const ACTION_ICONS: Record<string, string> = {
   create_task: "✚",
@@ -252,7 +253,7 @@ export function PmChat({
             </span>
           );
           return taskId ? (
-            <Link key={i} href={`/projects/${projectId}/tasks/${taskId}`}>
+            <Link key={i} href={taskPath(projectId, a.taskKey!)}>
               {chip}
             </Link>
           ) : (

@@ -6,6 +6,7 @@ import { useApi } from "@/hooks/use-api";
 import { useToast } from "@/components/ui/Toast";
 import { Badge } from "@/components/ui/Badge";
 import { STATUS_LABELS, PRIORITY_LABELS, DEFAULT_PROJECT_ICON, Priority, TaskStatus } from "@/types";
+import { projectPath, taskPath } from "@/lib/urls";
 
 interface MyTask {
   _id: string;
@@ -93,7 +94,7 @@ export default function MyTasksPage() {
           {Object.values(grouped).map(({ project, tasks: projectTasks }) => (
             <div key={project._id}>
               <Link
-                href={`/projects/${project._id}`}
+                href={projectPath(project.key)}
                 className="text-sm font-medium text-text-muted hover:text-text mb-2 flex items-center gap-2"
               >
                 <span aria-hidden="true">{project.icon || DEFAULT_PROJECT_ICON}</span>
@@ -107,7 +108,7 @@ export default function MyTasksPage() {
                 {projectTasks.map((task) => (
                   <Link
                     key={task._id}
-                    href={`/projects/${project._id}/tasks/${task._id}`}
+                    href={taskPath(project.key, task.taskNumber)}
                     className="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg border border-border bg-bg-card hover:border-primary/50 transition-colors block"
                   >
                     <span className="text-xs font-mono text-text-muted w-16 flex-shrink-0">
