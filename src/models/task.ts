@@ -122,6 +122,13 @@ const taskSchema = new Schema<ITask>(
       type: Number,
       default: 0,
     },
+    execution: {
+      runId: { type: String, default: "" },
+      workerId: { type: String, default: "" },
+      attempts: { type: Number, default: 0 },
+      startedAt: { type: Date, default: null },
+      lastError: { type: String, default: "" },
+    },
     createdBy: {
       type: Schema.Types.ObjectId,
       ref: "User",
