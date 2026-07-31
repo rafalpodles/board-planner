@@ -101,6 +101,156 @@ describe("createApiClient", () => {
     expect(task?.acceptanceCriteria).toEqual(["first"]);
   });
 
+  it("releases via POST with no body, so the server owns the target column", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    const api = createApiClient(config, fetchMock as never);
+
+    await api.release("t1");
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://app.example.com/api/projects/CP/tasks/t1/release");
+    expect(init.method).toBe("POST");
+    expect(init.body).toBeUndefined();
+  });
+
+  it("maps a customised board's roles onto its own ids", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        columns: [
+          { id: "ready", role: "approved", order: 1 },
+          { id: "doing", role: "active", order: 2 },
+          { id: "checking", role: "review", order: 3 },
+          { id: "shipped", role: "done", order: 4 },
+        ],
+      }),
+    });
+    const api = createApiClient(config, fetchMock as never);
+
+    expect(await api.statusIds()).toEqual({
+      approved: "ready",
+      review: "checking",
+      done: "shipped",
+    });
+  });
+
+  it("prefers the review column the board flags for human review", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        columns: [
+          { id: "checking", role: "review", order: 1 },
+          { id: "escalated", role: "review", order: 2, triggersPmReview: true },
+          { id: "verifying", role: "review", order: 3 },
+        ],
+      }),
+    });
+    const api = createApiClient(config, fetchMock as never);
+
+    expect((await api.statusIds()).review).toBe("escalated");
+  });
+
+  it("routes the seeded board to the column the PM automation watches", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        columns: [
+          { id: "planned", role: "backlog", order: 0 },
+          { id: "todo", role: "approved", order: 1 },
+          { id: "in_progress", role: "active", order: 2 },
+          { id: "in_review", role: "review", order: 3 },
+          { id: "needs_human_review", role: "review", order: 4, triggersPmReview: true },
+          { id: "ready_to_test", role: "review", order: 5 },
+          { id: "done", role: "done", order: 6 },
+        ],
+      }),
+    });
+    const api = createApiClient(config, fetchMock as never);
+
+    expect(await api.statusIds()).toEqual({
+      approved: "todo",
+      review: "needs_human_review",
+      done: "done",
+    });
+  });
+
+  it("reads the columns in board order, not storage order", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        columns: [
+          { id: "late", role: "review", order: 9 },
+          { id: "early", role: "review", order: 2 },
+        ],
+      }),
+    });
+    const api = createApiClient(config, fetchMock as never);
+
+    expect((await api.statusIds()).review).toBe("early");
+  });
+
+  it("falls back to the seeded ids when a role is absent", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ columns: [{ id: "doing", role: "active", order: 1 }] }),
+    });
+    const api = createApiClient(config, fetchMock as never);
+
+    expect(await api.statusIds()).toEqual({
+      approved: "todo",
+      review: "needs_human_review",
+      done: "done",
+    });
+  });
+
+  it("falls back for a board that predates column seeding", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({}),
+    });
+    const api = createApiClient(config, fetchMock as never);
+
+    expect(await api.statusIds()).toEqual({
+      approved: "todo",
+      review: "needs_human_review",
+      done: "done",
+    });
+  });
+
+  it("ignores malformed column entries instead of throwing", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        columns: [null, { role: "done" }, { id: 7, role: "done" }, { id: "shipped", role: "done" }],
+      }),
+    });
+    const api = createApiClient(config, fetchMock as never);
+
+    expect((await api.statusIds()).done).toBe("shipped");
+  });
+
+  it("reads the columns from the project endpoint a worker token can reach", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ columns: [] }),
+    });
+    const api = createApiClient(config, fetchMock as never);
+
+    await api.statusIds();
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://app.example.com/api/projects/CP");
+    expect(init.method).toBe("GET");
+  });
+
   it("still reports the status when reading the error body fails", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: false,

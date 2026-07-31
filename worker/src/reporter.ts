@@ -1,4 +1,4 @@
-import { ApiClient } from "./api.js";
+import { ApiClient, StatusIds } from "./api.js";
 import { ClaimedTask } from "./types.js";
 
 const MAX_REASON_CHARS = 2000;
@@ -18,7 +18,11 @@ function capped(text: string): string {
   return `${text.slice(0, MAX_REASON_CHARS)}\n[truncated to ${MAX_REASON_CHARS} characters]`;
 }
 
-export function createReporter(api: ApiClient, log: Log = (message) => console.error(message)): Reporter {
+export function createReporter(
+  api: ApiClient,
+  statusIds: StatusIds,
+  log: Log = (message) => console.error(message)
+): Reporter {
   const lastRelease = new Map<string, string>();
 
   async function comment(task: ClaimedTask, body: string): Promise<boolean> {
@@ -39,6 +43,14 @@ export function createReporter(api: ApiClient, log: Log = (message) => console.e
     }
   }
 
+  async function release(task: ClaimedTask): Promise<void> {
+    try {
+      await api.release(task.taskId);
+    } catch (error) {
+      log(`${task.taskKey}: could not return the task to the queue: ${String(error)}`);
+    }
+  }
+
   async function report(task: ClaimedTask, status: string, body: string): Promise<void> {
     lastRelease.delete(task.taskId);
     await comment(task, body);
@@ -49,7 +61,7 @@ export function createReporter(api: ApiClient, log: Log = (message) => console.e
     async blocked(task, reason) {
       await report(
         task,
-        "needs_human_review",
+        statusIds.review,
         `The execution worker stopped: the agent reported it could not finish.\n\n${capped(reason)}`
       );
     },
@@ -57,7 +69,7 @@ export function createReporter(api: ApiClient, log: Log = (message) => console.e
     async gateRejected(task, gate, reason, branch) {
       await report(
         task,
-        "needs_human_review",
+        statusIds.review,
         `The execution worker blocked the merge at the **${gate}** gate.\n\n${capped(reason)}\n\nThe work is pushed to \`${branch}\` for inspection.`
       );
     },
@@ -67,16 +79,16 @@ export function createReporter(api: ApiClient, log: Log = (message) => console.e
       if (lastRelease.get(task.taskId) !== text && (await comment(task, `Returned to the queue: ${text}`))) {
         lastRelease.set(task.taskId, text);
       }
-      await move(task, "todo");
+      await release(task);
     },
 
     async merged(task, prUrl, summary) {
-      await report(task, "done", `Merged ${prUrl}\n\n${capped(summary)}`);
+      await report(task, statusIds.done, `Merged ${prUrl}\n\n${capped(summary)}`);
     },
 
     async failed(task, reason) {
       const attempt = task.attempts > 0 ? ` on attempt ${task.attempts}` : "";
-      await report(task, "needs_human_review", `The execution worker gave up${attempt}.\n\n${capped(reason)}`);
+      await report(task, statusIds.review, `The execution worker gave up${attempt}.\n\n${capped(reason)}`);
     },
   };
 }
