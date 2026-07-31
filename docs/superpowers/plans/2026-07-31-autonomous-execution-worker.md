@@ -2099,6 +2099,168 @@ git commit -m "feat(worker): board reporting for every terminal outcome (CP-158)
 
 ---
 
+### Task 13a: Release endpoint and role-derived statuses
+
+Two defects found in Task 13's review, both of which defeat stated design properties.
+
+**A usage limit consumes an attempt after all.** `claimNextTask` `$inc`s `execution.attempts`
+on every claim and filters on `attempts < 3`, so three usage-limit bounces retire a task
+permanently: it sits in `todo` looking claimable to a human, invisible to the worker, with no
+line of code ever written for it. The spec says a usage limit must not consume an attempt.
+
+**The reporter's status literals 400 on any customised board.** `changeStatus` rejects ids
+that are not in the project's columns, while the claim path derives its ids from column
+*roles*. On a renamed board every status move the worker makes fails, and tasks pile up in
+the active column carrying a comment and no routing.
+
+**Files:**
+- Create: `src/app/api/projects/[projectId]/tasks/[taskId]/release/route.ts`
+- Modify: `src/lib/task-service.ts` (add `releaseTask`), `src/lib/task-service.test.ts`
+- Modify: `worker/src/api.ts` (add `release`, `statusIds`), `worker/src/api.test.ts`
+- Modify: `worker/src/reporter.ts`, `worker/src/reporter.test.ts`
+
+**Interfaces:**
+- Consumes: `getProjectColumns` / column roles from `src/lib/columns.ts`; `ApiClient` (Task 6)
+- Produces: `releaseTask(projectId, taskId): Promise<ITask | null>`;
+  `ApiClient.release(taskId): Promise<void>`; `ApiClient.statusIds(): Promise<StatusIds>`
+  where `StatusIds = { approved: string; review: string; done: string }`;
+  `createReporter(api, statusIds, log?)`
+
+- [ ] **Step 1: Write the failing service test**
+
+`src/lib/task-service.test.ts` — add to the existing file:
+
+```ts
+describe("releaseTask", () => {
+  beforeEach(() => {
+    findOneAndUpdate.mockReset();
+    findById.mockReset();
+    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+  });
+
+  it("returns the task to the approved column and gives back the attempt", async () => {
+    findOneAndUpdate.mockResolvedValue({ _id: "t1", taskNumber: 1 });
+
+    await releaseTask("p1", "t1");
+
+    const [filter, update] = findOneAndUpdate.mock.calls[0];
+    expect(filter._id).toBe("t1");
+    expect(update.$set.status).toBe("ready");
+    expect(update.$inc["execution.attempts"]).toBe(-1);
+  });
+
+  it("never drives attempts below zero", async () => {
+    findOneAndUpdate.mockResolvedValue(null);
+
+    await releaseTask("p1", "t1");
+
+    expect(findOneAndUpdate.mock.calls[0][0]["execution.attempts"]).toEqual({ $gt: 0 });
+  });
+});
+```
+
+- [ ] **Step 2: Run to verify it fails**
+
+Run: `npx vitest run src/lib/task-service.test.ts`
+Expected: FAIL — `releaseTask is not a function`
+
+- [ ] **Step 3: Implement `releaseTask`**
+
+Append to `src/lib/task-service.ts`:
+
+```ts
+export async function releaseTask(projectId: string, taskId: string): Promise<ITask | null> {
+  await connectDB();
+
+  const project = await Project.findById(projectId, "columns").lean();
+  const approved = getProjectColumns(project).find((c) => c.role === "approved")?.id;
+  if (!approved) return null;
+
+  return Task.findOneAndUpdate(
+    { _id: taskId, project: projectId, "execution.attempts": { $gt: 0 } },
+    { $set: { status: approved }, $inc: { "execution.attempts": -1 } },
+    { returnDocument: "after" }
+  );
+}
+```
+
+The `$gt: 0` guard keeps a double release from driving the counter negative and handing a
+task unlimited attempts.
+
+- [ ] **Step 4: Run to verify it passes**
+
+Run: `npx vitest run src/lib/task-service.test.ts`
+Expected: PASS
+
+- [ ] **Step 5: Add the release route**
+
+`src/app/api/projects/[projectId]/tasks/[taskId]/release/route.ts`:
+
+```ts
+import { NextResponse } from "next/server";
+import { connectDB } from "@/lib/db";
+import { withProjectAccess } from "@/lib/middleware";
+import { releaseTask } from "@/lib/task-service";
+
+export const POST = withProjectAccess(async (_request, { params }) => {
+  const { projectId, taskId } = await params;
+  await connectDB();
+
+  const task = await releaseTask(projectId, taskId);
+  if (!task) {
+    return NextResponse.json({ error: "Task not found or not releasable" }, { status: 404 });
+  }
+
+  return NextResponse.json(task);
+});
+```
+
+- [ ] **Step 6: Extend the worker's API client**
+
+Add to `worker/src/api.ts` — `StatusIds` and two methods on `ApiClient`:
+
+```ts
+export interface StatusIds {
+  approved: string;
+  review: string;
+  done: string;
+}
+```
+
+`release(taskId)` POSTs `/tasks/${taskId}/release` with no body. `statusIds()` GETs
+`/columns`, then maps the first column of each role to its id, falling back to
+`todo` / `needs_human_review` / `done` when a role is absent. Write tests covering: the
+release POST hits the right path; `statusIds` maps a customised board's roles to its own
+ids; a board missing a role falls back without throwing.
+
+Prefer the `review`-role column whose id is `needs_human_review` when a board has several,
+since that is the one the PM automation already keys on.
+
+- [ ] **Step 7: Make the reporter role-aware**
+
+`createReporter(api, statusIds, log?)` — replace every hardcoded literal with the
+corresponding field, and make `released` call `api.release(task.taskId)` instead of
+`setStatus(taskId, "todo")`, so the attempt is given back in the same atomic update that
+moves the status. Update the existing tests to pass a `StatusIds` and add one asserting
+`release` is used rather than `setStatus`.
+
+Also add the test the review asked for: two different task ids with the same reason must
+produce two comments, pinning that the release dedupe is keyed per task and not globally.
+
+- [ ] **Step 8: Verify and commit**
+
+Run: `npm test` at the root and `npm test` in `worker/`. Both green.
+
+```bash
+git add src/app/api/projects/\[projectId\]/tasks/\[taskId\]/release/route.ts \
+        src/lib/task-service.ts src/lib/task-service.test.ts \
+        worker/src/api.ts worker/src/api.test.ts \
+        worker/src/reporter.ts worker/src/reporter.test.ts
+git commit -m "fix(worker): give back the attempt on release, derive statuses from roles (CP-158)"
+```
+
+---
+
 ### Task 14: Delivery — PR and merge
 
 **Files:**
