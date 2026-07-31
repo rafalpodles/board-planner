@@ -14,7 +14,7 @@ interface RawTask {
   taskNumber: number;
   title: string;
   description: string;
-  checklist?: Array<{ text: string }>;
+  checklist?: Array<{ text?: unknown }>;
   execution?: { attempts?: number };
 }
 
@@ -52,7 +52,9 @@ export function createApiClient(config: WorkerConfig, fetchImpl: Fetch = fetch):
         taskNumber: raw.taskNumber,
         title: raw.title,
         description: raw.description,
-        acceptanceCriteria: (raw.checklist ?? []).map((item) => item.text),
+        acceptanceCriteria: (raw.checklist ?? [])
+          .filter((item): item is { text: string } => typeof item.text === "string")
+          .map((item) => item.text),
         attempts: raw.execution?.attempts ?? 0,
       };
     },
