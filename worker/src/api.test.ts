@@ -130,11 +130,33 @@ describe("createApiClient", () => {
     expect(await api.columnIds()).toEqual(["ready", "doing"]);
   });
 
-  it("reports an empty board rather than inventing columns", async () => {
+  // A project stored before the seeding migration carries no columns of its own, and the server
+  // routes it on the built-in seven. A worker that read that as "no columns" would refuse to work
+  // on a board the server handles perfectly well
+  it("reads a board with no columns of its own as the seeded seven", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ columns: [] }) });
+    const api = createApiClient(config, fetchMock as never);
+
+    expect(await api.columnIds()).toEqual([
+      "planned",
+      "todo",
+      "in_progress",
+      "in_review",
+      "needs_human_review",
+      "ready_to_test",
+      "done",
+    ]);
+  });
+
+  it("routes a board with no columns of its own to the seeded ids", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
     const api = createApiClient(config, fetchMock as never);
 
-    expect(await api.columnIds()).toEqual([]);
+    expect(await api.statusIds()).toEqual({
+      approved: "todo",
+      review: "needs_human_review",
+      done: "done",
+    });
   });
 
   it("charges the attempt when the release asks not to refund it", async () => {
