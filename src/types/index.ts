@@ -369,6 +369,20 @@ export const PROJECT_ICONS: string[] = [
   "🏥", "🎬", "🎵", "✈️", "🏠", "🌱", "⏰", "🏆",
 ];
 
+export interface IProjectRepository {
+  url: string;
+  defaultBranch: string;
+  localPath: string;
+}
+
+export interface ITaskExecution {
+  runId: string;
+  workerId: string;
+  attempts: number;
+  startedAt: Date | null;
+  lastError: string;
+}
+
 export interface IProject {
   _id: Types.ObjectId;
   name: string;
@@ -393,6 +407,7 @@ export interface IProject {
   codaTableId: string;
   codaToken: string;
   taskCounter: number;
+  repository: IProjectRepository;
   pm?: IPmConfig;
   owner: Types.ObjectId | IUser;
   admins: (Types.ObjectId | IUser)[];
@@ -546,6 +561,7 @@ export interface ITask {
   recurrence: IRecurrence | null;
   recurringParentId: Types.ObjectId | null;
   order: number;
+  execution: ITaskExecution;
   createdBy: Types.ObjectId | IUser;
   createdAt: Date;
   updatedAt: Date;
