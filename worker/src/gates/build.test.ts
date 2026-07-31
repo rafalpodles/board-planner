@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { buildGate } from "./build.js";
 import { CommandResult, Runner } from "../exec.js";
 import { GateContext } from "../types.js";
@@ -29,7 +29,23 @@ function runner(...results: CommandResult[]) {
   return { runner: { run }, run };
 }
 
+function slowInstall(installMs: number, ...rest: CommandResult[]) {
+  vi.useFakeTimers();
+  const run = vi.fn<Runner["run"]>();
+  run.mockImplementationOnce(async () => {
+    vi.advanceTimersByTime(installMs);
+    return ok;
+  });
+  for (const result of rest) run.mockResolvedValueOnce(result);
+  run.mockResolvedValue(ok);
+  return { runner: { run }, run };
+}
+
 describe("buildGate", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("installs dependencies before building a fresh worktree", async () => {
     const { runner: r, run } = runner(ok, ok);
 
@@ -120,11 +136,35 @@ describe("buildGate", () => {
   });
 
   it("gives the build only the time the install left", async () => {
-    const { runner: r, run } = runner(ok, ok);
+    const { runner: r, run } = slowInstall(3000);
 
     await buildGate(r, TIMEOUT_MS).run(context);
 
-    expect(run.mock.calls[1][2].timeoutMs).toBeLessThanOrEqual(TIMEOUT_MS);
-    expect(run.mock.calls[1][2].timeoutMs).toBeGreaterThan(0);
+    expect(run.mock.calls[1][2].timeoutMs).toBe(TIMEOUT_MS - 3000);
+  });
+
+  it("names the budget the build actually got, not the whole one", async () => {
+    const { runner: r } = slowInstall(4000, {
+      code: -1,
+      stdout: "",
+      stderr: "",
+      timedOut: true,
+    });
+
+    const result = await buildGate(r, TIMEOUT_MS).run(context);
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/timed out after 1000ms/);
+    expect(result.reason).toMatch(/install took 4000ms of the 5000ms budget/);
+  });
+
+  it("says the build never started when the install consumed the budget", async () => {
+    const { runner: r, run } = slowInstall(TIMEOUT_MS);
+
+    const result = await buildGate(r, TIMEOUT_MS).run(context);
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/never started/);
+    expect(run).toHaveBeenCalledTimes(1);
   });
 });
