@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { createWorkspace } from "./workspace.js";
+import { createWorkspace, reapOrphans, Workspace } from "./workspace.js";
 import { CommandResult } from "./exec.js";
 
 const config = {
@@ -150,5 +150,58 @@ describe("createWorkspace", () => {
   it("produces a clear error when a git call times out, instead of an empty one", async () => {
     const run = vi.fn().mockResolvedValue({ code: -1, stdout: "", stderr: "", timedOut: true });
     await expect(createWorkspace(config, { run }).listWorktrees()).rejects.toThrow(/timed out/);
+  });
+});
+
+describe("reapOrphans", () => {
+  function workspaceListing(paths: string[]): Workspace & { destroy: ReturnType<typeof vi.fn> } {
+    return {
+      create: vi.fn<Workspace["create"]>(),
+      destroy: vi.fn<Workspace["destroy"]>().mockResolvedValue(undefined),
+      listWorktrees: vi.fn<Workspace["listWorktrees"]>().mockResolvedValue(paths),
+    };
+  }
+
+  it("removes every worktree left under the worker's own root", async () => {
+    const workspace = workspaceListing(["/repo", "/worktrees/CP-1", "/worktrees/CP-2"]);
+
+    expect(await reapOrphans(workspace, "/worktrees")).toBe(2);
+    expect(workspace.destroy.mock.calls.map(([key]) => key)).toEqual(["CP-1", "CP-2"]);
+  });
+
+  // "/worktrees-archive" starts with "/worktrees" as a string but is a different directory
+  it("leaves a sibling directory whose name merely starts the same alone", async () => {
+    const workspace = workspaceListing(["/worktrees-archive/CP-1", "/worktrees.bak/CP-2"]);
+
+    expect(await reapOrphans(workspace, "/worktrees")).toBe(0);
+    expect(workspace.destroy).not.toHaveBeenCalled();
+  });
+
+  it("leaves the repository checkout and every worktree outside the root alone", async () => {
+    const workspace = workspaceListing(["/repo", "/repo/.claude/worktrees/cp-158"]);
+
+    expect(await reapOrphans(workspace, "/worktrees")).toBe(0);
+    expect(workspace.destroy).not.toHaveBeenCalled();
+  });
+
+  it("ignores a nested path that names no task of its own", async () => {
+    const workspace = workspaceListing(["/worktrees/CP-1/inner", "/worktrees/"]);
+
+    expect(await reapOrphans(workspace, "/worktrees")).toBe(0);
+  });
+
+  it("reports nothing to reap when the worktree list cannot be read", async () => {
+    const workspace = workspaceListing([]);
+    workspace.listWorktrees = vi.fn<Workspace["listWorktrees"]>().mockRejectedValue(new Error("no git"));
+
+    expect(await reapOrphans(workspace, "/worktrees")).toBe(0);
+  });
+
+  it("keeps reaping after one removal fails", async () => {
+    const workspace = workspaceListing(["/worktrees/CP-1", "/worktrees/CP-2"]);
+    workspace.destroy.mockRejectedValueOnce(new Error("locked"));
+
+    expect(await reapOrphans(workspace, "/worktrees")).toBe(2);
+    expect(workspace.destroy).toHaveBeenCalledTimes(2);
   });
 });

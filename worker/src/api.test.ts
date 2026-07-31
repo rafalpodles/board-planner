@@ -113,6 +113,30 @@ describe("createApiClient", () => {
     expect(init.body).toBeUndefined();
   });
 
+  it("lists the ids of every column the board carries", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        columns: [
+          { id: "ready", role: "approved", order: 1 },
+          { id: "doing", role: "active", order: 2 },
+          { id: 7, role: "broken" },
+        ],
+      }),
+    });
+    const api = createApiClient(config, fetchMock as never);
+
+    expect(await api.columnIds()).toEqual(["ready", "doing"]);
+  });
+
+  it("reports an empty board rather than inventing columns", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
+    const api = createApiClient(config, fetchMock as never);
+
+    expect(await api.columnIds()).toEqual([]);
+  });
+
   it("charges the attempt when the release asks not to refund it", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
     const api = createApiClient(config, fetchMock as never);
