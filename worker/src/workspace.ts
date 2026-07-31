@@ -1,4 +1,4 @@
-import { join } from "path";
+import { join, sep } from "path";
 import { WorkerConfig } from "./config.js";
 import { Runner } from "./exec.js";
 
@@ -8,6 +8,21 @@ export interface Workspace {
   create(taskKey: string, slug: string): Promise<string>;
   destroy(taskKey: string): Promise<void>;
   listWorktrees(): Promise<string[]>;
+}
+
+// A worktree under the worker's own root belongs to a run that died with its process. Nothing
+// holds it, and leaving it there makes the next attempt on that task collide with its own branch
+export async function reapOrphans(workspace: Workspace, worktreeRoot: string): Promise<number> {
+  const prefix = worktreeRoot.endsWith(sep) ? worktreeRoot : `${worktreeRoot}${sep}`;
+  const orphans = (await workspace.listWorktrees().catch(() => []))
+    .filter((path) => path.startsWith(prefix))
+    .map((path) => path.slice(prefix.length))
+    .filter((taskKey) => taskKey.length > 0 && !taskKey.includes(sep));
+
+  for (const taskKey of orphans) {
+    await workspace.destroy(taskKey).catch(() => {});
+  }
+  return orphans.length;
 }
 
 export function createWorkspace(config: WorkerConfig, runner: Runner): Workspace {

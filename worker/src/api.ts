@@ -15,6 +15,7 @@ export interface ApiClient {
   comment(taskId: string, body: string): Promise<void>;
   release(taskId: string, options?: { refund?: boolean }): Promise<void>;
   statusIds(): Promise<StatusIds>;
+  columnIds(): Promise<string[]>;
 }
 
 interface RawTask {
@@ -65,6 +66,14 @@ export function createApiClient(config: WorkerConfig, fetchImpl: Fetch = fetch):
       throw new Error(`${method} ${path} failed: ${response.status} ${detail}`);
     }
     return response;
+  }
+
+  async function readColumns(): Promise<BoardColumn[]> {
+    const body = (await (await send("", "GET")).json()) as { columns?: unknown };
+    return (Array.isArray(body.columns) ? body.columns : [])
+      .map(toColumn)
+      .filter((column): column is BoardColumn => column !== null)
+      .sort((a, b) => a.order - b.order);
   }
 
   let projectKey = "";
@@ -120,14 +129,12 @@ export function createApiClient(config: WorkerConfig, fetchImpl: Fetch = fetch):
       );
     },
 
-    async statusIds() {
-      const response = await send("", "GET");
-      const body = (await response.json()) as { columns?: unknown };
-      const columns = (Array.isArray(body.columns) ? body.columns : [])
-        .map(toColumn)
-        .filter((column): column is BoardColumn => column !== null)
-        .sort((a, b) => a.order - b.order);
+    async columnIds() {
+      return (await readColumns()).map((column) => column.id);
+    },
 
+    async statusIds() {
+      const columns = await readColumns();
       const withRole = (role: string) => columns.filter((column) => column.role === role);
       const review = withRole("review");
 
