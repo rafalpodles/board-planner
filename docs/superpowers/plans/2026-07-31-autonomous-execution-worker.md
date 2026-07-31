@@ -1428,6 +1428,14 @@ export async function collectDiff(
 
   const patch = await runner.run("git", ["diff", `${baseBranch}...HEAD`], opts);
   return { changedLines, changedFiles, patch: patch.stdout, truncated: false };
+```
+
+> **As-built note.** The shipped `diff.ts` goes further than this skeleton: it checks the
+> patch call's exit code, resolves numstat rename shorthand to a real path, and bounds the
+> patch at 200k chars via a `boundPatch` helper that owns the `truncated` flag. The cut and
+> the flag are the same decision, so they cannot disagree. Read the module, not this block.
+
+```ts
 }
 ```
 
