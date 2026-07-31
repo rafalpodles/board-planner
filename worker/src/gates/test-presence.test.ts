@@ -100,10 +100,28 @@ describe("testPresenceGate", () => {
 
   it("accepts a documentation-only diff with no test", async () => {
     const result = await testPresenceGate().run(
-      context({ changedFiles: ["README.md", "package.json"], patch: "" })
+      context({ changedFiles: ["README.md", "docs/setup.md"], patch: "" })
     );
     expect(result.ok).toBe(true);
   });
+
+  it("accepts a lockfile-only dependency bump with no test", async () => {
+    const result = await testPresenceGate().run(
+      context({ changedFiles: ["package-lock.json"], patch: "" })
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it.each(["package.json", "worker/package.json", ".github/workflows/ci.yml"])(
+    "never exempts %s, which defines what a later gate runs",
+    async (path) => {
+      const result = await testPresenceGate().run(
+        context({ changedFiles: ["README.md", path], patch: "" })
+      );
+      expect(result.ok).toBe(false);
+      expect(result.reason).toMatch(/no test/i);
+    }
+  );
 
   it("rejects an empty diff rather than vacuously exempting it", async () => {
     const result = await testPresenceGate().run(context({ changedFiles: [], patch: "" }));

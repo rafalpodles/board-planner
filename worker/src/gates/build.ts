@@ -29,8 +29,12 @@ export function buildGate(runner: Runner, timeoutMs: number): Gate {
       }
 
       const remainingMs = deadline - Date.now();
+      const installMs = timeoutMs - remainingMs;
       if (remainingMs <= 0) {
-        return { ok: false, reason: `build timed out after ${timeoutMs}ms` };
+        return {
+          ok: false,
+          reason: `the dependency install consumed the whole ${timeoutMs}ms budget — the build never started`,
+        };
       }
 
       const build = await runner.run("npm", ["run", "build"], {
@@ -38,7 +42,10 @@ export function buildGate(runner: Runner, timeoutMs: number): Gate {
         timeoutMs: remainingMs,
       });
       if (build.timedOut) {
-        return { ok: false, reason: `build timed out after ${timeoutMs}ms` };
+        return {
+          ok: false,
+          reason: `build timed out after ${remainingMs}ms (dependency install took ${installMs}ms of the ${timeoutMs}ms budget)`,
+        };
       }
       if (build.code !== 0) {
         return { ok: false, reason: `build failed (exit ${build.code}):\n${outputTail(build)}` };

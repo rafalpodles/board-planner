@@ -3,6 +3,12 @@ import { Gate } from "../types.js";
 const TEST_FILE = /\.(test|spec)\.[jt]sx?$/;
 const NO_TEST_EXPECTED =
   /\.(md|mdx|txt|json|ya?ml|toml|lock|css|scss|svg|png|jpe?g|gif|webp|ico)$/i;
+// package.json defines the command the build gate runs, .github defines CI — neither may be waved through untested
+const NEVER_EXEMPT = /(^|\/)package\.json$|(^|\/)\.github\//;
+
+function exemptFromTests(file: string): boolean {
+  return NO_TEST_EXPECTED.test(file) && !NEVER_EXEMPT.test(file);
+}
 
 function addsTestLines(patch: string): boolean {
   let inTestFile = false;
@@ -23,7 +29,7 @@ export function testPresenceGate(): Gate {
       if (diff.changedFiles.length === 0) {
         return { ok: false, reason: "the branch has no committed changes" };
       }
-      if (diff.changedFiles.every((file) => NO_TEST_EXPECTED.test(file))) {
+      if (diff.changedFiles.every(exemptFromTests)) {
         return { ok: true, reason: "" };
       }
 
