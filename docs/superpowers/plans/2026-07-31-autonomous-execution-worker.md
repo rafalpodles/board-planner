@@ -2386,6 +2386,34 @@ git commit -m "feat(worker): pull request creation and merge (CP-158)"
 
 ### Task 15: Task pipeline
 
+**Requirements accumulated from earlier tasks' reviews.** Each of these was found by a review
+of the task that produced the interface, and each is a defect if the pipeline does not honour
+it. They are requirements, not suggestions.
+
+1. **Validate the board before claiming anything.** `api.statusIds()` falls back to the seeded
+   literals when a role is absent from the board, and `changeStatus` then rejects those ids
+   with a 400. A worker that claims into a board it cannot route out of only manufactures
+   stranded work — a merged PR and a task stuck in the active column. Resolve the statuses
+   once at startup, verify every role mapped to a column the board actually contains, and
+   refuse to claim if not.
+2. **Resolve `statusIds()` per claimed task, not once per process.** A board reconfigured
+   mid-run silently reintroduces the 400s otherwise.
+3. **Pass `config.baseBranch` into `createDelivery`.** `--base` is optional in `Delivery`, so
+   without this a PR targets the repository's default branch, gets merged, and is reported as
+   a success with the work on the wrong branch.
+4. **Do not swallow the gate-rejection push.** `push` throws on a stale lease, and the
+   worktree is discarded immediately after — so a swallowed failure destroys the only copy of
+   the rejected work while the board comment tells a human to go inspect a branch that does
+   not exist. If the push fails, say so in the comment.
+5. **Assert a clean worktree after the executor returns, before the gates run.** The executor
+   runs with `bypassPermissions` in that worktree and `collectDiff` only sees committed
+   changes. An agent can write `.claude/settings.json` or `CLAUDE.md` and simply never
+   `git add` it: invisible to every gate, still loaded by the reviewer Claude spawned in that
+   directory. `git status --porcelain` must be empty; if it is not, route to human review.
+6. **Construct the reporter per task.** Its release-dedupe state is per-factory-call; a
+   process-lifetime reporter would suppress a second task's release comment.
+
+
 Wires claim → worktree → execute → gates → deliver → report, with worktree cleanup guaranteed.
 
 **Files:**
