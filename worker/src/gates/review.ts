@@ -3,6 +3,9 @@ import { Gate, GateContext } from "../types.js";
 
 const MAX_REASON_CHARS = 2000;
 
+const AGENT_INSTRUCTION_FILE =
+  /(^|\/)(CLAUDE(\.local)?\.md|AGENTS(\.local)?\.md|\.mcp\.json)$|(^|\/)\.claude\//i;
+
 const VERDICT_SCHEMA = {
   type: "object",
   properties: {
@@ -65,6 +68,11 @@ function outputTail(result: CommandResult): string {
   return `[output truncated to the last ${MAX_REASON_CHARS} characters]\n${output.slice(-MAX_REASON_CHARS)}`;
 }
 
+function capped(reason: string): string {
+  if (reason.length <= MAX_REASON_CHARS) return reason;
+  return `${reason.slice(0, MAX_REASON_CHARS)}\n[reason truncated to ${MAX_REASON_CHARS} characters]`;
+}
+
 function buildPrompt(context: GateContext): string {
   const criteria = context.task.acceptanceCriteria.length
     ? `\nAcceptance criteria:\n${context.task.acceptanceCriteria.map((c) => `- ${c}`).join("\n")}`
@@ -85,6 +93,19 @@ export function reviewGate(runner: Runner, timeoutMs: number): Gate {
   return {
     name: "review",
     async run(context) {
+      // The CLI loads CLAUDE.md, .claude/ and .mcp.json from its cwd as instructions and
+      // configuration, above any "untrusted data" boundary the prompt can draw — so a diff
+      // that writes them would be handing the reviewer its own instructions
+      const instructionFiles = context.diff.changedFiles.filter((file) =>
+        AGENT_INSTRUCTION_FILE.test(file)
+      );
+      if (instructionFiles.length > 0) {
+        return {
+          ok: false,
+          reason: `the change edits the agent's own instructions or configuration (${instructionFiles.join(", ")}), which the reviewer would load from the worktree as instructions — a human has to review this, not an agent running inside it`,
+        };
+      }
+
       // A reviewer cannot approve what it was not shown, and a diff long enough
       // to be cut is exactly the kind that hides something past the cut
       if (context.diff.truncated) {
@@ -136,13 +157,13 @@ export function reviewGate(runner: Runner, timeoutMs: number): Gate {
       if (!verdict) {
         return {
           ok: false,
-          reason: "the review could not be completed: the verdict did not match the required shape",
+          reason: `the review could not be completed: the verdict did not match the required shape\n${outputTail(result)}`,
         };
       }
 
       return verdict.approved
-        ? { ok: true, reason: verdict.reason }
-        : { ok: false, reason: `the reviewer rejected the change: ${verdict.reason}` };
+        ? { ok: true, reason: capped(verdict.reason) }
+        : { ok: false, reason: `the reviewer rejected the change: ${capped(verdict.reason)}` };
     },
   };
 }

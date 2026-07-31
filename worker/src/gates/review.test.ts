@@ -102,6 +102,62 @@ describe("reviewGate", () => {
     expect(promptOf(run)).not.toContain("I did exactly what the task asked");
   });
 
+  it.each([
+    "CLAUDE.md",
+    "worker/CLAUDE.md",
+    "CLAUDE.local.md",
+    "AGENTS.md",
+    ".mcp.json",
+    ".claude/settings.json",
+    ".claude/settings.local.json",
+    ".claude/hooks/pre-commit.sh",
+    "docs/.claude/agents/reviewer.md",
+    "claude.md",
+  ])("rejects a diff touching %s without spawning a reviewer", async (file) => {
+    const { runner, run } = claudeReturning({ approved: true, reason: "" });
+
+    const result = await reviewGate(runner, TIMEOUT_MS).run(
+      context({ changedFiles: ["src/a.ts", file] })
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain(file);
+    expect(result.reason).toMatch(/human/i);
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("still reviews a diff whose paths merely resemble the instruction files", async () => {
+    const { runner, run } = claudeReturning({ approved: true, reason: "fine" });
+
+    const result = await reviewGate(runner, TIMEOUT_MS).run(
+      context({ changedFiles: ["src/claude.ts", "docs/CLAUDE.md.template", "src/mcp.json"] })
+    );
+
+    expect(result.ok).toBe(true);
+    expect(run).toHaveBeenCalled();
+  });
+
+  it("gives the reviewer read-only tools and no permission bypass", async () => {
+    const { runner, run } = claudeReturning({ approved: true, reason: "" });
+
+    await reviewGate(runner, TIMEOUT_MS).run(context());
+
+    const args = run.mock.calls[0][1];
+    expect(args[args.indexOf("--allowedTools") + 1]).toBe("Read Grep Glob");
+    expect(args).not.toContain("--permission-mode");
+    expect(args[args.indexOf("--model") + 1]).toBe("opus");
+  });
+
+  it("asks for a schema-enforced verdict", async () => {
+    const { runner, run } = claudeReturning({ approved: true, reason: "" });
+
+    await reviewGate(runner, TIMEOUT_MS).run(context());
+
+    const args = run.mock.calls[0][1];
+    expect(args[args.indexOf("--output-format") + 1]).toBe("json");
+    expect(args[args.indexOf("--json-schema") + 1]).toContain('"required":["approved","reason"]');
+  });
+
   it("rejects a truncated diff without spawning a reviewer", async () => {
     const { runner, run } = claudeReturning({ approved: true, reason: "" });
 
@@ -141,13 +197,23 @@ describe("reviewGate", () => {
     expect(run.mock.calls[0][2].env?.PATH).toBe(process.env.PATH);
   });
 
-  it("fails closed when the reviewer output cannot be parsed", async () => {
+  it("fails closed when the reviewer output cannot be parsed, keeping the raw output", async () => {
     const { runner } = claudeStdout("garbage");
 
     const result = await reviewGate(runner, TIMEOUT_MS).run(context());
 
     expect(result.ok).toBe(false);
     expect(result.reason).toMatch(/could not be completed/i);
+    expect(result.reason).toMatch(/garbage/);
+  });
+
+  it.each([true, false])("caps a runaway reviewer reason (approved: %s)", async (approved) => {
+    const { runner } = claudeReturning({ approved, reason: "x".repeat(5000) });
+
+    const result = await reviewGate(runner, TIMEOUT_MS).run(context());
+
+    expect(result.reason.length).toBeLessThan(2200);
+    expect(result.reason).toMatch(/truncated/i);
   });
 
   it("fails closed on a timeout and says the review never ran", async () => {
