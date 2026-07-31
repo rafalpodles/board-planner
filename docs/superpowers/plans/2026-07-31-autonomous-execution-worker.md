@@ -1945,11 +1945,13 @@ export function buildGates(config: WorkerConfig, runner: Runner): Gate[] {
 }
 ```
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add worker/src/gates/review.ts worker/src/gates/review.test.ts worker/src/gates/index.ts
-git commit -m "feat(worker): review gate and gate ordering (CP-158)"
+git add worker/src/gates/review.ts worker/src/gates/review.test.ts \
+        worker/src/gates/test-run.ts worker/src/gates/test-run.test.ts \
+        worker/src/gates/index.ts
+git commit -m "feat(worker): review and test-run gates, gate ordering (CP-158)"
 ```
 
 ---
