@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
+import { StatusIds } from "./api.js";
 import { createReporter } from "./reporter.js";
 import { ClaimedTask } from "./types.js";
 
@@ -12,69 +13,82 @@ const task: ClaimedTask = {
   attempts: 1,
 };
 
+// Deliberately none of the seeded ids, so any surviving literal fails
+const statuses: StatusIds = { approved: "ready", review: "checking", done: "shipped" };
+
 function apiSpy() {
   return {
     claim: vi.fn(),
     setStatus: vi.fn<(taskId: string, status: string) => Promise<void>>().mockResolvedValue(undefined),
     comment: vi.fn<(taskId: string, body: string) => Promise<void>>().mockResolvedValue(undefined),
+    release: vi.fn<(taskId: string) => Promise<void>>().mockResolvedValue(undefined),
+    statusIds: vi.fn<() => Promise<StatusIds>>().mockResolvedValue(statuses),
   };
 }
 
 describe("createReporter", () => {
-  it("routes a blocked task to needs_human_review with the reason", async () => {
+  it("routes a blocked task to the board's review column with the reason", async () => {
     const api = apiSpy();
-    await createReporter(api).blocked(task, "requirements are ambiguous");
+    await createReporter(api, statuses).blocked(task, "requirements are ambiguous");
 
-    expect(api.setStatus).toHaveBeenCalledWith("t1", "needs_human_review");
+    expect(api.setStatus).toHaveBeenCalledWith("t1", "checking");
     expect(api.comment.mock.calls[0][1]).toMatch(/requirements are ambiguous/);
   });
 
   it("names the gate and the pushed branch when a gate rejects", async () => {
     const api = apiSpy();
-    await createReporter(api).gateRejected(task, "diff-size", "diff is 900 lines, limit is 400", "cp-158/worker");
+    await createReporter(api, statuses).gateRejected(task, "diff-size", "diff is 900 lines, limit is 400", "cp-158/worker");
 
-    expect(api.setStatus).toHaveBeenCalledWith("t1", "needs_human_review");
+    expect(api.setStatus).toHaveBeenCalledWith("t1", "checking");
     expect(api.comment.mock.calls[0][1]).toMatch(/diff-size/);
     expect(api.comment.mock.calls[0][1]).toMatch(/900 lines/);
     expect(api.comment.mock.calls[0][1]).toMatch(/cp-158\/worker/);
   });
 
-  it("returns a released task to todo", async () => {
+  it("releases through the release endpoint so the attempt is given back", async () => {
     const api = apiSpy();
-    await createReporter(api).released(task, "usage limit reached");
+    await createReporter(api, statuses).released(task, "usage limit reached");
 
-    expect(api.setStatus).toHaveBeenCalledWith("t1", "todo");
+    expect(api.release).toHaveBeenCalledWith("t1");
+    expect(api.setStatus).not.toHaveBeenCalled();
     expect(api.comment.mock.calls[0][1]).toMatch(/usage limit reached/);
   });
 
-  it("closes a merged task as done with the PR url", async () => {
+  it("closes a merged task in the board's done column with the PR url", async () => {
     const api = apiSpy();
-    await createReporter(api).merged(task, "https://github.com/x/y/pull/7", "added the thing");
+    await createReporter(api, statuses).merged(task, "https://github.com/x/y/pull/7", "added the thing");
 
-    expect(api.setStatus).toHaveBeenCalledWith("t1", "done");
+    expect(api.setStatus).toHaveBeenCalledWith("t1", "shipped");
     expect(api.comment.mock.calls[0][1]).toMatch(/pull\/7/);
     expect(api.comment.mock.calls[0][1]).toMatch(/added the thing/);
   });
 
   it("comments before it moves the task, so the reason survives a failed status update", async () => {
     const api = apiSpy();
-    await createReporter(api).merged(task, "https://x/pull/7", "done");
+    await createReporter(api, statuses).merged(task, "https://x/pull/7", "done");
 
     expect(api.comment.mock.invocationCallOrder[0]).toBeLessThan(api.setStatus.mock.invocationCallOrder[0]);
+  });
+
+  it("comments before it releases, so the reason survives a failed release", async () => {
+    const api = apiSpy();
+    await createReporter(api, statuses).released(task, "usage limit reached");
+
+    expect(api.comment.mock.invocationCallOrder[0]).toBeLessThan(api.release.mock.invocationCallOrder[0]);
   });
 
   it("comments even when the status update fails, so nothing is silently lost", async () => {
     const api = apiSpy();
     api.setStatus.mockRejectedValue(new Error("boom"));
-    await expect(createReporter(api, vi.fn()).blocked(task, "x")).resolves.toBeUndefined();
+    await expect(createReporter(api, statuses, vi.fn()).blocked(task, "x")).resolves.toBeUndefined();
     expect(api.comment).toHaveBeenCalled();
   });
 
   it("still moves the task when the comment fails", async () => {
     const api = apiSpy();
     api.comment.mockRejectedValue(new Error("boom"));
-    await expect(createReporter(api, vi.fn()).blocked(task, "x")).resolves.toBeUndefined();
-    expect(api.setStatus).toHaveBeenCalledWith("t1", "needs_human_review");
+    await expect(createReporter(api, statuses, vi.fn()).blocked(task, "x")).resolves.toBeUndefined();
+    expect(api.setStatus).toHaveBeenCalledWith("t1", "checking");
   });
 
   it("survives an api client that throws synchronously", async () => {
@@ -85,7 +99,15 @@ describe("createReporter", () => {
     api.setStatus.mockImplementation(() => {
       throw new Error("no fetch");
     });
-    await expect(createReporter(api, vi.fn()).merged(task, "url", "s")).resolves.toBeUndefined();
+    await expect(createReporter(api, statuses, vi.fn()).merged(task, "url", "s")).resolves.toBeUndefined();
+  });
+
+  it("survives a release endpoint that throws synchronously", async () => {
+    const api = apiSpy();
+    api.release.mockImplementation(() => {
+      throw new Error("no fetch");
+    });
+    await expect(createReporter(api, statuses, vi.fn()).released(task, "usage limit reached")).resolves.toBeUndefined();
   });
 
   it("logs to stderr by default so an unattended run leaves a trace", async () => {
@@ -93,7 +115,7 @@ describe("createReporter", () => {
     api.setStatus.mockRejectedValue(new Error("board is down"));
     const stderr = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    await createReporter(api).blocked(task, "x");
+    await createReporter(api, statuses).blocked(task, "x");
 
     expect(stderr).toHaveBeenCalledTimes(1);
     stderr.mockRestore();
@@ -104,17 +126,29 @@ describe("createReporter", () => {
     api.setStatus.mockRejectedValue(new Error("board is down"));
     const log = vi.fn();
 
-    await createReporter(api, log).blocked(task, "x");
+    await createReporter(api, statuses, log).blocked(task, "x");
 
     expect(log).toHaveBeenCalledTimes(1);
     expect(log.mock.calls[0][0]).toMatch(/CP-158/);
-    expect(log.mock.calls[0][0]).toMatch(/needs_human_review/);
+    expect(log.mock.calls[0][0]).toMatch(/checking/);
+    expect(log.mock.calls[0][0]).toMatch(/board is down/);
+  });
+
+  it("logs a failed release instead of dropping the task silently", async () => {
+    const api = apiSpy();
+    api.release.mockRejectedValue(new Error("board is down"));
+    const log = vi.fn();
+
+    await createReporter(api, statuses, log).released(task, "usage limit reached");
+
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(log.mock.calls[0][0]).toMatch(/CP-158/);
     expect(log.mock.calls[0][0]).toMatch(/board is down/);
   });
 
   it("caps an oversized agent-authored reason", async () => {
     const api = apiSpy();
-    await createReporter(api).blocked(task, "x".repeat(50_000));
+    await createReporter(api, statuses).blocked(task, "x".repeat(50_000));
 
     const body = api.comment.mock.calls[0][1];
     expect(body.length).toBeLessThan(3000);
@@ -123,25 +157,36 @@ describe("createReporter", () => {
 
   it("caps an oversized agent-authored summary", async () => {
     const api = apiSpy();
-    await createReporter(api).merged(task, "https://x/pull/7", "y".repeat(50_000));
+    await createReporter(api, statuses).merged(task, "https://x/pull/7", "y".repeat(50_000));
 
     expect(api.comment.mock.calls[0][1].length).toBeLessThan(3000);
   });
 
   it("does not repeat the release comment when the same task is released for the same reason", async () => {
     const api = apiSpy();
-    const reporter = createReporter(api);
+    const reporter = createReporter(api, statuses);
 
     await reporter.released(task, "usage limit reached");
     await reporter.released(task, "usage limit reached");
 
     expect(api.comment).toHaveBeenCalledTimes(1);
-    expect(api.setStatus).toHaveBeenCalledTimes(2);
+    expect(api.release).toHaveBeenCalledTimes(2);
+  });
+
+  it("comments for every task released for the same reason, not just the first", async () => {
+    const api = apiSpy();
+    const reporter = createReporter(api, statuses);
+
+    await reporter.released(task, "usage limit reached");
+    await reporter.released({ ...task, taskId: "t2", taskKey: "CP-159" }, "usage limit reached");
+
+    expect(api.comment).toHaveBeenCalledTimes(2);
+    expect(api.comment.mock.calls[1][0]).toBe("t2");
   });
 
   it("retries the release comment when the first one never landed", async () => {
     const api = apiSpy();
-    const reporter = createReporter(api, vi.fn());
+    const reporter = createReporter(api, statuses, vi.fn());
     api.comment.mockRejectedValueOnce(new Error("board is down"));
 
     await reporter.released(task, "usage limit reached");
@@ -152,7 +197,7 @@ describe("createReporter", () => {
 
   it("comments again when a release reason changes", async () => {
     const api = apiSpy();
-    const reporter = createReporter(api);
+    const reporter = createReporter(api, statuses);
 
     await reporter.released(task, "usage limit reached");
     await reporter.released(task, "the run timed out");
@@ -162,7 +207,7 @@ describe("createReporter", () => {
 
   it("comments again on a release that follows another outcome", async () => {
     const api = apiSpy();
-    const reporter = createReporter(api);
+    const reporter = createReporter(api, statuses);
 
     await reporter.released(task, "usage limit reached");
     await reporter.blocked(task, "ambiguous");
@@ -173,9 +218,9 @@ describe("createReporter", () => {
 
   it("names the attempt it gave up on without mangling the grammar", async () => {
     const api = apiSpy();
-    await createReporter(api).failed(task, "merge failed");
+    await createReporter(api, statuses).failed(task, "merge failed");
 
-    expect(api.setStatus).toHaveBeenCalledWith("t1", "needs_human_review");
+    expect(api.setStatus).toHaveBeenCalledWith("t1", "checking");
     expect(api.comment.mock.calls[0][1]).toMatch(/attempt 1\b/);
     expect(api.comment.mock.calls[0][1]).not.toMatch(/1 attempts/);
     expect(api.comment.mock.calls[0][1]).toMatch(/merge failed/);
@@ -183,7 +228,7 @@ describe("createReporter", () => {
 
   it("omits the attempt count when the board did not report one", async () => {
     const api = apiSpy();
-    await createReporter(api).failed({ ...task, attempts: 0 }, "merge failed");
+    await createReporter(api, statuses).failed({ ...task, attempts: 0 }, "merge failed");
 
     expect(api.comment.mock.calls[0][1]).not.toMatch(/attempt 0/);
     expect(api.comment.mock.calls[0][1]).toMatch(/merge failed/);

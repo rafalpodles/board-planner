@@ -563,3 +563,24 @@ export async function claimNextTask(
     { returnDocument: "after", sort: { order: 1, createdAt: 1 } }
   );
 }
+
+export async function releaseTask(projectId: string, taskId: string): Promise<ITask | null> {
+  await connectDB();
+
+  const project = await Project.findById(projectId, "columns").lean();
+  const columns = getProjectColumns(project);
+  const approved = columns.find((c) => c.role === "approved")?.id;
+  const active = columns.filter((c) => c.role === "active").map((c) => c.id);
+  if (!approved || active.length === 0) return null;
+
+  return Task.findOneAndUpdate(
+    {
+      _id: taskId,
+      project: projectId,
+      status: { $in: active },
+      "execution.attempts": { $gt: 0 },
+    },
+    { $set: { status: approved }, $inc: { "execution.attempts": -1 } },
+    { returnDocument: "after" }
+  );
+}
