@@ -240,20 +240,57 @@ vi.mock("@/models/project", () => ({ Project: { findById } }));
 const { claimNextTask } = await import("./task-service");
 
 describe("claimNextTask", () => {
+  // A non-default board on purpose: with the seeded columns the approved id is
+  // literally "todo" and the active id "in_progress", so a hardcoding
+  // implementation would pass every assertion below
+  const customBoard = {
+    columns: [
+      { id: "ready", label: "Ready", role: "approved", order: 1 },
+      { id: "doing", label: "Doing", role: "active", order: 2 },
+    ],
+  };
+
   beforeEach(() => {
     findOneAndUpdate.mockReset();
     findById.mockReset();
-    findById.mockReturnValue({ lean: () => Promise.resolve({ columns: null }) });
+    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
   });
 
-  it("filters on the approved-role column so an in_progress task cannot be re-claimed", async () => {
+  it("derives the source column from the approved role, not a fixed id", async () => {
     findOneAndUpdate.mockResolvedValue({ _id: "t1", taskNumber: 1 });
 
     await claimNextTask("p1", "worker-a", "run-1");
 
     const filter = findOneAndUpdate.mock.calls[0][0];
-    expect(filter.status).toEqual({ $in: ["todo"] });
+    expect(filter.status).toEqual({ $in: ["ready"] });
     expect(filter.project).toBe("p1");
+  });
+
+  it("derives the claimed status from the active role, not a fixed id", async () => {
+    findOneAndUpdate.mockResolvedValue({ _id: "t1", taskNumber: 1 });
+
+    await claimNextTask("p1", "worker-a", "run-1");
+
+    expect(findOneAndUpdate.mock.calls[0][1].$set.status).toBe("doing");
+  });
+
+  it("returns null when the board has no active column to claim into", async () => {
+    findById.mockReturnValue({
+      lean: () => Promise.resolve({ columns: [{ id: "ready", role: "approved", order: 1 }] }),
+    });
+
+    expect(await claimNextTask("p1", "worker-a", "run-1")).toBeNull();
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("orders by board position, never lexicographically by priority", async () => {
+    findOneAndUpdate.mockResolvedValue({ _id: "t1", taskNumber: 1 });
+
+    await claimNextTask("p1", "worker-a", "run-1");
+
+    const options = findOneAndUpdate.mock.calls[0][2];
+    expect(options.sort).toEqual({ order: 1, createdAt: 1 });
+    expect(options.sort.priority).toBeUndefined();
   });
 
   it("claims tasks that predate the execution subdocument", async () => {
@@ -274,7 +311,6 @@ describe("claimNextTask", () => {
     await claimNextTask("p1", "worker-a", "run-1");
 
     const update = findOneAndUpdate.mock.calls[0][1];
-    expect(update.$set.status).toBe("in_progress");
     expect(update.$set["execution.workerId"]).toBe("worker-a");
     expect(update.$set["execution.runId"]).toBe("run-1");
     expect(update.$inc["execution.attempts"]).toBe(1);
@@ -305,10 +341,10 @@ export async function claimNextTask(
   await connectDB();
 
   const project = await Project.findById(projectId, "columns").lean();
-  const approved = getProjectColumns(project)
-    .filter((c) => c.role === "approved")
-    .map((c) => c.id);
-  if (approved.length === 0) return null;
+  const columns = getProjectColumns(project);
+  const approved = columns.filter((c) => c.role === "approved").map((c) => c.id);
+  const activeStatus = columns.find((c) => c.role === "active")?.id;
+  if (approved.length === 0 || !activeStatus) return null;
 
   return Task.findOneAndUpdate(
     {
@@ -324,7 +360,7 @@ export async function claimNextTask(
     },
     {
       $set: {
-        status: ACTIVE_STATUS,
+        status: activeStatus,
         "execution.workerId": workerId,
         "execution.runId": runId,
         "execution.startedAt": new Date(),
@@ -332,7 +368,7 @@ export async function claimNextTask(
       },
       $inc: { "execution.attempts": 1 },
     },
-    { returnDocument: "after", sort: { priority: -1, order: 1, createdAt: 1 } }
+    { returnDocument: "after", sort: { order: 1, createdAt: 1 } }
   );
 }
 ```
@@ -341,8 +377,15 @@ Add near the top of the file:
 
 ```ts
 export const MAX_EXECUTION_ATTEMPTS = 3;
-const ACTIVE_STATUS = "in_progress";
 ```
+
+Two things this deliberately does **not** do. It does not hardcode `"in_progress"` —
+column ids are slugified from user-chosen labels, and this project's automation keys on
+the column *role*, never the display name, so the active status is derived exactly like
+the approved set. And it does not sort on `priority`: that field is a string enum, so
+Mongo would compare it lexicographically and `-1` would yield urgent, medium, low, high —
+claiming `low` ahead of `high`. Board `order` is the user's own expression of sequence,
+with `createdAt` breaking ties.
 
 Ensure `getProjectColumns` is imported from `./columns` (the file already imports `getColumnIds` from there).
 
