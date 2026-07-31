@@ -1,4 +1,5 @@
 import { ApiClient, StatusIds } from "./api.js";
+import { Outbox, OutboxOp } from "./outbox.js";
 import { ClaimedTask } from "./types.js";
 
 const MAX_REASON_CHARS = 2000;
@@ -22,16 +23,24 @@ function capped(text: string): string {
 export function createReporter(
   api: ApiClient,
   statusIds: StatusIds,
-  log: Log = (message) => console.error(message)
+  log: Log = (message) => console.error(message),
+  outbox?: Outbox
 ): Reporter {
   const lastRelease = new Map<string, string>();
+
+  // Losing a report strands the task: the work is merged but the board still shows it active,
+  // and claimNextTask only ever looks at the approved column
+  function queue(task: ClaimedTask, op: OutboxOp, what: string, error: unknown): void {
+    log(`${task.taskKey}: could not ${what}: ${String(error)}`);
+    if (outbox) outbox.add(op);
+  }
 
   async function comment(task: ClaimedTask, body: string): Promise<boolean> {
     try {
       await api.comment(task.taskId, body);
       return true;
     } catch (error) {
-      log(`${task.taskKey}: could not post the board comment: ${String(error)}`);
+      queue(task, { kind: "comment", taskId: task.taskId, body }, "post the board comment", error);
       return false;
     }
   }
@@ -40,7 +49,12 @@ export function createReporter(
     try {
       await api.setStatus(task.taskId, status);
     } catch (error) {
-      log(`${task.taskKey}: could not move the task to ${status}: ${String(error)}`);
+      queue(
+        task,
+        { kind: "status", taskId: task.taskId, status },
+        `move the task to ${status}`,
+        error
+      );
     }
   }
 
@@ -48,7 +62,12 @@ export function createReporter(
     try {
       await (options ? api.release(task.taskId, options) : api.release(task.taskId));
     } catch (error) {
-      log(`${task.taskKey}: could not return the task to the queue: ${String(error)}`);
+      queue(
+        task,
+        { kind: "release", taskId: task.taskId, refund: options?.refund !== false },
+        "return the task to the queue",
+        error
+      );
     }
   }
 

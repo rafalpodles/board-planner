@@ -1,5 +1,5 @@
 import { readFileSync, statSync } from "fs";
-import { hostname } from "os";
+import { homedir, hostname } from "os";
 import { join } from "path";
 
 export interface WorkerConfig {
@@ -8,6 +8,7 @@ export interface WorkerConfig {
   projectId: string;
   repoPath: string;
   worktreeRoot: string;
+  stateDir: string;
   baseBranch: string;
   pollIntervalMs: number;
   taskTimeoutMs: number;
@@ -73,6 +74,7 @@ export function loadConfig(env: Env, readSecret: SecretReader = readSecretFile):
     projectId: required(env, "CP_PROJECT_ID"),
     repoPath,
     worktreeRoot: env.CP_WORKTREE_ROOT?.trim() || join(repoPath, "..", "cp-worktrees"),
+    stateDir: env.CP_STATE_DIR?.trim() || join(homedir(), ".claudeplanner"),
     baseBranch: env.CP_BASE_BRANCH?.trim() || "main",
     pollIntervalMs: number(env, "CP_POLL_INTERVAL_MS", 30_000),
     taskTimeoutMs: number(env, "CP_TASK_TIMEOUT_MS", 1_800_000),

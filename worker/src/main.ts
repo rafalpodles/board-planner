@@ -1,4 +1,7 @@
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { dirname, join } from "path";
 import { createApiClient } from "./api.js";
+import { createOutbox, Store } from "./outbox.js";
 import { loadConfig } from "./config.js";
 import { createDelivery } from "./delivery.js";
 import { collectDiff } from "./diff.js";
@@ -12,17 +15,30 @@ import { createWorkspace, reapOrphans } from "./workspace.js";
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+function fileStore(path: string): Store {
+  return {
+    read: () => (existsSync(path) ? readFileSync(path, "utf8") : ""),
+    write: (text) => {
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, text, { mode: 0o600 });
+    },
+  };
+}
+
 async function main(): Promise<void> {
   const config = loadConfig(process.env);
   const runner = createRunner();
   const api = createApiClient(config);
   const workspace = createWorkspace(config, runner);
 
+  const outbox = createOutbox(fileStore(join(config.stateDir, "outbox.jsonl")));
+
   const deps: PipelineDeps = {
     config,
     api,
     columnIds: () => api.columnIds(),
-    createReporter,
+    createReporter: (client, statusIds) =>
+      createReporter(client, statusIds, (message) => console.error(message), outbox),
     createDelivery,
     workspace,
     executor: createExecutor(config, runner),
@@ -40,6 +56,12 @@ async function main(): Promise<void> {
     config,
     api,
     execute: (task) => runTask(deps, task),
+    async drain() {
+      const { delivered, pending, dropped } = await outbox.flush(api);
+      if (delivered || pending || dropped) {
+        console.log(`outbox: delivered ${delivered}, still pending ${pending}, dropped ${dropped}`);
+      }
+    },
     sleep,
   });
 

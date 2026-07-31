@@ -1,13 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const findOneAndUpdate = vi.fn();
+const updateMany = vi.fn();
 const findById = vi.fn();
 
 vi.mock("./db", () => ({ connectDB: vi.fn() }));
-vi.mock("@/models/task", () => ({ Task: { findOneAndUpdate } }));
+vi.mock("@/models/task", () => ({ Task: { findOneAndUpdate, updateMany } }));
 vi.mock("@/models/project", () => ({ Project: { findById } }));
 
-const { claimNextTask, releaseTask, MAX_EXECUTION_ATTEMPTS } = await import("./task-service");
+const { claimNextTask, releaseTask, releaseExpiredTasks, MAX_EXECUTION_ATTEMPTS, EXECUTION_LEASE_MS } =
+  await import("./task-service");
 
 // A non-default board on purpose: with the seeded columns the approved id is
 // literally "todo" and the active id "in_progress", so a hardcoding
@@ -235,5 +237,95 @@ describe("releaseTask charging the attempt", () => {
     const filter = findOneAndUpdate.mock.calls[0][0];
     expect(filter.status).toEqual({ $in: ["doing"] });
     expect(filter["execution.attempts"]).toBeUndefined();
+  });
+});
+
+describe("releaseExpiredTasks", () => {
+  const board = {
+    columns: [
+      { id: "ready", role: "approved", order: 1 },
+      { id: "doing", role: "active", order: 2 },
+      { id: "escalated", role: "review", order: 3, triggersPmReview: true },
+    ],
+  };
+  const now = new Date("2026-07-31T12:00:00.000Z");
+
+  beforeEach(() => {
+    updateMany.mockReset();
+    findById.mockReset();
+    findById.mockReturnValue({ lean: () => Promise.resolve(board) });
+    updateMany.mockResolvedValue({ modifiedCount: 0 });
+  });
+
+  it("only touches tasks whose lease has actually run out", async () => {
+    await releaseExpiredTasks("p1", now);
+
+    const filter = updateMany.mock.calls[0][0];
+    expect(filter.status).toEqual({ $in: ["doing"] });
+    expect(filter["execution.startedAt"]).toEqual({
+      $lt: new Date(now.getTime() - EXECUTION_LEASE_MS),
+    });
+    expect(filter.project).toBe("p1");
+  });
+
+  it("returns a task with attempts left to the queue", async () => {
+    await releaseExpiredTasks("p1", now);
+
+    const retryable = updateMany.mock.calls.find(
+      ([f]) => f["execution.attempts"]?.$lt === MAX_EXECUTION_ATTEMPTS
+    );
+    expect(retryable?.[1].$set.status).toBe("ready");
+  });
+
+  it("sends an exhausted task to the column humans watch, not back into the loop", async () => {
+    await releaseExpiredTasks("p1", now);
+
+    const spent = updateMany.mock.calls.find(
+      ([f]) => f["execution.attempts"]?.$gte === MAX_EXECUTION_ATTEMPTS
+    );
+    expect(spent?.[1].$set.status).toBe("escalated");
+  });
+
+  // Refunding would let a task that repeatedly outlives its worker cycle forever
+  it("never gives the attempt back", async () => {
+    await releaseExpiredTasks("p1", now);
+
+    for (const [, update] of updateMany.mock.calls) {
+      expect(JSON.stringify(update)).not.toContain("$inc");
+    }
+  });
+
+  it("counts everything it freed", async () => {
+    updateMany.mockResolvedValueOnce({ modifiedCount: 1 }).mockResolvedValueOnce({ modifiedCount: 2 });
+
+    expect(await releaseExpiredTasks("p1", now)).toBe(3);
+  });
+
+  it("holds an exhausted task in the queue when the board has no review column", async () => {
+    findById.mockReturnValue({
+      lean: () =>
+        Promise.resolve({
+          columns: [
+            { id: "ready", role: "approved", order: 1 },
+            { id: "doing", role: "active", order: 2 },
+          ],
+        }),
+    });
+
+    await releaseExpiredTasks("p1", now);
+
+    const spent = updateMany.mock.calls.find(
+      ([f]) => f["execution.attempts"]?.$gte === MAX_EXECUTION_ATTEMPTS
+    );
+    expect(spent?.[1].$set.status).toBe("ready");
+  });
+
+  it("does nothing on a board with no active column", async () => {
+    findById.mockReturnValue({
+      lean: () => Promise.resolve({ columns: [{ id: "ready", role: "approved", order: 1 }] }),
+    });
+
+    expect(await releaseExpiredTasks("p1", now)).toBe(0);
+    expect(updateMany).not.toHaveBeenCalled();
   });
 });
