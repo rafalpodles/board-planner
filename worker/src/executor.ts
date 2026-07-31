@@ -1,4 +1,5 @@
 import { WorkerConfig } from "./config.js";
+import { childEnv } from "./env.js";
 import { Runner } from "./exec.js";
 import { ClaimedTask, ExecutionResult, RunOutcome } from "./types.js";
 
@@ -95,8 +96,10 @@ export interface Executor {
 export function createExecutor(config: WorkerConfig, runner: Runner): Executor {
   return {
     async execute(task, worktreePath) {
-      const env = { ...process.env };
-      delete env.ANTHROPIC_API_KEY;
+      // The CLI authenticates from its logged-in session under HOME, so the allowlist both keeps
+      // ANTHROPIC_API_KEY out (which would bill per token) and keeps CP_API_TOKEN out of the
+      // hands of the agent it is about to run with bypassPermissions
+      const env = childEnv();
 
       const result = await runner.run(
         "claude",

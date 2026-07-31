@@ -2,7 +2,9 @@ import { CommandResult, Runner } from "../exec.js";
 import { Gate } from "../types.js";
 
 const MAX_REASON_CHARS = 2000;
-const INSTALL_ARGS = ["ci", "--no-audit", "--no-fund"];
+// --ignore-scripts: a lifecycle script from the worktree or any dependency would run as the
+// worker, outside the agent's tool allowlist and before the review gate reads a single line
+const INSTALL_ARGS = ["ci", "--ignore-scripts", "--no-audit", "--no-fund"];
 
 function outputTail(result: CommandResult): string {
   const output = [result.stdout, result.stderr].filter((stream) => stream.trim()).join("\n");
