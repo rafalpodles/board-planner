@@ -14,7 +14,6 @@ import { validateCustomFieldValues, sanitizeCustomFieldValues } from "@/lib/cust
 import { onTaskStatusChanged } from "@/lib/pm/triggers";
 
 export const MAX_EXECUTION_ATTEMPTS = 3;
-const ACTIVE_STATUS = "in_progress";
 
 export const taskPopulateFields = [
   { path: "assignee", select: "username fullName" },
@@ -534,10 +533,10 @@ export async function claimNextTask(
   await connectDB();
 
   const project = await Project.findById(projectId, "columns").lean();
-  const approved = getProjectColumns(project)
-    .filter((c) => c.role === "approved")
-    .map((c) => c.id);
-  if (approved.length === 0) return null;
+  const columns = getProjectColumns(project);
+  const approved = columns.filter((c) => c.role === "approved").map((c) => c.id);
+  const activeStatus = columns.find((c) => c.role === "active")?.id;
+  if (approved.length === 0 || !activeStatus) return null;
 
   return Task.findOneAndUpdate(
     {
@@ -553,7 +552,7 @@ export async function claimNextTask(
     },
     {
       $set: {
-        status: ACTIVE_STATUS,
+        status: activeStatus,
         "execution.workerId": workerId,
         "execution.runId": runId,
         "execution.startedAt": new Date(),
@@ -561,6 +560,6 @@ export async function claimNextTask(
       },
       $inc: { "execution.attempts": 1 },
     },
-    { returnDocument: "after", sort: { priority: -1, order: 1, createdAt: 1 } }
+    { returnDocument: "after", sort: { order: 1, createdAt: 1 } }
   );
 }
