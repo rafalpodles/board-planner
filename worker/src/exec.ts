@@ -1,4 +1,5 @@
 import { spawn } from "child_process";
+import { childEnv } from "./env.js";
 
 export interface CommandResult {
   code: number;
@@ -45,7 +46,7 @@ export function createRunner(): Runner {
         try {
           const child = spawn(command, args, {
             cwd: opts.cwd,
-            env: opts.env ?? process.env,
+            env: opts.env ?? childEnv(),
             stdio: ["ignore", "pipe", "pipe"],
           });
 

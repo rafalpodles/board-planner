@@ -1,3 +1,4 @@
+import { childEnv } from "./env.js";
 import { CommandResult, Runner } from "./exec.js";
 import { ClaimedTask } from "./types.js";
 
@@ -67,8 +68,14 @@ type MergeState = "merged" | "unmerged" | "unknown";
 export function createDelivery(runner: Runner, baseBranch?: string): Delivery {
   const baseArgs = baseBranch?.trim() ? ["--base", baseBranch.trim()] : [];
 
+  // Delivery runs our own commands, never agent-authored ones, so it is the one place that may
+  // carry the credentials git and gh need to reach the remote
   function run(command: string, args: string[], cwd: string): Promise<CommandResult> {
-    return runner.run(command, args, { cwd, timeoutMs: TIMEOUT_MS });
+    return runner.run(command, args, {
+      cwd,
+      timeoutMs: TIMEOUT_MS,
+      env: childEnv(["SSH_AUTH_SOCK", "GH_TOKEN", "GITHUB_TOKEN", "GH_CONFIG_DIR", "XDG_CONFIG_HOME"]),
+    });
   }
 
   async function mergeState(worktreePath: string, prUrl: string): Promise<MergeState> {

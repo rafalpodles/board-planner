@@ -69,3 +69,33 @@ describe("createRunner", () => {
     expect(result.timedOut).toBe(false);
   });
 });
+
+describe("the default child environment", () => {
+  // Every gate calls runner.run without an env of its own, so this default is what npm ci,
+  // npm run build and npm test actually inherit — including any dependency's lifecycle script
+  it("hands a spawned process none of the worker's secrets", async () => {
+    process.env.CP_API_TOKEN = "cp_secret_for_test";
+    try {
+      const result = await createRunner().run(
+        process.execPath,
+        ["-e", "console.log(process.env.CP_API_TOKEN ?? 'ABSENT')"],
+        { cwd: process.cwd(), timeoutMs: 10_000 }
+      );
+
+      expect(result.code).toBe(0);
+      expect(result.stdout.trim()).toBe("ABSENT");
+    } finally {
+      delete process.env.CP_API_TOKEN;
+    }
+  });
+
+  it("still hands it a PATH, or nothing would run at all", async () => {
+    const result = await createRunner().run(
+      process.execPath,
+      ["-e", "console.log(process.env.PATH ? 'SET' : 'MISSING')"],
+      { cwd: process.cwd(), timeoutMs: 10_000 }
+    );
+
+    expect(result.stdout.trim()).toBe("SET");
+  });
+});

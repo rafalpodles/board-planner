@@ -55,11 +55,24 @@ describe("buildGates", () => {
 
     expect(buildGates(config(), runner).map((gate) => gate.name)).toEqual([
       "diff-size",
+      "protected-paths",
       "test-presence",
       "build",
       "test-run",
       "review",
     ]);
+  });
+
+  // Cost ordering alone would put build ahead of protected-paths, and build runs npm on a tree
+  // the agent just wrote — executing its content before any gate has read it
+  it("reads the diff with every static gate before a single command runs against the worktree", () => {
+    const { runner } = spyRunner();
+    const names = buildGates(config(), runner).map((gate) => gate.name);
+
+    const firstExecuting = names.indexOf("build");
+    for (const staticGate of ["diff-size", "protected-paths", "test-presence"]) {
+      expect(names.indexOf(staticGate)).toBeLessThan(firstExecuting);
+    }
   });
 
   it("carries the configured diff caps into the first gate", async () => {

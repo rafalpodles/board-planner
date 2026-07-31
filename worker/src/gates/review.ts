@@ -3,8 +3,7 @@ import { Gate, GateContext } from "../types.js";
 
 const MAX_REASON_CHARS = 2000;
 
-const AGENT_INSTRUCTION_FILE =
-  /(^|\/)(CLAUDE(\.local)?\.md|AGENTS(\.local)?\.md|\.mcp\.json)$|(^|\/)\.claude\//i;
+import { AGENT_INSTRUCTION_FILE } from "./protected-paths.js";
 
 const VERDICT_SCHEMA = {
   type: "object",

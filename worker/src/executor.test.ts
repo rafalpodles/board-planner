@@ -197,3 +197,38 @@ describe("createExecutor", () => {
     expect(args[flagIndex + 1]).toMatch(/untrusted/i);
   });
 });
+
+describe("the environment handed to the agent", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  // The agent runs with bypassPermissions and has Bash. Anything in this environment is
+  // something it can read and use — CP_API_TOKEN would let it write to the board as the operator
+  it("carries no credential from the worker's own process", async () => {
+    vi.stubEnv("CP_API_TOKEN", "cp_secret");
+    vi.stubEnv("GH_TOKEN", "gho_secret");
+    vi.stubEnv("ANTHROPIC_API_KEY", "sk-secret");
+    const { runner, run } = runnerReturning({ code: 0, stdout: "{}", stderr: "", timedOut: false });
+
+    await createExecutor(config, runner).execute(task, "/wt");
+
+    const env = run.mock.calls[0][2].env;
+    expect(env.CP_API_TOKEN).toBeUndefined();
+    expect(env.GH_TOKEN).toBeUndefined();
+    expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(Object.values(env)).not.toContain("cp_secret");
+  });
+
+  it("still carries what the CLI needs to find its logged-in session", async () => {
+    vi.stubEnv("HOME", "/Users/rpo");
+    vi.stubEnv("PATH", "/usr/bin");
+    const { runner, run } = runnerReturning({ code: 0, stdout: "{}", stderr: "", timedOut: false });
+
+    await createExecutor(config, runner).execute(task, "/wt");
+
+    const env = run.mock.calls[0][2].env;
+    expect(env.HOME).toBe("/Users/rpo");
+    expect(env.PATH).toBe("/usr/bin");
+  });
+});

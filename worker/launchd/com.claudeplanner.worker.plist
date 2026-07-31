@@ -19,6 +19,8 @@
     <string>CP</string>
     <key>CP_REPO_PATH</key>
     <string>/Users/rpo/Documents/Projects/ClaudePlanner</string>
+    <key>CP_API_TOKEN_FILE</key>
+    <string>/Users/rpo/.claudeplanner/token</string>
     <key>HOME</key>
     <string>/Users/rpo</string>
     <key>PATH</key>

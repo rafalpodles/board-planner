@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { hostname } from "os";
 import { join } from "path";
 import { loadConfig } from "./config.js";
@@ -68,5 +68,49 @@ describe("loadConfig", () => {
 
   it("honours an explicit worker id override", () => {
     expect(loadConfig({ ...base, CP_WORKER_ID: "custom-worker" }).workerId).toBe("custom-worker");
+  });
+});
+
+describe("the api token", () => {
+  const base = {
+    CP_API_URL: "https://app.example.com",
+    CP_PROJECT_ID: "CP",
+    CP_REPO_PATH: "/repo",
+  };
+
+  it("reads it from a file when the environment does not carry it", () => {
+    const read = vi.fn().mockReturnValue("cp_from_file\n");
+
+    const config = loadConfig({ ...base, CP_API_TOKEN_FILE: "/secrets/token" }, read);
+
+    expect(config.apiToken).toBe("cp_from_file");
+    expect(read).toHaveBeenCalledWith("/secrets/token");
+  });
+
+  it("prefers an inline token, so a container needs no file", () => {
+    const read = vi.fn();
+
+    expect(loadConfig({ ...base, CP_API_TOKEN: "cp_inline" }, read).apiToken).toBe("cp_inline");
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it("names both ways when neither is set", () => {
+    expect(() => loadConfig(base, vi.fn())).toThrow(/CP_API_TOKEN or CP_API_TOKEN_FILE/);
+  });
+
+  it("refuses an empty secret file rather than authenticating as nobody", () => {
+    expect(() =>
+      loadConfig({ ...base, CP_API_TOKEN_FILE: "/secrets/token" }, () => "  \n")
+    ).toThrow(/empty file/);
+  });
+
+  it("lets the reader's own refusal through, so loose file permissions stop the boot", () => {
+    const read = vi.fn(() => {
+      throw new Error("/secrets/token is readable by group or others (mode 644)");
+    });
+
+    expect(() => loadConfig({ ...base, CP_API_TOKEN_FILE: "/secrets/token" }, read)).toThrow(
+      /readable by group or others/
+    );
   });
 });
