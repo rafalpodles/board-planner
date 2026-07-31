@@ -26,7 +26,7 @@ const SYSTEM_PROMPT = [
 ].join(" ");
 
 function isUsageLimit(text: string): boolean {
-  return /usage limit reached|rate limit|quota exceeded/i.test(text);
+  return /usage limit reached/i.test(text);
 }
 
 function buildPrompt(task: ClaimedTask): string {
@@ -123,13 +123,14 @@ export function createExecutor(config: WorkerConfig, runner: Runner): Executor {
 
       if (result.timedOut) return { kind: "timeout" };
 
-      if (result.code === 0) {
-        return parseExecutionResult(result.stdout);
-      }
+      const parsed = parseExecutionResult(result.stdout);
+      if (parsed.kind === "result") return parsed;
 
-      if (isUsageLimit(result.stderr) || isUsageLimit(result.stdout)) {
+      if (isUsageLimit(result.stdout) || isUsageLimit(result.stderr)) {
         return { kind: "usage_limit" };
       }
+
+      if (result.code === 0) return parsed;
       return { kind: "error", message: result.stderr || `claude exited ${result.code}` };
     },
   };

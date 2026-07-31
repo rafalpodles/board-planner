@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { createExecutor } from "./executor.js";
 
 const config = { taskTimeoutMs: 1000, apiBaseUrl: "https://app.example.com", apiToken: "cp_t" } as never;
@@ -19,6 +19,10 @@ function runnerReturning(result: Record<string, unknown>) {
 }
 
 describe("createExecutor", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("parses a schema-conforming result", async () => {
     const payload = {
       status: "completed",
@@ -40,6 +44,7 @@ describe("createExecutor", () => {
   });
 
   it("never passes an API key so the subscription is used", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
     const { runner, run } = runnerReturning({
       code: 0,
       stdout: JSON.stringify({ result: '{"status":"completed","summary":"","filesChanged":[],"testsAdded":[],"blockedReason":""}' }),
@@ -50,6 +55,7 @@ describe("createExecutor", () => {
     await createExecutor(config, runner).execute(task, "/wt");
 
     expect(run.mock.calls[0][2].env.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(run.mock.calls[0][2].env.PATH).toBe(process.env.PATH);
   });
 
   it("classifies a usage limit as its own outcome", async () => {
@@ -86,6 +92,37 @@ describe("createExecutor", () => {
       code: 0,
       stdout: JSON.stringify({ result: JSON.stringify(payload) }),
       stderr: "",
+      timedOut: false,
+    });
+
+    const outcome = await createExecutor(config, runner).execute(task, "/wt");
+
+    expect(outcome).toEqual({ kind: "result", result: payload });
+  });
+
+  it("classifies an exit-0 usage-limit response as its own outcome", async () => {
+    const { runner } = runnerReturning({
+      code: 0,
+      stdout: JSON.stringify({ result: "Claude AI usage limit reached|1735689600" }),
+      stderr: "",
+      timedOut: false,
+    });
+
+    expect(await createExecutor(config, runner).execute(task, "/wt")).toEqual({ kind: "usage_limit" });
+  });
+
+  it("does not classify a completed result mentioning rate limiting as a usage limit when the process exits non-zero for an unrelated reason", async () => {
+    const payload = {
+      status: "completed",
+      summary: "Added rate limiting to the login endpoint",
+      filesChanged: ["rate-limiter.ts"],
+      testsAdded: ["rate-limiter.test.ts"],
+      blockedReason: "",
+    };
+    const { runner } = runnerReturning({
+      code: 1,
+      stdout: JSON.stringify({ result: JSON.stringify(payload) }),
+      stderr: "post-task cleanup hook exited with status 1",
       timedOut: false,
     });
 
