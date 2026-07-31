@@ -113,6 +113,17 @@ describe("createApiClient", () => {
     expect(init.body).toBeUndefined();
   });
 
+  it("charges the attempt when the release asks not to refund it", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    const api = createApiClient(config, fetchMock as never);
+
+    await api.release("t1", { refund: false });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://app.example.com/api/projects/CP/tasks/t1/release");
+    expect(init.body).toBe(JSON.stringify({ refund: false }));
+  });
+
   it("maps a customised board's roles onto its own ids", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

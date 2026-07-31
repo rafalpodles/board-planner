@@ -96,7 +96,7 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
     worktreePath = await workspace.create(task.taskKey, SLUG);
   } catch (error) {
     await quietly(() => workspace.destroy(task.taskKey));
-    await reporter.failed(task, `could not create a worktree: ${String(error)}`);
+    await reporter.requeued(task, `could not create a worktree: ${String(error)}`);
     return;
   }
 
@@ -109,11 +109,11 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
       return;
     }
     if (outcome.kind === "timeout") {
-      await reporter.failed(task, `the run timed out after ${config.taskTimeoutMs}ms`);
+      await reporter.requeued(task, `the run timed out after ${config.taskTimeoutMs}ms`);
       return;
     }
     if (outcome.kind === "error") {
-      await reporter.failed(task, outcome.message);
+      await reporter.requeued(task, outcome.message);
       return;
     }
     if (outcome.result.status === "blocked") {
@@ -173,7 +173,7 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
 
     await reporter.merged(task, prUrl, outcome.result.summary);
   } catch (error) {
-    await reporter.failed(task, `the worker hit an unexpected error: ${String(error)}`);
+    await reporter.requeued(task, `the worker hit an unexpected error: ${String(error)}`);
   } finally {
     if (!keepWorktree) {
       await quietly(() => workspace.destroy(task.taskKey));

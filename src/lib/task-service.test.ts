@@ -161,3 +161,71 @@ describe("releaseTask", () => {
     expect(await releaseTask("p1", "t1")).toBeNull();
   });
 });
+
+describe("releaseTask charging the attempt", () => {
+  const boardWithReview = {
+    columns: [
+      { id: "ready", label: "Ready", role: "approved", order: 1 },
+      { id: "doing", label: "Doing", role: "active", order: 2 },
+      { id: "checking", label: "Checking", role: "review", order: 3 },
+      { id: "escalated", label: "Escalated", role: "review", order: 4, triggersPmReview: true },
+    ],
+  };
+
+  beforeEach(() => {
+    findOneAndUpdate.mockReset();
+    findById.mockReset();
+    findById.mockReturnValue({ lean: () => Promise.resolve(boardWithReview) });
+    findOneAndUpdate.mockResolvedValue({ _id: "t1", taskNumber: 1 });
+  });
+
+  it("keeps the attempt the run spent, so a repeating failure cannot retry forever", async () => {
+    await releaseTask("p1", "t1", { refund: false });
+
+    const update = findOneAndUpdate.mock.calls[0][1];
+    expect(JSON.stringify(update)).not.toContain("$inc");
+  });
+
+  it("sends a task back to the approved column while attempts remain", async () => {
+    await releaseTask("p1", "t1", { refund: false });
+
+    const [, update] = findOneAndUpdate.mock.calls[0];
+    expect(update[0].$set.status.$cond[1]).toBe("escalated");
+    expect(update[0].$set.status.$cond[2]).toBe("ready");
+    expect(update[0].$set.status.$cond[0]).toEqual({
+      $gte: ["$execution.attempts", MAX_EXECUTION_ATTEMPTS],
+    });
+  });
+
+  it("routes an exhausted task to the column the humans watch, not back to the queue", async () => {
+    await releaseTask("p1", "t1", { refund: false });
+
+    expect(findOneAndUpdate.mock.calls[0][1][0].$set.status.$cond[1]).toBe("escalated");
+  });
+
+  it("holds an exhausted task in the queue when the board has no review column", async () => {
+    findById.mockReturnValue({
+      lean: () =>
+        Promise.resolve({
+          columns: [
+            { id: "ready", role: "approved", order: 1 },
+            { id: "doing", role: "active", order: 2 },
+          ],
+        }),
+    });
+
+    await releaseTask("p1", "t1", { refund: false });
+
+    const cond = findOneAndUpdate.mock.calls[0][1][0].$set.status.$cond;
+    expect(cond[1]).toBe("ready");
+    expect(cond[2]).toBe("ready");
+  });
+
+  it("still only releases a task the worker is holding", async () => {
+    await releaseTask("p1", "t1", { refund: false });
+
+    const filter = findOneAndUpdate.mock.calls[0][0];
+    expect(filter.status).toEqual({ $in: ["doing"] });
+    expect(filter["execution.attempts"]).toBeUndefined();
+  });
+});

@@ -54,6 +54,31 @@ describe("createReporter", () => {
     expect(api.comment.mock.calls[0][1]).toMatch(/usage limit reached/);
   });
 
+  it("requeues a crashed run through the release endpoint, charging the attempt", async () => {
+    const api = apiSpy();
+    await createReporter(api, statuses).requeued(task, "the run timed out");
+
+    expect(api.release).toHaveBeenCalledWith("t1", { refund: false });
+    expect(api.setStatus).not.toHaveBeenCalled();
+    expect(api.comment.mock.calls[0][1]).toMatch(/the run timed out/);
+  });
+
+  it("says which attempt failed when it requeues, so a board reader can see them climb", async () => {
+    const api = apiSpy();
+    await createReporter(api, statuses).requeued({ ...task, attempts: 2 }, "the run timed out");
+
+    expect(api.comment.mock.calls[0][1]).toMatch(/attempt 2/);
+  });
+
+  it("survives a release endpoint that rejects a requeue", async () => {
+    const api = apiSpy();
+    api.release.mockRejectedValue(new Error("503"));
+
+    await expect(
+      createReporter(api, statuses, vi.fn()).requeued(task, "the run timed out")
+    ).resolves.toBeUndefined();
+  });
+
   it("closes a merged task in the board's done column with the PR url", async () => {
     const api = apiSpy();
     await createReporter(api, statuses).merged(task, "https://github.com/x/y/pull/7", "added the thing");
