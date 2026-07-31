@@ -263,3 +263,61 @@ describe("createApiClient", () => {
     await expect(api.claim("run-1")).rejects.toThrow(/500/);
   });
 });
+
+describe("createApiClient addressed by ObjectId", () => {
+  const byObjectId = { ...config, projectId: "69a52e3b399b27d3cbb2c5a5" } as never;
+
+  function fetchFor(project: unknown) {
+    return vi.fn().mockImplementation(async (url: string) =>
+      url.endsWith("/tasks/claim")
+        ? {
+            ok: true,
+            status: 200,
+            json: async () => ({ _id: "t1", taskNumber: 158, title: "Do the thing", description: "" }),
+          }
+        : { ok: true, status: 200, json: async () => project }
+    );
+  }
+
+  it("keys the task from the project's own key, not from the configured id", async () => {
+    const api = createApiClient(byObjectId, fetchFor({ key: "CP", columns: [] }) as never);
+
+    expect((await api.claim("run-1"))?.taskKey).toBe("CP-158");
+  });
+
+  it("reads the project key once, however many tasks it claims", async () => {
+    const fetchMock = fetchFor({ key: "CP", columns: [] });
+    const api = createApiClient(byObjectId, fetchMock as never);
+
+    await api.claim("run-1");
+    await api.claim("run-2");
+
+    const projectReads = fetchMock.mock.calls.filter(([url]) => !String(url).endsWith("/tasks/claim"));
+    expect(projectReads).toHaveLength(1);
+  });
+
+  it("does not read the project at all while the queue is empty", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 204 });
+    const api = createApiClient(byObjectId, fetchMock as never);
+
+    await api.claim("run-1");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the claimed task moving on the configured id when the project cannot be read", async () => {
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (url.endsWith("/tasks/claim")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ _id: "t1", taskNumber: 158, title: "Do the thing", description: "" }),
+        };
+      }
+      return { ok: false, status: 503, text: async () => "down" };
+    });
+    const api = createApiClient(byObjectId, fetchMock as never);
+
+    expect((await api.claim("run-1"))?.taskKey).toBe("69a52e3b399b27d3cbb2c5a5-158");
+  });
+});
