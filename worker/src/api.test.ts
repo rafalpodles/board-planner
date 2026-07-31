@@ -80,4 +80,36 @@ describe("createApiClient", () => {
     expect(init.method).toBe("POST");
     expect(init.body).toBe(JSON.stringify({ body: "hello" }));
   });
+
+  it("drops checklist items without a string text field", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        _id: "t1",
+        taskNumber: 158,
+        title: "Do the thing",
+        description: "body",
+        checklist: [{ text: "first" }, { done: true }, { text: 42 }],
+        execution: { attempts: 1 },
+      }),
+    });
+    const api = createApiClient(config, fetchMock as never);
+
+    const task = await api.claim("run-1");
+
+    expect(task?.acceptanceCriteria).toEqual(["first"]);
+  });
+
+  it("still reports the status when reading the error body fails", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      text: async () => {
+        throw new Error("stream closed");
+      },
+    });
+    const api = createApiClient(config, fetchMock as never);
+    await expect(api.claim("run-1")).rejects.toThrow(/500/);
+  });
 });
