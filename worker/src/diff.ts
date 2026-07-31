@@ -43,11 +43,14 @@ function parseNumstat(output: string): Pick<DiffStats, "changedLines" | "changed
   return { changedLines, changedFiles };
 }
 
-function boundPatch(patch: string): string {
-  if (patch.length <= MAX_PATCH_CHARS) return patch;
+function boundPatch(patch: string): Pick<DiffStats, "patch" | "truncated"> {
+  if (patch.length <= MAX_PATCH_CHARS) return { patch, truncated: false };
   const cut = patch.lastIndexOf("\n", MAX_PATCH_CHARS);
-  const truncated = patch.slice(0, cut > 0 ? cut : MAX_PATCH_CHARS);
-  return `${truncated}\n\n[patch truncated: exceeded ${MAX_PATCH_CHARS} characters]`;
+  const kept = patch.slice(0, cut > 0 ? cut : MAX_PATCH_CHARS);
+  return {
+    patch: `${kept}\n\n[patch truncated: exceeded ${MAX_PATCH_CHARS} characters]`,
+    truncated: true,
+  };
 }
 
 export async function collectDiff(
@@ -63,6 +66,7 @@ export async function collectDiff(
   const { changedLines, changedFiles } = parseNumstat(numstatOutput);
 
   const patchOutput = await git(runner, ["diff", range], opts);
+  const { patch, truncated } = boundPatch(patchOutput);
 
-  return { changedLines, changedFiles, patch: boundPatch(patchOutput) };
+  return { changedLines, changedFiles, patch, truncated };
 }

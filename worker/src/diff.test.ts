@@ -18,6 +18,7 @@ describe("collectDiff", () => {
     expect(diff.changedFiles).toEqual(["src/a.ts", "src/a.test.ts"]);
     expect(diff.changedLines).toBe(14);
     expect(diff.patch).toBe("diff --git ...");
+    expect(diff.truncated).toBe(false);
   });
 
   it("treats binary markers as zero lines", async () => {
@@ -75,16 +76,31 @@ describe("collectDiff", () => {
     await expect(collectDiff({ run }, "/wt", "main")).rejects.toThrow(/out of memory/);
   });
 
-  it("bounds a patch that exceeds the size limit instead of holding it unbounded in memory", async () => {
-    const hugePatch = "x".repeat(250_000);
+  it("does not truncate a patch exactly at the size limit", async () => {
+    const patchAtLimit = "x".repeat(200_000);
     const run = vi
       .fn()
       .mockResolvedValueOnce({ code: 0, stdout: "1\t0\tsrc/a.ts\n", stderr: "", timedOut: false })
-      .mockResolvedValueOnce({ code: 0, stdout: hugePatch, stderr: "", timedOut: false });
+      .mockResolvedValueOnce({ code: 0, stdout: patchAtLimit, stderr: "", timedOut: false });
 
     const diff = await collectDiff({ run }, "/wt", "main");
 
-    expect(diff.patch.length).toBeLessThan(hugePatch.length);
-    expect(diff.patch).toMatch(/truncated/);
+    expect(diff.patch).toBe(patchAtLimit);
+    expect(diff.truncated).toBe(false);
+  });
+
+  it("truncates a patch one character past the size limit, at an exact pinned boundary", async () => {
+    const oversizedPatch = "x".repeat(200_001);
+    const run = vi
+      .fn()
+      .mockResolvedValueOnce({ code: 0, stdout: "1\t0\tsrc/a.ts\n", stderr: "", timedOut: false })
+      .mockResolvedValueOnce({ code: 0, stdout: oversizedPatch, stderr: "", timedOut: false });
+
+    const diff = await collectDiff({ run }, "/wt", "main");
+
+    expect(diff.patch).toBe(
+      `${"x".repeat(200_000)}\n\n[patch truncated: exceeded 200000 characters]`,
+    );
+    expect(diff.truncated).toBe(true);
   });
 });
