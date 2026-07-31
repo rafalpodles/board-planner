@@ -681,6 +681,7 @@ export interface DiffStats {
   changedLines: number;
   changedFiles: string[];
   patch: string;
+  truncated: boolean;
 }
 
 export interface GateContext {
@@ -1426,7 +1427,7 @@ export async function collectDiff(
   }
 
   const patch = await runner.run("git", ["diff", `${baseBranch}...HEAD`], opts);
-  return { changedLines, changedFiles, patch: patch.stdout };
+  return { changedLines, changedFiles, patch: patch.stdout, truncated: false };
 }
 ```
 
@@ -1776,6 +1777,15 @@ export function reviewGate(runner: Runner, timeoutMs: number): Gate {
   return {
     name: "review",
     async run(context) {
+      // A reviewer cannot approve what it was not shown, and a diff long enough
+      // to be cut is exactly the kind that hides something in its second half
+      if (context.diff.truncated) {
+        return {
+          ok: false,
+          reason: "the diff was too large to review in full — it needs a human",
+        };
+      }
+
       const env = { ...process.env };
       delete env.ANTHROPIC_API_KEY;
 
