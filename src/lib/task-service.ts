@@ -564,7 +564,11 @@ export async function claimNextTask(
   );
 }
 
-export async function releaseTask(projectId: string, taskId: string): Promise<ITask | null> {
+export async function releaseTask(
+  projectId: string,
+  taskId: string,
+  options: { refund?: boolean } = {}
+): Promise<ITask | null> {
   await connectDB();
 
   const project = await Project.findById(projectId, "columns").lean();
@@ -572,6 +576,29 @@ export async function releaseTask(projectId: string, taskId: string): Promise<IT
   const approved = columns.find((c) => c.role === "approved")?.id;
   const active = columns.filter((c) => c.role === "active").map((c) => c.id);
   if (!approved || active.length === 0) return null;
+
+  if (options.refund === false) {
+    const review = columns.filter((c) => c.role === "review");
+    const exhausted = (review.find((c) => c.triggersPmReview) ?? review[0])?.id ?? approved;
+
+    return Task.findOneAndUpdate(
+      { _id: taskId, project: projectId, status: { $in: active } },
+      [
+        {
+          $set: {
+            status: {
+              $cond: [
+                { $gte: ["$execution.attempts", MAX_EXECUTION_ATTEMPTS] },
+                exhausted,
+                approved,
+              ],
+            },
+          },
+        },
+      ],
+      { returnDocument: "after" }
+    );
+  }
 
   return Task.findOneAndUpdate(
     {

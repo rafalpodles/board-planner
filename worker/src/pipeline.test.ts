@@ -82,6 +82,7 @@ function harness(overrides: Partial<PipelineDeps> = {}) {
     blocked: vi.fn<Reporter["blocked"]>().mockResolvedValue(undefined),
     gateRejected: vi.fn<Reporter["gateRejected"]>().mockResolvedValue(undefined),
     released: vi.fn<Reporter["released"]>().mockResolvedValue(undefined),
+    requeued: vi.fn<Reporter["requeued"]>().mockResolvedValue(undefined),
     merged: vi.fn<Reporter["merged"]>().mockResolvedValue(undefined),
     failed: vi.fn<Reporter["failed"]>().mockResolvedValue(undefined),
   };
@@ -211,24 +212,34 @@ describe("runTask", () => {
     expect(h.workspace.destroy).toHaveBeenCalledWith("CP-158");
   });
 
-  it("hands a timed-out run to a human rather than re-queueing it forever", async () => {
+  it("requeues a timed-out run and charges it the attempt, so retries terminate", async () => {
     const execute = vi.fn<Executor["execute"]>().mockResolvedValue({ kind: "timeout" });
     const h = harness({ executor: { execute } });
     await runTask(h.deps, task);
 
-    expect(h.reporter.failed).toHaveBeenCalled();
+    expect(h.reporter.requeued).toHaveBeenCalled();
     expect(h.reporter.released).not.toHaveBeenCalled();
+    expect(h.reporter.failed).not.toHaveBeenCalled();
   });
 
-  it("hands an executor error to a human", async () => {
+  it("requeues an executor error rather than spending a human on a crash", async () => {
     const execute = vi
       .fn<Executor["execute"]>()
       .mockResolvedValue({ kind: "error", message: "could not parse claude output" });
     const h = harness({ executor: { execute } });
     await runTask(h.deps, task);
 
-    expect(h.reporter.failed).toHaveBeenCalledWith(task, "could not parse claude output");
+    expect(h.reporter.requeued).toHaveBeenCalledWith(task, "could not parse claude output");
     expect(h.reporter.released).not.toHaveBeenCalled();
+  });
+
+  it("requeues an unexpected error from anywhere in the run", async () => {
+    const collectDiff = vi.fn<PipelineDeps["collectDiff"]>().mockRejectedValue(new Error("boom"));
+    const h = harness({ collectDiff });
+    await runTask(h.deps, task);
+
+    expect(h.reporter.requeued).toHaveBeenCalled();
+    expect(h.reporter.requeued.mock.calls[0][1]).toMatch(/boom/);
   });
 
   it("reports blocked without opening a pr", async () => {
@@ -358,12 +369,12 @@ describe("runTask", () => {
     expect(h.reporter.released).not.toHaveBeenCalled();
   });
 
-  it("destroys the worktree and reports failure when a gate throws", async () => {
+  it("destroys the worktree and requeues when a gate throws", async () => {
     const exploding = { name: "build", run: vi.fn<Gate["run"]>().mockRejectedValue(new Error("boom")) };
     const h = harness({ gates: [exploding] });
     await runTask(h.deps, task);
 
-    expect(h.reporter.failed.mock.calls[0][1]).toMatch(/boom/);
+    expect(h.reporter.requeued.mock.calls[0][1]).toMatch(/boom/);
     expect(h.workspace.destroy).toHaveBeenCalledWith("CP-158");
   });
 
@@ -410,7 +421,7 @@ describe("runTask", () => {
     expect(h.reporter.merged).toHaveBeenCalled();
   });
 
-  it("reports a failure and runs no executor when the worktree cannot be created", async () => {
+  it("requeues and runs no executor when the worktree cannot be created", async () => {
     const workspace = {
       create: vi.fn<Workspace["create"]>().mockRejectedValue(new Error("disk full")),
       destroy: vi.fn<Workspace["destroy"]>().mockResolvedValue(undefined),
@@ -419,7 +430,7 @@ describe("runTask", () => {
     const h = harness({ workspace });
     await runTask(h.deps, task);
 
-    expect(h.reporter.failed.mock.calls[0][1]).toMatch(/disk full/);
+    expect(h.reporter.requeued.mock.calls[0][1]).toMatch(/disk full/);
     expect(h.executor.execute).not.toHaveBeenCalled();
   });
 });

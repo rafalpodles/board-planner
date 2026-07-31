@@ -7,6 +7,7 @@ export interface Reporter {
   blocked(task: ClaimedTask, reason: string): Promise<void>;
   gateRejected(task: ClaimedTask, gate: string, reason: string, branch: string): Promise<void>;
   released(task: ClaimedTask, reason: string): Promise<void>;
+  requeued(task: ClaimedTask, reason: string): Promise<void>;
   merged(task: ClaimedTask, prUrl: string, summary: string): Promise<void>;
   failed(task: ClaimedTask, reason: string): Promise<void>;
 }
@@ -43,9 +44,9 @@ export function createReporter(
     }
   }
 
-  async function release(task: ClaimedTask): Promise<void> {
+  async function release(task: ClaimedTask, options?: { refund?: boolean }): Promise<void> {
     try {
-      await api.release(task.taskId);
+      await (options ? api.release(task.taskId, options) : api.release(task.taskId));
     } catch (error) {
       log(`${task.taskKey}: could not return the task to the queue: ${String(error)}`);
     }
@@ -80,6 +81,15 @@ export function createReporter(
         lastRelease.set(task.taskId, text);
       }
       await release(task);
+    },
+
+    // Charges the attempt, unlike released — a crash that repeats has to run out of retries
+    // instead of coming back forever
+    async requeued(task, reason) {
+      lastRelease.delete(task.taskId);
+      const attempt = task.attempts > 0 ? ` on attempt ${task.attempts}` : "";
+      await comment(task, `Returned to the queue after the run failed${attempt}.\n\n${capped(reason)}`);
+      await release(task, { refund: false });
     },
 
     async merged(task, prUrl, summary) {

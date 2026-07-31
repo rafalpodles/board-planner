@@ -13,7 +13,7 @@ export interface ApiClient {
   claim(runId: string): Promise<ClaimedTask | null>;
   setStatus(taskId: string, status: string): Promise<void>;
   comment(taskId: string, body: string): Promise<void>;
-  release(taskId: string): Promise<void>;
+  release(taskId: string, options?: { refund?: boolean }): Promise<void>;
   statusIds(): Promise<StatusIds>;
 }
 
@@ -112,8 +112,12 @@ export function createApiClient(config: WorkerConfig, fetchImpl: Fetch = fetch):
       await send(`/tasks/${taskId}/comments`, "POST", { body });
     },
 
-    async release(taskId) {
-      await send(`/tasks/${taskId}/release`, "POST");
+    async release(taskId, options) {
+      await send(
+        `/tasks/${taskId}/release`,
+        "POST",
+        options?.refund === false ? { refund: false } : undefined
+      );
     },
 
     async statusIds() {
