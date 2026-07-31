@@ -1,0 +1,425 @@
+import { describe, it, expect, vi } from "vitest";
+import { ApiClient, StatusIds } from "./api.js";
+import { WorkerConfig } from "./config.js";
+import { Delivery } from "./delivery.js";
+import { CommandResult, Runner } from "./exec.js";
+import { Executor } from "./executor.js";
+import { Reporter } from "./reporter.js";
+import { Workspace } from "./workspace.js";
+import { ClaimedTask, DiffStats, ExecutionResult, Gate } from "./types.js";
+import { PipelineDeps, resolveStatusIds, runTask } from "./pipeline.js";
+
+const task: ClaimedTask = {
+  taskId: "t1",
+  taskKey: "CP-158",
+  taskNumber: 158,
+  title: "Add a thing",
+  description: "body",
+  acceptanceCriteria: [],
+  attempts: 1,
+};
+
+const completed: ExecutionResult = {
+  status: "completed",
+  summary: "did it",
+  filesChanged: ["a.ts"],
+  testsAdded: ["a.test.ts"],
+  blockedReason: "",
+};
+
+// Deliberately none of the seeded ids, so any surviving literal fails
+const statuses: StatusIds = { approved: "ready", review: "checking", done: "shipped" };
+const board = ["ready", "doing", "checking", "shipped"];
+
+const diff: DiffStats = { changedLines: 10, changedFiles: ["a.ts"], patch: "d", truncated: false };
+
+const config: WorkerConfig = {
+  apiBaseUrl: "http://localhost:3000",
+  apiToken: "token",
+  projectId: "CP",
+  repoPath: "/repo",
+  worktreeRoot: "/worktrees",
+  baseBranch: "main",
+  pollIntervalMs: 1000,
+  taskTimeoutMs: 900_000,
+  concurrency: 1,
+  maxDiffLines: 400,
+  maxDiffFiles: 10,
+  workerId: "worker-test",
+};
+
+function shell(stdout = "", overrides: Partial<CommandResult> = {}): CommandResult {
+  return { code: 0, stdout, stderr: "", timedOut: false, ...overrides };
+}
+
+function passingGate(name: string) {
+  return { name, run: vi.fn<Gate["run"]>().mockResolvedValue({ ok: true, reason: "" }) };
+}
+
+function rejectingGate(name: string, reason: string) {
+  return { name, run: vi.fn<Gate["run"]>().mockResolvedValue({ ok: false, reason }) };
+}
+
+function deliverySpy(overrides: Partial<Delivery> = {}) {
+  return {
+    push: vi.fn<Delivery["push"]>().mockResolvedValue(undefined),
+    openPr: vi.fn<Delivery["openPr"]>().mockResolvedValue("https://x/pull/7"),
+    merge: vi.fn<Delivery["merge"]>().mockResolvedValue(undefined),
+    ...overrides,
+  };
+}
+
+function harness(overrides: Partial<PipelineDeps> = {}) {
+  const api = {
+    claim: vi.fn<ApiClient["claim"]>().mockResolvedValue(null),
+    setStatus: vi.fn<ApiClient["setStatus"]>().mockResolvedValue(undefined),
+    comment: vi.fn<ApiClient["comment"]>().mockResolvedValue(undefined),
+    release: vi.fn<ApiClient["release"]>().mockResolvedValue(undefined),
+    statusIds: vi.fn<ApiClient["statusIds"]>().mockResolvedValue(statuses),
+  };
+  const columnIds = vi.fn<PipelineDeps["columnIds"]>().mockResolvedValue(board);
+  const reporter = {
+    blocked: vi.fn<Reporter["blocked"]>().mockResolvedValue(undefined),
+    gateRejected: vi.fn<Reporter["gateRejected"]>().mockResolvedValue(undefined),
+    released: vi.fn<Reporter["released"]>().mockResolvedValue(undefined),
+    merged: vi.fn<Reporter["merged"]>().mockResolvedValue(undefined),
+    failed: vi.fn<Reporter["failed"]>().mockResolvedValue(undefined),
+  };
+  const createReporter = vi.fn<PipelineDeps["createReporter"]>(() => reporter);
+  const delivery = deliverySpy();
+  const createDelivery = vi.fn<PipelineDeps["createDelivery"]>(() => delivery);
+  const workspace = {
+    create: vi.fn<Workspace["create"]>().mockResolvedValue("/wt"),
+    destroy: vi.fn<Workspace["destroy"]>().mockResolvedValue(undefined),
+    listWorktrees: vi.fn<Workspace["listWorktrees"]>().mockResolvedValue([]),
+  };
+  const executor = {
+    execute: vi
+      .fn<Executor["execute"]>()
+      .mockResolvedValue({ kind: "result", result: completed }),
+  };
+  const collectDiff = vi.fn<PipelineDeps["collectDiff"]>().mockResolvedValue(diff);
+  const runner = { run: vi.fn<Runner["run"]>().mockResolvedValue(shell()) };
+
+  const deps: PipelineDeps = {
+    config,
+    api,
+    columnIds,
+    createReporter,
+    createDelivery,
+    workspace,
+    executor,
+    collectDiff,
+    runner,
+    gates: [],
+    ...overrides,
+  };
+
+  return {
+    deps,
+    api,
+    columnIds,
+    reporter,
+    createReporter,
+    delivery,
+    createDelivery,
+    workspace,
+    executor,
+    collectDiff,
+    runner,
+  };
+}
+
+describe("resolveStatusIds", () => {
+  it("returns the ids when every role maps to a column the board carries", async () => {
+    const resolved = await resolveStatusIds(
+      { statusIds: vi.fn<ApiClient["statusIds"]>().mockResolvedValue(statuses) },
+      async () => board
+    );
+
+    expect(resolved).toEqual(statuses);
+  });
+
+  it("names every role the board cannot route", async () => {
+    const promise = resolveStatusIds(
+      { statusIds: vi.fn<ApiClient["statusIds"]>().mockResolvedValue(statuses) },
+      async () => ["ready", "doing"]
+    );
+
+    await expect(promise).rejects.toThrow(/checking/);
+    await expect(promise).rejects.toThrow(/shipped/);
+  });
+});
+
+describe("runTask", () => {
+  it("merges and reports done on the happy path", async () => {
+    const h = harness();
+    await runTask(h.deps, task);
+
+    expect(h.delivery.push).toHaveBeenCalledWith("/wt", "cp-158/worker");
+    expect(h.delivery.openPr).toHaveBeenCalledWith("/wt", task, "did it");
+    expect(h.delivery.merge).toHaveBeenCalledWith("/wt", "https://x/pull/7");
+    expect(h.reporter.merged).toHaveBeenCalledWith(task, "https://x/pull/7", "did it");
+    expect(h.workspace.destroy).toHaveBeenCalledWith("CP-158");
+  });
+
+  it("opens the pull request against the configured base branch", async () => {
+    const h = harness({ config: { ...config, baseBranch: "develop" } });
+    await runTask(h.deps, task);
+
+    expect(h.createDelivery).toHaveBeenCalledWith(h.runner, "develop");
+  });
+
+  it("diffs against the configured base branch", async () => {
+    const h = harness({ config: { ...config, baseBranch: "develop" } });
+    await runTask(h.deps, task);
+
+    expect(h.collectDiff).toHaveBeenCalledWith(h.runner, "/wt", "develop");
+  });
+
+  it("resolves the board and builds a reporter for every task, not once per process", async () => {
+    const h = harness();
+    await runTask(h.deps, task);
+    await runTask(h.deps, task);
+
+    expect(h.api.statusIds).toHaveBeenCalledTimes(2);
+    expect(h.columnIds).toHaveBeenCalledTimes(2);
+    expect(h.createReporter).toHaveBeenCalledTimes(2);
+    expect(h.createReporter).toHaveBeenCalledWith(h.api, statuses);
+  });
+
+  it("does no work on a board that cannot route the outcome and hands the task back", async () => {
+    const columnIds = vi
+      .fn<PipelineDeps["columnIds"]>()
+      .mockResolvedValue(["ready", "doing", "checking"]);
+    const h = harness({ columnIds });
+    await runTask(h.deps, task);
+
+    expect(h.workspace.create).not.toHaveBeenCalled();
+    expect(h.executor.execute).not.toHaveBeenCalled();
+    expect(h.api.release).toHaveBeenCalledWith("t1");
+    expect(h.api.comment.mock.calls[0][1]).toMatch(/shipped/);
+  });
+
+  it("releases the task back to the queue on a usage limit", async () => {
+    const execute = vi.fn<Executor["execute"]>().mockResolvedValue({ kind: "usage_limit" });
+    const h = harness({ executor: { execute } });
+    await runTask(h.deps, task);
+
+    expect(h.reporter.released).toHaveBeenCalled();
+    expect(h.delivery.merge).not.toHaveBeenCalled();
+    expect(h.workspace.destroy).toHaveBeenCalledWith("CP-158");
+  });
+
+  it("hands a timed-out run to a human rather than re-queueing it forever", async () => {
+    const execute = vi.fn<Executor["execute"]>().mockResolvedValue({ kind: "timeout" });
+    const h = harness({ executor: { execute } });
+    await runTask(h.deps, task);
+
+    expect(h.reporter.failed).toHaveBeenCalled();
+    expect(h.reporter.released).not.toHaveBeenCalled();
+  });
+
+  it("hands an executor error to a human", async () => {
+    const execute = vi
+      .fn<Executor["execute"]>()
+      .mockResolvedValue({ kind: "error", message: "could not parse claude output" });
+    const h = harness({ executor: { execute } });
+    await runTask(h.deps, task);
+
+    expect(h.reporter.failed).toHaveBeenCalledWith(task, "could not parse claude output");
+    expect(h.reporter.released).not.toHaveBeenCalled();
+  });
+
+  it("reports blocked without opening a pr", async () => {
+    const blocked: ExecutionResult = { ...completed, status: "blocked", blockedReason: "ambiguous" };
+    const execute = vi
+      .fn<Executor["execute"]>()
+      .mockResolvedValue({ kind: "result", result: blocked });
+    const h = harness({ executor: { execute } });
+    await runTask(h.deps, task);
+
+    expect(h.reporter.blocked).toHaveBeenCalledWith(task, "ambiguous");
+    expect(h.delivery.openPr).not.toHaveBeenCalled();
+    expect(h.workspace.destroy).toHaveBeenCalledWith("CP-158");
+  });
+
+  it("refuses to gate a worktree the executor left dirty, and keeps it for a human", async () => {
+    const runner = {
+      run: vi.fn<Runner["run"]>().mockResolvedValue(shell("?? .claude/settings.json\n")),
+    };
+    const gate = passingGate("diff-size");
+    const h = harness({ runner, gates: [gate] });
+    await runTask(h.deps, task);
+
+    expect(runner.run).toHaveBeenCalledWith(
+      "git",
+      ["status", "--porcelain"],
+      expect.objectContaining({ cwd: "/wt" })
+    );
+    expect(h.collectDiff).not.toHaveBeenCalled();
+    expect(gate.run).not.toHaveBeenCalled();
+    expect(h.delivery.push).not.toHaveBeenCalled();
+    expect(h.reporter.failed.mock.calls[0][1]).toMatch(/\.claude\/settings\.json/);
+    expect(h.workspace.destroy).not.toHaveBeenCalled();
+  });
+
+  it("treats a worktree whose state cannot be read as dirty", async () => {
+    const runner = {
+      run: vi
+        .fn<Runner["run"]>()
+        .mockResolvedValue(shell("", { code: 128, stderr: "not a git repository" })),
+    };
+    const h = harness({ runner, gates: [passingGate("diff-size")] });
+    await runTask(h.deps, task);
+
+    expect(h.collectDiff).not.toHaveBeenCalled();
+    expect(h.reporter.failed.mock.calls[0][1]).toMatch(/not a git repository/);
+    expect(h.workspace.destroy).not.toHaveBeenCalled();
+  });
+
+  it("runs the gates on a clean worktree", async () => {
+    const gate = passingGate("diff-size");
+    const h = harness({ gates: [gate] });
+    await runTask(h.deps, task);
+
+    expect(gate.run).toHaveBeenCalledWith({
+      worktreePath: "/wt",
+      task,
+      result: completed,
+      diff,
+    });
+    expect(h.reporter.merged).toHaveBeenCalled();
+  });
+
+  it("stops at the first failing gate and names it", async () => {
+    const failing = rejectingGate("diff-size", "too big");
+    const later = passingGate("review");
+    const h = harness({ gates: [failing, later] });
+    await runTask(h.deps, task);
+
+    expect(h.reporter.gateRejected).toHaveBeenCalledWith(
+      task,
+      "diff-size",
+      "too big",
+      "cp-158/worker"
+    );
+    expect(later.run).not.toHaveBeenCalled();
+    expect(h.delivery.merge).not.toHaveBeenCalled();
+  });
+
+  it("pushes the rejected branch before discarding the worktree", async () => {
+    const h = harness({ gates: [rejectingGate("diff-size", "too big")] });
+    await runTask(h.deps, task);
+
+    expect(h.delivery.push).toHaveBeenCalledWith("/wt", "cp-158/worker");
+    expect(h.workspace.destroy).toHaveBeenCalledWith("CP-158");
+  });
+
+  it("says so in the comment and keeps the worktree when the rejected branch will not push", async () => {
+    const delivery = deliverySpy({
+      push: vi.fn<Delivery["push"]>().mockRejectedValue(new Error("stale info")),
+    });
+    const h = harness({
+      createDelivery: vi.fn<PipelineDeps["createDelivery"]>(() => delivery),
+      gates: [rejectingGate("diff-size", "too big")],
+    });
+    await runTask(h.deps, task);
+
+    const reason = h.reporter.gateRejected.mock.calls[0][2];
+    expect(reason).toMatch(/too big/);
+    expect(reason).toMatch(/stale info/);
+    expect(reason).toMatch(/not on the remote/);
+    expect(h.workspace.destroy).not.toHaveBeenCalled();
+  });
+
+  it("returns the task to the queue when a gate could not run because of a usage limit", async () => {
+    const gate = rejectingGate(
+      "review",
+      "the review could not be completed: claude exited 1\nClaude AI usage limit reached|1754006400"
+    );
+    const h = harness({ gates: [gate] });
+    await runTask(h.deps, task);
+
+    expect(h.reporter.released).toHaveBeenCalled();
+    expect(h.reporter.gateRejected).not.toHaveBeenCalled();
+    expect(h.delivery.push).not.toHaveBeenCalled();
+  });
+
+  it("still rejects a verdict that merely talks about a usage limit", async () => {
+    const gate = rejectingGate(
+      "review",
+      "the reviewer rejected the change: it deletes the usage limit reached branch"
+    );
+    const h = harness({ gates: [gate] });
+    await runTask(h.deps, task);
+
+    expect(h.reporter.gateRejected).toHaveBeenCalled();
+    expect(h.reporter.released).not.toHaveBeenCalled();
+  });
+
+  it("destroys the worktree and reports failure when a gate throws", async () => {
+    const exploding = { name: "build", run: vi.fn<Gate["run"]>().mockRejectedValue(new Error("boom")) };
+    const h = harness({ gates: [exploding] });
+    await runTask(h.deps, task);
+
+    expect(h.reporter.failed.mock.calls[0][1]).toMatch(/boom/);
+    expect(h.workspace.destroy).toHaveBeenCalledWith("CP-158");
+  });
+
+  it("keeps the worktree and names the branch and the pr when the merge fails", async () => {
+    const delivery = deliverySpy({
+      merge: vi.fn<Delivery["merge"]>().mockRejectedValue(new Error("not mergeable")),
+    });
+    const h = harness({ createDelivery: vi.fn<PipelineDeps["createDelivery"]>(() => delivery) });
+    await runTask(h.deps, task);
+
+    const reason = h.reporter.failed.mock.calls[0][1];
+    expect(reason).toMatch(/not mergeable/);
+    expect(reason).toMatch(/cp-158\/worker/);
+    expect(reason).toMatch(/https:\/\/x\/pull\/7/);
+    expect(h.workspace.destroy).not.toHaveBeenCalled();
+  });
+
+  it("names only the branch when the delivery push fails before any pr exists", async () => {
+    const delivery = deliverySpy({
+      push: vi.fn<Delivery["push"]>().mockRejectedValue(new Error("permission denied")),
+    });
+    const h = harness({ createDelivery: vi.fn<PipelineDeps["createDelivery"]>(() => delivery) });
+    await runTask(h.deps, task);
+
+    const reason = h.reporter.failed.mock.calls[0][1];
+    expect(reason).toMatch(/permission denied/);
+    expect(reason).toMatch(/cp-158\/worker/);
+    expect(reason).not.toMatch(/pull/);
+    expect(delivery.openPr).not.toHaveBeenCalled();
+    expect(h.workspace.destroy).not.toHaveBeenCalled();
+  });
+
+  it("never rejects, even when the cleanup itself throws", async () => {
+    const workspace = {
+      create: vi.fn<Workspace["create"]>().mockResolvedValue("/wt"),
+      destroy: vi.fn<Workspace["destroy"]>(() => {
+        throw new Error("worktree is locked");
+      }),
+      listWorktrees: vi.fn<Workspace["listWorktrees"]>().mockResolvedValue([]),
+    };
+    const h = harness({ workspace });
+
+    await expect(runTask(h.deps, task)).resolves.toBeUndefined();
+    expect(h.reporter.merged).toHaveBeenCalled();
+  });
+
+  it("reports a failure and runs no executor when the worktree cannot be created", async () => {
+    const workspace = {
+      create: vi.fn<Workspace["create"]>().mockRejectedValue(new Error("disk full")),
+      destroy: vi.fn<Workspace["destroy"]>().mockResolvedValue(undefined),
+      listWorktrees: vi.fn<Workspace["listWorktrees"]>().mockResolvedValue([]),
+    };
+    const h = harness({ workspace });
+    await runTask(h.deps, task);
+
+    expect(h.reporter.failed.mock.calls[0][1]).toMatch(/disk full/);
+    expect(h.executor.execute).not.toHaveBeenCalled();
+  });
+});
