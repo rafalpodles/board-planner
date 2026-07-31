@@ -256,6 +256,18 @@ describe("claimNextTask", () => {
     expect(filter.project).toBe("p1");
   });
 
+  it("claims tasks that predate the execution subdocument", async () => {
+    findOneAndUpdate.mockResolvedValue({ _id: "t1", taskNumber: 1 });
+
+    await claimNextTask("p1", "worker-a", "run-1");
+
+    const filter = findOneAndUpdate.mock.calls[0][0];
+    expect(filter.$or).toEqual([
+      { "execution.attempts": { $exists: false } },
+      { "execution.attempts": { $lt: 3 } },
+    ]);
+  });
+
   it("stamps worker identity and increments attempts", async () => {
     findOneAndUpdate.mockResolvedValue({ _id: "t1", taskNumber: 1 });
 
@@ -302,7 +314,13 @@ export async function claimNextTask(
     {
       project: projectId,
       status: { $in: approved },
-      "execution.attempts": { $lt: MAX_EXECUTION_ATTEMPTS },
+      // Mongoose applies defaults at hydration, so tasks created before the
+      // execution subdocument existed have no such field — and $lt never
+      // matches a missing one
+      $or: [
+        { "execution.attempts": { $exists: false } },
+        { "execution.attempts": { $lt: MAX_EXECUTION_ATTEMPTS } },
+      ],
     },
     {
       $set: {
