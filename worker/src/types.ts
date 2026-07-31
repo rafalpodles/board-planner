@@ -26,6 +26,7 @@ export interface DiffStats {
   changedLines: number;
   changedFiles: string[];
   patch: string;
+  truncated: boolean;
 }
 
 export interface GateContext {
