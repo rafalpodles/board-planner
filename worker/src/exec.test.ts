@@ -50,4 +50,22 @@ describe("createRunner", () => {
     },
     10000,
   );
+
+  it("resolves exactly once with the informative error for a missing binary", async () => {
+    const result = await createRunner().run("cp158-definitely-not-a-real-binary-xyz", [], {
+      cwd: process.cwd(),
+      timeoutMs: 5000,
+    });
+    expect(result.code).toBe(-1);
+    expect(result.stderr).toContain("ENOENT");
+  });
+
+  it("resolves instead of rejecting when spawn throws synchronously", async () => {
+    const result = await createRunner().run("node", ["-e", "1", "a\0b"], {
+      cwd: process.cwd(),
+      timeoutMs: 5000,
+    });
+    expect(result.code).toBe(-1);
+    expect(result.timedOut).toBe(false);
+  });
 });
