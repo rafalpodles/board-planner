@@ -67,6 +67,21 @@ export function createApiClient(config: WorkerConfig, fetchImpl: Fetch = fetch):
     return response;
   }
 
+  let projectKey = "";
+
+  // CP_PROJECT_ID addresses the project, and the route accepts an ObjectId as readily as a key —
+  // so the key a task is named by has to come from the project itself, not from that setting
+  async function keyForTasks(): Promise<string> {
+    if (projectKey) return projectKey;
+    try {
+      const body = (await (await send("", "GET")).json()) as { key?: unknown };
+      if (typeof body.key === "string" && body.key.trim()) projectKey = body.key.trim();
+    } catch {
+      // The task is claimed by the time this runs; the configured id keeps it moving
+    }
+    return projectKey || config.projectId;
+  }
+
   return {
     async claim(runId) {
       const response = await send("/tasks/claim", "POST", {
@@ -78,7 +93,7 @@ export function createApiClient(config: WorkerConfig, fetchImpl: Fetch = fetch):
       const raw = (await response.json()) as RawTask;
       return {
         taskId: raw._id,
-        taskKey: `${config.projectId}-${raw.taskNumber}`,
+        taskKey: `${await keyForTasks()}-${raw.taskNumber}`,
         taskNumber: raw.taskNumber,
         title: raw.title,
         description: raw.description,
