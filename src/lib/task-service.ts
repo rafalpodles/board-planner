@@ -596,7 +596,7 @@ export async function releaseTask(
           },
         },
       ],
-      { returnDocument: "after" }
+      { returnDocument: "after", updatePipeline: true }
     );
   }
 

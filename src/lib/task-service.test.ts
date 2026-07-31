@@ -221,6 +221,14 @@ describe("releaseTask charging the attempt", () => {
     expect(cond[2]).toBe("ready");
   });
 
+  // Mongoose rejects an array update outright unless this option says it is a pipeline, and a
+  // mocked findOneAndUpdate never runs that check — so assert the option, not just the stages
+  it("marks the update as a pipeline, which mongoose demands for an array update", async () => {
+    await releaseTask("p1", "t1", { refund: false });
+
+    expect(findOneAndUpdate.mock.calls[0][2]).toMatchObject({ updatePipeline: true });
+  });
+
   it("still only releases a task the worker is holding", async () => {
     await releaseTask("p1", "t1", { refund: false });
 
