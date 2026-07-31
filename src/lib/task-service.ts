@@ -4,7 +4,7 @@ import { Project } from "@/models/project";
 import { User } from "@/models/user";
 import { Comment } from "@/models/comment";
 import { ITask, DEFAULT_PRIORITY } from "@/types";
-import { getColumnIds, defaultStatusFor, roleOf } from "@/lib/columns";
+import { getColumnIds, defaultStatusFor, roleOf, getProjectColumns } from "@/lib/columns";
 import { logActivity } from "@/lib/activity";
 import { dispatchWebhooks } from "@/lib/webhooks";
 import { dispatchNotifications } from "@/lib/notifications";
@@ -12,6 +12,9 @@ import { createNotifications, collectRecipients, resolveMentions } from "@/lib/i
 import { parseChecklistString } from "@/lib/checklist";
 import { validateCustomFieldValues, sanitizeCustomFieldValues } from "@/lib/custom-fields";
 import { onTaskStatusChanged } from "@/lib/pm/triggers";
+
+export const MAX_EXECUTION_ATTEMPTS = 3;
+const ACTIVE_STATUS = "in_progress";
 
 export const taskPopulateFields = [
   { path: "assignee", select: "username fullName" },
@@ -520,5 +523,44 @@ async function createNextRecurrence(
     "recurrence",
     "",
     `Next occurrence created: ${project.key}-${project.taskCounter}`
+  );
+}
+
+export async function claimNextTask(
+  projectId: string,
+  workerId: string,
+  runId: string
+): Promise<ITask | null> {
+  await connectDB();
+
+  const project = await Project.findById(projectId, "columns").lean();
+  const approved = getProjectColumns(project)
+    .filter((c) => c.role === "approved")
+    .map((c) => c.id);
+  if (approved.length === 0) return null;
+
+  return Task.findOneAndUpdate(
+    {
+      project: projectId,
+      status: { $in: approved },
+      // Mongoose applies defaults at hydration, so tasks created before the
+      // execution subdocument existed have no such field — and $lt never
+      // matches a missing one
+      $or: [
+        { "execution.attempts": { $exists: false } },
+        { "execution.attempts": { $lt: MAX_EXECUTION_ATTEMPTS } },
+      ],
+    },
+    {
+      $set: {
+        status: ACTIVE_STATUS,
+        "execution.workerId": workerId,
+        "execution.runId": runId,
+        "execution.startedAt": new Date(),
+        "execution.lastError": "",
+      },
+      $inc: { "execution.attempts": 1 },
+    },
+    { returnDocument: "after", sort: { priority: -1, order: 1, createdAt: 1 } }
   );
 }
