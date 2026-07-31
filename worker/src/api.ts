@@ -34,8 +34,28 @@ interface BoardColumn {
   triggersPmReview: boolean;
 }
 
-// The ids the server itself falls back to for a board with no columns
-const SEEDED: StatusIds = { approved: "todo", review: "needs_human_review", done: "done" };
+// The board the server itself falls back to for a project stored with no columns of its own
+const SEEDED_BOARD: BoardColumn[] = [
+  { id: "planned", role: "backlog", order: 0, triggersPmReview: false },
+  { id: "todo", role: "approved", order: 1, triggersPmReview: false },
+  { id: "in_progress", role: "active", order: 2, triggersPmReview: false },
+  { id: "in_review", role: "review", order: 3, triggersPmReview: false },
+  { id: "needs_human_review", role: "review", order: 4, triggersPmReview: true },
+  { id: "ready_to_test", role: "review", order: 5, triggersPmReview: false },
+  { id: "done", role: "done", order: 6, triggersPmReview: false },
+];
+
+function statusIdsFrom(columns: BoardColumn[]): StatusIds {
+  const withRole = (role: string) => columns.filter((column) => column.role === role);
+  const review = withRole("review");
+  return {
+    approved: withRole("approved")[0]?.id ?? "",
+    review: (review.find((column) => column.triggersPmReview) ?? review[0])?.id ?? "",
+    done: withRole("done")[0]?.id ?? "",
+  };
+}
+
+const SEEDED = statusIdsFrom(SEEDED_BOARD);
 
 function toColumn(value: unknown): BoardColumn | null {
   if (typeof value !== "object" || value === null) return null;
@@ -70,10 +90,11 @@ export function createApiClient(config: WorkerConfig, fetchImpl: Fetch = fetch):
 
   async function readColumns(): Promise<BoardColumn[]> {
     const body = (await (await send("", "GET")).json()) as { columns?: unknown };
-    return (Array.isArray(body.columns) ? body.columns : [])
+    const columns = (Array.isArray(body.columns) ? body.columns : [])
       .map(toColumn)
       .filter((column): column is BoardColumn => column !== null)
       .sort((a, b) => a.order - b.order);
+    return columns.length > 0 ? columns : SEEDED_BOARD;
   }
 
   let projectKey = "";
@@ -134,14 +155,11 @@ export function createApiClient(config: WorkerConfig, fetchImpl: Fetch = fetch):
     },
 
     async statusIds() {
-      const columns = await readColumns();
-      const withRole = (role: string) => columns.filter((column) => column.role === role);
-      const review = withRole("review");
-
+      const ids = statusIdsFrom(await readColumns());
       return {
-        approved: withRole("approved")[0]?.id ?? SEEDED.approved,
-        review: (review.find((column) => column.triggersPmReview) ?? review[0])?.id ?? SEEDED.review,
-        done: withRole("done")[0]?.id ?? SEEDED.done,
+        approved: ids.approved || SEEDED.approved,
+        review: ids.review || SEEDED.review,
+        done: ids.done || SEEDED.done,
       };
     },
   };
