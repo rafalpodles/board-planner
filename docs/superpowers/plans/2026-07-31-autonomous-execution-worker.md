@@ -1837,7 +1837,86 @@ export function reviewGate(runner: Runner, timeoutMs: number): Gate {
 Run: `cd worker && npx vitest run src/gates/review.test.ts`
 Expected: 4 passing
 
-- [ ] **Step 5: Assemble the gate list in cost order**
+- [ ] **Step 5: Write the failing test-run gate test**
+
+`testPresenceGate` only proves a test file appears in the diff. Nothing in the pipeline
+ever executes it — `npm run build` is `next build`. Without this gate an agent that cannot
+make its change work satisfies the test requirement with a test that fails, and merges.
+
+`worker/src/gates/test-run.test.ts`:
+
+```ts
+import { describe, it, expect, vi } from "vitest";
+import { testRunGate } from "./test-run.js";
+
+const context = { worktreePath: "/wt" } as never;
+
+describe("testRunGate", () => {
+  it("accepts a passing suite", async () => {
+    const run = vi.fn().mockResolvedValue({ code: 0, stdout: "", stderr: "", timedOut: false });
+    expect((await testRunGate({ run }, 5000).run(context)).ok).toBe(true);
+  });
+
+  it("rejects a failing suite and carries the output", async () => {
+    const run = vi.fn().mockResolvedValue({
+      code: 1,
+      stdout: "FAIL src/a.test.ts > adds two numbers",
+      stderr: "",
+      timedOut: false,
+    });
+    const result = await testRunGate({ run }, 5000).run(context);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/adds two numbers/);
+  });
+
+  it("rejects on timeout naming the budget", async () => {
+    const run = vi.fn().mockResolvedValue({ code: -1, stdout: "", stderr: "", timedOut: true });
+    const result = await testRunGate({ run }, 5000).run(context);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/timed out after 5000ms/);
+  });
+
+  it("runs the suite in the worktree", async () => {
+    const run = vi.fn().mockResolvedValue({ code: 0, stdout: "", stderr: "", timedOut: false });
+    await testRunGate({ run }, 5000).run(context);
+    expect(run).toHaveBeenCalledWith("npm", ["test"], expect.objectContaining({ cwd: "/wt" }));
+  });
+});
+```
+
+- [ ] **Step 6: Implement the test-run gate**
+
+`worker/src/gates/test-run.ts`:
+
+```ts
+import { Runner } from "../exec.js";
+import { Gate } from "../types.js";
+
+const MAX_REASON_CHARS = 2000;
+
+export function testRunGate(runner: Runner, timeoutMs: number): Gate {
+  return {
+    name: "test-run",
+    async run({ worktreePath }) {
+      const result = await runner.run("npm", ["test"], { cwd: worktreePath, timeoutMs });
+
+      if (result.timedOut) {
+        return { ok: false, reason: `the test suite timed out after ${timeoutMs}ms` };
+      }
+      if (result.code !== 0) {
+        const output = [result.stdout, result.stderr].filter(Boolean).join("\n").slice(-MAX_REASON_CHARS);
+        return { ok: false, reason: `the test suite failed (exit ${result.code}):\n${output}` };
+      }
+      return { ok: true, reason: "" };
+    },
+  };
+}
+```
+
+`buildGate` already installs dependencies, and it runs first, so this gate finds a populated
+`node_modules`.
+
+- [ ] **Step 7: Assemble the gate list in cost order**
 
 `worker/src/gates/index.ts`:
 
@@ -1848,9 +1927,11 @@ import { Gate } from "../types.js";
 import { diffSizeGate } from "./diff-size.js";
 import { testPresenceGate } from "./test-presence.js";
 import { buildGate } from "./build.js";
+import { testRunGate } from "./test-run.js";
 import { reviewGate } from "./review.js";
 
 const BUILD_TIMEOUT_MS = 600_000;
+const TEST_TIMEOUT_MS = 600_000;
 const REVIEW_TIMEOUT_MS = 600_000;
 
 export function buildGates(config: WorkerConfig, runner: Runner): Gate[] {
@@ -1858,6 +1939,7 @@ export function buildGates(config: WorkerConfig, runner: Runner): Gate[] {
     diffSizeGate(config.maxDiffLines, config.maxDiffFiles),
     testPresenceGate(),
     buildGate(runner, BUILD_TIMEOUT_MS),
+    testRunGate(runner, TEST_TIMEOUT_MS),
     reviewGate(runner, REVIEW_TIMEOUT_MS),
   ];
 }
