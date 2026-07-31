@@ -480,6 +480,11 @@ describe("loadConfig", () => {
     expect(cfg.concurrency).toBe(1);
     expect(cfg.maxDiffLines).toBe(400);
     expect(cfg.maxDiffFiles).toBe(10);
+    expect(cfg.baseBranch).toBe("main");
+  });
+
+  it("honours an explicit base branch", () => {
+    expect(loadConfig({ ...base, CP_BASE_BRANCH: "develop" }).baseBranch).toBe("develop");
   });
 
   it("throws naming the missing variable", () => {
@@ -511,6 +516,7 @@ export interface WorkerConfig {
   projectId: string;
   repoPath: string;
   worktreeRoot: string;
+  baseBranch: string;
   pollIntervalMs: number;
   taskTimeoutMs: number;
   concurrency: number;
@@ -547,6 +553,7 @@ export function loadConfig(env: Env): WorkerConfig {
     projectId: required(env, "CP_PROJECT_ID"),
     repoPath,
     worktreeRoot: env.CP_WORKTREE_ROOT?.trim() || join(repoPath, "..", "cp-worktrees"),
+    baseBranch: env.CP_BASE_BRANCH?.trim() || "main",
     pollIntervalMs: number(env, "CP_POLL_INTERVAL_MS", 30_000),
     taskTimeoutMs: number(env, "CP_TASK_TIMEOUT_MS", 1_800_000),
     concurrency: number(env, "CP_CONCURRENCY", 1),
@@ -1818,13 +1825,14 @@ describe("createReporter", () => {
     expect(api.comment.mock.calls[0][1]).toMatch(/requirements are ambiguous/);
   });
 
-  it("names the gate when a gate rejects", async () => {
+  it("names the gate and the pushed branch when a gate rejects", async () => {
     const api = apiSpy();
-    await createReporter(api).gateRejected(task, "diff-size", "diff is 900 lines, limit is 400");
+    await createReporter(api).gateRejected(task, "diff-size", "diff is 900 lines, limit is 400", "cp-158/worker");
 
     expect(api.setStatus).toHaveBeenCalledWith("t1", "needs_human_review");
     expect(api.comment.mock.calls[0][1]).toMatch(/diff-size/);
     expect(api.comment.mock.calls[0][1]).toMatch(/900 lines/);
+    expect(api.comment.mock.calls[0][1]).toMatch(/cp-158\/worker/);
   });
 
   it("returns a released task to todo without a status comment", async () => {
@@ -1866,7 +1874,7 @@ import { ClaimedTask } from "./types.js";
 
 export interface Reporter {
   blocked(task: ClaimedTask, reason: string): Promise<void>;
-  gateRejected(task: ClaimedTask, gate: string, reason: string): Promise<void>;
+  gateRejected(task: ClaimedTask, gate: string, reason: string, branch: string): Promise<void>;
   released(task: ClaimedTask, reason: string): Promise<void>;
   merged(task: ClaimedTask, prUrl: string, summary: string): Promise<void>;
   failed(task: ClaimedTask, reason: string): Promise<void>;
@@ -1887,11 +1895,11 @@ export function createReporter(api: ApiClient): Reporter {
       );
     },
 
-    async gateRejected(task, gate, reason) {
+    async gateRejected(task, gate, reason, branch) {
       await report(
         task.taskId,
         "needs_human_review",
-        `The execution worker blocked the merge at the **${gate}** gate.\n\n${reason}\n\nThe branch is preserved for inspection.`
+        `The execution worker blocked the merge at the **${gate}** gate.\n\n${reason}\n\nThe work is pushed to \`${branch}\` for inspection.`
       );
     },
 
@@ -2090,7 +2098,7 @@ const goodResult = {
 
 function deps(overrides: Record<string, unknown> = {}) {
   return {
-    config: { repoPath: "/repo", maxDiffLines: 400, maxDiffFiles: 10 },
+    config: { repoPath: "/repo", baseBranch: "main", maxDiffLines: 400, maxDiffFiles: 10 },
     workspace: {
       create: vi.fn().mockResolvedValue("/wt"),
       destroy: vi.fn().mockResolvedValue(undefined),
@@ -2147,9 +2155,25 @@ describe("runTask", () => {
     const d = deps({ gates: [failing, later] });
     await runTask(d, task);
 
-    expect(d.reporter.gateRejected).toHaveBeenCalledWith(task, "diff-size", "too big");
+    expect(d.reporter.gateRejected).toHaveBeenCalledWith(task, "diff-size", "too big", "cp-158/worker");
     expect(later.run).not.toHaveBeenCalled();
     expect(d.delivery.merge).not.toHaveBeenCalled();
+  });
+
+  it("pushes the rejected branch before discarding the worktree", async () => {
+    const failing = { name: "diff-size", run: vi.fn().mockResolvedValue({ ok: false, reason: "too big" }) };
+    const d = deps({ gates: [failing] });
+    await runTask(d, task);
+
+    expect(d.delivery.push).toHaveBeenCalledWith("/wt", "cp-158/worker");
+    expect(d.workspace.destroy).toHaveBeenCalledWith("CP-158");
+  });
+
+  it("diffs against the configured base branch", async () => {
+    const d = deps({ config: { repoPath: "/repo", baseBranch: "develop" } });
+    await runTask(d, task);
+
+    expect(d.collectDiff).toHaveBeenCalledWith(d.runner, "/wt", "develop");
   });
 
   it("destroys the worktree even when a gate throws", async () => {
@@ -2205,11 +2229,11 @@ export interface PipelineDeps {
   reporter: Reporter;
 }
 
-const BASE_BRANCH = "main";
 const SLUG = "worker";
 
 export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<void> {
-  const { workspace, executor, gates, delivery, reporter } = deps;
+  const { config, workspace, executor, gates, delivery, reporter } = deps;
+  const branch = `${task.taskKey.toLowerCase()}/${SLUG}`;
 
   let worktreePath: string;
   try {
@@ -2240,19 +2264,20 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
       return;
     }
 
-    const diff = await deps.collectDiff(deps.runner, worktreePath, BASE_BRANCH);
+    const diff = await deps.collectDiff(deps.runner, worktreePath, config.baseBranch);
     const context = { worktreePath, task, result: outcome.result, diff };
 
     for (const gate of gates) {
       const verdict = await gate.run(context);
       if (!verdict.ok) {
-        keepWorktree = true;
-        await reporter.gateRejected(task, gate.name, verdict.reason);
+        // Push before cleanup: the worktree is about to go, so the branch is
+        // the only surviving copy of the rejected work
+        await delivery.push(worktreePath, branch).catch(() => {});
+        await reporter.gateRejected(task, gate.name, verdict.reason, branch);
         return;
       }
     }
 
-    const branch = `${task.taskKey.toLowerCase()}/${SLUG}`;
     await delivery.push(worktreePath, branch);
     const prUrl = await delivery.openPr(worktreePath, task, outcome.result.summary);
 
@@ -2560,6 +2585,7 @@ gates and carries the task to `done`.
 | `CP_PROJECT_ID` | yes | — |
 | `CP_REPO_PATH` | yes | — |
 | `CP_WORKTREE_ROOT` | no | `<repo>/../cp-worktrees` |
+| `CP_BASE_BRANCH` | no | `main` |
 | `CP_POLL_INTERVAL_MS` | no | `30000` |
 | `CP_TASK_TIMEOUT_MS` | no | `1800000` |
 | `CP_CONCURRENCY` | no | `1` |
