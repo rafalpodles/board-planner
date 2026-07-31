@@ -27,9 +27,10 @@ function outputTail(result: CommandResult): string {
   return `[output truncated to the last ${MAX_OUTPUT_CHARS} characters]\n${output.slice(-MAX_OUTPUT_CHARS)}`;
 }
 
-function failure(label: string, result: CommandResult): Error {
-  if (result.timedOut) return new Error(`${label} timed out after ${TIMEOUT_MS}ms`);
-  return new Error(`${label} failed (exit ${result.code}): ${outputTail(result)}`);
+function failure(label: string, result: CommandResult, note = ""): Error {
+  const suffix = note ? ` (${note})` : "";
+  if (result.timedOut) return new Error(`${label} timed out after ${TIMEOUT_MS}ms${suffix}`);
+  return new Error(`${label} failed (exit ${result.code})${suffix}: ${outputTail(result)}`);
 }
 
 function lastPrUrl(text: string): string {
@@ -57,27 +58,32 @@ function repoArgs(prUrl: string): string[] {
   }
   const [owner, repo, pull] = url.pathname.split("/").filter(Boolean);
   if (!owner || !repo || pull !== "pull") return [];
-  const host = url.hostname === "github.com" ? "" : `${url.hostname}/`;
+  const host = url.host === "github.com" ? "" : `${url.host}/`;
   return ["--repo", `${host}${owner}/${repo}`];
 }
 
-export function createDelivery(runner: Runner): Delivery {
+type MergeState = "merged" | "unmerged" | "unknown";
+
+export function createDelivery(runner: Runner, baseBranch?: string): Delivery {
+  const baseArgs = baseBranch?.trim() ? ["--base", baseBranch.trim()] : [];
+
   function run(command: string, args: string[], cwd: string): Promise<CommandResult> {
     return runner.run(command, args, { cwd, timeoutMs: TIMEOUT_MS });
   }
 
-  async function isMerged(worktreePath: string, prUrl: string): Promise<boolean> {
+  async function mergeState(worktreePath: string, prUrl: string): Promise<MergeState> {
     const result = await run(
       "gh",
       ["pr", "view", prUrl, "--json", "state", ...repoArgs(prUrl)],
       worktreePath
     );
-    if (result.code !== 0) return false;
+    if (result.code !== 0) return "unknown";
     try {
       const parsed: unknown = JSON.parse(result.stdout);
-      return isRecord(parsed) && parsed.state === "MERGED";
+      if (!isRecord(parsed) || typeof parsed.state !== "string") return "unknown";
+      return parsed.state === "MERGED" ? "merged" : "unmerged";
     } catch {
-      return false;
+      return "unknown";
     }
   }
 
@@ -97,7 +103,7 @@ export function createDelivery(runner: Runner): Delivery {
     async openPr(worktreePath, task, summary) {
       const result = await run(
         "gh",
-        ["pr", "create", "--title", prTitle(task), "--body", prBody(summary)],
+        ["pr", "create", "--title", prTitle(task), "--body", prBody(summary), ...baseArgs],
         worktreePath
       );
 
@@ -127,8 +133,14 @@ export function createDelivery(runner: Runner): Delivery {
         worktreePath
       );
       if (result.code === 0) return;
-      if (await isMerged(worktreePath, prUrl)) return;
-      throw failure("gh pr merge", result);
+
+      const state = await mergeState(worktreePath, prUrl);
+      if (state === "merged") return;
+      throw failure(
+        "gh pr merge",
+        result,
+        state === "unknown" ? "merge state could not be confirmed" : ""
+      );
     },
   };
 }

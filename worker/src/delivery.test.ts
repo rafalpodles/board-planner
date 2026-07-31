@@ -141,6 +141,20 @@ describe("openPr", () => {
     expect(body).toMatch(/truncated/);
   });
 
+  it("targets the configured base branch", async () => {
+    const run = vi.fn().mockResolvedValue({ ...ok, stdout: "https://github.com/x/y/pull/7" });
+    await createDelivery({ run }, "develop").openPr("/wt", task, "summary");
+
+    expect(valueOf(argsOf(run), "--base")).toBe("develop");
+  });
+
+  it("leaves the base to the repository default when none is configured", async () => {
+    const run = vi.fn().mockResolvedValue({ ...ok, stdout: "https://github.com/x/y/pull/7" });
+    await createDelivery({ run }).openPr("/wt", task, "summary");
+
+    expect(argsOf(run)).not.toContain("--base");
+  });
+
   it("keeps the pr title on a single line", async () => {
     const run = vi.fn().mockResolvedValue({ ...ok, stdout: "https://github.com/x/y/pull/7" });
     await createDelivery({ run }).openPr("/wt", { ...task, title: "Add\na  thing" }, "summary");
@@ -183,6 +197,13 @@ describe("merge", () => {
     expect(valueOf(argsOf(run), "--repo")).toBe("ghe.example.com/x/y");
   });
 
+  it("keeps a non-default port in the repository argument", async () => {
+    const { runner, run } = fakeCli({});
+    await createDelivery(runner).merge("/wt", "https://ghe.example.com:8443/x/y/pull/7");
+
+    expect(valueOf(argsOf(run), "--repo")).toBe("ghe.example.com:8443/x/y");
+  });
+
   it("leaves the repository to gh when the url is not a recognisable pull request url", async () => {
     const { runner, run } = fakeCli({});
     await createDelivery(runner).merge("/wt", "https://x/pull/7");
@@ -213,9 +234,24 @@ describe("merge", () => {
       "gh pr view": { stdout: '{"state":"OPEN"}' },
     });
 
+    const error = await createDelivery(runner)
+      .merge("/wt", "https://github.com/x/y/pull/7")
+      .then(() => new Error("merge resolved"))
+      .catch((thrown: unknown) => thrown);
+
+    expect(String(error)).toMatch(/gh pr merge failed \(exit 1\): .*base branch policy/s);
+    expect(String(error)).not.toMatch(/could not be confirmed/);
+  });
+
+  it("says the state is unconfirmed when the check itself fails, rather than asserting a failure", async () => {
+    const { runner } = fakeCli({
+      "gh pr merge": { code: 1, stderr: "connection reset by peer" },
+      "gh pr view": { code: 1, stderr: "gh: authentication token expired" },
+    });
+
     await expect(
       createDelivery(runner).merge("/wt", "https://github.com/x/y/pull/7")
-    ).rejects.toThrow(/gh pr merge failed \(exit 1\): .*base branch policy/s);
+    ).rejects.toThrow(/merge state could not be confirmed/);
   });
 
   it("names the timeout when the merge hangs", async () => {
