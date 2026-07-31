@@ -8,6 +8,9 @@ export interface LoopDeps {
   api: ApiClient;
   execute: (task: ClaimedTask) => Promise<void>;
   sleep: (ms: number) => Promise<void>;
+  // Undelivered reports go out before new work is claimed: a stranded task from the last cycle
+  // matters more than starting another one
+  drain?: () => Promise<void>;
   log?: (message: string) => void;
 }
 
@@ -24,6 +27,7 @@ export function createLoop(deps: LoopDeps): Loop {
     async start() {
       while (running) {
         try {
+          if (deps.drain) await deps.drain();
           const task = await deps.api.claim(randomUUID());
           if (task) {
             await deps.execute(task);

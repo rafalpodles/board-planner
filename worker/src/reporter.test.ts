@@ -259,3 +259,59 @@ describe("createReporter", () => {
     expect(api.comment.mock.calls[0][1]).toMatch(/merge failed/);
   });
 });
+
+describe("reports the server refused", () => {
+  function outboxSpy() {
+    return { add: vi.fn(), flush: vi.fn(), pending: vi.fn().mockReturnValue(0) };
+  }
+
+  it("queues a merge comment the server would not take, so the task is not stranded", async () => {
+    const api = apiSpy();
+    api.comment.mockRejectedValue(new Error("502 Bad Gateway"));
+    const outbox = outboxSpy();
+
+    await createReporter(api, statuses, vi.fn(), outbox).merged(task, "https://x/pull/7", "did it");
+
+    expect(outbox.add).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "comment", taskId: "t1" })
+    );
+  });
+
+  it("queues the status move too, so the board catches up on both", async () => {
+    const api = apiSpy();
+    api.setStatus.mockRejectedValue(new Error("502"));
+    const outbox = outboxSpy();
+
+    await createReporter(api, statuses, vi.fn(), outbox).merged(task, "https://x/pull/7", "did it");
+
+    expect(outbox.add).toHaveBeenCalledWith({ kind: "status", taskId: "t1", status: "shipped" });
+  });
+
+  it("preserves the refund flag when a requeue cannot be delivered", async () => {
+    const api = apiSpy();
+    api.release.mockRejectedValue(new Error("503"));
+    const outbox = outboxSpy();
+
+    await createReporter(api, statuses, vi.fn(), outbox).requeued(task, "timed out");
+
+    expect(outbox.add).toHaveBeenCalledWith({ kind: "release", taskId: "t1", refund: false });
+  });
+
+  it("marks a usage-limit release as refunding", async () => {
+    const api = apiSpy();
+    api.release.mockRejectedValue(new Error("503"));
+    const outbox = outboxSpy();
+
+    await createReporter(api, statuses, vi.fn(), outbox).released(task, "usage limit reached");
+
+    expect(outbox.add).toHaveBeenCalledWith({ kind: "release", taskId: "t1", refund: true });
+  });
+
+  it("queues nothing when the server accepts the report", async () => {
+    const outbox = outboxSpy();
+
+    await createReporter(apiSpy(), statuses, vi.fn(), outbox).merged(task, "https://x/pull/7", "ok");
+
+    expect(outbox.add).not.toHaveBeenCalled();
+  });
+});

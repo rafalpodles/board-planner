@@ -105,6 +105,13 @@ and `SIGINT` both finish the task in flight before the loop exits.
   worktree is kept and the comment says where it is.
 - **Worktrees left by a killed worker are reaped at startup**, but only under `CP_WORKTREE_ROOT` —
   the repository checkout and any worktree of your own are left alone.
+- **A report that cannot be delivered is not lost.** Merging to `main` redeploys the app, so the
+  report right after a merge is the one most likely to fail — and a lost one would leave the task
+  sitting in the active column where nothing can claim it again. Undelivered reports persist to
+  `<CP_STATE_DIR>/outbox.jsonl` and go out before the next task is claimed.
+- **A task abandoned by a dead worker comes back.** The claim endpoint frees anything whose lease
+  has outlived it, without refunding the attempt, so a task that repeatedly outlives its worker
+  runs out of attempts and reaches a human.
 
 ## Tests
 

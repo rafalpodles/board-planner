@@ -115,3 +115,44 @@ describe("createLoop", () => {
     expect(execute).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("draining undelivered reports", () => {
+  it("drains before claiming, so a stranded task is settled first", async () => {
+    const order: string[] = [];
+    const api = apiStub(async () => {
+      order.push("claim");
+      return null;
+    });
+    const loop = createLoop({
+      config,
+      api,
+      execute: vi.fn(),
+      drain: async () => {
+        order.push("drain");
+      },
+      sleep: async () => loop.stop(),
+      log: vi.fn(),
+    });
+
+    await loop.start();
+
+    expect(order).toEqual(["drain", "claim"]);
+  });
+
+  it("keeps working when the drain itself fails", async () => {
+    const api = apiStub(queue(task));
+    const execute = vi.fn().mockResolvedValue(undefined);
+    const loop = createLoop({
+      config,
+      api,
+      execute,
+      drain: async () => {
+        throw new Error("disk full");
+      },
+      sleep: async () => loop.stop(),
+      log: vi.fn(),
+    });
+
+    await expect(loop.start()).resolves.toBeUndefined();
+  });
+});

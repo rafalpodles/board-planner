@@ -15,6 +15,10 @@ import { onTaskStatusChanged } from "@/lib/pm/triggers";
 
 export const MAX_EXECUTION_ATTEMPTS = 3;
 
+// Four times the worker's default task timeout. A worker killed mid-run leaves its task in the
+// active column, where claimNextTask can never see it again — nothing else reclaims it.
+export const EXECUTION_LEASE_MS = 2 * 60 * 60 * 1000;
+
 export const taskPopulateFields = [
   { path: "assignee", select: "username fullName" },
   { path: "createdBy", select: "username fullName" },
@@ -523,6 +527,39 @@ async function createNextRecurrence(
     "",
     `Next occurrence created: ${project.key}-${project.taskCounter}`
   );
+}
+
+export async function releaseExpiredTasks(projectId: string, now = new Date()): Promise<number> {
+  await connectDB();
+
+  const project = await Project.findById(projectId, "columns").lean();
+  const columns = getProjectColumns(project);
+  const approved = columns.find((c) => c.role === "approved")?.id;
+  const active = columns.filter((c) => c.role === "active").map((c) => c.id);
+  if (!approved || active.length === 0) return 0;
+
+  const review = columns.filter((c) => c.role === "review");
+  const exhausted = (review.find((c) => c.triggersPmReview) ?? review[0])?.id ?? approved;
+  const expired = {
+    project: projectId,
+    status: { $in: active },
+    "execution.startedAt": { $lt: new Date(now.getTime() - EXECUTION_LEASE_MS) },
+  };
+
+  // The attempt is not refunded: a task that repeatedly outlives its worker has to run out of
+  // attempts and reach a human, rather than cycling through the queue forever
+  const [spent, retryable] = await Promise.all([
+    Task.updateMany(
+      { ...expired, "execution.attempts": { $gte: MAX_EXECUTION_ATTEMPTS } },
+      { $set: { status: exhausted } }
+    ),
+    Task.updateMany(
+      { ...expired, "execution.attempts": { $lt: MAX_EXECUTION_ATTEMPTS } },
+      { $set: { status: approved } }
+    ),
+  ]);
+
+  return spent.modifiedCount + retryable.modifiedCount;
 }
 
 export async function claimNextTask(
