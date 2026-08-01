@@ -106,4 +106,53 @@ describe("POST /tasks/claim", () => {
 
     expect(response.status).toBe(204);
   });
+
+  it("returns 404 when the project key does not resolve, without claiming", async () => {
+    resolveProjectId.mockResolvedValue(null);
+
+    const response = await POST(request(authed), { params: Promise.resolve({ projectId: "nope" }) });
+
+    expect(response.status).toBe(404);
+    expect(claimNextTask).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when runId is missing, without claiming", async () => {
+    const response = await POST(request(authed, {}), { params: Promise.resolve({ projectId: "CP" }) });
+
+    expect(response.status).toBe(400);
+    expect(claimNextTask).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when runId is empty or whitespace, without claiming", async () => {
+    for (const runId of ["", "   "]) {
+      const response = await POST(request(authed, { runId }), {
+        params: Promise.resolve({ projectId: "CP" }),
+      });
+      expect(response.status).toBe(400);
+    }
+
+    expect(claimNextTask).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when the body is not valid JSON, without claiming", async () => {
+    const malformed = new Request("http://localhost/api/projects/CP/tasks/claim", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...authed },
+      body: "{not json",
+    });
+
+    const response = await POST(malformed, { params: Promise.resolve({ projectId: "CP" }) });
+
+    expect(response.status).toBe(400);
+    expect(claimNextTask).not.toHaveBeenCalled();
+  });
+
+  // request.json() resolves a literal `null` body instead of rejecting, so a naive
+  // `.catch(() => ({}))` lets `null` straight through to the destructure
+  it("returns 400 when the body is the JSON literal null, without claiming", async () => {
+    const response = await POST(request(authed, null), { params: Promise.resolve({ projectId: "CP" }) });
+
+    expect(response.status).toBe(400);
+    expect(claimNextTask).not.toHaveBeenCalled();
+  });
 });

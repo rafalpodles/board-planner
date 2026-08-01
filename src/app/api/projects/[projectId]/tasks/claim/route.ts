@@ -18,7 +18,7 @@ export const POST = withWorker(async (request, { params, worker }) => {
   const verdict = verdictFor(worker, projectId, protocolOf(request));
   if (!verdict.ok) return NextResponse.json({ error: verdict.reason }, { status: 403 });
 
-  const { runId } = await request.json().catch(() => ({}));
+  const { runId } = (await request.json().catch(() => ({}))) ?? {};
   if (typeof runId !== "string" || !runId.trim()) {
     return NextResponse.json({ error: "runId is required" }, { status: 400 });
   }
