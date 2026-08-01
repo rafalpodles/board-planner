@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import bcrypt from "bcryptjs";
 
 const findById = vi.fn();
 const findOneAndUpdate = vi.fn();
@@ -65,10 +66,35 @@ describe("verdictFor", () => {
     expect(verdictFor(worker({ lastSeenAt: null }), project, PROTOCOL_VERSION, now).ok).toBe(false);
   });
 
+  // new Date("not-a-date").getTime() is NaN, and NaN > WORKER_STALE_MS is false --
+  // the old `> WORKER_STALE_MS` check failed open on an unparseable timestamp
+  it("refuses a worker whose lastSeenAt does not parse as a date", () => {
+    const verdict = verdictFor(worker({ lastSeenAt: "not-a-date" }), project, PROTOCOL_VERSION, now);
+
+    expect(verdict.ok).toBe(false);
+    expect((verdict as { reason: string }).reason).toMatch(/reported/i);
+  });
+
   it("compares the project as a string, so an ObjectId assignment matches a resolved id", () => {
     const assignments = [{ project: { toString: () => project }, proposedPath: "/repo" }];
 
     expect(verdictFor(worker({ assignments }), project, PROTOCOL_VERSION, now)).toEqual({ ok: true });
+  });
+
+  // String(undefined) === String(undefined): a caller passing no project id must not match
+  // an assignment that also has no project, however that assignment came to be malformed
+  it("refuses when the caller supplies no project id, even if an assignment has none either", () => {
+    const assignments = [{ proposedPath: "/repo" }];
+    const verdict = verdictFor(worker({ assignments }), undefined as unknown as string, PROTOCOL_VERSION, now);
+
+    expect(verdict.ok).toBe(false);
+    expect((verdict as { reason: string }).reason).toMatch(/assign/i);
+  });
+
+  it("never matches an assignment with no project, even against a truthy project id", () => {
+    const assignments = [{ proposedPath: "/repo" }];
+
+    expect(verdictFor(worker({ assignments }), "undefined", PROTOCOL_VERSION, now).ok).toBe(false);
   });
 
   // A worker heartbeating every WORKER_STALE_MS would race its own staleness check
@@ -78,6 +104,8 @@ describe("verdictFor", () => {
 });
 
 describe("verifyWorkerCredential", () => {
+  const workerId = "69a52e3b399b27d3cbb2c5a5";
+
   beforeEach(() => findById.mockReset());
 
   // An unauthenticated request must not be able to throw a CastError through the handler
@@ -86,9 +114,42 @@ describe("verifyWorkerCredential", () => {
     expect(findById).not.toHaveBeenCalled();
   });
 
-  it("rejects an unknown worker", async () => {
-    findById.mockResolvedValue(null);
+  // bcryptjs rejects its returned promise on a non-string argument -- without this guard
+  // that becomes an unhandled rejection instead of a clean refusal
+  it("rejects a non-string credential without touching the database", async () => {
+    expect(await verifyWorkerCredential(workerId, undefined as unknown as string)).toBeNull();
+    expect(findById).not.toHaveBeenCalled();
+  });
 
-    expect(await verifyWorkerCredential("69a52e3b399b27d3cbb2c5a5", "cpw_x")).toBeNull();
+  it("rejects an unknown worker", async () => {
+    findById.mockReturnValue({ select: () => Promise.resolve(null) });
+
+    expect(await verifyWorkerCredential(workerId, "cpw_x")).toBeNull();
+  });
+
+  // credentialHash is select: false on the schema; a plain findById would compare against
+  // undefined and reject every valid credential
+  it("asks for credentialHash explicitly, since the schema hides it by default", async () => {
+    const select = vi.fn().mockResolvedValue(null);
+    findById.mockReturnValue({ select });
+
+    await verifyWorkerCredential(workerId, "cpw_x");
+
+    expect(select).toHaveBeenCalledWith("+credentialHash");
+  });
+
+  it("accepts a correct credential", async () => {
+    const credentialHash = bcrypt.hashSync("cpw_secret", 10);
+    const stored = { _id: workerId, credentialHash };
+    findById.mockReturnValue({ select: () => Promise.resolve(stored) });
+
+    expect(await verifyWorkerCredential(workerId, "cpw_secret")).toBe(stored);
+  });
+
+  it("rejects an incorrect credential", async () => {
+    const credentialHash = bcrypt.hashSync("cpw_secret", 10);
+    findById.mockReturnValue({ select: () => Promise.resolve({ _id: workerId, credentialHash }) });
+
+    expect(await verifyWorkerCredential(workerId, "cpw_wrong")).toBeNull();
   });
 });

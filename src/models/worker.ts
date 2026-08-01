@@ -8,7 +8,7 @@ const workerSchema = new Schema<IWorker>(
     platform: { type: String, default: "" },
     version: { type: String, default: "" },
     protocolVersion: { type: Number, required: true },
-    credentialHash: { type: String, required: true },
+    credentialHash: { type: String, required: true, select: false },
     assignments: {
       type: [
         {
