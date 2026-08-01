@@ -17,21 +17,27 @@ export interface LoopDeps {
 export interface Loop {
   start(): Promise<void>;
   stop(): void;
+  pause(): void;
+  resume(): void;
+  paused(): boolean;
 }
 
 export function createLoop(deps: LoopDeps): Loop {
   const log = deps.log ?? ((message: string) => console.error(message));
   let running = true;
+  let pausedState = false;
 
   return {
     async start() {
       while (running) {
         try {
           if (deps.drain) await deps.drain();
-          const task = await deps.api.claim(randomUUID());
-          if (task) {
-            await deps.execute(task);
-            continue;
+          if (!pausedState) {
+            const task = await deps.api.claim(randomUUID());
+            if (task) {
+              await deps.execute(task);
+              continue;
+            }
           }
         } catch (error) {
           // runTask reports its own failures to the board, so anything reaching here is the
@@ -44,7 +50,20 @@ export function createLoop(deps: LoopDeps): Loop {
     },
 
     stop() {
+      pausedState = true;
       running = false;
+    },
+
+    pause() {
+      pausedState = true;
+    },
+
+    resume() {
+      pausedState = false;
+    },
+
+    paused() {
+      return pausedState;
     },
   };
 }

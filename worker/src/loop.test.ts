@@ -114,6 +114,49 @@ describe("createLoop", () => {
 
     expect(execute).toHaveBeenCalledTimes(1);
   });
+
+  it("claims nothing more once paused mid-task", async () => {
+    const api = apiStub(queue(task, { ...task, taskId: "t2" }));
+    let cycles = 0;
+    const loop = createLoop({
+      config,
+      api,
+      execute: async () => {
+        loop.pause();
+      },
+      sleep: async () => {
+        cycles += 1;
+        if (cycles >= 3) loop.stop();
+      },
+      log: vi.fn(),
+    });
+
+    await loop.start();
+
+    expect(api.claim).toHaveBeenCalledTimes(1);
+    expect(cycles).toBeGreaterThanOrEqual(3);
+  });
+
+  it("resumes claiming after resume", async () => {
+    const api = apiStub(queue(task));
+    let cycles = 0;
+    const loop = createLoop({
+      config,
+      api,
+      execute: vi.fn().mockResolvedValue(undefined),
+      sleep: async () => {
+        cycles += 1;
+        if (cycles === 1) loop.resume();
+        if (cycles >= 3) loop.stop();
+      },
+      log: vi.fn(),
+    });
+    loop.pause();
+
+    await loop.start();
+
+    expect(api.claim).toHaveBeenCalled();
+  });
 });
 
 describe("draining undelivered reports", () => {
