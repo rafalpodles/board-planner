@@ -166,8 +166,12 @@ describe("connectControl — frame parsing", () => {
 // Driven with fake timers and manual advances, never vi.waitFor's real-time polling: the backoff
 // delays are exact numbers here, and polling against them would race a live clock.
 describe("connectControl — reconnect scheduling", () => {
-  it("schedules a reconnect with backoff after the stream ends, without throwing", async () => {
+  it("schedules a reconnect with backoff after the stream ends, growing on repeated immediate EOF, without throwing", async () => {
     vi.useFakeTimers();
+    // Every connect gets a fresh, already-closing stream: an HTTP 200 whose body ends without
+    // ever delivering a byte, on every attempt. This is the case the backoff-reset bug hid in —
+    // resetting on response.ok alone (rather than on data actually being read) made every retry
+    // look "successful" and collapsed the backoff back to the base delay each time.
     const fetchImpl = vi.fn(async () => ({ ok: true, status: 200, body: closingStream([]) }));
     const control = connectControl(
       depsWith({ fetchImpl: fetchImpl as unknown as typeof fetch, reconnectDelayMs: 1000 })
@@ -181,6 +185,15 @@ describe("connectControl — reconnect scheduling", () => {
 
     await vi.advanceTimersByTimeAsync(1);
     expect(fetchImpl).toHaveBeenCalledTimes(2);
+
+    // Second cycle: the delay must double, not collapse back to the base — this is the part a
+    // single-cycle assertion cannot tell apart from the bug, since the first delay is 1000ms
+    // either way.
+    await vi.advanceTimersByTimeAsync(1999);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
 
     control.close();
   });

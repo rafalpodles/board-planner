@@ -48,8 +48,7 @@ async function main(): Promise<void> {
     store: identityStore,
   });
   let current: AbortController | null = null;
-  // Deliberately abort-only: a 403 means the server is already refusing every claim and
-  // heartbeat on its own, so this needs no matching un-pause once the lock lifts.
+  // Deliberately abort-only — see the commit message for why this needs no matching un-pause.
   heartbeat.onAbort(() => current?.abort());
 
   const deps: PipelineDeps = {
@@ -90,8 +89,7 @@ async function main(): Promise<void> {
     sleep,
   });
 
-  // "stop" pauses rather than calling loop.stop(), which would end main() and the process with
-  // it. Pausing after the abort is what stops the just-refunded task being reclaimed immediately.
+  // "stop" pauses rather than calling loop.stop() — see the commit message for why.
   const control = connectControl({
     apiBaseUrl: config.apiBaseUrl,
     identitySource: identityStore,

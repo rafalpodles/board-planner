@@ -33,9 +33,7 @@ export const POST = withAdmin(async (request, { params }) => {
     return NextResponse.json({ error: "Worker not found" }, { status: 404 });
   }
 
-  // Best-effort accelerator: publishToWorker is a same-process push and does nothing when the
-  // worker is disconnected, mid-backoff, or connected to a different replica. The write above,
-  // which the next heartbeat always picks up, is what makes the command durable.
+  // Best-effort accelerator — see src/lib/worker-events.ts; the write above is what's durable.
   publishToWorker(String(worker._id), { command: worker.command });
 
   return NextResponse.json({ command: worker.command, issuedAt: worker.commandIssuedAt });
