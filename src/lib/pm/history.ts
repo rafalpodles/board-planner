@@ -1,3 +1,6 @@
+import { PmAttachment } from "@/types";
+import { buildUserContent, MAX_REPLAYED_IMAGES } from "./attachments";
+
 export interface PmHistoryAuthor {
   username?: string;
   fullName?: string;
@@ -7,6 +10,7 @@ export interface PmHistoryEntry {
   role: string;
   content?: string;
   actions?: { summary?: string }[];
+  attachments?: PmAttachment[];
   // Populated to a user, or left as a raw ObjectId when the ref could not be resolved
   triggeredBy?: unknown;
 }
@@ -28,17 +32,30 @@ export function stripSpoofedLabels(content: string): string {
 // Past actions are replayed as their own system record, never appended to the assistant's
 // content. Anything sitting in the assistant channel is a style example the model imitates,
 // and it learned to emit "[Actions taken: ...]" as prose without ever calling a tool.
-export function replayHistory(history: PmHistoryEntry[]): Record<string, unknown>[] {
+export async function replayHistory(
+  history: PmHistoryEntry[]
+): Promise<Record<string, unknown>[]> {
   const messages: Record<string, unknown>[] = [];
+
+  // Only the most recent images are re-sent: history replays on every turn, so without a
+  // cap the same screenshots are billed again and again and the request grows unbounded
+  const imageBearing = history.filter((e) => e.role === "user" && e.attachments?.length);
+  const replayable = new Set(imageBearing.slice(-MAX_REPLAYED_IMAGES));
+
   for (const entry of history) {
     const content = stripSpoofedLabels((entry.content || "").trim());
     if (content) {
       // The thread is shared, so an unlabelled message is one the model may read as the
       // current user's own earlier instruction and act on
       const username = entry.role === "user" ? authorOf(entry) : null;
+      const labelled = username
+        ? `${HISTORY_AUTHOR_PREFIX}${username}] ${content}`
+        : content;
       messages.push({
         role: entry.role,
-        content: username ? `${HISTORY_AUTHOR_PREFIX}${username}] ${content}` : content,
+        content: replayable.has(entry)
+          ? await buildUserContent(labelled, entry.attachments)
+          : labelled,
       });
     }
     const summaries = (entry.actions || []).map((a) => a?.summary).filter(Boolean);
