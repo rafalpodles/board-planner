@@ -12,6 +12,7 @@ function depsWith(over: Partial<{
   uid: number;
   mode: number;
   fileUid: number;
+  workerId: string;
 }> = {}): RepoDeps {
   const gitConfig = over.gitConfig ?? "";
   const toplevel = over.toplevel;
@@ -28,6 +29,7 @@ function depsWith(over: Partial<{
     realpath: over.realpath ?? ((p: string) => p),
     stat: () => ({ uid: over.fileUid ?? 501, mode: over.mode ?? 0o755 }),
     uid: over.uid ?? 501,
+    workerId: over.workerId ?? "worker-1",
   };
 }
 
@@ -36,7 +38,18 @@ describe("bindRepository", () => {
     const result = await bindRepository(depsWith(), "/repo");
 
     expect(result.ok).toBe(true);
-    expect((result as { worktreeRoot: string }).worktreeRoot).toContain("cp-worktrees");
+    expect((result as { worktreeRoot: string }).worktreeRoot).toBe(join("/", "cp-worktrees", "worker-1"));
+  });
+
+  // Two worker processes running as the same OS user must not collide on the same worktree root —
+  // the whole reason RepoDeps.workerId went from optional to required
+  it("derives worktreeRoot from the given workerId, not the OS uid", async () => {
+    const a = await bindRepository(depsWith({ workerId: "worker-a", uid: 501 }), "/repo");
+    const b = await bindRepository(depsWith({ workerId: "worker-b", uid: 501 }), "/repo");
+
+    expect((a as { worktreeRoot: string }).worktreeRoot).toBe(join("/", "cp-worktrees", "worker-a"));
+    expect((b as { worktreeRoot: string }).worktreeRoot).toBe(join("/", "cp-worktrees", "worker-b"));
+    expect((a as { worktreeRoot: string }).worktreeRoot).not.toBe((b as { worktreeRoot: string }).worktreeRoot);
   });
 
   it("refuses a path the operator never allowed", async () => {

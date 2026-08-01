@@ -15,7 +15,7 @@ export interface RepoDeps {
   realpath: (p: string) => string;
   stat: (p: string) => { uid: number; mode: number };
   uid: number;
-  workerId?: string;
+  workerId: string;
 }
 
 type BindResult = { ok: true; path: string; worktreeRoot: string } | { ok: false; reason: string };
@@ -193,7 +193,7 @@ export async function bindRepository(deps: RepoDeps, proposedPath: string): Prom
     };
   }
 
-  const worktreeRoot = join(dirname(proposedPath), "cp-worktrees", deps.workerId ?? String(deps.uid));
+  const worktreeRoot = join(dirname(proposedPath), "cp-worktrees", deps.workerId);
   return { ok: true, path: proposedPath, worktreeRoot };
 }
 
