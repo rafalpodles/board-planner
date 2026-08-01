@@ -9,6 +9,7 @@ import { ApiPmMessage, ApiProject, ApiTask } from "@/types";
 import { Button } from "@/components/ui/Button";
 import { MarkdownContent } from "@/components/ui/MarkdownContent";
 import { timeAgo } from "@/lib/time";
+import { isPmLockedByInstance, isPmRunnable, pmDisabledReason } from "@/lib/pm/gate";
 import { taskPath } from "@/lib/urls";
 
 const ACTION_ICONS: Record<string, string> = {
@@ -272,18 +273,24 @@ export function PmChat({
     );
   }
 
-  if (!project?.pm?.enabled || !project?.pmAvailable) {
+  if (!project?.pmAvailable || !isPmRunnable(project?.pm)) {
+    const locked = isPmLockedByInstance(project?.pm);
     return (
       <div className="px-4 py-10 text-center space-y-3">
         <h1 className="text-xl font-bold">PM Agent</h1>
         <p className="text-sm text-text-muted">
           {!project?.pmAvailable
             ? "PM is not configured on the server (OPENROUTER_API_KEY missing)."
-            : "The PM agent is disabled for this project — enable it in settings."}
+            : locked
+              ? `${pmDisabledReason(project?.pm)} — it cannot be re-enabled from project settings.`
+              : "The PM agent is disabled for this project — enable it in settings."}
         </p>
-        <Link href={`/projects/${projectId}/settings`} className="text-primary text-sm hover:underline">
-          Go to settings
-        </Link>
+        {/* Project settings cannot clear an instance lock, so sending someone there is a dead end */}
+        {!locked && (
+          <Link href={`/projects/${projectId}/settings`} className="text-primary text-sm hover:underline">
+            Go to settings
+          </Link>
+        )}
       </div>
     );
   }
