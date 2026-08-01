@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const getAuthUser = vi.fn();
 const workerFindByIdAndUpdate = vi.fn();
+const publishToWorker = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({
@@ -9,6 +10,7 @@ vi.mock("@/lib/auth", () => ({
   RateLimitError: class RateLimitError extends Error {},
 }));
 vi.mock("@/models/worker", () => ({ Worker: { findByIdAndUpdate: workerFindByIdAndUpdate } }));
+vi.mock("@/lib/worker-events", () => ({ publishToWorker }));
 
 const { POST } = await import("./route");
 
@@ -31,6 +33,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   getAuthUser.mockResolvedValue(ADMIN);
   workerFindByIdAndUpdate.mockResolvedValue({
+    _id: WORKER_ID,
     command: "pause",
     commandIssuedAt: new Date("2026-08-01T12:00:00.000Z"),
   });
@@ -45,6 +48,7 @@ describe("POST /api/workers/:workerId/command", () => {
 
     expect(response.status).toBe(403);
     expect(workerFindByIdAndUpdate).not.toHaveBeenCalled();
+    expect(publishToWorker).not.toHaveBeenCalled();
   });
 
   it("400s an invalid command value", async () => {
@@ -54,6 +58,7 @@ describe("POST /api/workers/:workerId/command", () => {
 
     expect(response.status).toBe(400);
     expect(workerFindByIdAndUpdate).not.toHaveBeenCalled();
+    expect(publishToWorker).not.toHaveBeenCalled();
   });
 
   it("400s the JSON literal null body instead of throwing on the destructure", async () => {
@@ -62,6 +67,7 @@ describe("POST /api/workers/:workerId/command", () => {
     const response = await POST(req, ctx);
 
     expect(response.status).toBe(400);
+    expect(publishToWorker).not.toHaveBeenCalled();
   });
 
   it("404s a syntactically invalid worker id without a Mongoose cast error", async () => {
@@ -71,6 +77,7 @@ describe("POST /api/workers/:workerId/command", () => {
 
     expect(response.status).toBe(404);
     expect(workerFindByIdAndUpdate).not.toHaveBeenCalled();
+    expect(publishToWorker).not.toHaveBeenCalled();
   });
 
   it("404s a well-formed but unknown worker id", async () => {
@@ -80,6 +87,7 @@ describe("POST /api/workers/:workerId/command", () => {
     const response = await POST(req, ctx);
 
     expect(response.status).toBe(404);
+    expect(publishToWorker).not.toHaveBeenCalled();
   });
 
   it("issues a valid command, clearing commandAckedAt so an ack can be told apart from a request", async () => {
@@ -95,5 +103,13 @@ describe("POST /api/workers/:workerId/command", () => {
     );
     const json = await response.json();
     expect(json).toEqual({ command: "pause", issuedAt: "2026-08-01T12:00:00.000Z" });
+  });
+
+  it("publishes the issued command over the worker's SSE stream, keyed by its own id", async () => {
+    const { req, ctx } = request({ command: "pause" });
+
+    await POST(req, ctx);
+
+    expect(publishToWorker).toHaveBeenCalledWith(WORKER_ID, { command: "pause" });
   });
 });
