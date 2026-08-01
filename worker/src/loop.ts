@@ -50,7 +50,6 @@ export function createLoop(deps: LoopDeps): Loop {
     },
 
     stop() {
-      pausedState = true;
       running = false;
     },
 
