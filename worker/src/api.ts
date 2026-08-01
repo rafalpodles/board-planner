@@ -1,7 +1,13 @@
+import { existsSync, readFileSync } from "fs";
+import { join } from "path";
 import { WorkerConfig } from "./config.js";
+import { loadIdentity, PROTOCOL_VERSION, Store } from "./registration.js";
 import { ClaimedTask } from "./types.js";
 
 type Fetch = typeof globalThis.fetch;
+type Credential = "api" | "worker";
+
+const NOT_REGISTERED_MESSAGE = "this worker is not registered — see worker/README.md";
 
 export interface StatusIds {
   approved: string;
@@ -69,19 +75,52 @@ function toColumn(value: unknown): BoardColumn | null {
   };
 }
 
-export function createApiClient(config: WorkerConfig, fetchImpl: Fetch = fetch): ApiClient {
-  const base = `${config.apiBaseUrl}/api/projects/${config.projectId}`;
+// The claim credential lives at <stateDir>/worker.json, written by registration.ts. Read fresh on
+// every worker-credentialed call rather than cached at construction time, so a credential that
+// registration.ts refreshes (first registration, or re-registration after a 401) takes effect on
+// the very next call without restarting the process.
+function fileIdentityReader(stateDir: string): Pick<Store, "read"> {
+  const path = join(stateDir, "worker.json");
+  return { read: () => (existsSync(path) ? readFileSync(path, "utf8") : "") };
+}
 
-  async function send(path: string, method: string, body?: unknown): Promise<Response> {
+export function createApiClient(
+  config: WorkerConfig,
+  fetchImpl: Fetch = fetch,
+  identitySource?: Pick<Store, "read">
+): ApiClient {
+  const base = `${config.apiBaseUrl}/api/projects/${config.projectId}`;
+  let warnedNotRegistered = false;
+
+  function warnNotRegistered(): void {
+    if (warnedNotRegistered) return;
+    warnedNotRegistered = true;
+    console.error(NOT_REGISTERED_MESSAGE);
+  }
+
+  async function send(path: string, method: string, body?: unknown, credential: Credential = "api"): Promise<Response> {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+
+    if (credential === "worker") {
+      const identity = loadIdentity(identitySource ?? fileIdentityReader(config.stateDir));
+      if (!identity) {
+        warnNotRegistered();
+        throw new Error(NOT_REGISTERED_MESSAGE);
+      }
+      headers.Authorization = `Bearer ${identity.credential}`;
+      headers["X-Worker-Id"] = identity.workerId;
+      headers["X-CP-Protocol"] = String(PROTOCOL_VERSION);
+    } else {
+      headers.Authorization = `Bearer ${config.apiToken}`;
+    }
+
     const response = await fetchImpl(`${base}${path}`, {
       method,
-      headers: {
-        Authorization: `Bearer ${config.apiToken}`,
-        "Content-Type": "application/json",
-      },
+      headers,
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
     if (!response.ok) {
+      if (credential === "worker" && response.status === 401) warnNotRegistered();
       const detail = await response.text().catch(() => "");
       throw new Error(`${method} ${path} failed: ${response.status} ${detail}`);
     }
@@ -114,10 +153,7 @@ export function createApiClient(config: WorkerConfig, fetchImpl: Fetch = fetch):
 
   return {
     async claim(runId) {
-      const response = await send("/tasks/claim", "POST", {
-        workerId: config.workerId,
-        runId,
-      });
+      const response = await send("/tasks/claim", "POST", { runId }, "worker");
       if (response.status === 204) return null;
 
       const raw = (await response.json()) as RawTask;

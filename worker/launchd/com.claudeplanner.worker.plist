@@ -15,12 +15,10 @@
   <dict>
     <key>CP_API_URL</key>
     <string>https://claude-planner-production.up.railway.app</string>
-    <key>CP_PROJECT_ID</key>
-    <string>CP</string>
-    <key>CP_REPO_PATH</key>
-    <string>/Users/rpo/Documents/Projects/ClaudePlanner</string>
     <key>CP_API_TOKEN_FILE</key>
     <string>/Users/rpo/.claudeplanner/token</string>
+    <key>CP_STATE_DIR</key>
+    <string>/Users/rpo/.claudeplanner</string>
     <key>HOME</key>
     <string>/Users/rpo</string>
     <key>PATH</key>

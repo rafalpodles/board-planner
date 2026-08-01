@@ -8,10 +8,14 @@ const config = {
   workerId: "worker-a",
 } as never;
 
+// A stored identity, injected in place of the real <stateDir>/worker.json so claim() (the only
+// method that needs one) can authenticate without touching the filesystem
+const identityStore = { read: () => JSON.stringify({ workerId: "w1", credential: "cpw_secret" }) };
+
 describe("createApiClient", () => {
   it("returns null when the claim endpoint reports an empty queue", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 204 });
-    const api = createApiClient(config, fetchMock as never);
+    const api = createApiClient(config, fetchMock as never, identityStore);
     expect(await api.claim("run-1")).toBeNull();
   });
 
@@ -28,7 +32,7 @@ describe("createApiClient", () => {
         execution: { attempts: 1 },
       }),
     });
-    const api = createApiClient(config, fetchMock as never);
+    const api = createApiClient(config, fetchMock as never, identityStore);
 
     const task = await api.claim("run-1");
 
@@ -43,23 +47,67 @@ describe("createApiClient", () => {
     });
   });
 
-  it("sends the bearer token", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 204 });
-    const api = createApiClient(config, fetchMock as never);
-    await api.claim("run-1");
+  it("sends the api token on a project-scoped call", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    const api = createApiClient(config, fetchMock as never, identityStore);
+    await api.setStatus("t1", "done");
     const init = fetchMock.mock.calls[0][1];
     expect(init.headers.Authorization).toBe("Bearer cp_token");
+    expect(init.headers["X-Worker-Id"]).toBeUndefined();
+    expect(init.headers["X-CP-Protocol"]).toBeUndefined();
+  });
+
+  it("sends the worker credential, X-Worker-Id and X-CP-Protocol on claim, not the api token", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 204 });
+    const api = createApiClient(config, fetchMock as never, identityStore);
+    await api.claim("run-1");
+    const init = fetchMock.mock.calls[0][1];
+    expect(init.headers.Authorization).toBe("Bearer cpw_secret");
+    expect(init.headers["X-Worker-Id"]).toBe("w1");
+    expect(init.headers["X-CP-Protocol"]).toBe("1");
+  });
+
+  it("sends only runId in the claim body — the credential identifies the worker", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 204 });
+    const api = createApiClient(config, fetchMock as never, identityStore);
+    await api.claim("run-1");
+    const init = fetchMock.mock.calls[0][1];
+    expect(init.body).toBe(JSON.stringify({ runId: "run-1" }));
+  });
+
+  it("refuses to claim, without a network call, when no identity is stored", async () => {
+    const fetchMock = vi.fn();
+    const api = createApiClient(config, fetchMock as never, { read: () => "" });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(api.claim("run-1")).rejects.toThrow(/not registered/);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+
+  it("logs that the worker is not registered only once, even after repeated 401s", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 401, text: async () => "" });
+    const api = createApiClient(config, fetchMock as never, identityStore);
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(api.claim("run-1")).rejects.toThrow();
+    await expect(api.claim("run-2")).rejects.toThrow();
+
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/not registered/));
+    errorSpy.mockRestore();
   });
 
   it("throws on a non-ok response", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 500, text: async () => "boom" });
-    const api = createApiClient(config, fetchMock as never);
+    const api = createApiClient(config, fetchMock as never, identityStore);
     await expect(api.claim("run-1")).rejects.toThrow(/500/);
   });
 
   it("sends the status via PATCH", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
-    const api = createApiClient(config, fetchMock as never);
+    const api = createApiClient(config, fetchMock as never, identityStore);
 
     await api.setStatus("t1", "done");
 
@@ -71,7 +119,7 @@ describe("createApiClient", () => {
 
   it("sends the comment via POST", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 201 });
-    const api = createApiClient(config, fetchMock as never);
+    const api = createApiClient(config, fetchMock as never, identityStore);
 
     await api.comment("t1", "hello");
 
@@ -94,7 +142,7 @@ describe("createApiClient", () => {
         execution: { attempts: 1 },
       }),
     });
-    const api = createApiClient(config, fetchMock as never);
+    const api = createApiClient(config, fetchMock as never, identityStore);
 
     const task = await api.claim("run-1");
 
@@ -103,7 +151,7 @@ describe("createApiClient", () => {
 
   it("releases via POST with no body, so the server owns the target column", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
-    const api = createApiClient(config, fetchMock as never);
+    const api = createApiClient(config, fetchMock as never, identityStore);
 
     await api.release("t1");
 
@@ -125,7 +173,7 @@ describe("createApiClient", () => {
         ],
       }),
     });
-    const api = createApiClient(config, fetchMock as never);
+    const api = createApiClient(config, fetchMock as never, identityStore);
 
     expect(await api.columnIds()).toEqual(["ready", "doing"]);
   });
@@ -135,7 +183,7 @@ describe("createApiClient", () => {
   // on a board the server handles perfectly well
   it("reads a board with no columns of its own as the seeded seven", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ columns: [] }) });
-    const api = createApiClient(config, fetchMock as never);
+    const api = createApiClient(config, fetchMock as never, identityStore);
 
     expect(await api.columnIds()).toEqual([
       "planned",
@@ -150,7 +198,7 @@ describe("createApiClient", () => {
 
   it("routes a board with no columns of its own to the seeded ids", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
-    const api = createApiClient(config, fetchMock as never);
+    const api = createApiClient(config, fetchMock as never, identityStore);
 
     expect(await api.statusIds()).toEqual({
       approved: "todo",
@@ -161,7 +209,7 @@ describe("createApiClient", () => {
 
   it("charges the attempt when the release asks not to refund it", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
-    const api = createApiClient(config, fetchMock as never);
+    const api = createApiClient(config, fetchMock as never, identityStore);
 
     await api.release("t1", { refund: false });
 
@@ -183,7 +231,7 @@ describe("createApiClient", () => {
         ],
       }),
     });
-    const api = createApiClient(config, fetchMock as never);
+    const api = createApiClient(config, fetchMock as never, identityStore);
 
     expect(await api.statusIds()).toEqual({
       approved: "ready",
@@ -204,7 +252,7 @@ describe("createApiClient", () => {
         ],
       }),
     });
-    const api = createApiClient(config, fetchMock as never);
+    const api = createApiClient(config, fetchMock as never, identityStore);
 
     expect((await api.statusIds()).review).toBe("escalated");
   });
@@ -225,7 +273,7 @@ describe("createApiClient", () => {
         ],
       }),
     });
-    const api = createApiClient(config, fetchMock as never);
+    const api = createApiClient(config, fetchMock as never, identityStore);
 
     expect(await api.statusIds()).toEqual({
       approved: "todo",
@@ -245,7 +293,7 @@ describe("createApiClient", () => {
         ],
       }),
     });
-    const api = createApiClient(config, fetchMock as never);
+    const api = createApiClient(config, fetchMock as never, identityStore);
 
     expect((await api.statusIds()).review).toBe("early");
   });
@@ -256,7 +304,7 @@ describe("createApiClient", () => {
       status: 200,
       json: async () => ({ columns: [{ id: "doing", role: "active", order: 1 }] }),
     });
-    const api = createApiClient(config, fetchMock as never);
+    const api = createApiClient(config, fetchMock as never, identityStore);
 
     expect(await api.statusIds()).toEqual({
       approved: "todo",
@@ -271,7 +319,7 @@ describe("createApiClient", () => {
       status: 200,
       json: async () => ({}),
     });
-    const api = createApiClient(config, fetchMock as never);
+    const api = createApiClient(config, fetchMock as never, identityStore);
 
     expect(await api.statusIds()).toEqual({
       approved: "todo",
@@ -288,7 +336,7 @@ describe("createApiClient", () => {
         columns: [null, { role: "done" }, { id: 7, role: "done" }, { id: "shipped", role: "done" }],
       }),
     });
-    const api = createApiClient(config, fetchMock as never);
+    const api = createApiClient(config, fetchMock as never, identityStore);
 
     expect((await api.statusIds()).done).toBe("shipped");
   });
@@ -299,7 +347,7 @@ describe("createApiClient", () => {
       status: 200,
       json: async () => ({ columns: [] }),
     });
-    const api = createApiClient(config, fetchMock as never);
+    const api = createApiClient(config, fetchMock as never, identityStore);
 
     await api.statusIds();
 
@@ -316,7 +364,7 @@ describe("createApiClient", () => {
         throw new Error("stream closed");
       },
     });
-    const api = createApiClient(config, fetchMock as never);
+    const api = createApiClient(config, fetchMock as never, identityStore);
     await expect(api.claim("run-1")).rejects.toThrow(/500/);
   });
 });
@@ -337,14 +385,14 @@ describe("createApiClient addressed by ObjectId", () => {
   }
 
   it("keys the task from the project's own key, not from the configured id", async () => {
-    const api = createApiClient(byObjectId, fetchFor({ key: "CP", columns: [] }) as never);
+    const api = createApiClient(byObjectId, fetchFor({ key: "CP", columns: [] }) as never, identityStore);
 
     expect((await api.claim("run-1"))?.taskKey).toBe("CP-158");
   });
 
   it("reads the project key once, however many tasks it claims", async () => {
     const fetchMock = fetchFor({ key: "CP", columns: [] });
-    const api = createApiClient(byObjectId, fetchMock as never);
+    const api = createApiClient(byObjectId, fetchMock as never, identityStore);
 
     await api.claim("run-1");
     await api.claim("run-2");
@@ -355,7 +403,7 @@ describe("createApiClient addressed by ObjectId", () => {
 
   it("does not read the project at all while the queue is empty", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 204 });
-    const api = createApiClient(byObjectId, fetchMock as never);
+    const api = createApiClient(byObjectId, fetchMock as never, identityStore);
 
     await api.claim("run-1");
 
@@ -373,7 +421,7 @@ describe("createApiClient addressed by ObjectId", () => {
       }
       return { ok: false, status: 503, text: async () => "down" };
     });
-    const api = createApiClient(byObjectId, fetchMock as never);
+    const api = createApiClient(byObjectId, fetchMock as never, identityStore);
 
     expect((await api.claim("run-1"))?.taskKey).toBe("69a52e3b399b27d3cbb2c5a5-158");
   });

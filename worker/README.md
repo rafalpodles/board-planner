@@ -37,8 +37,7 @@ repeating failure runs out of retries and lands in front of a human instead of c
 |---|---|---|
 | `CP_API_URL` | yes | — |
 | `CP_API_TOKEN` or `CP_API_TOKEN_FILE` | yes | — |
-| `CP_PROJECT_ID` | yes | — |
-| `CP_REPO_PATH` | yes | — |
+| `CP_WORKER_NAME` | yes | — |
 | `CP_WORKTREE_ROOT` | no | `<repo>/../cp-worktrees` |
 | `CP_BASE_BRANCH` | no | `main` |
 | `CP_POLL_INTERVAL_MS` | no | `30000` |
@@ -48,14 +47,31 @@ repeating failure runs out of retries and lands in front of a human instead of c
 | `CP_MAX_DIFF_FILES` | no | `10` |
 | `CP_WORKER_ID` | no | `worker-<hostname>` |
 
-`CP_API_TOKEN` is a ClaudePlanner API token scoped to the project. `CP_PROJECT_ID` accepts either
-the project key or its ObjectId — tasks are named from the project's own key either way.
+`CP_API_TOKEN` must belong to an instance admin. The worker spends it once, to register itself —
+every call after that, to `/tasks/claim` and the rest of `/api/workers/**`, authenticates with the
+credential registration returns instead. See Registration below.
 
 Claude Code runs on the logged-in CLI session. Never set `ANTHROPIC_API_KEY`, or runs bill per
 token instead of drawing on the subscription.
 
 `CP_CONCURRENCY` is parsed and reported but the loop still takes one task per cycle; raising it
 needs a worker pool, which is deliberately deferred until the single-task path has run for a while.
+
+## Registration
+
+A worker has no identity until an instance admin registers it and assigns it a project in
+`/admin/workers`. Until then it polls but claims nothing: `/tasks/claim` and the rest of
+`/api/workers/**` refuse any request without a credential the server itself issued.
+
+On first run the worker registers itself with `CP_API_TOKEN` and persists the response — a
+`workerId` and a `cpw_`-prefixed credential — to `<CP_STATE_DIR>/worker.json`, mode `0600`. Every
+later run reuses that file; the worker registers again only if the file is missing or the server
+rejects its stored credential with 401.
+
+Registration assigns a project, but not a filesystem. The repository path an admin proposes for
+this worker must still be approved on this machine, by listing it in `<CP_STATE_DIR>/repos.json`.
+A worker pointed at a path outside its own allowlist stays idle, with the reason visible in
+`/admin/workers`.
 
 ## Running
 
@@ -80,8 +96,8 @@ install -m 600 /dev/null ~/.claudeplanner/token && pbpaste > ~/.claudeplanner/to
 The worker refuses to start if that file is readable by group or others. `CP_API_TOKEN` still
 works inline for a container, where there is no file to protect.
 
-The plist carries the paths for this machine — check `ProgramArguments`, `CP_REPO_PATH` and `PATH`
-before loading it anywhere else. Logs go to `/tmp/claudeplanner-worker.log` and
+The plist carries the paths for this machine — check `ProgramArguments` and `PATH` before loading
+it anywhere else. Logs go to `/tmp/claudeplanner-worker.log` and
 `/tmp/claudeplanner-worker.error.log`.
 
 Stop it with `launchctl unload ~/Library/LaunchAgents/com.claudeplanner.worker.plist`. `SIGTERM`
