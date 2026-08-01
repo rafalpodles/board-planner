@@ -9,6 +9,7 @@ import { isPmRunnable, pmDisabledReason, resolvePmModel } from "./availability";
 import { PM_TOOLS, pmToolDefinitions, PmToolContext } from "./tools";
 import { discoverMcpTools, callMcpTool, McpRuntime, MAX_MCP_CALLS_PER_TURN } from "./mcp-tools";
 import { replayHistory, stripSpoofedLabels, HISTORY_AUTHOR_PREFIX } from "./history";
+import { pmThreadFilter } from "./thread";
 import { getProjectColumns, defaultStatusFor } from "@/lib/columns";
 
 const MAX_STEPS = 15;
@@ -144,7 +145,7 @@ export async function runPmTurn(opts: {
 
   const actor = await resolveActor(opts.triggeredByUserId);
 
-  const history = await PmMessage.find({ project: opts.projectId })
+  const history = await PmMessage.find(pmThreadFilter(opts.projectId, opts.triggeredByUserId))
     .sort({ createdAt: -1 })
     .limit(HISTORY_LIMIT)
     .populate("triggeredBy", "username fullName")

@@ -82,17 +82,20 @@ export async function POST(
     );
   }
 
-  const abort = acquireTurnLock(projectId);
+  const triggeredByUserId = String(user._id);
+
+  // One turn per project even though conversations are private — the agent writes to a
+  // board everyone shares
+  const abort = acquireTurnLock(projectId, triggeredByUserId);
   if (!abort) {
     return NextResponse.json(
-      { error: "A PM turn is already in progress for this project" },
+      { error: "Someone is already talking to the PM agent on this project — try again in a moment" },
       { status: 409 }
     );
   }
 
   const encoder = new TextEncoder();
   const userMessage = message.trim();
-  const triggeredByUserId = String(user._id);
 
   const stream = new ReadableStream({
     start(controller) {
