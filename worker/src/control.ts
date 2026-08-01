@@ -67,11 +67,8 @@ async function consumeFrames(
   }
 }
 
-// This registers against whichever server process the worker's TCP connection happens to land
-// on. On more than one Railway replica, a command published while this stream is open on a
-// different replica never arrives here — the heartbeat carries the same command as a fallback,
-// so a stream that never connects, or drops and is mid-backoff, degrades to polling rather than
-// losing the command.
+// Single-process accelerator only — see src/lib/worker-events.ts for why the heartbeat is the
+// durable contract this falls back to.
 export function connectControl(deps: ControlDeps): Control {
   const fetchImpl = deps.fetchImpl ?? fetch;
   const log = deps.log ?? ((message: string) => console.error(message));
