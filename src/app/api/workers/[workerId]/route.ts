@@ -101,9 +101,13 @@ export const PATCH = withAuth(async (request, { params, user }) => {
     }
   }
 
-  // Resolved lazily and only once: whether the caller admins any project this
-  // worker is assigned to, which is what a policy-field edit requires
+  // Policy is worker-wide, so a project admin must control every project this
+  // worker currently serves, not just one — otherwise admining any single
+  // assigned project reaches into every other project sharing the worker.
+  // Resolved lazily and only once. `[].every(...)` is vacuously true, so an
+  // unassigned worker is excluded explicitly rather than falling through it.
   let allowedForPolicy: boolean | null = isAdmin ? true : null;
+  let verifiedProjectIds = new Set<string>();
   for (const field of POLICY_FIELDS) {
     if (!(field in body)) continue;
 
@@ -112,10 +116,19 @@ export const PATCH = withAuth(async (request, { params, user }) => {
       const projects = projectIds.length
         ? await Project.find({ _id: { $in: projectIds } }).select("owner admins")
         : [];
-      allowedForPolicy = projects.some((p) => canAdminProject(user, p));
+      allowedForPolicy =
+        projectIds.length > 0 &&
+        projects.length === projectIds.length &&
+        projects.every((p) => canAdminProject(user, p));
+      if (allowedForPolicy) {
+        verifiedProjectIds = new Set(projects.map((p) => String(p._id)));
+      }
     }
     if (!allowedForPolicy) {
-      return NextResponse.json({ error: `${field} requires project admin` }, { status: 403 });
+      return NextResponse.json(
+        { error: `${field} requires admin of every project this worker is assigned to` },
+        { status: 403 }
+      );
     }
 
     if (field === "baseBranch" || field === "model") {
@@ -142,5 +155,12 @@ export const PATCH = withAuth(async (request, { params, user }) => {
     await logProjectAudit(String(assignment.project), String(user._id), "worker_updated", detail);
   }
 
-  return NextResponse.json(toApiWorker(updated!));
+  const apiWorker = toApiWorker(updated!);
+  if (!isAdmin) {
+    // Filtered against verifiedProjectIds rather than trusting the response is
+    // already scoped: assignments can change between the read above and this
+    // write, and a project admin must never see a project added in that window
+    apiWorker.assignments = apiWorker.assignments.filter((a) => verifiedProjectIds.has(a.project));
+  }
+  return NextResponse.json(apiWorker);
 });

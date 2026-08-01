@@ -105,7 +105,9 @@ beforeEach(() => {
 
 describe("GET /api/workers/:workerId", () => {
   it("returns the caller's own record, without credentialHash", async () => {
-    verifyWorkerCredential.mockResolvedValue(workerDoc({ lastSeenAt: new Date() }));
+    verifyWorkerCredential.mockResolvedValue(
+      workerDoc({ lastSeenAt: new Date(), credentialHash: "should-never-reach-the-client" })
+    );
 
     const request = new Request(`http://localhost/api/workers/${WORKER_ID}`, {
       headers: { authorization: "Bearer cpw_secret", "x-worker-id": WORKER_ID },
@@ -138,6 +140,7 @@ describe("PATCH /api/workers/:workerId — authorization matrix", () => {
 
     expect(response.status).toBe(403);
     expect((await response.json()).error).toMatch(/instance-admin only/);
+    expect(workerFindByIdAndUpdate).not.toHaveBeenCalled();
   });
 
   it("refuses a project admin on an admin-only field — project admin is not instance admin", async () => {
@@ -147,6 +150,7 @@ describe("PATCH /api/workers/:workerId — authorization matrix", () => {
 
     expect(response.status).toBe(403);
     expect((await response.json()).error).toMatch(/instance-admin only/);
+    expect(workerFindByIdAndUpdate).not.toHaveBeenCalled();
   });
 
   it("refuses a plain member on a policy field when they admin none of the assigned projects", async () => {
@@ -156,7 +160,29 @@ describe("PATCH /api/workers/:workerId — authorization matrix", () => {
     const response = await PATCH(patchRequest({ baseBranch: "develop" }), ctx());
 
     expect(response.status).toBe(403);
-    expect((await response.json()).error).toMatch(/requires project admin/);
+    expect((await response.json()).error).toMatch(/requires admin of every/);
+    expect(workerFindByIdAndUpdate).not.toHaveBeenCalled();
+  });
+
+  // The whole trust model: admining one project a shared worker serves must not
+  // grant control (or visibility) over another, unrelated project on that worker
+  it("refuses a project admin of A when the worker is also assigned to B", async () => {
+    getAuthUser.mockResolvedValue(PROJECT_ADMIN);
+    workerFindById.mockResolvedValue(
+      workerDoc({
+        assignments: [
+          { project: PROJECT_A, proposedPath: "/repo-a" },
+          { project: PROJECT_B, proposedPath: "/Users/alice/repos/project-b-confidential" },
+        ],
+      })
+    );
+    mockProjects([projectDoc({ _id: PROJECT_A }), projectDoc({ _id: PROJECT_B, admins: ["someone-else"] })]);
+
+    const response = await PATCH(patchRequest({ baseBranch: "develop" }), ctx());
+
+    expect(response.status).toBe(403);
+    expect((await response.json()).error).toMatch(/requires admin of every/);
+    expect(workerFindByIdAndUpdate).not.toHaveBeenCalled();
   });
 
   it("allows a project admin on a policy field", async () => {
@@ -172,6 +198,48 @@ describe("PATCH /api/workers/:workerId — authorization matrix", () => {
     );
   });
 
+  // Independent of the authorization gate above: the response must reflect only what
+  // was verified, not whatever the write happens to return
+  it("does not disclose a project the caller cannot see, even if assignments changed between the read and the write", async () => {
+    getAuthUser.mockResolvedValue(PROJECT_ADMIN);
+    workerFindById.mockResolvedValue(
+      workerDoc({ assignments: [{ project: PROJECT_A, proposedPath: "/repo-a" }] })
+    );
+    // Simulates a concurrent instance-admin assignment change landing between the
+    // authorization read and this write
+    workerFindByIdAndUpdate.mockResolvedValue(
+      workerDoc({
+        assignments: [
+          { project: PROJECT_A, proposedPath: "/repo-a" },
+          { project: PROJECT_B, proposedPath: "/Users/alice/repos/project-b-confidential" },
+        ],
+      })
+    );
+
+    const response = await PATCH(patchRequest({ baseBranch: "develop" }), ctx());
+
+    expect(response.status).toBe(200);
+    const json = await response.json();
+    expect(json.assignments).toEqual([{ project: PROJECT_A, proposedPath: "/repo-a" }]);
+    expect(JSON.stringify(json)).not.toContain(PROJECT_B);
+    expect(JSON.stringify(json)).not.toContain("project-b-confidential");
+  });
+
+  it("returns the full assignments list to an instance admin, unfiltered", async () => {
+    getAuthUser.mockResolvedValue(INSTANCE_ADMIN);
+    const bothAssignments = [
+      { project: PROJECT_A, proposedPath: "/repo-a" },
+      { project: PROJECT_B, proposedPath: "/repo-b" },
+    ];
+    workerFindById.mockResolvedValue(workerDoc({ assignments: bothAssignments }));
+    workerFindByIdAndUpdate.mockResolvedValue(workerDoc({ assignments: bothAssignments }));
+
+    const response = await PATCH(patchRequest({ baseBranch: "develop" }), ctx());
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).assignments).toEqual(bothAssignments);
+  });
+
   it("refuses a policy field on a worker with no assignments even for a project admin", async () => {
     getAuthUser.mockResolvedValue(PROJECT_ADMIN);
     workerFindById.mockResolvedValue(workerDoc({ assignments: [] }));
@@ -180,6 +248,7 @@ describe("PATCH /api/workers/:workerId — authorization matrix", () => {
 
     expect(response.status).toBe(403);
     expect(projectFind).not.toHaveBeenCalled();
+    expect(workerFindByIdAndUpdate).not.toHaveBeenCalled();
   });
 
   it("allows an instance admin on both admin and policy fields in one request", async () => {
