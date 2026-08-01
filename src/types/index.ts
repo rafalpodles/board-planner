@@ -372,7 +372,47 @@ export const PROJECT_ICONS: string[] = [
 export interface IProjectRepository {
   url: string;
   defaultBranch: string;
-  localPath: string;
+}
+
+export interface WorkerAssignment {
+  project: Types.ObjectId;
+  proposedPath: string;
+}
+
+export interface WorkerPolicy {
+  baseBranch: string;
+  pollIntervalMs: number;
+  taskTimeoutMs: number;
+  maxDiffLines: number;
+  maxDiffFiles: number;
+  model: string;
+}
+
+export interface IWorker {
+  _id: Types.ObjectId;
+  name: string;
+  host: string;
+  platform: string;
+  version: string;
+  protocolVersion: number;
+  credentialHash: string;
+  assignments: WorkerAssignment[];
+  policy: WorkerPolicy;
+  enabled: boolean;
+  lockedByInstance: boolean;
+  lastSeenAt: Date | null;
+  bindingError: string;
+  command: "" | "pause" | "resume" | "stop";
+  commandIssuedAt: Date | null;
+  commandAckedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface ApiWorker extends Omit<IWorker, "_id" | "credentialHash" | "assignments"> {
+  _id: string;
+  assignments: Array<{ project: string; proposedPath: string }>;
+  stale: boolean;
 }
 
 export interface ITaskExecution {
