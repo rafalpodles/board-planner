@@ -26,14 +26,15 @@ export function verdictFor(
   if (!worker.enabled) return { ok: false, reason: "this worker is disabled" };
   if (worker.lockedByInstance) return { ok: false, reason: "this worker is locked by the instance" };
 
-  const seen = worker.lastSeenAt ? new Date(worker.lastSeenAt).getTime() : 0;
-  if (now.getTime() - seen > WORKER_STALE_MS) {
-    return { ok: false, reason: "this worker has not reported in" };
-  }
+  // A non-finite lastSeenAt (unparseable, missing) must count as maximally stale, not as fresh
+  const seenAt = worker.lastSeenAt ? new Date(worker.lastSeenAt).getTime() : NaN;
+  const isFresh = Number.isFinite(seenAt) && now.getTime() - seenAt <= WORKER_STALE_MS;
+  if (!isFresh) return { ok: false, reason: "this worker has not reported in" };
 
-  const assigned = (worker.assignments ?? []).some(
-    (a) => String(a.project) === String(projectId)
-  );
+  // A falsy projectId must never match an assignment with no project via a shared String(undefined)
+  const assigned =
+    !!projectId &&
+    (worker.assignments ?? []).some((a) => a.project != null && String(a.project) === String(projectId));
   if (!assigned) return { ok: false, reason: "this worker has no assignment for this project" };
 
   return { ok: true };
@@ -70,9 +71,10 @@ export async function verifyWorkerCredential(
   workerId: string,
   credential: string
 ): Promise<IWorker | null> {
-  if (!isValidObjectId(workerId)) return null;
+  if (!isValidObjectId(workerId) || typeof credential !== "string") return null;
   await connectDB();
-  const worker = await Worker.findById(workerId);
+  // credentialHash is select: false on the schema; it must be asked for explicitly
+  const worker = await Worker.findById(workerId).select("+credentialHash");
   if (!worker) return null;
   return (await bcrypt.compare(credential, worker.credentialHash)) ? worker : null;
 }
