@@ -150,7 +150,7 @@ export default function TokensPage() {
 
   return (
     <div className="max-w-2xl mx-auto">
-      <h1 className="text-2xl font-bold mb-6">API Tokens</h1>
+      <h2 className="text-lg font-semibold mb-6">API Tokens</h2>
 
       <p className="text-sm text-text-muted mb-6">
         Use API tokens for programmatic access (MCP server, CI, scripts).
