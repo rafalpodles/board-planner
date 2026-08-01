@@ -58,6 +58,8 @@ describe("bindRepository", () => {
     "core.fsmonitor=/tmp/x",
     "core.sshCommand=/tmp/x",
     "core.hooksPath=/tmp/hooks",
+    "core.editor=/tmp/x",
+    "sequence.editor=/tmp/x",
     "diff.external=/tmp/x",
     "filter.lfs.clean=/tmp/x",
     "filter.lfs.process=/tmp/x",
@@ -65,12 +67,39 @@ describe("bindRepository", () => {
     "diff.mydriver.command=/tmp/x",
     "merge.mine.driver=/tmp/x",
     "credential.helper=!/tmp/x",
+    "credential.https://github.com.helper=!/tmp/x",
+    "protocol.allow=always",
+    "protocol.ext.allow=always",
+    "remote.origin.url=ext::/tmp/x",
     "alias.st=!/tmp/x",
   ])("refuses a repository whose git config sets %s", async (line) => {
     const result = await bindRepository(depsWith({ gitConfig: `${line}\n` }), "/repo");
 
     expect(result.ok).toBe(false);
     expect((result as { reason: string }).reason).toMatch(/git config/i);
+  });
+
+  // The reproduction that matters most: neither key alone is a command, but together they make
+  // git run one — this is what delivery.ts's own push would otherwise execute
+  it("refuses a repository pairing a permissive protocol.allow with an ext:: remote", async () => {
+    const gitConfig = "protocol.ext.allow=always\nremote.origin.url=ext::sh -c 'touch /tmp/pwned'\n";
+    const result = await bindRepository(depsWith({ gitConfig }), "/repo");
+
+    expect(result.ok).toBe(false);
+    expect((result as { reason: string }).reason).toMatch(/git config/i);
+  });
+
+  // These sit in the same families as the dangerous keys above but hold no command, so refusing
+  // them would reject ordinary Git-LFS and gitattributes repositories for no security benefit
+  it.each([
+    "filter.lfs.required=true",
+    "diff.d.binary=true",
+    "merge.m.name=custom merge driver",
+    "diff.mytype.xfuncname=^function",
+  ])("accepts a repository whose git config merely sets %s", async (line) => {
+    const result = await bindRepository(depsWith({ gitConfig: `${line}\n` }), "/repo");
+
+    expect(result.ok).toBe(true);
   });
 
   // toplevel is pinned to the proposed path so rule 6 (own toplevel) cannot also refuse and mask

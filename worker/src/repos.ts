@@ -37,19 +37,34 @@ const SENSITIVE_ROOTS = [
   "/private/tmp",
 ];
 
+// This denylist is defence in depth against a repository that was ALREADY hostile when it was
+// proposed. It is not, and cannot be, a complete boundary, for two reasons that no amount of
+// enumeration fixes: the worker's agent runs with git in its own tool allowlist, so once a
+// repository is bound it can set any config key it likes inside that worktree — this scan runs
+// once, at bind time, against config the agent has not touched yet. And GIT_CONFIG_NOSYSTEM plus
+// the -c overrides neutralise system and command-line config on every call, but nothing disables
+// repository-local config, because filter/diff/merge drivers and credential helpers need it to
+// work at all. Keep the list honest, not exhaustive: match only the subkeys git actually executes,
+// so a legitimate Git-LFS or gitattributes repository is not refused for an inert sibling key.
 const EXACT_DANGEROUS_KEYS = [
   "core.fsmonitor",
   "core.pager",
   "core.sshcommand",
   "core.hookspath",
+  "core.editor",
+  "sequence.editor",
   "diff.external",
-  "credential.helper",
 ];
 
-// git executes whatever these families point at (filter.<name>.clean/smudge/process,
-// diff.<name>.textconv/command, merge.<name>.driver, ...). Rather than enumerate every leaf name
-// git has ever added, any subkey under these sections is treated as dangerous.
-const EXECUTABLE_FAMILIES = ["filter.", "diff.", "merge."];
+// <family>.<name>.<leaf> keys whose value git runs as a command. Everything else under these
+// sections (filter.*.required, diff.*.binary/xfuncname/algorithm, merge.*.name, ...) is inert and
+// must be allowed.
+const EXECUTABLE_LEAVES: Record<string, string[]> = {
+  "filter.": ["clean", "smudge", "process"],
+  "diff.": ["textconv", "command"],
+  "merge.": ["driver"],
+  "credential.": ["helper"],
+};
 
 function sensitiveLocation(path: string): string | null {
   const root = SENSITIVE_ROOTS.find((dir) => path === dir || path.startsWith(`${dir}${sep}`));
@@ -58,17 +73,40 @@ function sensitiveLocation(path: string): string | null {
   return null;
 }
 
-function dangerousConfigKey(listOutput: string): string | null {
+function dangerousFamilyLeaf(key: string): boolean {
+  for (const [family, leaves] of Object.entries(EXECUTABLE_LEAVES)) {
+    if (!key.startsWith(family)) continue;
+    const rest = key.slice(family.length);
+    const leaf = rest.slice(rest.lastIndexOf(".") + 1);
+    if (leaves.includes(leaf)) return true;
+  }
+  return false;
+}
+
+// protocol.<name>.allow (or the bare protocol.allow default) does not itself hold a command, but
+// paired with a remote.*.url using the ext:: transport it makes git run one — ext defaults to
+// "never" precisely because it executes a program, and local config can override that default.
+function isProtocolAllowKey(key: string): boolean {
+  return key === "protocol.allow" || (key.startsWith("protocol.") && key.endsWith(".allow"));
+}
+
+function usesExtTransport(value: string): boolean {
+  return value.trim().toLowerCase().startsWith("ext::");
+}
+
+function dangerousConfigEntry(listOutput: string): string | null {
   for (const rawLine of listOutput.split("\n")) {
     const line = rawLine.trim();
     if (!line) continue;
     const eq = line.indexOf("=");
     const key = (eq === -1 ? line : line.slice(0, eq)).toLowerCase();
+    const value = eq === -1 ? "" : line.slice(eq + 1);
+
     if (EXACT_DANGEROUS_KEYS.includes(key)) return key;
     if (key.startsWith("alias.")) return key;
-    if (EXECUTABLE_FAMILIES.some((family) => key.startsWith(family) && key.slice(family.length).includes("."))) {
-      return key;
-    }
+    if (dangerousFamilyLeaf(key)) return key;
+    if (isProtocolAllowKey(key)) return key;
+    if (usesExtTransport(value)) return key;
   }
   return null;
 }
@@ -138,11 +176,11 @@ export async function bindRepository(deps: RepoDeps, proposedPath: string): Prom
   if (config.code !== 0 || config.timedOut) {
     return { ok: false, reason: `could not read git config in ${proposedPath}` };
   }
-  const dangerous = dangerousConfigKey(config.stdout);
+  const dangerous = dangerousConfigEntry(config.stdout);
   if (dangerous) {
     return {
       ok: false,
-      reason: `${proposedPath}'s git config sets ${dangerous}, which git would execute as a command`,
+      reason: `${proposedPath}'s git config sets ${dangerous}, which can make git run an attacker's command`,
     };
   }
 
