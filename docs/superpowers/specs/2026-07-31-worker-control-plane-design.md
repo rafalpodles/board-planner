@@ -132,10 +132,19 @@ At adoption, not at use, the worker canonicalises with `realpath` and refuses wh
 - `<path>/.git` is missing, or `git rev-parse --show-toplevel` does not return the path itself;
 - the owner is not the worker's uid, or it is group- or world-writable.
 
-Then, before anything else runs in a newly bound repository: `git config --local --list` must not
-set `core.fsmonitor`, `core.pager`, `core.sshCommand`, `core.hooksPath`, `diff.external`,
-`filter.*.clean`, `filter.*.smudge` or `alias.*`. Every git invocation passes
-`GIT_CONFIG_NOSYSTEM=1 -c core.fsmonitor=false -c core.pager=cat`.
+The allowlist entry and the checks above are the actual boundary — they are what stops a server,
+or whoever compromised it, from pointing the worker at a directory of its own choosing. On top of
+that, before anything else runs in a newly bound repository, the worker also scans
+`git config --local --list` and refuses known command-holding keys (`core.fsmonitor`, `core.pager`,
+`diff.external`, `filter.*.clean`, and the rest of the list in `worker/src/repos.ts`, which is the
+source of truth, not this paragraph). This is a cheap early warning against a repository that was
+*already* hostile when it was proposed, not a boundary in itself, and it is deliberately not
+exhaustive: `--list` prints `include.path=<file>` but never that file's contents, so any key on the
+list can be smuggled through one level of indirection and the scan will never see it — no amount of
+enumeration closes that gap, only the allowlist does. Every git invocation still passes
+`GIT_CONFIG_NOSYSTEM=1 -c core.fsmonitor=false -c core.pager=cat`, neutralising system and
+command-line config; nothing disables repository-local config, which is exactly why the scan can
+only ever be a first line of defence.
 
 `worktreeRoot` derives from the validated path and is never independently settable. **No repository
 URL is ever accepted for cloning** — `Project.repository.url` may be displayed and nothing more.

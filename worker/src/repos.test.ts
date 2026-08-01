@@ -59,6 +59,7 @@ describe("bindRepository", () => {
     "core.sshCommand=/tmp/x",
     "core.hooksPath=/tmp/hooks",
     "core.editor=/tmp/x",
+    "core.gitProxy=/tmp/x",
     "sequence.editor=/tmp/x",
     "diff.external=/tmp/x",
     "filter.lfs.clean=/tmp/x",
@@ -68,8 +69,11 @@ describe("bindRepository", () => {
     "merge.mine.driver=/tmp/x",
     "credential.helper=!/tmp/x",
     "credential.https://github.com.helper=!/tmp/x",
+    "remote.origin.receivepack=/tmp/x",
+    "remote.origin.uploadpack=/tmp/x",
     "protocol.allow=always",
     "protocol.ext.allow=always",
+    "protocol.ext.allow=user",
     "remote.origin.url=ext::/tmp/x",
     "alias.st=!/tmp/x",
   ])("refuses a repository whose git config sets %s", async (line) => {
@@ -90,12 +94,16 @@ describe("bindRepository", () => {
   });
 
   // These sit in the same families as the dangerous keys above but hold no command, so refusing
-  // them would reject ordinary Git-LFS and gitattributes repositories for no security benefit
+  // them would reject ordinary Git-LFS and gitattributes repositories for no security benefit.
+  // protocol.*.allow=never is the explicitly safe value — it reinforces ext's default, it does not
+  // relax it — and must not be refused just because the key shape matches.
   it.each([
     "filter.lfs.required=true",
     "diff.d.binary=true",
     "merge.m.name=custom merge driver",
     "diff.mytype.xfuncname=^function",
+    "protocol.allow=never",
+    "protocol.ext.allow=never",
   ])("accepts a repository whose git config merely sets %s", async (line) => {
     const result = await bindRepository(depsWith({ gitConfig: `${line}\n` }), "/repo");
 
