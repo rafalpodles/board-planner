@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState, KeyboardEvent } from "react";
 import { Comments } from "./Comments";
 import { ActivityTimeline } from "./ActivityTimeline";
 
@@ -17,10 +17,30 @@ export function TaskActivityPanel({ projectId, taskId }: TaskActivityPanelProps)
   const [historyCount, setHistoryCount] = useState<number | null>(null);
   const [historyRefresh, setHistoryRefresh] = useState(0);
 
+  const tabRefs = useRef<Record<Tab, HTMLButtonElement | null>>({
+    comments: null,
+    history: null,
+  });
+
   const tabs: { id: Tab; label: string; count: number | null }[] = [
     { id: "comments", label: "Comments", count: commentCount },
     { id: "history", label: "History", count: historyCount },
   ];
+
+  // role="tablist" promises arrow-key navigation to assistive tech, so it has to work
+  function handleKeyDown(e: KeyboardEvent<HTMLButtonElement>) {
+    const order = tabs.map((t) => t.id);
+    const i = order.indexOf(tab);
+    let next: Tab | null = null;
+    if (e.key === "ArrowRight") next = order[(i + 1) % order.length];
+    else if (e.key === "ArrowLeft") next = order[(i - 1 + order.length) % order.length];
+    else if (e.key === "Home") next = order[0];
+    else if (e.key === "End") next = order[order.length - 1];
+    if (!next) return;
+    e.preventDefault();
+    setTab(next);
+    tabRefs.current[next]?.focus();
+  }
 
   return (
     <div>
@@ -34,8 +54,13 @@ export function TaskActivityPanel({ projectId, taskId }: TaskActivityPanelProps)
             key={t.id}
             role="tab"
             id={`task-panel-tab-${t.id}`}
+            ref={(el) => {
+              tabRefs.current[t.id] = el;
+            }}
             aria-selected={tab === t.id}
             aria-controls={`task-panel-${t.id}`}
+            tabIndex={tab === t.id ? 0 : -1}
+            onKeyDown={handleKeyDown}
             onClick={() => setTab(t.id)}
             className={`shrink-0 -mb-px border-b-2 px-3 py-2 text-sm transition-colors ${
               tab === t.id
