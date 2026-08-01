@@ -10,6 +10,8 @@ interface ActivityTimelineProps {
   taskId: string;
   hideHeading?: boolean;
   onCountChange?: (count: number) => void;
+  // Bumped by the parent when something outside this component wrote an activity entry
+  refreshKey?: number;
 }
 
 function actionIcon(action: string) {
@@ -94,6 +96,7 @@ export function ActivityTimeline({
   taskId,
   hideHeading,
   onCountChange,
+  refreshKey,
 }: ActivityTimelineProps) {
   const [logs, setLogs] = useState<ApiActivityLog[]>([]);
   const [expanded, setExpanded] = useState(false);
@@ -110,7 +113,7 @@ export function ActivityTimeline({
       })
       .catch(() => setFailed(true));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [taskId]);
+  }, [taskId, refreshKey]);
 
   const displayLogs = expanded ? logs : logs.slice(0, 5);
 

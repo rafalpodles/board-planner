@@ -15,6 +15,7 @@ export function TaskActivityPanel({ projectId, taskId }: TaskActivityPanelProps)
   const [tab, setTab] = useState<Tab>("comments");
   const [commentCount, setCommentCount] = useState<number | null>(null);
   const [historyCount, setHistoryCount] = useState<number | null>(null);
+  const [historyRefresh, setHistoryRefresh] = useState(0);
 
   const tabs: { id: Tab; label: string; count: number | null }[] = [
     { id: "comments", label: "Comments", count: commentCount },
@@ -63,6 +64,7 @@ export function TaskActivityPanel({ projectId, taskId }: TaskActivityPanelProps)
           taskId={taskId}
           hideHeading
           onCountChange={setCommentCount}
+          onMutated={() => setHistoryRefresh((k) => k + 1)}
         />
       </div>
 
@@ -77,6 +79,7 @@ export function TaskActivityPanel({ projectId, taskId }: TaskActivityPanelProps)
           taskId={taskId}
           hideHeading
           onCountChange={setHistoryCount}
+          refreshKey={historyRefresh}
         />
       </div>
     </div>
