@@ -18,6 +18,7 @@ export interface PipelineDeps {
   collectDiff: (runner: Runner, worktreePath: string, baseBranch: string) => Promise<DiffStats>;
   runner: Runner;
   gates: Gate[];
+  signal?: AbortSignal;
 }
 
 const SLUG = "worker";
@@ -72,6 +73,18 @@ async function quietly(work: () => Promise<unknown>): Promise<void> {
   } catch {
     return;
   }
+}
+
+// An operator's stop is not the task's failure — released refunds the attempt, where requeued
+// would charge it and eventually park the task in review as "gave up"
+async function releaseIfAborted(
+  deps: PipelineDeps,
+  reporter: Reporter,
+  task: ClaimedTask
+): Promise<boolean> {
+  if (!deps.signal?.aborted) return false;
+  await reporter.released(task, "the run was stopped");
+  return true;
 }
 
 export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<void> {
@@ -135,6 +148,8 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
     const context: GateContext = { worktreePath, task, result: outcome.result, diff };
 
     for (const gate of gates) {
+      if (await releaseIfAborted(deps, reporter, task)) return;
+
       const verdict = await gate.run(context);
       if (verdict.ok) continue;
 
@@ -156,6 +171,8 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
       );
       return;
     }
+
+    if (await releaseIfAborted(deps, reporter, task)) return;
 
     let prUrl = "";
     try {

@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { hostname } from "os";
 import { dirname, join } from "path";
 import { createApiClient } from "./api.js";
 import { createOutbox, Store } from "./outbox.js";
@@ -11,9 +12,11 @@ import { buildGates } from "./gates/index.js";
 import { createLoop } from "./loop.js";
 import { PipelineDeps, runTask } from "./pipeline.js";
 import { createReporter } from "./reporter.js";
+import { startHeartbeat } from "./registration.js";
 import { createWorkspace, reapOrphans } from "./workspace.js";
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+const WORKER_VERSION = "1.0.0";
 
 function fileStore(path: string): Store {
   return {
@@ -32,6 +35,18 @@ async function main(): Promise<void> {
   const workspace = createWorkspace(config, runner);
 
   const outbox = createOutbox(fileStore(join(config.stateDir, "outbox.jsonl")));
+
+  const workerName = process.env.CP_WORKER_NAME?.trim();
+  if (!workerName) throw new Error("CP_WORKER_NAME is required");
+
+  const heartbeat = startHeartbeat({
+    apiBaseUrl: config.apiBaseUrl,
+    apiToken: config.apiToken,
+    registration: { name: workerName, host: hostname(), platform: process.platform, version: WORKER_VERSION },
+    store: fileStore(join(config.stateDir, "worker.json")),
+  });
+  let current: AbortController | null = null;
+  heartbeat.onAbort(() => current?.abort());
 
   const deps: PipelineDeps = {
     config,
@@ -55,7 +70,13 @@ async function main(): Promise<void> {
   const loop = createLoop({
     config,
     api,
-    execute: (task) => runTask(deps, task),
+    execute: (task) => {
+      const controller = new AbortController();
+      current = controller;
+      return runTask({ ...deps, signal: controller.signal }, task).finally(() => {
+        current = null;
+      });
+    },
     async drain() {
       const { delivered, pending, dropped } = await outbox.flush(api);
       if (delivered || pending || dropped) {
@@ -71,7 +92,9 @@ async function main(): Promise<void> {
   console.log(
     `worker ${config.workerId} polling ${config.apiBaseUrl} for ${config.projectId} every ${config.pollIntervalMs}ms`
   );
+  await heartbeat.tick();
   await loop.start();
+  heartbeat.stop();
   console.log(`worker ${config.workerId} stopped`);
 }
 
