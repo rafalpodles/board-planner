@@ -140,7 +140,7 @@ export default function UsersPage() {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold">Users</h1>
+        <h2 className="text-lg font-semibold">Users</h2>
         <Button onClick={() => setShowNew(true)}>New User</Button>
       </div>
 
