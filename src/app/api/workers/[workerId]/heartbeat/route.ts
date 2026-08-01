@@ -11,8 +11,10 @@ export const POST = withWorker(async (request, { worker }) => {
     return NextResponse.json({ error: "this worker may not run", abort: true }, { status: 403 });
   }
 
+  const protocolVersion = protocolOf(request);
   await touchWorker(String(worker._id), {
-    protocolVersion: protocolOf(request),
+    // A missing/unparseable protocol header must not overwrite a valid stored version with NaN
+    ...(Number.isFinite(protocolVersion) ? { protocolVersion } : {}),
     version: typeof body.version === "string" ? body.version : worker.version,
     // An ack for a command that is no longer current must not clear the newer one
     ...(body.acked && body.acked === worker.command ? { commandAckedAt: new Date() } : {}),

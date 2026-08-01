@@ -65,6 +65,9 @@ export function withWorker(
     if (!worker) {
       return NextResponse.json({ error: "Worker credential rejected" }, { status: 401 });
     }
+    // credentialHash is only loaded to verify the credential above; clear it so no
+    // downstream handler can spread it into a response
+    worker.credentialHash = "";
 
     // The path segment is authoritative on /api/workers/:id, so a credential must not act on
     // someone else's record just because the route happens to carry an id
