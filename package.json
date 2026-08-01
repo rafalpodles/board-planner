@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start -H 0.0.0.0 -p ${PORT:-3000}",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.26.0",
@@ -33,6 +35,7 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@types/nodemailer": "^7.0.11"
+    "@types/nodemailer": "^7.0.11",
+    "vitest": "^3.2.7"
   }
 }
