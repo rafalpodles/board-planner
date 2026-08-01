@@ -123,7 +123,7 @@ export default function AdminAgentsPage() {
 
   return (
     <div className="max-w-5xl mx-auto">
-      <h1 className="text-2xl font-bold mb-1">PM agents</h1>
+      <h2 className="text-lg font-semibold mb-1">PM agents</h2>
       <p className="text-sm text-text-muted mb-6">
         Every project on this instance. Only an instance admin can change what is on this page.
       </p>

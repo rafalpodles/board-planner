@@ -53,7 +53,7 @@ export default function ProfilePage() {
 
   return (
     <div className="max-w-md mx-auto">
-      <h1 className="text-2xl font-bold mb-6">Profile Settings</h1>
+      <h2 className="text-lg font-semibold mb-6">Profile</h2>
 
       <div className="space-y-4">
         <div>
