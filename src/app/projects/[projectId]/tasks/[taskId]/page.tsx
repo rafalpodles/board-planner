@@ -13,10 +13,9 @@ import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Modal } from "@/components/ui/Modal";
 import { TaskForm } from "@/components/tasks/TaskForm";
-import { Comments } from "@/components/tasks/Comments";
+import { TaskActivityPanel } from "@/components/tasks/TaskActivityPanel";
 import { TaskLinks } from "@/components/tasks/TaskLinks";
 import { useToast } from "@/components/ui/Toast";
-import { ActivityTimeline } from "@/components/tasks/ActivityTimeline";
 import { GitlabActivity } from "@/components/tasks/GitlabActivity";
 
 export default function TaskDetailPage() {
@@ -280,14 +279,8 @@ export default function TaskDetailPage() {
           </Button>
         </div>
 
-        {/* Comments */}
         <div className="border-t border-border pt-6">
-          <Comments projectId={projectId} taskId={taskId} />
-        </div>
-
-        {/* Activity Log */}
-        <div className="border-t border-border pt-6">
-          <ActivityTimeline projectId={projectId} taskId={taskId} />
+          <TaskActivityPanel projectId={projectId} taskId={taskId} />
         </div>
       </div>
 
