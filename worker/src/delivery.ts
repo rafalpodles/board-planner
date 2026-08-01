@@ -69,12 +69,20 @@ export function createDelivery(runner: Runner, baseBranch?: string): Delivery {
   const baseArgs = baseBranch?.trim() ? ["--base", baseBranch.trim()] : [];
 
   // Delivery runs our own commands, never agent-authored ones, so it is the one place that may
-  // carry the credentials git and gh need to reach the remote
+  // carry the credentials git and gh need to reach the remote. The repository was approved by
+  // bindRepository, but its gitconfig (credential.helper, core.sshCommand, ...) still fires on
+  // every git call unless each one, not just the one at bind time, neutralises it too. gh does not
+  // understand git's -c flag, so only git invocations get it; GIT_CONFIG_NOSYSTEM is harmless for gh.
   function run(command: string, args: string[], cwd: string): Promise<CommandResult> {
-    return runner.run(command, args, {
+    const fullArgs =
+      command === "git" ? ["-c", "core.fsmonitor=false", "-c", "core.pager=cat", ...args] : args;
+    return runner.run(command, fullArgs, {
       cwd,
       timeoutMs: TIMEOUT_MS,
-      env: childEnv(["SSH_AUTH_SOCK", "GH_TOKEN", "GITHUB_TOKEN", "GH_CONFIG_DIR", "XDG_CONFIG_HOME"]),
+      env: {
+        ...childEnv(["SSH_AUTH_SOCK", "GH_TOKEN", "GITHUB_TOKEN", "GH_CONFIG_DIR", "XDG_CONFIG_HOME"]),
+        GIT_CONFIG_NOSYSTEM: "1",
+      },
     });
   }
 

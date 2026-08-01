@@ -15,9 +15,17 @@ const task: ClaimedTask = {
 
 const ok: CommandResult = { code: 0, stdout: "", stderr: "", timedOut: false };
 
+// Drops the "-c key=value" pairs delivery.ts prepends to git commands, so a response keyed by
+// "git push" still matches regardless of which config flags ride along in front of it.
+function withoutConfigFlags(args: string[]): string[] {
+  const rest = [...args];
+  while (rest[0] === "-c") rest.splice(0, 2);
+  return rest;
+}
+
 function fakeCli(responses: Record<string, Partial<CommandResult>>) {
   const run = vi.fn(async (command: string, args: string[]): Promise<CommandResult> => {
-    const line = `${command} ${args.join(" ")}`;
+    const line = `${command} ${withoutConfigFlags(args).join(" ")}`;
     const key = Object.keys(responses).find((prefix) => line.startsWith(prefix));
     return { ...ok, ...(key ? responses[key] : {}) };
   });
@@ -39,7 +47,17 @@ describe("push", () => {
 
     expect(run).toHaveBeenCalledWith(
       "git",
-      ["push", "--force-with-lease", "-u", "origin", "cp-158/worker"],
+      [
+        "-c",
+        "core.fsmonitor=false",
+        "-c",
+        "core.pager=cat",
+        "push",
+        "--force-with-lease",
+        "-u",
+        "origin",
+        "cp-158/worker",
+      ],
       expect.objectContaining({ cwd: "/wt" })
     );
   });
@@ -64,9 +82,31 @@ describe("push", () => {
     const run = vi.fn().mockResolvedValue({ code: -1, stdout: "", stderr: "", timedOut: true });
     await expect(createDelivery({ run }).push("/wt", "cp-158/worker")).rejects.toThrow(/timed out/);
   });
+
+  // The repository was approved by bindRepository, but its own gitconfig (credential.helper,
+  // core.sshCommand, ...) still fires on this call unless it is neutralised here too
+  it("neutralises system and repository git config on the push", async () => {
+    const run = vi.fn().mockResolvedValue(ok);
+    await createDelivery({ run }).push("/wt", "cp-158/worker");
+
+    const [command, args, opts] = run.mock.calls[0];
+    expect(command).toBe("git");
+    expect(args).toEqual(expect.arrayContaining(["-c", "core.pager=cat"]));
+    expect((opts as { env: Record<string, string> }).env.GIT_CONFIG_NOSYSTEM).toBe("1");
+  });
 });
 
 describe("openPr", () => {
+  // gh does not understand git's -c flag, so only git invocations may carry it
+  it("does not prepend git config flags to a gh command", async () => {
+    const run = vi.fn().mockResolvedValue({ ...ok, stdout: "https://github.com/x/y/pull/7" });
+    await createDelivery({ run }).openPr("/wt", task, "summary");
+
+    const [command, args] = run.mock.calls[0];
+    expect(command).toBe("gh");
+    expect(args).not.toContain("-c");
+  });
+
   it("returns the pr url from gh output", async () => {
     const run = vi
       .fn()

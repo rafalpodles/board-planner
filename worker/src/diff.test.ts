@@ -103,4 +103,17 @@ describe("collectDiff", () => {
     );
     expect(diff.truncated).toBe(true);
   });
+
+  // A repository's own gitconfig (diff.*.textconv, filter.*.clean, ...) fires on `git diff` just
+  // as easily as on the checks that ran once at bind time — every call here must be protected too
+  it("neutralises system and repository git config on every call it makes", async () => {
+    const run = vi.fn().mockResolvedValue({ code: 0, stdout: "", stderr: "", timedOut: false });
+    await collectDiff({ run }, "/wt", "main");
+
+    expect(run.mock.calls.length).toBeGreaterThan(0);
+    for (const call of run.mock.calls) {
+      expect(call[1]).toEqual(expect.arrayContaining(["-c", "core.pager=cat"]));
+      expect(call[2].env.GIT_CONFIG_NOSYSTEM).toBe("1");
+    }
+  });
 });

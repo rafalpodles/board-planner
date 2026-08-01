@@ -1,5 +1,8 @@
-import { describe, it, expect, vi } from "vitest";
-import { bindRepository, RepoDeps } from "./repos.js";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
+import { describe, it, expect, vi, afterAll } from "vitest";
+import { bindRepository, createAllowlistReader, RepoDeps } from "./repos.js";
 
 function depsWith(over: Partial<{
   allowlist: string[];
@@ -57,6 +60,11 @@ describe("bindRepository", () => {
     "core.hooksPath=/tmp/hooks",
     "diff.external=/tmp/x",
     "filter.lfs.clean=/tmp/x",
+    "filter.lfs.process=/tmp/x",
+    "diff.mydriver.textconv=/tmp/x",
+    "diff.mydriver.command=/tmp/x",
+    "merge.mine.driver=/tmp/x",
+    "credential.helper=!/tmp/x",
     "alias.st=!/tmp/x",
   ])("refuses a repository whose git config sets %s", async (line) => {
     const result = await bindRepository(depsWith({ gitConfig: `${line}\n` }), "/repo");
@@ -65,16 +73,23 @@ describe("bindRepository", () => {
     expect((result as { reason: string }).reason).toMatch(/git config/i);
   });
 
+  // toplevel is pinned to the proposed path so rule 6 (own toplevel) cannot also refuse and mask
+  // whether the rule actually under test fired — depsWith()'s default toplevel is "/repo", which
+  // none of these paths equal, so without the override every case here would "pass" vacuously.
   it.each([
-    ["/Users/rpo/.ssh", "sensitive directory"],
-    ["/etc", "sensitive directory"],
-    ["/repo/node_modules/x", "node_modules"],
-    ["relative/path", "absolute"],
-    ["/a/../b", "absolute"],
-  ])("refuses %s outright", async (path) => {
-    const result = await bindRepository(depsWith({ allowlist: [path] }), path);
+    ["/Users/rpo/.ssh", /sensitive/i],
+    ["/etc", /sensitive/i],
+    ["/private/etc/passwd", /sensitive/i],
+    ["/tmp/evil", /sensitive/i],
+    ["/private/tmp/evil", /sensitive/i],
+    ["/repo/node_modules/x", /node_modules/i],
+    ["relative/path", /absolute/i],
+    ["/a/../b", /absolute/i],
+  ])("refuses %s outright", async (path, reason) => {
+    const result = await bindRepository(depsWith({ allowlist: [path], toplevel: path }), path);
 
     expect(result.ok).toBe(false);
+    expect((result as { reason: string }).reason).toMatch(reason);
   });
 
   it("refuses a repository that is not its own toplevel", async () => {
@@ -112,5 +127,29 @@ describe("bindRepository", () => {
       expect(call[1]).toEqual(expect.arrayContaining(["-c", "core.pager=cat"]));
       expect(call[2].env.GIT_CONFIG_NOSYSTEM).toBe("1");
     }
+  });
+});
+
+describe("createAllowlistReader", () => {
+  const dir = mkdtempSync(join(tmpdir(), "cp-repos-test-"));
+
+  afterAll(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("reads repos.json when only its owner can read it", () => {
+    const path = join(dir, "repos.json");
+    writeFileSync(path, JSON.stringify({ repos: ["/repo"] }));
+    chmodSync(path, 0o600);
+
+    expect(createAllowlistReader(dir)()).toBe(JSON.stringify({ repos: ["/repo"] }));
+  });
+
+  it("refuses repos.json readable by group or others, the same as a loose SSH key", () => {
+    const path = join(dir, "repos.json");
+    writeFileSync(path, JSON.stringify({ repos: ["/repo"] }));
+    chmodSync(path, 0o644);
+
+    expect(() => createAllowlistReader(dir)()).toThrow(/readable by group or others/);
   });
 });
