@@ -216,7 +216,6 @@ const projectSchema = new Schema<IProject>(
     repository: {
       url: { type: String, default: "" },
       defaultBranch: { type: String, default: "main" },
-      localPath: { type: String, default: "" },
     },
     owner: {
       type: Schema.Types.ObjectId,
