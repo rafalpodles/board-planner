@@ -124,6 +124,16 @@ describe("startHeartbeat", () => {
     expect(onAbort).not.toHaveBeenCalled();
   });
 
+  // The other half of the 401-vs-network distinction: a blip must not make the worker treat its
+  // own credential as invalid, or it would re-register and mint a duplicate identity
+  it("does not clear the stored identity when the heartbeat merely fails to reach the server", async () => {
+    const deps = depsWith({ throws: new Error("ECONNREFUSED") });
+
+    await startHeartbeat(deps).tick();
+
+    expect(deps.store.write).not.toHaveBeenCalled();
+  });
+
   it("echoes the command it applied, so the console can stop saying Pausing", async () => {
     const deps = depsWith();
     const heartbeat = startHeartbeat(deps);
