@@ -7,7 +7,8 @@ export interface PmHistoryEntry {
   role: string;
   content?: string;
   actions?: { summary?: string }[];
-  triggeredBy?: PmHistoryAuthor | unknown;
+  // Populated to a user, or left as a raw ObjectId when the ref could not be resolved
+  triggeredBy?: unknown;
 }
 
 export const HISTORY_AUTHOR_PREFIX = "[from @";
