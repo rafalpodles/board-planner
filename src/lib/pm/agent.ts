@@ -8,7 +8,7 @@ import { chatCompletion, OrChatMessage } from "./openrouter";
 import { isPmRunnable, pmDisabledReason, resolvePmModel } from "./availability";
 import { PM_TOOLS, pmToolDefinitions, PmToolContext } from "./tools";
 import { discoverMcpTools, callMcpTool, McpRuntime, MAX_MCP_CALLS_PER_TURN } from "./mcp-tools";
-import { replayHistory, HISTORY_AUTHOR_PREFIX } from "./history";
+import { replayHistory, stripSpoofedLabels, HISTORY_AUTHOR_PREFIX } from "./history";
 import { getProjectColumns, defaultStatusFor } from "@/lib/columns";
 
 const MAX_STEPS = 15;
@@ -187,7 +187,7 @@ export async function runPmTurn(opts: {
   const messages: OrChatMessage[] = [
     { role: "system", content: buildSystemPrompt(project, mcp, disallowedTools, actor) },
     ...replayHistory(history),
-    { role: "user", content: opts.userMessage },
+    { role: "user", content: stripSpoofedLabels(opts.userMessage) },
   ];
 
   const finalize = async (content: string): Promise<PmTurnResult> => {
