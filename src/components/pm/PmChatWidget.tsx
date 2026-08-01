@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
+import { isPmRunnable } from "@/lib/pm/gate";
 import { projectRefFromPathname } from "@/lib/urls";
 import { ApiProject } from "@/types";
 import { PmChat } from "./PmChat";
@@ -29,7 +30,7 @@ export function PmChatWidget() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
-  if (!projectId || onPmPage || !project?.pm?.enabled || !project?.pmAvailable) {
+  if (!projectId || onPmPage || !project?.pmAvailable || !isPmRunnable(project?.pm)) {
     return null;
   }
 
