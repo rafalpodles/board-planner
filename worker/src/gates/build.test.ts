@@ -59,6 +59,16 @@ describe("buildGate", () => {
     expect(run.mock.calls[1][2].cwd).toBe("/wt");
   });
 
+  it("passes the signal through to both the install and the build, so a stop can kill either", async () => {
+    const controller = new AbortController();
+    const { runner: r, run } = runner(ok, ok);
+
+    await buildGate(r, TIMEOUT_MS).run({ ...context, signal: controller.signal });
+
+    expect(run.mock.calls[0][2].signal).toBe(controller.signal);
+    expect(run.mock.calls[1][2].signal).toBe(controller.signal);
+  });
+
   it("rejects and carries the tail of the output", async () => {
     const { runner: r } = runner(ok, { ...ok, code: 1, stderr: "Type error on line 4" });
 

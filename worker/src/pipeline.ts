@@ -115,7 +115,7 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
 
   let keepWorktree = false;
   try {
-    const outcome = await executor.execute(task, worktreePath);
+    const outcome = await executor.execute(task, worktreePath, deps.signal);
 
     if (outcome.kind === "usage_limit") {
       await reporter.released(task, "usage limit reached");
@@ -145,7 +145,7 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
     }
 
     const diff = await deps.collectDiff(runner, worktreePath, config.baseBranch);
-    const context: GateContext = { worktreePath, task, result: outcome.result, diff };
+    const context: GateContext = { worktreePath, task, result: outcome.result, diff, signal: deps.signal };
 
     for (const gate of gates) {
       if (await releaseIfAborted(deps, reporter, task)) return;
@@ -177,7 +177,13 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
     let prUrl = "";
     try {
       await delivery.push(worktreePath, branch);
+      if (await releaseIfAborted(deps, reporter, task)) return;
+
       prUrl = await delivery.openPr(worktreePath, task, outcome.result.summary);
+      if (await releaseIfAborted(deps, reporter, task)) return;
+
+      // No signal on the merge call itself: killing "gh pr merge" mid-flight leaves ambiguous
+      // remote state that only mergeState() can untangle — better not to create it
       await delivery.merge(worktreePath, prUrl);
     } catch (error) {
       keepWorktree = true;

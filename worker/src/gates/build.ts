@@ -15,11 +15,11 @@ function outputTail(result: CommandResult): string {
 export function buildGate(runner: Runner, timeoutMs: number): Gate {
   return {
     name: "build",
-    async run({ worktreePath }) {
+    async run({ worktreePath, signal }) {
       const deadline = Date.now() + timeoutMs;
 
       // a worktree is a fresh checkout with no node_modules — skip this and every build fails with "next: command not found"
-      const install = await runner.run("npm", INSTALL_ARGS, { cwd: worktreePath, timeoutMs });
+      const install = await runner.run("npm", INSTALL_ARGS, { cwd: worktreePath, timeoutMs, signal });
       if (install.timedOut) {
         return { ok: false, reason: `dependency install timed out after ${timeoutMs}ms` };
       }
@@ -42,6 +42,7 @@ export function buildGate(runner: Runner, timeoutMs: number): Gate {
       const build = await runner.run("npm", ["run", "build"], {
         cwd: worktreePath,
         timeoutMs: remainingMs,
+        signal,
       });
       if (build.timedOut) {
         return {

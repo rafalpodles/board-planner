@@ -12,8 +12,8 @@ function outputTail(result: CommandResult): string {
 export function testRunGate(runner: Runner, timeoutMs: number): Gate {
   return {
     name: "test-run",
-    async run({ worktreePath }) {
-      const result = await runner.run("npm", ["test"], { cwd: worktreePath, timeoutMs });
+    async run({ worktreePath, signal }) {
+      const result = await runner.run("npm", ["test"], { cwd: worktreePath, timeoutMs, signal });
 
       if (result.timedOut) {
         return { ok: false, reason: `the test suite timed out after ${timeoutMs}ms` };

@@ -136,7 +136,7 @@ export function reviewGate(runner: Runner, timeoutMs: number): Gate {
           "--model",
           "opus",
         ],
-        { cwd: context.worktreePath, timeoutMs, env }
+        { cwd: context.worktreePath, timeoutMs, env, signal: context.signal }
       );
 
       if (result.timedOut) {

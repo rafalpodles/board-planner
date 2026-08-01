@@ -197,6 +197,15 @@ describe("reviewGate", () => {
     expect(run.mock.calls[0][2].env?.PATH).toBe(process.env.PATH);
   });
 
+  it("passes the context's signal through to the runner, so a stop can kill the reviewer", async () => {
+    const controller = new AbortController();
+    const { runner, run } = claudeReturning({ approved: true, reason: "" });
+
+    await reviewGate(runner, TIMEOUT_MS).run({ ...context(), signal: controller.signal });
+
+    expect(run.mock.calls[0][2].signal).toBe(controller.signal);
+  });
+
   it("fails closed when the reviewer output cannot be parsed, keeping the raw output", async () => {
     const { runner } = claudeStdout("garbage");
 
