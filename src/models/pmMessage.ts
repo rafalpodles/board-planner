@@ -24,6 +24,16 @@ const pmMessageSchema = new Schema<IPmMessage>(
       }],
       default: [],
     },
+    attachments: {
+      type: [{
+        fileId: { type: String, required: true },
+        mimeType: { type: String, required: true },
+        width: { type: Number },
+        height: { type: Number },
+        bytes: { type: Number },
+      }],
+      default: [],
+    },
     trigger: {
       type: triggerSchema,
       default: () => ({ type: "chat", taskKey: "" }),

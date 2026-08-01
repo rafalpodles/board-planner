@@ -2,7 +2,8 @@ import { connectDB } from "@/lib/db";
 import { Project } from "@/models/project";
 import { PmMessage } from "@/models/pmMessage";
 import { User } from "@/models/user";
-import { IPmMessage, PmMessageTrigger } from "@/types";
+import { IPmMessage, PmAttachment, PmMessageTrigger } from "@/types";
+import { buildUserContent } from "./attachments";
 import { getPmUser, PM_USERNAME } from "./pm-user";
 import { chatCompletion, OrChatMessage } from "./openrouter";
 import { isPmRunnable, pmDisabledReason, resolvePmModel } from "./availability";
@@ -127,6 +128,7 @@ export async function runPmTurn(opts: {
   userMessage: string;
   // What the thread keeps when the prompt itself is machine-generated bulk; defaults to userMessage
   storedMessage?: string;
+  attachments?: PmAttachment[];
   triggeredByUserId: string;
   trigger?: PmMessageTrigger;
   disallowedTools?: string[];
@@ -157,6 +159,7 @@ export async function runPmTurn(opts: {
     role: "user",
     content: opts.storedMessage ?? opts.userMessage,
     actions: [],
+    attachments: opts.attachments ?? [],
     trigger,
     triggeredBy: opts.triggeredByUserId,
   });
@@ -187,8 +190,11 @@ export async function runPmTurn(opts: {
 
   const messages: OrChatMessage[] = [
     { role: "system", content: buildSystemPrompt(project, mcp, disallowedTools, actor) },
-    ...replayHistory(history),
-    { role: "user", content: stripSpoofedLabels(opts.userMessage) },
+    ...(await replayHistory(history)),
+    {
+      role: "user",
+      content: await buildUserContent(stripSpoofedLabels(opts.userMessage), opts.attachments),
+    },
   ];
 
   const finalize = async (content: string): Promise<PmTurnResult> => {

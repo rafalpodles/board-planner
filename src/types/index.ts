@@ -421,6 +421,7 @@ export interface IPmMessage {
   role: "user" | "assistant";
   content: string;
   actions: IPmAction[];
+  attachments: PmAttachment[];
   trigger: PmMessageTrigger;
   triggeredBy: Types.ObjectId | IUser | null;
   createdAt: Date;
@@ -665,12 +666,21 @@ export interface ApiPmAction {
   at: string;
 }
 
+export interface PmAttachment {
+  fileId: string;
+  mimeType: string;
+  width?: number;
+  height?: number;
+  bytes?: number;
+}
+
 export interface ApiPmMessage {
   _id: string;
   project: string;
   role: "user" | "assistant";
   content: string;
   actions: ApiPmAction[];
+  attachments?: PmAttachment[];
   trigger: PmMessageTrigger;
   triggeredBy: ApiUser | string | null;
   createdAt: string;
