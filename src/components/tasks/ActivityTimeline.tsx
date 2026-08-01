@@ -8,6 +8,10 @@ import { timeAgo } from "@/lib/time";
 interface ActivityTimelineProps {
   projectId: string;
   taskId: string;
+  hideHeading?: boolean;
+  onCountChange?: (count: number) => void;
+  // Bumped by the parent when something outside this component wrote an activity entry
+  refreshKey?: number;
 }
 
 function actionIcon(action: string) {
@@ -90,28 +94,46 @@ function describeAction(log: ApiActivityLog): string {
 export function ActivityTimeline({
   projectId,
   taskId,
+  hideHeading,
+  onCountChange,
+  refreshKey,
 }: ActivityTimelineProps) {
   const [logs, setLogs] = useState<ApiActivityLog[]>([]);
   const [expanded, setExpanded] = useState(false);
+  const [failed, setFailed] = useState(false);
   const api = useApi();
 
   useEffect(() => {
+    setFailed(false);
     api
       .get(`/api/projects/${projectId}/tasks/${taskId}/activity`)
-      .then((data: ApiActivityLog[]) => setLogs(data))
-      .catch(() => {});
+      .then((data: ApiActivityLog[]) => {
+        setLogs(data);
+        onCountChange?.(data.length);
+      })
+      .catch(() => setFailed(true));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [taskId]);
-
-  if (logs.length === 0) return null;
+  }, [taskId, refreshKey]);
 
   const displayLogs = expanded ? logs : logs.slice(0, 5);
 
   return (
     <div>
-      <h3 className="font-semibold mb-3">
-        Activity ({logs.length})
-      </h3>
+      {!hideHeading && (
+        <h3 className="font-semibold mb-3">History ({logs.length})</h3>
+      )}
+
+      {failed && (
+        <p className="text-sm text-danger">
+          Could not load this task&apos;s history.
+        </p>
+      )}
+
+      {!failed && logs.length === 0 && (
+        <p className="text-sm text-text-muted">
+          No history yet — changes to this task will be recorded here.
+        </p>
+      )}
 
       <div className="space-y-2">
         {displayLogs.map((log) => (
@@ -127,9 +149,13 @@ export function ActivityTimeline({
             <span className="flex-1 text-text-muted">
               {describeAction(log)}
             </span>
-            <span className="flex-shrink-0 text-xs text-text-muted">
+            <time
+              dateTime={log.createdAt}
+              title={new Date(log.createdAt).toLocaleString()}
+              className="flex-shrink-0 text-xs text-text-muted"
+            >
               {timeAgo(log.createdAt)}
-            </span>
+            </time>
           </div>
         ))}
       </div>
