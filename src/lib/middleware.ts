@@ -5,6 +5,7 @@ import { connectDB } from "./db";
 import { Project } from "@/models/project";
 import { Task } from "@/models/task";
 import { IProject, IUser } from "@/types";
+import { PROJECT_KEY_PATTERN } from "./urls";
 
 type AuthenticatedHandler = (
   request: Request,
@@ -63,7 +64,6 @@ export function canAdminProject(
   return (user.allowedProjects || []).some((p) => p.toString() === projectId);
 }
 
-const PROJECT_KEY_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,19}$/;
 // "146" or "CP-146" — the project is already pinned by the projectId segment,
 // so only the number is used and any key prefix is decoration
 const TASK_NUMBER_PATTERN = /^(?:[A-Za-z][A-Za-z0-9_-]*-)?(\d{1,9})$/;
