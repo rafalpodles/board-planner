@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
+import { projectRefFromPathname } from "@/lib/urls";
 import { ApiProject } from "@/types";
 import { PmChat } from "./PmChat";
 
@@ -11,8 +12,7 @@ export function PmChatWidget() {
   const pathname = usePathname();
   const api = useApi();
 
-  const match = pathname?.match(/^\/projects\/([0-9a-f]{24})(\/|$)/);
-  const projectId = match?.[1];
+  const projectId = projectRefFromPathname(pathname);
   const onPmPage = !!pathname && /\/pm\/?$/.test(pathname);
 
   const [project, setProject] = useState<ApiProject | null>(null);
