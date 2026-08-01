@@ -3,6 +3,7 @@ import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { withAdmin } from "@/lib/middleware";
 import { Worker } from "@/models/worker";
+import { publishToWorker } from "@/lib/worker-events";
 
 const COMMANDS = ["pause", "resume", "stop"] as const;
 
@@ -31,6 +32,11 @@ export const POST = withAdmin(async (request, { params }) => {
   if (!worker) {
     return NextResponse.json({ error: "Worker not found" }, { status: 404 });
   }
+
+  // Best-effort accelerator: publishToWorker is a same-process push and does nothing when the
+  // worker is disconnected, mid-backoff, or connected to a different replica. The write above,
+  // which the next heartbeat always picks up, is what makes the command durable.
+  publishToWorker(String(worker._id), { command: worker.command });
 
   return NextResponse.json({ command: worker.command, issuedAt: worker.commandIssuedAt });
 });
