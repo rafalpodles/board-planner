@@ -37,33 +37,38 @@ const SENSITIVE_ROOTS = [
   "/private/tmp",
 ];
 
-// This denylist is defence in depth against a repository that was ALREADY hostile when it was
-// proposed. It is not, and cannot be, a complete boundary, for two reasons that no amount of
-// enumeration fixes: the worker's agent runs with git in its own tool allowlist, so once a
-// repository is bound it can set any config key it likes inside that worktree — this scan runs
-// once, at bind time, against config the agent has not touched yet. And GIT_CONFIG_NOSYSTEM plus
-// the -c overrides neutralise system and command-line config on every call, but nothing disables
-// repository-local config, because filter/diff/merge drivers and credential helpers need it to
-// work at all. Keep the list honest, not exhaustive: match only the subkeys git actually executes,
-// so a legitimate Git-LFS or gitattributes repository is not refused for an inert sibling key.
+// The allowlist entry the operator picked, plus realpath below, is the actual security boundary —
+// it is what stops a server (or whoever compromised it) from pointing the worker at a directory of
+// its choosing. This denylist is a cheap, one-time defence in depth against a directory that was
+// ALREADY hostile when the operator approved it; it is deliberately NOT exhaustive and cannot be
+// made exhaustive by adding more keys. Two structural reasons bound it, not just missing entries:
+// `git config --local --list` prints `include.path=<file>` but never that file's contents, so any
+// key below can be smuggled through one level of indirection and this line scan will never see it
+// — enumeration cannot close that gap, only the allowlist can. And once a repository is bound the
+// agent holds `git` in its own tool allowlist, so it can set any config key it likes inside that
+// worktree; this scan runs once, before the agent ever touches the checkout. Match only the
+// subkeys git actually executes, so a legitimate Git-LFS or gitattributes repository is not refused
+// for an inert sibling key — and do not chase completeness here; that game is already lost.
 const EXACT_DANGEROUS_KEYS = [
   "core.fsmonitor",
   "core.pager",
   "core.sshcommand",
   "core.hookspath",
   "core.editor",
+  "core.gitproxy",
   "sequence.editor",
   "diff.external",
 ];
 
 // <family>.<name>.<leaf> keys whose value git runs as a command. Everything else under these
 // sections (filter.*.required, diff.*.binary/xfuncname/algorithm, merge.*.name, ...) is inert and
-// must be allowed.
+// must be allowed. remote.*.receivepack/uploadpack fire on this module's own push/fetch.
 const EXECUTABLE_LEAVES: Record<string, string[]> = {
   "filter.": ["clean", "smudge", "process"],
   "diff.": ["textconv", "command"],
   "merge.": ["driver"],
   "credential.": ["helper"],
+  "remote.": ["receivepack", "uploadpack"],
 };
 
 function sensitiveLocation(path: string): string | null {
@@ -86,8 +91,12 @@ function dangerousFamilyLeaf(key: string): boolean {
 // protocol.<name>.allow (or the bare protocol.allow default) does not itself hold a command, but
 // paired with a remote.*.url using the ext:: transport it makes git run one — ext defaults to
 // "never" precisely because it executes a program, and local config can override that default.
-function isProtocolAllowKey(key: string): boolean {
-  return key === "protocol.allow" || (key.startsWith("protocol.") && key.endsWith(".allow"));
+// "never" is the explicitly safe value and must not be refused; anything else (always, user, or an
+// unrecognised value) is treated as permissive, since this module's own git calls are the
+// user-initiated case "user" allows.
+function isPermissiveProtocolAllow(key: string, value: string): boolean {
+  const isAllowKey = key === "protocol.allow" || (key.startsWith("protocol.") && key.endsWith(".allow"));
+  return isAllowKey && value.trim().toLowerCase() !== "never";
 }
 
 function usesExtTransport(value: string): boolean {
@@ -105,7 +114,7 @@ function dangerousConfigEntry(listOutput: string): string | null {
     if (EXACT_DANGEROUS_KEYS.includes(key)) return key;
     if (key.startsWith("alias.")) return key;
     if (dangerousFamilyLeaf(key)) return key;
-    if (isProtocolAllowKey(key)) return key;
+    if (isPermissiveProtocolAllow(key, value)) return key;
     if (usesExtTransport(value)) return key;
   }
   return null;
