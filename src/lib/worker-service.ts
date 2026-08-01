@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import { isValidObjectId } from "mongoose";
 import { connectDB } from "./db";
 import { Worker } from "@/models/worker";
-import { IWorker } from "@/types";
+import { ApiWorker, IWorker } from "@/types";
 
 export const PROTOCOL_VERSION = 1;
 export const WORKER_STALE_MS = 5 * 60 * 1000;
@@ -85,4 +85,35 @@ export async function touchWorker(
 ): Promise<void> {
   await connectDB();
   await Worker.updateOne({ _id: workerId }, { $set: { lastSeenAt: new Date(), ...patch } });
+}
+
+// Built field-by-field so credentialHash can never leak through, even if a caller
+// passes in a document that was queried with it selected
+export function toApiWorker(worker: IWorker, now = new Date()): ApiWorker {
+  const seenAt = worker.lastSeenAt ? new Date(worker.lastSeenAt).getTime() : NaN;
+  const stale = !Number.isFinite(seenAt) || now.getTime() - seenAt > WORKER_STALE_MS;
+
+  return {
+    _id: String(worker._id),
+    name: worker.name,
+    host: worker.host,
+    platform: worker.platform,
+    version: worker.version,
+    protocolVersion: worker.protocolVersion,
+    assignments: (worker.assignments ?? []).map((a) => ({
+      project: String(a.project),
+      proposedPath: a.proposedPath,
+    })),
+    policy: worker.policy,
+    enabled: worker.enabled,
+    lockedByInstance: worker.lockedByInstance,
+    lastSeenAt: worker.lastSeenAt ? new Date(worker.lastSeenAt).toISOString() : null,
+    bindingError: worker.bindingError,
+    command: worker.command,
+    commandIssuedAt: worker.commandIssuedAt ? new Date(worker.commandIssuedAt).toISOString() : null,
+    commandAckedAt: worker.commandAckedAt ? new Date(worker.commandAckedAt).toISOString() : null,
+    createdAt: new Date(worker.createdAt).toISOString(),
+    updatedAt: new Date(worker.updatedAt).toISOString(),
+    stale,
+  };
 }
