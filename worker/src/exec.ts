@@ -12,6 +12,8 @@ export interface RunOpts {
   cwd: string;
   timeoutMs: number;
   env?: NodeJS.ProcessEnv;
+  signal?: AbortSignal;
+  stdin?: string;
 }
 
 export interface Runner {
@@ -47,7 +49,8 @@ export function createRunner(): Runner {
           const child = spawn(command, args, {
             cwd: opts.cwd,
             env: opts.env ?? childEnv(),
-            stdio: ["ignore", "pipe", "pipe"],
+            stdio: ["pipe", "pipe", "pipe"],
+            signal: opts.signal,
           });
 
           timer = setTimeout(() => {
@@ -57,6 +60,11 @@ export function createRunner(): Runner {
               child.kill("SIGKILL");
             }, SIGKILL_GRACE_MS);
           }, opts.timeoutMs);
+
+          if (opts.stdin !== undefined) {
+            child.stdin.on("error", () => {});
+            child.stdin.end(opts.stdin);
+          }
 
           child.stdout.on("data", (chunk: Buffer | string) => {
             stdout += chunk.toString();

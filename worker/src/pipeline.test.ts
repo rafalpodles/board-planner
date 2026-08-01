@@ -319,6 +319,42 @@ describe("runTask", () => {
     expect(h.delivery.merge).not.toHaveBeenCalled();
   });
 
+  it("stops between phases without starting the next gate", async () => {
+    const controller = new AbortController();
+    const later = { name: "build", run: vi.fn() };
+    const first = {
+      name: "diff-size",
+      run: vi.fn(async () => {
+        controller.abort();
+        return { ok: true, reason: "" };
+      }),
+    };
+    const h = harness({ gates: [first, later], signal: controller.signal });
+
+    await runTask(h.deps, task);
+
+    expect(later.run).not.toHaveBeenCalled();
+    expect(h.reporter.released).toHaveBeenCalled();
+  });
+
+  it("stops before delivery when the signal aborts after the last gate passes", async () => {
+    const controller = new AbortController();
+    const gate = {
+      name: "review",
+      run: vi.fn(async () => {
+        controller.abort();
+        return { ok: true, reason: "" };
+      }),
+    };
+    const h = harness({ gates: [gate], signal: controller.signal });
+
+    await runTask(h.deps, task);
+
+    expect(h.delivery.push).not.toHaveBeenCalled();
+    expect(h.reporter.released).toHaveBeenCalled();
+    expect(h.reporter.merged).not.toHaveBeenCalled();
+  });
+
   it("pushes the rejected branch before discarding the worktree", async () => {
     const h = harness({ gates: [rejectingGate("diff-size", "too big")] });
     await runTask(h.deps, task);

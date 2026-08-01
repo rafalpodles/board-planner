@@ -68,6 +68,29 @@ describe("createRunner", () => {
     expect(result.code).toBe(-1);
     expect(result.timedOut).toBe(false);
   });
+
+  it("kills a running command when the signal aborts", async () => {
+    const controller = new AbortController();
+    const running = createRunner().run(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+      cwd: process.cwd(),
+      timeoutMs: 60_000,
+      signal: controller.signal,
+    });
+
+    controller.abort();
+
+    expect((await running).code).not.toBe(0);
+  });
+
+  it("passes a prompt on stdin rather than argv, where any process could read it", async () => {
+    const result = await createRunner().run(
+      process.execPath,
+      ["-e", "process.stdin.on('data', d => process.stdout.write(d))"],
+      { cwd: process.cwd(), timeoutMs: 10_000, stdin: "secret-prompt" }
+    );
+
+    expect(result.stdout).toContain("secret-prompt");
+  });
 });
 
 describe("the default child environment", () => {
