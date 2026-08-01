@@ -409,9 +409,24 @@ export interface IWorker {
   updatedAt: Date;
 }
 
-export interface ApiWorker extends Omit<IWorker, "_id" | "credentialHash" | "assignments"> {
+export interface ApiWorker {
   _id: string;
+  name: string;
+  host: string;
+  platform: string;
+  version: string;
+  protocolVersion: number;
   assignments: Array<{ project: string; proposedPath: string }>;
+  policy: WorkerPolicy;
+  enabled: boolean;
+  lockedByInstance: boolean;
+  lastSeenAt: string | null;
+  bindingError: string;
+  command: "" | "pause" | "resume" | "stop";
+  commandIssuedAt: string | null;
+  commandAckedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
   stale: boolean;
 }
 
