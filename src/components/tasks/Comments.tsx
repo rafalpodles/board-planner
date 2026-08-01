@@ -21,9 +21,17 @@ interface CommentsProps {
   taskId: string;
   hideHeading?: boolean;
   onCountChange?: (count: number) => void;
+  // Adding, editing and deleting a comment each write an activity entry; reacting does not
+  onMutated?: () => void;
 }
 
-export function Comments({ projectId, taskId, hideHeading, onCountChange }: CommentsProps) {
+export function Comments({
+  projectId,
+  taskId,
+  hideHeading,
+  onCountChange,
+  onMutated,
+}: CommentsProps) {
   const [comments, setComments] = useState<ApiComment[]>([]);
   const [body, setBody] = useState("");
   const [loading, setLoading] = useState(false);
@@ -73,6 +81,7 @@ export function Comments({ projectId, taskId, hideHeading, onCountChange }: Comm
       );
       setBody("");
       await loadComments();
+      onMutated?.();
     } catch {
       toast("Failed to post comment", "error");
     } finally {
@@ -91,6 +100,7 @@ export function Comments({ projectId, taskId, hideHeading, onCountChange }: Comm
       setEditingId(null);
       setEditBody("");
       await loadComments();
+      onMutated?.();
       toast("Comment updated", "success");
     } catch {
       toast("Failed to update comment", "error");
@@ -107,6 +117,7 @@ export function Comments({ projectId, taskId, hideHeading, onCountChange }: Comm
       );
       setConfirmDeleteId(null);
       await loadComments();
+      onMutated?.();
       toast("Comment deleted", "success");
     } catch {
       toast("Failed to delete comment", "error");
