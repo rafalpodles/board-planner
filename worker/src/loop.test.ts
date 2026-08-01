@@ -153,9 +153,35 @@ describe("createLoop", () => {
     });
     loop.pause();
 
+    expect(loop.paused()).toBe(true);
     await loop.start();
 
+    expect(cycles).toBeGreaterThanOrEqual(3);
     expect(api.claim).toHaveBeenCalled();
+  });
+
+  it("drains while paused, even when the loop is not claiming", async () => {
+    const order: string[] = [];
+    const api = apiStub(queue(task));
+    const loop = createLoop({
+      config,
+      api,
+      execute: vi.fn(),
+      drain: async () => {
+        order.push("drain");
+      },
+      sleep: async () => {
+        order.push("sleep");
+        if (order.filter((x) => x === "drain").length >= 3) loop.stop();
+      },
+      log: vi.fn(),
+    });
+    loop.pause();
+
+    await loop.start();
+
+    expect(order.filter((x) => x === "drain").length).toBeGreaterThanOrEqual(3);
+    expect(api.claim).not.toHaveBeenCalled();
   });
 });
 
