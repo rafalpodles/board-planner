@@ -335,6 +335,29 @@ describe("runTask", () => {
 
     expect(later.run).not.toHaveBeenCalled();
     expect(h.reporter.released).toHaveBeenCalled();
+    expect(h.reporter.requeued).not.toHaveBeenCalled();
+  });
+
+  it("passes the signal to the executor, so a stop can reach the run in flight", async () => {
+    const controller = new AbortController();
+    const execute = vi
+      .fn<Executor["execute"]>()
+      .mockResolvedValue({ kind: "result", result: completed });
+    const h = harness({ executor: { execute }, signal: controller.signal });
+
+    await runTask(h.deps, task);
+
+    expect(execute).toHaveBeenCalledWith(task, "/wt", controller.signal);
+  });
+
+  it("gives every gate the signal, so a build or review gate can honour a stop", async () => {
+    const controller = new AbortController();
+    const gate = passingGate("build");
+    const h = harness({ gates: [gate], signal: controller.signal });
+
+    await runTask(h.deps, task);
+
+    expect(gate.run).toHaveBeenCalledWith(expect.objectContaining({ signal: controller.signal }));
   });
 
   it("stops before delivery when the signal aborts after the last gate passes", async () => {
@@ -353,6 +376,7 @@ describe("runTask", () => {
     expect(h.delivery.push).not.toHaveBeenCalled();
     expect(h.reporter.released).toHaveBeenCalled();
     expect(h.reporter.merged).not.toHaveBeenCalled();
+    expect(h.reporter.requeued).not.toHaveBeenCalled();
   });
 
   it("pushes the rejected branch before discarding the worktree", async () => {

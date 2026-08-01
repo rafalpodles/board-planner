@@ -34,6 +34,7 @@ export interface GateContext {
   task: ClaimedTask;
   result: ExecutionResult;
   diff: DiffStats;
+  signal?: AbortSignal;
 }
 
 export interface GateResult {

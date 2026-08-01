@@ -91,6 +91,18 @@ describe("createRunner", () => {
 
     expect(result.stdout).toContain("secret-prompt");
   });
+
+  it("closes stdin immediately when none is given, so a child reading it to EOF does not wait out the timeout", async () => {
+    const start = Date.now();
+    const result = await createRunner().run(
+      process.execPath,
+      ["-e", "process.stdin.resume(); process.stdin.on('end', () => process.exit(0))"],
+      { cwd: process.cwd(), timeoutMs: 3000 }
+    );
+
+    expect(result.timedOut).toBe(false);
+    expect(Date.now() - start).toBeLessThan(1500);
+  });
 });
 
 describe("the default child environment", () => {

@@ -181,6 +181,15 @@ describe("createExecutor", () => {
     expect(outcome.kind).toBe("error");
   });
 
+  it("passes the abort signal through to the runner, so a stop can reach the run in flight", async () => {
+    const controller = new AbortController();
+    const { runner, run } = runnerReturning({ code: 0, stdout: "{}", stderr: "", timedOut: false });
+
+    await createExecutor(config, runner).execute(task, "/wt", controller.signal);
+
+    expect(run.mock.calls[0][2].signal).toBe(controller.signal);
+  });
+
   it("tells the model the task text is untrusted data, not instructions to follow", async () => {
     const { runner, run } = runnerReturning({
       code: 0,

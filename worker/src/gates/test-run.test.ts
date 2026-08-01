@@ -96,4 +96,13 @@ describe("testRunGate", () => {
     expect(run).toHaveBeenCalledWith("npm", ["test"], expect.objectContaining({ cwd: "/wt" }));
     expect(run.mock.calls[0][2].timeoutMs).toBe(TIMEOUT_MS);
   });
+
+  it("passes the signal through to the runner, so a stop can kill the suite", async () => {
+    const controller = new AbortController();
+    const { runner, run } = runnerReturning(ok);
+
+    await testRunGate(runner, TIMEOUT_MS).run({ ...context, signal: controller.signal });
+
+    expect(run.mock.calls[0][2].signal).toBe(controller.signal);
+  });
 });

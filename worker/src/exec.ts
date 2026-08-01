@@ -61,10 +61,10 @@ export function createRunner(): Runner {
             }, SIGKILL_GRACE_MS);
           }, opts.timeoutMs);
 
-          if (opts.stdin !== undefined) {
-            child.stdin.on("error", () => {});
-            child.stdin.end(opts.stdin);
-          }
+          // stdio is "pipe" for stdin too, so it must always be ended — otherwise a child that
+          // reads it to EOF hangs until timeoutMs, where "ignore" used to give instant EOF
+          child.stdin.on("error", () => {});
+          child.stdin.end(opts.stdin);
 
           child.stdout.on("data", (chunk: Buffer | string) => {
             stdout += chunk.toString();

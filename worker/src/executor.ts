@@ -90,12 +90,12 @@ function parseExecutionResult(stdout: string): RunOutcome {
 }
 
 export interface Executor {
-  execute(task: ClaimedTask, worktreePath: string): Promise<RunOutcome>;
+  execute(task: ClaimedTask, worktreePath: string, signal?: AbortSignal): Promise<RunOutcome>;
 }
 
 export function createExecutor(config: WorkerConfig, runner: Runner): Executor {
   return {
-    async execute(task, worktreePath) {
+    async execute(task, worktreePath, signal) {
       // The CLI authenticates from its logged-in session under HOME, so the allowlist both keeps
       // ANTHROPIC_API_KEY out (which would bill per token) and keeps CP_API_TOKEN out of the
       // hands of the agent it is about to run with bypassPermissions
@@ -121,7 +121,7 @@ export function createExecutor(config: WorkerConfig, runner: Runner): Executor {
           "--fallback-model",
           "sonnet",
         ],
-        { cwd: worktreePath, timeoutMs: config.taskTimeoutMs, env }
+        { cwd: worktreePath, timeoutMs: config.taskTimeoutMs, env, signal }
       );
 
       if (result.timedOut) return { kind: "timeout" };
