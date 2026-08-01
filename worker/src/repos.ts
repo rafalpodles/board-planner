@@ -1,3 +1,4 @@
+import { readFileSync, statSync } from "fs";
 import { homedir } from "os";
 import { dirname, isAbsolute, join, sep } from "path";
 import { childEnv } from "./env.js";
@@ -21,27 +22,38 @@ type BindResult = { ok: true; path: string; worktreeRoot: string } | { ok: false
 
 const GIT_TIMEOUT_MS = 60_000;
 
+// macOS canonicalises /etc, /tmp and /var to /private/*, so both forms of each are listed —
+// otherwise a proposedPath spelled with the canonical form would slip past the alias.
 const SENSITIVE_ROOTS = [
   join(homedir(), "Library"),
   join(homedir(), ".ssh"),
   join(homedir(), ".config"),
   join(homedir(), ".claude"),
   "/etc",
+  "/private/etc",
   "/System",
   "/private/var",
+  "/tmp",
+  "/private/tmp",
 ];
 
-const DANGEROUS_CONFIG_KEYS = [
+const EXACT_DANGEROUS_KEYS = [
   "core.fsmonitor",
   "core.pager",
   "core.sshcommand",
   "core.hookspath",
   "diff.external",
+  "credential.helper",
 ];
+
+// git executes whatever these families point at (filter.<name>.clean/smudge/process,
+// diff.<name>.textconv/command, merge.<name>.driver, ...). Rather than enumerate every leaf name
+// git has ever added, any subkey under these sections is treated as dangerous.
+const EXECUTABLE_FAMILIES = ["filter.", "diff.", "merge."];
 
 function sensitiveLocation(path: string): string | null {
   const root = SENSITIVE_ROOTS.find((dir) => path === dir || path.startsWith(`${dir}${sep}`));
-  if (root) return `${path} is under ${root}`;
+  if (root) return `${path} is under the sensitive directory ${root}`;
   if (path.split(sep).includes("node_modules")) return `${path} contains a node_modules segment`;
   return null;
 }
@@ -52,9 +64,11 @@ function dangerousConfigKey(listOutput: string): string | null {
     if (!line) continue;
     const eq = line.indexOf("=");
     const key = (eq === -1 ? line : line.slice(0, eq)).toLowerCase();
-    if (DANGEROUS_CONFIG_KEYS.includes(key)) return key;
-    if (key.startsWith("filter.") && (key.endsWith(".clean") || key.endsWith(".smudge"))) return key;
+    if (EXACT_DANGEROUS_KEYS.includes(key)) return key;
     if (key.startsWith("alias.")) return key;
+    if (EXECUTABLE_FAMILIES.some((family) => key.startsWith(family) && key.slice(family.length).includes("."))) {
+      return key;
+    }
   }
   return null;
 }
@@ -134,4 +148,19 @@ export async function bindRepository(deps: RepoDeps, proposedPath: string): Prom
 
   const worktreeRoot = join(dirname(proposedPath), "cp-worktrees", deps.workerId ?? String(deps.uid));
   return { ok: true, path: proposedPath, worktreeRoot };
+}
+
+// Mirrors config.ts's readSecretFile discipline: repos.json decides what code can run on this
+// machine, so a copy readable by group or others is refused, the same as a loose SSH key.
+export function createAllowlistReader(stateDir: string): () => string {
+  const path = join(stateDir, "repos.json");
+  return () => {
+    const { mode } = statSync(path);
+    if (mode & 0o077) {
+      throw new Error(
+        `${path} is readable by group or others (mode ${(mode & 0o777).toString(8)}); run chmod 600 on it`
+      );
+    }
+    return readFileSync(path, "utf8");
+  };
 }
