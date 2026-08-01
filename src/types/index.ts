@@ -885,7 +885,8 @@ export type ProjectAuditAction =
   | "task_created"
   | "task_deleted"
   | "bulk_delete"
-  | "bulk_move";
+  | "bulk_move"
+  | "worker_updated";
 
 export interface IProjectAuditLog {
   _id: Types.ObjectId;
