@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "fs";
+import { existsSync, readFileSync, statSync } from "fs";
 import { join } from "path";
 import { WorkerConfig } from "./config.js";
 import { loadIdentity, PROTOCOL_VERSION, Store } from "./registration.js";
@@ -79,9 +79,24 @@ function toColumn(value: unknown): BoardColumn | null {
 // every worker-credentialed call rather than cached at construction time, so a credential that
 // registration.ts refreshes (first registration, or re-registration after a 401) takes effect on
 // the very next call without restarting the process.
+//
+// Same mode discipline as config.ts's readSecretFile and repos.ts's createAllowlistReader: a copy
+// readable by group or others is refused, not silently trusted. writeFileSync's mode option only
+// applies at file creation, so an existing loose file would otherwise stay loose forever.
 function fileIdentityReader(stateDir: string): Pick<Store, "read"> {
   const path = join(stateDir, "worker.json");
-  return { read: () => (existsSync(path) ? readFileSync(path, "utf8") : "") };
+  return {
+    read: () => {
+      if (!existsSync(path)) return "";
+      const { mode } = statSync(path);
+      if (mode & 0o077) {
+        throw new Error(
+          `${path} is readable by group or others (mode ${(mode & 0o777).toString(8)}); run chmod 600 on it`
+        );
+      }
+      return readFileSync(path, "utf8");
+    },
+  };
 }
 
 export function createApiClient(

@@ -7,6 +7,12 @@ The worker talks to the app over REST with a Bearer token and never touches Mong
 app runs on Railway while the checkout lives on a laptop behind NAT, and a machine executing
 agent-written code has no business holding database credentials.
 
+> **Mid-migration:** this branch is moving worker identity to server-side registration. The
+> Configuration table and Registration section below describe the target shape, but `main.ts`
+> still requires the pre-migration `CP_PROJECT_ID` and `CP_REPO_PATH` (it exits with `CP_REPO_PATH
+> is required` without them) and does not yet read `CP_WORKER_NAME`. Set both the old and new
+> variables until this note is gone.
+
 ## How one task runs
 
 ```

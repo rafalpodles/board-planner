@@ -1,4 +1,7 @@
-import { describe, it, expect, vi } from "vitest";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
+import { describe, it, expect, vi, afterAll } from "vitest";
 import { createApiClient } from "./api.js";
 
 const config = {
@@ -117,7 +120,7 @@ describe("createApiClient", () => {
     expect(init.body).toBe(JSON.stringify({ status: "done" }));
   });
 
-  it("sends the comment via POST", async () => {
+  it("sends the comment via POST, with the api token, not the worker credential", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 201 });
     const api = createApiClient(config, fetchMock as never, identityStore);
 
@@ -127,6 +130,8 @@ describe("createApiClient", () => {
     expect(url).toBe("https://app.example.com/api/projects/CP/tasks/t1/comments");
     expect(init.method).toBe("POST");
     expect(init.body).toBe(JSON.stringify({ body: "hello" }));
+    expect(init.headers.Authorization).toBe("Bearer cp_token");
+    expect(init.headers["X-Worker-Id"]).toBeUndefined();
   });
 
   it("drops checklist items without a string text field", async () => {
@@ -149,7 +154,7 @@ describe("createApiClient", () => {
     expect(task?.acceptanceCriteria).toEqual(["first"]);
   });
 
-  it("releases via POST with no body, so the server owns the target column", async () => {
+  it("releases via POST with no body, so the server owns the target column, using the api token", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
     const api = createApiClient(config, fetchMock as never, identityStore);
 
@@ -159,6 +164,8 @@ describe("createApiClient", () => {
     expect(url).toBe("https://app.example.com/api/projects/CP/tasks/t1/release");
     expect(init.method).toBe("POST");
     expect(init.body).toBeUndefined();
+    expect(init.headers.Authorization).toBe("Bearer cp_token");
+    expect(init.headers["X-Worker-Id"]).toBeUndefined();
   });
 
   it("lists the ids of every column the board carries", async () => {
@@ -341,7 +348,9 @@ describe("createApiClient", () => {
     expect((await api.statusIds()).done).toBe("shipped");
   });
 
-  it("reads the columns from the project endpoint a worker token can reach", async () => {
+  // Was misnamed "...a worker token can reach" — it is the api token, like every other
+  // project-scoped call; only claim() uses the worker credential
+  it("reads columns (backing statusIds/columnIds) with the api token, not the worker credential", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -354,6 +363,24 @@ describe("createApiClient", () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("https://app.example.com/api/projects/CP");
     expect(init.method).toBe("GET");
+    expect(init.headers.Authorization).toBe("Bearer cp_token");
+    expect(init.headers["X-Worker-Id"]).toBeUndefined();
+    expect(init.headers["X-CP-Protocol"]).toBeUndefined();
+  });
+
+  it("reads columns for columnIds with the api token too", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ columns: [] }),
+    });
+    const api = createApiClient(config, fetchMock as never, identityStore);
+
+    await api.columnIds();
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(init.headers.Authorization).toBe("Bearer cp_token");
+    expect(init.headers["X-Worker-Id"]).toBeUndefined();
   });
 
   it("still reports the status when reading the error body fails", async () => {
@@ -390,6 +417,17 @@ describe("createApiClient addressed by ObjectId", () => {
     expect((await api.claim("run-1"))?.taskKey).toBe("CP-158");
   });
 
+  it("reads the project key with the api token, not the worker credential", async () => {
+    const fetchMock = fetchFor({ key: "CP", columns: [] });
+    const api = createApiClient(byObjectId, fetchMock as never, identityStore);
+
+    await api.claim("run-1");
+
+    const [, init] = fetchMock.mock.calls.find(([url]) => !String(url).endsWith("/tasks/claim"))!;
+    expect(init.headers.Authorization).toBe("Bearer cp_token");
+    expect(init.headers["X-Worker-Id"]).toBeUndefined();
+  });
+
   it("reads the project key once, however many tasks it claims", async () => {
     const fetchMock = fetchFor({ key: "CP", columns: [] });
     const api = createApiClient(byObjectId, fetchMock as never, identityStore);
@@ -424,5 +462,60 @@ describe("createApiClient addressed by ObjectId", () => {
     const api = createApiClient(byObjectId, fetchMock as never, identityStore);
 
     expect((await api.claim("run-1"))?.taskKey).toBe("69a52e3b399b27d3cbb2c5a5-158");
+  });
+});
+
+// No identitySource override here — these exercise the real, file-backed reader the constructor
+// falls back to, the same as production. The same mode discipline as config.test.ts's secret-file
+// tests and repos.test.ts's createAllowlistReader tests.
+describe("createApiClient's default identity file", () => {
+  const dir = mkdtempSync(join(tmpdir(), "cp-api-test-"));
+
+  afterAll(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("reads worker.json when only its owner can read it", async () => {
+    const path = join(dir, "worker.json");
+    writeFileSync(path, JSON.stringify({ workerId: "w1", credential: "cpw_from_disk" }));
+    chmodSync(path, 0o600);
+    const cfg = { ...config, stateDir: dir } as never;
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 204 });
+    const api = createApiClient(cfg, fetchMock as never);
+
+    await api.claim("run-1");
+
+    const init = fetchMock.mock.calls[0][1];
+    expect(init.headers.Authorization).toBe("Bearer cpw_from_disk");
+  });
+
+  it("refuses a worker.json readable by group or others, the same as config.ts's secret file", async () => {
+    // Its own subdirectory: fileIdentityReader always looks for <stateDir>/worker.json, so this
+    // case cannot share a directory with the mode-0600 happy path above
+    const looseDir = join(dir, "loose");
+    mkdirSync(looseDir);
+    const path = join(looseDir, "worker.json");
+    writeFileSync(path, JSON.stringify({ workerId: "w1", credential: "cpw_x" }));
+    chmodSync(path, 0o644);
+    const cfg = { ...config, stateDir: looseDir } as never;
+    const fetchMock = vi.fn();
+    const api = createApiClient(cfg, fetchMock as never);
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(api.claim("run-1")).rejects.toThrow(/readable by group or others/);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+
+  it("treats a missing worker.json as not registered, not a permission error", async () => {
+    const cfg = { ...config, stateDir: join(dir, "does-not-exist") } as never;
+    const fetchMock = vi.fn();
+    const api = createApiClient(cfg, fetchMock as never);
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(api.claim("run-1")).rejects.toThrow(/not registered/);
+
+    errorSpy.mockRestore();
   });
 });
