@@ -184,7 +184,7 @@ export default function SprintsPage() {
   }
 
   return (
-    <div className="max-w-3xl mx-auto">
+    <div className="max-w-7xl mx-auto w-full">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-2">
           <button
@@ -208,7 +208,7 @@ export default function SprintsPage() {
           <Button size="sm" onClick={() => openForm()}>Create your first sprint</Button>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="grid gap-3 xl:grid-cols-2">
           {sprints.map((sprint) => {
             const start = new Date(sprint.startDate);
             const end = new Date(sprint.endDate);
@@ -224,7 +224,7 @@ export default function SprintsPage() {
                 className="border border-border rounded-lg p-4 bg-bg-card"
               >
                 <div className="flex items-start justify-between gap-3 mb-2">
-                  <div>
+                  <div className="min-w-0">
                     <div className="flex items-center gap-2 mb-1">
                       <h3 className="font-semibold">{sprint.name}</h3>
                       {statusBadge(sprint.status)}

@@ -34,10 +34,26 @@ const CATEGORY_COLORS: Record<string, string> = {
   idea: "#f59e0b",
 };
 
-function DonutChart({ data, colors }: { data: Record<string, number>; colors: Record<string, string> }) {
+function EmptyChart({ message }: { message: string }) {
+  return (
+    <div className="flex h-32 items-center justify-center rounded border border-dashed border-border px-4">
+      <p className="text-center text-xs text-text-muted">{message}</p>
+    </div>
+  );
+}
+
+function DonutChart({
+  data,
+  colors,
+  emptyMessage,
+}: {
+  data: Record<string, number>;
+  colors: Record<string, string>;
+  emptyMessage: string;
+}) {
   const entries = Object.entries(data).filter(([, v]) => v > 0);
   const total = entries.reduce((s, [, v]) => s + v, 0);
-  if (total === 0) return <p className="text-sm text-text-muted">No data</p>;
+  if (total === 0) return <EmptyChart message={emptyMessage} />;
 
   const size = 120;
   const strokeWidth = 24;
@@ -87,7 +103,17 @@ function DonutChart({ data, colors }: { data: Record<string, number>; colors: Re
   );
 }
 
-function BarChart({ data, label }: { data: { label: string; value: number }[]; label: string }) {
+function BarChart({
+  data,
+  label,
+  emptyMessage,
+}: {
+  data: { label: string; value: number }[];
+  label: string;
+  emptyMessage: string;
+}) {
+  if (!data.some((d) => d.value > 0)) return <EmptyChart message={emptyMessage} />;
+
   const max = Math.max(...data.map((d) => d.value), 1);
 
   return (
@@ -115,11 +141,19 @@ function BarChart({ data, label }: { data: { label: string; value: number }[]; l
   );
 }
 
-function HorizontalBars({ data, colors }: { data: Record<string, number>; colors?: Record<string, string> }) {
+function HorizontalBars({
+  data,
+  colors,
+  emptyMessage,
+}: {
+  data: Record<string, number>;
+  colors?: Record<string, string>;
+  emptyMessage: string;
+}) {
   const entries = Object.entries(data).sort((a, b) => b[1] - a[1]);
   const max = Math.max(...entries.map(([, v]) => v), 1);
 
-  if (entries.length === 0) return <p className="text-sm text-text-muted">No data</p>;
+  if (entries.length === 0) return <EmptyChart message={emptyMessage} />;
 
   return (
     <div className="space-y-2">
@@ -138,6 +172,50 @@ function HorizontalBars({ data, colors }: { data: Record<string, number>; colors
           <span className="text-xs font-medium w-6 text-right">{value}</span>
         </div>
       ))}
+    </div>
+  );
+}
+
+function CreatedVsCompletedChart({ data }: { data: Stats["createdOverTime"] }) {
+  if (!data.some((d) => d.created > 0 || d.completed > 0)) {
+    return (
+      <EmptyChart message="Nothing created or completed in the last 8 weeks — new and finished tasks show up here." />
+    );
+  }
+
+  const max = Math.max(...data.map((d) => Math.max(d.created, d.completed)), 1);
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-end gap-1 h-32">
+        {data.map((d, i) => (
+          <div key={i} className="flex-1 flex gap-px items-end h-full">
+            <div
+              className="flex-1 bg-primary/60 rounded-t"
+              style={{ height: `${(d.created / max) * 100}%`, minHeight: d.created > 0 ? 4 : 0 }}
+            />
+            <div
+              className="flex-1 bg-status-done rounded-t"
+              style={{ height: `${(d.completed / max) * 100}%`, minHeight: d.completed > 0 ? 4 : 0 }}
+            />
+          </div>
+        ))}
+      </div>
+      <div className="flex gap-1">
+        {data.map((d, i) => (
+          <span key={i} className="flex-1 text-[9px] text-text-muted text-center truncate">
+            {d.week}
+          </span>
+        ))}
+      </div>
+      <div className="flex gap-4 justify-center mt-2">
+        <span className="flex items-center gap-1 text-xs text-text-muted">
+          <span className="w-3 h-3 rounded-sm bg-primary/60" /> Created
+        </span>
+        <span className="flex items-center gap-1 text-xs text-text-muted">
+          <span className="w-3 h-3 rounded-sm bg-status-done" /> Completed
+        </span>
+      </div>
     </div>
   );
 }
@@ -177,7 +255,7 @@ export default function DashboardPage() {
   const completionPct = stats.total > 0 ? Math.round((stats.done / stats.total) * 100) : 0;
 
   return (
-    <div className="max-w-5xl mx-auto">
+    <div className="max-w-7xl mx-auto w-full">
       <div className="flex items-center gap-2 mb-6">
         <button
           onClick={() => router.push(`/projects/${projectId}`)}
@@ -212,10 +290,14 @@ export default function DashboardPage() {
       </div>
 
       {/* Charts */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 mb-8">
         <div className="bg-bg-card border border-border rounded-lg p-4">
           <h2 className="font-semibold mb-4">Status Breakdown</h2>
-          <DonutChart data={stats.statusBreakdown} colors={STATUS_COLORS} />
+          <DonutChart
+            data={stats.statusBreakdown}
+            colors={STATUS_COLORS}
+            emptyMessage="No tasks on the board yet — every task counts towards its column here."
+          />
         </div>
 
         <div className="bg-bg-card border border-border rounded-lg p-4">
@@ -223,67 +305,38 @@ export default function DashboardPage() {
           <BarChart
             data={stats.velocity.map((v) => ({ label: v.week, value: v.count }))}
             label="Last 8 weeks"
+            emptyMessage="No tasks completed in the last 8 weeks — each week a task reaches Done adds a bar."
           />
         </div>
 
         <div className="bg-bg-card border border-border rounded-lg p-4">
           <h2 className="font-semibold mb-4">By Category</h2>
-          <HorizontalBars data={stats.categoryBreakdown} colors={CATEGORY_COLORS} />
+          <HorizontalBars
+            data={stats.categoryBreakdown}
+            colors={CATEGORY_COLORS}
+            emptyMessage="No tasks yet — categories appear as soon as the board has tasks."
+          />
         </div>
 
         <div className="bg-bg-card border border-border rounded-lg p-4">
           <h2 className="font-semibold mb-4">By Assignee</h2>
-          <HorizontalBars data={stats.assigneeBreakdown} />
+          <HorizontalBars
+            data={stats.assigneeBreakdown}
+            emptyMessage="Nobody is assigned yet — assign a task to see the split per person."
+          />
         </div>
 
         <div className="bg-bg-card border border-border rounded-lg p-4">
           <h2 className="font-semibold mb-4">By Difficulty</h2>
-          <HorizontalBars data={stats.difficultyBreakdown} />
+          <HorizontalBars
+            data={stats.difficultyBreakdown}
+            emptyMessage="No tasks yet — the S/M/L/XL split shows up once tasks exist."
+          />
         </div>
 
         <div className="bg-bg-card border border-border rounded-lg p-4">
           <h2 className="font-semibold mb-4">Created vs Completed</h2>
-          <div className="space-y-1">
-            <div className="flex items-end gap-1 h-32">
-              {stats.createdOverTime.map((d, i) => (
-                <div key={i} className="flex-1 flex flex-col items-center gap-0.5">
-                  <div className="w-full flex flex-col items-center gap-0.5" style={{ height: "100%" }}>
-                    <div className="w-full flex gap-px flex-1 items-end">
-                      <div
-                        className="flex-1 bg-primary/60 rounded-t"
-                        style={{
-                          height: `${(d.created / Math.max(...stats.createdOverTime.map((x) => Math.max(x.created, x.completed)), 1)) * 100}%`,
-                          minHeight: d.created > 0 ? 4 : 0,
-                        }}
-                      />
-                      <div
-                        className="flex-1 bg-status-done rounded-t"
-                        style={{
-                          height: `${(d.completed / Math.max(...stats.createdOverTime.map((x) => Math.max(x.created, x.completed)), 1)) * 100}%`,
-                          minHeight: d.completed > 0 ? 4 : 0,
-                        }}
-                      />
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div className="flex gap-1">
-              {stats.createdOverTime.map((d, i) => (
-                <span key={i} className="flex-1 text-[9px] text-text-muted text-center truncate">
-                  {d.week}
-                </span>
-              ))}
-            </div>
-            <div className="flex gap-4 justify-center mt-2">
-              <span className="flex items-center gap-1 text-xs text-text-muted">
-                <span className="w-3 h-3 rounded-sm bg-primary/60" /> Created
-              </span>
-              <span className="flex items-center gap-1 text-xs text-text-muted">
-                <span className="w-3 h-3 rounded-sm bg-status-done" /> Completed
-              </span>
-            </div>
-          </div>
+          <CreatedVsCompletedChart data={stats.createdOverTime} />
         </div>
       </div>
     </div>
