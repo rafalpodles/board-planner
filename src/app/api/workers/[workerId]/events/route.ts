@@ -4,8 +4,16 @@ import { withWorker } from "@/lib/middleware";
 import { phaseFrom, recordTaskPhase } from "@/lib/task-service";
 
 // withWorker owns the credential and 403s a path segment that names someone else's worker; the
-// update filter owns the rest — a phase can only ever land on the task this run is still holding.
+// update filter owns the rest — a phase only lands on a task this worker still holds under this
+// run, since every exit from the active state clears the run identity along with the phase.
 export const POST = withWorker(async (request, { worker }) => {
+  // Every other withWorker route refuses a killed worker, and this one is not the exception: an
+  // abort is asynchronous, so without this the board would keep advancing a run the admin just
+  // stopped — at exactly the moment the operator needs the badge to be true
+  if (!worker.enabled || worker.lockedByInstance) {
+    return NextResponse.json({ error: "this worker may not run", abort: true }, { status: 403 });
+  }
+
   const body = (await request.json().catch(() => ({}))) ?? {};
 
   const { taskId, runId, seq } = body;

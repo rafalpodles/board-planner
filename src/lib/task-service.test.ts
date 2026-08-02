@@ -46,6 +46,9 @@ function matches(filter: unknown, doc: unknown): boolean {
 }
 
 const PHASE_KEYS = ["execution.phase", "execution.phaseAt", "execution.phaseSeq"];
+// Every exit also clears the run identity, so a released worker replaying its own old runId
+// reaches nothing. The claim is the exception: it sets runId in the same update.
+const RUN_KEYS = [...PHASE_KEYS, "execution.runId"];
 
 // A non-default board on purpose: with the seeded columns the approved id is
 // literally "todo" and the active id "in_progress", so a hardcoding
@@ -410,6 +413,14 @@ describe("recordTaskPhase", () => {
     expect(matches(await filterFor(3), doc)).toBe(false);
   });
 
+  // The worker mints its own runId, so it knows the one it used an hour ago. Every exit clears the
+  // run identity precisely so that replaying it reaches nothing — and note the release also unsets
+  // phaseSeq, so the $exists branch would otherwise accept any seq, however stale
+  it("drops a replay of the run the task was released from", async () => {
+    const released = { _id: TASK_ID, execution: { workerId: "w1", attempts: 1 } };
+    expect(matches(await filterFor(1), released)).toBe(false);
+  });
+
   it("drops an event carrying a seq already recorded", async () => {
     const doc = { ...holder, execution: { ...holder.execution, phaseSeq: 3 } };
     expect(matches(await filterFor(3), doc)).toBe(false);
@@ -508,13 +519,14 @@ describe("clearing the phase on every exit from the active column", () => {
       "execution.phase": "",
       "execution.phaseAt": "",
       "execution.phaseSeq": "",
+      "execution.runId": "",
     });
   });
 
   it("clears it when the edit form PUTs a new status", async () => {
     await updateTask("p1", "t1", { status: "checking" }, "actor");
 
-    expect(Object.keys(findOneAndUpdate.mock.calls[0][1].$unset ?? {})).toEqual(PHASE_KEYS);
+    expect(Object.keys(findOneAndUpdate.mock.calls[0][1].$unset ?? {})).toEqual(RUN_KEYS);
   });
 
   // The phase belongs to the run, not to the card: renaming a task the worker is running must not
@@ -530,7 +542,7 @@ describe("clearing the phase on every exit from the active column", () => {
 
     await releaseTask("p1", "t1");
 
-    expect(Object.keys(findOneAndUpdate.mock.calls[0][1].$unset)).toEqual(PHASE_KEYS);
+    expect(Object.keys(findOneAndUpdate.mock.calls[0][1].$unset)).toEqual(RUN_KEYS);
   });
 
   it("clears it when the release charges the attempt", async () => {
@@ -539,7 +551,7 @@ describe("clearing the phase on every exit from the active column", () => {
     await releaseTask("p1", "t1", { refund: false });
 
     const stages = findOneAndUpdate.mock.calls[0][1];
-    expect(stages[stages.length - 1]).toEqual({ $unset: PHASE_KEYS });
+    expect(stages[stages.length - 1]).toEqual({ $unset: RUN_KEYS });
   });
 
   it("clears it when a lease expires, whether or not attempts remain", async () => {
@@ -547,7 +559,7 @@ describe("clearing the phase on every exit from the active column", () => {
 
     expect(updateMany.mock.calls).toHaveLength(2);
     for (const [, update] of updateMany.mock.calls) {
-      expect(Object.keys(update.$unset)).toEqual(PHASE_KEYS);
+      expect(Object.keys(update.$unset)).toEqual(RUN_KEYS);
     }
   });
 });
