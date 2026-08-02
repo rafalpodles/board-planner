@@ -1,421 +1,370 @@
-# Worker control plane, part B — telemetry and the live view Implementation Plan
+# CP-161 part B — execution telemetry
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+Revision 2. Revision 1 (`cb51cc9`) was reviewed independently and came back with six Criticals. The
+root cause of half of them was the same: **it planned a migration to an output format nobody had
+observed.** Every event shape in it was invented.
 
-**Goal:** Make an opaque eight-minute run legible. The worker starts reporting what it is doing as it does it — a full-fidelity stream to a local socket, a summarised phase feed to the board — so an operator can answer *stuck or working?* without reading a log file over SSH into their own laptop.
+This revision is built on a captured transcript, committed as a fixture, and it states plainly where
+observation stops and inference begins.
 
-**Architecture:** One `emit` in the worker fans out at two fidelities. The loud data (every file the agent touches) stays on the machine, reachable over a loopback socket that can only read, pause and stop. The durable data (phase transitions, outcomes) goes to the server, where the task card and the fleet console read it. The two views differ in resolution, not in truth.
+Part A gave the server the ability to say *stop*. Part B gives the human the ability to see *what is
+happening right now* — on the board, and in the menubar app.
 
-**Tech Stack:** Node 22+ for the worker, Next.js 16 App Router route handlers, Mongoose 8 on MongoDB 4.4, vitest in both packages.
+## What was measured before writing this
 
-**Depends on:** part A (`docs/superpowers/plans/2026-07-31-worker-control-plane-a-governance.md`), merged into this branch at `6e4f179`.
+A real `claude -p` run with the executor's own flags, captured to
+`worker/src/__fixtures__/stream-success.ndjson` (system events and thinking blocks redacted,
+everything else verbatim). What it settles:
 
-## Global Constraints
+| Question | Answer | Consequence |
+|---|---|---|
+| Does `stream-json` need `--verbose` under `-p`? | **Yes.** The CLI refuses: `When using --print, --output-format=stream-json requires --verbose` | Revision 1 omitted it. Its first commit would have failed *every* run and drained the retry ladder on every queued task. |
+| What is the usage-limit signal? | A first-class **`rate_limit_event`** carrying `rate_limit_info: {status, resetsAt, rateLimitType, utilization, isUsingOverage, surpassedThreshold}` | Revision 1 invented `result.subtype === "error_usage_limit"`. It does not exist. |
+| Domain of `status`? | `"allowed" \| "allowed_warning" \| "rejected"` (CLI binary: 68 / 15 / 82 occurrences) | `"rejected"` is the hard signal. |
+| Domain of `result.subtype`? | `"success" \| "error_max_turns" \| "error_during_execution"` | No usage-limit subtype. Confirms the above. |
+| Does `--json-schema` survive? | Yes — payload still arrives as a **string** in the final `result` event's `result` field. There is also a pre-parsed `structured_output` object. | `extractResultPayload` survives; only envelope selection changes. |
+| Is file content really in stdout? | **Yes.** The fixture contains `1\texport const answer = 41;` verbatim inside a `tool_result`. | The poisoning risk below is measured, not theoretical. |
+| How large is the stream? | 115 KB for a one-line edit — but **91% is the `system` init event** (91 tools, 142 slash commands, 139 agents, 80 skills). | The size story is a *fixed ~100 KB header*, not growth proportional to the task. This kills the case for a global cap. |
 
-- **MongoDB 4.4** — no `$dateTrunc`, `$dateAdd`/`$dateDiff`, `$setWindowFields`, no `$lookup` mixing `localField`/`foreignField` with an inline `pipeline`.
-- **Any array (aggregation pipeline) update needs `updatePipeline: true`.** Mocked-Mongoose tests do not validate driver options — assert the option explicitly. This gap produced a 500 on the release path that a whole green suite passed.
-- Document interfaces use `Types.ObjectId` and expose a separate `Api*` interface for responses.
-- Route handlers take `Request`; `context.params` is `Promise<Record<string, string>>`. There is no `Params` type.
-- Every git invocation passes `GIT_CONFIG_NOSYSTEM=1` and `-c core.fsmonitor=false -c core.pager=cat`.
-- Comments minimal — design rationale belongs in the commit message, not the source.
-- English; conventional commits; no trailers or footers.
-- No new dependencies without checking `npm ls <name>` first.
-- **Every implementation report must quote the `git diff --stat` of its own commit.** In part A a report claimed a removal its commit never made; the diff stat makes report and commit unable to disagree.
+**Still unobserved:** an actual `status: "rejected"` event, and the exit-1/empty-stdout variant. Both
+are already encoded in `worker/src/executor.test.ts` (`:103-112` and `:61-70`) from earlier real runs.
+**Those two tests are the specification. This plan does not delete them.**
 
-## The trap this part walks into
+## The trap, stated once
 
-`worker/src/executor.ts` runs `claude -p` with `--output-format json` and reads one blob at the end. Moving to `stream-json` is what makes everything else in this plan possible, and it breaks two things that currently look fine:
+`isUsageLimit` (`worker/src/executor.ts:30`) scans the *whole* of stdout for `usage limit reached`.
+Today stdout is one result blob, so that is safe. After the migration stdout carries the content of
+every file the agent read — and that phrase appears in **eight files of this repository**, including
+`executor.ts` itself.
 
-**The parser.** `extractEnvelope` slices from the first `{` to the last `}`. Across NDJSON that spans from the `init` message to the final `result` and is not valid JSON, so every run would end as `{kind:"error"}` — requeued, attempt charged, three strikes to human review. The whole queue dies on one flag change.
+An agent working on the worker reads its own source → false usage limit → `release({refund: true})` →
+the loop `continue`s **without sleeping**. An unbounded, free retry loop, triggered precisely by the
+tasks this worker exists to run.
 
-**The usage-limit heuristic, which becomes self-poisoning.** `isUsageLimit` scans all of stdout. That is safe today because stdout holds only the final result. With a stream it holds the contents of every file the agent read — and the phrase `usage limit reached` appears in eight files of this repository, including `executor.ts` and `pipeline.ts`. An agent working on the worker would read its own source, produce a false usage limit, release **with the attempt refunded**, and the loop would `continue` without sleeping: an unbounded free loop, on exactly the tasks this worker exists to do.
+The fix is not a better regex. It is: **classify from typed events, never from raw text — except
+stderr, which structurally cannot carry file content.**
 
-Both are addressed in Task 1, before anything consumes the stream.
+## Loose ends from part A, honestly
+
+Part A closed C1–C3. **C4 is still open**: worker registration is `withAdmin`
+(`src/app/api/workers/register/route.ts:8`), so the laptop holds an instance-admin token, and the
+agent — running `bypassPermissions` with `Read` — can read it off disk and lift its own kill switch.
+`grep -i enrol` returns nothing in this repo. rpo has deferred the one-time enrolment token to a
+separate conversation.
+
+**This plan does not paper over it.** Revision 1's Task 4 justified the socket design with "the worst
+an agent gains by reading the secret is the ability to watch a run and stop it." That was false while
+C4 is open. It is deleted, and the socket is designed as if the secret were already compromised —
+because it effectively is.
 
 ---
 
-## File Structure
+## Task 1 — migrate to `stream-json`, classify from events
 
-**Worker**
+**Files:** `worker/src/stream.ts` (new), `worker/src/stream.test.ts` (new), `worker/src/executor.ts`,
+`worker/src/executor.test.ts`, `worker/src/__fixtures__/stream-success.ndjson` (committed).
 
-| File | Responsibility |
-|---|---|
-| `worker/src/stream.ts` | Line-framed NDJSON reader over a chunk callback; owns the partial-line buffer |
-| `worker/src/telemetry.ts` | One `emit`, fanned out at two fidelities; the only module that decides what each channel sees |
-| `worker/src/local-server.ts` | Unix domain socket: status, event stream, log tail, and only `pause`/`stop` |
-| `worker/src/exec.ts` (modify) | A chunk callback so a caller can consume output as it arrives |
-| `worker/src/executor.ts` (modify) | `stream-json`, typed classification, prompt on stdin |
-| `worker/src/pipeline.ts` (modify) | Emits phase transitions |
-| `worker/src/reporter.ts` (modify) | Scrubs board comments |
-| `worker/src/main.ts` (modify) | Wires telemetry and the local socket |
+**Consumes:** nothing. **Produces:** `parseStream`, and a correct `RunOutcome` for the same inputs as
+today.
 
-**Server**
+Format change and every consumer fixed **in one commit**. No window where `main` is broken.
 
-| File | Responsibility |
-|---|---|
-| `src/models/task.ts` (modify) | `execution.phase`, `phaseSeq`, `phaseStartedAt` |
-| `src/app/api/workers/[workerId]/events/route.ts` | Accepts phase transitions, conditional on `runId` and `seq` |
-| `src/components/tasks/ExecutionPanel.tsx` | Which worker, which attempt, current phase, elapsed |
-| `src/app/(app)/settings/workers/page.tsx` (modify) | Phase column, now that there is a phase |
+**Step 1 — `stream.ts`.** `parseStream(stdout: string): StreamEvent[]`. Split on newlines, `JSON.parse`
+each non-empty line, **skip unparseable lines rather than throwing** — a partial final line is normal
+when a process is killed. Narrow on `type`: `system`, `assistant`, `user`, `rate_limit_event`,
+`result`. Unknown types pass through as `{type: string}` and are ignored by callers; the CLI adds
+event types between versions and an unknown one must never be fatal.
+
+**Step 2 — flags.** `--output-format json` → `--output-format stream-json --verbose`. Nothing else in
+the argv changes.
+
+**Step 3 — envelope selection.** Replace `extractEnvelope`'s "first `{` to last `}`" slice — which
+across NDJSON yields invalid JSON and would make *every* run `{kind:"error"}` — with: take the **last**
+event whose `type === "result"`. `extractResultPayload` stays; the fixture proves the payload is still
+a JSON string in `result`.
+
+**Step 4 — classification, in this order.** After `timedOut`:
+
+1. Any `rate_limit_event` with `rate_limit_info.status === "rejected"` → `{kind: "usage_limit"}`.
+2. Else final `result` has `is_error === true` **and** the phrase matches **its own `result` field
+   only** (not the stream) → `{kind: "usage_limit"}`. The exit-0 case at `executor.test.ts:103-112`.
+3. Else `isUsageLimit(result.stderr)` → `{kind: "usage_limit"}`. **Keep this.** stderr carries CLI
+   diagnostics, never file content, and it is the only signal in the exit-1/empty-stdout case at
+   `executor.test.ts:61-70`.
+4. Else parse the payload as today.
+
+**Delete `isUsageLimit(result.stdout)` and nothing else.** That single call is the vulnerability.
+
+**Step 5 — `pipeline.ts` is out of scope.** Revision 1 said "the same applies to `hitUsageLimit` in
+`pipeline.ts`". It does not. The review gate (`worker/src/gates/review.ts:126`) still uses
+`--output-format json`, so its stdout is still one blob and the text scan there is both safe and
+load-bearing. Removing it turns a reviewer hitting a subscription limit into a *gate rejection*:
+branch pushed, "blocked at the review gate" comment, human summoned to a billing event. Leave it.
+
+**Step 6 — tests, all from the fixture.**
+- `parseStream` on the fixture returns 11 events, last one `type: "result"`.
+- A truncated fixture (drop the final 20 bytes) still parses every complete line.
+- An unknown `type` is preserved and ignored.
+- `executor` on the fixture returns `{kind: "result"}` with the parsed payload.
+- **Poisoning test:** a fixture whose `tool_result` contains the literal `usage limit reached` while
+  the final `result` is a clean success → `{kind: "result"}`.
+  *Mutation check: restore the stdout scan and confirm this test fails.*
+- **Both existing usage-limit tests, translated to stream shape, still pass.** Not deleted. If a
+  translated test cannot be made to pass, **stop and report** — that means the classification is
+  wrong, not the test.
+- `rate_limit_event` with `status: "rejected"` → `{kind: "usage_limit"}`.
+- `rate_limit_event` with `status: "allowed_warning"` → **not** a usage limit. This is the one in the
+  real fixture; treating a warning as a limit would stall the queue at 75% utilization.
+
+**No stdout cap in this task.** Revision 1 added a 256 KB tail to `exec.ts` claiming "every existing
+consumer reads error output". False, and the consequence is a silently weakened security gate:
+`diff.ts:22` returns stdout as the **payload** of `git diff --numstat`, whose output is sorted by path
+— so a head-truncating tail drops exactly the dot-directories `.claude/`, `.github/workflows/`,
+`.husky/`. `protectedPathsGate` reads `diff.changedFiles`, so it stops seeing them, and `buildGate`
+then runs npm on a worktree with a swapped `package.json`. `delivery.ts:97` `JSON.parse`s stdout;
+`repos.ts:180` compares it exactly. If a cap is ever needed it is `RunOpts.maxStdoutBytes`, opt-in,
+set only on the `claude` call, with an explicit `CommandResult.stdoutTruncated` flag — never a silent
+global tail. The measurement above shows it is not needed: the bulk is a fixed header.
+
+**Gate:** `npm test && npm run build` in `worker/`, plus one real end-to-end run through the rig
+confirming a task still reaches `done`.
 
 ---
 
-### Task 1: `stream.ts` and the `stream-json` migration
+## Task 2 — `telemetry.ts`: a typed bus with a structurally safe summary
 
-The enabling change, and the one that breaks the queue if done carelessly.
+**Files:** `worker/src/telemetry.ts` (new), `worker/src/telemetry.test.ts` (new).
 
-**Files:**
-- Create: `worker/src/stream.ts`, `worker/src/stream.test.ts`
-- Modify: `worker/src/exec.ts`, `worker/src/exec.test.ts`, `worker/src/executor.ts`, `worker/src/executor.test.ts`
+**Consumes:** `StreamEvent` from Task 1. **Produces:** `Telemetry` — consumed by Tasks 4 and 6.
 
-**Interfaces:**
-- Produces: `createLineReader(onLine: (line: string) => void): { push(chunk: Buffer): void; end(): void }`
-- Produces: `RunOpts.onStdout?: (chunk: Buffer) => void`
-
-- [ ] **Step 1: Write the failing test**
-
-`worker/src/stream.test.ts`:
+**Step 1 — two types, and the whole safety argument lives in their shape.**
 
 ```ts
-import { describe, it, expect, vi } from "vitest";
-import { createLineReader } from "./stream.js";
-
-describe("createLineReader", () => {
-  it("emits complete lines and holds a partial one", () => {
-    const lines: string[] = [];
-    const reader = createLineReader((line) => lines.push(line));
-
-    reader.push(Buffer.from('{"a":1}\n{"b":'));
-    expect(lines).toEqual(['{"a":1}']);
-
-    reader.push(Buffer.from('2}\n'));
-    expect(lines).toEqual(['{"a":1}', '{"b":2}']);
-  });
-
-  // A chunk boundary inside a multi-byte character corrupts exactly the line carrying the contract
-  it("does not corrupt a multi-byte character split across chunks", () => {
-    const lines: string[] = [];
-    const reader = createLineReader((line) => lines.push(line));
-    const utf8 = Buffer.from('{"s":"→"}\n');
-
-    reader.push(utf8.subarray(0, 7));
-    reader.push(utf8.subarray(7));
-
-    expect(lines).toEqual(['{"s":"→"}']);
-    expect(lines[0]).not.toContain("�");
-  });
-
-  it("flushes a trailing line with no newline on end", () => {
-    const lines: string[] = [];
-    const reader = createLineReader((line) => lines.push(line));
-
-    reader.push(Buffer.from('{"a":1}'));
-    reader.end();
-
-    expect(lines).toEqual(['{"a":1}']);
-  });
-
-  it("skips blank lines rather than emitting empty strings", () => {
-    const lines: string[] = [];
-    const reader = createLineReader((line) => lines.push(line));
-
-    reader.push(Buffer.from("\n\n{\"a\":1}\n\n"));
-
-    expect(lines).toEqual(['{"a":1}']);
-  });
-});
+export interface ToolActivity { name: string; target?: string }        // "Edit", "src/foo.ts"
+export interface Progress { phase: Phase; tool?: ToolActivity; turns: number; costUsd?: number }
+export interface Quota { status: "allowed" | "allowed_warning" | "rejected";
+                         utilization: number; resetsAt: number; rateLimitType: string }
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+`ToolActivity.target` is a **path or identifier, never content**. The summarised type is
+*structurally incapable* of carrying file bodies, prompts or diffs. That is the guarantee — not a
+scrubbing pass over a rich type, which is a filter that has to be right every single time.
 
-Run: `cd worker && npx vitest run src/stream.test.ts`
-Expected: FAIL — cannot resolve `./stream.js`.
+**Step 2 — `summarise(event): Progress | Quota | null`.** From `assistant` events with `tool_use`
+content, take `name` plus a target derived only from a whitelist of input keys (`file_path`, `path`,
+`pattern`, `command` → **first word only**). Everything else dropped. From `rate_limit_event`, map to
+`Quota`. From `result`, take `num_turns` and `total_cost_usd`. Everything else → `null`.
 
-- [ ] **Step 3: Implement `stream.ts`**
+**Step 3 — the bus.** `subscribe(fn)`, `emit(event)`, `recent(): Progress[]` over a bounded ring
+buffer of 50. Two sinks, both wired in Task 6. **No ring buffer in `stream.ts`** — revision 1 put one
+there with no consumer; `telemetry.recent()` is the only one.
 
-Use `StringDecoder` from `node:string_decoder` for the partial-character case; a plain `chunk.toString()` splits multi-byte characters at chunk boundaries and produces `U+FFFD` in whichever line happens to straddle one.
+**Step 4 — failure policy, fixed here so no implementer invents it.** The server sink is
+fire-and-forget: at most one POST in flight, excess **dropped not queued**, `.catch(() => {})` on
+every call. Phase events are not reports — a lost one costs a stale UI for seconds, while an unhandled
+rejection from a synchronous `emit` in `pipeline.ts` exits the process under Node 22. Deliberately
+**no outbox**; `reporter.ts` has one because a lost *report* strands a task.
 
-- [ ] **Step 4: Give `exec.ts` a chunk callback**
-
-`RunOpts` gains `onStdout?: (chunk: Buffer) => void`, called as data arrives. The accumulated `stdout` string stays for existing callers, but **cap it** — with `stream-json` a thirty-minute run carries every file the agent read, and the current code concatenates without bound. Keep a bounded tail (the last 256 KB is enough for every existing consumer, all of which read error output) and note the truncation in the returned string.
-
-- [ ] **Step 5: Move `executor.ts` to `stream-json`**
-
-Replace `--output-format json` with `--output-format stream-json`. Parse each line as it arrives; keep the **last event whose `type` is `"result"`** and a bounded ring buffer of recent events for telemetry (Task 2 consumes it).
-
-**Classification changes, and this is the part that matters:**
-
-- The final result comes from the typed `result` event, not from slicing the whole of stdout.
-- **A usage limit is recognised only from the typed event** — its `subtype`, or whatever field the CLI actually sets. **Never** from scanning raw text. Delete the stdout scan; the same applies to `hitUsageLimit` in `pipeline.ts`, which reads a gate's `reason` string.
-- Pass the prompt on **stdin**, not `argv`. `RunOpts.stdin` already exists from part A and is unused. Today the prompt and, in the review gate, the full diff are visible to any process on the machine through `ps`.
-
-- [ ] **Step 6: Write the test that would have caught the self-poisoning**
-
-```ts
-it("does not read a usage limit out of file contents the agent happened to print", async () => {
-  const stream = [
-    JSON.stringify({ type: "system", subtype: "init" }),
-    JSON.stringify({ type: "assistant", message: { content: "…usage limit reached…" } }),
-    JSON.stringify({ type: "user", message: { content: "file says: usage limit reached" } }),
-    JSON.stringify({ type: "result", subtype: "success", result: JSON.stringify(RESULT) }),
-  ].join("\n");
-  const { runner } = runnerStreaming(stream);
-
-  const outcome = await createExecutor(config, runner).execute(task, "/wt");
-
-  expect(outcome.kind).toBe("result");
-});
-
-it("recognises a real usage limit from the typed event", async () => {
-  const stream = JSON.stringify({ type: "result", subtype: "error_usage_limit" });
-  const { runner } = runnerStreaming(stream);
-
-  expect((await createExecutor(config, runner).execute(task, "/wt")).kind).toBe("usage_limit");
-});
-```
-
-Confirm the first test fails against the old text-scanning classification before you delete it.
-
-- [ ] **Step 7: Run everything and commit**
-
-Run: `cd worker && npx vitest run && npm run build`
-
-```bash
-git add worker/src
-git commit -m "feat(worker): parse the agent's output as a stream (CP-161)"
-```
+**Step 5 — the test that actually proves it.** Build a **full** `tool_use` event whose input contains
+a secret (`{file_path: "x.ts", content: "TOKEN=cpw_deadbeef…"}`), run it through `summarise`, assert
+`JSON.stringify(result)` does not contain it. Revision 1 asserted on `toServer.mock.calls` after
+emitting a tool event — which passes trivially if tool events never reach the server at all, proving
+nothing about the type.
 
 ---
 
-### Task 2: `telemetry.ts` — one emit, two fidelities
+## Task 3 — phase on the task, **and the client that gets it there**
 
-**Files:**
-- Create: `worker/src/telemetry.ts`, `worker/src/telemetry.test.ts`
+**Files:** `src/models/task.ts`, `src/lib/task-service.ts`,
+`src/app/api/workers/[workerId]/events/route.ts` (new) + test, `worker/src/api.ts`,
+`worker/src/api.test.ts`, `src/types/index.ts`.
 
-**Interfaces:**
-- Consumes: nothing from other tasks
-- Produces: `createTelemetry(deps): { emit(event: RunEvent): void; subscribe(cb): () => void; recent(): RunEvent[] }`
-- Produces: `RunEvent` (full) and `PhaseEvent` (summarised)
+**Consumes:** Task 2's `Progress`. **Produces:** `execution.phase`, and `api.postEvent()` — consumed
+by Tasks 6, 7, 8.
 
-- [ ] **Step 1: Write the failing test**
+**This task owns the transport end to end.** Revision 1 split it: route in one task, wiring in
+another, and **no task at all** added the HTTP client — while `api.ts:141`'s `send()` hardcodes
+`${apiBaseUrl}/api/projects/${projectId}${path}` and structurally cannot address `/api/workers/...`.
+That is ledger line 90 repeating verbatim: *"task 3 built the field, task 10 built the consumer,
+neither owned the join."* All four whole-branch Criticals in part A lived in exactly this kind of seam.
 
-The critical one is negative:
+**Step 1 — schema.** On `Task.execution`: `phase?: string`, `phaseAt?: Date`, `phaseSeq?: number`.
+Add `runId?: string`, assigned **server-side at claim** and returned in `ClaimedTask` — the worker
+reads it from the claim response (`raw.execution?.runId`), it does not mint its own.
 
-```ts
-// The server feed must be shaped so it CANNOT carry content, not merely trimmed of it
-it("never lets file contents reach the server feed", () => {
-  const secret = "AKIAIOSFODNN7EXAMPLE";
-  const toServer = vi.fn();
-  const telemetry = createTelemetry({ toServer, ... });
+**Step 2 — the endpoint.** `POST /api/workers/[workerId]/events` wrapped in **`withWorker`**, which
+already 403s a mismatched `params.workerId` (`src/lib/middleware.ts:52`). Revision 1 specified no auth
+at all — that would allow writing `execution.phase` on any task in the instance. Update filter:
+`{_id: taskId, "execution.workerId": String(worker._id), "execution.runId": runId}` — **the run is the
+authorization**, so a stale worker cannot write to a task it no longer holds.
 
-  telemetry.emit({
-    kind: "tool",
-    tool: "Read",
-    path: "src/config.ts",
-    input: `a file containing ${secret}`,
-    result: `and more ${secret}`,
-  });
+**Step 3 — ordering.** Guard with
+`$or: [{"execution.phaseSeq": {$exists: false}}, {"execution.phaseSeq": {$lt: seq}}]`. A bare `$lt`
+never matches a missing field, so every pre-existing task would silently drop its first phase — the
+trap is already documented 20 lines away at `src/lib/task-service.ts:582-588`.
 
-  expect(JSON.stringify(toServer.mock.calls)).not.toContain(secret);
-});
+**Step 4 — clearing.** Phase must clear on **every** exit from active, not just `changeStatus`
+(`:137`): `updateTask` (`:302`, the PUT form path), `releaseTask` (`:604`), `releaseExpiredTasks`
+(`:532`). A gate rejection lands in a `review`-role column, not `done` — so the most common non-merge
+outcome is precisely the one revision 1's "terminal status" wording missed, and it would leave a
+frozen "running tests" badge forever.
 
-it("gives the local subscriber the full event", () => { /* input and result both present */ });
-it("summarises a phase transition for the server", () => { /* {phase, seq, at} only */ });
-it("keeps a bounded ring of recent events", () => { /* push 500, expect the cap */ });
-it("survives a subscriber that throws", () => { /* one bad subscriber does not stop the others */ });
-```
+**Step 5 — the client.** `api.postEvent(workerId, body)` in `worker/src/api.ts`, using the **worker
+credential** (`cpw_`), not the API token, addressing `/api/workers/...` — which needs a second
+base-path helper alongside `send()`. Test asserts the URL and the `X-Worker-Id` / auth headers.
 
-- [ ] **Step 2–4: Implement, run, commit**
-
-The summarised event type must be **structurally incapable** of carrying a content field — build it by naming the fields it may have (`tool`, `phase`, `path`, `bytesRead`, `bytesWritten`, `durationMs`, `exitCode`, `ok`), never by deleting fields from the full event. A redaction someone can forget to apply is not a boundary.
-
-```bash
-git commit -m "feat(worker): one emit, two fidelities (CP-161)"
-```
-
----
-
-### Task 3: Phase transitions from the pipeline
-
-**Files:**
-- Modify: `worker/src/pipeline.ts`, `worker/src/pipeline.test.ts`, `worker/src/types.ts`, `worker/src/api.ts`
-- Modify: `src/models/task.ts`, `src/types/index.ts`
-- Create: `src/app/api/workers/[workerId]/events/route.ts` and its test
-
-**Interfaces:**
-- Consumes: `telemetry.emit` (Task 2)
-- Produces: `POST /api/workers/:workerId/events` accepting `{taskId, runId, seq, phase}`
-
-- [ ] **Step 1: `runId` must reach the pipeline**
-
-It is generated inline in `loop.ts` (`deps.api.claim(randomUUID())`) and thrown away; `ClaimedTask` does not carry it. Without it a buffered event from a dead run overwrites the phase of a live one. Add it to `ClaimedTask` and thread it through.
-
-- [ ] **Step 2: Write the failing tests**
-
-Server side, the conditional write is the substance:
-
-```ts
-it("ignores a phase from a run that is no longer the current one", async () => { /* runId mismatch → no write */ });
-it("ignores a phase whose seq is not greater than the stored one", async () => { /* two instant gates cannot land out of order */ });
-it("clears the phase when the task reaches a terminal status", async () => { /* a merged task must not show "build · 4h ago" forever */ });
-```
-
-- [ ] **Step 3–5: Implement, run, commit**
-
-`Task.execution` gains `phase`, `phaseSeq`, `phaseStartedAt`. The write is conditional on `execution.runId` matching and `execution.phaseSeq` being lower. `changeStatus` clears the phase on a terminal move.
-
-```bash
-git commit -m "feat(worker): report phase transitions (CP-161)"
-```
+**Step 6 — the test that catches the seam.** One worker-side test asserting the `runId` from
+`api.claim` reaches the `postEvent` payload. Note `worker/tsconfig.json:13` excludes
+`src/**/*.test.ts` and vitest transpiles without typechecking, so adding a field to `ClaimedTask`
+raises **no error** in the ~10 fixture-bearing test files — `task.runId` would simply be `undefined`
+everywhere and every server-side test would pass on a hand-written value. Nothing but this test
+notices.
 
 ---
 
-### Task 4: The local socket
+## Task 4 — local socket, designed as if the secret is already gone
 
-**Files:**
-- Create: `worker/src/local-server.ts`, `worker/src/local-server.test.ts`
-- Modify: `worker/src/main.ts`
+**Files:** `worker/src/local-server.ts` (new) + test, `worker/src/main.ts`, `worker/src/config.ts`.
 
-**Interfaces:**
-- Consumes: `telemetry.subscribe` (Task 2), `Loop` (part A)
-- Produces: `startLocalServer(deps): { close(): void }`
+**Consumes:** Task 2's `Telemetry`, and **`CommandHandlers`** from `worker/src/commands.ts`.
 
-- [ ] **Step 1: Write the failing test**
+**Step 1 — transport.** Unix domain socket at `${CP_STATE_DIR}/worker.sock`, mode `0600`, unlinked on
+startup and at exit. Not a TCP port: a port is reachable by every process on the machine and by
+anything that can make a browser issue a request to localhost.
 
-```ts
-it("listens on a unix socket, never a TCP port", async () => { /* no port bound */ });
-it("refuses a request without the local secret", async () => { /* 401, handler not reached */ });
-it("streams events to a connected client", async () => { /* emit → received */ });
-it("exposes no route that changes what the worker executes", async () => {
-  // Full compromise of the local secret must buy watching and stopping, nothing more
-  for (const path of ["/run", "/reload-config", "/config", "/assignments"]) {
-    expect((await request(path, "POST")).status).toBe(404);
-  }
-});
-it("pauses and stops", async () => { /* the only two mutating routes */ });
-```
+**Step 2 — `CommandHandlers`, not `Loop`.** Revision 1 had the socket call `loop.pause()` directly.
+That bypasses both the ack — the console would sit on "Pausing…" forever — and the `lastAppliedAt`
+recency guard that `commands.ts:48-64` owns and that part A needed a separate round to get right.
+Ledger line 70: *stop = abort + `loop.pause()`, never `loop.stop()`*. The socket goes through the same
+door as the server channel or it drifts from it.
 
-- [ ] **Step 2–4: Implement, run, commit**
+**Step 3 — a closed route list.** `GET /status`, `GET /stream` (SSE of `Progress`), `POST /pause`,
+`POST /resume`, `POST /stop`. Anything else → 404. **No `GET /logs`** — revision 1 specified it with no
+source; the worker has no log file, everything goes to `console.error` and thence to launchd.
 
-A **unix domain socket** at `<stateDir>/worker.sock`, mode `0600` — not a TCP port. That removes browser reachability entirely: nothing to rebind to, no `Host` header to validate.
+**Step 4 — the honest security statement.** Filesystem permissions are the whole boundary. While C4 is
+open the agent runs as the same uid and can reach this socket; it could pause its own worker. It
+cannot escalate through it — the socket exposes no repository binding, no credential, and no route
+that starts work. That is the actual claim, and it is smaller than revision 1's.
 
-Routes: `GET /status`, `GET /stream`, `GET /logs`, `POST /pause`, `POST /stop`. Nothing else, ever.
-
-Be honest in the module's comment about what the secret is worth: the agent runs as the same uid and can read `<stateDir>` at will, so the secret is no boundary against it. What makes that acceptable is that the socket **cannot redirect the worker** — the worst an agent gains by reading the secret is the ability to watch a run and stop it.
-
-```bash
-git commit -m "feat(worker): a loopback socket that can only watch and stop (CP-161)"
-```
+**Step 5 — extract the wiring factory here.** `main.ts` has no test file. Revision 1 had Task 4 add
+untested wiring to it and Task 6 rewrite that wiring two commits later, leaving the seam open in
+between. The extraction moves **into this task**, so no task ever adds untested code to `main.ts`.
 
 ---
 
-### Task 5: Scrub what reaches the board
+## Task 5 — scrub what still reaches the board
 
-**Files:**
-- Modify: `worker/src/reporter.ts`, `worker/src/reporter.test.ts`
+**Files:** `src/lib/scrub.ts` (new) + test, `worker/src/reporter.ts`, `worker/src/pipeline.ts`.
 
-- [ ] **Step 1: Write the failing test**
+Task 2 makes telemetry structurally safe. This covers the other path: gate output and error messages,
+which are free text and land in task comments.
 
-Board comments already leak today: gate rejections carry `outputTail`, and `pipeline.ts` puts absolute worktree paths into comments.
+**Step 1 — anchored patterns; redact the match, not the line.**
+`ghp_[A-Za-z0-9]{36}`, `cpw?_[a-f0-9]{32,}`, `sk-ant-[\w-]{20,}`, `Bearer [A-Za-z0-9._~+/-]{20,}`.
+Revision 1 used a bare `sk-`, which matches `ta`**sk-**`service`, `ri`**sk-**`based`, `di`**sk-**`usage`
+— and then dropped the whole line, which for a gate rejection is the single most informative line
+there is. Replace the match with `[redacted]`; keep the line.
 
-```ts
-it.each([
-  ["/Users/rpo/Documents/Projects/ClaudePlanner/worker", "~"],
-  ["https://x-access-token:ghp_secret@github.com/o/r", "ghp_secret"],
-])("scrubs %s before it reaches the board", async (input, mustNotAppear) => { … });
+**Step 2 — both call sites.** `reporter.ts`, **and** `pipeline.ts:109`, which publishes a comment
+through `deps.api.comment` directly. Revision 1 said "centrally in reporter.ts" and would have missed
+the second.
 
-it("drops a line carrying something shaped like a credential", async () => {
-  // ghp_, cp_, cpw_, sk-, AKIA, -----BEGIN
-});
-```
-
-- [ ] **Step 2–4: Implement centrally in `reporter.ts`**, not per call site, run, commit.
-
-```bash
-git commit -m "fix(worker): stop board comments carrying paths and secrets (CP-161)"
-```
+**Step 3 — table-driven test**, each row `{input, mustNotAppear, mustAppear}`. Revision 1's first row
+had `mustNotAppear: "~"` — the character that is supposed to survive.
 
 ---
 
-### Task 6: Wire telemetry into the worker
+## Task 6 — wire telemetry through the run
 
-**Files:**
-- Modify: `worker/src/main.ts`, `worker/src/executor.ts`, `worker/src/pipeline.ts`
+**Files:** `worker/src/pipeline.ts`, `worker/src/executor.ts`, `worker/src/main.ts` via the Task 4
+factory.
 
-- [ ] **Step 1–4: Wire, verify, commit**
-
-`main.ts` constructs the telemetry bus once, hands `emit` to the executor and the pipeline, and starts the local socket. This is the join that part A's review showed nobody owns by default — `main.ts` has no test file, and every defect the whole-branch review found lived in a seam only `main.ts` closed. Extract the wiring into a testable factory the way part A's `createRunGuard`/`createCommandHandlers` were extracted, and test it.
-
-```bash
-git commit -m "feat(worker): wire telemetry and the local socket (CP-161)"
-```
+`executor` gains an optional `onEvent` called per parsed stream event — which requires `exec.ts` to
+expose incremental stdout, so this task adds an `onStdout` chunk callback rather than only resolving
+at exit. `pipeline` emits a coarse phase at each stage boundary (`claiming`, `worktree`, `agent`,
+`gates:<name>`, `push`, `pr`, `merge`). Both sinks attach in the factory; both tested there.
 
 ---
 
-### Task 7: The execution panel on the task card
+## Task 7 — execution panel on the task detail page
 
-**Files:**
-- Create: `src/components/tasks/ExecutionPanel.tsx` and its test
-- Modify: the task detail page
+**Files:** `src/components/tasks/TaskDetail.tsx` (+ its existing test), and whatever supplies
+`execution` to the client.
 
-- [ ] **Step 1–4: Build, verify live, commit**
+Shows: current phase, elapsed since `phaseAt`, worker name, link to the branch. Refreshes on the
+page's existing `usePollWhileVisible`.
 
-Shows: which worker, current phase and elapsed time.
+**Two things it deliberately does not show**, both verified in code:
+- **"last error"** — `execution.lastError` is only ever written as `""`
+  (`src/lib/task-service.ts:596`), so the field would always be blank.
+- **"attempt 2 of 3"** — `attempts` is *decremented* on refund (`:647`), making it a remaining-budget
+  counter, not an attempt number.
 
-**It does not show "last error".** `execution.lastError` is only ever written as `""` — nothing puts content there — so the field would render empty forever. Either `reporter` starts writing it, which is new data and its own decision, or the panel does not offer it. This plan chooses not to offer it.
-
-**Nor "attempt 2 of 3".** `attempts` is decremented on refund, so it is a budget counter, not an ordinal. Show it as attempts spent, or not at all.
-
-```bash
-git commit -m "feat(tasks): show what the worker is doing on the task card (CP-161)"
-```
+Better to omit than to render a number that lies.
 
 ---
 
-### Task 8: The phase column in the fleet console
+## Task 8 — phase on the board, **including the API that carries it**
 
-**Files:**
-- Modify: `src/app/(app)/settings/workers/page.tsx`
+**Files:** `src/app/api/admin/workers/route.ts`, `toApiWorker`, `ApiWorker` in `src/types/index.ts`,
+`src/app/(app)/settings/workers/page.tsx`.
 
-- [ ] **Step 1–3: Add the column, verify live, commit**
-
-Part A's Task 12 deliberately omitted this because `Task.execution.phase` did not exist. It does now.
-
-```bash
-git commit -m "feat(admin): show the current phase in the fleet console (CP-161)"
-```
+Revision 1 listed only `page.tsx`, which makes the task **unimplementable**: `GET /api/admin/workers`
+returns `Worker` documents through `toApiWorker`, and phase lives on `Task.execution`. The route gains
+a lookup — `Task.find({"execution.workerId": {$in: ids}, status: {$in: activeRoles}})` — and
+`ApiWorker` gains `currentTask?: {key, title, phase, phaseAt}`.
 
 ---
 
-### Task 9: Retention and the loose ends part A parked
+## Tasks 9a / 9b / 9c — three unrelated changes, separated
 
-**Files:**
-- Modify: `src/models/task.ts` or a new events collection, `worker/src/exec.ts`, `worker/src/executor.ts`
+Revision 1's Task 9 was a junk drawer, and its first item had no writer.
 
-- [ ] **Step 1: A TTL index on whatever stores phase history**, 30–90 days. Nothing currently bounds it.
+**9a — configurable model.** `WorkerConfig` gains `model`/`fallbackModel`; touches `config.ts`,
+`main.ts` (`configFor`, `:63-80`) **and `gates/review.ts:136`**, which hardcodes `--model opus`
+separately. Revision 1 listed none of these files.
 
-- [ ] **Step 2: Kill the process group, not the pid.** From part A's cluster review: `child.kill` signals one process, so a `Bash`-tool grandchild of a killed `claude` can still be writing when `git worktree remove --force` runs. `spawn({detached: true})` plus `process.kill(-pid)` closes that and the inherited-stdio hang together. This was deliberately deferred as too risky to combine with the abort fix; it is safe to do on its own, with the existing abort tests as the net.
+**9b — process group.** `spawn({detached: true})` plus `process.kill(-pid, …)` for **both** signals in
+`terminate()`, tolerating `ESRCH`. The riskiest change in part B, landing directly on the
+`exit`/`close` drain part A just added (`worker/src/exec.ts:99-111`). It also changes signal delivery
+for children that currently escape it — `pipeline.ts:216-218` deliberately passes no signal to
+`gh pr merge`, and a group kill on timeout would now reach it. Its own task, its own tests.
 
-- [ ] **Step 3: Wire `EffectiveConfig.model`.** It is parsed, documented as live policy, writable by a project admin — and `executor.ts` hardcodes `"--model","opus"`. A project admin who sets it gets a 200 and no effect.
-
-- [ ] **Step 4: Run everything and commit**
-
-```bash
-git commit -m "chore(worker): bound retention, kill the process group, honour the model policy (CP-161)"
-```
+**9c — dropped.** Revision 1's TTL index had nothing to index: this plan stores three scalars on the
+task, no phase *history*. A retention policy for a collection nobody writes to is dead code. If phase
+history is ever wanted, that is a new design conversation, not a leftover step.
 
 ---
 
-## Verification for part B
+## Verification, corrected
 
-On the CP-158 rig, with the scratch repository under `~/cp-rig/`:
+Revision 1's list could pass while the thing was broken. Fixed:
 
-1. A run's phases appear on the task card as they happen, and the card stops showing a phase once the task is done.
-2. The fleet console shows the same phases, one resolution coarser.
-3. `cp-worker status` — or a plain `curl --unix-socket` — streams the agent's file-by-file activity live.
-4. The same request without the local secret is refused, and no TCP port is listening.
-5. A task whose description makes the agent read `worker/src/executor.ts` completes normally — **it does not produce a false usage limit**, which is the failure this plan's Task 1 exists to prevent.
-6. A gate rejection comment on the board contains no absolute path and no token-shaped string.
-7. `ps` during a run shows no prompt and no diff in the command line.
+1. Task reaches `done` through the rig; phase advances on the board and **clears** — checked for a
+   **gate rejection** as well as a merge, since rejection is the common case and lands in `review`.
+2. Board console shows the running task's phase (needs Task 8's API change).
+3. `nc -U ${CP_STATE_DIR}/worker.sock` returns status; `ls -l` shows `0600`; a process under a
+   different uid is refused. *(Revision 1 invoked `cp-worker status`, a command that does not exist —
+   `worker/package.json` declares no `bin`.)*
+4. **Poisoning, negative:** a task whose diff contains `usage limit reached` completes normally.
+5. **Poisoning, positive — the twin revision 1 lacked:** a genuine `rate_limit_event`
+   `status: "rejected"` is still classified as a usage limit and **does not** charge the attempt.
+   Without this, item 4 passes just as well when usage-limit detection is entirely dead — exactly the
+   state revision 1 would have shipped.
+6. Secrets in gate output are redacted in the task comment; the surrounding line survives.
+7. **Dropped.** Revision 1 asserted no secret appears in any process's argv. It cannot pass: the
+   review gate pastes the diff into a prompt passed as an argv element (`gates/review.ts:79-88, :126`),
+   and no task here migrates it to stdin. Part A recorded the same shape as *"PLAN DEFECT, mine"*.
+   Moving the review gate to stdin is real work and belongs in its own task, not smuggled in as a
+   checkbox.
 
-Part C — the menubar app — gets its own plan, written after this one has been reviewed.
+## A capability this plan did not go looking for
+
+`rate_limit_event` carries `utilization`, `resetsAt`, `rateLimitType` and `isUsingOverage` on every
+run. That is a live subscription gauge, free — the menubar can show "76% of the seven-day limit,
+resets Tuesday" with no extra API call, and the worker could decline to claim new work as it nears the
+ceiling instead of discovering it mid-task.
+
+Out of scope here. Worth its own task. It only became visible by capturing the stream instead of
+imagining it.
