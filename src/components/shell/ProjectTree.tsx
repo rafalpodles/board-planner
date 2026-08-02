@@ -44,7 +44,7 @@ interface SubItemProps {
 }
 
 function SubItem({ href, onClick, icon, label, active, dot, pill }: SubItemProps) {
-  const className = `flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors ${
+  const className = `focus-ring flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors ${
     active
       ? "bg-bg-hover font-semibold text-text"
       : "text-text-muted hover:bg-bg-hover hover:text-text"
@@ -104,7 +104,7 @@ export function ProjectTree({
       <div className="mb-1.5 ml-2.5 flex items-center gap-1">
         <Link
           href="/projects"
-          className="text-[10.5px] font-bold uppercase tracking-wider text-text-muted transition-colors hover:text-text"
+          className="focus-ring rounded text-[10.5px] font-bold uppercase tracking-wider text-text-muted transition-colors hover:text-text"
         >
           Projects
         </Link>
@@ -113,7 +113,7 @@ export function ProjectTree({
             href="/projects/new"
             title="New project"
             aria-label="New project"
-            className="ml-auto mr-2.5 rounded-md p-0.5 text-text-muted transition-colors hover:bg-bg-hover hover:text-text"
+            className="focus-ring ml-auto mr-2.5 rounded-md p-0.5 text-text-muted transition-colors hover:bg-bg-hover hover:text-text"
           >
             <SubIcon d={SUB_ICONS.plus} />
           </Link>
@@ -138,7 +138,7 @@ export function ProjectTree({
                 onClick={() => setManuallyExpanded(expanded ? "" : project._id)}
                 aria-expanded={expanded}
                 aria-label={expanded ? `Collapse ${project.name}` : `Expand ${project.name}`}
-                className="p-1.5 text-text-muted opacity-60"
+                className="focus-ring rounded p-1.5 text-text-muted opacity-60"
               >
                 <svg
                   className={`h-3 w-3 transition-transform ${expanded ? "rotate-90" : ""}`}
@@ -152,7 +152,7 @@ export function ProjectTree({
               </button>
               <Link
                 href={base}
-                className="flex min-w-0 flex-1 items-center gap-2 py-2 text-sm text-text-muted transition-colors hover:text-text"
+                className="focus-ring-inset flex min-w-0 flex-1 items-center gap-2 rounded py-2 text-sm text-text-muted transition-colors hover:text-text"
               >
                 <span aria-hidden className="text-[15px] leading-none">
                   {project.icon || DEFAULT_PROJECT_ICON}

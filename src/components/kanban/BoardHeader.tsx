@@ -84,7 +84,7 @@ export function BoardHeader({
                   onClick={() => setScopeOpen((v) => !v)}
                   aria-expanded={scopeOpen}
                   aria-label="Change sprint scope"
-                  className="max-w-[12rem] truncate rounded px-1 py-0.5 text-text-muted underline decoration-dotted underline-offset-2 transition-colors hover:text-text"
+                  className="focus-ring max-w-[12rem] truncate rounded px-1 py-0.5 text-text-muted underline decoration-dotted underline-offset-2 transition-colors hover:text-text"
                 >
                   {scopeLabel ?? "All tasks"}
                 </button>
@@ -151,7 +151,7 @@ export function BoardHeader({
             type="button"
             onClick={() => onViewModeChange(mode)}
             aria-current={viewMode === mode ? "true" : undefined}
-            className={`rounded-md px-2 py-1.5 text-[13px] transition-colors @md:px-3 ${
+            className={`focus-ring rounded-md px-2 py-1.5 text-[13px] transition-colors @md:px-3 ${
               viewMode === mode
                 ? "bg-bg-input font-medium text-text"
                 : "text-text-muted hover:text-text"
@@ -167,7 +167,7 @@ export function BoardHeader({
         onClick={onRefresh}
         title="Refresh board (R)"
         aria-label="Refresh board"
-        className="block shrink-0 rounded-lg p-2 text-text-muted transition-colors hover:bg-bg-card hover:text-text"
+        className="focus-ring block shrink-0 rounded-lg p-2 text-text-muted transition-colors hover:bg-bg-card hover:text-text"
       >
         <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path
@@ -218,7 +218,7 @@ function ScopeOption({
       type="button"
       onClick={() => onPick(value)}
       aria-current={scope === value ? "true" : undefined}
-      className={`block w-full truncate px-3 py-1.5 text-left text-[13px] transition-colors hover:bg-bg-hover ${
+      className={`focus-ring-inset block w-full truncate px-3 py-1.5 text-left text-[13px] transition-colors hover:bg-bg-hover ${
         scope === value ? "font-semibold text-text" : "text-text-muted"
       }`}
     >

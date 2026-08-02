@@ -113,6 +113,21 @@ body {
   animation: slide-in 0.2s ease-out;
 }
 
+/* One keyboard-focus treatment for the shell. An outline rather than a box-shadow
+   ring: the sidebar and the column bodies scroll, and a ring on an item at the
+   edge is clipped by its overflow container while an outline never is. */
+.focus-ring:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* Sits flush inside a bordered group (the sort control), where an offset outline
+   would be cropped by the parent's rounding */
+.focus-ring-inset:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
 /* Scrolls, but without a visible bar */
 .no-scrollbar {
   scrollbar-width: none;

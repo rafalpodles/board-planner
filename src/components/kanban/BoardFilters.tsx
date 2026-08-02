@@ -276,7 +276,7 @@ export function BoardFilters({
   }
 
   const selectClass =
-    "h-8 w-full rounded-lg border border-border bg-bg-input px-2 text-[12px] text-text focus:outline-none focus:ring-1 focus:ring-primary";
+    "focus-ring h-8 w-full rounded-lg border border-border bg-bg-input px-2 text-[12px] text-text";
 
   return (
     <div className="flex flex-wrap items-center gap-2.5 border-b border-border px-6 py-2.5">
@@ -301,7 +301,7 @@ export function BoardFilters({
           placeholder={`Search tasks, or ${projectKey ?? "CP"}-128…`}
           value={filters.search}
           onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))}
-          className="h-[34px] w-full rounded-lg border border-border bg-bg-card pl-8 pr-2.5 text-[13px] text-text placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-primary"
+          className="focus-ring h-[34px] w-full rounded-lg border border-border bg-bg-card pl-8 pr-2.5 text-[13px] text-text placeholder:text-text-muted"
         />
       </div>
 
@@ -311,7 +311,7 @@ export function BoardFilters({
         <button
           onClick={() => setShowFilters((v) => !v)}
           aria-expanded={showFilters}
-          className={`flex h-[34px] items-center gap-1.5 rounded-lg border px-2.5 text-[13px] font-medium transition-colors ${
+          className={`focus-ring flex h-[34px] items-center gap-1.5 rounded-lg border px-2.5 text-[13px] font-medium transition-colors ${
             hasActiveFilters
               ? "border-primary bg-primary/10 text-primary"
               : "border-border text-text-muted hover:text-text"
@@ -348,7 +348,7 @@ export function BoardFilters({
                   </span>
                   <button
                     onClick={clearFilters}
-                    className="text-[12px] text-text-muted underline hover:text-text"
+                    className="focus-ring rounded text-[12px] text-text-muted underline hover:text-text"
                   >
                     Clear all
                   </button>
@@ -483,7 +483,7 @@ export function BoardFilters({
       {hasActiveFilters && (
         <button
           onClick={clearFilters}
-          className="shrink-0 text-[12px] text-text-muted underline hover:text-text"
+          className="focus-ring shrink-0 rounded text-[12px] text-text-muted underline hover:text-text"
         >
           Clear
         </button>
@@ -492,8 +492,9 @@ export function BoardFilters({
       <div className="ml-auto flex h-[34px] shrink-0 items-center overflow-hidden rounded-lg border border-border bg-bg-card">
         <select
           value={sortField}
+          aria-label="Sort tasks by"
           onChange={(e) => setSortField(e.target.value as SortField)}
-          className="h-full bg-transparent px-2.5 text-[13px] text-text-muted focus:outline-none"
+          className="focus-ring-inset h-full rounded-l-lg bg-transparent px-2.5 text-[13px] text-text-muted"
         >
           {SORT_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>
@@ -506,7 +507,7 @@ export function BoardFilters({
           onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}
           title={sortDir === "asc" ? "Ascending" : "Descending"}
           aria-label={sortDir === "asc" ? "Sort ascending" : "Sort descending"}
-          className="h-full w-[30px] text-[13px] text-text-muted transition-colors hover:text-text"
+          className="focus-ring-inset h-full w-[30px] rounded-r-lg text-[13px] text-text-muted transition-colors hover:text-text"
         >
           {sortDir === "asc" ? "↑" : "↓"}
         </button>
@@ -568,7 +569,7 @@ function FilterChip({
       <button
         onClick={onRemove}
         aria-label={`Remove ${label} filter`}
-        className="flex h-[15px] w-[15px] items-center justify-center rounded-full bg-black/10 text-[10px] leading-none transition-opacity hover:opacity-70"
+        className="focus-ring flex h-[15px] w-[15px] items-center justify-center rounded-full bg-black/10 text-[10px] leading-none transition-opacity hover:opacity-70"
       >
         ×
       </button>
