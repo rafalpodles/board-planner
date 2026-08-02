@@ -2,8 +2,6 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { AuthGuard } from "@/components/AuthGuard";
-import { Navbar } from "@/components/Navbar";
 import { useAuth } from "@/hooks/use-auth";
 
 interface SettingsGroup {
@@ -41,10 +39,8 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
   const flat = groups.flatMap((g) => g.sections);
 
   return (
-    <AuthGuard>
-      <Navbar />
-      <main className="max-w-[1600px] mx-auto px-4 py-6">
-        <h1 className="text-2xl font-bold mb-6">Settings</h1>
+    <>
+      <h1 className="text-2xl font-bold mb-6">Settings</h1>
 
         {/* Horizontal pill row below md, sidebar above — same shape as project settings */}
         <nav
@@ -99,7 +95,6 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
 
           <div className="min-w-0">{children}</div>
         </div>
-      </main>
-    </AuthGuard>
+    </>
   );
 }

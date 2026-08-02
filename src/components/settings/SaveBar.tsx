@@ -44,7 +44,7 @@ export function SaveBar({ pending, total, onGoToSection }: SaveBarProps) {
         transition-transform duration-200 ${open ? "translate-y-0" : "translate-y-full pointer-events-none"}`}
       aria-hidden={!open}
     >
-      <div className="mx-auto flex w-full max-w-[1160px] flex-wrap items-center gap-3 px-4 py-3 sm:px-6">
+      <div className="flex w-full flex-wrap items-center gap-3 px-4 py-3 sm:px-6">
         <span className="h-2 w-2 shrink-0 rounded-full bg-warning" />
         <div className="text-sm">
           {view.total === 1 ? "1 unsaved change" : `${view.total} unsaved changes`}
