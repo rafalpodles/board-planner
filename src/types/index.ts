@@ -620,6 +620,10 @@ export interface ApiProject {
   codaTableId?: string;
   codaTokenSet?: boolean;
   taskCounter: number;
+  // Sidebar badges, computed by the list endpoint only
+  taskCount?: number;
+  lastTaskUpdate?: string | null;
+  hasActiveSprint?: boolean;
   pm?: ApiPmConfig;
   pmAvailable?: boolean;
   owner: ApiUser | string;
