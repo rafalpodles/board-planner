@@ -123,7 +123,7 @@ export function ListView({ tasks, projectKey, projectId, sprints = [], categorie
     const active = sortKey === column;
     return (
       <th
-        className={`text-left px-3 py-2 font-medium cursor-pointer select-none hover:text-text transition-colors ${className || ""}`}
+        className={`text-left px-2 py-2 font-medium cursor-pointer select-none hover:text-text transition-colors ${className || ""}`}
         onClick={() => handleSort(column)}
       >
         <span className="inline-flex items-center gap-0.5">
@@ -153,7 +153,7 @@ export function ListView({ tasks, projectKey, projectId, sprints = [], categorie
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-bg-input text-text-muted text-xs border-b border-border">
-              {selectionActive && <th className="w-9 px-3 py-2" />}
+              {selectionActive && <th className="w-8 px-2 py-2" />}
               <SortHeader label="Key" column="taskNumber" />
               <SortHeader label="Title" column="title" />
               <SortHeader label="Status" column="status" className="hidden sm:table-cell" />
@@ -181,6 +181,10 @@ export function ListView({ tasks, projectKey, projectId, sprints = [], categorie
               const selected = selectedTasks?.has(task._id) ?? false;
               const catColor = categoryColor(categories, task.category);
               const tinted = !selected && index !== focusedIndex && !!catColor;
+              const taskKey = `${projectKey}-${task.taskNumber}`;
+              const statusLabel = columnById.get(task.status)?.label ?? task.status;
+              const assigneeName =
+                task.assignee && typeof task.assignee === "object" ? task.assignee.fullName : "—";
 
               return (
                 <tr
@@ -207,7 +211,7 @@ export function ListView({ tasks, projectKey, projectId, sprints = [], categorie
                   }`}
                 >
                   {selectionActive && (
-                    <td className="px-3 py-2">
+                    <td className="px-2 py-2">
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -223,27 +227,35 @@ export function ListView({ tasks, projectKey, projectId, sprints = [], categorie
                       </button>
                     </td>
                   )}
-                  <td className="px-3 py-2 font-mono text-xs text-text-muted whitespace-nowrap">
-                    {task.pinned && (
-                      <svg className="w-3 h-3 text-primary inline mr-1" fill="currentColor" viewBox="0 0 24 24">
-                        <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2z"/>
-                      </svg>
-                    )}
-                    {projectKey}-{task.taskNumber}
+                  <td
+                    className="px-2 py-2 font-mono text-xs text-text-muted max-w-24"
+                    title={taskKey}
+                  >
+                    <span className="flex items-center gap-1">
+                      {task.pinned && (
+                        <svg className="w-3 h-3 shrink-0 text-primary" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2z"/>
+                        </svg>
+                      )}
+                      <span className="truncate">{taskKey}</span>
+                    </span>
                   </td>
-                  <td className="px-3 py-2 font-medium truncate max-w-[300px]">
-                    {task.title}
+                  <td className="px-2 py-2 font-medium w-full max-w-0" title={task.title}>
+                    <div className="truncate min-w-36 sm:min-w-48 lg:min-w-56 2xl:min-w-80">
+                      {task.title}
+                    </div>
                   </td>
-                  <td className="px-3 py-2 hidden sm:table-cell">
+                  <td className="px-2 py-2 hidden sm:table-cell">
                     {onStatusChange ? (
                       <select
                         value={task.status}
+                        title={statusLabel}
                         onChange={(e) => {
                           e.stopPropagation();
                           onStatusChange(task._id, e.target.value);
                         }}
                         onClick={(e) => e.stopPropagation()}
-                        className="text-xs bg-bg-input border border-border rounded px-1.5 py-1 text-text focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+                        className="text-xs bg-bg-input border border-border rounded px-1.5 py-1 max-w-28 text-text focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
                       >
                         {listColumns.map((c) => (
                           <option key={c.id} value={c.id}>{c.label}</option>
@@ -254,43 +266,42 @@ export function ListView({ tasks, projectKey, projectId, sprints = [], categorie
                         variant="status"
                         value={task.status}
                         color={columnById.get(task.status)?.color}
+                        className="max-w-28"
                       >
-                        {columnById.get(task.status)?.label ?? task.status}
+                        <span className="truncate" title={statusLabel}>{statusLabel}</span>
                       </Badge>
                     )}
                   </td>
-                  <td className="px-3 py-2 hidden md:table-cell text-text-muted">
-                    {task.assignee && typeof task.assignee === "object"
-                      ? task.assignee.fullName
-                      : "—"}
+                  <td className="px-2 py-2 hidden md:table-cell text-text-muted max-w-32" title={assigneeName}>
+                    <div className="truncate">{assigneeName}</div>
                   </td>
-                  <td className="px-3 py-2 hidden md:table-cell">
+                  <td className="px-2 py-2 hidden md:table-cell">
                     <Badge variant="priority" value={task.priority}>
                       {PRIORITY_LABELS[task.priority] ?? task.priority}
                     </Badge>
                   </td>
-                  <td className="px-3 py-2 hidden lg:table-cell text-xs whitespace-nowrap">
+                  <td className="px-2 py-2 hidden lg:table-cell text-xs max-w-32">
                     {(() => {
                       const sprint = task.sprint ? sprintById.get(task.sprint) : undefined;
                       if (!sprint) return <span className="text-text-muted">—</span>;
                       const timing = sprintTiming(sprint);
                       const inner = (
                         <span
-                          className={`inline-flex items-center gap-1.5 ${
+                          className={`flex items-center gap-1.5 ${
                             timing === "active" ? "font-medium" : "text-text-muted"
                           }`}
                         >
                           {timing === "active" && (
                             <span className="w-1.5 h-1.5 rounded-full bg-success shrink-0" />
                           )}
-                          {sprint.name}
+                          <span className="truncate" title={sprint.name}>{sprint.name}</span>
                         </span>
                       );
                       return projectId ? (
                         <Link
                           href={`/projects/${projectId}/sprints`}
                           onClick={(e) => e.stopPropagation()}
-                          className="hover:underline"
+                          className="block hover:underline"
                         >
                           {inner}
                         </Link>
@@ -299,27 +310,31 @@ export function ListView({ tasks, projectKey, projectId, sprints = [], categorie
                       );
                     })()}
                   </td>
-                  <td className="px-3 py-2 hidden lg:table-cell">
+                  <td className="px-2 py-2 hidden lg:table-cell">
                     <Badge variant="difficulty" value={task.difficulty}>
                       {task.difficulty}
                     </Badge>
                   </td>
-                  <td className="px-3 py-2 hidden lg:table-cell">
+                  <td className="px-2 py-2 hidden lg:table-cell max-w-32">
                     <Badge
                       variant="category"
                       value={task.category}
                       color={catColor}
+                      className="max-w-28"
                     >
-                      {task.category}
+                      <span className="truncate" title={task.category}>{task.category}</span>
                     </Badge>
                   </td>
-                  <td className="px-3 py-2 hidden xl:table-cell text-text-muted">
-                    {task.component || "—"}
+                  <td
+                    className="px-2 py-2 hidden xl:table-cell text-text-muted max-w-32"
+                    title={task.component || undefined}
+                  >
+                    <div className="truncate">{task.component || "—"}</div>
                   </td>
-                  <td className={`px-3 py-2 hidden md:table-cell text-xs whitespace-nowrap ${dueDateInfo?.color || "text-text-muted"}`}>
-                    {dueDateInfo?.formatted || "—"}
+                  <td className={`px-2 py-2 hidden md:table-cell text-xs max-w-24 ${dueDateInfo?.color || "text-text-muted"}`}>
+                    <div className="truncate">{dueDateInfo?.formatted || "—"}</div>
                   </td>
-                  <td className="px-3 py-2 hidden sm:table-cell text-text-muted text-xs whitespace-nowrap">
+                  <td className="px-2 py-2 hidden sm:table-cell text-text-muted text-xs whitespace-nowrap">
                     {timeAgo(task.updatedAt)}
                   </td>
                 </tr>
