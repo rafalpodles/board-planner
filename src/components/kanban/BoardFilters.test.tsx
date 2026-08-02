@@ -34,6 +34,7 @@ const tasks = [
 
 function renderFilters(over: Partial<React.ComponentProps<typeof BoardFilters>> = {}) {
   const onFilter = vi.fn();
+  const onSortChange = vi.fn();
   const utils = render(
     <BoardFilters
       tasks={tasks}
@@ -43,11 +44,14 @@ function renderFilters(over: Partial<React.ComponentProps<typeof BoardFilters>> 
       projectKey="TP"
       projectId="TP"
       currentUsername="rpo"
+      sortField="manual"
+      sortDir="asc"
+      onSortChange={onSortChange}
       onFilter={onFilter}
       {...over}
     />
   );
-  return { ...utils, onFilter };
+  return { ...utils, onFilter, onSortChange };
 }
 
 beforeEach(() => localStorage.clear());
