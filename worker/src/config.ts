@@ -30,7 +30,7 @@ export interface Bootstrap {
 }
 
 // Mirrors the server's WorkerPolicy (src/types/index.ts): worker-wide settings an instance or
-// project admin edits in /admin/workers, never the laptop's own environment.
+// project admin edits in /settings/workers, never the laptop's own environment.
 export interface EffectiveConfig {
   baseBranch: string;
   pollIntervalMs: number;

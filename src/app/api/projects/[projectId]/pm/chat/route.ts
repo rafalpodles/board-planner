@@ -6,8 +6,14 @@ import { runPmTurn } from "@/lib/pm/agent";
 import { isPmAvailable } from "@/lib/pm/config";
 import { acquireTurnLock, releaseTurnLock } from "@/lib/pm/turn-lock";
 import { isOverDailyTurnCap } from "@/lib/pm/turn-cap";
-import { isPmRunnable, pmDisabledReason } from "@/lib/pm/availability";
+import { isPmRunnable, pmDisabledReason, resolvePmModel } from "@/lib/pm/availability";
+import {
+  IMAGE_MIME_TYPES,
+  MAX_ATTACHMENTS_PER_MESSAGE,
+  modelAcceptsImages,
+} from "@/lib/pm/attachments";
 import { resolveProjectId } from "@/lib/middleware";
+import { PmAttachment } from "@/types";
 
 export const maxDuration = 300;
 
@@ -62,8 +68,9 @@ export async function POST(
   }
 
   let message: unknown;
+  let attachments: unknown;
   try {
-    ({ message } = await request.json());
+    ({ message, attachments } = await request.json());
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
@@ -74,6 +81,46 @@ export async function POST(
     );
   }
 
+  const parsedAttachments: PmAttachment[] = [];
+  if (attachments !== undefined) {
+    if (!Array.isArray(attachments) || attachments.length > MAX_ATTACHMENTS_PER_MESSAGE) {
+      return NextResponse.json(
+        { error: `attachments must be an array of at most ${MAX_ATTACHMENTS_PER_MESSAGE} images` },
+        { status: 400 }
+      );
+    }
+    for (const a of attachments) {
+      if (
+        !a ||
+        typeof a.fileId !== "string" ||
+        typeof a.mimeType !== "string" ||
+        !IMAGE_MIME_TYPES.has(a.mimeType)
+      ) {
+        return NextResponse.json(
+          { error: "each attachment needs a fileId and a supported image mimeType" },
+          { status: 400 }
+        );
+      }
+      parsedAttachments.push({
+        fileId: a.fileId,
+        mimeType: a.mimeType,
+        width: typeof a.width === "number" ? a.width : undefined,
+        height: typeof a.height === "number" ? a.height : undefined,
+        bytes: typeof a.bytes === "number" ? a.bytes : undefined,
+      });
+    }
+
+    // Better a clear refusal than a provider error the user cannot act on. Unknown
+    // capability (network failure, unlisted model) is allowed through rather than blocked.
+    const model = await resolvePmModel(project.pm.model);
+    if ((await modelAcceptsImages(model)) === false) {
+      return NextResponse.json(
+        { error: `The configured PM model (${model}) does not accept images. Remove the attachment or switch models in settings.` },
+        { status: 400 }
+      );
+    }
+  }
+
   const { over, cap } = await isOverDailyTurnCap(projectId, project.pm);
   if (over) {
     return NextResponse.json(
@@ -82,17 +129,20 @@ export async function POST(
     );
   }
 
-  const abort = acquireTurnLock(projectId);
+  const triggeredByUserId = String(user._id);
+
+  // One turn per project even though conversations are private — the agent writes to a
+  // board everyone shares
+  const abort = acquireTurnLock(projectId, triggeredByUserId);
   if (!abort) {
     return NextResponse.json(
-      { error: "A PM turn is already in progress for this project" },
+      { error: "Someone is already talking to the PM agent on this project — try again in a moment" },
       { status: 409 }
     );
   }
 
   const encoder = new TextEncoder();
   const userMessage = message.trim();
-  const triggeredByUserId = String(user._id);
 
   const stream = new ReadableStream({
     start(controller) {
@@ -116,6 +166,7 @@ export async function POST(
           const result = await runPmTurn({
             projectId,
             userMessage,
+            attachments: parsedAttachments,
             triggeredByUserId,
             onEvent: (event) => sendEvent("action", event),
             signal: abort.signal,
