@@ -21,6 +21,13 @@ export function sprintScopeLabel(scope: string, sprints: ApiSprint[]): string | 
   return sprints.find((s) => s._id === scope)?.name ?? null;
 }
 
+// A task created while the board is scoped to a sprint must land in that sprint,
+// or the server filter hides it the moment it is saved. "all" and "backlog" are
+// modes rather than sprints, so they still mean no sprint.
+export function sprintDefaultForNewTask(scope: string): string {
+  return scope === ALL_TASKS || scope === BACKLOG ? "" : scope;
+}
+
 export function boardSubtitle(scopeLabel: string | null, taskCount: number): string {
   const parts = ["Board"];
   if (scopeLabel) parts.push(scopeLabel);
