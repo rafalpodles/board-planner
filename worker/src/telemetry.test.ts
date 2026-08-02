@@ -86,9 +86,9 @@ describe("summarise — what a tool call is allowed to reveal", () => {
     const cases: Array<{ input: Record<string, unknown>; target: string | undefined }> = [
       { input: { file_path: "src/a.ts" }, target: "src/a.ts" },
       { input: { path: "src/b" }, target: "src/b" },
-      { input: { pattern: "**/*.ts" }, target: "**/*.ts" },
       { input: { command: "npm run build" }, target: "npm" },
       { input: { prompt: "leak me", description: "leak me", url: "https://evil" }, target: undefined },
+      { input: { pattern: `grep for ${SECRET}` }, target: undefined },
       { input: {}, target: undefined },
     ];
 
@@ -113,7 +113,7 @@ describe("summarise — what a tool call is allowed to reveal", () => {
       toolUse("Grep", { pattern: "second" }),
     ]);
 
-    expect(summarise(event)).toEqual({ phase: "agent", tool: { name: "Grep", target: "second" } });
+    expect(summarise(event)).toEqual({ phase: "agent", tool: { name: "Grep" } });
   });
 
   it("says nothing about a message that only thinks or talks", () => {

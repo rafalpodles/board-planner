@@ -34,7 +34,10 @@ export interface Telemetry {
 
 const RECENT_LIMIT = 50;
 
-const TARGET_KEYS = ["file_path", "path", "pattern"] as const;
+// `pattern` is deliberately absent: a grep pattern is arbitrary agent-authored text, so an agent
+// searching for a secret would make that secret the target. A path cannot carry a file body; a
+// search string can carry anything.
+const TARGET_KEYS = ["file_path", "path"] as const;
 
 const KNOWN_STATUSES: readonly RateLimitStatus[] = ["allowed", "allowed_warning", "rejected"];
 
