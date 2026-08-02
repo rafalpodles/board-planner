@@ -29,7 +29,6 @@ export const GET = withAuth(async (_request, { user }) => {
         $group: {
           _id: "$project",
           taskCount: { $sum: 1 },
-          lastTaskUpdate: { $max: "$updatedAt" },
         },
       },
     ]),
@@ -48,7 +47,6 @@ export const GET = withAuth(async (_request, { user }) => {
 
     const stats = statsByProject.get(String(p._id));
     obj.taskCount = stats?.taskCount ?? 0;
-    obj.lastTaskUpdate = stats?.lastTaskUpdate ?? null;
     obj.hasActiveSprint = withActiveSprint.has(String(p._id));
     return obj;
   });

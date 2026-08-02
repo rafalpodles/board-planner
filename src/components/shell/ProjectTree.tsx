@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useState } from "react";
 import { ApiProject, DEFAULT_PROJECT_ICON } from "@/types";
 import { projectPath } from "@/lib/urls";
-import { activityStatus } from "@/lib/activity-status";
 import { isNavItemActive } from "@/lib/nav-active";
 
 const SUB_ICONS = {
@@ -83,7 +82,6 @@ interface ProjectTreeProps {
   projects: ApiProject[];
   pathname: string;
   isAdmin: boolean;
-  now: number;
   onOpenImport: () => void;
   onOpenExport: () => void;
 }
@@ -92,7 +90,6 @@ export function ProjectTree({
   projects,
   pathname,
   isAdmin,
-  now,
   onOpenImport,
   onOpenExport,
 }: ProjectTreeProps) {
@@ -127,7 +124,6 @@ export function ProjectTree({
         const expanded = expandedId === project._id;
         const isRouteProject = routeProject?._id === project._id;
         const base = projectPath(project.key);
-        const status = activityStatus(project.lastTaskUpdate, now);
 
         return (
           <div key={project._id}>
@@ -170,17 +166,6 @@ export function ProjectTree({
 
             {expanded && (
               <div className="ml-5 flex flex-col gap-px border-l border-border pl-3">
-                {status && (
-                  <p className="flex items-center gap-2 px-2 py-1 text-[11px] text-text-muted">
-                    <span
-                      className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                        status === "working" ? "bg-success" : "bg-text-muted"
-                      }`}
-                    />
-                    {status === "working" ? "Claude working" : "Claude idle"}
-                  </p>
-                )}
-
                 <SubItem
                   href={base}
                   icon={SUB_ICONS.board}
