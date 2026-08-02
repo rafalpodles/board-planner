@@ -1,0 +1,251 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useApi } from "@/hooks/use-api";
+import { useAuth } from "@/hooks/use-auth";
+import { useToast } from "@/components/ui/Toast";
+import { Button } from "@/components/ui/Button";
+import { usePollWhileVisible } from "@/hooks/use-poll-while-visible";
+import { timeAgo } from "@/lib/time";
+import { ApiWorker } from "@/types";
+
+const POLL_MS = 5_000;
+const UNACKED_WARNING_MS = 60_000;
+
+type Command = "pause" | "resume" | "stop";
+
+const COMMAND_LABELS: Record<Command, { pending: string; applied: string }> = {
+  pause: { pending: "Pausing…", applied: "Paused" },
+  resume: { pending: "Resuming…", applied: "Resumed" },
+  stop: { pending: "Stopping…", applied: "Stopped" },
+};
+
+const TONE_CLASSES = {
+  pending: "text-warning",
+  applied: "text-text-muted",
+  warning: "text-danger",
+};
+
+// The worker only proves a command took effect by acking it over heartbeat, so this
+// must never report "applied" from commandIssuedAt alone — that would claim a worker
+// is paused while it could still be mid-merge
+function commandStatus(worker: ApiWorker): { text: string; tone: keyof typeof TONE_CLASSES } | null {
+  if (!worker.command) return null;
+  const issuedAt = worker.commandIssuedAt ? new Date(worker.commandIssuedAt).getTime() : null;
+  const ackedAt = worker.commandAckedAt ? new Date(worker.commandAckedAt).getTime() : null;
+
+  if (ackedAt !== null && (issuedAt === null || ackedAt >= issuedAt)) {
+    return { text: COMMAND_LABELS[worker.command].applied, tone: "applied" };
+  }
+
+  const elapsedMs = issuedAt !== null ? Date.now() - issuedAt : 0;
+  if (elapsedMs >= UNACKED_WARNING_MS) {
+    return { text: `not acknowledged for ${Math.floor(elapsedMs / 1000)}s`, tone: "warning" };
+  }
+  return { text: COMMAND_LABELS[worker.command].pending, tone: "pending" };
+}
+
+export default function AdminWorkersPage() {
+  const api = useApi();
+  const router = useRouter();
+  const { isAdmin, isLoading: authLoading } = useAuth();
+  const { toast } = useToast();
+
+  const [workers, setWorkers] = useState<ApiWorker[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [savingId, setSavingId] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const res: ApiWorker[] = await api.get("/api/admin/workers");
+      setWorkers(res);
+    } catch {
+      toast("Failed to load workers", "error");
+    } finally {
+      setLoading(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (authLoading) return;
+    if (!isAdmin) router.replace("/projects");
+  }, [isAdmin, authLoading, router]);
+
+  usePollWhileVisible(load, POLL_MS, !authLoading && isAdmin);
+
+  async function patch(worker: ApiWorker, changes: Partial<Pick<ApiWorker, "enabled" | "lockedByInstance">>) {
+    setSavingId(worker._id);
+    try {
+      const updated = await api.patch(`/api/workers/${worker._id}`, changes);
+      setWorkers((prev) => (prev ? prev.map((w) => (w._id === worker._id ? { ...w, ...updated } : w)) : prev));
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Update failed", "error");
+      load();
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  async function sendCommand(worker: ApiWorker, command: Command) {
+    setSavingId(worker._id);
+    try {
+      const res: { command: Command; issuedAt: string } = await api.post(
+        `/api/workers/${worker._id}/command`,
+        { command }
+      );
+      setWorkers((prev) =>
+        prev
+          ? prev.map((w) =>
+              w._id === worker._id
+                ? { ...w, command: res.command, commandIssuedAt: res.issuedAt, commandAckedAt: null }
+                : w
+            )
+          : prev
+      );
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Command failed", "error");
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  if (authLoading || loading) {
+    return (
+      <div className="flex justify-center py-12">
+        <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary border-t-transparent" />
+      </div>
+    );
+  }
+  if (!isAdmin || !workers) return null;
+
+  return (
+    <div className="max-w-6xl mx-auto">
+      <h1 className="text-2xl font-bold mb-1">Worker fleet</h1>
+      <p className="text-sm text-text-muted mb-6">
+        Every worker registered on this instance. Only an instance admin can change what is on this page.
+      </p>
+
+      <div className="border border-border rounded-lg overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-bg-input text-text-muted text-xs border-b border-border">
+                <th className="text-left px-3 py-2 font-medium">Name</th>
+                <th className="text-left px-3 py-2 font-medium">Host</th>
+                <th className="text-left px-3 py-2 font-medium">Version</th>
+                <th className="text-left px-3 py-2 font-medium">Last seen</th>
+                <th className="text-left px-3 py-2 font-medium">Binding error</th>
+                <th className="text-left px-3 py-2 font-medium">Enabled</th>
+                <th className="text-left px-3 py-2 font-medium">Lock</th>
+                <th className="text-left px-3 py-2 font-medium">Commands</th>
+              </tr>
+            </thead>
+            <tbody>
+              {workers.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="px-3 py-6 text-center text-text-muted text-sm">
+                    No workers registered yet.
+                  </td>
+                </tr>
+              )}
+              {workers.map((worker) => {
+                const status = commandStatus(worker);
+                return (
+                  <tr key={worker._id} className="border-b border-border last:border-b-0">
+                    <td className="px-3 py-2 font-medium whitespace-nowrap">{worker.name}</td>
+                    <td className="px-3 py-2 text-text-muted whitespace-nowrap">{worker.host || "—"}</td>
+                    <td className="px-3 py-2 text-text-muted font-mono text-xs whitespace-nowrap">
+                      {worker.version || "—"}
+                    </td>
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      <div className="flex items-center gap-2">
+                        <span className={worker.stale ? "text-danger" : "text-text-muted"}>
+                          {worker.lastSeenAt ? timeAgo(worker.lastSeenAt) : "never"}
+                        </span>
+                        {worker.stale && (
+                          <span className="text-xs px-1.5 py-0.5 rounded-full border border-danger/40 bg-danger/10 text-danger">
+                            stale
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 max-w-[16rem]">
+                      {worker.bindingError && (
+                        <span className="text-xs text-danger block truncate" title={worker.bindingError}>
+                          {worker.bindingError}
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2">
+                      <Button
+                        size="sm"
+                        variant={worker.enabled && !worker.lockedByInstance ? "primary" : "secondary"}
+                        disabled={savingId === worker._id || worker.lockedByInstance}
+                        onClick={() => patch(worker, { enabled: !worker.enabled })}
+                      >
+                        {worker.enabled ? "On" : "Off"}
+                      </Button>
+                    </td>
+                    <td className="px-3 py-2">
+                      <button
+                        onClick={() => patch(worker, { lockedByInstance: !worker.lockedByInstance })}
+                        disabled={savingId === worker._id}
+                        className={`text-xs px-2 py-1 rounded border transition-colors cursor-pointer ${
+                          worker.lockedByInstance
+                            ? "border-danger bg-danger/10 text-danger"
+                            : "border-border text-text-muted hover:text-text"
+                        }`}
+                        title={
+                          worker.lockedByInstance
+                            ? "Locked — this worker cannot claim or continue tasks"
+                            : "Lock this worker (kill switch)"
+                        }
+                      >
+                        {worker.lockedByInstance ? "Locked" : "Lock"}
+                      </button>
+                    </td>
+                    <td className="px-3 py-2">
+                      <div className="flex flex-col gap-1">
+                        {status && (
+                          <span className={`text-xs ${TONE_CLASSES[status.tone]}`}>{status.text}</span>
+                        )}
+                        <div className="flex flex-wrap gap-1">
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            disabled={savingId === worker._id}
+                            onClick={() => sendCommand(worker, "pause")}
+                          >
+                            Pause
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            disabled={savingId === worker._id}
+                            onClick={() => sendCommand(worker, "resume")}
+                          >
+                            Resume
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="danger"
+                            disabled={savingId === worker._id}
+                            onClick={() => sendCommand(worker, "stop")}
+                          >
+                            Stop
+                          </Button>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
