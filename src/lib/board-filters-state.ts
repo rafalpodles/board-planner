@@ -1,4 +1,5 @@
 import { SortDir, SortField } from "@/types";
+import { ListColumnId, DEFAULT_HIDDEN, sanitizeHidden } from "./list-columns";
 
 export interface BoardFilterValues {
   assignee: string;
@@ -15,6 +16,7 @@ export interface PersistedBoardFilters {
   sortField: SortField;
   sortDir: SortDir;
   showFilters: boolean;
+  hiddenColumns: ListColumnId[];
 }
 
 export const EMPTY_FILTERS: BoardFilterValues = {
@@ -34,6 +36,7 @@ const DEFAULTS: PersistedBoardFilters = {
   sortField: "manual",
   sortDir: "asc",
   showFilters: false,
+  hiddenColumns: DEFAULT_HIDDEN,
 };
 
 function str(value: unknown): string {
@@ -63,6 +66,7 @@ export function migratePersistedFilters(
     sortField: (str(blob.sortField) || DEFAULTS.sortField) as SortField,
     sortDir: str(blob.sortDir) === "desc" ? "desc" : "asc",
     showFilters: blob.showFilters === true,
+    hiddenColumns: sanitizeHidden(blob.hiddenColumns),
   };
 }
 

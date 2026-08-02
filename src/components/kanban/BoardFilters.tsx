@@ -21,8 +21,11 @@ import {
 } from "@/types";
 import { categoryColor } from "@/lib/category-colors";
 import { SortContext, sortTasks } from "@/lib/task-sort";
+import { ListColumnId } from "@/lib/list-columns";
+import { ColumnPicker } from "./ColumnPicker";
 import {
   BoardFilterValues,
+  PersistedBoardFilters,
   EMPTY_FILTERS,
   countActiveFilters,
   migratePersistedFilters,
@@ -43,7 +46,7 @@ const DATE_PRESETS = [
 
 function savePersistedState(
   projectId: string,
-  state: { filters: BoardFilterValues; sortField: SortField; sortDir: SortDir; showFilters: boolean }
+  state: PersistedBoardFilters
 ) {
   try {
     localStorage.setItem(`board-filters:${projectId}`, JSON.stringify(state));
@@ -70,6 +73,8 @@ interface BoardFiltersProps {
   /** Which fields the dropdown offers; the current value is always included */
   sortFields?: SortField[];
   sortContext?: SortContext;
+  hiddenColumns?: ListColumnId[];
+  onHiddenColumnsChange?: (hidden: ListColumnId[]) => void;
   onFilter: (filtered: ApiTask[]) => void;
 }
 
@@ -88,6 +93,8 @@ export function BoardFilters({
   onSortChange,
   sortFields = BOARD_SORT_FIELDS,
   sortContext,
+  hiddenColumns,
+  onHiddenColumnsChange,
   onFilter,
 }: BoardFiltersProps) {
   const [initialized, setInitialized] = useState(false);
@@ -107,6 +114,7 @@ export function BoardFilters({
     const state = migratePersistedFilters(raw, currentUsername);
     setFilters((f) => ({ ...f, ...state.filters }));
     onSortChange(state.sortField, state.sortDir);
+    onHiddenColumnsChange?.(state.hiddenColumns);
     setShowFilters(state.showFilters);
     setInitialized(true);
     // onSortChange is the owner's setter; re-running on its identity would
@@ -117,8 +125,14 @@ export function BoardFilters({
   const persistState = useCallback(() => {
     const { search: _search, ...rest } = filters;
     void _search;
-    savePersistedState(projectId, { filters: rest, sortField, sortDir, showFilters });
-  }, [projectId, filters, sortField, sortDir, showFilters]);
+    savePersistedState(projectId, {
+      filters: rest,
+      sortField,
+      sortDir,
+      showFilters,
+      hiddenColumns: hiddenColumns ?? [],
+    });
+  }, [projectId, filters, sortField, sortDir, showFilters, hiddenColumns]);
 
   useEffect(() => {
     if (initialized) persistState();
@@ -503,6 +517,10 @@ export function BoardFilters({
           {sortDir === "asc" ? "↑" : "↓"}
         </button>
       </div>
+
+      {onHiddenColumnsChange && (
+        <ColumnPicker hidden={hiddenColumns ?? []} onChange={onHiddenColumnsChange} />
+      )}
 
       {extraControls}
     </div>
