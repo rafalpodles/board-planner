@@ -72,7 +72,7 @@ export default function MyTasksPage() {
   }
 
   return (
-    <div>
+    <div className="max-w-4xl mx-auto w-full">
       <PageHeader
         title="My Tasks"
         subtitle={sorted.length === 1 ? "1 task" : `${sorted.length} tasks`}
