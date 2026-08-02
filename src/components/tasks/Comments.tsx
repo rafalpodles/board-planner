@@ -19,9 +19,19 @@ interface MentionUser {
 interface CommentsProps {
   projectId: string;
   taskId: string;
+  hideHeading?: boolean;
+  onCountChange?: (count: number) => void;
+  // Adding, editing and deleting a comment each write an activity entry; reacting does not
+  onMutated?: () => void;
 }
 
-export function Comments({ projectId, taskId }: CommentsProps) {
+export function Comments({
+  projectId,
+  taskId,
+  hideHeading,
+  onCountChange,
+  onMutated,
+}: CommentsProps) {
   const [comments, setComments] = useState<ApiComment[]>([]);
   const [body, setBody] = useState("");
   const [loading, setLoading] = useState(false);
@@ -47,6 +57,7 @@ export function Comments({ projectId, taskId }: CommentsProps) {
         `/api/projects/${projectId}/tasks/${taskId}/comments`
       );
       setComments(data);
+      onCountChange?.(data.length);
     } catch {
       toast("Failed to load comments", "error");
     }
@@ -70,6 +81,7 @@ export function Comments({ projectId, taskId }: CommentsProps) {
       );
       setBody("");
       await loadComments();
+      onMutated?.();
     } catch {
       toast("Failed to post comment", "error");
     } finally {
@@ -88,6 +100,7 @@ export function Comments({ projectId, taskId }: CommentsProps) {
       setEditingId(null);
       setEditBody("");
       await loadComments();
+      onMutated?.();
       toast("Comment updated", "success");
     } catch {
       toast("Failed to update comment", "error");
@@ -104,6 +117,7 @@ export function Comments({ projectId, taskId }: CommentsProps) {
       );
       setConfirmDeleteId(null);
       await loadComments();
+      onMutated?.();
       toast("Comment deleted", "success");
     } catch {
       toast("Failed to delete comment", "error");
@@ -255,9 +269,11 @@ export function Comments({ projectId, taskId }: CommentsProps) {
 
   return (
     <div>
-      <h3 className="font-semibold mb-3">
-        Comments ({comments.length})
-      </h3>
+      {!hideHeading && (
+        <h3 className="font-semibold mb-3">
+          Comments ({comments.length})
+        </h3>
+      )}
 
       <div className="space-y-3 mb-4">
         {comments.map((comment) => (
@@ -315,7 +331,7 @@ export function Comments({ projectId, taskId }: CommentsProps) {
                     onBlur={() => setTimeout(() => setMentionQuery(null), 150)}
                     rows={3}
                     autoFocus
-                    className="w-full rounded-lg border border-border bg-bg-input px-3 py-2 text-text min-h-[88px] placeholder:text-text-muted/50 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent resize-y"
+                    className="w-full rounded-lg border border-border bg-bg-input px-3 py-2 text-text min-h-[88px] placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent resize-y"
                   />
                 </div>
                 <div className="flex gap-2">
@@ -401,7 +417,7 @@ export function Comments({ projectId, taskId }: CommentsProps) {
             onBlur={() => setTimeout(() => setMentionQuery(null), 150)}
             placeholder="Add a comment... (use @ to mention)"
             rows={3}
-            className="w-full rounded-lg border border-border bg-bg-input px-3 py-2 text-text min-h-[88px] placeholder:text-text-muted/50 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent resize-y"
+            className="w-full rounded-lg border border-border bg-bg-input px-3 py-2 text-text min-h-[88px] placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent resize-y"
           />
         </div>
         <Button type="submit" size="sm" disabled={loading || !body.trim()}>

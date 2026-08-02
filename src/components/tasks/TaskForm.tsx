@@ -68,6 +68,8 @@ interface TaskFormProps {
   projectLabels?: ApiLabel[];
   taskTemplates?: ApiTaskTemplate[];
   sprints?: ApiSprint[];
+  /** Pre-selects a sprint when creating; ignored when editing an existing task */
+  defaultSprint?: string;
   customFields?: ApiCustomField[];
   onSaved: () => void;
   // When set, the created task is linked as this task's child
@@ -85,6 +87,7 @@ export function TaskForm({
   projectLabels = [],
   taskTemplates = [],
   sprints = [],
+  defaultSprint = "",
   customFields = [],
   onSaved,
   parentTaskId,
@@ -117,7 +120,7 @@ export function TaskForm({
   const [selectedLabels, setSelectedLabels] = useState<string[]>(
     task?.labels || []
   );
-  const [sprint, setSprint] = useState(task?.sprint || "");
+  const [sprint, setSprint] = useState(task?.sprint || defaultSprint || "");
   const [customFieldValues, setCustomFieldValues] = useState<Record<string, unknown>>(
     task?.customFieldValues || {}
   );

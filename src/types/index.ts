@@ -114,6 +114,7 @@ export interface IUser {
   fullName: string;
   email: string;
   emailNotifications: boolean;
+  collapseEmptyColumns: boolean;
   role: UserRole;
   allowedProjects: Types.ObjectId[];
   // Runtime-only, set for project-scoped tokens — a scoped token never gets project-admin
@@ -491,6 +492,7 @@ export interface IPmMessage {
   role: "user" | "assistant";
   content: string;
   actions: IPmAction[];
+  attachments: PmAttachment[];
   trigger: PmMessageTrigger;
   triggeredBy: Types.ObjectId | IUser | null;
   createdAt: Date;
@@ -644,6 +646,7 @@ export interface ApiUser {
   fullName: string;
   email: string;
   emailNotifications: boolean;
+  collapseEmptyColumns?: boolean;
   role: UserRole;
   allowedProjects: string[];
   createdAt: string;
@@ -690,6 +693,9 @@ export interface ApiProject {
   codaTableId?: string;
   codaTokenSet?: boolean;
   taskCounter: number;
+  // Sidebar badges, computed by the list endpoint only
+  taskCount?: number;
+  hasActiveSprint?: boolean;
   pm?: ApiPmConfig;
   pmAvailable?: boolean;
   owner: ApiUser | string;
@@ -736,12 +742,21 @@ export interface ApiPmAction {
   at: string;
 }
 
+export interface PmAttachment {
+  fileId: string;
+  mimeType: string;
+  width?: number;
+  height?: number;
+  bytes?: number;
+}
+
 export interface ApiPmMessage {
   _id: string;
   project: string;
   role: "user" | "assistant";
   content: string;
   actions: ApiPmAction[];
+  attachments?: PmAttachment[];
   trigger: PmMessageTrigger;
   triggeredBy: ApiUser | string | null;
   createdAt: string;

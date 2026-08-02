@@ -36,7 +36,7 @@ export interface Heartbeat {
   onAbort(cb: () => void): void;
   ack(command: string): void;
   // Surfaced on every heartbeat, so a project this worker cannot bind to shows the reason in
-  // /admin/workers without needing its own endpoint. An empty string clears a previously-reported
+  // /settings/workers without needing its own endpoint. An empty string clears a previously-reported
   // error once the operator fixes it — bindingError is always sent, never merely omitted.
   reportBindingError(message: string): void;
 }

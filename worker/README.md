@@ -57,7 +57,7 @@ token instead of drawing on the subscription.
 
 Everything that used to be an environment variable beyond the four above — base branch, poll
 interval, task timeout, diff caps, model — is now worker policy, set by an instance or project
-admin in `/admin/workers`, not by whoever starts the process:
+admin in `/settings/workers`, not by whoever starts the process:
 
 | Policy field | Default |
 |---|---|
@@ -73,7 +73,7 @@ A policy change takes effect on the worker's own refresh cycle, without a restar
 ## Registration
 
 A worker has no identity until an instance admin registers it and assigns it one or more projects
-in `/admin/workers`. Until then it polls but claims nothing: `/tasks/claim` and the rest of
+in `/settings/workers`. Until then it polls but claims nothing: `/tasks/claim` and the rest of
 `/api/workers/**` refuse any request without a credential the server itself issued.
 
 On first run the worker registers itself with `CP_API_TOKEN` and persists the response — a
@@ -85,7 +85,7 @@ registering fresh, reads its current policy and assignments back from `GET /api/
 Registration assigns projects, but not a filesystem. The repository path an admin proposes for
 each assigned project must still be approved on this machine, by listing it in
 `<CP_STATE_DIR>/repos.json`. A worker pointed at a path outside its own allowlist leaves that one
-project unbound and idle, with the reason visible as `bindingError` in `/admin/workers` — its
+project unbound and idle, with the reason visible as `bindingError` in `/settings/workers` — its
 other assignments keep working normally.
 
 ## Running

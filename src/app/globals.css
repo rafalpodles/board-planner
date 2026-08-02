@@ -2,37 +2,45 @@
 @plugin "@tailwindcss/typography";
 
 @theme {
-  --color-primary: #3b82f6;
-  --color-primary-hover: #2563eb;
-  --color-danger: #ef4444;
-  --color-danger-hover: #dc2626;
-  --color-success: #22c55e;
-  --color-warning: #f59e0b;
+  /* Accent-as-text; overridden per theme so it stays readable on the background */
+  --color-primary: #60a5fa;
+  --color-primary-hover: #93c5fd;
+  --color-danger: #f87171;
+  --color-danger-hover: #fca5a5;
+  --color-success: #4ade80;
+  --color-warning: #fbbf24;
+
+  /* Accent-as-surface, dark enough to carry white text in either theme */
+  --color-primary-solid: #2563eb;
+  --color-primary-solid-hover: #1d4ed8;
+  --color-danger-solid: #dc2626;
+  --color-danger-solid-hover: #b91c1c;
+  --color-success-solid: #15803d;
   --color-bg: #0f172a;
   --color-bg-card: #1e293b;
   --color-bg-input: #334155;
   --color-bg-hover: #334155;
   --color-border: #475569;
   --color-text: #f1f5f9;
-  --color-text-muted: #94a3b8;
+  --color-text-muted: #a9b6c8;
 
-  --color-status-planned: #6b7280;
-  --color-status-todo: #3b82f6;
-  --color-status-in-progress: #f59e0b;
-  --color-status-in-review: #a855f7;
-  --color-status-needs-human-review: #f43f5e;
-  --color-status-ready-to-test: #06b6d4;
-  --color-status-done: #22c55e;
+  --color-status-planned: #9ca3af;
+  --color-status-todo: #60a5fa;
+  --color-status-in-progress: #fbbf24;
+  --color-status-in-review: #c084fc;
+  --color-status-needs-human-review: #fb7185;
+  --color-status-ready-to-test: #22d3ee;
+  --color-status-done: #4ade80;
 
-  --color-difficulty-s: #22c55e;
-  --color-difficulty-m: #3b82f6;
-  --color-difficulty-l: #f59e0b;
-  --color-difficulty-xl: #ef4444;
+  --color-difficulty-s: #4ade80;
+  --color-difficulty-m: #60a5fa;
+  --color-difficulty-l: #fbbf24;
+  --color-difficulty-xl: #f87171;
 
-  --color-priority-low: #6b7280;
-  --color-priority-medium: #3b82f6;
-  --color-priority-high: #f59e0b;
-  --color-priority-urgent: #ef4444;
+  --color-priority-low: #9ca3af;
+  --color-priority-medium: #60a5fa;
+  --color-priority-high: #fbbf24;
+  --color-priority-urgent: #f87171;
 }
 
 body {
@@ -48,7 +56,46 @@ body {
   --color-bg-hover: #e2e8f0;
   --color-border: #cbd5e1;
   --color-text: #0f172a;
-  --color-text-muted: #64748b;
+  --color-text-muted: #475569;
+  --color-primary: #1d4ed8;
+  --color-primary-hover: #1e40af;
+  --color-danger: #b91c1c;
+  --color-danger-hover: #991b1b;
+  --color-success: #166534;
+  --color-warning: #92400e;
+
+  --color-status-planned: #4b5563;
+  --color-status-todo: #1d4ed8;
+  --color-status-in-progress: #92400e;
+  --color-status-in-review: #7e22ce;
+  --color-status-needs-human-review: #be123c;
+  --color-status-ready-to-test: #0e7490;
+  --color-status-done: #166534;
+
+  --color-difficulty-s: #166534;
+  --color-difficulty-m: #1d4ed8;
+  --color-difficulty-l: #92400e;
+  --color-difficulty-xl: #b91c1c;
+
+  --color-priority-low: #4b5563;
+  --color-priority-medium: #1d4ed8;
+  --color-priority-high: #92400e;
+  --color-priority-urgent: #b91c1c;
+}
+
+/* Tinted chips: --chip carries the accent, the surface is a tint of it against
+   the card. The semantic tokens are tuned per theme, so the label stays close to
+   the accent — enough hue to tell categories apart at a glance. */
+.chip {
+  --chip: var(--color-primary);
+  background-color: color-mix(in srgb, var(--chip) 18%, var(--color-bg-card));
+  color: color-mix(in srgb, var(--chip) 85%, var(--color-text));
+}
+
+/* Project-defined category and label colours are arbitrary and not theme-tuned,
+   so the label is pulled toward the foreground far enough to stay readable */
+.chip-custom {
+  color: color-mix(in srgb, var(--chip) 55%, var(--color-text));
 }
 
 @keyframes slide-in {
@@ -64,6 +111,21 @@ body {
 
 .animate-slide-in {
   animation: slide-in 0.2s ease-out;
+}
+
+/* One keyboard-focus treatment for the shell. An outline rather than a box-shadow
+   ring: the sidebar and the column bodies scroll, and a ring on an item at the
+   edge is clipped by its overflow container while an outline never is. */
+.focus-ring:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* Sits flush inside a bordered group (the sort control), where an offset outline
+   would be cropped by the parent's rounding */
+.focus-ring-inset:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
 }
 
 /* Scrolls, but without a visible bar */

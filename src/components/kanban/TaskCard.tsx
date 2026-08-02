@@ -1,11 +1,13 @@
 "use client";
 
+import { useRef, type CSSProperties } from "react";
 import { ApiTask, ApiLabel, ApiProjectCategory, PRIORITY_LABELS } from "@/types";
 import { Badge } from "@/components/ui/Badge";
 import { categoryColor, categoryTint } from "@/lib/category-colors";
+import { taskPath } from "@/lib/urls";
 
 // Cards are narrow; the default badge padding makes three of them wrap raggedly
-const COMPACT_BADGE = "text-[10px] px-1.5 whitespace-nowrap";
+const COMPACT_BADGE = "text-[11px] px-1.5 whitespace-nowrap";
 
 interface TaskCardProps {
   task: ApiTask;
@@ -35,16 +37,30 @@ export function TaskCard({
   );
   const catColor = categoryColor(projectCategories, task.category);
   const tinted = !selected && !!catColor;
+  const dragged = useRef(false);
+
+  function activate(intendsSelection: boolean) {
+    if (onSelect && (selectionActive || intendsSelection)) onSelect(task._id);
+    else onClick();
+  }
+
   return (
-    <div
+    <div className="relative">
+    <a
+      href={taskPath(projectKey, task.taskNumber)}
       draggable
       style={tinted ? categoryTint(catColor) : undefined}
+      onMouseDown={() => {
+        dragged.current = false;
+      }}
       onDragStart={(e) => {
+        dragged.current = true;
         e.dataTransfer.setData("text/plain", task._id);
         e.dataTransfer.effectAllowed = "move";
       }}
-      className={`bg-bg rounded-lg border p-3 cursor-grab
-        transition-colors group active:cursor-grabbing relative
+      className={`block bg-bg rounded-lg border p-3 cursor-pointer
+        transition-colors group
+        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary
         ${selected
           ? "border-primary bg-primary/5"
           : tinted
@@ -55,31 +71,25 @@ export function TaskCard({
         onContextMenu?.(task._id, e.clientX, e.clientY);
       }}
       onClick={(e) => {
-        if (selectionActive || e.ctrlKey || e.metaKey) {
+        // A browser can still fire a click after a drop; the next press clears the flag
+        if (dragged.current) {
           e.preventDefault();
-          onSelect?.(task._id);
-        } else {
-          onClick();
+          return;
         }
+        if (e.metaKey || e.ctrlKey) return;
+        e.preventDefault();
+        activate(e.shiftKey);
+      }}
+      onKeyDown={(e) => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault();
+        // The board's own Enter handler listens on `document` — the very node the
+        // App Router hydrates and React delegates from — so stopPropagation would
+        // not reach it; only stopping the native event immediately does
+        e.nativeEvent.stopImmediatePropagation();
+        activate(e.shiftKey);
       }}
     >
-      {(selectionActive || selected) && (
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onSelect?.(task._id);
-          }}
-          className={`absolute top-2 right-2 w-5 h-5 rounded border flex items-center justify-center
-            transition-colors text-[10px]
-            ${selected
-              ? "bg-primary border-primary text-white"
-              : "border-border bg-bg-input text-transparent hover:border-primary/50"
-            }`}
-        >
-          {selected && "\u2713"}
-        </button>
-      )}
-
       <div className="flex flex-wrap items-center gap-1 mb-2 pr-6">
         <span className="text-xs font-mono text-text-muted flex items-center gap-1 mr-0.5">
           {task.pinned && (
@@ -114,7 +124,7 @@ export function TaskCard({
 
       {task.component && (
         <div className="mb-2">
-          <Badge className="text-[10px]">{task.component}</Badge>
+          <Badge className="text-[11px]">{task.component}</Badge>
         </div>
       )}
 
@@ -123,8 +133,8 @@ export function TaskCard({
           {taskLabels.map((label) => (
             <span
               key={label._id}
-              className="text-[10px] px-1.5 py-0.5 rounded-full text-white font-medium"
-              style={{ backgroundColor: label.color }}
+              className="chip chip-custom text-[11px] px-1.5 py-0.5 rounded-full font-medium"
+              style={{ "--chip": label.color } as CSSProperties}
             >
               {label.name}
             </span>
@@ -141,17 +151,23 @@ export function TaskCard({
         return (
           <div className="mb-2 flex flex-wrap gap-1">
             {blocked > 0 && (
-              <span className="text-[10px] text-warning bg-warning/10 px-1.5 py-0.5 rounded font-medium">
+              <span
+                className="chip text-[11px] px-1.5 py-0.5 rounded font-medium"
+                style={{ "--chip": "var(--color-warning)" } as CSSProperties}
+              >
                 Blocked ({blocked})
               </span>
             )}
             {relates > 0 && (
-              <span className="text-[10px] text-primary bg-primary/10 px-1.5 py-0.5 rounded font-medium">
+              <span
+                className="chip text-[11px] px-1.5 py-0.5 rounded font-medium"
+                style={{ "--chip": "var(--color-primary)" } as CSSProperties}
+              >
                 Relates ({relates})
               </span>
             )}
             {duplicates > 0 && (
-              <span className="text-[10px] text-text-muted bg-bg-input px-1.5 py-0.5 rounded font-medium">
+              <span className="text-[11px] text-text-muted bg-bg-input px-1.5 py-0.5 rounded font-medium">
                 Duplicate ({duplicates})
               </span>
             )}
@@ -163,7 +179,7 @@ export function TaskCard({
         <div className="mb-2 flex items-center gap-1.5">
           <div className="flex-1 h-1 bg-bg-input rounded-full overflow-hidden">
             <div
-              className="h-full bg-primary rounded-full transition-all"
+              className="h-full bg-primary-solid rounded-full transition-all"
               style={{
                 width: `${(task.checklist.filter((i) => i.done).length / task.checklist.length) * 100}%`,
               }}
@@ -180,13 +196,17 @@ export function TaskCard({
           {task.linkedPRs.map((pr) => (
             <span
               key={`${pr.provider ?? "github"}-${pr.number}`}
-              className={`text-[10px] px-1.5 py-0.5 rounded font-medium inline-flex items-center gap-1 ${
-                pr.state === "merged"
-                  ? "text-[#8b5cf6] bg-[#8b5cf6]/10"
-                  : pr.state === "open"
-                    ? "text-[#22c55e] bg-[#22c55e]/10"
-                    : "text-danger bg-danger/10"
-              }`}
+              className="chip chip-custom text-[11px] px-1.5 py-0.5 rounded font-medium inline-flex items-center gap-1"
+              style={
+                {
+                  "--chip":
+                    pr.state === "merged"
+                      ? "#8b5cf6"
+                      : pr.state === "open"
+                        ? "var(--color-success)"
+                        : "var(--color-danger)",
+                } as CSSProperties
+              }
               title={pr.title}
             >
               <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 16 16">
@@ -227,6 +247,25 @@ export function TaskCard({
           );
         })()}
       </div>
+    </a>
+
+    {(selectionActive || selected) && (
+      <button
+        type="button"
+        aria-label={`Select ${projectKey}-${task.taskNumber}`}
+        aria-pressed={selected}
+        onClick={() => onSelect?.(task._id)}
+        className={`absolute top-2 right-2 w-5 h-5 rounded border flex items-center justify-center
+          transition-colors text-[10px]
+          focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary
+          ${selected
+            ? "bg-primary-solid border-primary text-white"
+            : "border-border bg-bg-input text-transparent hover:border-primary/50"
+          }`}
+      >
+        {selected && "✓"}
+      </button>
+    )}
     </div>
   );
 }

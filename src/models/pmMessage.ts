@@ -24,6 +24,16 @@ const pmMessageSchema = new Schema<IPmMessage>(
       }],
       default: [],
     },
+    attachments: {
+      type: [{
+        fileId: { type: String, required: true },
+        mimeType: { type: String, required: true },
+        width: { type: Number },
+        height: { type: Number },
+        bytes: { type: Number },
+      }],
+      default: [],
+    },
     trigger: {
       type: triggerSchema,
       default: () => ({ type: "chat", taskKey: "" }),
@@ -34,6 +44,8 @@ const pmMessageSchema = new Schema<IPmMessage>(
 );
 
 pmMessageSchema.index({ project: 1, createdAt: -1 });
+// Threads are read per user, newest first, with _id as the paging cursor
+pmMessageSchema.index({ project: 1, triggeredBy: 1, _id: -1 });
 
 export const PmMessage: Model<IPmMessage> =
   mongoose.models.PmMessage || mongoose.model<IPmMessage>("PmMessage", pmMessageSchema);

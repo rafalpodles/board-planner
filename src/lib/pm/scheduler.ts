@@ -60,7 +60,7 @@ async function runBoardReview(
     console.warn(`PM board review skipped for ${projectKey}: turn cap (${cap}) reached`);
     return;
   }
-  const abort = acquireTurnLock(projectId);
+  const abort = acquireTurnLock(projectId, pmUserId);
   if (!abort) {
     console.warn(`PM board review skipped for ${projectKey}: a turn is already running`);
     return;
