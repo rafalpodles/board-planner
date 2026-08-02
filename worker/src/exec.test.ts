@@ -132,6 +132,44 @@ describe("createRunner", () => {
     20_000
   );
 
+  // The "close" event waits for stdio EOF as well as process exit. A gate spawns npm, whose own
+  // children inherit its stdio; if the direct child exits while a grandchild still holds those
+  // pipes open, "close" never fires. Reproduces the reviewer's repro: exit at ~1.3s, no close by 6s.
+  it(
+    "settles when a child exits but a grandchild keeps its inherited stdio open",
+    async () => {
+      const pidFile = join(tmpdir(), `cp161-grandchild-${process.pid}-${Date.now()}`);
+      const start = Date.now();
+
+      try {
+        const result = await createRunner().run(
+          process.execPath,
+          [
+            "-e",
+            `
+            const { spawn } = require("child_process");
+            const fs = require("fs");
+            const grandchild = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "inherit" });
+            fs.writeFileSync(${JSON.stringify(pidFile)}, String(grandchild.pid));
+            process.exit(0);
+            `,
+          ],
+          { cwd: process.cwd(), timeoutMs: 10_000 }
+        );
+
+        expect(result.code).toBe(0);
+        expect(Date.now() - start).toBeLessThan(2000);
+      } finally {
+        if (existsSync(pidFile)) {
+          const pid = Number(readFileSync(pidFile, "utf8"));
+          if (alive(pid)) process.kill(pid, "SIGKILL");
+          rmSync(pidFile, { force: true });
+        }
+      }
+    },
+    5000
+  );
+
   it("kills a command whose signal had already aborted before it was spawned", async () => {
     const controller = new AbortController();
     controller.abort();

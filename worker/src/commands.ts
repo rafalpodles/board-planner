@@ -42,13 +42,20 @@ export interface CommandDeps {
 
 export function createCommandHandlers(deps: CommandDeps): CommandHandlers {
   // Both transports deliver the same standing command, so the issuance instant — not the command
-  // name — is what separates a redelivery from an operator asking again.
-  let appliedToken: string | null = null;
+  // name — is what separates a redelivery from an operator asking again. Applying is gated on
+  // recency, not equality: a heartbeat computed before a later command was written still carries
+  // the old issuance, and must not resurrect what that later command already superseded.
+  let lastAppliedAt = -Infinity;
 
   function apply(command: WorkerCommand, issuedAt: string | undefined, effect: () => void): void {
-    const token = `${command}@${issuedAt ?? ""}`;
-    if (token === appliedToken) return;
-    appliedToken = token;
+    const instant = issuedAt ? Date.parse(issuedAt) : NaN;
+    if (Number.isNaN(instant)) {
+      // Undated pause/stop is a safe default to apply; undated resume is not — see commit message.
+      if (command === "resume") return;
+    } else {
+      if (instant <= lastAppliedAt) return;
+      lastAppliedAt = instant;
+    }
 
     effect();
 

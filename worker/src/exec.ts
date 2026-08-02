@@ -21,6 +21,7 @@ export interface Runner {
 }
 
 const SIGKILL_GRACE_MS = 5000;
+const STDIO_DRAIN_GRACE_MS = 200;
 
 export function createRunner(): Runner {
   return {
@@ -32,11 +33,13 @@ export function createRunner(): Runner {
         let timedOut = false;
         let timer: NodeJS.Timeout | undefined;
         let killTimer: NodeJS.Timeout | undefined;
+        let drainTimer: NodeJS.Timeout | undefined;
         let onAbort: (() => void) | undefined;
 
         function clearTimers(): void {
           if (timer) clearTimeout(timer);
           if (killTimer) clearTimeout(killTimer);
+          if (drainTimer) clearTimeout(drainTimer);
           if (onAbort) opts.signal?.removeEventListener("abort", onAbort);
         }
 
@@ -50,8 +53,7 @@ export function createRunner(): Runner {
         try {
           // spawn's own `signal` option is deliberately not used: it rejects the moment abort() is
           // called, leaving a child that ignores SIGTERM alive inside the worktree the pipeline is
-          // about to remove. An abort escalates on the same path a timeout does, and only "close"
-          // settles the promise.
+          // about to remove. An abort escalates on the same path a timeout does.
           const child = spawn(command, args, {
             cwd: opts.cwd,
             env: opts.env ?? childEnv(),
@@ -92,6 +94,16 @@ export function createRunner(): Runner {
 
           child.on("error", (error) => {
             settle({ code: -1, stdout, stderr: String(error), timedOut });
+          });
+
+          // "close" also waits for stdout/stderr EOF, which never comes if a grandchild inherited
+          // these pipes and outlives this child (e.g. a gate's npm spawning its own children).
+          // Settle on "exit" instead, giving "close" a short window to still land the full output.
+          child.on("exit", (code) => {
+            if (settled) return;
+            drainTimer = setTimeout(() => {
+              settle({ code: code ?? -1, stdout, stderr, timedOut });
+            }, STDIO_DRAIN_GRACE_MS);
           });
 
           child.on("close", (code) => {
