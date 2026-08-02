@@ -22,6 +22,15 @@ vi.mock("./TaskLinks", () => ({ TaskLinks: () => <div data-testid="task-links" /
 vi.mock("./GitlabActivity", () => ({ GitlabActivity: () => <div data-testid="gitlab" /> }));
 vi.mock("./TaskForm", () => ({ TaskForm: () => <div data-testid="task-form" /> }));
 
+// Mocked per module rather than by patching window.matchMedia: test files run in
+// parallel over one global, and a sibling file's patch would land mid-test
+const { viewport } = vi.hoisted(() => ({ viewport: { wide: false } }));
+vi.mock("@/hooks/use-media-query", () => ({ useMediaQuery: () => viewport.wide }));
+
+function setViewport(wide: boolean) {
+  viewport.wide = wide;
+}
+
 const task = {
   _id: "t1",
   taskNumber: 6,
@@ -49,6 +58,9 @@ const project = {
 };
 
 beforeEach(() => {
+  // ResizableSplit stores its width and collapsed flag here, and a leftover flag
+  // would silently take the aside away from these specs
+  localStorage.clear();
   api.get.mockReset();
   api.get.mockImplementation((url: string) => {
     if (url.includes("/tasks/")) return Promise.resolve(task);
@@ -84,13 +96,28 @@ describe("TaskDetail", () => {
     expect(screen.queryByText(/Open full task page/i)).toBeNull();
   });
 
-  it("lays out content and activity as two columns", async () => {
+  it("lays out content and activity as two resizable columns when there is room", async () => {
+    setViewport(true);
     const { container } = renderDetail();
     await waitFor(() => expect(screen.getByTestId("task-form")).toBeTruthy());
-    const grid = container.querySelector(".lg\\:grid");
+
+    const grid = container.querySelector<HTMLElement>(".grid")!;
     expect(grid).toBeTruthy();
-    expect(grid!.className).toContain("lg:grid-cols-[minmax(0,1fr)_360px]");
-    expect(container.querySelector("aside")).toBeTruthy();
+    expect(grid.style.gridTemplateColumns).toBe("minmax(0,1fr) 9px 360px");
+    expect(screen.getByRole("separator")).toBeTruthy();
+    expect(container.querySelector("aside")!.contains(screen.getByTestId("activity-panel"))).toBe(
+      true
+    );
+  });
+
+  // A divider has nothing to divide once the columns are stacked
+  it("stacks without a divider on a narrow screen", async () => {
+    setViewport(false);
+    const { container } = renderDetail();
+    await waitFor(() => expect(screen.getByTestId("task-form")).toBeTruthy());
+
+    expect(container.querySelector(".grid")).toBeNull();
+    expect(screen.queryByRole("separator")).toBeNull();
     expect(container.querySelector("aside")!.contains(screen.getByTestId("activity-panel"))).toBe(
       true
     );

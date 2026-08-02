@@ -13,6 +13,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Modal } from "@/components/ui/Modal";
 import { TaskForm } from "@/components/tasks/TaskForm";
 import { TaskActivityPanel } from "@/components/tasks/TaskActivityPanel";
+import { ResizableSplit } from "@/components/tasks/ResizableSplit";
 import { TaskLinks } from "@/components/tasks/TaskLinks";
 import { useToast } from "@/components/ui/Toast";
 import { GitlabActivity } from "@/components/tasks/GitlabActivity";
@@ -140,8 +141,11 @@ export function TaskDetail({
         </button>
       )}
 
-      <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start lg:gap-6">
-      <div className="space-y-6">
+      <ResizableSplit
+        asideLabel="activity"
+        aside={<TaskActivityPanel projectId={projectId} taskId={taskId} />}
+      >
+      <>
         {/* Header */}
         <div>
           <div className="flex flex-wrap items-center gap-2 mb-2">
@@ -299,12 +303,8 @@ export function TaskDetail({
           </Button>
         </div>
 
-      </div>
-
-      <aside className="mt-6 border-t border-border pt-6 lg:mt-0 lg:border-l lg:border-t-0 lg:pl-6 lg:pt-0">
-        <TaskActivityPanel projectId={projectId} taskId={taskId} />
-      </aside>
-      </div>
+      </>
+      </ResizableSplit>
 
       <Modal
         open={addingChild}
