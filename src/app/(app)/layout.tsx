@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { AuthGuard } from "@/components/AuthGuard";
 import { CommandPalette } from "@/components/CommandPalette";
@@ -15,6 +15,7 @@ import { projectRefFromPathname } from "@/lib/urls";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [navOpen, setNavOpen] = useState(false);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const projectRef = projectRefFromPathname(usePathname());
@@ -32,6 +33,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <Sidebar
             mobileOpen={navOpen}
             onNavigate={() => setNavOpen(false)}
+            onCloseMobile={() => setNavOpen(false)}
+            menuButtonRef={menuButtonRef}
             onOpenImport={() => setImportOpen(true)}
             onOpenExport={() => setExportOpen(true)}
           />
@@ -44,12 +47,15 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             />
           )}
 
-          <div className="flex h-dvh min-w-0 flex-1 flex-col">
+          {/* inert while the drawer is open: the scrim hides the page visually, but
+              without this Tab walks straight past the drawer into it */}
+          <div className="flex h-dvh min-w-0 flex-1 flex-col" inert={navOpen || undefined}>
             <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2 md:hidden">
               <button
+                ref={menuButtonRef}
                 onClick={() => setNavOpen(true)}
                 aria-label="Open navigation"
-                className="rounded-md p-1.5 text-text-muted transition-colors hover:bg-bg-hover hover:text-text"
+                className="focus-ring flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md text-text-muted transition-colors hover:bg-bg-hover hover:text-text"
               >
                 <svg
                   className="h-5 w-5"
