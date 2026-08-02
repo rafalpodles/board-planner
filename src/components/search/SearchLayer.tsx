@@ -12,6 +12,25 @@ import { MIN_QUERY, SearchHit, columnOf, groupOf, useSearch } from "./use-search
 
 const GROUP_LABELS = { current: "In this project", other: "Other projects" } as const;
 
+interface Run {
+  group: string;
+  label: string | null;
+  items: { hit: SearchHit; index: number }[];
+}
+
+/** Indices stay flat across runs, so ↑↓ walk the whole list without knowing about groups */
+function runsOf(hits: SearchHit[], currentProjectRef?: string): Run[] {
+  const numbered = hits.map((hit, index) => ({ hit, index }));
+  if (!currentProjectRef) return [{ group: "all", label: null, items: numbered }];
+  return (["current", "other"] as const)
+    .map((group) => ({
+      group,
+      label: GROUP_LABELS[group],
+      items: numbered.filter(({ hit }) => groupOf(hit, currentProjectRef) === group),
+    }))
+    .filter((run) => run.items.length > 0);
+}
+
 function isTypingTarget(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
   if (!el) return false;
@@ -23,7 +42,7 @@ function isTypingTarget(target: EventTarget | null): boolean {
   );
 }
 
-export function useSearchShortcut(onOpen: () => void, onClose: () => void, open: boolean) {
+function useSearchShortcut(onOpen: () => void, onClose: () => void, open: boolean) {
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       const cmdK = (e.metaKey || e.ctrlKey) && e.key === "k";
@@ -157,54 +176,55 @@ export function SearchLayer({ open, onOpen, onClose }: SearchLayerProps) {
               {loading ? "Searching…" : "No matches"}
             </p>
           ) : (
-            <div role="listbox" aria-label="Search results" className="flex flex-col gap-px">
-              {hits.map((hit, index) => {
-                const group = groupOf(hit, currentProjectRef);
-                const startsGroup =
-                  !!currentProjectRef &&
-                  (index === 0 || groupOf(hits[index - 1], currentProjectRef) !== group);
-                const column = columnOf(hit, projects);
-                return (
-                  <div key={hit.id}>
-                    {startsGroup && (
-                      <h2
-                        role="presentation"
-                        className="px-2 pb-1 pt-3 text-[10.5px] font-bold uppercase tracking-wider text-text-muted"
+            <div role="listbox" aria-label="Search results" className="flex flex-col">
+              {runsOf(hits, currentProjectRef).map((run) => (
+                <div
+                  key={run.group}
+                  role={run.label ? "group" : undefined}
+                  aria-label={run.label ?? undefined}
+                  className="flex flex-col gap-px"
+                >
+                  {run.label && (
+                    <span className="px-2 pb-1 pt-3 text-[10.5px] font-bold uppercase tracking-wider text-text-muted">
+                      {run.label}
+                    </span>
+                  )}
+                  {run.items.map(({ hit, index }) => {
+                    const column = columnOf(hit, projects);
+                    return (
+                      <button
+                        key={hit.id}
+                        type="button"
+                        role="option"
+                        aria-selected={index === selectedIndex}
+                        data-selected={index === selectedIndex}
+                        onMouseEnter={() => search.setSelectedIndex(index)}
+                        onClick={() => close(hit)}
+                        className={`focus-ring flex w-full items-start gap-2.5 rounded-md px-2 py-2 text-left text-[13px] transition-colors ${
+                          index === selectedIndex
+                            ? "bg-bg-hover text-text"
+                            : "text-text-muted hover:bg-bg-hover"
+                        }`}
                       >
-                        {GROUP_LABELS[group]}
-                      </h2>
-                    )}
-                    <button
-                      type="button"
-                      role="option"
-                      aria-selected={index === selectedIndex}
-                      data-selected={index === selectedIndex}
-                      onMouseEnter={() => search.setSelectedIndex(index)}
-                      onClick={() => close(hit)}
-                      className={`focus-ring flex w-full items-start gap-2.5 rounded-md px-2 py-2 text-left text-[13px] transition-colors ${
-                        index === selectedIndex
-                          ? "bg-bg-hover text-text"
-                          : "text-text-muted hover:bg-bg-hover"
-                      }`}
-                    >
-                      {hit.icon && (
-                        <span aria-hidden className="mt-px text-[15px] leading-none">
-                          {hit.icon}
+                        {hit.icon && (
+                          <span aria-hidden className="mt-px text-[15px] leading-none">
+                            {hit.icon}
+                          </span>
+                        )}
+                        <span className="min-w-0 flex-1 text-text">{hit.label}</span>
+                        {hit.status && (
+                          <Badge variant="status" value={hit.status} color={column?.color}>
+                            {column?.label ?? STATUS_LABELS[hit.status] ?? hit.status}
+                          </Badge>
+                        )}
+                        <span className="shrink-0 font-mono text-[11px] text-text-muted">
+                          {hit.meta}
                         </span>
-                      )}
-                      <span className="min-w-0 flex-1 text-text">{hit.label}</span>
-                      {hit.status && (
-                        <Badge variant="status" value={hit.status} color={column?.color}>
-                          {column?.label ?? STATUS_LABELS[hit.status] ?? hit.status}
-                        </Badge>
-                      )}
-                      <span className="shrink-0 font-mono text-[11px] text-text-muted">
-                        {hit.meta}
-                      </span>
-                    </button>
-                  </div>
-                );
-              })}
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
             </div>
           )}
         </div>
