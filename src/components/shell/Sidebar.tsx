@@ -9,7 +9,6 @@ import { useApi } from "@/hooks/use-api";
 import { useTheme } from "@/components/ThemeProvider";
 import { usePollWhileVisible } from "@/hooks/use-poll-while-visible";
 import { useFocusTrap } from "@/hooks/use-focus-trap";
-import { SearchIconButton, SearchTrigger } from "@/components/search/SearchTrigger";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { isNavItemActive } from "@/lib/nav-active";
 import { useProjects } from "@/hooks/use-projects";
@@ -47,31 +46,64 @@ function Icon({ d, className = "" }: { d: string; className?: string }) {
 }
 
 interface NavItemProps {
-  href: string;
   icon: string;
   label: string;
-  active: boolean;
   collapsed: boolean;
+  active?: boolean;
   badge?: React.ReactNode;
+  /** A row is a link, unless it acts on this page — then it is a button */
+  href?: string;
+  onClick?: () => void;
+  keyshortcuts?: string;
 }
 
-function NavItem({ href, icon, label, active, collapsed, badge }: NavItemProps) {
+function NavItem({
+  href,
+  onClick,
+  icon,
+  label,
+  active = false,
+  collapsed,
+  badge,
+  keyshortcuts,
+}: NavItemProps) {
+  const className = `focus-ring flex min-h-[44px] w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-colors md:min-h-0 ${
+    collapsed ? "justify-center" : ""
+  } ${
+    active ? "bg-primary/15 font-semibold text-text" : "text-text-muted hover:bg-bg-hover hover:text-text"
+  }`;
+
+  const body = (
+    <>
+      <Icon d={icon} className={`h-[17px] w-[17px] ${active ? "text-primary" : ""}`} />
+      {!collapsed && <span className="flex-1 truncate">{label}</span>}
+      {!collapsed && badge}
+    </>
+  );
+
+  if (!href) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        title={collapsed ? label : undefined}
+        aria-label={label}
+        aria-keyshortcuts={keyshortcuts}
+        className={className}
+      >
+        {body}
+      </button>
+    );
+  }
+
   return (
     <Link
       href={href}
       title={collapsed ? label : undefined}
       aria-current={active ? "page" : undefined}
-      className={`focus-ring flex min-h-[44px] w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-colors md:min-h-0 ${
-        collapsed ? "justify-center" : ""
-      } ${
-        active
-          ? "bg-primary/15 font-semibold text-text"
-          : "text-text-muted hover:bg-bg-hover hover:text-text"
-      }`}
+      className={className}
     >
-      <Icon d={icon} className={`h-[17px] w-[17px] ${active ? "text-primary" : ""}`} />
-      {!collapsed && <span className="flex-1 truncate">{label}</span>}
-      {!collapsed && badge}
+      {body}
     </Link>
   );
 }
@@ -215,10 +247,15 @@ export function Sidebar({
         </button>
       </div>
 
-      {!compact && <SearchTrigger onOpen={onOpenSearch} />}
-
       <nav className="flex flex-1 flex-col gap-4 overflow-y-auto px-2.5 pb-2.5">
         <div>
+          <NavItem
+            icon={ICONS.search}
+            label="Search"
+            collapsed={compact}
+            onClick={onOpenSearch}
+            keyshortcuts="Meta+K Control+K"
+          />
           <NavItem
             href="/my-tasks"
             icon={ICONS.myTasks}
@@ -240,11 +277,6 @@ export function Sidebar({
               ) : undefined
             }
           />
-          {compact && (
-            <div className="flex justify-center">
-              <SearchIconButton onOpen={onOpenSearch} />
-            </div>
-          )}
         </div>
 
         {compact ? (
