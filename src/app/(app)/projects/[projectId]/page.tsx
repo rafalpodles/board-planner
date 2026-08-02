@@ -187,12 +187,6 @@ export default function KanbanPage() {
         setShowShortcutHelp((v) => !v);
         return;
       }
-      if (e.key === "/" && noMod) {
-        e.preventDefault();
-        const searchInput = document.querySelector<HTMLInputElement>('input[placeholder*="Search"]');
-        searchInput?.focus();
-        return;
-      }
       if (e.key === "v" && noMod) {
         e.preventDefault();
         setViewMode((prev) => {

@@ -1,10 +1,11 @@
 "use client";
 
 import Image from "next/image";
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { AuthGuard } from "@/components/AuthGuard";
-import { CommandPalette } from "@/components/CommandPalette";
+import { SearchLayer } from "@/components/search/SearchLayer";
+import { SearchIconButton } from "@/components/search/SearchTrigger";
 import { PmChatWidget } from "@/components/pm/PmChatWidget";
 import { ImportDialog } from "@/components/import-export/ImportDialog";
 import { ExportDialog } from "@/components/import-export/ExportDialog";
@@ -18,7 +19,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const projectRef = projectRefFromPathname(usePathname());
+
+  const openSearch = useCallback(() => setSearchOpen(true), []);
+  const closeSearch = useCallback(() => setSearchOpen(false), []);
 
   return (
     <AuthGuard>
@@ -37,6 +42,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             menuButtonRef={menuButtonRef}
             onOpenImport={() => setImportOpen(true)}
             onOpenExport={() => setExportOpen(true)}
+            onOpenSearch={openSearch}
           />
 
           {navOpen && (
@@ -69,6 +75,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               </button>
               <Image src="/logo.svg" alt="" width={20} height={20} />
               <span className="text-sm font-bold">ClaudePlanner</span>
+              <div className="ml-auto">
+                <SearchIconButton onOpen={openSearch} />
+              </div>
             </div>
 
             {/* tabIndex makes the target focusable, or the skip link moves the
@@ -83,7 +92,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </div>
         </div>
 
-        <CommandPalette />
+        <SearchLayer open={searchOpen} onOpen={openSearch} onClose={closeSearch} />
         <PmChatWidget />
 
         {projectRef && (

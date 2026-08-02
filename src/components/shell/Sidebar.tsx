@@ -9,11 +9,7 @@ import { useApi } from "@/hooks/use-api";
 import { useTheme } from "@/components/ThemeProvider";
 import { usePollWhileVisible } from "@/hooks/use-poll-while-visible";
 import { useFocusTrap } from "@/hooks/use-focus-trap";
-import {
-  SidebarSearchField,
-  SidebarSearchResults,
-  useSidebarSearch,
-} from "./SidebarSearch";
+import { SearchIconButton, SearchTrigger } from "@/components/search/SearchTrigger";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { isNavItemActive } from "@/lib/nav-active";
 import { useProjects } from "@/hooks/use-projects";
@@ -96,6 +92,7 @@ interface SidebarProps {
   menuButtonRef?: React.RefObject<HTMLElement | null>;
   onOpenImport: () => void;
   onOpenExport: () => void;
+  onOpenSearch: () => void;
 }
 
 export function Sidebar({
@@ -105,6 +102,7 @@ export function Sidebar({
   menuButtonRef,
   onOpenImport,
   onOpenExport,
+  onOpenSearch,
 }: SidebarProps) {
   const { user, isAdmin, logout } = useAuth();
   const { projects, reorder } = useProjects();
@@ -164,8 +162,6 @@ export function Sidebar({
     returnFocusTo: menuButtonRef,
   });
 
-  const search = useSidebarSearch(projects);
-
   if (!user) return null;
 
   // The drawer is always full width, so the icon-only rail is a desktop-only state
@@ -219,27 +215,9 @@ export function Sidebar({
         </button>
       </div>
 
-      {!compact && (
-        <SidebarSearchField
-          value={search.query}
-          onChange={search.setQuery}
-          onKeyDown={search.handleKeyDown}
-          onClear={search.reset}
-        />
-      )}
+      {!compact && <SearchTrigger onOpen={onOpenSearch} />}
 
-      {/* Same container either way, so swapping the contents shifts nothing */}
       <nav className="flex flex-1 flex-col gap-4 overflow-y-auto px-2.5 pb-2.5">
-        {search.active ? (
-          <SidebarSearchResults
-            hits={search.hits}
-            loading={search.loading}
-            selectedIndex={search.selectedIndex}
-            onHover={search.setSelectedIndex}
-            onOpen={search.open}
-          />
-        ) : (
-        <>
         <div>
           <NavItem
             href="/my-tasks"
@@ -263,13 +241,9 @@ export function Sidebar({
             }
           />
           {compact && (
-            <NavItem
-              href="/search"
-              icon={ICONS.search}
-              label="Search"
-              active={isActive("/search")}
-              collapsed
-            />
+            <div className="flex justify-center">
+              <SearchIconButton onOpen={onOpenSearch} />
+            </div>
           )}
         </div>
 
@@ -302,8 +276,6 @@ export function Sidebar({
             collapsed={compact}
           />
         </div>
-        </>
-        )}
       </nav>
 
       <div className="border-t border-border p-2.5" ref={menuRef}>
