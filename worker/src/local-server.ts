@@ -1,7 +1,7 @@
 import { chmodSync, lstatSync, mkdirSync, unlinkSync } from "fs";
 import { createServer, IncomingMessage, ServerResponse } from "http";
 import { dirname } from "path";
-import { CommandHandlers, WorkerCommand } from "./commands.js";
+import { LocalCommands, WorkerCommand } from "./commands.js";
 import { isQuota, Telemetry } from "./telemetry.js";
 
 // A unix domain socket, not a TCP port: a port is reachable by every process on the machine and by
@@ -16,12 +16,13 @@ import { isQuota, Telemetry } from "./telemetry.js";
 
 export interface LocalServerDeps {
   socketPath: string;
-  // The server channel's dispatcher, deliberately — it owns the acknowledgement and the recency
-  // guard, and a socket that called loop.pause() directly would skip both.
-  handlers: CommandHandlers;
+  // The same dispatcher the server channels use, so pause/resume/stop get the same effects and the
+  // same acknowledgement — but by its local entry point, which does not touch the recency guard.
+  // That guard orders instants from the server's clock; feeding it this laptop's would let one
+  // local pause swallow a later board-issued stop.
+  handlers: LocalCommands;
   telemetry: Pick<Telemetry, "subscribe" | "recent">;
   paused: () => boolean;
-  now?: () => number;
   log?: (message: string) => void;
 }
 
@@ -45,19 +46,7 @@ function removeStale(socketPath: string): void {
 
 export function startLocalServer(deps: LocalServerDeps): LocalServer {
   const log = deps.log ?? ((message: string) => console.error(message));
-  const now = deps.now ?? Date.now;
   const streams = new Set<ServerResponse>();
-
-  // commands.ts orders by issuance and drops anything not newer than what it already applied, so
-  // two local commands landing in the same millisecond would collapse into one. Local issuances are
-  // therefore strictly increasing rather than merely current.
-  let lastIssuedAt = -Infinity;
-
-  function issue(command: WorkerCommand): void {
-    const instant = Math.max(now(), lastIssuedAt + 1);
-    lastIssuedAt = instant;
-    deps.handlers[command](new Date(instant).toISOString());
-  }
 
   function json(response: ServerResponse, status: number, body: unknown): void {
     response.writeHead(status, { "Content-Type": "application/json" });
@@ -65,7 +54,7 @@ export function startLocalServer(deps: LocalServerDeps): LocalServer {
   }
 
   function apply(response: ServerResponse, command: WorkerCommand): void {
-    issue(command);
+    deps.handlers[command]();
     json(response, 200, { paused: deps.paused() });
   }
 
@@ -136,9 +125,11 @@ export function startLocalServer(deps: LocalServerDeps): LocalServer {
       server.on("error", (error) => log(`local control socket failed: ${String(error)}`));
       try {
         // listen() creates the socket under the process umask, so narrowing it is a second syscall
-        // and another uid has a brief window in which the socket is reachable. The mkdir above
-        // closes that window only for a state dir this worker created; an existing looser one keeps
-        // it open.
+        // and there is a window before it. What actually closes that window is the umask: at the
+        // 022 launchd runs with, the socket lands at 0755 and connect(2) needs the write bit, so no
+        // other uid can reach it. It opens at umask 0002 or looser. The mkdir above is not the
+        // mitigation — mkdirSync does not chmod a directory that already exists, and this one
+        // normally does, since the operator creates it by hand to place the token file.
         chmodSync(deps.socketPath, 0o600);
       } catch (error) {
         reject(error instanceof Error ? error : new Error(String(error)));
