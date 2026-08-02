@@ -14,7 +14,7 @@ interface ColumnProps {
   selectedTasks?: Set<string>;
   selectionMode?: boolean;
   collapsed?: boolean;
-  onExpand?: () => void;
+  onToggleCollapsed?: () => void;
   onDragOverColumn?: (over: boolean) => void;
   onStatusChange: (taskId: string, status: string) => void;
   onTaskDrop?: (taskId: string, status: string, dropIndex: number) => void;
@@ -32,7 +32,7 @@ export function Column({
   selectedTasks,
   selectionMode,
   collapsed = false,
-  onExpand,
+  onToggleCollapsed,
   onDragOverColumn,
   onStatusChange,
   onTaskDrop,
@@ -87,7 +87,7 @@ export function Column({
         }
         setDropIndex(null);
       }}
-      onClick={collapsed ? onExpand : undefined}
+      onClick={collapsed ? onToggleCollapsed : undefined}
       title={collapsed ? `${column.label} — 0 tasks. Click to expand.` : undefined}
       className={`bg-bg-card rounded-xl border border-border
         border-t-2 flex flex-col max-h-[calc(100vh-12rem)] lg:max-h-full lg:h-full lg:min-h-0
@@ -115,11 +115,33 @@ export function Column({
         </>
       ) : (
       <>
-      <div className="px-3 py-2.5 flex items-center justify-between border-b border-border">
-        <h3 className="text-sm font-medium">{column.label}</h3>
-        <span className="text-xs text-text-muted bg-bg-input rounded-full px-2 py-0.5">
-          {tasks.length}
-        </span>
+      <div className="px-3 py-2.5 flex items-center justify-between gap-1.5 border-b border-border">
+        <h3 className="min-w-0 truncate text-sm font-medium">{column.label}</h3>
+        <div className="flex shrink-0 items-center gap-1">
+          <span className="text-xs text-text-muted bg-bg-input rounded-full px-2 py-0.5">
+            {tasks.length}
+          </span>
+          {/* Only an empty column can return to the rail, so only it offers the way back */}
+          {tasks.length === 0 && onToggleCollapsed && (
+            <button
+              type="button"
+              onClick={onToggleCollapsed}
+              title={`Collapse ${column.label}`}
+              aria-label={`Collapse ${column.label}`}
+              className="rounded p-0.5 text-text-muted transition-colors hover:bg-bg-hover hover:text-text"
+            >
+              <svg
+                className="h-3.5 w-3.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
+          )}
+        </div>
       </div>
 
       <div data-column-body className="flex-1 overflow-y-auto overscroll-y-contain no-scrollbar p-2 space-y-2">
