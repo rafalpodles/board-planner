@@ -9,8 +9,11 @@ interface ShortcutHelpProps {
 
 const SHORTCUTS = [
   { key: "N", description: "Create new task" },
+  { key: "Tab", description: "Move between board cards" },
   { key: "J / K", description: "Navigate tasks (list view)" },
-  { key: "Enter", description: "Open focused task" },
+  { key: "Enter / Space", description: "Open focused task" },
+  { key: "⇧ Click", description: "Add card to selection" },
+  { key: "⌘ Click", description: "Open task in a new tab" },
   { key: "/", description: "Focus search" },
   { key: "V", description: "Toggle view: board ↔ list" },
   { key: "R", description: "Refresh board" },
