@@ -27,15 +27,34 @@ vi.mock("next/image", () => ({
   default: (props: { alt?: string }) => <span data-testid="logo" aria-label={props.alt} />,
 }));
 
-function renderSidebar(props: { mobileOpen?: boolean } = {}) {
+function renderSidebar(
+  props: {
+    mobileOpen?: boolean;
+    onCloseMobile?: () => void;
+    menuButtonRef?: React.RefObject<HTMLElement | null>;
+  } = {}
+) {
   return render(
     <Sidebar
       mobileOpen={props.mobileOpen ?? false}
       onNavigate={() => {}}
+      onCloseMobile={props.onCloseMobile ?? (() => {})}
+      menuButtonRef={props.menuButtonRef}
       onOpenImport={() => {}}
       onOpenExport={() => {}}
     />
   );
+}
+
+// jsdom/happy-dom answer every media query with false, so the drawer branch only
+// runs when matchMedia is told the viewport is narrow
+function setViewport(mobile: boolean) {
+  window.matchMedia = ((query: string) => ({
+    matches: mobile && query.includes("max-width"),
+    media: query,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  })) as unknown as typeof window.matchMedia;
 }
 
 beforeEach(() => {
@@ -135,5 +154,106 @@ describe("Sidebar", () => {
     renderSidebar({ mobileOpen: false });
     const entry = await screen.findByTitle("All projects");
     expect(entry.getAttribute("aria-current")).toBe("page");
+  });
+});
+
+// The drawer painted a scrim and blocked the page visually, but owed it none of
+// a modal's actual contract: Escape did nothing and Tab walked straight past it
+describe("Sidebar as a mobile drawer", () => {
+  afterEach(() => setViewport(false));
+
+  it("presents itself as a dialog only while it is a drawer", async () => {
+    setViewport(true);
+    const { container } = renderSidebar({ mobileOpen: true });
+    await waitFor(() => {
+      const aside = container.querySelector("aside")!;
+      expect(aside.getAttribute("role")).toBe("dialog");
+      expect(aside.getAttribute("aria-modal")).toBe("true");
+      expect(aside.getAttribute("aria-label")).toBe("Navigation");
+    });
+  });
+
+  it("is plain layout above the breakpoint, even when mobileOpen is set", async () => {
+    setViewport(false);
+    const { container } = renderSidebar({ mobileOpen: true });
+    await waitFor(() => expect(screen.getByText("My Tasks")).toBeTruthy());
+    const aside = container.querySelector("aside")!;
+    expect(aside.getAttribute("role")).toBeNull();
+    expect(aside.getAttribute("aria-modal")).toBeNull();
+  });
+
+  it("closes on Escape", async () => {
+    setViewport(true);
+    const onCloseMobile = vi.fn();
+    renderSidebar({ mobileOpen: true, onCloseMobile });
+    await waitFor(() => expect(screen.getByLabelText("Close navigation")).toBeTruthy());
+
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    expect(onCloseMobile).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not answer Escape when it is not a drawer", async () => {
+    setViewport(false);
+    const onCloseMobile = vi.fn();
+    renderSidebar({ mobileOpen: false, onCloseMobile });
+    await waitFor(() => expect(screen.getByText("My Tasks")).toBeTruthy());
+
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    expect(onCloseMobile).not.toHaveBeenCalled();
+  });
+
+  it("keeps Tab inside itself", async () => {
+    setViewport(true);
+    const { container } = renderSidebar({ mobileOpen: true });
+    const aside = await waitFor(() => container.querySelector("aside")!);
+    const stops = [...aside.querySelectorAll<HTMLElement>("a[href], button")];
+    const last = stops[stops.length - 1];
+
+    last.focus();
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
+    });
+    expect(aside.contains(document.activeElement)).toBe(true);
+    expect(document.activeElement).toBe(stops[0]);
+  });
+
+  it("labels its close control for the drawer, not the desktop rail", async () => {
+    setViewport(true);
+    renderSidebar({ mobileOpen: true });
+    await waitFor(() => expect(screen.getByLabelText("Close navigation")).toBeTruthy());
+    expect(screen.queryByLabelText("Collapse sidebar")).toBeNull();
+  });
+
+  it("closes when that control is used", async () => {
+    setViewport(true);
+    const onCloseMobile = vi.fn();
+    renderSidebar({ mobileOpen: true, onCloseMobile });
+    const close = await screen.findByLabelText("Close navigation");
+    await act(async () => close.click());
+    expect(onCloseMobile).toHaveBeenCalledTimes(1);
+  });
+
+  it("still says Collapse sidebar on the desktop layout", async () => {
+    setViewport(false);
+    renderSidebar({ mobileOpen: false });
+    await waitFor(() => expect(screen.getByLabelText("Collapse sidebar")).toBeTruthy());
+  });
+
+  it("returns focus to whatever opened it", async () => {
+    setViewport(true);
+    const trigger = document.createElement("button");
+    document.body.appendChild(trigger);
+    const menuButtonRef = { current: trigger };
+
+    const { unmount } = renderSidebar({ mobileOpen: true, menuButtonRef });
+    await waitFor(() => expect(screen.getByLabelText("Close navigation")).toBeTruthy());
+    await act(async () => unmount());
+
+    expect(document.activeElement).toBe(trigger);
+    trigger.remove();
   });
 });
