@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import Link from "next/link";
 import { useApi } from "@/hooks/use-api";
 import { useToast } from "@/components/ui/Toast";
@@ -115,9 +115,8 @@ export default function MyTasksPage() {
                       {project.key}-{task.taskNumber}
                     </span>
                     <span
-                      className={`text-xs px-2 py-0.5 rounded-full flex-shrink-0 ${
-                        statusColor(task.status)
-                      }`}
+                      className="chip text-xs px-2 py-0.5 rounded-full flex-shrink-0"
+                      style={{ "--chip": statusAccent(task.status) } as CSSProperties}
                     >
                       {STATUS_LABELS[task.status]}
                     </span>
@@ -141,21 +140,21 @@ export default function MyTasksPage() {
   );
 }
 
-function statusColor(status: string): string {
+function statusAccent(status: string): string {
   switch (status) {
     case "in_progress":
-      return "bg-status-in-progress/20 text-status-in-progress";
+      return "var(--color-status-in-progress)";
     case "in_review":
-      return "bg-status-in-review/20 text-status-in-review";
+      return "var(--color-status-in-review)";
     case "needs_human_review":
-      return "bg-status-needs-human-review/20 text-status-needs-human-review";
+      return "var(--color-status-needs-human-review)";
     case "todo":
-      return "bg-status-todo/20 text-status-todo";
+      return "var(--color-status-todo)";
     case "ready_to_test":
-      return "bg-status-ready-to-test/20 text-status-ready-to-test";
+      return "var(--color-status-ready-to-test)";
     case "done":
-      return "bg-status-done/20 text-status-done";
+      return "var(--color-status-done)";
     default:
-      return "bg-status-planned/20 text-status-planned";
+      return "var(--color-status-planned)";
   }
 }

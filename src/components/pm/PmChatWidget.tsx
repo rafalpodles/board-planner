@@ -67,7 +67,7 @@ export function PmChatWidget() {
         onClick={() => setOpen((v) => !v)}
         aria-label={open ? "Close PM chat" : "Open PM chat"}
         title="PM Agent"
-        className="fixed bottom-6 right-4 z-50 flex h-14 w-14 cursor-pointer items-center justify-center rounded-full bg-primary text-white shadow-lg ring-4 ring-primary/20 transition-colors hover:bg-primary-hover"
+        className="fixed bottom-6 right-4 z-50 flex h-14 w-14 cursor-pointer items-center justify-center rounded-full bg-primary-solid text-white shadow-lg ring-4 ring-primary/20 transition-colors hover:bg-primary-solid-hover"
       >
         {open ? (
           <svg

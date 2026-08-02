@@ -201,7 +201,7 @@ export function MarkdownEditor({
           type="button"
           onClick={() => setPreview((p) => !p)}
           className={`ml-auto text-xs px-2 py-1 rounded transition-colors cursor-pointer ${
-            preview ? "text-primary bg-primary/10" : "text-text-muted hover:text-text hover:bg-bg-input"
+            preview ? "chip" : "text-text-muted hover:text-text hover:bg-bg-input"
           }`}
         >
           {preview ? "Edit" : "Preview"}
@@ -220,7 +220,7 @@ export function MarkdownEditor({
           {value.trim() ? (
             <MarkdownContent>{value}</MarkdownContent>
           ) : (
-            <p className="text-sm text-text-muted/50">Nothing to preview yet.</p>
+            <p className="text-sm text-text-muted">Nothing to preview yet.</p>
           )}
         </div>
       ) : (

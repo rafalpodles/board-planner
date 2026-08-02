@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, FormEvent } from "react";
+import { useEffect, useState, FormEvent, type CSSProperties } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
 import { ApiSprint, SprintStatus, SPRINT_STATUS_LABELS } from "@/types";
@@ -157,13 +157,19 @@ export default function SprintsPage() {
   }
 
   function statusBadge(status: SprintStatus) {
-    const colors: Record<SprintStatus, string> = {
-      planned: "bg-bg-input text-text-muted",
-      active: "bg-primary/10 text-primary",
-      completed: "bg-status-done/10 text-status-done",
+    const accents: Record<SprintStatus, string | undefined> = {
+      planned: undefined,
+      active: "var(--color-primary)",
+      completed: "var(--color-status-done)",
     };
+    const accent = accents[status];
     return (
-      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${colors[status]}`}>
+      <span
+        className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+          accent ? "chip" : "bg-bg-input text-text-muted"
+        }`}
+        style={accent ? ({ "--chip": accent } as CSSProperties) : undefined}
+      >
         {SPRINT_STATUS_LABELS[status]}
       </span>
     );
