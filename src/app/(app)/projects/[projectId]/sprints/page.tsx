@@ -10,6 +10,7 @@ import { Modal } from "@/components/ui/Modal";
 import { Select } from "@/components/ui/Select";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useToast } from "@/components/ui/Toast";
+import { PageHeader } from "@/components/shell/PageHeader";
 import {
   addDays,
   daysBetween,
@@ -185,23 +186,15 @@ export default function SprintsPage() {
 
   return (
     <div className="max-w-7xl mx-auto w-full">
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => router.push(`/projects/${projectId}`)}
-            aria-label="Back to board"
-            className="focus-ring rounded text-text-muted hover:text-text transition-colors"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
-          </button>
-          <h1 className="text-2xl font-bold">Sprints</h1>
-        </div>
-        <Button size="sm" onClick={() => openForm()}>
-          New Sprint
-        </Button>
-      </div>
+      <PageHeader
+        title="Sprints"
+        subtitle={sprints.length === 1 ? "1 sprint" : `${sprints.length} sprints`}
+        actions={
+          <Button size="sm" onClick={() => openForm()}>
+            New Sprint
+          </Button>
+        }
+      />
 
       {sprints.length === 0 ? (
         <div className="text-center py-16">
