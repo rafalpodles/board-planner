@@ -16,6 +16,7 @@ import { Modal } from "@/components/ui/Modal";
 import { AuthedImage } from "@/components/ui/AuthedImage";
 
 const MAX_ATTACHMENTS = 4;
+const MAX_INPUT_HEIGHT = 200;
 
 interface PendingAttachment {
   fileId: string;
@@ -57,6 +58,7 @@ export function PmChat({
   const [dragOver, setDragOver] = useState(false);
   const [expandedImage, setExpandedImage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const [liveActions, setLiveActions] = useState<{ tool: string; taskKey?: string; summary: string }[]>([]);
   const [recovering, setRecovering] = useState(false);
   const [stopping, setStopping] = useState(false);
@@ -64,6 +66,15 @@ export function PmChat({
   const [lastFailedInput, setLastFailedInput] = useState("");
   const [loading, setLoading] = useState(true);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+
+  // Height is measured, not declared: `auto` first so shrinking is possible, then
+  // the content height capped, past which the textarea scrolls on its own
+  useEffect(() => {
+    const field = inputRef.current;
+    if (!field) return;
+    field.style.height = "auto";
+    field.style.height = `${Math.min(field.scrollHeight, MAX_INPUT_HEIGHT)}px`;
+  }, [input]);
 
   const refreshTaskMap = useCallback(async () => {
     try {
@@ -525,6 +536,7 @@ export function PmChat({
           </svg>
         </button>
         <textarea
+          ref={inputRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
@@ -543,7 +555,8 @@ export function PmChat({
           }
           rows={2}
           disabled={working}
-          className="flex-1 bg-bg-input border border-border rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary resize-none disabled:opacity-60"
+          style={{ maxHeight: MAX_INPUT_HEIGHT }}
+          className="flex-1 overflow-y-auto bg-bg-input border border-border rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary resize-none disabled:opacity-60"
         />
         {working ? (
           <button
