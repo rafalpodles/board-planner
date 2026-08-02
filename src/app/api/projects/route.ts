@@ -14,9 +14,11 @@ export const GET = withAuth(async (_request, { user }) => {
       ? {}
       : { _id: { $in: user.allowedProjects || [] } };
 
+  // Manual order first; anything never dragged keeps its default 0 and falls
+  // back to newest-first, which is the order this list had before CP-180
   const projects = await Project.find(filter)
     .populate("owner", "username fullName")
-    .sort({ createdAt: -1 });
+    .sort({ sortOrder: 1, createdAt: -1 });
 
   // The sidebar renders on every route, so its per-project badges have to come
   // from this one request. Two flat queries joined in memory rather than a
