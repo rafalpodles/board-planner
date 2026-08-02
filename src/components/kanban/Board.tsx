@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { ApiTask, ApiLabel, ApiProjectCategory, ApiProjectColumn } from "@/types";
 import { effectiveColumns } from "@/lib/columns";
+import { boardGridTemplate, boardMinWidth, isColumnCollapsed } from "@/lib/board-grid";
 import { Column } from "./Column";
 
 interface BoardProps {
@@ -47,6 +48,18 @@ export function Board({
     [tasks, boardColumns]
   );
 
+  // Expanding a rail is a reading choice, not a preference — it lasts the session
+  const [pinnedColumns, setPinnedColumns] = useState<Set<string>>(new Set());
+  const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
+
+  const collapsed = boardColumns.map((column) =>
+    isColumnCollapsed(
+      grouped[column.id].length,
+      pinnedColumns.has(column.id),
+      dragOverColumn === column.id
+    )
+  );
+
   return (
     <div className="relative lg:h-full">
       <div
@@ -59,11 +72,11 @@ export function Board({
           // viewport and their internal overflow-y never engages.
           className="grid gap-4 lg:h-full lg:grid-rows-[minmax(0,1fr)]"
           style={{
-            gridTemplateColumns: `repeat(${boardColumns.length}, minmax(0, 1fr))`,
-            minWidth: `${boardColumns.length * 200}px`,
+            gridTemplateColumns: boardGridTemplate(collapsed),
+            minWidth: `${boardMinWidth(collapsed)}px`,
           }}
         >
-          {boardColumns.map((column) => (
+          {boardColumns.map((column, i) => (
             <Column
               key={column.id}
               column={column}
@@ -73,6 +86,15 @@ export function Board({
               projectCategories={projectCategories}
               selectedTasks={selectedTasks}
               selectionMode={selectionMode}
+              collapsed={collapsed[i]}
+              onExpand={() =>
+                setPinnedColumns((prev) => new Set(prev).add(column.id))
+              }
+              onDragOverColumn={(over) =>
+                setDragOverColumn((prev) =>
+                  over ? column.id : prev === column.id ? null : prev
+                )
+              }
               onStatusChange={onStatusChange}
               onTaskDrop={onTaskDrop}
               onTaskClick={onTaskClick}
