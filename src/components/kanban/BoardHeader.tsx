@@ -6,15 +6,12 @@ import { Button } from "@/components/ui/Button";
 import {
   ALL_TASKS,
   BACKLOG,
-  boardSubtitle,
   sprintScopeLabel,
 } from "@/lib/sprint-scope";
 
 interface BoardHeaderProps {
   projectName: string;
   projectIcon?: string;
-  taskCount: number;
-  doneCount: number;
   sprints: ApiSprint[];
   scope: string;
   onScopeChange: (scope: string) => void;
@@ -27,8 +24,6 @@ interface BoardHeaderProps {
 export function BoardHeader({
   projectName,
   projectIcon,
-  taskCount,
-  doneCount,
   sprints,
   scope,
   onScopeChange,
@@ -54,7 +49,6 @@ export function BoardHeader({
   const scopeLabel = sprintScopeLabel(scope, sprints);
   const activeSprint = sprints.find((s) => s.status === "active");
   const plannedSprints = sprints.filter((s) => s.status === "planned");
-  const progress = taskCount > 0 ? (doneCount / taskCount) * 100 : 0;
 
   function pick(next: string) {
     setScopeOpen(false);
@@ -74,24 +68,16 @@ export function BoardHeader({
             ref={scopeRef}
             className="relative flex items-center gap-1 text-[11px] leading-tight text-text-muted"
           >
-            {sprints.length === 0 ? (
-              <span className="truncate">{boardSubtitle(null, taskCount)}</span>
-            ) : (
-              <>
-                <span className="hidden truncate @xl:inline">Board ·</span>
-                <button
-                  type="button"
-                  onClick={() => setScopeOpen((v) => !v)}
-                  aria-expanded={scopeOpen}
-                  aria-label="Change sprint scope"
-                  className="focus-ring max-w-[12rem] truncate rounded px-1 py-0.5 text-text-muted underline decoration-dotted underline-offset-2 transition-colors hover:text-text"
-                >
-                  {scopeLabel ?? "All tasks"}
-                </button>
-                <span className="hidden truncate @xl:inline">
-                  · {taskCount === 1 ? "1 task" : `${taskCount} tasks`}
-                </span>
-              </>
+            {sprints.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setScopeOpen((v) => !v)}
+                aria-expanded={scopeOpen}
+                aria-label="Change sprint scope"
+                className="focus-ring max-w-[12rem] truncate rounded px-1 py-0.5 text-text-muted underline decoration-dotted underline-offset-2 transition-colors hover:text-text"
+              >
+                {scopeLabel ?? "All tasks"}
+              </button>
             )}
 
             {scopeOpen && (
@@ -129,20 +115,6 @@ export function BoardHeader({
           </div>
         </div>
       </div>
-
-      {taskCount > 0 && (
-        <div className="hidden shrink-0 items-center gap-2 @xl:flex">
-          <div className="h-[5px] w-16 overflow-hidden rounded-full bg-bg-input">
-            <div
-              className="h-full rounded-full bg-status-done transition-all duration-300"
-              style={{ width: `${progress}%` }}
-            />
-          </div>
-          <span className="text-[11px] text-text-muted">
-            {doneCount}/{taskCount}
-          </span>
-        </div>
-      )}
 
       <div className="ml-auto flex shrink-0 items-center rounded-lg border border-border bg-bg-card p-0.5">
         {(["board", "list"] as const).map((mode) => (
