@@ -205,6 +205,21 @@ describe("runTask", () => {
     expect(h.api.comment.mock.calls[0][2]).toMatch(/shipped/);
   });
 
+  // This comment is posted directly, before a reporter exists to scrub it
+  it("redacts a credential in the error it comments when the board cannot be resolved", async () => {
+    const credential = `cpw_${"9f3c".repeat(16)}`;
+    const h = harness();
+    h.api.statusIds.mockRejectedValue(new Error(`401 for worker w1 with credential ${credential}`));
+
+    await runTask(h.deps, task);
+
+    const body = h.api.comment.mock.calls[0][2];
+    expect(body).not.toContain(credential);
+    expect(body).not.toContain("cpw_");
+    expect(body).toContain("Returned to the queue");
+    expect(body).toContain("401 for worker w1 with credential [redacted]");
+  });
+
   it("releases the task back to the queue on a usage limit", async () => {
     const execute = vi.fn<Executor["execute"]>().mockResolvedValue({ kind: "usage_limit" });
     const h = harness({ executor: { execute } });

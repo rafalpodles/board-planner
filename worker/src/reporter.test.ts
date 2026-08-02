@@ -335,3 +335,57 @@ describe("reports the server refused", () => {
     expect(outbox.add).not.toHaveBeenCalled();
   });
 });
+
+describe("secrets in free text bound for the board", () => {
+  const credential = `cpw_${"9f3c".repeat(16)}`;
+
+  it("redacts a credential in a gate rejection and keeps the rest of the line", async () => {
+    const api = apiSpy();
+    await createReporter(api, statuses).gateRejected(
+      task,
+      "build",
+      `\`npm ci\` failed: ${credential} was rejected by the registry`,
+      "cp-158/worker"
+    );
+
+    const body = api.comment.mock.calls[0][2];
+    expect(body).not.toContain(credential);
+    expect(body).toContain("`npm ci` failed: [redacted] was rejected by the registry");
+    expect(body).toContain("build");
+    expect(body).toContain("cp-158/worker");
+  });
+
+  it("redacts a credential the agent put in its blocked reason", async () => {
+    const api = apiSpy();
+    await createReporter(api, statuses).blocked(task, `no access with ${credential}, need a new one`);
+
+    const body = api.comment.mock.calls[0][2];
+    expect(body).not.toContain(credential);
+    expect(body).toContain("no access with [redacted], need a new one");
+  });
+
+  it("redacts the body it queues, so a replayed report does not publish the secret", async () => {
+    const api = apiSpy();
+    api.comment.mockRejectedValue(new Error("502"));
+    const outbox = { add: vi.fn(), flush: vi.fn(), pending: vi.fn().mockReturnValue(0) };
+
+    await createReporter(api, statuses, vi.fn(), outbox).merged(
+      task,
+      "https://x/pull/7",
+      `pushed with ${credential}`
+    );
+
+    const op = outbox.add.mock.calls[0][0] as { body: string };
+    expect(op.body).not.toContain(credential);
+    expect(op.body).toContain("pushed with [redacted]");
+  });
+
+  it("redacts a secret straddling the truncation point instead of clipping it in half", async () => {
+    const api = apiSpy();
+    await createReporter(api, statuses).blocked(task, `${"x".repeat(1990)}${credential}`);
+
+    const body = api.comment.mock.calls[0][2];
+    expect(body).not.toContain("cpw_");
+    expect(body).toContain("[redacted]");
+  });
+});

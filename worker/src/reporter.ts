@@ -1,5 +1,6 @@
 import { ApiClient, StatusIds } from "./api.js";
 import { Outbox, OutboxOp } from "./outbox.js";
+import { scrub } from "./scrub.js";
 import { ClaimedTask } from "./types.js";
 
 const MAX_REASON_CHARS = 2000;
@@ -15,9 +16,13 @@ export interface Reporter {
 
 type Log = (message: string) => void;
 
-function capped(text: string): string {
-  if (text.length <= MAX_REASON_CHARS) return text;
-  return `${text.slice(0, MAX_REASON_CHARS)}\n[truncated to ${MAX_REASON_CHARS} characters]`;
+// Every agent- and gate-authored string entering a board comment goes through here. Redacted
+// before the cut, not after: a secret straddling it would otherwise survive as a prefix too short
+// for any pattern to match — up to 60 of a worker credential's 64 hex characters.
+function safeText(text: string): string {
+  const safe = scrub(text);
+  if (safe.length <= MAX_REASON_CHARS) return safe;
+  return `${safe.slice(0, MAX_REASON_CHARS)}\n[truncated to ${MAX_REASON_CHARS} characters]`;
 }
 
 export function createReporter(
@@ -94,7 +99,7 @@ export function createReporter(
       await report(
         task,
         statusIds.review,
-        `The execution worker stopped: the agent reported it could not finish.\n\n${capped(reason)}`
+        `The execution worker stopped: the agent reported it could not finish.\n\n${safeText(reason)}`
       );
     },
 
@@ -102,12 +107,12 @@ export function createReporter(
       await report(
         task,
         statusIds.review,
-        `The execution worker blocked the merge at the **${gate}** gate.\n\n${capped(reason)}\n\nThe work is pushed to \`${branch}\` for inspection.`
+        `The execution worker blocked the merge at the **${gate}** gate.\n\n${safeText(reason)}\n\nThe work is pushed to \`${branch}\` for inspection.`
       );
     },
 
     async released(task, reason) {
-      const text = capped(reason);
+      const text = safeText(reason);
       if (lastRelease.get(task.taskId) !== text && (await comment(task, `Returned to the queue: ${text}`))) {
         lastRelease.set(task.taskId, text);
       }
@@ -119,17 +124,17 @@ export function createReporter(
     async requeued(task, reason) {
       lastRelease.delete(task.taskId);
       const attempt = task.attempts > 0 ? ` on attempt ${task.attempts}` : "";
-      await comment(task, `Returned to the queue after the run failed${attempt}.\n\n${capped(reason)}`);
+      await comment(task, `Returned to the queue after the run failed${attempt}.\n\n${safeText(reason)}`);
       await release(task, { refund: false });
     },
 
     async merged(task, prUrl, summary) {
-      await report(task, statusIds.done, `Merged ${prUrl}\n\n${capped(summary)}`);
+      await report(task, statusIds.done, `Merged ${prUrl}\n\n${safeText(summary)}`);
     },
 
     async failed(task, reason) {
       const attempt = task.attempts > 0 ? ` on attempt ${task.attempts}` : "";
-      await report(task, statusIds.review, `The execution worker gave up${attempt}.\n\n${capped(reason)}`);
+      await report(task, statusIds.review, `The execution worker gave up${attempt}.\n\n${safeText(reason)}`);
     },
   };
 }
