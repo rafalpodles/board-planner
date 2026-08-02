@@ -27,10 +27,3 @@ export function sprintScopeLabel(scope: string, sprints: ApiSprint[]): string | 
 export function sprintDefaultForNewTask(scope: string): string {
   return scope === ALL_TASKS || scope === BACKLOG ? "" : scope;
 }
-
-export function boardSubtitle(scopeLabel: string | null, taskCount: number): string {
-  const parts = ["Board"];
-  if (scopeLabel) parts.push(scopeLabel);
-  parts.push(`${taskCount} ${taskCount === 1 ? "task" : "tasks"}`);
-  return parts.join(" · ");
-}
