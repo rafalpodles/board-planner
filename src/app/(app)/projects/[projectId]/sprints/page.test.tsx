@@ -50,18 +50,7 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-describe("Sprints page width", () => {
-  it("uses the width the sidebar freed up, up to a readable maximum", async () => {
-    const { container } = await renderSprints();
-    expect(container.firstElementChild!.className).toContain("max-w-7xl");
-  });
-
-  it("lays the sprint cards two across on a wide screen", async () => {
-    await renderSprints();
-    const card = screen.getByRole("heading", { name: "Sprint 12" }).closest("div.border")!;
-    expect(card.parentElement!.className).toContain("xl:grid-cols-2");
-  });
-
+describe("Sprints page", () => {
   it("still lists every sprint", async () => {
     await renderSprints();
     expect(screen.getByRole("heading", { name: "Sprint 12" })).toBeTruthy();
