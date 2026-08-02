@@ -162,12 +162,33 @@ describe("ResizableSplit", () => {
 
     act(() => screen.getByRole("button", { name: "Hide activity" }).click());
     expect(screen.queryByTestId("aside")).toBeNull();
-    expect(grid(container)).toBeNull();
     expect(localStorage.getItem("task-detail-aside-collapsed")).toBe("1");
 
     act(() => screen.getByRole("button", { name: "Show activity" }).click());
     expect(screen.getByTestId("aside")).toBeTruthy();
     expect(localStorage.getItem("task-detail-aside-collapsed")).toBe("0");
+  });
+
+  // Collapsing must not move the control out from under the cursor: the toggle
+  // keeps its own column at the right instead of dropping below the content
+  it("leaves the toggle where it was when the aside collapses", () => {
+    const { container } = renderSplit();
+
+    act(() => screen.getByRole("button", { name: "Hide activity" }).click());
+
+    const cells = grid(container)!.children;
+    expect(grid(container)!.style.gridTemplateColumns).toBe("minmax(0,1fr) auto");
+    expect(cells[cells.length - 1].contains(screen.getByRole("button", { name: "Show activity" })))
+      .toBe(true);
+  });
+
+  it("keeps the toggle under the content when stacked", () => {
+    setViewport(false);
+    localStorage.setItem("task-detail-aside-collapsed", "1");
+    const { container } = renderSplit();
+
+    expect(grid(container)).toBeNull();
+    expect(screen.getByRole("button", { name: "Show activity" })).toBeTruthy();
   });
 
   it("comes back collapsed if that is how it was left", () => {

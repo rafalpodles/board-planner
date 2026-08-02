@@ -102,11 +102,31 @@ export function ResizableSplit({ children, aside, asideLabel }: ResizableSplitPr
 
   const split = isWide && !collapsed;
 
+  const toggle = (className: string) => (
+    <button
+      type="button"
+      onClick={toggleCollapsed}
+      className={`focus-ring rounded-md text-text-muted transition-colors hover:bg-bg-hover hover:text-text ${className}`}
+    >
+      {collapsed ? "Show" : "Hide"} {asideLabel}
+    </button>
+  );
+
   return (
     <div
       ref={containerRef}
-      className={split ? "grid items-start" : ""}
-      style={split ? { gridTemplateColumns: `minmax(0,1fr) ${DIVIDER}px ${width}px` } : undefined}
+      className={isWide ? "grid items-start" : ""}
+      style={
+        isWide
+          ? {
+              // Collapsed still keeps a column, so the toggle stays where it was
+              // rather than dropping below the content
+              gridTemplateColumns: collapsed
+                ? "minmax(0,1fr) auto"
+                : `minmax(0,1fr) ${DIVIDER}px ${width}px`,
+            }
+          : undefined
+      }
     >
       <div className="min-w-0 space-y-6">{children}</div>
 
@@ -134,37 +154,22 @@ export function ResizableSplit({ children, aside, asideLabel }: ResizableSplitPr
         </div>
       )}
 
-      {collapsed ? (
+      {isWide ? (
+        collapsed ? (
+          <div className="flex justify-end pl-6">{toggle("px-2 py-1 text-xs")}</div>
+        ) : (
+          <aside className="min-w-0 pl-6">
+            <div className="mb-2 flex justify-end">{toggle("px-2 py-1 text-xs")}</div>
+            {aside}
+          </aside>
+        )
+      ) : collapsed ? (
+        // Stacked, the aside belongs under the content, and so does the way back to it
         <div className="mt-6 border-t border-border pt-6">
-          <button
-            type="button"
-            onClick={toggleCollapsed}
-            className="focus-ring rounded-md px-2 py-1.5 text-sm text-text-muted transition-colors hover:bg-bg-hover hover:text-text"
-          >
-            Show {asideLabel}
-          </button>
+          {toggle("min-h-[44px] px-2 py-1.5 text-sm")}
         </div>
       ) : (
-        <aside
-          className={
-            split
-              ? "min-w-0 pl-6"
-              : "mt-6 min-w-0 border-t border-border pt-6"
-          }
-        >
-          {isWide && (
-            <div className="mb-2 flex justify-end">
-              <button
-                type="button"
-                onClick={toggleCollapsed}
-                className="focus-ring rounded-md px-2 py-1 text-xs text-text-muted transition-colors hover:bg-bg-hover hover:text-text"
-              >
-                Hide {asideLabel}
-              </button>
-            </div>
-          )}
-          {aside}
-        </aside>
+        <aside className="mt-6 min-w-0 border-t border-border pt-6">{aside}</aside>
       )}
     </div>
   );
