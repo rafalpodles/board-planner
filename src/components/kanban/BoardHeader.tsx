@@ -62,32 +62,35 @@ export function BoardHeader({
   }
 
   return (
-    <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border bg-bg px-6">
+    // z-30 keeps the scope menu over the board: @container makes the header a stacking context
+    <header className="@container relative z-30 flex h-14 shrink-0 items-center gap-3 border-b border-border bg-bg px-6">
       <div className="flex min-w-0 items-center gap-2">
-        <span aria-hidden className="shrink-0 text-[17px] leading-none">
+        <span aria-hidden className="hidden shrink-0 text-[17px] leading-none @md:inline">
           {projectIcon || DEFAULT_PROJECT_ICON}
         </span>
         <div className="min-w-0">
           <h1 className="truncate text-[15px] font-semibold leading-tight">{projectName}</h1>
           <div
             ref={scopeRef}
-            className="relative flex items-center gap-1 whitespace-nowrap text-[11px] leading-tight text-text-muted"
+            className="relative flex items-center gap-1 text-[11px] leading-tight text-text-muted"
           >
             {sprints.length === 0 ? (
               <span className="truncate">{boardSubtitle(null, taskCount)}</span>
             ) : (
               <>
-                <span>Board ·</span>
+                <span className="hidden truncate @xl:inline">Board ·</span>
                 <button
                   type="button"
                   onClick={() => setScopeOpen((v) => !v)}
                   aria-expanded={scopeOpen}
                   aria-label="Change sprint scope"
-                  className="max-w-[12rem] truncate rounded px-1 text-text-muted underline decoration-dotted underline-offset-2 transition-colors hover:text-text"
+                  className="max-w-[12rem] truncate rounded px-1 py-0.5 text-text-muted underline decoration-dotted underline-offset-2 transition-colors hover:text-text"
                 >
                   {scopeLabel ?? "All tasks"}
                 </button>
-                <span>· {taskCount === 1 ? "1 task" : `${taskCount} tasks`}</span>
+                <span className="hidden truncate @xl:inline">
+                  · {taskCount === 1 ? "1 task" : `${taskCount} tasks`}
+                </span>
               </>
             )}
 
@@ -128,7 +131,7 @@ export function BoardHeader({
       </div>
 
       {taskCount > 0 && (
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="hidden shrink-0 items-center gap-2 @xl:flex">
           <div className="h-[5px] w-16 overflow-hidden rounded-full bg-bg-input">
             <div
               className="h-full rounded-full bg-status-done transition-all duration-300"
@@ -148,7 +151,7 @@ export function BoardHeader({
             type="button"
             onClick={() => onViewModeChange(mode)}
             aria-current={viewMode === mode ? "true" : undefined}
-            className={`rounded-md px-3 py-1.5 text-[13px] transition-colors ${
+            className={`rounded-md px-2 py-1.5 text-[13px] transition-colors @md:px-3 ${
               viewMode === mode
                 ? "bg-bg-input font-medium text-text"
                 : "text-text-muted hover:text-text"
@@ -164,7 +167,7 @@ export function BoardHeader({
         onClick={onRefresh}
         title="Refresh board (R)"
         aria-label="Refresh board"
-        className="shrink-0 rounded-lg p-2 text-text-muted transition-colors hover:bg-bg-card hover:text-text"
+        className="block shrink-0 rounded-lg p-2 text-text-muted transition-colors hover:bg-bg-card hover:text-text"
       >
         <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path
@@ -180,10 +183,20 @@ export function BoardHeader({
         size="sm"
         onClick={onNewTask}
         title="New task (N)"
+        aria-label="New task"
         className="shrink-0 whitespace-nowrap"
       >
-        New task
-        <kbd className="ml-1 rounded bg-black/25 px-1 text-[11px]">N</kbd>
+        <svg
+          aria-hidden
+          className="h-4 w-4 @md:hidden"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v14M5 12h14" />
+        </svg>
+        <span className="hidden @md:inline">New task</span>
+        <kbd className="ml-1 hidden rounded bg-black/25 px-1 text-[11px] @xl:inline">N</kbd>
       </Button>
     </header>
   );
