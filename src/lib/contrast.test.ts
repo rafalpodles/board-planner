@@ -1,7 +1,10 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { chipContrast, contrastRatio, parseHex } from "./contrast";
+import { chipContrast, chipCustomContrast, contrastRatio, parseHex } from "./contrast";
+
+// Colours a project owner can pick for a category or label — vivid, not theme-tuned
+const PROJECT_PICKED = ["#22c55e", "#3b82f6", "#f59e0b", "#ef4444", "#a855f7", "#06b6d4"];
 
 const css = readFileSync(join(process.cwd(), "src/app/globals.css"), "utf8");
 
@@ -65,6 +68,21 @@ describe("chip contrast", () => {
         });
       }
     });
+  }
+});
+
+describe("chip with a project-picked colour", () => {
+  for (const [name, theme] of THEMES) {
+    for (const picked of PROJECT_PICKED) {
+      it(`${name}: ${picked} clears AA`, () => {
+        const ratio = chipCustomContrast(
+          parseHex(picked),
+          parseHex(theme["--color-bg-card"]),
+          parseHex(theme["--color-text"])
+        );
+        expect(ratio).toBeGreaterThanOrEqual(AA);
+      });
+    }
   }
 });
 

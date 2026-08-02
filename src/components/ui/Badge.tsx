@@ -73,7 +73,10 @@ export function Badge({
   }
 
   return (
-    <span className={`${base} chip ${className}`} style={{ "--chip": accent } as CSSProperties}>
+    <span
+      className={`${base} chip ${color ? "chip-custom" : ""} ${className}`}
+      style={{ "--chip": accent } as CSSProperties}
+    >
       {children}
     </span>
   );
