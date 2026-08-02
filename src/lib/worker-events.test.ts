@@ -29,6 +29,17 @@ describe("worker-events", () => {
     expect(frameOf(controller.enqueue.mock.calls[0])).toBe('event: command\ndata: {"command":"pause"}\n\n');
   });
 
+  it("carries the issuance in the frame, so the worker can dedupe it against its heartbeat", () => {
+    const controller = fakeController();
+    registerWorkerStream("w-issued", controller);
+
+    publishToWorker("w-issued", { command: "stop", commandIssuedAt: "2026-08-01T12:00:00.000Z" });
+
+    expect(frameOf(controller.enqueue.mock.calls[0])).toBe(
+      'event: command\ndata: {"command":"stop","commandIssuedAt":"2026-08-01T12:00:00.000Z"}\n\n'
+    );
+  });
+
   it("scopes delivery to the published worker id", () => {
     const a = fakeController();
     const b = fakeController();

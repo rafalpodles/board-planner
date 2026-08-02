@@ -23,6 +23,7 @@ export const POST = withWorker(async (request, { worker }) => {
 
   return NextResponse.json({
     command: worker.command,
+    commandIssuedAt: worker.commandIssuedAt ? new Date(worker.commandIssuedAt).toISOString() : null,
     policy: worker.policy,
     assignments: worker.assignments.map((a) => ({
       project: String(a.project),

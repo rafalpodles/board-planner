@@ -1,11 +1,12 @@
+import { CommandHandlers, isWorkerCommand, WorkerCommand } from "./commands.js";
 import { loadIdentity, PROTOCOL_VERSION, Store } from "./registration.js";
 
-export type WorkerCommand = "pause" | "resume" | "stop";
+export type { WorkerCommand } from "./commands.js";
 
 export interface ControlDeps {
   apiBaseUrl: string;
   identitySource: Pick<Store, "read">;
-  handlers: Record<WorkerCommand, () => void>;
+  handlers: CommandHandlers;
   fetchImpl?: typeof fetch;
   reconnectDelayMs?: number;
   log?: (message: string) => void;
@@ -15,16 +16,11 @@ export interface Control {
   close(): void;
 }
 
-const COMMANDS = new Set<WorkerCommand>(["pause", "resume", "stop"]);
 const MAX_RECONNECT_DELAY_MS = 60_000;
-
-function isWorkerCommand(value: unknown): value is WorkerCommand {
-  return typeof value === "string" && COMMANDS.has(value as WorkerCommand);
-}
 
 async function consumeFrames(
   body: ReadableStream<Uint8Array>,
-  onCommand: (command: WorkerCommand) => void,
+  onCommand: (command: WorkerCommand, issuedAt?: string) => void,
   onData: () => void
 ): Promise<void> {
   const reader = body.getReader();
@@ -51,8 +47,16 @@ async function consumeFrames(
 
         if (event === "command" && dataLines.length > 0) {
           try {
-            const payload = JSON.parse(dataLines.join("\n")) as { command?: unknown };
-            if (isWorkerCommand(payload.command)) onCommand(payload.command);
+            const payload = JSON.parse(dataLines.join("\n")) as {
+              command?: unknown;
+              commandIssuedAt?: unknown;
+            };
+            if (isWorkerCommand(payload.command)) {
+              onCommand(
+                payload.command,
+                typeof payload.commandIssuedAt === "string" ? payload.commandIssuedAt : undefined
+              );
+            }
           } catch {
             // Malformed frame — dropped, not fatal. The next heartbeat still carries the
             // current command, so a frame lost here is not a command lost.
@@ -113,7 +117,7 @@ export function connectControl(deps: ControlDeps): Control {
       // backoff — only a stream that actually carried data proves the connection was live.
       await consumeFrames(
         response.body,
-        (command) => deps.handlers[command](),
+        (command, issuedAt) => deps.handlers[command](issuedAt),
         () => { retries = 0; }
       );
     } catch (error) {

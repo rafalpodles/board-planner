@@ -12,6 +12,7 @@ import {
   parseAssignments,
   WorkerConfig,
 } from "./config.js";
+import { createCommandHandlers, createRunGuard } from "./commands.js";
 import { connectControl } from "./control.js";
 import { createDelivery } from "./delivery.js";
 import { collectDiff } from "./diff.js";
@@ -158,16 +159,7 @@ async function main(): Promise<void> {
     await rebind();
   }
 
-  const workerName = bootstrap.workerName;
-  const heartbeat = startHeartbeat({
-    apiBaseUrl: bootstrap.apiBaseUrl,
-    apiToken: bootstrap.apiToken,
-    registration: { name: workerName, host: hostname(), platform: process.platform, version: WORKER_VERSION },
-    store: identityStore,
-  });
-  let current: AbortController | null = null;
-  // Deliberately abort-only — see the commit message for why this needs no matching un-pause.
-  heartbeat.onAbort(() => current?.abort());
+  const runs = createRunGuard();
 
   async function execute(task: ClaimedTask): Promise<void> {
     const taskConfig = configFor(task.projectId);
@@ -178,27 +170,23 @@ async function main(): Promise<void> {
       return;
     }
 
-    const controller = new AbortController();
-    current = controller;
-    const deps: PipelineDeps = {
-      config: taskConfig,
-      api,
-      columnIds: (projectId) => api.columnIds(projectId),
-      createReporter: (client, statusIds) =>
-        createReporter(client, statusIds, (message) => console.error(message), outbox),
-      createDelivery,
-      workspace: createWorkspace(taskConfig, runner),
-      executor: createExecutor(taskConfig, runner),
-      collectDiff,
-      runner,
-      gates: buildGates(taskConfig, runner),
-      signal: controller.signal,
-    };
-    try {
-      await runTask(deps, task);
-    } finally {
-      current = null;
-    }
+    await runs.under((signal) => {
+      const deps: PipelineDeps = {
+        config: taskConfig,
+        api,
+        columnIds: (projectId) => api.columnIds(projectId),
+        createReporter: (client, statusIds) =>
+          createReporter(client, statusIds, (message) => console.error(message), outbox),
+        createDelivery,
+        workspace: createWorkspace(taskConfig, runner),
+        executor: createExecutor(taskConfig, runner),
+        collectDiff,
+        runner,
+        gates: buildGates(taskConfig, runner),
+        signal,
+      };
+      return runTask(deps, task);
+    });
   }
 
   async function drain(): Promise<void> {
@@ -218,25 +206,28 @@ async function main(): Promise<void> {
     drain,
   });
 
-  // "stop" pauses rather than calling loop.stop() — see the commit message for why.
+  // One dispatcher behind both transports — see the commit message for why the heartbeat, not the
+  // stream, is the one that has to work.
+  const handlers = createCommandHandlers({
+    loop,
+    runs,
+    ack: (command) => heartbeat.ack(command),
+  });
+
+  const heartbeat = startHeartbeat({
+    apiBaseUrl: bootstrap.apiBaseUrl,
+    apiToken: bootstrap.apiToken,
+    registration: { name: bootstrap.workerName, host: hostname(), platform: process.platform, version: WORKER_VERSION },
+    store: identityStore,
+    handlers,
+  });
+  // Deliberately abort-only — see the commit message for why this needs no matching un-pause.
+  heartbeat.onAbort(() => runs.abort());
+
   const control = connectControl({
     apiBaseUrl: bootstrap.apiBaseUrl,
     identitySource: identityStore,
-    handlers: {
-      pause: () => {
-        loop.pause();
-        if (loop.paused()) heartbeat.ack("pause");
-      },
-      resume: () => {
-        loop.resume();
-        if (!loop.paused()) heartbeat.ack("resume");
-      },
-      stop: () => {
-        current?.abort();
-        loop.pause();
-        if (loop.paused()) heartbeat.ack("stop");
-      },
-    },
+    handlers,
   });
 
   process.on("SIGTERM", () => loop.stop());

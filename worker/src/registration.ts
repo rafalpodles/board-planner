@@ -1,3 +1,5 @@
+import { CommandHandlers, isWorkerCommand } from "./commands.js";
+
 export const PROTOCOL_VERSION = 1;
 
 export interface Identity {
@@ -22,6 +24,8 @@ export interface HeartbeatDeps {
   apiToken: string;
   registration: RegistrationInfo;
   store: Store;
+  // The command channel that survives SSE loss and a restart, so this is the durable one
+  handlers: CommandHandlers;
   fetchImpl?: typeof fetch;
   log?: (message: string) => void;
 }
@@ -176,6 +180,16 @@ export function startHeartbeat(deps: HeartbeatDeps): Heartbeat {
         // it so the next tick registers afresh instead of retrying the same dead credential forever
         cached = null;
         deps.store.write("", { mode: 0o600 });
+      } else if (response.ok) {
+        const body = (await response.json().catch(() => null)) as {
+          command?: unknown;
+          commandIssuedAt?: unknown;
+        } | null;
+        if (body && isWorkerCommand(body.command)) {
+          deps.handlers[body.command](
+            typeof body.commandIssuedAt === "string" ? body.commandIssuedAt : undefined
+          );
+        }
       }
     } catch (error) {
       log(`heartbeat could not reach the server: ${String(error)}`);
