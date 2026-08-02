@@ -98,6 +98,50 @@ describe("summarise — what a tool call is allowed to reveal", () => {
     }
   });
 
+  // Naming the key is not enough: the tool_use block is summarised whether or not the call then
+  // failed, so an agent can put anything in file_path and never care that it does not resolve
+  it("refuses a file_path that is really a file body", () => {
+    const body = `const token = "${SECRET}";\nexport const answer = 41;\n`;
+    const event = assistantEvent([toolUse("Read", { file_path: body })]);
+
+    const result = summarise(event);
+
+    expect(result).toEqual({ phase: "agent", tool: { name: "Read" } });
+    expect(JSON.stringify(result)).not.toContain(SECRET);
+  });
+
+  it("refuses a path longer than any real path", () => {
+    const event = assistantEvent([toolUse("Read", { file_path: `src/${"a".repeat(200)}.ts` })]);
+
+    expect(summarise(event)).toEqual({ phase: "agent", tool: { name: "Read" } });
+  });
+
+  // `FOO=secret npm run build` is ordinary debugging behaviour, and this repo's CLAUDE.md documents
+  // exactly which variables an agent would prefix
+  it("refuses an env-var prefix standing where the executable should be", () => {
+    const event = assistantEvent([toolUse("Bash", { command: `MONGODB_URI=mongodb+srv://u:${SECRET}@host npm run build` })]);
+
+    const result = summarise(event);
+
+    expect(result).toEqual({ phase: "agent", tool: { name: "Bash" } });
+    expect(JSON.stringify(result)).not.toContain(SECRET);
+  });
+
+  it("reduces an absolute command to its executable", () => {
+    const event = assistantEvent([toolUse("Bash", { command: "/usr/local/bin/npm run build" })]);
+
+    expect(summarise(event)).toEqual({ phase: "agent", tool: { name: "Bash", target: "npm" } });
+  });
+
+  it("refuses a tool name that is not a tool name", () => {
+    const event = assistantEvent([toolUse(`leak ${SECRET}`, { file_path: "src/a.ts" })]);
+
+    const result = summarise(event);
+
+    expect(result).toBeNull();
+    expect(JSON.stringify(result)).not.toContain(SECRET);
+  });
+
   it("ignores a whitelisted key whose value is not a string", () => {
     const event = assistantEvent([toolUse("Read", { file_path: { nested: SECRET }, path: ["a", SECRET] })]);
 
