@@ -1,6 +1,7 @@
 import { WorkerConfig } from "./config.js";
 import { childEnv } from "./env.js";
 import { Runner } from "./exec.js";
+import { isRateLimitEvent, lastResultEvent, parseStream, ResultEvent, StreamEvent } from "./stream.js";
 import { ClaimedTask, ExecutionResult, RunOutcome } from "./types.js";
 
 export const RESULT_SCHEMA = {
@@ -30,6 +31,14 @@ function isUsageLimit(text: string): boolean {
   return /usage limit reached/i.test(text);
 }
 
+function wasRateLimited(events: StreamEvent[]): boolean {
+  return events.some((event) => isRateLimitEvent(event) && event.rate_limit_info?.status === "rejected");
+}
+
+function reportsUsageLimit(final: ResultEvent | undefined): boolean {
+  return final?.is_error === true && typeof final.result === "string" && isUsageLimit(final.result);
+}
+
 function buildPrompt(task: ClaimedTask): string {
   const criteria = task.acceptanceCriteria.length
     ? `\n\nAcceptance criteria:\n${task.acceptanceCriteria.map((c) => `- ${c}`).join("\n")}`
@@ -56,30 +65,18 @@ function isExecutionResult(value: unknown): value is ExecutionResult {
   );
 }
 
-function extractEnvelope(stdout: string): unknown {
-  try {
-    return JSON.parse(stdout);
-  } catch {
-    const start = stdout.indexOf("{");
-    const end = stdout.lastIndexOf("}");
-    if (start === -1 || end === -1 || end <= start) {
-      throw new Error("no JSON object found in claude output");
-    }
-    return JSON.parse(stdout.slice(start, end + 1));
+function extractResultPayload(final: ResultEvent): unknown {
+  if (!("result" in final)) {
+    throw new Error("result event has no result field");
   }
-}
-
-function extractResultPayload(envelope: unknown): unknown {
-  if (!isRecord(envelope) || !("result" in envelope)) {
-    throw new Error("envelope has no result field");
-  }
-  const { result } = envelope;
+  const { result } = final;
   return typeof result === "string" ? JSON.parse(result) : result;
 }
 
-function parseExecutionResult(stdout: string): RunOutcome {
+function parseExecutionResult(final: ResultEvent | undefined): RunOutcome {
+  if (!final) return { kind: "error", message: "could not parse claude output" };
   try {
-    const payload = extractResultPayload(extractEnvelope(stdout));
+    const payload = extractResultPayload(final);
     if (!isExecutionResult(payload)) {
       return { kind: "error", message: "claude output did not match the result schema" };
     }
@@ -107,7 +104,9 @@ export function createExecutor(config: WorkerConfig, runner: Runner): Executor {
           "-p",
           buildPrompt(task),
           "--output-format",
-          "json",
+          "stream-json",
+          // the CLI refuses stream-json under -p without it: "requires --verbose"
+          "--verbose",
           "--json-schema",
           JSON.stringify(RESULT_SCHEMA),
           "--permission-mode",
@@ -126,12 +125,17 @@ export function createExecutor(config: WorkerConfig, runner: Runner): Executor {
 
       if (result.timedOut) return { kind: "timeout" };
 
-      const parsed = parseExecutionResult(result.stdout);
-      if (parsed.kind === "result") return parsed;
+      // stdout now carries the content of every file the agent read, so nothing here scans it as
+      // text: the usage limit is read off typed events, and off stderr, which cannot carry file bodies
+      const events = parseStream(result.stdout);
+      const final = lastResultEvent(events);
 
-      if (isUsageLimit(result.stdout) || isUsageLimit(result.stderr)) {
+      if (wasRateLimited(events) || reportsUsageLimit(final) || isUsageLimit(result.stderr)) {
         return { kind: "usage_limit" };
       }
+
+      const parsed = parseExecutionResult(final);
+      if (parsed.kind === "result") return parsed;
 
       if (result.code === 0) return parsed;
       return { kind: "error", message: result.stderr || `claude exited ${result.code}` };
