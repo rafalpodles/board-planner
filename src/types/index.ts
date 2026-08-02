@@ -769,11 +769,25 @@ export interface ApiComment {
 }
 
 // Sort options for board columns
-export type SortField = "manual" | "updatedAt" | "createdAt" | "dueDate" | "priority" | "difficulty" | "category" | "title";
+export type SortField =
+  | "manual"
+  | "key"
+  | "updatedAt"
+  | "createdAt"
+  | "dueDate"
+  | "priority"
+  | "difficulty"
+  | "category"
+  | "title"
+  | "status"
+  | "assignee"
+  | "sprint"
+  | "component";
 export type SortDir = "asc" | "desc";
 
 export const SORT_OPTIONS: { value: SortField; label: string; defaultDir: SortDir }[] = [
   { value: "manual", label: "Manual order", defaultDir: "asc" },
+  { value: "key", label: "Key", defaultDir: "asc" },
   { value: "updatedAt", label: "Last updated", defaultDir: "desc" },
   { value: "createdAt", label: "Created", defaultDir: "desc" },
   { value: "dueDate", label: "Due date", defaultDir: "asc" },
@@ -781,7 +795,31 @@ export const SORT_OPTIONS: { value: SortField; label: string; defaultDir: SortDi
   { value: "difficulty", label: "Difficulty", defaultDir: "asc" },
   { value: "category", label: "Category", defaultDir: "asc" },
   { value: "title", label: "Title", defaultDir: "asc" },
+  { value: "status", label: "Status", defaultDir: "asc" },
+  { value: "assignee", label: "Assignee", defaultDir: "asc" },
+  { value: "sprint", label: "Sprint", defaultDir: "asc" },
+  { value: "component", label: "Component", defaultDir: "asc" },
 ];
+
+// The board already groups by status and shows no assignee, sprint or component
+// column, so those four read as nonsense in its dropdown. The list offers all.
+export const BOARD_SORT_FIELDS: SortField[] = [
+  "manual",
+  "key",
+  "updatedAt",
+  "createdAt",
+  "dueDate",
+  "priority",
+  "difficulty",
+  "category",
+  "title",
+];
+
+export const LIST_SORT_FIELDS: SortField[] = SORT_OPTIONS.map((o) => o.value);
+
+export function defaultSortDir(field: SortField): SortDir {
+  return SORT_OPTIONS.find((o) => o.value === field)?.defaultDir ?? "asc";
+}
 
 // Activity log
 export type ActivityAction =

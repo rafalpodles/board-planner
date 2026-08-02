@@ -11,13 +11,16 @@ import {
   PRIORITY_LABELS,
   PRIORITY_ORDER,
   SORT_OPTIONS,
+  BOARD_SORT_FIELDS,
   SortField,
   SortDir,
   Difficulty,
   Category,
   Priority,
+  defaultSortDir
 } from "@/types";
 import { categoryColor } from "@/lib/category-colors";
+import { SortContext, sortTasks } from "@/lib/task-sort";
 import {
   BoardFilterValues,
   EMPTY_FILTERS,
@@ -59,6 +62,14 @@ interface BoardFiltersProps {
   currentUsername?: string;
   projectCategories?: ApiProjectCategory[];
   extraControls?: React.ReactNode;
+  /** Sort is owned above this component so the list view's column headers and
+      this dropdown drive the same value */
+  sortField: SortField;
+  sortDir: SortDir;
+  onSortChange: (field: SortField, dir: SortDir) => void;
+  /** Which fields the dropdown offers; the current value is always included */
+  sortFields?: SortField[];
+  sortContext?: SortContext;
   onFilter: (filtered: ApiTask[]) => void;
 }
 
@@ -72,12 +83,15 @@ export function BoardFilters({
   currentUsername,
   projectCategories,
   extraControls,
+  sortField,
+  sortDir,
+  onSortChange,
+  sortFields = BOARD_SORT_FIELDS,
+  sortContext,
   onFilter,
 }: BoardFiltersProps) {
   const [initialized, setInitialized] = useState(false);
   const [filters, setFilters] = useState<Filters>({ search: "", ...EMPTY_FILTERS });
-  const [sortField, setSortField] = useState<SortField>("manual");
-  const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [showFilters, setShowFilters] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
 
@@ -92,10 +106,12 @@ export function BoardFilters({
     }
     const state = migratePersistedFilters(raw, currentUsername);
     setFilters((f) => ({ ...f, ...state.filters }));
-    setSortField(state.sortField);
-    setSortDir(state.sortDir);
+    onSortChange(state.sortField, state.sortDir);
     setShowFilters(state.showFilters);
     setInitialized(true);
+    // onSortChange is the owner's setter; re-running on its identity would
+    // re-hydrate over whatever the user has since chosen
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, currentUsername]);
 
   const persistState = useCallback(() => {
@@ -197,41 +213,11 @@ export function BoardFilters({
       });
     }
 
-    const difficultyOrder: Record<string, number> = { S: 0, M: 1, L: 2, XL: 3 };
-    const dir = sortDir === "asc" ? 1 : -1;
-
-    result = [...result].sort((a, b) => {
-      let cmp = 0;
-      switch (sortField) {
-        // Mirrors the API's own ordering, so drag-and-drop reordering survives
-        case "manual":
-          cmp =
-            (a.order ?? 0) - (b.order ?? 0) ||
-            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-          break;
-        case "updatedAt":
-        case "createdAt":
-          cmp = new Date(a[sortField]).getTime() - new Date(b[sortField]).getTime();
-          break;
-        case "priority":
-          cmp = (PRIORITY_ORDER[a.priority] ?? 99) - (PRIORITY_ORDER[b.priority] ?? 99);
-          break;
-        case "difficulty":
-          cmp = (difficultyOrder[a.difficulty] ?? 0) - (difficultyOrder[b.difficulty] ?? 0);
-          break;
-        case "category":
-          cmp = a.category.localeCompare(b.category);
-          break;
-        case "title":
-          cmp = a.title.localeCompare(b.title);
-          break;
-      }
-      return cmp * dir;
-    });
+    result = sortTasks(result, sortField, sortDir, sortContext);
 
     onFilter(result);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters, tasks, sortField, sortDir, currentUsername, labels, projectKey]);
+  }, [filters, tasks, sortField, sortDir, sortContext, currentUsername, labels, projectKey]);
 
   function clearFilters() {
     setFilters((f) => ({ ...EMPTY_FILTERS, search: f.search }));
@@ -493,10 +479,15 @@ export function BoardFilters({
         <select
           value={sortField}
           aria-label="Sort tasks by"
-          onChange={(e) => setSortField(e.target.value as SortField)}
+          onChange={(e) => {
+            const next = e.target.value as SortField;
+            onSortChange(next, defaultSortDir(next));
+          }}
           className="focus-ring-inset h-full rounded-l-lg bg-transparent px-2.5 text-[13px] text-text-muted"
         >
-          {SORT_OPTIONS.map((o) => (
+          {SORT_OPTIONS.filter(
+            (o) => sortFields.includes(o.value) || o.value === sortField
+          ).map((o) => (
             <option key={o.value} value={o.value}>
               {o.label}
             </option>
@@ -504,7 +495,7 @@ export function BoardFilters({
         </select>
         <div className="h-full w-px bg-border" />
         <button
-          onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}
+          onClick={() => onSortChange(sortField, sortDir === "asc" ? "desc" : "asc")}
           title={sortDir === "asc" ? "Ascending" : "Descending"}
           aria-label={sortDir === "asc" ? "Sort ascending" : "Sort descending"}
           className="focus-ring-inset h-full w-[30px] rounded-r-lg text-[13px] text-text-muted transition-colors hover:text-text"
