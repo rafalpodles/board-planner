@@ -82,14 +82,17 @@ async function quietly(work: () => Promise<unknown>): Promise<void> {
 }
 
 // An operator's stop is not the task's failure — released refunds the attempt, where requeued
-// would charge it and eventually park the task in review as "gave up"
+// would charge it and eventually park the task in review as "gave up". Checked on both sides of
+// every phase that spawns: a killed child settles as an ordinary non-zero exit, indistinguishable
+// from a real build failure by the time the verdict is read.
 async function releaseIfAborted(
   deps: PipelineDeps,
   reporter: Reporter,
-  task: ClaimedTask
+  task: ClaimedTask,
+  detail = ""
 ): Promise<boolean> {
   if (!deps.signal?.aborted) return false;
-  await reporter.released(task, "the run was stopped");
+  await reporter.released(task, `the run was stopped${detail}`);
   return true;
 }
 
@@ -124,6 +127,7 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
   let keepWorktree = false;
   try {
     const outcome = await executor.execute(task, worktreePath, deps.signal);
+    if (await releaseIfAborted(deps, reporter, task)) return;
 
     if (outcome.kind === "usage_limit") {
       await reporter.released(task, "usage limit reached");
@@ -159,6 +163,7 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
       if (await releaseIfAborted(deps, reporter, task)) return;
 
       const verdict = await gate.run(context);
+      if (await releaseIfAborted(deps, reporter, task)) return;
       if (verdict.ok) continue;
 
       if (hitUsageLimit(verdict)) {
@@ -185,10 +190,28 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
     let prUrl = "";
     try {
       await delivery.push(worktreePath, branch);
-      if (await releaseIfAborted(deps, reporter, task)) return;
+      if (
+        await releaseIfAborted(
+          deps,
+          reporter,
+          task,
+          `: \`${branch}\` is pushed, but no pull request was opened for it`
+        )
+      ) {
+        return;
+      }
 
       prUrl = await delivery.openPr(worktreePath, task, outcome.result.summary);
-      if (await releaseIfAborted(deps, reporter, task)) return;
+      if (
+        await releaseIfAborted(
+          deps,
+          reporter,
+          task,
+          `: \`${branch}\` is pushed and ${prUrl} is open, but it was not merged`
+        )
+      ) {
+        return;
+      }
 
       // No signal on the merge call itself: killing "gh pr merge" mid-flight leaves ambiguous
       // remote state that only mergeState() can untangle — better not to create it

@@ -344,6 +344,82 @@ describe("runTask", () => {
     expect(h.reporter.requeued).not.toHaveBeenCalled();
   });
 
+  // A killed agent settles as an ordinary failed run, so without a check here the operator's stop
+  // is charged to the task and three of them park it in review as "gave up on attempt 3"
+  it("releases without charging the attempt when the stop lands inside the agent run", async () => {
+    const controller = new AbortController();
+    const execute = vi.fn<Executor["execute"]>(async () => {
+      controller.abort();
+      return { kind: "error", message: "AbortError: The operation was aborted" };
+    });
+    const h = harness({ executor: { execute }, signal: controller.signal });
+
+    await runTask(h.deps, task);
+
+    expect(h.reporter.released).toHaveBeenCalled();
+    expect(h.reporter.requeued).not.toHaveBeenCalled();
+    expect(h.delivery.push).not.toHaveBeenCalled();
+  });
+
+  // Same shape one phase later: the gate's own subprocess is killed, so the gate reports a
+  // perfectly ordinary "build failed (exit -1)" and the board would blame the change for it
+  it("releases and pushes nothing when the stop lands inside a gate's own subprocess", async () => {
+    const controller = new AbortController();
+    const gate = {
+      name: "build",
+      run: vi.fn<Gate["run"]>(async () => {
+        controller.abort();
+        return { ok: false, reason: "build failed (exit -1)" };
+      }),
+    };
+    const h = harness({ gates: [gate], signal: controller.signal });
+
+    await runTask(h.deps, task);
+
+    expect(h.reporter.released).toHaveBeenCalled();
+    expect(h.reporter.gateRejected).not.toHaveBeenCalled();
+    expect(h.delivery.push).not.toHaveBeenCalled();
+  });
+
+  it("names the pushed branch when the stop lands between the push and the pull request", async () => {
+    const controller = new AbortController();
+    const delivery = deliverySpy({
+      push: vi.fn<Delivery["push"]>(async () => {
+        controller.abort();
+      }),
+    });
+    const h = harness({
+      createDelivery: vi.fn<PipelineDeps["createDelivery"]>(() => delivery),
+      signal: controller.signal,
+    });
+
+    await runTask(h.deps, task);
+
+    expect(h.reporter.released.mock.calls[0][1]).toMatch(/cp-158\/worker/);
+    expect(delivery.openPr).not.toHaveBeenCalled();
+  });
+
+  it("names the open pull request when the stop lands between it and the merge", async () => {
+    const controller = new AbortController();
+    const delivery = deliverySpy({
+      openPr: vi.fn<Delivery["openPr"]>(async () => {
+        controller.abort();
+        return "https://x/pull/7";
+      }),
+    });
+    const h = harness({
+      createDelivery: vi.fn<PipelineDeps["createDelivery"]>(() => delivery),
+      signal: controller.signal,
+    });
+
+    await runTask(h.deps, task);
+
+    const reason = h.reporter.released.mock.calls[0][1];
+    expect(reason).toMatch(/cp-158\/worker/);
+    expect(reason).toMatch(/https:\/\/x\/pull\/7/);
+    expect(delivery.merge).not.toHaveBeenCalled();
+  });
+
   it("passes the signal to the executor, so a stop can reach the run in flight", async () => {
     const controller = new AbortController();
     const execute = vi

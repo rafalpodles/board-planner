@@ -32,10 +32,12 @@ export function createRunner(): Runner {
         let timedOut = false;
         let timer: NodeJS.Timeout | undefined;
         let killTimer: NodeJS.Timeout | undefined;
+        let onAbort: (() => void) | undefined;
 
         function clearTimers(): void {
           if (timer) clearTimeout(timer);
           if (killTimer) clearTimeout(killTimer);
+          if (onAbort) opts.signal?.removeEventListener("abort", onAbort);
         }
 
         function settle(result: CommandResult): void {
@@ -46,20 +48,35 @@ export function createRunner(): Runner {
         }
 
         try {
+          // spawn's own `signal` option is deliberately not used: it rejects the moment abort() is
+          // called, leaving a child that ignores SIGTERM alive inside the worktree the pipeline is
+          // about to remove. An abort escalates on the same path a timeout does, and only "close"
+          // settles the promise.
           const child = spawn(command, args, {
             cwd: opts.cwd,
             env: opts.env ?? childEnv(),
             stdio: ["pipe", "pipe", "pipe"],
-            signal: opts.signal,
           });
+
+          let terminating = false;
+          function terminate(): void {
+            if (terminating) return;
+            terminating = true;
+            child.kill("SIGTERM");
+            killTimer = setTimeout(() => child.kill("SIGKILL"), SIGKILL_GRACE_MS);
+          }
 
           timer = setTimeout(() => {
             timedOut = true;
-            child.kill("SIGTERM");
-            killTimer = setTimeout(() => {
-              child.kill("SIGKILL");
-            }, SIGKILL_GRACE_MS);
+            terminate();
           }, opts.timeoutMs);
+
+          if (opts.signal?.aborted) {
+            terminate();
+          } else if (opts.signal) {
+            onAbort = terminate;
+            opts.signal.addEventListener("abort", onAbort, { once: true });
+          }
 
           // stdio is "pipe" for stdin too, so it must always be ended — otherwise a child that
           // reads it to EOF hangs until timeoutMs, where "ignore" used to give instant EOF

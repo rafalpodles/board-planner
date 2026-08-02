@@ -105,11 +105,16 @@ describe("POST /api/workers/:workerId/command", () => {
     expect(json).toEqual({ command: "pause", issuedAt: "2026-08-01T12:00:00.000Z" });
   });
 
-  it("publishes the issued command over the worker's SSE stream, keyed by its own id", async () => {
+  // The issuance travels with the command so the worker can tell this delivery from the copy its
+  // next heartbeat carries — without it, the same stop would be applied twice
+  it("publishes the issued command and its issuance over the worker's SSE stream, keyed by its own id", async () => {
     const { req, ctx } = request({ command: "pause" });
 
     await POST(req, ctx);
 
-    expect(publishToWorker).toHaveBeenCalledWith(WORKER_ID, { command: "pause" });
+    expect(publishToWorker).toHaveBeenCalledWith(WORKER_ID, {
+      command: "pause",
+      commandIssuedAt: "2026-08-01T12:00:00.000Z",
+    });
   });
 });

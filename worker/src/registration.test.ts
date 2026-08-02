@@ -1,7 +1,12 @@
 import { describe, it, expect, vi } from "vitest";
+import { CommandHandlers } from "./commands.js";
 import { HeartbeatDeps, Store, loadIdentity, startHeartbeat } from "./registration.js";
 
 type Stored = { workerId: string; credential: string; heartbeatMs: number };
+
+function handlerStub(): CommandHandlers {
+  return { pause: vi.fn(), resume: vi.fn(), stop: vi.fn() };
+}
 
 function depsWith(
   opts: {
@@ -9,6 +14,8 @@ function depsWith(
     throws?: Error;
     stored?: Stored | null;
     registerResponse?: Partial<Stored>;
+    body?: Record<string, unknown>;
+    handlers?: CommandHandlers;
   } = {}
 ): HeartbeatDeps {
   const initialStored = opts.stored === undefined ? { workerId: "w1", credential: "cpw_existing", heartbeatMs: 60_000 } : opts.stored;
@@ -29,7 +36,7 @@ function depsWith(
       };
     }
     const status = opts.status ?? 200;
-    return { ok: status >= 200 && status < 300, status, json: async () => ({}) };
+    return { ok: status >= 200 && status < 300, status, json: async () => opts.body ?? {} };
   });
 
   return {
@@ -37,6 +44,7 @@ function depsWith(
     apiToken: "cp_admin_token",
     registration: { name: "worker-1", host: "host-1", platform: "darwin", version: "1.0.0" },
     store,
+    handlers: opts.handlers ?? handlerStub(),
     fetchImpl: fetchImpl as unknown as typeof fetch,
     log: vi.fn(),
   };
@@ -152,6 +160,51 @@ describe("startHeartbeat", () => {
 
     const [, init] = calls(deps)[0];
     expect(JSON.parse(init.body).acked).toBeUndefined();
+  });
+
+  it("dispatches the standing command carried by the heartbeat body", async () => {
+    const handlers = handlerStub();
+    const deps = depsWith({
+      handlers,
+      body: { command: "pause", commandIssuedAt: "2026-08-01T12:00:00.000Z" },
+    });
+
+    await startHeartbeat(deps).tick();
+
+    expect(handlers.pause).toHaveBeenCalledWith("2026-08-01T12:00:00.000Z");
+    expect(handlers.resume).not.toHaveBeenCalled();
+    expect(handlers.stop).not.toHaveBeenCalled();
+  });
+
+  it("dispatches a command whose issuance the server left out, rather than dropping it", async () => {
+    const handlers = handlerStub();
+
+    await startHeartbeat(depsWith({ handlers, body: { command: "stop" } })).tick();
+
+    expect(handlers.stop).toHaveBeenCalledWith(undefined);
+  });
+
+  it("dispatches nothing for a command name outside pause/resume/stop", async () => {
+    const handlers = handlerStub();
+
+    await startHeartbeat(depsWith({ handlers, body: { command: "reboot" } })).tick();
+
+    expect(handlers.pause).not.toHaveBeenCalled();
+    expect(handlers.resume).not.toHaveBeenCalled();
+    expect(handlers.stop).not.toHaveBeenCalled();
+  });
+
+  // A refusal is already an abort; obeying a stale command from the same response would be a
+  // second, unrelated state change on a worker the server has just cut off
+  it("dispatches no command on a refused heartbeat", async () => {
+    const handlers = handlerStub();
+    const heartbeat = startHeartbeat(
+      depsWith({ handlers, status: 403, body: { command: "pause" } })
+    );
+
+    await heartbeat.tick();
+
+    expect(handlers.pause).not.toHaveBeenCalled();
   });
 
   it("clears the stored identity on a 401, so the next tick registers again", async () => {

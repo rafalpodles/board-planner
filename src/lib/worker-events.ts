@@ -20,7 +20,10 @@ export function unregisterWorkerStream(
   if (streams.get(workerId) === controller) streams.delete(workerId);
 }
 
-export function publishToWorker(workerId: string, event: { command: string }): void {
+export function publishToWorker(
+  workerId: string,
+  event: { command: string; commandIssuedAt?: string }
+): void {
   const controller = streams.get(workerId);
   if (!controller) return;
   try {

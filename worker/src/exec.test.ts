@@ -1,5 +1,17 @@
-import { describe, it, expect } from "vitest";
+import { existsSync, readFileSync, rmSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
+import { describe, it, expect, vi } from "vitest";
 import { createRunner } from "./exec.js";
+
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 describe("createRunner", () => {
   it("captures stdout and a zero exit code", async () => {
@@ -80,6 +92,57 @@ describe("createRunner", () => {
     controller.abort();
 
     expect((await running).code).not.toBe(0);
+  });
+
+  // The timeout branch above covers its own escalation; the abort branch had none, and the
+  // pipeline removes the worktree the moment this resolves
+  it(
+    "escalates an abort to SIGKILL and does not resolve while the child is still alive",
+    async () => {
+      const pidFile = join(tmpdir(), `cp161-abort-${process.pid}-${Date.now()}`);
+      const controller = new AbortController();
+      const running = createRunner().run(
+        process.execPath,
+        [
+          "-e",
+          `process.on('SIGTERM', () => {}); require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000)`,
+        ],
+        { cwd: process.cwd(), timeoutMs: 60_000, signal: controller.signal }
+      );
+
+      try {
+        await vi.waitFor(() => expect(existsSync(pidFile)).toBe(true));
+        const pid = Number(readFileSync(pidFile, "utf8"));
+        expect(alive(pid)).toBe(true);
+
+        controller.abort();
+        const result = await running;
+
+        expect(alive(pid)).toBe(false);
+        expect(result.code).not.toBe(0);
+        expect(result.timedOut).toBe(false);
+      } finally {
+        if (existsSync(pidFile)) {
+          const pid = Number(readFileSync(pidFile, "utf8"));
+          if (alive(pid)) process.kill(pid, "SIGKILL");
+          rmSync(pidFile, { force: true });
+        }
+      }
+    },
+    20_000
+  );
+
+  it("kills a command whose signal had already aborted before it was spawned", async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    const result = await createRunner().run(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+      cwd: process.cwd(),
+      timeoutMs: 60_000,
+      signal: controller.signal,
+    });
+
+    expect(result.code).not.toBe(0);
   });
 
   it("passes a prompt on stdin rather than argv, where any process could read it", async () => {

@@ -34,7 +34,12 @@ export const POST = withAdmin(async (request, { params }) => {
   }
 
   // Best-effort accelerator — see src/lib/worker-events.ts; the write above is what's durable.
-  publishToWorker(String(worker._id), { command: worker.command });
+  // commandIssuedAt rides along so a worker that sees the same issuance twice, once here and once
+  // on its next heartbeat, can tell it apart from the operator asking again.
+  publishToWorker(String(worker._id), {
+    command: worker.command,
+    ...(worker.commandIssuedAt ? { commandIssuedAt: new Date(worker.commandIssuedAt).toISOString() } : {}),
+  });
 
   return NextResponse.json({ command: worker.command, issuedAt: worker.commandIssuedAt });
 });
