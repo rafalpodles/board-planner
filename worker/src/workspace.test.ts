@@ -12,9 +12,13 @@ function runnerReturning(stdout = "") {
   return { runner: { run }, run };
 }
 
+// Every call now carries the fixed "-c core.fsmonitor=false -c core.pager=cat" prefix (see
+// createWorkspace's git()) — strip it so response maps keep naming the real git subcommand
+const HARDENING_PREFIX = ["-c", "core.fsmonitor=false", "-c", "core.pager=cat"];
+
 function fakeGit(responses: Record<string, Partial<CommandResult>>) {
   const run = vi.fn(async (_command: string, args: string[]): Promise<CommandResult> => {
-    const override = responses[args.join(" ")];
+    const override = responses[args.slice(HARDENING_PREFIX.length).join(" ")];
     return { code: 0, stdout: "", stderr: "", timedOut: false, ...override };
   });
   return { runner: { run }, run };
@@ -28,14 +32,24 @@ describe("createWorkspace", () => {
     expect(path).toBe("/worktrees/CP-158");
     expect(run).toHaveBeenCalledWith(
       "git",
-      ["worktree", "add", "-B", "cp-158/worker", "/worktrees/CP-158"],
-      expect.objectContaining({ cwd: "/repo" }),
+      [...HARDENING_PREFIX, "worktree", "add", "-B", "cp-158/worker", "/worktrees/CP-158"],
+      expect.objectContaining({ cwd: "/repo", env: expect.objectContaining({ GIT_CONFIG_NOSYSTEM: "1" }) }),
     );
     expect(run).not.toHaveBeenCalledWith(
       "git",
-      ["worktree", "remove", "--force", "/worktrees/CP-158"],
+      [...HARDENING_PREFIX, "worktree", "remove", "--force", "/worktrees/CP-158"],
       expect.anything(),
     );
+  });
+
+  it("neutralises system and repository git config on every call it makes", async () => {
+    const { runner, run } = runnerReturning();
+    await createWorkspace(config, runner).create("CP-158", "worker");
+
+    for (const call of run.mock.calls) {
+      expect(call[1]).toEqual(expect.arrayContaining(["-c", "core.pager=cat"]));
+      expect(call[2].env.GIT_CONFIG_NOSYSTEM).toBe("1");
+    }
   });
 
   it("throws when git fails to create the worktree", async () => {
@@ -49,7 +63,8 @@ describe("createWorkspace", () => {
 
   it("removes a leftover worktree from a crashed previous attempt before recreating it", async () => {
     let worktreeExists = true;
-    const run = vi.fn(async (_command: string, args: string[]): Promise<CommandResult> => {
+    const run = vi.fn(async (_command: string, rawArgs: string[]): Promise<CommandResult> => {
+      const args = rawArgs.slice(HARDENING_PREFIX.length);
       if (args[0] === "worktree" && args[1] === "list") {
         return {
           code: 0,
@@ -81,12 +96,12 @@ describe("createWorkspace", () => {
     expect(path).toBe("/worktrees/CP-158");
     expect(run).toHaveBeenCalledWith(
       "git",
-      ["worktree", "remove", "--force", "/worktrees/CP-158"],
+      [...HARDENING_PREFIX, "worktree", "remove", "--force", "/worktrees/CP-158"],
       expect.anything(),
     );
     expect(run).toHaveBeenCalledWith(
       "git",
-      ["worktree", "add", "-B", "cp-158/worker", "/worktrees/CP-158"],
+      [...HARDENING_PREFIX, "worktree", "add", "-B", "cp-158/worker", "/worktrees/CP-158"],
       expect.anything(),
     );
   });
@@ -99,7 +114,7 @@ describe("createWorkspace", () => {
 
     expect(run).toHaveBeenCalledWith(
       "git",
-      ["worktree", "remove", "--force", "/worktrees/CP-158"],
+      [...HARDENING_PREFIX, "worktree", "remove", "--force", "/worktrees/CP-158"],
       expect.anything(),
     );
   });
@@ -110,7 +125,7 @@ describe("createWorkspace", () => {
 
     expect(run).not.toHaveBeenCalledWith(
       "git",
-      ["worktree", "remove", "--force", "/worktrees/CP-158"],
+      [...HARDENING_PREFIX, "worktree", "remove", "--force", "/worktrees/CP-158"],
       expect.anything(),
     );
   });

@@ -37,21 +37,26 @@ export function createReporter(
 
   async function comment(task: ClaimedTask, body: string): Promise<boolean> {
     try {
-      await api.comment(task.taskId, body);
+      await api.comment(task.projectId, task.taskId, body);
       return true;
     } catch (error) {
-      queue(task, { kind: "comment", taskId: task.taskId, body }, "post the board comment", error);
+      queue(
+        task,
+        { kind: "comment", projectId: task.projectId, taskId: task.taskId, body },
+        "post the board comment",
+        error
+      );
       return false;
     }
   }
 
   async function move(task: ClaimedTask, status: string): Promise<void> {
     try {
-      await api.setStatus(task.taskId, status);
+      await api.setStatus(task.projectId, task.taskId, status);
     } catch (error) {
       queue(
         task,
-        { kind: "status", taskId: task.taskId, status },
+        { kind: "status", projectId: task.projectId, taskId: task.taskId, status },
         `move the task to ${status}`,
         error
       );
@@ -60,11 +65,18 @@ export function createReporter(
 
   async function release(task: ClaimedTask, options?: { refund?: boolean }): Promise<void> {
     try {
-      await (options ? api.release(task.taskId, options) : api.release(task.taskId));
+      await (options
+        ? api.release(task.projectId, task.taskId, options)
+        : api.release(task.projectId, task.taskId));
     } catch (error) {
       queue(
         task,
-        { kind: "release", taskId: task.taskId, refund: options?.refund !== false },
+        {
+          kind: "release",
+          projectId: task.projectId,
+          taskId: task.taskId,
+          refund: options?.refund !== false,
+        },
         "return the task to the queue",
         error
       );

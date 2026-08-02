@@ -30,20 +30,20 @@ describe("createOutbox", () => {
   it("delivers what it holds and empties itself", async () => {
     const store = memoryStore();
     const outbox = createOutbox(store, vi.fn());
-    outbox.add({ kind: "comment", taskId: "t1", body: "merged" });
-    outbox.add({ kind: "status", taskId: "t1", status: "done" });
+    outbox.add({ kind: "comment", projectId: "CP", taskId: "t1", body: "merged" });
+    outbox.add({ kind: "status", projectId: "CP", taskId: "t1", status: "done" });
     const api = apiSpy();
 
     expect(await outbox.flush(api)).toEqual({ delivered: 2, pending: 0, dropped: 0 });
-    expect(api.comment).toHaveBeenCalledWith("t1", "merged");
-    expect(api.setStatus).toHaveBeenCalledWith("t1", "done");
+    expect(api.comment).toHaveBeenCalledWith("CP", "t1", "merged");
+    expect(api.setStatus).toHaveBeenCalledWith("CP", "t1", "done");
     expect(outbox.pending()).toBe(0);
   });
 
   // The whole reason this exists: the process can die between the merge and the report
   it("survives a restart, because a new instance reads the same store", async () => {
     const store = memoryStore();
-    createOutbox(store, vi.fn()).add({ kind: "comment", taskId: "t1", body: "merged" });
+    createOutbox(store, vi.fn()).add({ kind: "comment", projectId: "CP", taskId: "t1", body: "merged" });
 
     const afterRestart = createOutbox(store, vi.fn());
 
@@ -54,7 +54,7 @@ describe("createOutbox", () => {
   it("keeps an undelivered report and counts the attempt", async () => {
     const store = memoryStore();
     const outbox = createOutbox(store, vi.fn());
-    outbox.add({ kind: "comment", taskId: "t1", body: "merged" });
+    outbox.add({ kind: "comment", projectId: "CP", taskId: "t1", body: "merged" });
     const api = apiSpy({ comment: vi.fn().mockRejectedValue(new Error("502")) });
 
     expect(await outbox.flush(api)).toEqual({ delivered: 0, pending: 1, dropped: 0 });
@@ -65,8 +65,8 @@ describe("createOutbox", () => {
   it("stops draining at the first failure rather than reordering around it", async () => {
     const store = memoryStore();
     const outbox = createOutbox(store, vi.fn());
-    outbox.add({ kind: "comment", taskId: "t1", body: "merged" });
-    outbox.add({ kind: "status", taskId: "t1", status: "done" });
+    outbox.add({ kind: "comment", projectId: "CP", taskId: "t1", body: "merged" });
+    outbox.add({ kind: "status", projectId: "CP", taskId: "t1", status: "done" });
     const api = apiSpy({ comment: vi.fn().mockRejectedValue(new Error("502")) });
 
     const result = await outbox.flush(api);
@@ -78,12 +78,12 @@ describe("createOutbox", () => {
   it("delivers on a later flush once the server comes back", async () => {
     const store = memoryStore();
     const outbox = createOutbox(store, vi.fn());
-    outbox.add({ kind: "comment", taskId: "t1", body: "merged" });
+    outbox.add({ kind: "comment", projectId: "CP", taskId: "t1", body: "merged" });
     await outbox.flush(apiSpy({ comment: vi.fn().mockRejectedValue(new Error("502")) }));
 
     const api = apiSpy();
     expect(await outbox.flush(api)).toEqual({ delivered: 1, pending: 0, dropped: 0 });
-    expect(api.comment).toHaveBeenCalledWith("t1", "merged");
+    expect(api.comment).toHaveBeenCalledWith("CP", "t1", "merged");
   });
 
   // Otherwise one permanently rejected report blocks every later one forever
@@ -91,7 +91,7 @@ describe("createOutbox", () => {
     const store = memoryStore();
     const log = vi.fn();
     const outbox = createOutbox(store, log);
-    outbox.add({ kind: "comment", taskId: "gone", body: "merged" });
+    outbox.add({ kind: "comment", projectId: "CP", taskId: "gone", body: "merged" });
     const api = apiSpy({ comment: vi.fn().mockRejectedValue(new Error("404")) });
 
     for (let i = 0; i < 19; i += 1) await outbox.flush(api);
@@ -104,27 +104,30 @@ describe("createOutbox", () => {
   it("carries the refund flag, so a requeue does not silently become a refund", async () => {
     const store = memoryStore();
     const outbox = createOutbox(store, vi.fn());
-    outbox.add({ kind: "release", taskId: "t1", refund: false });
+    outbox.add({ kind: "release", projectId: "CP", taskId: "t1", refund: false });
     const api = apiSpy();
 
     await outbox.flush(api);
 
-    expect(api.release).toHaveBeenCalledWith("t1", { refund: false });
+    expect(api.release).toHaveBeenCalledWith("CP", "t1", { refund: false });
   });
 
   it("releases with a refund when that is what was queued", async () => {
     const store = memoryStore();
     const outbox = createOutbox(store, vi.fn());
-    outbox.add({ kind: "release", taskId: "t1", refund: true });
+    outbox.add({ kind: "release", projectId: "CP", taskId: "t1", refund: true });
     const api = apiSpy();
 
     await outbox.flush(api);
 
-    expect(api.release).toHaveBeenCalledWith("t1");
+    expect(api.release).toHaveBeenCalledWith("CP", "t1");
   });
 
   it("ignores a corrupted line rather than losing the whole queue", async () => {
-    const good = JSON.stringify({ op: { kind: "comment", taskId: "t1", body: "ok" }, attempts: 0 });
+    const good = JSON.stringify({
+      op: { kind: "comment", projectId: "CP", taskId: "t1", body: "ok" },
+      attempts: 0,
+    });
     const store = memoryStore(`not json\n${good}\n{"op":{}}\n`);
 
     expect(createOutbox(store, vi.fn()).pending()).toBe(1);
@@ -145,7 +148,7 @@ describe("createOutbox", () => {
     const store = memoryStore();
     const outbox = createOutbox(store, vi.fn());
     for (let i = 0; i < 505; i += 1) {
-      outbox.add({ kind: "comment", taskId: `t${i}`, body: "x" });
+      outbox.add({ kind: "comment", projectId: "CP", taskId: `t${i}`, body: "x" });
     }
 
     expect(outbox.pending()).toBe(500);

@@ -1,21 +1,57 @@
 import { readFileSync, statSync } from "fs";
-import { homedir, hostname } from "os";
+import { homedir } from "os";
 import { join } from "path";
 
+// The shape workspace.ts, executor.ts, gates/index.ts, loop.ts and pipeline.ts run against for one
+// task: Bootstrap's connection details plus the current EffectiveConfig policy plus one assignment's
+// bound repository. main.ts assembles it at runtime; nothing loads it from the environment anymore.
 export interface WorkerConfig {
   apiBaseUrl: string;
   apiToken: string;
-  projectId: string;
   repoPath: string;
   worktreeRoot: string;
   stateDir: string;
   baseBranch: string;
   pollIntervalMs: number;
   taskTimeoutMs: number;
-  concurrency: number;
   maxDiffLines: number;
   maxDiffFiles: number;
   workerId: string;
+}
+
+// What a worker needs before it can even register: where the server is, how to authenticate to it
+// once, a name to register under, and where to keep the identity that registration mints. Everything
+// else — project, repository, timing, diff caps — is no longer the operator's to set at boot.
+export interface Bootstrap {
+  apiBaseUrl: string;
+  apiToken: string;
+  workerName: string;
+  stateDir: string;
+}
+
+// Mirrors the server's WorkerPolicy (src/types/index.ts): worker-wide settings an instance or
+// project admin edits in /admin/workers, never the laptop's own environment.
+export interface EffectiveConfig {
+  baseBranch: string;
+  pollIntervalMs: number;
+  taskTimeoutMs: number;
+  maxDiffLines: number;
+  maxDiffFiles: number;
+  model: string;
+}
+
+export const DEFAULT_POLICY: EffectiveConfig = {
+  baseBranch: "main",
+  pollIntervalMs: 30_000,
+  taskTimeoutMs: 1_800_000,
+  maxDiffLines: 400,
+  maxDiffFiles: 10,
+  model: "opus",
+};
+
+export interface Assignment {
+  project: string;
+  proposedPath: string;
 }
 
 type Env = Record<string, string | undefined>;
@@ -56,31 +92,48 @@ function required(env: Env, key: string): string {
   return value.trim();
 }
 
-function number(env: Env, key: string, fallback: number): number {
-  const raw = env[key];
-  if (!raw) return fallback;
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    throw new Error(`${key} must be a positive number`);
-  }
-  return parsed;
-}
-
-export function loadConfig(env: Env, readSecret: SecretReader = readSecretFile): WorkerConfig {
-  const repoPath = required(env, "CP_REPO_PATH");
+export function loadBootstrap(env: Env, readSecret: SecretReader = readSecretFile): Bootstrap {
   return {
     apiBaseUrl: required(env, "CP_API_URL").replace(/\/$/, ""),
     apiToken: requiredSecret(env, "CP_API_TOKEN", readSecret),
-    projectId: required(env, "CP_PROJECT_ID"),
-    repoPath,
-    worktreeRoot: env.CP_WORKTREE_ROOT?.trim() || join(repoPath, "..", "cp-worktrees"),
+    workerName: required(env, "CP_WORKER_NAME"),
     stateDir: env.CP_STATE_DIR?.trim() || join(homedir(), ".claudeplanner"),
-    baseBranch: env.CP_BASE_BRANCH?.trim() || "main",
-    pollIntervalMs: number(env, "CP_POLL_INTERVAL_MS", 30_000),
-    taskTimeoutMs: number(env, "CP_TASK_TIMEOUT_MS", 1_800_000),
-    concurrency: number(env, "CP_CONCURRENCY", 1),
-    maxDiffLines: number(env, "CP_MAX_DIFF_LINES", 400),
-    maxDiffFiles: number(env, "CP_MAX_DIFF_FILES", 10),
-    workerId: env.CP_WORKER_ID?.trim() || `worker-${hostname()}`,
   };
+}
+
+function isPositiveNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+// Applies whatever of the known policy fields are present and well-typed in patch, leaving
+// everything else — including fields this worker does not recognise — untouched
+export function applyPolicy(current: EffectiveConfig, patch: unknown): EffectiveConfig {
+  if (typeof patch !== "object" || patch === null) return current;
+  const source = patch as Record<string, unknown>;
+  const next = { ...current };
+
+  if (isNonEmptyString(source.baseBranch)) next.baseBranch = source.baseBranch.trim();
+  if (isPositiveNumber(source.pollIntervalMs)) next.pollIntervalMs = source.pollIntervalMs;
+  if (isPositiveNumber(source.taskTimeoutMs)) next.taskTimeoutMs = source.taskTimeoutMs;
+  if (isPositiveNumber(source.maxDiffLines)) next.maxDiffLines = source.maxDiffLines;
+  if (isPositiveNumber(source.maxDiffFiles)) next.maxDiffFiles = source.maxDiffFiles;
+  if (isNonEmptyString(source.model)) next.model = source.model.trim();
+
+  return next;
+}
+
+function isAssignment(value: unknown): value is Assignment {
+  if (typeof value !== "object" || value === null) return false;
+  const { project, proposedPath } = value as Record<string, unknown>;
+  return isNonEmptyString(project) && isNonEmptyString(proposedPath);
+}
+
+// Drops malformed entries rather than refusing the whole list — one bad assignment must not take
+// every other project this worker serves down with it
+export function parseAssignments(value: unknown): Assignment[] {
+  return Array.isArray(value) ? value.filter(isAssignment) : [];
 }

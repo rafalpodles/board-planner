@@ -17,6 +17,8 @@
     <string>https://claude-planner-production.up.railway.app</string>
     <key>CP_API_TOKEN_FILE</key>
     <string>/Users/rpo/.claudeplanner/token</string>
+    <key>CP_WORKER_NAME</key>
+    <string>rpo-laptop</string>
     <key>CP_STATE_DIR</key>
     <string>/Users/rpo/.claudeplanner</string>
     <key>HOME</key>

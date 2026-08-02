@@ -1,6 +1,7 @@
 import { ApiClient, StatusIds } from "./api.js";
 import { WorkerConfig } from "./config.js";
 import { Delivery } from "./delivery.js";
+import { childEnv } from "./env.js";
 import { Runner } from "./exec.js";
 import { Executor } from "./executor.js";
 import { Reporter } from "./reporter.js";
@@ -10,7 +11,7 @@ import { ClaimedTask, DiffStats, Gate, GateContext, GateResult } from "./types.j
 export interface PipelineDeps {
   config: WorkerConfig;
   api: ApiClient;
-  columnIds: () => Promise<string[]>;
+  columnIds: (projectId: string) => Promise<string[]>;
   createReporter: (api: ApiClient, statusIds: StatusIds) => Reporter;
   createDelivery: (runner: Runner, baseBranch?: string) => Delivery;
   workspace: Workspace;
@@ -27,9 +28,10 @@ const ROLES = ["approved", "review", "done"] as const;
 
 export async function resolveStatusIds(
   api: Pick<ApiClient, "statusIds">,
-  columnIds: () => Promise<string[]>
+  columnIds: (projectId: string) => Promise<string[]>,
+  projectId: string
 ): Promise<StatusIds> {
-  const [statusIds, ids] = await Promise.all([api.statusIds(), columnIds()]);
+  const [statusIds, ids] = await Promise.all([api.statusIds(projectId), columnIds(projectId)]);
   const columns = new Set(ids);
   const unroutable = ROLES.filter((role) => !columns.has(statusIds[role]));
   if (unroutable.length === 0) return statusIds;
@@ -44,10 +46,14 @@ function hitUsageLimit(verdict: GateResult): boolean {
   return /could not be completed/i.test(verdict.reason) && /usage limit reached/i.test(verdict.reason);
 }
 
+// Same neutralisation as diff.ts and delivery.ts: this worktree comes from a server-proposed,
+// locally-approved repository, but the approval happens once at bind time — its gitconfig still
+// fires on every git call unless each one, not just the one at bind time, is protected too.
 async function unfinishedWork(runner: Runner, worktreePath: string): Promise<string | null> {
-  const result = await runner.run("git", ["status", "--porcelain"], {
+  const result = await runner.run("git", ["-c", "core.fsmonitor=false", "-c", "core.pager=cat", "status", "--porcelain"], {
     cwd: worktreePath,
     timeoutMs: GIT_TIMEOUT_MS,
+    env: { ...childEnv(), GIT_CONFIG_NOSYSTEM: "1" },
   });
   if (result.timedOut) return `\`git status\` timed out after ${GIT_TIMEOUT_MS}ms`;
   if (result.code !== 0) return `\`git status\` failed: ${result.stderr || result.stdout}`;
@@ -93,11 +99,13 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
 
   let statusIds: StatusIds;
   try {
-    statusIds = await resolveStatusIds(deps.api, deps.columnIds);
+    statusIds = await resolveStatusIds(deps.api, deps.columnIds, task.projectId);
   } catch (error) {
     // Without a validated review column the queue is the only move left that cannot strand the task
-    await quietly(() => deps.api.comment(task.taskId, `Returned to the queue: ${String(error)}`));
-    await quietly(() => deps.api.release(task.taskId));
+    await quietly(() =>
+      deps.api.comment(task.projectId, task.taskId, `Returned to the queue: ${String(error)}`)
+    );
+    await quietly(() => deps.api.release(task.projectId, task.taskId));
     return;
   }
 

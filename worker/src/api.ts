@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, statSync } from "fs";
 import { join } from "path";
-import { WorkerConfig } from "./config.js";
+import { Bootstrap } from "./config.js";
 import { loadIdentity, PROTOCOL_VERSION, Store } from "./registration.js";
 import { ClaimedTask } from "./types.js";
 
@@ -16,16 +16,17 @@ export interface StatusIds {
 }
 
 export interface ApiClient {
-  claim(runId: string): Promise<ClaimedTask | null>;
-  setStatus(taskId: string, status: string): Promise<void>;
-  comment(taskId: string, body: string): Promise<void>;
-  release(taskId: string, options?: { refund?: boolean }): Promise<void>;
-  statusIds(): Promise<StatusIds>;
-  columnIds(): Promise<string[]>;
+  claim(projectId: string, runId: string): Promise<ClaimedTask | null>;
+  setStatus(projectId: string, taskId: string, status: string): Promise<void>;
+  comment(projectId: string, taskId: string, body: string): Promise<void>;
+  release(projectId: string, taskId: string, options?: { refund?: boolean }): Promise<void>;
+  statusIds(projectId: string): Promise<StatusIds>;
+  columnIds(projectId: string): Promise<string[]>;
 }
 
 interface RawTask {
   _id: string;
+  project?: unknown;
   taskNumber: number;
   title: string;
   description: string;
@@ -99,12 +100,14 @@ function fileIdentityReader(stateDir: string): Pick<Store, "read"> {
   };
 }
 
+// A worker may hold assignments to several projects, so the base URL is no longer fixed at
+// construction — it is built per call from the project the call concerns. One client is built
+// once, from Bootstrap alone, before any assignment or repository is known.
 export function createApiClient(
-  config: WorkerConfig,
+  config: Bootstrap,
   fetchImpl: Fetch = fetch,
   identitySource?: Pick<Store, "read">
 ): ApiClient {
-  const base = `${config.apiBaseUrl}/api/projects/${config.projectId}`;
   let warnedNotRegistered = false;
 
   function warnNotRegistered(): void {
@@ -113,7 +116,13 @@ export function createApiClient(
     console.error(NOT_REGISTERED_MESSAGE);
   }
 
-  async function send(path: string, method: string, body?: unknown, credential: Credential = "api"): Promise<Response> {
+  async function send(
+    projectId: string,
+    path: string,
+    method: string,
+    body?: unknown,
+    credential: Credential = "api"
+  ): Promise<Response> {
     const headers: Record<string, string> = { "Content-Type": "application/json" };
 
     if (credential === "worker") {
@@ -129,7 +138,7 @@ export function createApiClient(
       headers.Authorization = `Bearer ${config.apiToken}`;
     }
 
-    const response = await fetchImpl(`${base}${path}`, {
+    const response = await fetchImpl(`${config.apiBaseUrl}/api/projects/${projectId}${path}`, {
       method,
       headers,
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -142,8 +151,8 @@ export function createApiClient(
     return response;
   }
 
-  async function readColumns(): Promise<BoardColumn[]> {
-    const body = (await (await send("", "GET")).json()) as { columns?: unknown };
+  async function readColumns(projectId: string): Promise<BoardColumn[]> {
+    const body = (await (await send(projectId, "", "GET")).json()) as { columns?: unknown };
     const columns = (Array.isArray(body.columns) ? body.columns : [])
       .map(toColumn)
       .filter((column): column is BoardColumn => column !== null)
@@ -151,30 +160,36 @@ export function createApiClient(
     return columns.length > 0 ? columns : SEEDED_BOARD;
   }
 
-  let projectKey = "";
+  const projectKeys = new Map<string, string>();
 
-  // CP_PROJECT_ID addresses the project, and the route accepts an ObjectId as readily as a key —
-  // so the key a task is named by has to come from the project itself, not from that setting
-  async function keyForTasks(): Promise<string> {
-    if (projectKey) return projectKey;
+  // The assignment addresses a project by its ObjectId, and the route accepts a key as readily
+  // as an id — so the key a task is named by has to come from the project itself
+  async function keyForTasks(projectId: string): Promise<string> {
+    const cached = projectKeys.get(projectId);
+    if (cached) return cached;
     try {
-      const body = (await (await send("", "GET")).json()) as { key?: unknown };
-      if (typeof body.key === "string" && body.key.trim()) projectKey = body.key.trim();
+      const body = (await (await send(projectId, "", "GET")).json()) as { key?: unknown };
+      if (typeof body.key === "string" && body.key.trim()) {
+        const key = body.key.trim();
+        projectKeys.set(projectId, key);
+        return key;
+      }
     } catch {
-      // The task is claimed by the time this runs; the configured id keeps it moving
+      // The task is claimed by the time this runs; the id used to claim it keeps it moving
     }
-    return projectKey || config.projectId;
+    return projectId;
   }
 
   return {
-    async claim(runId) {
-      const response = await send("/tasks/claim", "POST", { runId }, "worker");
+    async claim(projectId, runId) {
+      const response = await send(projectId, "/tasks/claim", "POST", { runId }, "worker");
       if (response.status === 204) return null;
 
       const raw = (await response.json()) as RawTask;
       return {
         taskId: raw._id,
-        taskKey: `${await keyForTasks()}-${raw.taskNumber}`,
+        projectId: typeof raw.project === "string" && raw.project ? raw.project : projectId,
+        taskKey: `${await keyForTasks(projectId)}-${raw.taskNumber}`,
         taskNumber: raw.taskNumber,
         title: raw.title,
         description: raw.description,
@@ -185,28 +200,29 @@ export function createApiClient(
       };
     },
 
-    async setStatus(taskId, status) {
-      await send(`/tasks/${taskId}/status`, "PATCH", { status });
+    async setStatus(projectId, taskId, status) {
+      await send(projectId, `/tasks/${taskId}/status`, "PATCH", { status });
     },
 
-    async comment(taskId, body) {
-      await send(`/tasks/${taskId}/comments`, "POST", { body });
+    async comment(projectId, taskId, body) {
+      await send(projectId, `/tasks/${taskId}/comments`, "POST", { body });
     },
 
-    async release(taskId, options) {
+    async release(projectId, taskId, options) {
       await send(
+        projectId,
         `/tasks/${taskId}/release`,
         "POST",
         options?.refund === false ? { refund: false } : undefined
       );
     },
 
-    async columnIds() {
-      return (await readColumns()).map((column) => column.id);
+    async columnIds(projectId) {
+      return (await readColumns(projectId)).map((column) => column.id);
     },
 
-    async statusIds() {
-      const ids = statusIdsFrom(await readColumns());
+    async statusIds(projectId) {
+      const ids = statusIdsFrom(await readColumns(projectId));
       return {
         approved: ids.approved || SEEDED.approved,
         review: ids.review || SEEDED.review,

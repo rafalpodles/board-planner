@@ -1,5 +1,6 @@
 export interface ClaimedTask {
   taskId: string;
+  projectId: string;
   taskKey: string;
   taskNumber: number;
   title: string;

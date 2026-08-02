@@ -31,6 +31,10 @@ export interface Heartbeat {
   stop(): void;
   onAbort(cb: () => void): void;
   ack(command: string): void;
+  // Surfaced on every heartbeat, so a project this worker cannot bind to shows the reason in
+  // /admin/workers without needing its own endpoint. An empty string clears a previously-reported
+  // error once the operator fixes it — bindingError is always sent, never merely omitted.
+  reportBindingError(message: string): void;
 }
 
 interface StoredIdentity extends Identity {
@@ -80,6 +84,7 @@ export function startHeartbeat(deps: HeartbeatDeps): Heartbeat {
   let timer: ReturnType<typeof setTimeout> | null = null;
   let cached: StoredIdentity | null = null;
   let acked: string | undefined;
+  let bindingError = "";
 
   async function register(): Promise<StoredIdentity | null> {
     try {
@@ -159,6 +164,7 @@ export function startHeartbeat(deps: HeartbeatDeps): Heartbeat {
         },
         body: JSON.stringify({
           version: deps.registration.version,
+          bindingError,
           ...(acked !== undefined ? { acked } : {}),
         }),
       });
@@ -189,6 +195,9 @@ export function startHeartbeat(deps: HeartbeatDeps): Heartbeat {
     },
     ack(command) {
       acked = command;
+    },
+    reportBindingError(message) {
+      bindingError = message;
     },
   };
 }
