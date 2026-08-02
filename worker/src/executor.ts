@@ -31,12 +31,16 @@ function isUsageLimit(text: string): boolean {
   return /usage limit reached/i.test(text);
 }
 
+// The agent writes `result` itself, so a task about this very detection code can put the phrase
+// there; only the CLI's exact sentinel counts. stderr stays on the loose match — the CLI owns it.
+const USAGE_LIMIT_SENTINEL = /^Claude(?: AI)? usage limit reached\|\d+$/;
+
 function wasRateLimited(events: StreamEvent[]): boolean {
   return events.some((event) => isRateLimitEvent(event) && event.rate_limit_info?.status === "rejected");
 }
 
 function reportsUsageLimit(final: ResultEvent | undefined): boolean {
-  return final?.is_error === true && typeof final.result === "string" && isUsageLimit(final.result);
+  return typeof final?.result === "string" && USAGE_LIMIT_SENTINEL.test(final.result.trim());
 }
 
 function buildPrompt(task: ClaimedTask): string {
@@ -130,12 +134,16 @@ export function createExecutor(config: WorkerConfig, runner: Runner): Executor {
       const events = parseStream(result.stdout);
       const final = lastResultEvent(events);
 
-      if (wasRateLimited(events) || reportsUsageLimit(final) || isUsageLimit(result.stderr)) {
-        return { kind: "usage_limit" };
-      }
+      if (wasRateLimited(events)) return { kind: "usage_limit" };
 
+      // A schema-valid payload is never a usage limit, so settling the success case first makes the
+      // text checks below unreachable for any run that actually produced one
       const parsed = parseExecutionResult(final);
       if (parsed.kind === "result") return parsed;
+
+      if (reportsUsageLimit(final) || isUsageLimit(result.stderr)) {
+        return { kind: "usage_limit" };
+      }
 
       if (result.code === 0) return parsed;
       return { kind: "error", message: result.stderr || `claude exited ${result.code}` };

@@ -167,15 +167,84 @@ describe("createExecutor", () => {
     expect(outcome).toEqual({ kind: "result", result: payload });
   });
 
+  // Faithful translation of the pre-migration payload: the only added field is `type`, which the
+  // stream shape requires. No is_error, no subtype — nothing has ever established that a real limit
+  // sets them, so classification must not depend on them
   it("classifies an exit-0 usage-limit response as its own outcome", async () => {
     const { runner } = runnerReturning({
       code: 0,
-      stdout: stream(resultEvent({ is_error: true, result: "Claude AI usage limit reached|1735689600" })),
+      stdout: stream({ type: "result", result: "Claude AI usage limit reached|1735689600" }),
       stderr: "",
       timedOut: false,
     });
 
     expect(await createExecutor(config, runner).execute(task, "/wt")).toEqual({ kind: "usage_limit" });
+  });
+
+  it("still classifies it when the CLI does declare the error", async () => {
+    const { runner } = runnerReturning({
+      code: 0,
+      stdout: stream(
+        resultEvent({ subtype: "error_during_execution", is_error: true, result: "Claude usage limit reached|1735689600" })
+      ),
+      stderr: "",
+      timedOut: false,
+    });
+
+    expect(await createExecutor(config, runner).execute(task, "/wt")).toEqual({ kind: "usage_limit" });
+  });
+
+  // The agent writes `result`, so a task about this detection code can put the phrase there. A free
+  // refund loops without sleeping, so this must stay an error
+  it("does not take the agent's own prose about usage limits as a usage limit", async () => {
+    const { runner } = runnerReturning({
+      code: 0,
+      stdout: stream(
+        resultEvent({
+          subtype: "error_max_turns",
+          is_error: true,
+          result: "I reworked the usage limit reached detection but ran out of turns.",
+        })
+      ),
+      stderr: "",
+      timedOut: false,
+    });
+
+    const outcome = await createExecutor(config, runner).execute(task, "/wt");
+    expect(outcome.kind).toBe("error");
+  });
+
+  // --fallback-model sonnet means an opus limit can be announced on stderr while the run goes on to
+  // finish on sonnet. Reading stderr before the payload would throw that completed work away
+  it("keeps a run that finished on the fallback model after the CLI announced a limit", async () => {
+    const payload = {
+      status: "completed",
+      summary: "Added the missing guard",
+      filesChanged: ["src/a.ts"],
+      testsAdded: ["src/a.test.ts"],
+      blockedReason: "",
+    };
+    const { runner } = runnerReturning({
+      code: 0,
+      stdout: completed(payload),
+      stderr: "Claude usage limit reached. Falling back to sonnet.",
+      timedOut: false,
+    });
+
+    expect(await createExecutor(config, runner).execute(task, "/wt")).toEqual({ kind: "result", result: payload });
+  });
+
+  it("does not take a successful run's summary about usage limits as a usage limit", async () => {
+    const payload = {
+      status: "completed",
+      summary: "Reworked how the executor detects a usage limit reached response",
+      filesChanged: ["worker/src/executor.ts"],
+      testsAdded: ["worker/src/executor.test.ts"],
+      blockedReason: "",
+    };
+    const { runner } = runnerReturning({ code: 0, stdout: completed(payload), stderr: "", timedOut: false });
+
+    expect(await createExecutor(config, runner).execute(task, "/wt")).toEqual({ kind: "result", result: payload });
   });
 
   it("classifies a rejected rate_limit_event as a usage limit", async () => {
