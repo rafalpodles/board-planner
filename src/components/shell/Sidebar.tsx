@@ -57,7 +57,7 @@ function NavItem({ href, icon, label, active, collapsed, badge }: NavItemProps) 
       href={href}
       title={collapsed ? label : undefined}
       aria-current={active ? "page" : undefined}
-      className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-colors ${
+      className={`focus-ring flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-colors ${
         collapsed ? "justify-center" : ""
       } ${
         active
@@ -155,7 +155,7 @@ export function Sidebar({ mobileOpen, onNavigate, onOpenImport, onOpenExport }: 
         }`}
       >
         {!compact && (
-          <Link href="/projects" className="flex min-w-0 items-center gap-2">
+          <Link href="/projects" className="focus-ring flex min-w-0 items-center gap-2 rounded">
             <Image src="/logo.svg" alt="" width={24} height={24} />
             <span className="truncate text-[15px] font-bold">ClaudePlanner</span>
           </Link>
@@ -164,7 +164,7 @@ export function Sidebar({ mobileOpen, onNavigate, onOpenImport, onOpenExport }: 
           onClick={toggleCollapsed}
           title={compact ? "Expand sidebar" : "Collapse sidebar"}
           aria-label={compact ? "Expand sidebar" : "Collapse sidebar"}
-          className={`rounded-md p-1 text-text-muted transition-colors hover:bg-bg-hover hover:text-text ${
+          className={`focus-ring rounded-md p-1 text-text-muted transition-colors hover:bg-bg-hover hover:text-text ${
             compact ? "" : "ml-auto"
           }`}
         >
@@ -176,7 +176,7 @@ export function Sidebar({ mobileOpen, onNavigate, onOpenImport, onOpenExport }: 
         <div className="relative px-2.5 pb-2.5">
           <Link
             href="/search"
-            className="block rounded-lg border border-border bg-bg-input py-2 pl-3 pr-[34px] text-[13px] text-text-muted transition-colors hover:text-text"
+            className="focus-ring block rounded-lg border border-border bg-bg-input py-2 pl-3 pr-[34px] text-[13px] text-text-muted transition-colors hover:text-text"
           >
             Search tasks and projects
           </Link>
@@ -254,7 +254,7 @@ export function Sidebar({ mobileOpen, onNavigate, onOpenImport, onOpenExport }: 
         <div className="relative">
           <button
             onClick={() => setMenuOpen((v) => !v)}
-            className={`flex w-full items-center gap-2 rounded-lg p-1 text-left transition-colors hover:bg-bg-hover ${
+            className={`focus-ring flex w-full items-center gap-2 rounded-lg p-1 text-left transition-colors hover:bg-bg-hover ${
               compact ? "justify-center" : ""
             }`}
           >
@@ -282,7 +282,7 @@ export function Sidebar({ mobileOpen, onNavigate, onOpenImport, onOpenExport }: 
               <Link
                 href="/settings"
                 onClick={() => setMenuOpen(false)}
-                className="flex items-center gap-2 px-3 py-2 text-sm text-text-muted hover:bg-bg-hover hover:text-text"
+                className="focus-ring-inset flex items-center gap-2 px-3 py-2 text-sm text-text-muted hover:bg-bg-hover hover:text-text"
               >
                 <Icon d={ICONS.settings} className="h-4 w-4" />
                 Settings
@@ -292,7 +292,7 @@ export function Sidebar({ mobileOpen, onNavigate, onOpenImport, onOpenExport }: 
                   toggleTheme();
                   setMenuOpen(false);
                 }}
-                className="block w-full cursor-pointer px-3 py-2 text-left text-sm text-text-muted hover:bg-bg-hover hover:text-text"
+                className="focus-ring-inset block w-full cursor-pointer px-3 py-2 text-left text-sm text-text-muted hover:bg-bg-hover hover:text-text"
               >
                 {theme === "dark" ? "Light mode" : "Dark mode"}
               </button>
@@ -302,7 +302,7 @@ export function Sidebar({ mobileOpen, onNavigate, onOpenImport, onOpenExport }: 
                   logout();
                   router.replace("/login");
                 }}
-                className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-sm text-text-muted hover:bg-bg-hover hover:text-text"
+                className="focus-ring-inset flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-sm text-text-muted hover:bg-bg-hover hover:text-text"
               >
                 <Icon d={ICONS.logout} className="h-4 w-4" />
                 Logout

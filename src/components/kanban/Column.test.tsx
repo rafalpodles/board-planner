@@ -107,6 +107,32 @@ describe("Column, collapsed to a rail", () => {
     expect(screen.queryByLabelText("Collapse Needs Human Review")).toBeNull();
   });
 
+  // The rail stays a div because it is also the drop target, so it has to borrow
+  // the keyboard contract a button would have given it for free
+  it("is reachable and operable from the keyboard", async () => {
+    const onToggleCollapsed = vi.fn();
+    const { container } = renderColumn({ collapsed: true, onToggleCollapsed });
+    const rail = container.firstElementChild as HTMLElement;
+
+    expect(rail.getAttribute("role")).toBe("button");
+    expect(rail.getAttribute("tabindex")).toBe("0");
+    expect(rail.getAttribute("aria-label")).toBe("Expand Needs Human Review");
+
+    for (const key of ["Enter", " "]) {
+      await act(async () => {
+        rail.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+      });
+    }
+    expect(onToggleCollapsed).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not present the open column as a button", () => {
+    const { container } = renderColumn({ collapsed: false });
+    const root = container.firstElementChild as HTMLElement;
+    expect(root.getAttribute("role")).toBeNull();
+    expect(root.getAttribute("tabindex")).toBeNull();
+  });
+
   // Without this there is nowhere to drop a card into an empty column
   it("reports a drag entering and leaving so the board can expand it", async () => {
     const onDragOverColumn = vi.fn();
