@@ -4,7 +4,8 @@ import { useEffect, useState, FormEvent } from "react";
 import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { useRouter } from "next/navigation";
-import { ApiUser, ApiProject } from "@/types";
+import { ApiUser } from "@/types";
+import { useProjects } from "@/hooks/use-projects";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Card } from "@/components/ui/Card";
@@ -16,7 +17,7 @@ export default function UsersPage() {
   const { isAdmin, isLoading: authLoading } = useAuth();
   const router = useRouter();
   const [users, setUsers] = useState<ApiUser[]>([]);
-  const [projects, setProjects] = useState<ApiProject[]>([]);
+  const { projects } = useProjects();
   const [loading, setLoading] = useState(true);
   const [showNew, setShowNew] = useState(false);
   const [username, setUsername] = useState("");
@@ -47,11 +48,9 @@ export default function UsersPage() {
       return;
     }
 
-    Promise.all([api.get("/api/users"), api.get("/api/projects")])
-      .then(([u, p]: [ApiUser[], ApiProject[]]) => {
-        setUsers(u);
-        setProjects(p);
-      })
+    api
+      .get("/api/users")
+      .then(setUsers)
       .catch(() => toast("Failed to load data", "error"))
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
