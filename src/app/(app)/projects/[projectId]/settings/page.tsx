@@ -232,7 +232,7 @@ export default function ProjectSettingsPage() {
           aria-current={s.id === active}
           className={`shrink-0 rounded-full border px-3.5 py-1.5 text-sm transition-colors ${
             s.id === active
-              ? "border-primary bg-primary font-semibold text-white"
+              ? "border-primary bg-primary-solid font-semibold text-white"
               : "border-border bg-bg-card text-text-muted"
           }`}
         >
@@ -304,7 +304,7 @@ export default function ProjectSettingsPage() {
                 }}
                 placeholder="Search settings..."
                 aria-label="Search settings"
-                className="w-full rounded-lg border border-border bg-bg-input px-3 py-2 text-sm placeholder:text-text-muted/60 focus:outline-none focus:ring-2 focus:ring-primary"
+                className="w-full rounded-lg border border-border bg-bg-input px-3 py-2 text-sm placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary"
               />
             </div>
 

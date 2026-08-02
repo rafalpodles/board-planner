@@ -319,7 +319,7 @@ export function BoardFilters({
         >
           Filters
           {activeCount > 0 && (
-            <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold text-white">
+            <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-primary-solid px-1 text-[10px] font-bold text-white">
               {activeCount}
             </span>
           )}

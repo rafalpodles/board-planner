@@ -1,11 +1,12 @@
 "use client";
 
+import type { CSSProperties } from "react";
 import { ApiTask, ApiLabel, ApiProjectCategory, PRIORITY_LABELS } from "@/types";
 import { Badge } from "@/components/ui/Badge";
 import { categoryColor, categoryTint } from "@/lib/category-colors";
 
 // Cards are narrow; the default badge padding makes three of them wrap raggedly
-const COMPACT_BADGE = "text-[10px] px-1.5 whitespace-nowrap";
+const COMPACT_BADGE = "text-[11px] px-1.5 whitespace-nowrap";
 
 interface TaskCardProps {
   task: ApiTask;
@@ -72,7 +73,7 @@ export function TaskCard({
           className={`absolute top-2 right-2 w-5 h-5 rounded border flex items-center justify-center
             transition-colors text-[10px]
             ${selected
-              ? "bg-primary border-primary text-white"
+              ? "bg-primary-solid border-primary text-white"
               : "border-border bg-bg-input text-transparent hover:border-primary/50"
             }`}
         >
@@ -114,7 +115,7 @@ export function TaskCard({
 
       {task.component && (
         <div className="mb-2">
-          <Badge className="text-[10px]">{task.component}</Badge>
+          <Badge className="text-[11px]">{task.component}</Badge>
         </div>
       )}
 
@@ -123,8 +124,8 @@ export function TaskCard({
           {taskLabels.map((label) => (
             <span
               key={label._id}
-              className="text-[10px] px-1.5 py-0.5 rounded-full text-white font-medium"
-              style={{ backgroundColor: label.color }}
+              className="chip text-[11px] px-1.5 py-0.5 rounded-full font-medium"
+              style={{ "--chip": label.color } as CSSProperties}
             >
               {label.name}
             </span>
@@ -141,17 +142,23 @@ export function TaskCard({
         return (
           <div className="mb-2 flex flex-wrap gap-1">
             {blocked > 0 && (
-              <span className="text-[10px] text-warning bg-warning/10 px-1.5 py-0.5 rounded font-medium">
+              <span
+                className="chip text-[11px] px-1.5 py-0.5 rounded font-medium"
+                style={{ "--chip": "var(--color-warning)" } as CSSProperties}
+              >
                 Blocked ({blocked})
               </span>
             )}
             {relates > 0 && (
-              <span className="text-[10px] text-primary bg-primary/10 px-1.5 py-0.5 rounded font-medium">
+              <span
+                className="chip text-[11px] px-1.5 py-0.5 rounded font-medium"
+                style={{ "--chip": "var(--color-primary)" } as CSSProperties}
+              >
                 Relates ({relates})
               </span>
             )}
             {duplicates > 0 && (
-              <span className="text-[10px] text-text-muted bg-bg-input px-1.5 py-0.5 rounded font-medium">
+              <span className="text-[11px] text-text-muted bg-bg-input px-1.5 py-0.5 rounded font-medium">
                 Duplicate ({duplicates})
               </span>
             )}
@@ -163,7 +170,7 @@ export function TaskCard({
         <div className="mb-2 flex items-center gap-1.5">
           <div className="flex-1 h-1 bg-bg-input rounded-full overflow-hidden">
             <div
-              className="h-full bg-primary rounded-full transition-all"
+              className="h-full bg-primary-solid rounded-full transition-all"
               style={{
                 width: `${(task.checklist.filter((i) => i.done).length / task.checklist.length) * 100}%`,
               }}
@@ -180,13 +187,17 @@ export function TaskCard({
           {task.linkedPRs.map((pr) => (
             <span
               key={`${pr.provider ?? "github"}-${pr.number}`}
-              className={`text-[10px] px-1.5 py-0.5 rounded font-medium inline-flex items-center gap-1 ${
-                pr.state === "merged"
-                  ? "text-[#8b5cf6] bg-[#8b5cf6]/10"
-                  : pr.state === "open"
-                    ? "text-[#22c55e] bg-[#22c55e]/10"
-                    : "text-danger bg-danger/10"
-              }`}
+              className="chip text-[11px] px-1.5 py-0.5 rounded font-medium inline-flex items-center gap-1"
+              style={
+                {
+                  "--chip":
+                    pr.state === "merged"
+                      ? "#8b5cf6"
+                      : pr.state === "open"
+                        ? "var(--color-success)"
+                        : "var(--color-danger)",
+                } as CSSProperties
+              }
               title={pr.title}
             >
               <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 16 16">

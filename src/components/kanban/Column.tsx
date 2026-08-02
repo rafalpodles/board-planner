@@ -147,7 +147,7 @@ export function Column({
           <div className="h-0.5 bg-primary rounded-full mx-1 -mt-1" />
         )}
         {tasks.length === 0 && (
-          <p className="text-xs text-text-muted/50 text-center py-6">
+          <p className="text-xs text-text-muted text-center py-6">
             Drop tasks here
           </p>
         )}

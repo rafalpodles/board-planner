@@ -331,7 +331,7 @@ export function Comments({
                     onBlur={() => setTimeout(() => setMentionQuery(null), 150)}
                     rows={3}
                     autoFocus
-                    className="w-full rounded-lg border border-border bg-bg-input px-3 py-2 text-text min-h-[88px] placeholder:text-text-muted/50 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent resize-y"
+                    className="w-full rounded-lg border border-border bg-bg-input px-3 py-2 text-text min-h-[88px] placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent resize-y"
                   />
                 </div>
                 <div className="flex gap-2">
@@ -417,7 +417,7 @@ export function Comments({
             onBlur={() => setTimeout(() => setMentionQuery(null), 150)}
             placeholder="Add a comment... (use @ to mention)"
             rows={3}
-            className="w-full rounded-lg border border-border bg-bg-input px-3 py-2 text-text min-h-[88px] placeholder:text-text-muted/50 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent resize-y"
+            className="w-full rounded-lg border border-border bg-bg-input px-3 py-2 text-text min-h-[88px] placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent resize-y"
           />
         </div>
         <Button type="submit" size="sm" disabled={loading || !body.trim()}>
