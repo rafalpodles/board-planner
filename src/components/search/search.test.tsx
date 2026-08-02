@@ -217,6 +217,17 @@ describe("SearchLayer", () => {
     expect(screen.getByText("In this project")).toBeTruthy();
     expect(screen.getByText("Other projects")).toBeTruthy();
     expect(screen.getAllByRole("option")[0].textContent).toContain("Mobile App");
+
+    // a listbox owes its options a group, not a bare div, or the heading is
+    // decoration and the grouping never reaches a screen reader
+    const groups = screen.getAllByRole("group");
+    expect(groups.map((g) => g.getAttribute("aria-label"))).toEqual([
+      "In this project",
+      "Other projects",
+    ]);
+    for (const option of screen.getAllByRole("option")) {
+      expect(option.parentElement?.getAttribute("role")).toBe("group");
+    }
   });
 
   it("leaves the groups off when the route has no project", async () => {
