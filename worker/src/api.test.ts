@@ -32,7 +32,7 @@ describe("createApiClient", () => {
         title: "Do the thing",
         description: "body",
         checklist: [{ text: "first", done: false }],
-        execution: { attempts: 1 },
+        execution: { attempts: 1, runId: "run-on-the-task" },
       }),
     });
     const api = createApiClient(config, fetchMock as never, identityStore);
@@ -48,7 +48,19 @@ describe("createApiClient", () => {
       description: "body",
       acceptanceCriteria: ["first"],
       attempts: 1,
+      runId: "run-on-the-task",
     });
+  });
+
+  it("falls back to the run it proposed when the response carries none", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ _id: "t1", taskNumber: 158, title: "Do the thing", description: "" }),
+    });
+    const api = createApiClient(config, fetchMock as never, identityStore);
+
+    expect((await api.claim("CP", "run-1"))?.runId).toBe("run-1");
   });
 
   it("falls back to the id used to claim when the task carries no project field", async () => {
@@ -406,6 +418,62 @@ describe("createApiClient", () => {
     expect(init.headers["X-Worker-Id"]).toBeUndefined();
   });
 
+  it("posts a phase event to the worker's own events endpoint, not a project one", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    const api = createApiClient(config, fetchMock as never, identityStore);
+
+    await api.postEvent({ taskId: "t1", runId: "run-1", phase: "gates:build" });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://app.example.com/api/workers/w1/events");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({
+      taskId: "t1",
+      runId: "run-1",
+      phase: "gates:build",
+      seq: 1,
+    });
+  });
+
+  it("posts a phase event with the worker credential, not the api token", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    const api = createApiClient(config, fetchMock as never, identityStore);
+
+    await api.postEvent({ taskId: "t1", runId: "run-1", phase: "agent" });
+
+    const init = fetchMock.mock.calls[0][1];
+    expect(init.headers.Authorization).toBe("Bearer cpw_secret");
+    expect(init.headers["X-Worker-Id"]).toBe("w1");
+    expect(init.headers["X-CP-Protocol"]).toBe("1");
+  });
+
+  // The server keeps the highest seq it has seen and drops the rest, so the order events were
+  // reported in has to survive a network that reorders them
+  it("stamps each event with a seq that only goes up", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    const api = createApiClient(config, fetchMock as never, identityStore);
+
+    await api.postEvent({ taskId: "t1", runId: "run-1", phase: "worktree" });
+    await api.postEvent({ taskId: "t1", runId: "run-1", phase: "agent" });
+    await api.postEvent({ taskId: "t1", runId: "run-1", phase: "gates:build" });
+
+    const seqs = fetchMock.mock.calls.map(([, init]) => JSON.parse(init.body).seq);
+    expect(seqs).toEqual([1, 2, 3]);
+  });
+
+  it("refuses to post an event, without a network call, when no identity is stored", async () => {
+    const fetchMock = vi.fn();
+    const api = createApiClient(config, fetchMock as never, { read: () => "" });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(api.postEvent({ taskId: "t1", runId: "run-1", phase: "agent" })).rejects.toThrow(
+      /not registered/
+    );
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+
   it("still reports the status when reading the error body fails", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: false,
@@ -537,5 +605,40 @@ describe("createApiClient's default identity file", () => {
     await expect(api.claim("CP", "run-1")).rejects.toThrow(/not registered/);
 
     errorSpy.mockRestore();
+  });
+});
+
+// The one test that notices the seam. worker/tsconfig.json excludes src/**/*.test.ts and vitest
+// transpiles without typechecking, so a ClaimedTask.runId that is never populated raises no error
+// anywhere: every other fixture would simply carry `undefined` and every server-side test would
+// still pass on its own hand-written value.
+describe("the run identity, from claim through to postEvent", () => {
+  it("posts the run the server recorded on the task, not the one the claim proposed", async () => {
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (String(url).endsWith("/tasks/claim")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            _id: "t1",
+            taskNumber: 158,
+            title: "Do the thing",
+            description: "",
+            execution: { attempts: 1, runId: "run-the-server-recorded" },
+          }),
+        };
+      }
+      return { ok: true, status: 200, json: async () => ({ key: "CP" }) };
+    });
+    const api = createApiClient(config, fetchMock as never, identityStore);
+
+    const task = await api.claim("CP", "run-the-worker-proposed");
+    expect(task).not.toBeNull();
+    await api.postEvent({ taskId: task!.taskId, runId: task!.runId, phase: "agent" });
+
+    const [url, init] = fetchMock.mock.calls[fetchMock.mock.calls.length - 1];
+    expect(url).toBe("https://app.example.com/api/workers/w1/events");
+    expect(JSON.parse(init.body).taskId).toBe("t1");
+    expect(JSON.parse(init.body).runId).toBe("run-the-server-recorded");
   });
 });
