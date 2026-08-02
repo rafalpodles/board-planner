@@ -13,6 +13,9 @@ interface ColumnProps {
   projectCategories?: ApiProjectCategory[];
   selectedTasks?: Set<string>;
   selectionMode?: boolean;
+  collapsed?: boolean;
+  onExpand?: () => void;
+  onDragOverColumn?: (over: boolean) => void;
   onStatusChange: (taskId: string, status: string) => void;
   onTaskDrop?: (taskId: string, status: string, dropIndex: number) => void;
   onTaskClick: (taskId: string) => void;
@@ -28,6 +31,9 @@ export function Column({
   projectCategories,
   selectedTasks,
   selectionMode,
+  collapsed = false,
+  onExpand,
+  onDragOverColumn,
   onStatusChange,
   onTaskDrop,
   onTaskClick,
@@ -58,16 +64,19 @@ export function Column({
       onDragEnter={(e) => {
         e.preventDefault();
         setIsDragOver(true);
+        onDragOverColumn?.(true);
       }}
       onDragLeave={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node)) {
           setIsDragOver(false);
           setDropIndex(null);
+          onDragOverColumn?.(false);
         }
       }}
       onDrop={(e) => {
         e.preventDefault();
         setIsDragOver(false);
+        onDragOverColumn?.(false);
         const taskId = e.dataTransfer.getData("text/plain");
         if (taskId) {
           if (onTaskDrop && dropIndex !== null) {
@@ -78,11 +87,34 @@ export function Column({
         }
         setDropIndex(null);
       }}
+      onClick={collapsed ? onExpand : undefined}
+      title={collapsed ? `${column.label} — 0 tasks. Click to expand.` : undefined}
       className={`bg-bg-card rounded-xl border border-border
         border-t-2 flex flex-col max-h-[calc(100vh-12rem)] lg:max-h-full lg:h-full lg:min-h-0
-        transition-colors ${isDragOver ? "bg-primary/5 border-primary/30" : ""}`}
+        transition-colors ${isDragOver ? "bg-primary/5 border-primary/30" : ""}
+        ${collapsed ? "items-center gap-2.5 py-2.5 cursor-pointer hover:bg-bg-hover" : ""}`}
       style={{ borderTopColor: column.color }}
     >
+      {collapsed ? (
+        <>
+          <span className="rounded-full bg-bg-input px-2 py-0.5 text-xs text-text-muted">
+            {tasks.length}
+          </span>
+          <span className="min-h-0 flex-1 truncate text-[12px] font-semibold text-text-muted [writing-mode:vertical-rl]">
+            {column.label}
+          </span>
+          <svg
+            className="h-3.5 w-3.5 shrink-0 text-text-muted"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2}
+            viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+          </svg>
+        </>
+      ) : (
+      <>
       <div className="px-3 py-2.5 flex items-center justify-between border-b border-border">
         <h3 className="text-sm font-medium">{column.label}</h3>
         <span className="text-xs text-text-muted bg-bg-input rounded-full px-2 py-0.5">
@@ -120,6 +152,8 @@ export function Column({
           </p>
         )}
       </div>
+      </>
+      )}
     </div>
   );
 }
