@@ -9,6 +9,8 @@ import { useApi } from "@/hooks/use-api";
 import { useTheme } from "@/components/ThemeProvider";
 import { usePollWhileVisible } from "@/hooks/use-poll-while-visible";
 import { isNavItemActive } from "@/lib/nav-active";
+import { useProjects } from "@/hooks/use-projects";
+import { ProjectTree } from "./ProjectTree";
 
 const ICONS = {
   myTasks:
@@ -81,10 +83,13 @@ function GroupHeading({ children }: { children: React.ReactNode }) {
 interface SidebarProps {
   mobileOpen: boolean;
   onNavigate: () => void;
+  onOpenImport: () => void;
+  onOpenExport: () => void;
 }
 
-export function Sidebar({ mobileOpen, onNavigate }: SidebarProps) {
-  const { user, logout } = useAuth();
+export function Sidebar({ mobileOpen, onNavigate, onOpenImport, onOpenExport }: SidebarProps) {
+  const { user, isAdmin, logout } = useAuth();
+  const { projects } = useProjects();
   const { theme, toggle: toggleTheme } = useTheme();
   const pathname = usePathname() ?? "";
   const router = useRouter();
@@ -93,7 +98,12 @@ export function Sidebar({ mobileOpen, onNavigate }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
   const menuRef = useRef<HTMLDivElement>(null);
+
+  // Ticks the Claude working/idle line over to idle without a reload
+  const tick = useCallback(() => setNow(Date.now()), []);
+  usePollWhileVisible(tick, 60_000, !!user);
 
   useEffect(() => {
     setCollapsed(localStorage.getItem(COLLAPSED_KEY) === "1");
@@ -215,16 +225,24 @@ export function Sidebar({ mobileOpen, onNavigate }: SidebarProps) {
           )}
         </div>
 
-        <div>
-          {!compact && <GroupHeading>Projects</GroupHeading>}
+        {compact ? (
           <NavItem
             href="/projects"
             icon={ICONS.projects}
             label="All projects"
             active={isActive("/projects")}
-            collapsed={compact}
+            collapsed
           />
-        </div>
+        ) : (
+          <ProjectTree
+            projects={projects}
+            pathname={pathname}
+            isAdmin={isAdmin}
+            now={now}
+            onOpenImport={onOpenImport}
+            onOpenExport={onOpenExport}
+          />
+        )}
 
         <div>
           {!compact && <GroupHeading>Instance</GroupHeading>}

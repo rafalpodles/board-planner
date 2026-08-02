@@ -2,20 +2,33 @@
 
 import Image from "next/image";
 import { useState } from "react";
+import { usePathname } from "next/navigation";
 import { AuthGuard } from "@/components/AuthGuard";
 import { CommandPalette } from "@/components/CommandPalette";
 import { PmChatWidget } from "@/components/pm/PmChatWidget";
+import { ImportDialog } from "@/components/import-export/ImportDialog";
+import { ExportDialog } from "@/components/import-export/ExportDialog";
 import { ProjectsProvider } from "@/components/shell/ProjectsProvider";
 import { Sidebar } from "@/components/shell/Sidebar";
+import { emitBoardRefresh } from "@/lib/board-refresh";
+import { projectRefFromPathname } from "@/lib/urls";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [navOpen, setNavOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const projectRef = projectRefFromPathname(usePathname());
 
   return (
     <AuthGuard>
       <ProjectsProvider>
         <div className="flex">
-          <Sidebar mobileOpen={navOpen} onNavigate={() => setNavOpen(false)} />
+          <Sidebar
+            mobileOpen={navOpen}
+            onNavigate={() => setNavOpen(false)}
+            onOpenImport={() => setImportOpen(true)}
+            onOpenExport={() => setExportOpen(true)}
+          />
 
           {navOpen && (
             <div
@@ -51,8 +64,25 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             </main>
           </div>
         </div>
+
         <CommandPalette />
         <PmChatWidget />
+
+        {projectRef && (
+          <>
+            <ImportDialog
+              open={importOpen}
+              onClose={() => setImportOpen(false)}
+              projectId={projectRef}
+              onImported={() => emitBoardRefresh(projectRef)}
+            />
+            <ExportDialog
+              open={exportOpen}
+              onClose={() => setExportOpen(false)}
+              projectId={projectRef}
+            />
+          </>
+        )}
       </ProjectsProvider>
     </AuthGuard>
   );

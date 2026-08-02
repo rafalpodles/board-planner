@@ -8,13 +8,12 @@ import { useAuth } from "@/hooks/use-auth";
 import { usePollWhileVisible } from "@/hooks/use-poll-while-visible";
 import { ApiProject, ApiTask, ApiSprint, DEFAULT_PROJECT_ICON } from "@/types";
 import { effectiveColumns } from "@/lib/columns";
+import { activityStatus as computeActivityStatus } from "@/lib/activity-status";
 import { subscribeBoardRefresh } from "@/lib/board-refresh";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Board } from "@/components/kanban/Board";
 import { BoardFilters } from "@/components/kanban/BoardFilters";
 import { TaskForm } from "@/components/tasks/TaskForm";
-import { ImportDialog } from "@/components/import-export/ImportDialog";
-import { ExportDialog } from "@/components/import-export/ExportDialog";
 import { TaskContextMenu } from "@/components/kanban/TaskContextMenu";
 import { ListView } from "@/components/kanban/ListView";
 import { Button } from "@/components/ui/Button";
@@ -62,8 +61,6 @@ export default function KanbanPage() {
   const [loading, setLoading] = useState(true);
   const [showNewTask, setShowNewTask] = useState(false);
   const [editTaskId, setEditTaskId] = useState<string | null>(null);
-  const [showImport, setShowImport] = useState(false);
-  const [showExport, setShowExport] = useState(false);
   const loadSeq = useRef(0);
   const [selectedTasks, setSelectedTasks] = useState<Set<string>>(new Set());
   const [selectionMode, setSelectionMode] = useState(false);
@@ -88,8 +85,7 @@ export default function KanbanPage() {
   const activityStatus = useMemo(() => {
     if (tasks.length === 0) return null;
     const latest = Math.max(...tasks.map((t) => new Date(t.updatedAt).getTime()));
-    const minutesAgo = (now - latest) / 60_000;
-    return minutesAgo < 15 ? "working" : "idle";
+    return computeActivityStatus(latest, now);
   }, [tasks, now]);
 
   const loadData = useCallback(async () => {
@@ -432,20 +428,6 @@ export default function KanbanPage() {
           </Button>
           <Button
             size="sm"
-            variant="secondary"
-            onClick={() => setShowImport(true)}
-          >
-            Import
-          </Button>
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => setShowExport(true)}
-          >
-            Export
-          </Button>
-          <Button
-            size="sm"
             variant="ghost"
             onClick={() => {
               const next = viewMode === "board" ? "list" : "board";
@@ -731,19 +713,6 @@ export default function KanbanPage() {
           </Modal>
         );
       })()}
-
-      <ImportDialog
-        open={showImport}
-        onClose={() => setShowImport(false)}
-        projectId={projectId}
-        onImported={loadData}
-      />
-
-      <ExportDialog
-        open={showExport}
-        onClose={() => setShowExport(false)}
-        projectId={projectId}
-      />
 
       <ShortcutHelp
         open={showShortcutHelp}
