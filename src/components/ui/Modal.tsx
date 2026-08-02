@@ -6,6 +6,8 @@ const SIZE_CLASSES = {
   sm: "sm:max-w-md",
   md: "sm:max-w-lg",
   lg: "sm:max-w-2xl",
+  // Wide enough for the two-column task detail; lg would clip it to one column
+  xl: "sm:max-w-6xl",
 } as const;
 
 interface ModalProps {
