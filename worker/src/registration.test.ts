@@ -178,4 +178,39 @@ describe("startHeartbeat", () => {
     await expect(startHeartbeat(deps).tick()).resolves.toBeUndefined();
     expect(deps.store.write).not.toHaveBeenCalled();
   });
+
+  it("sends an empty binding error when nothing has ever been reported", async () => {
+    const deps = depsWith();
+
+    await startHeartbeat(deps).tick();
+
+    const [, init] = calls(deps)[0];
+    expect(JSON.parse(init.body).bindingError).toBe("");
+  });
+
+  it("sends the reported binding error on the next heartbeat", async () => {
+    const deps = depsWith();
+    const heartbeat = startHeartbeat(deps);
+
+    heartbeat.reportBindingError("p1: not approved on this machine — add it to repos.json");
+    await heartbeat.tick();
+
+    const [, init] = calls(deps)[0];
+    expect(JSON.parse(init.body).bindingError).toBe(
+      "p1: not approved on this machine — add it to repos.json"
+    );
+  });
+
+  // The operator fixes repos.json; the server-side field must clear, not stay stuck forever
+  it("clears a previously reported binding error once told there is none", async () => {
+    const deps = depsWith();
+    const heartbeat = startHeartbeat(deps);
+
+    heartbeat.reportBindingError("p1: not approved on this machine");
+    heartbeat.reportBindingError("");
+    await heartbeat.tick();
+
+    const [, init] = calls(deps)[0];
+    expect(JSON.parse(init.body).bindingError).toBe("");
+  });
 });

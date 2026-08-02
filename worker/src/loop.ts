@@ -1,10 +1,12 @@
 import { randomUUID } from "crypto";
 import { ApiClient } from "./api.js";
-import { WorkerConfig } from "./config.js";
 import { ClaimedTask } from "./types.js";
 
 export interface LoopDeps {
-  config: WorkerConfig;
+  pollIntervalMs: () => number;
+  // The project ids currently claimable, read fresh on every pass — a worker may serve more than
+  // one project, and an admin can add or remove an assignment while this loop is already running
+  assignments: () => string[];
   api: ApiClient;
   execute: (task: ClaimedTask) => Promise<void>;
   sleep: (ms: number) => Promise<void>;
@@ -30,22 +32,39 @@ export function createLoop(deps: LoopDeps): Loop {
   return {
     async start() {
       while (running) {
-        try {
-          if (deps.drain) await deps.drain();
-          if (!pausedState) {
-            const task = await deps.api.claim(randomUUID());
-            if (task) {
-              await deps.execute(task);
-              continue;
+        let claimedAny = false;
+
+        if (deps.drain) {
+          try {
+            await deps.drain();
+          } catch (error) {
+            log(`worker cycle failed: ${String(error)}`);
+          }
+        }
+
+        if (!pausedState) {
+          // Every assignment gets its own attempt and its own try/catch, in order: a project that
+          // cannot be claimed from, or a task that blows up, must not cost a sibling project its
+          // turn in this pass — that would starve whichever assignment comes last in the list.
+          for (const projectId of deps.assignments()) {
+            if (!running) return;
+            try {
+              const task = await deps.api.claim(projectId, randomUUID());
+              if (task) {
+                await deps.execute(task);
+                claimedAny = true;
+              }
+            } catch (error) {
+              // runTask reports its own failures to the board, so anything reaching here is the
+              // worker itself breaking — the next pass is the only recovery available
+              log(`worker cycle failed for ${projectId}: ${String(error)}`);
             }
           }
-        } catch (error) {
-          // runTask reports its own failures to the board, so anything reaching here is the
-          // worker itself breaking — the next cycle is the only recovery available
-          log(`worker cycle failed: ${String(error)}`);
         }
+
         if (!running) return;
-        await deps.sleep(deps.config.pollIntervalMs);
+        if (claimedAny) continue;
+        await deps.sleep(deps.pollIntervalMs());
       }
     },
 

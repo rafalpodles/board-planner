@@ -5,9 +5,9 @@ import { ApiClient } from "./api.js";
 // main also redeploys the app, which makes the report right after a merge the one most likely to
 // fail — so it has to survive the process, not just the request.
 export type OutboxOp =
-  | { kind: "comment"; taskId: string; body: string }
-  | { kind: "status"; taskId: string; status: string }
-  | { kind: "release"; taskId: string; refund: boolean };
+  | { kind: "comment"; projectId: string; taskId: string; body: string }
+  | { kind: "status"; projectId: string; taskId: string; status: string }
+  | { kind: "release"; projectId: string; taskId: string; refund: boolean };
 
 interface Entry {
   op: OutboxOp;
@@ -49,9 +49,11 @@ function serialise(entries: Entry[]): string {
 }
 
 async function deliver(api: ApiClient, op: OutboxOp): Promise<void> {
-  if (op.kind === "comment") return api.comment(op.taskId, op.body);
-  if (op.kind === "status") return api.setStatus(op.taskId, op.status);
-  return op.refund ? api.release(op.taskId) : api.release(op.taskId, { refund: false });
+  if (op.kind === "comment") return api.comment(op.projectId, op.taskId, op.body);
+  if (op.kind === "status") return api.setStatus(op.projectId, op.taskId, op.status);
+  return op.refund
+    ? api.release(op.projectId, op.taskId)
+    : api.release(op.projectId, op.taskId, { refund: false });
 }
 
 export function createOutbox(store: Store, log: Log = (m) => console.error(m)): Outbox {

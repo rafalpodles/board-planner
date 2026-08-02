@@ -3,8 +3,7 @@ import { ApiClient } from "./api.js";
 import { createLoop, Loop } from "./loop.js";
 import { ClaimedTask } from "./types.js";
 
-const task = { taskId: "t1", taskKey: "CP-158" } as ClaimedTask;
-const config = { pollIntervalMs: 30_000, concurrency: 1, workerId: "w" } as never;
+const task = { taskId: "t1", taskKey: "CP-158", projectId: "P1" } as ClaimedTask;
 
 function apiStub(claim: ApiClient["claim"]) {
   return {
@@ -25,12 +24,23 @@ function queue(...tasks: ClaimedTask[]): ApiClient["claim"] {
 
 function loopOver(
   api: ReturnType<typeof apiStub>,
-  overrides: { execute?: (task: ClaimedTask) => Promise<void>; sleep?: (ms: number) => Promise<void> } = {}
+  overrides: {
+    assignments?: string[];
+    execute?: (task: ClaimedTask) => Promise<void>;
+    sleep?: (ms: number) => Promise<void>;
+  } = {}
 ): { loop: Loop; execute: ReturnType<typeof vi.fn>; sleep: ReturnType<typeof vi.fn> } {
   const execute = vi.fn(overrides.execute ?? (async () => undefined));
   // Stopping on the first idle sleep is what ends every test below
   const sleep = vi.fn(overrides.sleep ?? (async () => loop.stop()));
-  const loop = createLoop({ config, api, execute, sleep, log: vi.fn() });
+  const loop = createLoop({
+    pollIntervalMs: () => 30_000,
+    assignments: () => overrides.assignments ?? ["P1"],
+    api,
+    execute,
+    sleep,
+    log: vi.fn(),
+  });
   return { loop, execute, sleep };
 }
 
@@ -42,6 +52,15 @@ describe("createLoop", () => {
     await loop.start();
 
     expect(execute).toHaveBeenCalledWith(task);
+  });
+
+  it("claims against the assignment's project id, not a leftover from configuration", async () => {
+    const api = apiStub(queue(task));
+    const { loop } = loopOver(api, { assignments: ["P1"] });
+
+    await loop.start();
+
+    expect(api.claim.mock.calls[0][0]).toBe("P1");
   });
 
   it("takes the next task without sleeping while the queue has work", async () => {
@@ -71,7 +90,11 @@ describe("createLoop", () => {
       if (claims === 1) throw new Error("network down");
       return null;
     });
-    const { loop } = loopOver(api, { sleep: async () => { if (claims >= 2) loop.stop(); } });
+    const { loop } = loopOver(api, {
+      sleep: async () => {
+        if (claims >= 2) loop.stop();
+      },
+    });
 
     await loop.start();
 
@@ -97,7 +120,7 @@ describe("createLoop", () => {
 
     await loop.start();
 
-    const runIds = api.claim.mock.calls.map(([runId]) => runId);
+    const runIds = api.claim.mock.calls.map(([, runId]) => runId);
     expect(new Set(runIds).size).toBe(runIds.length);
     expect(runIds[0]).toMatch(/^[0-9a-f-]{36}$/);
   });
@@ -119,7 +142,8 @@ describe("createLoop", () => {
     const api = apiStub(queue(task, { ...task, taskId: "t2" }));
     let cycles = 0;
     const loop = createLoop({
-      config,
+      pollIntervalMs: () => 30_000,
+      assignments: () => ["P1"],
       api,
       execute: async () => {
         loop.pause();
@@ -141,7 +165,8 @@ describe("createLoop", () => {
     const api = apiStub(queue(task));
     let cycles = 0;
     const loop = createLoop({
-      config,
+      pollIntervalMs: () => 30_000,
+      assignments: () => ["P1"],
       api,
       execute: vi.fn().mockResolvedValue(undefined),
       sleep: async () => {
@@ -164,7 +189,8 @@ describe("createLoop", () => {
     const order: string[] = [];
     const api = apiStub(queue(task));
     const loop = createLoop({
-      config,
+      pollIntervalMs: () => 30_000,
+      assignments: () => ["P1"],
       api,
       execute: vi.fn(),
       drain: async () => {
@@ -183,17 +209,67 @@ describe("createLoop", () => {
     expect(order.filter((x) => x === "drain").length).toBeGreaterThanOrEqual(3);
     expect(api.claim).not.toHaveBeenCalled();
   });
+
+  it("gives every assignment a turn in the same pass, so the last one is never starved", async () => {
+    const attempted: string[] = [];
+    const api = apiStub(async (projectId: string) => {
+      attempted.push(projectId);
+      return null;
+    });
+    const { loop } = loopOver(api, { assignments: ["A", "B", "C"] });
+
+    await loop.start();
+
+    expect(attempted).toEqual(["A", "B", "C"]);
+  });
+
+  it("does not let one assignment's claim failure skip the rest of the pass", async () => {
+    const attempted: string[] = [];
+    const api = apiStub(async (projectId: string) => {
+      attempted.push(projectId);
+      if (projectId === "A") throw new Error("A is down");
+      return null;
+    });
+    const { loop } = loopOver(api, { assignments: ["A", "B", "C"] });
+
+    await loop.start();
+
+    expect(attempted).toEqual(["A", "B", "C"]);
+  });
+
+  it("keeps every assignment moving across repeated passes, not just the first one tried", async () => {
+    const tasksByProject: Record<string, ClaimedTask[]> = {
+      A: [{ ...task, taskId: "a1", projectId: "A" }],
+      B: [{ ...task, taskId: "b1", projectId: "B" }],
+      C: [{ ...task, taskId: "c1", projectId: "C" }],
+    };
+    const api = apiStub(async (projectId: string) => tasksByProject[projectId].shift() ?? null);
+    const executed: string[] = [];
+    const { loop } = loopOver(api, {
+      assignments: ["A", "B", "C"],
+      execute: async (t) => {
+        executed.push(t.taskId);
+      },
+    });
+
+    await loop.start();
+
+    // A busy-loop pass (claimedAny) revisits every assignment again, not only the one that hit —
+    // so B and C are claimed in the very same pass A's task is, not deferred behind it
+    expect(executed).toEqual(["a1", "b1", "c1"]);
+  });
 });
 
 describe("draining undelivered reports", () => {
   it("drains before claiming, so a stranded task is settled first", async () => {
     const order: string[] = [];
-    const api = apiStub(async () => {
-      order.push("claim");
+    const api = apiStub(async (projectId: string) => {
+      order.push(`claim:${projectId}`);
       return null;
     });
     const loop = createLoop({
-      config,
+      pollIntervalMs: () => 30_000,
+      assignments: () => ["P1"],
       api,
       execute: vi.fn(),
       drain: async () => {
@@ -205,14 +281,15 @@ describe("draining undelivered reports", () => {
 
     await loop.start();
 
-    expect(order).toEqual(["drain", "claim"]);
+    expect(order).toEqual(["drain", "claim:P1"]);
   });
 
   it("keeps working when the drain itself fails", async () => {
     const api = apiStub(queue(task));
     const execute = vi.fn().mockResolvedValue(undefined);
     const loop = createLoop({
-      config,
+      pollIntervalMs: () => 30_000,
+      assignments: () => ["P1"],
       api,
       execute,
       drain: async () => {

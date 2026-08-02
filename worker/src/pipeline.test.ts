@@ -11,6 +11,7 @@ import { PipelineDeps, resolveStatusIds, runTask } from "./pipeline.js";
 
 const task: ClaimedTask = {
   taskId: "t1",
+  projectId: "CP",
   taskKey: "CP-158",
   taskNumber: 158,
   title: "Add a thing",
@@ -36,13 +37,12 @@ const diff: DiffStats = { changedLines: 10, changedFiles: ["a.ts"], patch: "d", 
 const config: WorkerConfig = {
   apiBaseUrl: "http://localhost:3000",
   apiToken: "token",
-  projectId: "CP",
   repoPath: "/repo",
   worktreeRoot: "/worktrees",
+  stateDir: "/state",
   baseBranch: "main",
   pollIntervalMs: 1000,
   taskTimeoutMs: 900_000,
-  concurrency: 1,
   maxDiffLines: 400,
   maxDiffFiles: 10,
   workerId: "worker-test",
@@ -76,6 +76,7 @@ function harness(overrides: Partial<PipelineDeps> = {}) {
     comment: vi.fn<ApiClient["comment"]>().mockResolvedValue(undefined),
     release: vi.fn<ApiClient["release"]>().mockResolvedValue(undefined),
     statusIds: vi.fn<ApiClient["statusIds"]>().mockResolvedValue(statuses),
+    columnIds: vi.fn<ApiClient["columnIds"]>().mockResolvedValue(board),
   };
   const columnIds = vi.fn<PipelineDeps["columnIds"]>().mockResolvedValue(board);
   const reporter = {
@@ -135,7 +136,8 @@ describe("resolveStatusIds", () => {
   it("returns the ids when every role maps to a column the board carries", async () => {
     const resolved = await resolveStatusIds(
       { statusIds: vi.fn<ApiClient["statusIds"]>().mockResolvedValue(statuses) },
-      async () => board
+      async () => board,
+      "CP"
     );
 
     expect(resolved).toEqual(statuses);
@@ -144,7 +146,8 @@ describe("resolveStatusIds", () => {
   it("names every role the board cannot route", async () => {
     const promise = resolveStatusIds(
       { statusIds: vi.fn<ApiClient["statusIds"]>().mockResolvedValue(statuses) },
-      async () => ["ready", "doing"]
+      async () => ["ready", "doing"],
+      "CP"
     );
 
     await expect(promise).rejects.toThrow(/checking/);
@@ -198,8 +201,8 @@ describe("runTask", () => {
 
     expect(h.workspace.create).not.toHaveBeenCalled();
     expect(h.executor.execute).not.toHaveBeenCalled();
-    expect(h.api.release).toHaveBeenCalledWith("t1");
-    expect(h.api.comment.mock.calls[0][1]).toMatch(/shipped/);
+    expect(h.api.release).toHaveBeenCalledWith("CP", "t1");
+    expect(h.api.comment.mock.calls[0][2]).toMatch(/shipped/);
   });
 
   it("releases the task back to the queue on a usage limit", async () => {
@@ -265,8 +268,11 @@ describe("runTask", () => {
 
     expect(runner.run).toHaveBeenCalledWith(
       "git",
-      ["status", "--porcelain"],
-      expect.objectContaining({ cwd: "/wt" })
+      ["-c", "core.fsmonitor=false", "-c", "core.pager=cat", "status", "--porcelain"],
+      expect.objectContaining({
+        cwd: "/wt",
+        env: expect.objectContaining({ GIT_CONFIG_NOSYSTEM: "1" }),
+      })
     );
     expect(h.collectDiff).not.toHaveBeenCalled();
     expect(gate.run).not.toHaveBeenCalled();

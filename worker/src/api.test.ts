@@ -7,7 +7,6 @@ import { createApiClient } from "./api.js";
 const config = {
   apiBaseUrl: "https://app.example.com",
   apiToken: "cp_token",
-  projectId: "CP",
   workerId: "worker-a",
 } as never;
 
@@ -19,7 +18,7 @@ describe("createApiClient", () => {
   it("returns null when the claim endpoint reports an empty queue", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 204 });
     const api = createApiClient(config, fetchMock as never, identityStore);
-    expect(await api.claim("run-1")).toBeNull();
+    expect(await api.claim("CP", "run-1")).toBeNull();
   });
 
   it("maps a claimed task onto ClaimedTask", async () => {
@@ -28,6 +27,7 @@ describe("createApiClient", () => {
       status: 200,
       json: async () => ({
         _id: "t1",
+        project: "CP",
         taskNumber: 158,
         title: "Do the thing",
         description: "body",
@@ -37,10 +37,11 @@ describe("createApiClient", () => {
     });
     const api = createApiClient(config, fetchMock as never, identityStore);
 
-    const task = await api.claim("run-1");
+    const task = await api.claim("CP", "run-1");
 
     expect(task).toEqual({
       taskId: "t1",
+      projectId: "CP",
       taskKey: "CP-158",
       taskNumber: 158,
       title: "Do the thing",
@@ -50,10 +51,32 @@ describe("createApiClient", () => {
     });
   });
 
+  it("falls back to the id used to claim when the task carries no project field", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ _id: "t1", taskNumber: 158, title: "Do the thing", description: "" }),
+    });
+    const api = createApiClient(config, fetchMock as never, identityStore);
+
+    const task = await api.claim("CP", "run-1");
+
+    expect(task?.projectId).toBe("CP");
+  });
+
+  it("claims against the project-scoped url", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 204 });
+    const api = createApiClient(config, fetchMock as never, identityStore);
+    await api.claim("CP", "run-1");
+
+    const [url] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://app.example.com/api/projects/CP/tasks/claim");
+  });
+
   it("sends the api token on a project-scoped call", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
     const api = createApiClient(config, fetchMock as never, identityStore);
-    await api.setStatus("t1", "done");
+    await api.setStatus("CP", "t1", "done");
     const init = fetchMock.mock.calls[0][1];
     expect(init.headers.Authorization).toBe("Bearer cp_token");
     expect(init.headers["X-Worker-Id"]).toBeUndefined();
@@ -63,7 +86,7 @@ describe("createApiClient", () => {
   it("sends the worker credential, X-Worker-Id and X-CP-Protocol on claim, not the api token", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 204 });
     const api = createApiClient(config, fetchMock as never, identityStore);
-    await api.claim("run-1");
+    await api.claim("CP", "run-1");
     const init = fetchMock.mock.calls[0][1];
     expect(init.headers.Authorization).toBe("Bearer cpw_secret");
     expect(init.headers["X-Worker-Id"]).toBe("w1");
@@ -73,7 +96,7 @@ describe("createApiClient", () => {
   it("sends only runId in the claim body — the credential identifies the worker", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 204 });
     const api = createApiClient(config, fetchMock as never, identityStore);
-    await api.claim("run-1");
+    await api.claim("CP", "run-1");
     const init = fetchMock.mock.calls[0][1];
     expect(init.body).toBe(JSON.stringify({ runId: "run-1" }));
   });
@@ -83,7 +106,7 @@ describe("createApiClient", () => {
     const api = createApiClient(config, fetchMock as never, { read: () => "" });
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    await expect(api.claim("run-1")).rejects.toThrow(/not registered/);
+    await expect(api.claim("CP", "run-1")).rejects.toThrow(/not registered/);
 
     expect(fetchMock).not.toHaveBeenCalled();
     errorSpy.mockRestore();
@@ -94,8 +117,8 @@ describe("createApiClient", () => {
     const api = createApiClient(config, fetchMock as never, identityStore);
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    await expect(api.claim("run-1")).rejects.toThrow();
-    await expect(api.claim("run-2")).rejects.toThrow();
+    await expect(api.claim("CP", "run-1")).rejects.toThrow();
+    await expect(api.claim("CP", "run-2")).rejects.toThrow();
 
     expect(errorSpy).toHaveBeenCalledTimes(1);
     expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/not registered/));
@@ -105,14 +128,14 @@ describe("createApiClient", () => {
   it("throws on a non-ok response", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 500, text: async () => "boom" });
     const api = createApiClient(config, fetchMock as never, identityStore);
-    await expect(api.claim("run-1")).rejects.toThrow(/500/);
+    await expect(api.claim("CP", "run-1")).rejects.toThrow(/500/);
   });
 
   it("sends the status via PATCH", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
     const api = createApiClient(config, fetchMock as never, identityStore);
 
-    await api.setStatus("t1", "done");
+    await api.setStatus("CP", "t1", "done");
 
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("https://app.example.com/api/projects/CP/tasks/t1/status");
@@ -124,7 +147,7 @@ describe("createApiClient", () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 201 });
     const api = createApiClient(config, fetchMock as never, identityStore);
 
-    await api.comment("t1", "hello");
+    await api.comment("CP", "t1", "hello");
 
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("https://app.example.com/api/projects/CP/tasks/t1/comments");
@@ -149,7 +172,7 @@ describe("createApiClient", () => {
     });
     const api = createApiClient(config, fetchMock as never, identityStore);
 
-    const task = await api.claim("run-1");
+    const task = await api.claim("CP", "run-1");
 
     expect(task?.acceptanceCriteria).toEqual(["first"]);
   });
@@ -158,7 +181,7 @@ describe("createApiClient", () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
     const api = createApiClient(config, fetchMock as never, identityStore);
 
-    await api.release("t1");
+    await api.release("CP", "t1");
 
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("https://app.example.com/api/projects/CP/tasks/t1/release");
@@ -182,7 +205,7 @@ describe("createApiClient", () => {
     });
     const api = createApiClient(config, fetchMock as never, identityStore);
 
-    expect(await api.columnIds()).toEqual(["ready", "doing"]);
+    expect(await api.columnIds("CP")).toEqual(["ready", "doing"]);
   });
 
   // A project stored before the seeding migration carries no columns of its own, and the server
@@ -192,7 +215,7 @@ describe("createApiClient", () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ columns: [] }) });
     const api = createApiClient(config, fetchMock as never, identityStore);
 
-    expect(await api.columnIds()).toEqual([
+    expect(await api.columnIds("CP")).toEqual([
       "planned",
       "todo",
       "in_progress",
@@ -207,7 +230,7 @@ describe("createApiClient", () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
     const api = createApiClient(config, fetchMock as never, identityStore);
 
-    expect(await api.statusIds()).toEqual({
+    expect(await api.statusIds("CP")).toEqual({
       approved: "todo",
       review: "needs_human_review",
       done: "done",
@@ -218,7 +241,7 @@ describe("createApiClient", () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
     const api = createApiClient(config, fetchMock as never, identityStore);
 
-    await api.release("t1", { refund: false });
+    await api.release("CP", "t1", { refund: false });
 
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("https://app.example.com/api/projects/CP/tasks/t1/release");
@@ -240,7 +263,7 @@ describe("createApiClient", () => {
     });
     const api = createApiClient(config, fetchMock as never, identityStore);
 
-    expect(await api.statusIds()).toEqual({
+    expect(await api.statusIds("CP")).toEqual({
       approved: "ready",
       review: "checking",
       done: "shipped",
@@ -261,7 +284,7 @@ describe("createApiClient", () => {
     });
     const api = createApiClient(config, fetchMock as never, identityStore);
 
-    expect((await api.statusIds()).review).toBe("escalated");
+    expect((await api.statusIds("CP")).review).toBe("escalated");
   });
 
   it("routes the seeded board to the column the PM automation watches", async () => {
@@ -282,7 +305,7 @@ describe("createApiClient", () => {
     });
     const api = createApiClient(config, fetchMock as never, identityStore);
 
-    expect(await api.statusIds()).toEqual({
+    expect(await api.statusIds("CP")).toEqual({
       approved: "todo",
       review: "needs_human_review",
       done: "done",
@@ -302,7 +325,7 @@ describe("createApiClient", () => {
     });
     const api = createApiClient(config, fetchMock as never, identityStore);
 
-    expect((await api.statusIds()).review).toBe("early");
+    expect((await api.statusIds("CP")).review).toBe("early");
   });
 
   it("falls back to the seeded ids when a role is absent", async () => {
@@ -313,7 +336,7 @@ describe("createApiClient", () => {
     });
     const api = createApiClient(config, fetchMock as never, identityStore);
 
-    expect(await api.statusIds()).toEqual({
+    expect(await api.statusIds("CP")).toEqual({
       approved: "todo",
       review: "needs_human_review",
       done: "done",
@@ -328,7 +351,7 @@ describe("createApiClient", () => {
     });
     const api = createApiClient(config, fetchMock as never, identityStore);
 
-    expect(await api.statusIds()).toEqual({
+    expect(await api.statusIds("CP")).toEqual({
       approved: "todo",
       review: "needs_human_review",
       done: "done",
@@ -345,7 +368,7 @@ describe("createApiClient", () => {
     });
     const api = createApiClient(config, fetchMock as never, identityStore);
 
-    expect((await api.statusIds()).done).toBe("shipped");
+    expect((await api.statusIds("CP")).done).toBe("shipped");
   });
 
   // Was misnamed "...a worker token can reach" — it is the api token, like every other
@@ -358,7 +381,7 @@ describe("createApiClient", () => {
     });
     const api = createApiClient(config, fetchMock as never, identityStore);
 
-    await api.statusIds();
+    await api.statusIds("CP");
 
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("https://app.example.com/api/projects/CP");
@@ -376,7 +399,7 @@ describe("createApiClient", () => {
     });
     const api = createApiClient(config, fetchMock as never, identityStore);
 
-    await api.columnIds();
+    await api.columnIds("CP");
 
     const [, init] = fetchMock.mock.calls[0];
     expect(init.headers.Authorization).toBe("Bearer cp_token");
@@ -392,65 +415,51 @@ describe("createApiClient", () => {
       },
     });
     const api = createApiClient(config, fetchMock as never, identityStore);
-    await expect(api.claim("run-1")).rejects.toThrow(/500/);
+    await expect(api.claim("CP", "run-1")).rejects.toThrow(/500/);
   });
 });
 
-describe("createApiClient addressed by ObjectId", () => {
-  const byObjectId = { ...config, projectId: "69a52e3b399b27d3cbb2c5a5" } as never;
-
-  function fetchFor(project: unknown) {
-    return vi.fn().mockImplementation(async (url: string) =>
-      url.endsWith("/tasks/claim")
-        ? {
-            ok: true,
-            status: 200,
-            json: async () => ({ _id: "t1", taskNumber: 158, title: "Do the thing", description: "" }),
-          }
-        : { ok: true, status: 200, json: async () => project }
-    );
+describe("createApiClient — more than one project", () => {
+  function fetchFor(projects: Record<string, { key: string; columns: unknown[] }>) {
+    return vi.fn().mockImplementation(async (url: string) => {
+      const match = /\/api\/projects\/([^/]+)/.exec(String(url));
+      const projectId = match?.[1] ?? "";
+      if (String(url).endsWith("/tasks/claim")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            _id: `t-${projectId}`,
+            project: projectId,
+            taskNumber: 1,
+            title: "Do the thing",
+            description: "",
+          }),
+        };
+      }
+      return { ok: true, status: 200, json: async () => projects[projectId] };
+    });
   }
 
-  it("keys the task from the project's own key, not from the configured id", async () => {
-    const api = createApiClient(byObjectId, fetchFor({ key: "CP", columns: [] }) as never, identityStore);
+  it("keys each project's tasks from that project's own key, cached independently", async () => {
+    const fetchMock = fetchFor({
+      A: { key: "ALPHA", columns: [] },
+      B: { key: "BETA", columns: [] },
+    });
+    const api = createApiClient(config, fetchMock as never, identityStore);
 
-    expect((await api.claim("run-1"))?.taskKey).toBe("CP-158");
-  });
+    expect((await api.claim("A", "run-1"))?.taskKey).toBe("ALPHA-1");
+    expect((await api.claim("B", "run-1"))?.taskKey).toBe("BETA-1");
 
-  it("reads the project key with the api token, not the worker credential", async () => {
-    const fetchMock = fetchFor({ key: "CP", columns: [] });
-    const api = createApiClient(byObjectId, fetchMock as never, identityStore);
-
-    await api.claim("run-1");
-
-    const [, init] = fetchMock.mock.calls.find(([url]) => !String(url).endsWith("/tasks/claim"))!;
-    expect(init.headers.Authorization).toBe("Bearer cp_token");
-    expect(init.headers["X-Worker-Id"]).toBeUndefined();
-  });
-
-  it("reads the project key once, however many tasks it claims", async () => {
-    const fetchMock = fetchFor({ key: "CP", columns: [] });
-    const api = createApiClient(byObjectId, fetchMock as never, identityStore);
-
-    await api.claim("run-1");
-    await api.claim("run-2");
-
+    // Reading each project's key once, however many tasks are claimed from it
+    await api.claim("A", "run-2");
     const projectReads = fetchMock.mock.calls.filter(([url]) => !String(url).endsWith("/tasks/claim"));
-    expect(projectReads).toHaveLength(1);
+    expect(projectReads).toHaveLength(2);
   });
 
-  it("does not read the project at all while the queue is empty", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 204 });
-    const api = createApiClient(byObjectId, fetchMock as never, identityStore);
-
-    await api.claim("run-1");
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("keeps the claimed task moving on the configured id when the project cannot be read", async () => {
+  it("keeps a claimed task moving on the id used to claim when the project cannot be read", async () => {
     const fetchMock = vi.fn().mockImplementation(async (url: string) => {
-      if (url.endsWith("/tasks/claim")) {
+      if (String(url).endsWith("/tasks/claim")) {
         return {
           ok: true,
           status: 200,
@@ -459,9 +468,20 @@ describe("createApiClient addressed by ObjectId", () => {
       }
       return { ok: false, status: 503, text: async () => "down" };
     });
-    const api = createApiClient(byObjectId, fetchMock as never, identityStore);
+    const api = createApiClient(config, fetchMock as never, identityStore);
 
-    expect((await api.claim("run-1"))?.taskKey).toBe("69a52e3b399b27d3cbb2c5a5-158");
+    expect((await api.claim("69a52e3b399b27d3cbb2c5a5", "run-1"))?.taskKey).toBe(
+      "69a52e3b399b27d3cbb2c5a5-158"
+    );
+  });
+
+  it("does not read a project at all while its queue is empty", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 204 });
+    const api = createApiClient(config, fetchMock as never, identityStore);
+
+    await api.claim("A", "run-1");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -483,7 +503,7 @@ describe("createApiClient's default identity file", () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 204 });
     const api = createApiClient(cfg, fetchMock as never);
 
-    await api.claim("run-1");
+    await api.claim("CP", "run-1");
 
     const init = fetchMock.mock.calls[0][1];
     expect(init.headers.Authorization).toBe("Bearer cpw_from_disk");
@@ -502,7 +522,7 @@ describe("createApiClient's default identity file", () => {
     const api = createApiClient(cfg, fetchMock as never);
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    await expect(api.claim("run-1")).rejects.toThrow(/readable by group or others/);
+    await expect(api.claim("CP", "run-1")).rejects.toThrow(/readable by group or others/);
 
     expect(fetchMock).not.toHaveBeenCalled();
     errorSpy.mockRestore();
@@ -514,7 +534,7 @@ describe("createApiClient's default identity file", () => {
     const api = createApiClient(cfg, fetchMock as never);
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    await expect(api.claim("run-1")).rejects.toThrow(/not registered/);
+    await expect(api.claim("CP", "run-1")).rejects.toThrow(/not registered/);
 
     errorSpy.mockRestore();
   });
