@@ -1,7 +1,13 @@
 import { describe, it, expect, vi } from "vitest";
 import { homedir } from "os";
 import { join } from "path";
-import { applyPolicy, DEFAULT_POLICY, loadBootstrap, parseAssignments } from "./config.js";
+import {
+  applyPolicy,
+  DEFAULT_POLICY,
+  loadBootstrap,
+  localSocketPath,
+  parseAssignments,
+} from "./config.js";
 
 const base = {
   CP_API_URL: "https://app.example.com",
@@ -29,6 +35,19 @@ describe("loadBootstrap", () => {
   it("honours an explicit state dir", () => {
     const bootstrap = loadBootstrap({ ...base, CP_STATE_DIR: "/custom/state" });
     expect(bootstrap.stateDir).toBe("/custom/state");
+  });
+
+  // The menubar app has to find the socket without asking the worker where it put it, so its
+  // location is derived from the one directory both sides already agree on
+  it("puts the local control socket in the state dir the operator chose", () => {
+    const bootstrap = loadBootstrap({ ...base, CP_STATE_DIR: "/custom/state" });
+    expect(localSocketPath(bootstrap.stateDir)).toBe("/custom/state/worker.sock");
+  });
+
+  it("puts the local control socket under the home directory by default", () => {
+    expect(localSocketPath(loadBootstrap(base).stateDir)).toBe(
+      join(homedir(), ".claudeplanner", "worker.sock")
+    );
   });
 
   it("does not require a project or a repository path", () => {

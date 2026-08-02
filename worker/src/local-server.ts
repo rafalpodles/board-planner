@@ -1,0 +1,164 @@
+import { chmodSync, lstatSync, mkdirSync, unlinkSync } from "fs";
+import { createServer, IncomingMessage, ServerResponse } from "http";
+import { dirname } from "path";
+import { CommandHandlers, WorkerCommand } from "./commands.js";
+import { isQuota, Telemetry } from "./telemetry.js";
+
+// A unix domain socket, not a TCP port: a port is reachable by every process on the machine and by
+// anything that can make a browser issue a request to localhost. Filesystem permissions are the
+// entire boundary here — 0600 on the socket, and nothing else.
+//
+// That boundary does not hold against this machine's own coding agent. Worker registration is still
+// withAdmin, so the laptop holds an instance-admin token, and the agent runs as this same uid with
+// Read: it can reach this socket and pause its own worker. What it cannot do is escalate through it.
+// No route returns a credential or a repository binding, and no route starts work. Designed on the
+// assumption that the secret is already gone, because it effectively is.
+
+export interface LocalServerDeps {
+  socketPath: string;
+  // The server channel's dispatcher, deliberately — it owns the acknowledgement and the recency
+  // guard, and a socket that called loop.pause() directly would skip both.
+  handlers: CommandHandlers;
+  telemetry: Pick<Telemetry, "subscribe" | "recent">;
+  paused: () => boolean;
+  now?: () => number;
+  log?: (message: string) => void;
+}
+
+export interface LocalServer {
+  ready: Promise<void>;
+  close(): Promise<void>;
+}
+
+type Route = (request: IncomingMessage, response: ServerResponse) => void;
+
+// A crash leaves the socket inode behind and bind() then fails with EADDRINUSE, so a restart has to
+// clear it. Only a socket is ever removed: anything else at that path is somebody's file.
+function removeStale(socketPath: string): void {
+  const existing = lstatSync(socketPath, { throwIfNoEntry: false });
+  if (!existing) return;
+  if (!existing.isSocket()) {
+    throw new Error(`${socketPath} exists and is not a socket; refusing to remove it`);
+  }
+  unlinkSync(socketPath);
+}
+
+export function startLocalServer(deps: LocalServerDeps): LocalServer {
+  const log = deps.log ?? ((message: string) => console.error(message));
+  const now = deps.now ?? Date.now;
+  const streams = new Set<ServerResponse>();
+
+  // commands.ts orders by issuance and drops anything not newer than what it already applied, so
+  // two local commands landing in the same millisecond would collapse into one. Local issuances are
+  // therefore strictly increasing rather than merely current.
+  let lastIssuedAt = -Infinity;
+
+  function issue(command: WorkerCommand): void {
+    const instant = Math.max(now(), lastIssuedAt + 1);
+    lastIssuedAt = instant;
+    deps.handlers[command](new Date(instant).toISOString());
+  }
+
+  function json(response: ServerResponse, status: number, body: unknown): void {
+    response.writeHead(status, { "Content-Type": "application/json" });
+    response.end(JSON.stringify(body));
+  }
+
+  function apply(response: ServerResponse, command: WorkerCommand): void {
+    issue(command);
+    json(response, 200, { paused: deps.paused() });
+  }
+
+  function openStream(_request: IncomingMessage, response: ServerResponse): void {
+    response.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    });
+    // Without this the head sits in the buffer until the first event, and a client that opened the
+    // stream to learn the worker is idle would wait for a response that never comes.
+    response.flushHeaders();
+    streams.add(response);
+
+    const unsubscribe = deps.telemetry.subscribe((update) => {
+      if (isQuota(update)) return;
+      response.write(`data: ${JSON.stringify(update)}\n\n`);
+    });
+
+    // The response, not the request: since Node 16 a bodiless GET's IncomingMessage emits "close"
+    // as soon as it is consumed, which would tear the subscription down before the first event.
+    response.on("close", () => {
+      unsubscribe();
+      streams.delete(response);
+    });
+  }
+
+  const routes: Record<string, Route> = {
+    "GET /status": (_request, response) => {
+      const recent = deps.telemetry.recent();
+      json(response, 200, { paused: deps.paused(), current: recent.at(-1) ?? null, recent });
+    },
+    "GET /stream": openStream,
+    "POST /pause": (_request, response) => apply(response, "pause"),
+    "POST /resume": (_request, response) => apply(response, "resume"),
+    "POST /stop": (_request, response) => apply(response, "stop"),
+  };
+
+  const server = createServer((request, response) => {
+    request.resume(); // no route reads a body, and an unread one stalls the connection
+    const path = (request.url ?? "").split("?")[0];
+    const route = routes[`${request.method ?? ""} ${path}`];
+    if (!route) {
+      json(response, 404, { error: "not found" });
+      return;
+    }
+    try {
+      route(request, response);
+    } catch (error) {
+      log(`local control request failed: ${String(error)}`);
+      if (response.headersSent) response.end();
+      else json(response, 500, { error: "internal error" });
+    }
+  });
+
+  const ready = new Promise<void>((resolve, reject) => {
+    try {
+      mkdirSync(dirname(deps.socketPath), { recursive: true, mode: 0o700 });
+      removeStale(deps.socketPath);
+    } catch (error) {
+      reject(error instanceof Error ? error : new Error(String(error)));
+      return;
+    }
+
+    server.once("error", reject);
+    server.listen(deps.socketPath, () => {
+      server.off("error", reject);
+      server.on("error", (error) => log(`local control socket failed: ${String(error)}`));
+      try {
+        // listen() creates the socket under the process umask, so narrowing it is a second syscall
+        // and another uid has a brief window in which the socket is reachable. The mkdir above
+        // closes that window only for a state dir this worker created; an existing looser one keeps
+        // it open.
+        chmodSync(deps.socketPath, 0o600);
+      } catch (error) {
+        reject(error instanceof Error ? error : new Error(String(error)));
+        return;
+      }
+      resolve();
+    });
+  });
+
+  return {
+    ready,
+    // close() takes the socket off disk itself — the open SSE responses are what would otherwise
+    // keep the process alive, since closing a server only stops it accepting new connections
+    async close() {
+      for (const response of streams) response.end();
+      streams.clear();
+      await new Promise<void>((resolve) => {
+        server.close(() => resolve());
+        server.closeAllConnections();
+      });
+    },
+  };
+}

@@ -101,6 +101,14 @@ export function loadBootstrap(env: Env, readSecret: SecretReader = readSecretFil
   };
 }
 
+export const LOCAL_SOCKET_NAME = "worker.sock";
+
+// The local control plane lives beside the identity and the outbox, in the one directory this
+// worker already owns — see local-server.ts for why it is a socket there and not a port
+export function localSocketPath(stateDir: string): string {
+  return join(stateDir, LOCAL_SOCKET_NAME);
+}
+
 function isPositiveNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
