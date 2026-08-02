@@ -120,3 +120,23 @@ describe("ListView truncated cells", () => {
     expect(screen.getByTitle("To Do").tagName).toBe("SELECT");
   });
 });
+
+// A row's status picker announced only its value, so nine of them on a page were
+// nine identical "To Do" controls with no way to tell which task they belonged to
+describe("ListView accessible names", () => {
+  it("names the status picker by task and field", () => {
+    renderList({ onStatusChange: () => {} });
+    const select = screen.getByLabelText(
+      "Status for CP-191: Pages do not use the width the sidebar redesign freed up, and the list view scrolls sideways"
+    );
+    expect(select.tagName).toBe("SELECT");
+  });
+
+  it("leaves no control in a row without an accessible name", () => {
+    const { container } = renderList({ onStatusChange: () => {} });
+    const unnamed = [...container.querySelectorAll("select, button")].filter(
+      (el) => !el.getAttribute("aria-label") && !el.textContent?.trim() && !el.getAttribute("title")
+    );
+    expect(unnamed).toEqual([]);
+  });
+});
