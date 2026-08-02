@@ -417,6 +417,7 @@ export default function KanbanPage() {
         projectKey={project.key}
         labels={project.labels || []}
         categories={(project.categories || []).map((c) => c.name)}
+        projectCategories={project.categories || []}
         projectId={projectId}
         currentUsername={user?.username}
         extraControls={
@@ -457,7 +458,6 @@ export default function KanbanPage() {
           tasks={filteredTasks}
           projectKey={project.key}
           projectLabels={project.labels || []}
-          projectCategories={project.categories || []}
           columns={project.columns || []}
           selectedTasks={selectedTasks}
           selectionMode={selectionMode}
