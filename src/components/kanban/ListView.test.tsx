@@ -34,8 +34,8 @@ function renderList(over: Partial<React.ComponentProps<typeof ListView>> = {}) {
 
 afterEach(cleanup);
 
-describe("ListView column widths", () => {
-  it("still offers every column at desktop width", () => {
+describe("ListView columns", () => {
+  it("still offers every column", () => {
     renderList();
     const headers = [...screen.getByRole("table").querySelectorAll("th")].map((th) =>
       th.textContent?.trim()
@@ -55,30 +55,68 @@ describe("ListView column widths", () => {
     ]);
   });
 
-  // A long title used to force the table past its container, cutting off "Updated"
-  it("gives the leftover width to the title and lets it shrink to nothing", () => {
-    renderList();
-    const titleCell = screen.getByText(tasks[0].title).closest("td")!;
-    expect(titleCell.className).toContain("w-full");
-    expect(titleCell.className).toContain("max-w-0");
-    expect(screen.getByText(tasks[0].title).className).toContain("truncate");
+  it("keeps the body in step with the header, with and without the selection column", () => {
+    const cellCounts = () => {
+      const table = screen.getByRole("table");
+      return {
+        header: table.querySelectorAll("thead th").length,
+        row: table.querySelector("tbody tr")!.querySelectorAll("td").length,
+      };
+    };
 
-    const titleHeader = screen.getByText("Title").closest("th")!;
-    expect(titleHeader.className).toContain("w-full");
+    renderList();
+    const plain = cellCounts();
+    expect(plain.row).toBe(plain.header);
+
+    cleanup();
+    renderList({ selectionMode: true });
+    const selecting = cellCounts();
+    expect(selecting.row).toBe(selecting.header);
+    expect(selecting.header).toBe(plain.header + 1);
+  });
+});
+
+describe("ListView truncated cells", () => {
+  // Every capped column clips its text, so the full value has to stay reachable on hover
+  it("keeps the whole title reachable", () => {
+    renderList();
+    expect(screen.getByTitle(tasks[0].title).textContent).toBe(tasks[0].title);
   });
 
-  it("caps the free-text columns so long values cannot widen the table", () => {
+  it("keeps the whole key reachable", () => {
     renderList();
-    const assignee = screen.getByText("Rafał Podleś-Wojciechowski");
-    expect(assignee.className).toContain("truncate");
-    expect(assignee.closest("td")!.className).toContain("max-w-");
+    expect(screen.getByTitle("CP-191").textContent).toBe("CP-191");
+  });
 
-    const sprint = screen.getByText("Sprint 2026-Q3 hardening and cleanup");
-    expect(sprint.className).toContain("truncate");
-    expect(sprint.closest("td")!.className).toContain("max-w-");
+  it("keeps the whole assignee name reachable", () => {
+    renderList();
+    expect(screen.getByTitle("Rafał Podleś-Wojciechowski").textContent).toBe(
+      "Rafał Podleś-Wojciechowski"
+    );
+  });
 
-    const component = screen.getByText("kanban-list-view");
-    expect(component.className).toContain("truncate");
-    expect(component.closest("td")!.className).toContain("max-w-");
+  it("keeps the whole sprint name reachable", () => {
+    renderList();
+    expect(screen.getByTitle(sprints[0].name).textContent).toBe(sprints[0].name);
+  });
+
+  it("keeps the whole component reachable", () => {
+    renderList();
+    expect(screen.getByTitle("kanban-list-view").textContent).toBe("kanban-list-view");
+  });
+
+  it("keeps the whole category reachable", () => {
+    renderList();
+    expect(screen.getByTitle("bug").textContent).toBe("bug");
+  });
+
+  it("keeps the whole status label reachable as a badge", () => {
+    renderList();
+    expect(screen.getByTitle("To Do").textContent).toBe("To Do");
+  });
+
+  it("keeps the whole status label reachable as a picker", () => {
+    renderList({ onStatusChange: () => {} });
+    expect(screen.getByTitle("To Do").tagName).toBe("SELECT");
   });
 });

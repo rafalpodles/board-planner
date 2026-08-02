@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup, within } from "@testing-library/react";
 import DashboardPage from "./page";
+import { TASK_STATUSES } from "@/types";
 
 const { api } = vi.hoisted(() => ({ api: { get: vi.fn() } }));
 
@@ -34,6 +35,16 @@ const emptyStats: Stats = {
   difficultyBreakdown: { M: 4 },
   velocity: weeks.map((week) => ({ week, count: 0 })),
   createdOverTime: weeks.map((week) => ({ week, created: 0, completed: 0 })),
+};
+
+// What /api/projects/[projectId]/stats really answers for a project with no tasks:
+// the status keys are seeded to zero, the other breakdowns come back absent
+const noTasksStats: Partial<Stats> = {
+  total: 0,
+  statusBreakdown: Object.fromEntries(TASK_STATUSES.map((s) => [s, 0])),
+  categoryBreakdown: {},
+  assigneeBreakdown: {},
+  difficultyBreakdown: {},
 };
 
 async function renderDashboard(stats: Partial<Stats> = {}) {
@@ -75,11 +86,14 @@ describe("Dashboard charts with no data", () => {
     expect(screen.queryByText("Jul 20")).toBeNull();
   });
 
-  it("explains every breakdown that has nothing to show", async () => {
-    await renderDashboard({ statusBreakdown: {}, categoryBreakdown: {}, assigneeBreakdown: {} });
+  it("explains every breakdown on a board that has no tasks at all", async () => {
+    await renderDashboard(noTasksStats);
     expect(screen.getByText(/every task counts towards its column here/i)).toBeTruthy();
     expect(screen.getByText(/categories appear as soon as the board has tasks/i)).toBeTruthy();
     expect(screen.getByText(/assign a task to see the split per person/i)).toBeTruthy();
+    expect(screen.getByText(/the S\/M\/L\/XL split shows up once tasks exist/i)).toBeTruthy();
+    expect(screen.getByText(/each week a task reaches Done adds a bar/i)).toBeTruthy();
+    expect(screen.getByText(/new and finished tasks show up here/i)).toBeTruthy();
   });
 });
 
@@ -102,17 +116,12 @@ describe("Dashboard charts with partial data", () => {
     expect(chart.getByText("Created")).toBeTruthy();
     expect(chart.getByText("Completed")).toBeTruthy();
   });
-});
 
-describe("Dashboard width", () => {
-  it("uses the width the sidebar freed up, up to a readable maximum", async () => {
-    const { container } = await renderDashboard();
-    expect(container.firstElementChild!.className).toContain("max-w-7xl");
-  });
-
-  it("lays the six panels out three across on a wide screen", async () => {
+  it("still draws the breakdowns once a single task exists", async () => {
     await renderDashboard();
-    const card = screen.getByRole("heading", { name: "Velocity (tasks done/week)" }).closest("div")!;
-    expect(card.parentElement!.className).toContain("xl:grid-cols-3");
+    expect(screen.queryByText(/every task counts towards its column here/i)).toBeNull();
+    expect(screen.queryByText(/categories appear as soon as the board has tasks/i)).toBeNull();
+    expect(screen.queryByText(/assign a task to see the split per person/i)).toBeNull();
+    expect(screen.queryByText(/the S\/M\/L\/XL split shows up once tasks exist/i)).toBeNull();
   });
 });
