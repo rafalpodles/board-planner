@@ -22,7 +22,7 @@ import { ShortcutHelp } from "@/components/ui/ShortcutHelp";
 import { useCanonicalUrl } from "@/hooks/use-canonical-url";
 import { projectPath, taskPath } from "@/lib/urls";
 import { BoardHeader } from "@/components/kanban/BoardHeader";
-import { sprintScopeFromParam, sprintScopeToQuery } from "@/lib/sprint-scope";
+import { sprintDefaultForNewTask, sprintScopeFromParam, sprintScopeToQuery } from "@/lib/sprint-scope";
 
 // "relates" is symmetric and "duplicates" has a readable inverse, so a card should
 // show a relation regardless of which side created it. Every task is already loaded,
@@ -574,6 +574,7 @@ export default function KanbanPage() {
           projectLabels={project.labels || []}
           taskTemplates={project.taskTemplates || []}
           sprints={sprints}
+          defaultSprint={sprintDefaultForNewTask(selectedSprint)}
           customFields={project.customFields || []}
           onSaved={() => {
             setShowNewTask(false);
