@@ -1,9 +1,10 @@
 "use client";
 
-import type { CSSProperties } from "react";
+import { useRef, type CSSProperties } from "react";
 import { ApiTask, ApiLabel, ApiProjectCategory, PRIORITY_LABELS } from "@/types";
 import { Badge } from "@/components/ui/Badge";
 import { categoryColor, categoryTint } from "@/lib/category-colors";
+import { taskPath } from "@/lib/urls";
 
 // Cards are narrow; the default badge padding makes three of them wrap raggedly
 const COMPACT_BADGE = "text-[11px] px-1.5 whitespace-nowrap";
@@ -36,16 +37,30 @@ export function TaskCard({
   );
   const catColor = categoryColor(projectCategories, task.category);
   const tinted = !selected && !!catColor;
+  const dragged = useRef(false);
+
+  function activate(intendsSelection: boolean) {
+    if (onSelect && (selectionActive || intendsSelection)) onSelect(task._id);
+    else onClick();
+  }
+
   return (
-    <div
+    <div className="relative">
+    <a
+      href={taskPath(projectKey, task.taskNumber)}
       draggable
       style={tinted ? categoryTint(catColor) : undefined}
+      onMouseDown={() => {
+        dragged.current = false;
+      }}
       onDragStart={(e) => {
+        dragged.current = true;
         e.dataTransfer.setData("text/plain", task._id);
         e.dataTransfer.effectAllowed = "move";
       }}
-      className={`bg-bg rounded-lg border p-3 cursor-grab
-        transition-colors group active:cursor-grabbing relative
+      className={`block bg-bg rounded-lg border p-3 cursor-pointer
+        transition-colors group
+        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary
         ${selected
           ? "border-primary bg-primary/5"
           : tinted
@@ -56,31 +71,25 @@ export function TaskCard({
         onContextMenu?.(task._id, e.clientX, e.clientY);
       }}
       onClick={(e) => {
-        if (selectionActive || e.ctrlKey || e.metaKey) {
+        // A browser can still fire a click after a drop; the next press clears the flag
+        if (dragged.current) {
           e.preventDefault();
-          onSelect?.(task._id);
-        } else {
-          onClick();
+          return;
         }
+        if (e.metaKey || e.ctrlKey) return;
+        e.preventDefault();
+        activate(e.shiftKey);
+      }}
+      onKeyDown={(e) => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault();
+        // The board's own Enter handler listens on `document` — the very node the
+        // App Router hydrates and React delegates from — so stopPropagation would
+        // not reach it; only stopping the native event immediately does
+        e.nativeEvent.stopImmediatePropagation();
+        activate(e.shiftKey);
       }}
     >
-      {(selectionActive || selected) && (
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onSelect?.(task._id);
-          }}
-          className={`absolute top-2 right-2 w-5 h-5 rounded border flex items-center justify-center
-            transition-colors text-[10px]
-            ${selected
-              ? "bg-primary-solid border-primary text-white"
-              : "border-border bg-bg-input text-transparent hover:border-primary/50"
-            }`}
-        >
-          {selected && "\u2713"}
-        </button>
-      )}
-
       <div className="flex flex-wrap items-center gap-1 mb-2 pr-6">
         <span className="text-xs font-mono text-text-muted flex items-center gap-1 mr-0.5">
           {task.pinned && (
@@ -238,6 +247,25 @@ export function TaskCard({
           );
         })()}
       </div>
+    </a>
+
+    {(selectionActive || selected) && (
+      <button
+        type="button"
+        aria-label={`Select ${projectKey}-${task.taskNumber}`}
+        aria-pressed={selected}
+        onClick={() => onSelect?.(task._id)}
+        className={`absolute top-2 right-2 w-5 h-5 rounded border flex items-center justify-center
+          transition-colors text-[10px]
+          focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary
+          ${selected
+            ? "bg-primary-solid border-primary text-white"
+            : "border-border bg-bg-input text-transparent hover:border-primary/50"
+          }`}
+      >
+        {selected && "✓"}
+      </button>
+    )}
     </div>
   );
 }
