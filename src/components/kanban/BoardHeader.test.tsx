@@ -31,6 +31,18 @@ function renderHeader(over: Partial<React.ComponentProps<typeof BoardHeader>> = 
 
 afterEach(cleanup);
 
+function classesOf(el: Element) {
+  return el.className.split(/\s+/);
+}
+
+// null = present at every width, otherwise the breakpoint the element first appears at
+function shownFrom(el: Element): string | null {
+  const classes = classesOf(el);
+  if (!classes.includes("hidden")) return null;
+  const restore = classes.find((c) => /^(sm|md|lg|xl):(inline|block|flex|inline-flex)$/.test(c));
+  return restore ? restore.split(":")[0] : "never";
+}
+
 describe("BoardHeader", () => {
   it("names the project", () => {
     renderHeader();
@@ -160,5 +172,80 @@ describe("BoardHeader", () => {
     const titleBlock = header.firstElementChild!;
     expect(titleBlock.className).toContain("min-w-0");
     expect(titleBlock.className).not.toContain("shrink-0");
+  });
+});
+
+// Below lg the header has no room for everything, so it sheds instead of squeezing
+describe("BoardHeader on a narrow board", () => {
+  it("keeps the project name and the scope control at every width", () => {
+    const { container } = renderHeader();
+    const header = container.querySelector("header")!;
+
+    for (const start of [
+      screen.getByRole("heading", { name: "Test Project" }),
+      screen.getByLabelText("Change sprint scope"),
+    ]) {
+      for (let el: Element | null = start; el && el !== header; el = el.parentElement) {
+        expect(shownFrom(el)).toBeNull();
+      }
+    }
+  });
+
+  it("drops the done meter", () => {
+    renderHeader();
+    expect(shownFrom(screen.getByText("12/30").parentElement!)).toBe("lg");
+  });
+
+  it("drops the decorative subtitle segments around the scope control", () => {
+    renderHeader();
+    expect(shownFrom(screen.getByText("Board ·"))).toBe("lg");
+    expect(shownFrom(screen.getByText(/30 tasks/))).toBe("lg");
+  });
+
+  // A segment that cannot shrink pushes the subtitle out over the controls next to it
+  it("lets every subtitle segment clip itself", () => {
+    renderHeader();
+    const row = screen.getByLabelText("Change sprint scope").parentElement!;
+    const segments = [...row.children].filter((c) => c.getAttribute("role") !== "menu");
+    expect(segments.length).toBe(3);
+    for (const segment of segments) {
+      expect(classesOf(segment)).toContain("truncate");
+    }
+  });
+
+  it("clips the subtitle of a sprintless project too", () => {
+    renderHeader({ sprints: [] });
+    expect(classesOf(screen.getByText("Board · 30 tasks"))).toContain("truncate");
+  });
+
+  it("collapses New task to a labelled icon button", () => {
+    renderHeader();
+    const button = screen.getByLabelText("New task");
+    expect(button.querySelector("svg")).toBeTruthy();
+    expect(shownFrom(screen.getByText("New task", { selector: "span" }))).toBe("sm");
+    expect(shownFrom(screen.getByText("N"))).toBe("lg");
+  });
+
+  it("still reports a new task from the collapsed button", async () => {
+    const onNewTask = vi.fn();
+    renderHeader({ onNewTask });
+    await act(async () => {
+      (screen.getByLabelText("New task") as HTMLButtonElement).click();
+    });
+    expect(onNewTask).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops refresh, which the board does on its own anyway", () => {
+    renderHeader();
+    expect(shownFrom(screen.getByLabelText("Refresh board"))).toBe("sm");
+  });
+
+  it("keeps the view switcher, the only way to reach the list", () => {
+    const { container } = renderHeader();
+    const header = container.querySelector("header")!;
+    const switcher = screen.getByText("List", { selector: "button" }).parentElement!;
+    for (let el: Element | null = switcher; el && el !== header; el = el.parentElement) {
+      expect(shownFrom(el)).toBeNull();
+    }
   });
 });
