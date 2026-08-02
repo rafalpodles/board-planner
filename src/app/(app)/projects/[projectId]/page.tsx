@@ -113,13 +113,6 @@ export default function KanbanPage() {
     [project?.columns, sprints]
   );
 
-  const doneCount = useMemo(() => {
-    const doneIds = new Set(
-      effectiveColumns(project?.columns).filter((c) => c.role === "done").map((c) => c.id)
-    );
-    return tasks.filter((t) => doneIds.has(t.status)).length;
-  }, [tasks, project?.columns]);
-
   const loadData = useCallback(async () => {
     const seq = ++loadSeq.current;
     try {
@@ -413,8 +406,6 @@ export default function KanbanPage() {
       <BoardHeader
         projectName={project.name}
         projectIcon={project.icon}
-        taskCount={tasks.length}
-        doneCount={doneCount}
         sprints={sprints}
         scope={selectedSprint}
         onScopeChange={setSelectedSprint}

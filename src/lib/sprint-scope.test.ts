@@ -3,7 +3,6 @@ import {
   sprintScopeFromParam,
   sprintScopeToQuery,
   sprintScopeLabel,
-  boardSubtitle,
   sprintDefaultForNewTask,
 } from "./sprint-scope";
 import { ApiSprint } from "@/types";
@@ -89,22 +88,3 @@ describe("sprintDefaultForNewTask", () => {
   });
 });
 
-describe("boardSubtitle", () => {
-  it("omits the scope segment when unscoped", () => {
-    expect(boardSubtitle(null, 30)).toBe("Board · 30 tasks");
-  });
-
-  it("includes the scope segment when scoped", () => {
-    expect(boardSubtitle("Sprint 12", 8)).toBe("Board · Sprint 12 · 8 tasks");
-    expect(boardSubtitle("Backlog", 4)).toBe("Board · Backlog · 4 tasks");
-  });
-
-  it("says one task, not 1 tasks", () => {
-    expect(boardSubtitle(null, 1)).toBe("Board · 1 task");
-    expect(boardSubtitle("Sprint 12", 1)).toBe("Board · Sprint 12 · 1 task");
-  });
-
-  it("handles an empty board", () => {
-    expect(boardSubtitle(null, 0)).toBe("Board · 0 tasks");
-  });
-});
