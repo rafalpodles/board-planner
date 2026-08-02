@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
 import { STATUS_LABELS, TaskStatus } from "@/types";
 import { useToast } from "@/components/ui/Toast";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 interface Stats {
   total: number;
@@ -256,18 +257,7 @@ export default function DashboardPage() {
 
   return (
     <div className="max-w-7xl mx-auto w-full">
-      <div className="flex items-center gap-2 mb-6">
-        <button
-          onClick={() => router.push(`/projects/${projectId}`)}
-          className="text-text-muted hover:text-text transition-colors"
-          title="Back to board"
-        >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-          </svg>
-        </button>
-        <h1 className="text-2xl font-bold">{projectName} — Dashboard</h1>
-      </div>
+      <PageHeader title="Dashboard" subtitle={projectName} />
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
