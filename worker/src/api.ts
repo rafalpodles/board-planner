@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, statSync } from "fs";
 import { join } from "path";
 import { Bootstrap } from "./config.js";
-import { loadIdentity, PROTOCOL_VERSION, Store } from "./registration.js";
+import { Identity, loadIdentity, PROTOCOL_VERSION, Store } from "./registration.js";
 import { ClaimedTask } from "./types.js";
 
 type Fetch = typeof globalThis.fetch;
@@ -15,6 +15,15 @@ export interface StatusIds {
   done: string;
 }
 
+// What the run is doing, addressed by the task and the run that holds it. `seq` is not here: the
+// client stamps it as the call is made, so ordering follows the order events were reported rather
+// than the order the network happened to deliver them in.
+export interface PhaseEvent {
+  taskId: string;
+  runId: string;
+  phase: string;
+}
+
 export interface ApiClient {
   claim(projectId: string, runId: string): Promise<ClaimedTask | null>;
   setStatus(projectId: string, taskId: string, status: string): Promise<void>;
@@ -22,6 +31,7 @@ export interface ApiClient {
   release(projectId: string, taskId: string, options?: { refund?: boolean }): Promise<void>;
   statusIds(projectId: string): Promise<StatusIds>;
   columnIds(projectId: string): Promise<string[]>;
+  postEvent(event: PhaseEvent): Promise<void>;
 }
 
 interface RawTask {
@@ -31,7 +41,7 @@ interface RawTask {
   title: string;
   description: string;
   checklist?: Array<{ text?: unknown }>;
-  execution?: { attempts?: number };
+  execution?: { attempts?: number; runId?: unknown };
 }
 
 interface BoardColumn {
@@ -116,8 +126,17 @@ export function createApiClient(
     console.error(NOT_REGISTERED_MESSAGE);
   }
 
-  async function send(
-    projectId: string,
+  function identityOrThrow(): Identity {
+    const identity = loadIdentity(identitySource ?? fileIdentityReader(config.stateDir));
+    if (!identity) {
+      warnNotRegistered();
+      throw new Error(NOT_REGISTERED_MESSAGE);
+    }
+    return identity;
+  }
+
+  // Path from the api root, so a call can address /api/workers/... as readily as a project
+  async function request(
     path: string,
     method: string,
     body?: unknown,
@@ -126,11 +145,7 @@ export function createApiClient(
     const headers: Record<string, string> = { "Content-Type": "application/json" };
 
     if (credential === "worker") {
-      const identity = loadIdentity(identitySource ?? fileIdentityReader(config.stateDir));
-      if (!identity) {
-        warnNotRegistered();
-        throw new Error(NOT_REGISTERED_MESSAGE);
-      }
+      const identity = identityOrThrow();
       headers.Authorization = `Bearer ${identity.credential}`;
       headers["X-Worker-Id"] = identity.workerId;
       headers["X-CP-Protocol"] = String(PROTOCOL_VERSION);
@@ -138,7 +153,7 @@ export function createApiClient(
       headers.Authorization = `Bearer ${config.apiToken}`;
     }
 
-    const response = await fetchImpl(`${config.apiBaseUrl}/api/projects/${projectId}${path}`, {
+    const response = await fetchImpl(`${config.apiBaseUrl}${path}`, {
       method,
       headers,
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -151,6 +166,16 @@ export function createApiClient(
     return response;
   }
 
+  function send(
+    projectId: string,
+    path: string,
+    method: string,
+    body?: unknown,
+    credential: Credential = "api"
+  ): Promise<Response> {
+    return request(`/api/projects/${projectId}${path}`, method, body, credential);
+  }
+
   async function readColumns(projectId: string): Promise<BoardColumn[]> {
     const body = (await (await send(projectId, "", "GET")).json()) as { columns?: unknown };
     const columns = (Array.isArray(body.columns) ? body.columns : [])
@@ -161,6 +186,7 @@ export function createApiClient(
   }
 
   const projectKeys = new Map<string, string>();
+  let eventSeq = 0;
 
   // The assignment addresses a project by its ObjectId, and the route accepts a key as readily
   // as an id — so the key a task is named by has to come from the project itself
@@ -197,6 +223,12 @@ export function createApiClient(
           .filter((item): item is { text: string } => typeof item.text === "string")
           .map((item) => item.text),
         attempts: raw.execution?.attempts ?? 0,
+        // The run stored on the task wins over the one this call proposed: the server is what
+        // every later event is checked against
+        runId:
+          typeof raw.execution?.runId === "string" && raw.execution.runId
+            ? raw.execution.runId
+            : runId,
       };
     },
 
@@ -228,6 +260,19 @@ export function createApiClient(
         review: ids.review || SEEDED.review,
         done: ids.done || SEEDED.done,
       };
+    },
+
+    // The worker id in the path comes from the same identity that signs the request, so the two
+    // cannot disagree — the server 403s a path that names anyone else
+    async postEvent(event) {
+      const { workerId } = identityOrThrow();
+      eventSeq += 1;
+      await request(
+        `/api/workers/${workerId}/events`,
+        "POST",
+        { ...event, seq: eventSeq },
+        "worker"
+      );
     },
   };
 }

@@ -15,6 +15,13 @@ import { onTaskStatusChanged } from "@/lib/pm/triggers";
 
 export const MAX_EXECUTION_ATTEMPTS = 3;
 
+// Long enough for "gates:build" or "Edit src/lib/task-service.ts", short enough that a badge
+// cannot become a payload
+export const MAX_PHASE_LENGTH = 120;
+
+const PHASE_FIELDS = ["execution.phase", "execution.phaseAt", "execution.phaseSeq"];
+const UNSET_PHASE = Object.fromEntries(PHASE_FIELDS.map((field) => [field, ""]));
+
 // Four times the worker's default task timeout. A worker killed mid-run leaves its task in the
 // active column, where claimNextTask can never see it again — nothing else reclaims it.
 export const EXECUTION_LEASE_MS = 2 * 60 * 60 * 1000;
@@ -159,7 +166,7 @@ export async function changeStatus(
 
   const task = await Task.findOneAndUpdate(
     { _id: taskId, project: projectId },
-    { $set: { status } },
+    { $set: { status }, $unset: UNSET_PHASE },
     { returnDocument: "after" }
   ).populate([
     { path: "assignee", select: "username fullName" },
@@ -299,9 +306,11 @@ export async function updateTask(
     updates.assignee = assigneeUser ? assigneeUser._id : null;
   }
 
+  // The edit form PUTs the whole task, status included, so this is as much an exit from the
+  // active column as changeStatus is — but only when the status is actually part of the edit
   const task = await Task.findOneAndUpdate(
     { _id: taskId, project: projectId },
-    { $set: updates },
+    updates.status === undefined ? { $set: updates } : { $set: updates, $unset: UNSET_PHASE },
     { returnDocument: "after", runValidators: true }
   ).populate(taskPopulateFields);
 
@@ -551,11 +560,11 @@ export async function releaseExpiredTasks(projectId: string, now = new Date()): 
   const [spent, retryable] = await Promise.all([
     Task.updateMany(
       { ...expired, "execution.attempts": { $gte: MAX_EXECUTION_ATTEMPTS } },
-      { $set: { status: exhausted } }
+      { $set: { status: exhausted }, $unset: UNSET_PHASE }
     ),
     Task.updateMany(
       { ...expired, "execution.attempts": { $lt: MAX_EXECUTION_ATTEMPTS } },
-      { $set: { status: approved } }
+      { $set: { status: approved }, $unset: UNSET_PHASE }
     ),
   ]);
 
@@ -595,6 +604,9 @@ export async function claimNextTask(
         "execution.startedAt": new Date(),
         "execution.lastError": "",
       },
+      // A run counts its own phases from one, so a phaseSeq left by an earlier run would swallow
+      // the first events of this one
+      $unset: UNSET_PHASE,
       $inc: { "execution.attempts": 1 },
     },
     { returnDocument: "after", sort: { order: 1, createdAt: 1 } }
@@ -632,6 +644,7 @@ export async function releaseTask(
             },
           },
         },
+        { $unset: PHASE_FIELDS },
       ],
       { returnDocument: "after", updatePipeline: true }
     );
@@ -644,7 +657,55 @@ export async function releaseTask(
       status: { $in: active },
       "execution.attempts": { $gt: 0 },
     },
-    { $set: { status: approved }, $inc: { "execution.attempts": -1 } },
+    { $set: { status: approved }, $inc: { "execution.attempts": -1 }, $unset: UNSET_PHASE },
     { returnDocument: "after" }
   );
+}
+
+export interface TaskPhaseUpdate {
+  taskId: string;
+  workerId: string;
+  runId: string;
+  seq: number;
+  phase: string;
+}
+
+// A phase is a short label for a board badge, and the only free text a worker can write onto a
+// task without going through a comment. Anything longer, empty, or carrying control characters is
+// not a label.
+export function phaseFrom(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const phase = value.trim();
+  if (!phase || phase.length > MAX_PHASE_LENGTH) return null;
+  if (/[\u0000-\u001f\u007f]/.test(phase)) return null;
+  return phase;
+}
+
+// The run is the authorization: a worker that has been released from this task, or whose run was
+// superseded by a newer claim, matches nothing however valid its credential is.
+export async function recordTaskPhase(event: TaskPhaseUpdate): Promise<boolean> {
+  await connectDB();
+
+  const result = await Task.updateOne(
+    {
+      _id: event.taskId,
+      "execution.workerId": event.workerId,
+      "execution.runId": event.runId,
+      // Same trap as claimNextTask's attempts guard: a task that has never carried a phase has no
+      // phaseSeq at all, and $lt never matches a missing field
+      $or: [
+        { "execution.phaseSeq": { $exists: false } },
+        { "execution.phaseSeq": { $lt: event.seq } },
+      ],
+    },
+    {
+      $set: {
+        "execution.phase": event.phase,
+        "execution.phaseAt": new Date(),
+        "execution.phaseSeq": event.seq,
+      },
+    }
+  );
+
+  return result.matchedCount > 0;
 }

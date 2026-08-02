@@ -437,6 +437,11 @@ export interface ITaskExecution {
   attempts: number;
   startedAt: Date | null;
   lastError: string;
+  // Absent until the run that holds the task reports one, and unset again the moment it leaves
+  // the active column — so "no phase" is a missing field, never a stale one
+  phase?: string;
+  phaseAt?: Date | null;
+  phaseSeq?: number;
 }
 
 export interface IProject {

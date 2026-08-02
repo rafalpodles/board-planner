@@ -7,6 +7,9 @@ export interface ClaimedTask {
   description: string;
   acceptanceCriteria: string[];
   attempts: number;
+  // The run recorded on the task itself, read back from the claim response. Every phase event is
+  // authorized against it, so a locally invented value would simply be dropped by the server.
+  runId: string;
 }
 
 export interface ExecutionResult {

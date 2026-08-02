@@ -1,15 +1,51 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+// mongoose's own query matcher, so the filters below are judged by MongoDB semantics rather than
+// by a hand-rolled reading of them
+import sift from "sift";
 
 const findOneAndUpdate = vi.fn();
 const updateMany = vi.fn();
+const updateOne = vi.fn();
+const findOne = vi.fn();
+const findByIdAndUpdate = vi.fn();
 const findById = vi.fn();
+const userFindOne = vi.fn();
 
 vi.mock("./db", () => ({ connectDB: vi.fn() }));
-vi.mock("@/models/task", () => ({ Task: { findOneAndUpdate, updateMany } }));
+vi.mock("@/models/task", () => ({
+  Task: { findOneAndUpdate, updateMany, updateOne, findOne, findByIdAndUpdate },
+}));
 vi.mock("@/models/project", () => ({ Project: { findById } }));
+vi.mock("@/models/user", () => ({ User: { findOne: userFindOne } }));
+vi.mock("@/models/comment", () => ({ Comment: {} }));
+vi.mock("@/lib/activity", () => ({ logActivity: vi.fn() }));
+vi.mock("@/lib/webhooks", () => ({ dispatchWebhooks: vi.fn() }));
+vi.mock("@/lib/notifications", () => ({ dispatchNotifications: vi.fn() }));
+vi.mock("@/lib/in-app-notifications", () => ({
+  createNotifications: vi.fn(),
+  collectRecipients: () => [],
+  resolveMentions: async () => [],
+}));
+vi.mock("@/lib/pm/triggers", () => ({ onTaskStatusChanged: vi.fn().mockResolvedValue(undefined) }));
 
-const { claimNextTask, releaseTask, releaseExpiredTasks, MAX_EXECUTION_ATTEMPTS, EXECUTION_LEASE_MS } =
-  await import("./task-service");
+const {
+  claimNextTask,
+  releaseTask,
+  releaseExpiredTasks,
+  recordTaskPhase,
+  phaseFrom,
+  changeStatus,
+  updateTask,
+  MAX_EXECUTION_ATTEMPTS,
+  MAX_PHASE_LENGTH,
+  EXECUTION_LEASE_MS,
+} = await import("./task-service");
+
+function matches(filter: unknown, doc: unknown): boolean {
+  return sift(filter as Record<string, unknown>)(doc);
+}
+
+const PHASE_KEYS = ["execution.phase", "execution.phaseAt", "execution.phaseSeq"];
 
 // A non-default board on purpose: with the seeded columns the approved id is
 // literally "todo" and the active id "in_progress", so a hardcoding
@@ -95,6 +131,16 @@ describe("claimNextTask", () => {
     expect(update.$set["execution.workerId"]).toBe("worker-a");
     expect(update.$set["execution.runId"]).toBe("run-1");
     expect(update.$inc["execution.attempts"]).toBe(1);
+  });
+
+  // Each run counts its phases from one, so a phaseSeq left behind by an earlier run would make
+  // the ordering guard swallow the first events of this one
+  it("drops any phase an earlier run left on the task", async () => {
+    findOneAndUpdate.mockResolvedValue({ _id: "t1", taskNumber: 1 });
+
+    await claimNextTask("p1", "worker-a", "run-1");
+
+    expect(Object.keys(findOneAndUpdate.mock.calls[0][1].$unset)).toEqual(PHASE_KEYS);
   });
 
   it("returns null when nothing is claimable", async () => {
@@ -327,5 +373,181 @@ describe("releaseExpiredTasks", () => {
 
     expect(await releaseExpiredTasks("p1", now)).toBe(0);
     expect(updateMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("recordTaskPhase", () => {
+  const TASK_ID = "69a52e3b399b27d3cbb2c5b7";
+  const holder = {
+    _id: TASK_ID,
+    execution: { workerId: "w1", runId: "run-1", attempts: 1 },
+  };
+
+  beforeEach(() => {
+    updateOne.mockReset();
+    updateOne.mockResolvedValue({ matchedCount: 1, modifiedCount: 1 });
+  });
+
+  async function filterFor(seq: number) {
+    updateOne.mockClear();
+    await recordTaskPhase({ taskId: TASK_ID, workerId: "w1", runId: "run-1", seq, phase: "agent" });
+    return updateOne.mock.calls[0][0];
+  }
+
+  // A bare $lt never matches a missing field, so with one branch this filter would drop the first
+  // phase of every task that has never carried one — which is all of them, once
+  it("applies the first phase to a task that has no phaseSeq at all", async () => {
+    expect(matches(await filterFor(1), holder)).toBe(true);
+  });
+
+  it("applies an event newer than the phase already on the task", async () => {
+    const doc = { ...holder, execution: { ...holder.execution, phaseSeq: 3 } };
+    expect(matches(await filterFor(7), doc)).toBe(true);
+  });
+
+  it("drops an event overtaken by a newer one", async () => {
+    const doc = { ...holder, execution: { ...holder.execution, phaseSeq: 7 } };
+    expect(matches(await filterFor(3), doc)).toBe(false);
+  });
+
+  it("drops an event carrying a seq already recorded", async () => {
+    const doc = { ...holder, execution: { ...holder.execution, phaseSeq: 3 } };
+    expect(matches(await filterFor(3), doc)).toBe(false);
+  });
+
+  // The run is the authorization: without these two clauses a worker could write a phase onto any
+  // task in the instance, including one another worker is holding
+  it("refuses a worker that is not the one holding the task", async () => {
+    const doc = { ...holder, execution: { ...holder.execution, workerId: "w2" } };
+    expect(matches(await filterFor(1), doc)).toBe(false);
+  });
+
+  it("refuses a run the task has moved on from", async () => {
+    const doc = { ...holder, execution: { ...holder.execution, runId: "run-0" } };
+    expect(matches(await filterFor(1), doc)).toBe(false);
+  });
+
+  it("refuses a different task", async () => {
+    const doc = { ...holder, _id: "69a52e3b399b27d3cbb2c5c9" };
+    expect(matches(await filterFor(1), doc)).toBe(false);
+  });
+
+  it("stamps the phase, its seq and when it arrived", async () => {
+    await recordTaskPhase({
+      taskId: TASK_ID,
+      workerId: "w1",
+      runId: "run-1",
+      seq: 4,
+      phase: "gates:build",
+    });
+
+    const update = updateOne.mock.calls[0][1];
+    expect(update.$set["execution.phase"]).toBe("gates:build");
+    expect(update.$set["execution.phaseSeq"]).toBe(4);
+    expect(update.$set["execution.phaseAt"]).toBeInstanceOf(Date);
+  });
+
+  it("reports whether the write landed", async () => {
+    const event = { taskId: TASK_ID, workerId: "w1", runId: "run-1", seq: 1, phase: "agent" };
+
+    expect(await recordTaskPhase(event)).toBe(true);
+
+    updateOne.mockResolvedValue({ matchedCount: 0, modifiedCount: 0 });
+    expect(await recordTaskPhase(event)).toBe(false);
+  });
+});
+
+describe("phaseFrom", () => {
+  it("keeps a label a badge can show", () => {
+    expect(phaseFrom("gates:build")).toBe("gates:build");
+    expect(phaseFrom("  agent  ")).toBe("agent");
+  });
+
+  it("refuses anything that is not a label", () => {
+    expect(phaseFrom("")).toBeNull();
+    expect(phaseFrom("   ")).toBeNull();
+    expect(phaseFrom(42)).toBeNull();
+    expect(phaseFrom(undefined)).toBeNull();
+    expect(phaseFrom({ phase: "agent" })).toBeNull();
+    expect(phaseFrom("x".repeat(MAX_PHASE_LENGTH + 1))).toBeNull();
+    expect(phaseFrom("agent\nwipe")).toBeNull();
+    expect(phaseFrom("agent\u001b[2Kwipe")).toBeNull();
+  });
+});
+
+// A frozen badge is worse than none: a gate rejection lands in a review column, not done, so the
+// most common non-merge outcome is the one that has to clear
+describe("clearing the phase on every exit from the active column", () => {
+  const board = {
+    columns: [
+      { id: "ready", role: "approved", order: 1 },
+      { id: "doing", role: "active", order: 2 },
+      { id: "checking", role: "review", order: 3, triggersPmReview: true },
+    ],
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    findById.mockReturnValue({ lean: () => Promise.resolve(board) });
+    findOne.mockReturnValue({
+      lean: () => Promise.resolve({ _id: "t1", taskNumber: 1, status: "doing", title: "x" }),
+      populate: () => ({
+        lean: () => Promise.resolve({ _id: "t1", taskNumber: 1, status: "doing", title: "x" }),
+      }),
+    });
+    findOneAndUpdate.mockReturnValue({
+      populate: () => Promise.resolve({ _id: "t1", taskNumber: 1, status: "checking", title: "x" }),
+    });
+    updateMany.mockResolvedValue({ modifiedCount: 0 });
+  });
+
+  it("clears it when a gate rejection moves the task to a review column", async () => {
+    await changeStatus("p1", "t1", "checking", "actor");
+
+    expect(findOneAndUpdate.mock.calls[0][1].$unset).toEqual({
+      "execution.phase": "",
+      "execution.phaseAt": "",
+      "execution.phaseSeq": "",
+    });
+  });
+
+  it("clears it when the edit form PUTs a new status", async () => {
+    await updateTask("p1", "t1", { status: "checking" }, "actor");
+
+    expect(Object.keys(findOneAndUpdate.mock.calls[0][1].$unset ?? {})).toEqual(PHASE_KEYS);
+  });
+
+  // The phase belongs to the run, not to the card: renaming a task the worker is running must not
+  // blank the badge
+  it("leaves it alone when the edit touches no status", async () => {
+    await updateTask("p1", "t1", { title: "renamed" }, "actor");
+
+    expect(findOneAndUpdate.mock.calls[0][1].$unset).toBeUndefined();
+  });
+
+  it("clears it when the task is released with the attempt refunded", async () => {
+    findOneAndUpdate.mockResolvedValue({ _id: "t1" });
+
+    await releaseTask("p1", "t1");
+
+    expect(Object.keys(findOneAndUpdate.mock.calls[0][1].$unset)).toEqual(PHASE_KEYS);
+  });
+
+  it("clears it when the release charges the attempt", async () => {
+    findOneAndUpdate.mockResolvedValue({ _id: "t1" });
+
+    await releaseTask("p1", "t1", { refund: false });
+
+    const stages = findOneAndUpdate.mock.calls[0][1];
+    expect(stages[stages.length - 1]).toEqual({ $unset: PHASE_KEYS });
+  });
+
+  it("clears it when a lease expires, whether or not attempts remain", async () => {
+    await releaseExpiredTasks("p1", new Date("2026-07-31T12:00:00.000Z"));
+
+    expect(updateMany.mock.calls).toHaveLength(2);
+    for (const [, update] of updateMany.mock.calls) {
+      expect(Object.keys(update.$unset)).toEqual(PHASE_KEYS);
+    }
   });
 });

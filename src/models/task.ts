@@ -128,6 +128,11 @@ const taskSchema = new Schema<ITask>(
       attempts: { type: Number, default: 0 },
       startedAt: { type: Date, default: null },
       lastError: { type: String, default: "" },
+      // No defaults: the phase trio is written by a live run and unset when it ends, so a task
+      // that is not running carries no phase fields at all
+      phase: { type: String },
+      phaseAt: { type: Date },
+      phaseSeq: { type: Number },
     },
     createdBy: {
       type: Schema.Types.ObjectId,
