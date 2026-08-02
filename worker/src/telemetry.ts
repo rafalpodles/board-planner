@@ -35,9 +35,26 @@ export interface Telemetry {
 const RECENT_LIMIT = 50;
 
 // `pattern` is deliberately absent: a grep pattern is arbitrary agent-authored text, so an agent
-// searching for a secret would make that secret the target. A path cannot carry a file body; a
-// search string can carry anything.
+// searching for a secret would make that secret the target.
 const TARGET_KEYS = ["file_path", "path"] as const;
+
+// Naming a key is not enough — nothing stops an agent putting a file body in `file_path`, and the
+// tool_use block is summarised whether or not the call then failed. So the value must also look
+// like what it claims to be. This bounds what a target can carry; it does not prove the value is a
+// real path, and a short single-line string is not distinguishable from one.
+const MAX_TARGET_LENGTH = 200;
+const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
+// Quotes, semicolons, equals and backticks are everywhere in code and in assignments of the form
+// `TOKEN=...`, and effectively never in a path a tool is asked to open
+const NOT_IN_A_PATH = /["'`;=]/;
+const TOOL_NAME = /^[A-Za-z0-9_.-]{1,64}$/;
+
+function pathLike(value: string): string | undefined {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > MAX_TARGET_LENGTH) return undefined;
+  if (CONTROL_CHARS.test(trimmed) || NOT_IN_A_PATH.test(trimmed)) return undefined;
+  return trimmed;
+}
 
 const KNOWN_STATUSES: readonly RateLimitStatus[] = ["allowed", "allowed_warning", "rejected"];
 
@@ -45,21 +62,24 @@ export function isQuota(update: TelemetryUpdate): update is Quota {
   return "status" in update;
 }
 
-// The only values that ever leave a tool input. Read by name, never spread: a key nobody listed
-// here cannot reach the summary, so file bodies, prompts and diffs are excluded by construction.
+// The only values that ever leave a tool input. Read by name and never spread, so an unlisted key
+// cannot reach the summary — and every value that does is bounded and shape-checked, because
+// choosing the key alone leaves it free to hold anything the agent wants.
 function toolTarget(input: unknown): string | undefined {
   if (typeof input !== "object" || input === null) return undefined;
   const record = input as Record<string, unknown>;
 
   for (const key of TARGET_KEYS) {
     const value = record[key];
-    if (typeof value === "string" && value.length > 0) return value;
+    if (typeof value === "string" && value.length > 0) return pathLike(value);
   }
 
   const command = record.command;
   if (typeof command === "string") {
-    const executable = command.trim().split(/\s+/)[0];
-    if (executable) return executable;
+    const token = command.trim().split(/\s+/)[0];
+    // `FOO=secret npm run build` is ordinary debugging, not an attack, and its first token is a
+    // credential rather than the executable
+    if (token && !token.includes("=")) return pathLike(token.split("/").pop() ?? token);
   }
 
   return undefined;
@@ -78,7 +98,7 @@ function lastToolUse(event: StreamEvent): ToolActivity | undefined {
     const block = blocks[i];
     if (typeof block !== "object" || block === null) continue;
     const { type, name, input } = block as { type?: unknown; name?: unknown; input?: unknown };
-    if (type !== "tool_use" || typeof name !== "string") continue;
+    if (type !== "tool_use" || typeof name !== "string" || !TOOL_NAME.test(name)) continue;
     const target = toolTarget(input);
     return target === undefined ? { name } : { name, target };
   }
