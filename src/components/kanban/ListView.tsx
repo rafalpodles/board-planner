@@ -157,13 +157,13 @@ export function ListView({ tasks, projectKey, projectId, sprints = [], categorie
               <SortHeader label="Key" column="taskNumber" />
               <SortHeader label="Title" column="title" />
               <SortHeader label="Status" column="status" className="hidden sm:table-cell" />
-              <SortHeader label="Assignee" column="assignee" className="hidden lg:table-cell" />
-              <SortHeader label="Priority" column="priority" className="hidden lg:table-cell" />
-              <SortHeader label="Sprint" column="sprint" className="hidden xl:table-cell" />
-              <SortHeader label="Difficulty" column="difficulty" className="hidden xl:table-cell" />
-              <SortHeader label="Category" column="category" className="hidden 2xl:table-cell" />
-              <SortHeader label="Component" column="component" className="hidden min-[1700px]:table-cell" />
-              <SortHeader label="Due" column="dueDate" className="hidden lg:table-cell" />
+              <SortHeader label="Assignee" column="assignee" className="hidden md:table-cell" />
+              <SortHeader label="Priority" column="priority" className="hidden md:table-cell" />
+              <SortHeader label="Sprint" column="sprint" className="hidden lg:table-cell" />
+              <SortHeader label="Difficulty" column="difficulty" className="hidden lg:table-cell" />
+              <SortHeader label="Category" column="category" className="hidden lg:table-cell" />
+              <SortHeader label="Component" column="component" className="hidden xl:table-cell" />
+              <SortHeader label="Due" column="dueDate" className="hidden md:table-cell" />
               <SortHeader label="Updated" column="updatedAt" className="hidden sm:table-cell" />
             </tr>
           </thead>
@@ -272,15 +272,15 @@ export function ListView({ tasks, projectKey, projectId, sprints = [], categorie
                       </Badge>
                     )}
                   </td>
-                  <td className="px-2 py-2 hidden lg:table-cell text-text-muted max-w-32" title={assigneeName}>
+                  <td className="px-2 py-2 hidden md:table-cell text-text-muted max-w-32" title={assigneeName}>
                     <div className="truncate">{assigneeName}</div>
                   </td>
-                  <td className="px-2 py-2 hidden lg:table-cell">
+                  <td className="px-2 py-2 hidden md:table-cell">
                     <Badge variant="priority" value={task.priority}>
                       {PRIORITY_LABELS[task.priority] ?? task.priority}
                     </Badge>
                   </td>
-                  <td className="px-2 py-2 hidden xl:table-cell text-xs max-w-32">
+                  <td className="px-2 py-2 hidden lg:table-cell text-xs max-w-32">
                     {(() => {
                       const sprint = task.sprint ? sprintById.get(task.sprint) : undefined;
                       if (!sprint) return <span className="text-text-muted">—</span>;
@@ -310,12 +310,12 @@ export function ListView({ tasks, projectKey, projectId, sprints = [], categorie
                       );
                     })()}
                   </td>
-                  <td className="px-2 py-2 hidden xl:table-cell">
+                  <td className="px-2 py-2 hidden lg:table-cell">
                     <Badge variant="difficulty" value={task.difficulty}>
                       {task.difficulty}
                     </Badge>
                   </td>
-                  <td className="px-2 py-2 hidden 2xl:table-cell max-w-32">
+                  <td className="px-2 py-2 hidden lg:table-cell max-w-32">
                     <Badge
                       variant="category"
                       value={task.category}
@@ -326,12 +326,12 @@ export function ListView({ tasks, projectKey, projectId, sprints = [], categorie
                     </Badge>
                   </td>
                   <td
-                    className="px-2 py-2 hidden min-[1700px]:table-cell text-text-muted max-w-32"
+                    className="px-2 py-2 hidden xl:table-cell text-text-muted max-w-32"
                     title={task.component || undefined}
                   >
                     <div className="truncate">{task.component || "—"}</div>
                   </td>
-                  <td className={`px-2 py-2 hidden lg:table-cell text-xs max-w-24 ${dueDateInfo?.color || "text-text-muted"}`}>
+                  <td className={`px-2 py-2 hidden md:table-cell text-xs max-w-24 ${dueDateInfo?.color || "text-text-muted"}`}>
                     <div className="truncate">{dueDateInfo?.formatted || "—"}</div>
                   </td>
                   <td className="px-2 py-2 hidden sm:table-cell text-text-muted text-xs whitespace-nowrap">
