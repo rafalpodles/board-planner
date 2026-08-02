@@ -13,20 +13,52 @@ const SIZE_CLASSES = {
 const FOCUSABLE_SELECTOR = [
   "a[href]",
   "button:not([disabled])",
-  "input:not([disabled])",
+  'input:not([disabled]):not([type="hidden"])',
   "select:not([disabled])",
   "textarea:not([disabled])",
+  "details > summary:first-of-type",
+  '[contenteditable]:not([contenteditable="false"])',
   '[tabindex]:not([tabindex="-1"])',
 ].join(", ");
 
+const UNNAMED_DIALOG_LABEL = "Dialog";
+
 const openDialogs: HTMLElement[] = [];
 
-// A nested dialog renders inside its parent's panel, so containment — not open order — decides which is on top
+// All overlays share z-50, so the dialog last in the DOM is the one painted in front
 function topmostDialog() {
-  const innermost = openDialogs.filter(
-    (dialog) => !openDialogs.some((other) => other !== dialog && dialog.contains(other))
+  return openDialogs.reduce<HTMLElement | undefined>(
+    (top, dialog) =>
+      top && !(top.compareDocumentPosition(dialog) & Node.DOCUMENT_POSITION_FOLLOWING)
+        ? top
+        : dialog,
+    undefined
   );
-  return innermost[innermost.length - 1];
+}
+
+// The selector matches markup; only these checks tell us what a keyboard user can actually reach
+function tabbablesWithin(dialog: HTMLElement) {
+  const rendered = new Map<Element, boolean>();
+
+  function isRendered(el: HTMLElement): boolean {
+    const cached = rendered.get(el);
+    if (cached !== undefined) return cached;
+    const style = getComputedStyle(el);
+    const parent = el.parentElement;
+    const ok =
+      !el.hidden &&
+      style.display !== "none" &&
+      style.visibility !== "hidden" &&
+      (el === dialog || parent === null || isRendered(parent));
+    rendered.set(el, ok);
+    return ok;
+  }
+
+  return Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
+    (el) =>
+      isRendered(el) &&
+      (el.tagName === "SUMMARY" || !el.closest("details:not([open])"))
+  );
 }
 
 interface ModalProps {
@@ -35,12 +67,22 @@ interface ModalProps {
   title: string;
   children: React.ReactNode;
   size?: keyof typeof SIZE_CLASSES;
+  /** Where focus lands on close when nothing was focused at open time — keyboard shortcuts, Safari clicks */
+  returnFocusTo?: React.RefObject<HTMLElement | null>;
 }
 
-export function Modal({ open, onClose, title, children, size = "md" }: ModalProps) {
+export function Modal({
+  open,
+  onClose,
+  title,
+  children,
+  size = "md",
+  returnFocusTo,
+}: ModalProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
+  const named = title.trim().length > 0;
 
   useEffect(() => {
     if (!open) return;
@@ -56,12 +98,17 @@ export function Modal({ open, onClose, title, children, size = "md" }: ModalProp
 
   useEffect(() => {
     if (!open) return;
-    const trigger = document.activeElement as HTMLElement | null;
+    const focused = document.activeElement as HTMLElement | null;
+    const trigger =
+      focused && focused !== document.body && focused !== document.documentElement
+        ? focused
+        : null;
     dialogRef.current!.focus();
     return () => {
-      if (trigger?.isConnected) trigger.focus();
+      const target = trigger ?? returnFocusTo?.current ?? null;
+      if (target?.isConnected) target.focus();
     };
-  }, [open]);
+  }, [open, returnFocusTo]);
 
   useEffect(() => {
     if (!open) return;
@@ -74,18 +121,10 @@ export function Modal({ open, onClose, title, children, size = "md" }: ModalProp
       }
       if (e.key !== "Tab") return;
 
-      const focusable = Array.from(
-        dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)
-      );
-      if (focusable.length === 0) {
-        e.preventDefault();
-        dialog.focus();
-        return;
-      }
-
+      const focusable = tabbablesWithin(dialog);
       const active = document.activeElement;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
+      const first = focusable[0] ?? dialog;
+      const last = focusable[focusable.length - 1] ?? dialog;
       const leavingForwards = !e.shiftKey && (active === last || !dialog.contains(active));
       const leavingBackwards =
         e.shiftKey && (active === first || active === dialog || !dialog.contains(active));
@@ -109,14 +148,17 @@ export function Modal({ open, onClose, title, children, size = "md" }: ModalProp
       ref={overlayRef}
       className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60"
       onClick={(e) => {
-        if (e.target === overlayRef.current) onClose();
+        if (e.target !== overlayRef.current) return;
+        if (topmostDialog() !== dialogRef.current) return;
+        onClose();
       }}
     >
       <div
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-labelledby={titleId}
+        aria-labelledby={named ? titleId : undefined}
+        aria-label={named ? undefined : UNNAMED_DIALOG_LABEL}
         tabIndex={-1}
         className={`flex flex-col w-full ${SIZE_CLASSES[size]} max-h-[90vh]
         bg-bg-card border border-border rounded-t-2xl sm:rounded-2xl p-4 sm:p-6 sm:mx-4
