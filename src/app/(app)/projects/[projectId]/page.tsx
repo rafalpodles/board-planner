@@ -8,6 +8,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { usePollWhileVisible } from "@/hooks/use-poll-while-visible";
 import { ApiProject, ApiTask, ApiSprint , BOARD_SORT_FIELDS, LIST_SORT_FIELDS, SortField, SortDir } from "@/types";
 import { effectiveColumns } from "@/lib/columns";
+import { ListColumnId } from "@/lib/list-columns";
 import { subscribeBoardRefresh } from "@/lib/board-refresh";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Board } from "@/components/kanban/Board";
@@ -81,6 +82,7 @@ export default function KanbanPage() {
   // headers set the same value, and it survives switching between them
   const [sortField, setSortField] = useState<SortField>("manual");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [hiddenColumns, setHiddenColumns] = useState<ListColumnId[]>([]);
 
   const [viewMode, setViewMode] = useState<"board" | "list">(() => {
     if (typeof window === "undefined") return "board";
@@ -448,6 +450,8 @@ export default function KanbanPage() {
         }}
         sortFields={viewMode === "list" ? LIST_SORT_FIELDS : BOARD_SORT_FIELDS}
         sortContext={sortContext}
+        hiddenColumns={hiddenColumns}
+        {...(viewMode === "list" ? { onHiddenColumnsChange: setHiddenColumns } : {})}
         extraControls={
           <button
             onClick={() => {
@@ -514,6 +518,7 @@ export default function KanbanPage() {
             setSortField(field);
             setSortDir(dir);
           }}
+          hiddenColumns={hiddenColumns}
           onTaskClick={openTask}
           onStatusChange={handleStatusChange}
           onTaskSelect={handleTaskSelect}
