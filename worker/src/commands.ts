@@ -2,6 +2,12 @@ import { Loop } from "./loop.js";
 
 export type WorkerCommand = "pause" | "resume" | "stop";
 export type CommandHandlers = Record<WorkerCommand, (issuedAt?: string) => void>;
+export type LocalCommands = Record<WorkerCommand, () => void>;
+
+export interface CommandChannels {
+  remote: CommandHandlers;
+  local: LocalCommands;
+}
 
 const COMMANDS = new Set<string>(["pause", "resume", "stop"]);
 
@@ -40,11 +46,16 @@ export interface CommandDeps {
   ack: (command: WorkerCommand) => void;
 }
 
-export function createCommandHandlers(deps: CommandDeps): CommandHandlers {
-  // Both transports deliver the same standing command, so the issuance instant — not the command
-  // name — is what separates a redelivery from an operator asking again. Applying is gated on
-  // recency, not equality: a heartbeat computed before a later command was written still carries
+export function createCommandHandlers(deps: CommandDeps): CommandChannels {
+  // Both SERVER transports deliver the same standing command, so the issuance instant — not the
+  // command name — is what separates a redelivery from an operator asking again. Applying is gated
+  // on recency, not equality: a heartbeat computed before a later command was written still carries
   // the old issuance, and must not resurrect what that later command already superseded.
+  //
+  // Every instant compared here comes from the server's clock. A local command must never enter
+  // this guard: it would order the laptop's clock against the server's, and a laptop running ahead
+  // would make one local pause silently swallow a later board-issued stop — the emergency brake,
+  // dropped, while the run carries on to merge.
   let lastAppliedAt = -Infinity;
 
   function apply(command: WorkerCommand, issuedAt: string | undefined, effect: () => void): void {
@@ -58,18 +69,40 @@ export function createCommandHandlers(deps: CommandDeps): CommandHandlers {
     }
 
     effect();
+    settle(command);
+  }
 
+  function settle(command: WorkerCommand): void {
     const settled = command === "resume" ? !deps.loop.paused() : deps.loop.paused();
     if (settled) deps.ack(command);
   }
 
+  const effects: Record<WorkerCommand, () => void> = {
+    pause: () => deps.loop.pause(),
+    resume: () => deps.loop.resume(),
+    stop: () => {
+      deps.runs.abort();
+      deps.loop.pause();
+    },
+  };
+
+  // A local command arrives by direct call from an operator at this machine. It is never
+  // redelivered and never reordered, so it needs no recency guard — and must not touch one.
+  function applyLocal(command: WorkerCommand): void {
+    effects[command]();
+    settle(command);
+  }
+
   return {
-    pause: (issuedAt) => apply("pause", issuedAt, () => deps.loop.pause()),
-    resume: (issuedAt) => apply("resume", issuedAt, () => deps.loop.resume()),
-    stop: (issuedAt) =>
-      apply("stop", issuedAt, () => {
-        deps.runs.abort();
-        deps.loop.pause();
-      }),
+    remote: {
+      pause: (issuedAt) => apply("pause", issuedAt, effects.pause),
+      resume: (issuedAt) => apply("resume", issuedAt, effects.resume),
+      stop: (issuedAt) => apply("stop", issuedAt, effects.stop),
+    },
+    local: {
+      pause: () => applyLocal("pause"),
+      resume: () => applyLocal("resume"),
+      stop: () => applyLocal("stop"),
+    },
   };
 }

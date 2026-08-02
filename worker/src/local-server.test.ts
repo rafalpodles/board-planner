@@ -5,7 +5,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiClient } from "./api.js";
-import { CommandHandlers, createCommandHandlers } from "./commands.js";
+import { CommandChannels, createCommandHandlers } from "./commands.js";
 import { LocalServer, startLocalServer } from "./local-server.js";
 import { createLoop, Loop } from "./loop.js";
 import { createTelemetry, Telemetry } from "./telemetry.js";
@@ -37,8 +37,7 @@ function idleLoop(): Loop {
 
 async function serve(
   opts: {
-    now?: () => number;
-    handlers?: CommandHandlers;
+    handlers?: CommandChannels;
     telemetry?: Pick<Telemetry, "subscribe" | "recent">;
     socketPath?: string;
   } = {}
@@ -46,21 +45,20 @@ async function serve(
   const loop = idleLoop();
   const abort = vi.fn();
   const ack = vi.fn();
-  const handlers = opts.handlers ?? createCommandHandlers({ loop, runs: { abort }, ack });
+  const channels = opts.handlers ?? createCommandHandlers({ loop, runs: { abort }, ack });
   const socketPath = opts.socketPath ?? tempSocketPath();
 
   const server = startLocalServer({
     socketPath,
-    handlers,
+    handlers: channels.local,
     telemetry: opts.telemetry ?? createTelemetry(),
     paused: () => loop.paused(),
-    now: opts.now,
     log: vi.fn(),
   });
   started.push(server);
   await server.ready;
 
-  return { loop, abort, ack, handlers, socketPath, server };
+  return { loop, abort, ack, channels, socketPath, server };
 }
 
 function call(
@@ -213,17 +211,31 @@ describe("commands over the socket", () => {
 
   // The guard commands.ts owns orders by issuance, so a local command has to carry one — an undated
   // command would leave lastAppliedAt untouched and let a superseded server command back in.
-  it("stamps its issuance into the same recency guard the server channel uses", async () => {
-    const { socketPath, loop, handlers } = await serve({ now: () => 5_000 });
+  // The board's stop is the emergency brake. It is stamped by the server's clock, so a local pause
+  // that entered the same guard would let a laptop running fast discard it — and the run would
+  // carry on to merge while the operator was told it had stopped.
+  it("never lets a local command discard a later stop issued by the board", async () => {
+    const { socketPath, loop, abort, channels } = await serve();
 
     await call(socketPath, "POST", "/pause");
-    handlers.resume(new Date(4_000).toISOString());
+    channels.remote.stop(new Date(4_000).toISOString());
 
+    expect(abort).toHaveBeenCalledTimes(1);
     expect(loop.paused()).toBe(true);
   });
 
+  it("leaves the server's ordering untouched, so its own commands still order among themselves", async () => {
+    const { socketPath, loop, channels } = await serve();
+
+    await call(socketPath, "POST", "/pause");
+    channels.remote.resume(new Date(9_000).toISOString());
+    channels.remote.pause(new Date(8_000).toISOString());
+
+    expect(loop.paused()).toBe(false);
+  });
+
   it("does not let two commands issued in the same millisecond collapse into one", async () => {
-    const { socketPath, loop } = await serve({ now: () => 5_000 });
+    const { socketPath, loop } = await serve();
 
     await call(socketPath, "POST", "/pause");
     expect(loop.paused()).toBe(true);
@@ -244,6 +256,21 @@ describe("the progress stream", () => {
 
     await vi.waitFor(() => expect(stream.frames.join("")).toContain('data: {"phase":"gates:build"}\n\n'));
     stream.close();
+  });
+
+  // wiring.ts awaits close() during shutdown, and closing a server only stops it accepting new
+  // connections — an attached menubar would otherwise hold the process open until launchd escalates
+  // to SIGKILL. The client here deliberately never disconnects.
+  it("closes down promptly with a client still attached", async () => {
+    const { socketPath, server } = await serve();
+    await openStream(socketPath);
+
+    await expect(
+      Promise.race([
+        server.close(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("close() hung")), 1_000)),
+      ])
+    ).resolves.toBeUndefined();
   });
 
   it("does not put quota on a stream that carries progress", async () => {

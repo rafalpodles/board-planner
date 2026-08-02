@@ -92,13 +92,22 @@ function harness(overrides: Partial<WorkerDeps> = {}) {
 }
 
 describe("the local socket's place in the wiring", () => {
-  // The whole point of routing the socket through commands.ts: it owns the acknowledgement and the
-  // recency guard. A socket handed loop.pause() would satisfy no assertion here.
-  it("hands the socket the very dispatcher the server's two channels use", () => {
+  // The two server channels deliver the same standing command, so they must share the guard that
+  // tells a redelivery from a fresh instruction.
+  it("gives both server channels the one guarded dispatcher", () => {
     const { seen } = harness();
 
-    expect(seen.local?.handlers).toBe(seen.heartbeat?.handlers);
-    expect(seen.local?.handlers).toBe(seen.control?.handlers);
+    expect(seen.heartbeat?.handlers).toBe(seen.control?.handlers);
+  });
+
+  // The socket still goes through commands.ts — a socket handed loop.pause() would skip the
+  // acknowledgement — but by the local entry point. Handing it the server's record would order this
+  // laptop's clock against the server's, and a fast laptop would drop a board-issued stop.
+  it("keeps the socket out of the guard the server's clock writes to", () => {
+    const { seen } = harness();
+
+    expect(seen.local?.handlers).toBeDefined();
+    expect(seen.local?.handlers).not.toBe(seen.heartbeat?.handlers);
   });
 
   it("puts the socket in the worker's own state directory", () => {

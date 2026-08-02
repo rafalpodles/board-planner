@@ -1,6 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
 import { ApiClient } from "./api.js";
-import { CommandHandlers, createCommandHandlers, createRunGuard } from "./commands.js";
+import { CommandDeps, CommandHandlers, createCommandHandlers, createRunGuard } from "./commands.js";
+
+// These exercise the server channel, whose commands carry the server's clock and are ordered by
+// the recency guard. The socket's local entry point deliberately bypasses that — see local-server.
+const remoteHandlers = (deps: CommandDeps): CommandHandlers => createCommandHandlers(deps).remote;
 import { connectControl } from "./control.js";
 import { createLoop, Loop } from "./loop.js";
 import { HeartbeatDeps, startHeartbeat } from "./registration.js";
@@ -71,7 +75,7 @@ function controlOver(frames: string[], handlers: CommandHandlers) {
 describe("createRunGuard", () => {
   it("aborts the very signal the pipeline is running under, not a fresh controller", async () => {
     const runs = createRunGuard();
-    const handlers = createCommandHandlers({ loop: idleLoop(), runs, ack: vi.fn() });
+    const handlers = remoteHandlers({ loop: idleLoop(), runs, ack: vi.fn() });
     const heartbeat = startHeartbeat(heartbeatDeps(handlers, { status: 403 }));
     heartbeat.onAbort(() => runs.abort());
 
@@ -100,7 +104,7 @@ describe("createRunGuard", () => {
 describe("commands over the heartbeat", () => {
   it("pauses the loop from the heartbeat alone, with no control stream open", async () => {
     const loop = idleLoop();
-    const handlers = createCommandHandlers({ loop, runs: { abort: vi.fn() }, ack: vi.fn() });
+    const handlers = remoteHandlers({ loop, runs: { abort: vi.fn() }, ack: vi.fn() });
     const heartbeat = startHeartbeat(
       heartbeatDeps(handlers, { command: "pause", commandIssuedAt: "2026-08-01T12:00:00.000Z" })
     );
@@ -112,7 +116,7 @@ describe("commands over the heartbeat", () => {
 
   it("acknowledges a heartbeat-delivered command the same way the stream path does", async () => {
     const loop = idleLoop();
-    const handlers = createCommandHandlers({
+    const handlers = remoteHandlers({
       loop,
       runs: { abort: vi.fn() },
       ack: (command) => heartbeat.ack(command),
@@ -135,7 +139,7 @@ describe("commands over the heartbeat", () => {
 
   it("ignores an empty command, so a worker with nothing standing keeps claiming", async () => {
     const loop = idleLoop();
-    const handlers = createCommandHandlers({ loop, runs: { abort: vi.fn() }, ack: vi.fn() });
+    const handlers = remoteHandlers({ loop, runs: { abort: vi.fn() }, ack: vi.fn() });
 
     await startHeartbeat(heartbeatDeps(handlers, { command: "" })).tick();
 
@@ -146,7 +150,7 @@ describe("commands over the heartbeat", () => {
 describe("the same command over both transports", () => {
   it("does not apply a stream command a second time when the heartbeat repeats it", async () => {
     const abort = vi.fn();
-    const handlers = createCommandHandlers({ loop: idleLoop(), runs: { abort }, ack: vi.fn() });
+    const handlers = remoteHandlers({ loop: idleLoop(), runs: { abort }, ack: vi.fn() });
     const control = controlOver(
       ['event: command\ndata: {"command":"stop","commandIssuedAt":"2026-08-01T12:00:00.000Z"}\n\n'],
       handlers
@@ -165,7 +169,7 @@ describe("the same command over both transports", () => {
   // The other half: dedupe on the command name alone would swallow this and leave a run going
   it("applies a re-issued stop, because the issuance is newer even though the name is not", async () => {
     const abort = vi.fn();
-    const handlers = createCommandHandlers({ loop: idleLoop(), runs: { abort }, ack: vi.fn() });
+    const handlers = remoteHandlers({ loop: idleLoop(), runs: { abort }, ack: vi.fn() });
     const control = controlOver(
       ['event: command\ndata: {"command":"stop","commandIssuedAt":"2026-08-01T12:00:00.000Z"}\n\n'],
       handlers
@@ -186,7 +190,7 @@ describe("the same command over both transports", () => {
   it("ignores a resume whose issuance predates a stop that already landed", () => {
     const abort = vi.fn();
     const loop = idleLoop();
-    const handlers = createCommandHandlers({ loop, runs: { abort }, ack: vi.fn() });
+    const handlers = remoteHandlers({ loop, runs: { abort }, ack: vi.fn() });
 
     handlers.resume("2026-08-01T12:00:00.000Z"); // standing resume@T1
     handlers.stop("2026-08-01T12:00:30.000Z"); // operator stops: stop@T2, newer than T1
@@ -201,7 +205,7 @@ describe("the same command over both transports", () => {
   it("applies a second stop whose issuance is genuinely newer than the first", () => {
     const abort = vi.fn();
     const loop = idleLoop();
-    const handlers = createCommandHandlers({ loop, runs: { abort }, ack: vi.fn() });
+    const handlers = remoteHandlers({ loop, runs: { abort }, ack: vi.fn() });
 
     handlers.stop("2026-08-01T12:00:00.000Z");
     handlers.stop("2026-08-01T12:05:00.000Z");
@@ -216,7 +220,7 @@ describe("a command with no issuance", () => {
   // not: applying it blind could un-pause a worker a dated stop just silenced.
   it("ignores a resume with no issuance, so a malformed command cannot resurrect a stopped worker", () => {
     const loop = idleLoop();
-    const handlers = createCommandHandlers({ loop, runs: { abort: vi.fn() }, ack: vi.fn() });
+    const handlers = remoteHandlers({ loop, runs: { abort: vi.fn() }, ack: vi.fn() });
 
     handlers.stop("2026-08-01T12:00:00.000Z");
     expect(loop.paused()).toBe(true);
@@ -229,7 +233,7 @@ describe("a command with no issuance", () => {
   it("still applies an undated stop, since pausing is the safe failure", () => {
     const abort = vi.fn();
     const loop = idleLoop();
-    const handlers = createCommandHandlers({ loop, runs: { abort }, ack: vi.fn() });
+    const handlers = remoteHandlers({ loop, runs: { abort }, ack: vi.fn() });
 
     handlers.stop(undefined);
 

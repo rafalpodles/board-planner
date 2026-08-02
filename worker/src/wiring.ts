@@ -260,8 +260,9 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   });
 
   // One dispatcher behind all three transports — see the commit message for why the heartbeat, not
-  // the stream, is the one that has to work.
-  const handlers = createCommandHandlers({
+  // the stream, is the one that has to work. Two entry points, though: the server channels share a
+  // recency guard over the server's clock, and the local socket must stay out of it.
+  const channels = createCommandHandlers({
     loop,
     runs,
     ack: (command) => heartbeat.ack(command),
@@ -277,7 +278,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       version: WORKER_VERSION,
     },
     store: identityStore,
-    handlers,
+    handlers: channels.remote,
     fetchImpl: deps.fetchImpl,
     log: deps.logError,
   };
@@ -288,7 +289,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   const control = deps.connectControl({
     apiBaseUrl: bootstrap.apiBaseUrl,
     identitySource: identityStore,
-    handlers,
+    handlers: channels.remote,
     fetchImpl: deps.fetchImpl,
     log: deps.logError,
   });
@@ -299,7 +300,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
 
   const local = deps.startLocalServer({
     socketPath: localSocketPath(bootstrap.stateDir),
-    handlers,
+    handlers: channels.local,
     telemetry,
     paused: () => loop.paused(),
     log: deps.logError,
