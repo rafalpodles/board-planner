@@ -469,6 +469,7 @@ export default function KanbanPage() {
           columns={project.columns || []}
           selectedTasks={selectedTasks}
           selectionMode={selectionMode}
+          collapseEmptyColumns={user?.collapseEmptyColumns ?? true}
           onStatusChange={handleStatusChange}
           onTaskDrop={handleTaskDrop}
           onTaskClick={openTask}

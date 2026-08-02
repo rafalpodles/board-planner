@@ -28,6 +28,18 @@ describe("isColumnCollapsed", () => {
     expect(isColumnCollapsed(3, true, true)).toBe(false);
     expect(isColumnCollapsed(3, false, true)).toBe(false);
   });
+
+  // The user preference is a veto, not another input to weigh
+  it("collapses nothing once the preference is off", () => {
+    expect(isColumnCollapsed(0, false, false, false)).toBe(false);
+    expect(isColumnCollapsed(0, true, false, false)).toBe(false);
+    expect(isColumnCollapsed(0, false, true, false)).toBe(false);
+  });
+
+  it("keeps collapsing when the preference is omitted, so callers that never pass it are unchanged", () => {
+    expect(isColumnCollapsed(0, false, false)).toBe(true);
+    expect(isColumnCollapsed(0, false, false, true)).toBe(true);
+  });
 });
 
 describe("boardGridTemplate", () => {

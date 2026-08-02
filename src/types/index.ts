@@ -114,6 +114,7 @@ export interface IUser {
   fullName: string;
   email: string;
   emailNotifications: boolean;
+  collapseEmptyColumns: boolean;
   role: UserRole;
   allowedProjects: Types.ObjectId[];
   // Runtime-only, set for project-scoped tokens — a scoped token never gets project-admin
@@ -574,6 +575,7 @@ export interface ApiUser {
   fullName: string;
   email: string;
   emailNotifications: boolean;
+  collapseEmptyColumns?: boolean;
   role: UserRole;
   allowedProjects: string[];
   createdAt: string;

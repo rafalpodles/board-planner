@@ -17,6 +17,7 @@ interface AuthState {
   error: string | null;
   login: (username: string, password: string) => Promise<boolean>;
   logout: () => void;
+  refreshUser: () => Promise<void>;
   getAuthHeader: () => string | null;
 }
 
@@ -92,11 +93,18 @@ export function useAuthProvider(): AuthState {
     setUser(null);
   }, []);
 
+  // Preferences saved elsewhere in the app have to reach the cached user, or a
+  // client-side navigation keeps rendering the value from page load
+  const refreshUser = useCallback(async () => {
+    const header = getAuthHeader();
+    if (header) await fetchUser(header);
+  }, [fetchUser, getAuthHeader]);
+
   const isAdmin = user?.role === "admin";
 
   return useMemo(
-    () => ({ user, isAdmin, isLoading, error, login, logout, getAuthHeader }),
-    [user, isAdmin, isLoading, error, login, logout, getAuthHeader]
+    () => ({ user, isAdmin, isLoading, error, login, logout, refreshUser, getAuthHeader }),
+    [user, isAdmin, isLoading, error, login, logout, refreshUser, getAuthHeader]
   );
 }
 
