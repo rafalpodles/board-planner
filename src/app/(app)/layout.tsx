@@ -2,25 +2,17 @@
 
 import Image from "next/image";
 import { useCallback, useRef, useState } from "react";
-import { usePathname } from "next/navigation";
 import { AuthGuard } from "@/components/AuthGuard";
 import { SearchLayer } from "@/components/search/SearchLayer";
 import { SearchIconButton } from "@/components/search/SearchTrigger";
 import { PmChatWidget } from "@/components/pm/PmChatWidget";
-import { ImportDialog } from "@/components/import-export/ImportDialog";
-import { ExportDialog } from "@/components/import-export/ExportDialog";
 import { ProjectsProvider } from "@/components/shell/ProjectsProvider";
 import { Sidebar } from "@/components/shell/Sidebar";
-import { emitBoardRefresh } from "@/lib/board-refresh";
-import { projectRefFromPathname } from "@/lib/urls";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [navOpen, setNavOpen] = useState(false);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
-  const [importOpen, setImportOpen] = useState(false);
-  const [exportOpen, setExportOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
-  const projectRef = projectRefFromPathname(usePathname());
 
   const openSearch = useCallback(() => setSearchOpen(true), []);
   const closeSearch = useCallback(() => setSearchOpen(false), []);
@@ -40,8 +32,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             onNavigate={() => setNavOpen(false)}
             onCloseMobile={() => setNavOpen(false)}
             menuButtonRef={menuButtonRef}
-            onOpenImport={() => setImportOpen(true)}
-            onOpenExport={() => setExportOpen(true)}
             onOpenSearch={openSearch}
           />
 
@@ -95,21 +85,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <SearchLayer open={searchOpen} onOpen={openSearch} onClose={closeSearch} />
         <PmChatWidget />
 
-        {projectRef && (
-          <>
-            <ImportDialog
-              open={importOpen}
-              onClose={() => setImportOpen(false)}
-              projectId={projectRef}
-              onImported={() => emitBoardRefresh(projectRef)}
-            />
-            <ExportDialog
-              open={exportOpen}
-              onClose={() => setExportOpen(false)}
-              projectId={projectRef}
-            />
-          </>
-        )}
       </ProjectsProvider>
     </AuthGuard>
   );
