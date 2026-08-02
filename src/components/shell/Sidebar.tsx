@@ -98,12 +98,7 @@ export function Sidebar({ mobileOpen, onNavigate, onOpenImport, onOpenExport }: 
   const [collapsed, setCollapsed] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
-  const [now, setNow] = useState(() => Date.now());
   const menuRef = useRef<HTMLDivElement>(null);
-
-  // Ticks the Claude working/idle line over to idle without a reload
-  const tick = useCallback(() => setNow(Date.now()), []);
-  usePollWhileVisible(tick, 60_000, !!user);
 
   useEffect(() => {
     setCollapsed(localStorage.getItem(COLLAPSED_KEY) === "1");
@@ -238,7 +233,6 @@ export function Sidebar({ mobileOpen, onNavigate, onOpenImport, onOpenExport }: 
             projects={projects}
             pathname={pathname}
             isAdmin={isAdmin}
-            now={now}
             onOpenImport={onOpenImport}
             onOpenExport={onOpenExport}
           />
