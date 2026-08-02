@@ -78,12 +78,13 @@ describe("Board empty-column rail", () => {
     { id: "done", label: "Done", color: "#22c55e", role: "done", order: 1 },
   ] as AnyColumn[];
 
-  function renderTwoColumnBoard() {
+  function renderTwoColumnBoard(collapseEmptyColumns?: boolean) {
     return render(
       <Board
         tasks={tasks}
         projectKey="TP"
         columns={twoColumns}
+        collapseEmptyColumns={collapseEmptyColumns}
         onStatusChange={() => {}}
         onTaskClick={() => {}}
       />
@@ -114,6 +115,19 @@ describe("Board empty-column rail", () => {
       });
       expect(rail(container)).toBeTruthy();
     }
+  });
+
+  it("leaves the empty column at full width when the preference is off", () => {
+    const { container } = renderTwoColumnBoard(false);
+    expect(rail(container)).toBeNull();
+    // Full width, not a 44px slot
+    const grid = container.querySelector("[style*='grid-template-columns']") as HTMLElement;
+    expect(grid.style.gridTemplateColumns).toBe("minmax(0, 1fr) minmax(0, 1fr)");
+  });
+
+  it("offers no collapse control when the preference is off, since there is no rail to return to", () => {
+    renderTwoColumnBoard(false);
+    expect(screen.queryByLabelText("Collapse Done")).toBeNull();
   });
 
   it("keeps the expansion out of localStorage", async () => {

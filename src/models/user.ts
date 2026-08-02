@@ -29,6 +29,11 @@ const userSchema = new Schema<IUser>({
     type: Boolean,
     default: false,
   },
+  // true keeps the board's existing behaviour for everyone who never touches it
+  collapseEmptyColumns: {
+    type: Boolean,
+    default: true,
+  },
   role: {
     type: String,
     enum: ["admin", "member"],

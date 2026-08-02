@@ -14,6 +14,7 @@ interface BoardProps {
   columns?: ApiProjectColumn[];
   selectedTasks?: Set<string>;
   selectionMode?: boolean;
+  collapseEmptyColumns?: boolean;
   onStatusChange: (taskId: string, status: string) => void;
   onTaskDrop?: (taskId: string, status: string, dropIndex: number) => void;
   onTaskClick: (taskId: string) => void;
@@ -29,6 +30,7 @@ export function Board({
   columns,
   selectedTasks,
   selectionMode,
+  collapseEmptyColumns = true,
   onStatusChange,
   onTaskDrop,
   onTaskClick,
@@ -56,7 +58,8 @@ export function Board({
     isColumnCollapsed(
       grouped[column.id].length,
       pinnedColumns.has(column.id),
-      dragOverColumn === column.id
+      dragOverColumn === column.id,
+      collapseEmptyColumns
     )
   );
 
@@ -87,12 +90,17 @@ export function Board({
               selectedTasks={selectedTasks}
               selectionMode={selectionMode}
               collapsed={collapsed[i]}
-              onToggleCollapsed={() =>
-                setPinnedColumns((prev) => {
-                  const next = new Set(prev);
-                  if (!next.delete(column.id)) next.add(column.id);
-                  return next;
-                })
+              // Withheld when the preference is off: nothing can become a rail,
+              // so a collapse control would be a button that does nothing
+              onToggleCollapsed={
+                collapseEmptyColumns
+                  ? () =>
+                      setPinnedColumns((prev) => {
+                        const next = new Set(prev);
+                        if (!next.delete(column.id)) next.add(column.id);
+                        return next;
+                      })
+                  : undefined
               }
               onDragOverColumn={(over) =>
                 setDragOverColumn((prev) =>
