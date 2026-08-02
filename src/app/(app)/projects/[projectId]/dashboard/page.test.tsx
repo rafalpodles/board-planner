@@ -62,6 +62,15 @@ function panel(title: string) {
   return within(screen.getByRole("heading", { name: title }).closest("div")!);
 }
 
+function barStylesOf(chartTitle: string): string[] {
+  const card = screen.getByRole("heading", { name: chartTitle }).closest("div")!;
+  return [...card.querySelectorAll<HTMLElement>("[style*='height']")].map((bar) => bar.style.height);
+}
+
+function barHeightsOf(chartTitle: string): number[] {
+  return barStylesOf(chartTitle).map((height) => parseFloat(height) || 0);
+}
+
 beforeEach(() => {
   api.get.mockReset();
 });
@@ -105,6 +114,48 @@ describe("Dashboard charts with partial data", () => {
     expect(screen.queryByText(/each week a task reaches Done adds a bar/i)).toBeNull();
     expect(screen.getByText("Last 8 weeks")).toBeTruthy();
     expect(screen.getAllByText("Jul 20").length).toBeGreaterThan(0);
+  });
+
+  // A percentage height is what made every bar collapse to its minimum: the column
+  // sizes to its content, so there is nothing for the percentage to resolve against
+  it("sizes the velocity bars in px, never as a percentage of an auto-height column", async () => {
+    await renderDashboard({
+      velocity: weeks.map((week, i) => ({ week, count: i })),
+    });
+
+    for (const height of barStylesOf("Velocity (tasks done/week)")) {
+      expect(height).toMatch(/px$/);
+    }
+  });
+
+  it("scales the velocity bars to the data instead of drawing them all flat", async () => {
+    await renderDashboard({
+      velocity: weeks.map((week, i) => ({ week, count: [0, 1, 2, 4, 0, 8, 3, 0][i] })),
+    });
+    const heights = barHeightsOf("Velocity (tasks done/week)");
+
+    expect(heights).toHaveLength(8);
+    expect(heights[5]).toBeGreaterThan(heights[3]);
+    expect(heights[3]).toBeGreaterThan(heights[1]);
+    expect(heights.filter((h) => h === 0)).toHaveLength(3);
+    expect(new Set(heights.filter((h) => h > 0)).size).toBe(5);
+  });
+
+  it("keeps a week with a single completion visible rather than invisible", async () => {
+    await renderDashboard({
+      velocity: weeks.map((week, i) => ({ week, count: i === 0 ? 1 : i === 7 ? 200 : 0 })),
+    });
+    const heights = barHeightsOf("Velocity (tasks done/week)");
+
+    expect(heights[0]).toBeGreaterThan(0);
+    expect(heights[7]).toBeGreaterThan(heights[0]);
+  });
+
+  it("gives the only bar of a single-bucket chart the full track", async () => {
+    await renderDashboard({ velocity: [{ week: "Jul 20", count: 3 }] });
+    const [only] = barHeightsOf("Velocity (tasks done/week)");
+
+    expect(only).toBeGreaterThan(0);
   });
 
   it("draws created vs completed when only tasks were created", async () => {
