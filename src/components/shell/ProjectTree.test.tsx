@@ -178,3 +178,64 @@ describe("ProjectTree", () => {
     );
   });
 });
+
+describe("ProjectTree reordering", () => {
+  function rows(container: HTMLElement) {
+    return [...container.querySelectorAll('[draggable="true"]')] as HTMLElement[];
+  }
+
+  function drag(container: HTMLElement, fromIndex: number, toIndex: number) {
+    const data = new Map<string, string>();
+    const dataTransfer = {
+      effectAllowed: "",
+      dropEffect: "",
+      setData: (k: string, v: string) => void data.set(k, v),
+      getData: (k: string) => data.get(k) ?? "",
+    };
+    const source = rows(container)[fromIndex];
+    const target = rows(container)[toIndex];
+
+    const fire = (el: HTMLElement, type: string) => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperty(event, "dataTransfer", { value: dataTransfer });
+      el.dispatchEvent(event);
+    };
+
+    fire(source, "dragstart");
+    fire(target, "dragover");
+    fire(target, "drop");
+  }
+
+  it("makes rows draggable when reordering is allowed", () => {
+    const { container } = renderTree({ onReorder: () => {} });
+    expect(rows(container)).toHaveLength(2);
+  });
+
+  it("makes nothing draggable without a reorder handler", () => {
+    const { container } = renderTree();
+    expect(rows(container)).toHaveLength(0);
+  });
+
+  // One project cannot be reordered against anything
+  it("makes nothing draggable with a single project", () => {
+    const { container } = renderTree({
+      projects: [project({ _id: "1", key: "TP" })],
+      onReorder: () => {},
+    });
+    expect(rows(container)).toHaveLength(0);
+  });
+
+  it("reports the reordered ids on drop", async () => {
+    const onReorder = vi.fn();
+    const { container } = renderTree({ onReorder });
+    await act(async () => drag(container, 0, 1));
+    expect(onReorder).toHaveBeenCalledWith(["2", "1"]);
+  });
+
+  it("reports nothing when a row is dropped on itself", async () => {
+    const onReorder = vi.fn();
+    const { container } = renderTree({ onReorder });
+    await act(async () => drag(container, 1, 1));
+    expect(onReorder).not.toHaveBeenCalled();
+  });
+});
