@@ -41,8 +41,6 @@ function renderSidebar(
       onNavigate={() => {}}
       onCloseMobile={props.onCloseMobile ?? (() => {})}
       menuButtonRef={props.menuButtonRef}
-      onOpenImport={() => {}}
-      onOpenExport={() => {}}
       onOpenSearch={props.onOpenSearch ?? (() => {})}
     />
   );

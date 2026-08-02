@@ -122,8 +122,6 @@ interface SidebarProps {
   onCloseMobile: () => void;
   /** Focus goes back to whatever opened the drawer */
   menuButtonRef?: React.RefObject<HTMLElement | null>;
-  onOpenImport: () => void;
-  onOpenExport: () => void;
   onOpenSearch: () => void;
 }
 
@@ -132,8 +130,6 @@ export function Sidebar({
   onNavigate,
   onCloseMobile,
   menuButtonRef,
-  onOpenImport,
-  onOpenExport,
   onOpenSearch,
 }: SidebarProps) {
   const { user, isAdmin, logout } = useAuth();
@@ -293,8 +289,6 @@ export function Sidebar({
             pathname={pathname}
             isAdmin={isAdmin}
             onReorder={isAdmin ? reorder : undefined}
-            onOpenImport={onOpenImport}
-            onOpenExport={onOpenExport}
           />
         )}
 
