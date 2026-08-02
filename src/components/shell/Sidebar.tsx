@@ -107,7 +107,7 @@ export function Sidebar({
   onOpenExport,
 }: SidebarProps) {
   const { user, isAdmin, logout } = useAuth();
-  const { projects } = useProjects();
+  const { projects, reorder } = useProjects();
   const { theme, toggle: toggleTheme } = useTheme();
   const pathname = usePathname() ?? "";
   const router = useRouter();
@@ -286,6 +286,7 @@ export function Sidebar({
             projects={projects}
             pathname={pathname}
             isAdmin={isAdmin}
+            onReorder={isAdmin ? reorder : undefined}
             onOpenImport={onOpenImport}
             onOpenExport={onOpenExport}
           />

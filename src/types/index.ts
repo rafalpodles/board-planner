@@ -394,6 +394,7 @@ export interface IProject {
   codaTableId: string;
   codaToken: string;
   taskCounter: number;
+  sortOrder: number;
   pm?: IPmConfig;
   owner: Types.ObjectId | IUser;
   admins: (Types.ObjectId | IUser)[];
@@ -622,6 +623,7 @@ export interface ApiProject {
   codaTableId?: string;
   codaTokenSet?: boolean;
   taskCounter: number;
+  sortOrder?: number;
   // Sidebar badges, computed by the list endpoint only
   taskCount?: number;
   hasActiveSprint?: boolean;

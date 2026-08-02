@@ -5,6 +5,7 @@ import { useState } from "react";
 import { ApiProject, DEFAULT_PROJECT_ICON } from "@/types";
 import { projectPath } from "@/lib/urls";
 import { isNavItemActive } from "@/lib/nav-active";
+import { moveItem } from "@/lib/reorder";
 
 const SUB_ICONS = {
   board: "M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2",
@@ -82,6 +83,8 @@ interface ProjectTreeProps {
   projects: ApiProject[];
   pathname: string;
   isAdmin: boolean;
+  /** Omitted for anyone who may not change the shared order */
+  onReorder?: (orderedIds: string[]) => void;
   onOpenImport: () => void;
   onOpenExport: () => void;
 }
@@ -90,6 +93,7 @@ export function ProjectTree({
   projects,
   pathname,
   isAdmin,
+  onReorder,
   onOpenImport,
   onOpenExport,
 }: ProjectTreeProps) {
@@ -98,6 +102,22 @@ export function ProjectTree({
   );
   const [manuallyExpanded, setManuallyExpanded] = useState<string | null>(null);
   const expandedId = manuallyExpanded ?? routeProject?._id ?? null;
+
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+  const canReorder = !!onReorder && projects.length > 1;
+
+  // The dragged id comes off the dataTransfer rather than component state: the
+  // browser owns the drag session, and state may not have flushed by drop time
+  function handleDrop(e: React.DragEvent, targetId: string) {
+    const sourceId = e.dataTransfer.getData("text/plain") || draggingId;
+    const from = projects.findIndex((p) => p._id === sourceId);
+    const to = projects.findIndex((p) => p._id === targetId);
+    setDraggingId(null);
+    setDropTargetId(null);
+    if (from < 0 || to < 0 || from === to) return;
+    onReorder?.(moveItem(projects, from, to).map((p) => p._id));
+  }
 
   return (
     <div>
@@ -129,8 +149,38 @@ export function ProjectTree({
           <div key={project._id}>
             <div
               data-active-project={isRouteProject || undefined}
+              data-drop-target={dropTargetId === project._id || undefined}
+              // The row is the drag source, not the links inside it: dragging a
+              // link would hand the browser a URL drag instead of a reorder
+              draggable={canReorder}
+              onDragStart={(e) => {
+                setDraggingId(project._id);
+                e.dataTransfer.effectAllowed = "move";
+                e.dataTransfer.setData("text/plain", project._id);
+              }}
+              onDragEnd={() => {
+                setDraggingId(null);
+                setDropTargetId(null);
+              }}
+              onDragOver={(e) => {
+                if (!canReorder || draggingId === project._id) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                setDropTargetId(project._id);
+              }}
+              onDragLeave={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                  setDropTargetId((current) => (current === project._id ? null : current));
+                }
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                handleDrop(e, project._id);
+              }}
               className={`flex w-full items-center gap-1.5 rounded-lg pr-2.5 transition-colors hover:bg-bg-hover ${
                 isRouteProject ? "shadow-[inset_3px_0_0_var(--color-primary)]" : ""
+              } ${draggingId === project._id ? "opacity-40" : ""} ${
+                dropTargetId === project._id ? "outline outline-2 outline-primary" : ""
               }`}
             >
               <button
