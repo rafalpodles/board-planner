@@ -88,11 +88,26 @@ export function Column({
         setDropIndex(null);
       }}
       onClick={collapsed ? onToggleCollapsed : undefined}
+      // The rail has to stay a div — it is also the drop target — so it borrows
+      // a button's keyboard contract rather than becoming one
+      role={collapsed ? "button" : undefined}
+      tabIndex={collapsed ? 0 : undefined}
+      aria-label={collapsed ? `Expand ${column.label}` : undefined}
+      onKeyDown={
+        collapsed
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onToggleCollapsed?.();
+              }
+            }
+          : undefined
+      }
       title={collapsed ? `${column.label} — 0 tasks. Click to expand.` : undefined}
       className={`bg-bg-card rounded-xl border border-border
         border-t-2 flex flex-col max-h-[calc(100vh-12rem)] lg:max-h-full lg:h-full lg:min-h-0
         transition-colors ${isDragOver ? "bg-primary/5 border-primary/30" : ""}
-        ${collapsed ? "items-center gap-2.5 py-2.5 cursor-pointer hover:bg-bg-hover" : ""}`}
+        ${collapsed ? "focus-ring items-center gap-2.5 py-2.5 cursor-pointer hover:bg-bg-hover" : ""}`}
       style={{ borderTopColor: column.color }}
     >
       {collapsed ? (
@@ -128,7 +143,7 @@ export function Column({
               onClick={onToggleCollapsed}
               title={`Collapse ${column.label}`}
               aria-label={`Collapse ${column.label}`}
-              className="rounded p-0.5 text-text-muted transition-colors hover:bg-bg-hover hover:text-text"
+              className="focus-ring rounded p-0.5 text-text-muted transition-colors hover:bg-bg-hover hover:text-text"
             >
               <svg
                 className="h-3.5 w-3.5"

@@ -433,7 +433,7 @@ export default function KanbanPage() {
               setSelectionMode((on) => !on);
               setSelectedTasks(new Set());
             }}
-            className={`text-xs px-3 py-1.5 rounded-lg border transition-colors
+            className={`focus-ring text-xs px-3 py-1.5 rounded-lg border transition-colors
               ${selectionMode
                 ? "border-primary bg-primary/10 text-primary"
                 : "border-border text-text-muted hover:text-text hover:border-border"
