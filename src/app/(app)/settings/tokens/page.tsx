@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
-import { ApiApiToken, ApiProject } from "@/types";
+import { ApiApiToken } from "@/types";
+import { useProjects } from "@/hooks/use-projects";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { useToast } from "@/components/ui/Toast";
@@ -30,7 +31,7 @@ export default function TokensPage() {
   const { isAdmin } = useAuth();
   const { toast } = useToast();
   const [tokens, setTokens] = useState<ApiApiToken[]>([]);
-  const [projects, setProjects] = useState<ApiProject[]>([]);
+  const { projects } = useProjects();
   const [connections, setConnections] = useState<OAuthConnection[]>([]);
   const [oauthClients, setOauthClients] = useState<OAuthClientRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -41,10 +42,9 @@ export default function TokensPage() {
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    Promise.all([api.get("/api/tokens"), api.get("/api/projects"), api.get("/api/oauth/connections")])
-      .then(([t, p, c]: [ApiApiToken[], ApiProject[], OAuthConnection[]]) => {
+    Promise.all([api.get("/api/tokens"), api.get("/api/oauth/connections")])
+      .then(([t, c]: [ApiApiToken[], OAuthConnection[]]) => {
         setTokens(t);
-        setProjects(p);
         setConnections(c);
       })
       .catch(() => toast("Failed to load tokens", "error"))
@@ -149,7 +149,7 @@ export default function TokensPage() {
   }
 
   return (
-    <div className="max-w-2xl mx-auto">
+    <div>
       <h2 className="text-lg font-semibold mb-6">API Tokens</h2>
 
       <p className="text-sm text-text-muted mb-6">
