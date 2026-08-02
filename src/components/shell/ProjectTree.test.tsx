@@ -23,8 +23,6 @@ function renderTree(over: Partial<React.ComponentProps<typeof ProjectTree>> = {}
       projects={[TP, MOB]}
       pathname="/projects/TP"
       isAdmin
-      onOpenImport={() => {}}
-      onOpenExport={() => {}}
       {...over}
     />
   );
@@ -142,30 +140,20 @@ describe("ProjectTree", () => {
     expect(screen.queryByLabelText("New project")).toBeNull();
   });
 
-  it("triggers the import and export dialogs for the current project", async () => {
-    const onOpenImport = vi.fn();
-    const onOpenExport = vi.fn();
-    renderTree({ onOpenImport, onOpenExport });
-
-    await act(async () => {
-      screen.getByText("Import").click();
-    });
-    await act(async () => {
-      screen.getByText("Export").click();
-    });
-
-    expect(onOpenImport).toHaveBeenCalledTimes(1);
-    expect(onOpenExport).toHaveBeenCalledTimes(1);
+  // Import/export was deleted in CP-205; the sub-nav is links only now
+  it("offers no import or export entry", async () => {
+    renderTree();
+    expect(screen.queryByText("Import")).toBeNull();
+    expect(screen.queryByText("Export")).toBeNull();
   });
 
-  // Import/export act on whatever project the board is showing, so they make no
-  // sense under a project you have merely expanded to peek at
-  it("does not offer import or export under a non-route project", async () => {
-    renderTree();
-    await act(async () => {
-      screen.getByLabelText("Expand Mobile App").click();
-    });
-    expect(screen.queryByText("Import")).toBeNull();
+  it("renders every sub-nav entry as a link, never a button", async () => {
+    const { container } = renderTree();
+    const subNav = [...container.querySelectorAll("a, button")].filter((el) =>
+      ["Board", "Sprints", "Dashboard", "PM agent", "Settings"].includes(el.textContent?.trim() || "")
+    );
+    expect(subNav.length).toBeGreaterThan(0);
+    expect(subNav.every((el) => el.tagName === "A")).toBe(true);
   });
 
   it("links sub-nav entries under the project key", () => {

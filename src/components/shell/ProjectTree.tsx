@@ -13,7 +13,6 @@ const SUB_ICONS = {
   dashboard:
     "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z",
   pm: "M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z",
-  importExport: "M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4",
   settings:
     "M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z",
   chevron: "M9 5l7 7-7 7",
@@ -35,8 +34,7 @@ function SubIcon({ d }: { d: string }) {
 }
 
 interface SubItemProps {
-  href?: string;
-  onClick?: () => void;
+  href: string;
   icon: string;
   label: string;
   active?: boolean;
@@ -44,7 +42,7 @@ interface SubItemProps {
   pill?: number;
 }
 
-function SubItem({ href, onClick, icon, label, active, dot, pill }: SubItemProps) {
+function SubItem({ href, icon, label, active, dot, pill }: SubItemProps) {
   const className = `focus-ring flex min-h-[44px] w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors md:min-h-0 ${
     active
       ? "bg-bg-hover font-semibold text-text"
@@ -65,17 +63,10 @@ function SubItem({ href, onClick, icon, label, active, dot, pill }: SubItemProps
     </>
   );
 
-  if (href) {
-    return (
-      <Link href={href} aria-current={active ? "page" : undefined} className={className}>
-        {body}
-      </Link>
-    );
-  }
   return (
-    <button type="button" onClick={onClick} className={className}>
+    <Link href={href} aria-current={active ? "page" : undefined} className={className}>
       {body}
-    </button>
+    </Link>
   );
 }
 
@@ -85,8 +76,6 @@ interface ProjectTreeProps {
   isAdmin: boolean;
   /** Omitted for anyone who may not change the shared order */
   onReorder?: (orderedIds: string[]) => void;
-  onOpenImport: () => void;
-  onOpenExport: () => void;
 }
 
 export function ProjectTree({
@@ -94,8 +83,6 @@ export function ProjectTree({
   pathname,
   isAdmin,
   onReorder,
-  onOpenImport,
-  onOpenExport,
 }: ProjectTreeProps) {
   const routeProject = projects.find((p) =>
     isNavItemActive(pathname, projectPath(p.key)) || isNavItemActive(pathname, projectPath(p._id))
@@ -244,20 +231,6 @@ export function ProjectTree({
                     active={isNavItemActive(pathname, `${base}/pm`)}
                     dot={project.pm?.enabled}
                   />
-                )}
-                {isRouteProject && (
-                  <>
-                    <SubItem
-                      onClick={onOpenImport}
-                      icon={SUB_ICONS.importExport}
-                      label="Import"
-                    />
-                    <SubItem
-                      onClick={onOpenExport}
-                      icon={SUB_ICONS.importExport}
-                      label="Export"
-                    />
-                  </>
                 )}
                 {isAdmin && (
                   <SubItem

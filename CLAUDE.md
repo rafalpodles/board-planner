@@ -97,11 +97,14 @@ src/
     projects/         # Project pages (kanban, task detail, settings)
     login/, profile/, users/, tokens/, notifications/, search/, my-tasks/
   components/
-    kanban/           # Board, Column, TaskCard, ListView, TimelineView
+    kanban/           # Board, Column, TaskCard, ListView
     tasks/            # TaskForm, Comments, TaskLinks, ActivityTimeline
-    import-export/    # Markdown import/export
+    search/           # SearchLayer (⌘K), search core
+    shell/            # Sidebar, ProjectTree, PageHeader
+    pm/               # PM agent chat
+    settings/         # Project settings sections
     ui/               # Button, Modal, Badge, Toast, etc.
-    Navbar.tsx, CommandPalette.tsx, AuthGuard.tsx, AuthProvider.tsx
+    AuthGuard.tsx, AuthProvider.tsx, ThemeProvider.tsx
   hooks/
     use-api.ts        # HTTP client with auth headers
     use-auth.ts       # Auth state management
@@ -114,7 +117,7 @@ src/
     in-app-notifications.ts
     github.ts         # GitHub PR linking
     custom-fields.ts  # Custom field validation
-    webhooks.ts, activity.ts, projectAudit.ts, markdown.ts, checklist.ts
+    webhooks.ts, activity.ts, projectAudit.ts, checklist.ts
   models/             # Mongoose schemas
     user.ts, task.ts, project.ts, comment.ts, sprint.ts,
     apiToken.ts, notification.ts, activityLog.ts, projectAuditLog.ts, settings.ts
