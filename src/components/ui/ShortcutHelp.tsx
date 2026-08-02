@@ -7,19 +7,39 @@ interface ShortcutHelpProps {
   onClose: () => void;
 }
 
-const SHORTCUTS = [
-  { key: "N", description: "Create new task" },
-  { key: "Tab", description: "Move between board cards" },
-  { key: "J / K", description: "Navigate tasks (list view)" },
-  { key: "Enter / Space", description: "Open focused task" },
-  { key: "⇧ Click", description: "Add card to selection" },
-  { key: "⌘ Click", description: "Open task in a new tab" },
-  { key: "/", description: "Focus search" },
-  { key: "V", description: "Toggle view: board ↔ list" },
-  { key: "R", description: "Refresh board" },
-  { key: "Esc", description: "Close dialogs / clear selection" },
-  { key: "⌘K", description: "Quick search" },
-  { key: "?", description: "Show this help" },
+// The same dialog is shown in both views, so anything that only works in one of
+// them is listed under that view rather than claimed everywhere
+const SHORTCUT_GROUPS = [
+  {
+    title: "Anywhere",
+    shortcuts: [
+      { key: "N", description: "Create new task" },
+      { key: "/", description: "Focus search" },
+      { key: "⌘K", description: "Quick search" },
+      { key: "V", description: "Toggle view: board ↔ list" },
+      { key: "R", description: "Refresh board" },
+      { key: "Esc", description: "Close dialogs / clear selection" },
+      { key: "?", description: "Show this help" },
+    ],
+  },
+  {
+    title: "Board",
+    shortcuts: [
+      { key: "Tab", description: "Move between cards" },
+      { key: "Enter / Space", description: "Open the focused card" },
+      { key: "⇧ Enter", description: "Add the focused card to the selection" },
+      { key: "⇧ Click", description: "Add a card to the selection" },
+      { key: "⌘ / Ctrl Click", description: "Open a card in a new tab" },
+      { key: "Middle click", description: "Open a card in a new tab" },
+    ],
+  },
+  {
+    title: "List",
+    shortcuts: [
+      { key: "J / K", description: "Move between rows" },
+      { key: "Enter", description: "Open the focused row" },
+    ],
+  },
 ];
 
 export function ShortcutHelp({ open, onClose }: ShortcutHelpProps) {
@@ -43,18 +63,28 @@ export function ShortcutHelp({ open, onClose }: ShortcutHelpProps) {
       onClick={onClose}
     >
       <div
-        className="bg-bg-card border border-border rounded-xl shadow-xl p-6 max-w-sm w-full mx-4"
+        className="bg-bg-card border border-border rounded-xl shadow-xl p-6 max-w-md w-full mx-4
+          max-h-[85vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="text-lg font-semibold mb-4">Keyboard Shortcuts</h2>
-        <div className="space-y-2">
-          {SHORTCUTS.map(({ key, description }) => (
-            <div key={key} className="flex items-center justify-between">
-              <span className="text-sm text-text-muted">{description}</span>
-              <kbd className="text-xs bg-bg-input border border-border px-2 py-1 rounded font-mono">
-                {key}
-              </kbd>
-            </div>
+        <div className="space-y-4">
+          {SHORTCUT_GROUPS.map(({ title, shortcuts }) => (
+            <section key={title}>
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-text-muted mb-2">
+                {title}
+              </h3>
+              <div className="space-y-2">
+                {shortcuts.map(({ key, description }) => (
+                  <div key={key} className="flex items-center justify-between gap-4">
+                    <span className="text-sm text-text-muted">{description}</span>
+                    <kbd className="text-xs bg-bg-input border border-border px-2 py-1 rounded font-mono whitespace-nowrap">
+                      {key}
+                    </kbd>
+                  </div>
+                ))}
+              </div>
+            </section>
           ))}
         </div>
         <p className="text-xs text-text-muted mt-4">
