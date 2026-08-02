@@ -5,7 +5,7 @@ import { Task } from "@/models/task";
 import { DEPENDENCY_TYPES, DependencyType, RelationType } from "@/types";
 
 // Add a dependency. "blocked_by" lands in blockedBy (the relation that drives
-// cycle detection and timeline arrows); the rest go into the typed relations array.
+// cycle detection); the rest go into the typed relations array.
 export const POST = withProjectAccess(async (request, { params }) => {
   const { projectId, taskId } = await params;
   await connectDB();
