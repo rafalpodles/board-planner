@@ -4,15 +4,11 @@ import { render, screen, cleanup, act } from "@testing-library/react";
 import { ProjectTree } from "./ProjectTree";
 import { ApiProject } from "@/types";
 
-const NOW = new Date("2026-08-02T12:00:00Z").getTime();
-const ago = (ms: number) => new Date(NOW - ms).toISOString();
-
 function project(over: Partial<ApiProject> & { _id: string; key: string }): ApiProject {
   return {
     name: `Project ${over.key}`,
     icon: "📋",
     taskCount: 0,
-    lastTaskUpdate: null,
     hasActiveSprint: false,
     ...over,
   } as ApiProject;
@@ -27,7 +23,6 @@ function renderTree(over: Partial<React.ComponentProps<typeof ProjectTree>> = {}
       projects={[TP, MOB]}
       pathname="/projects/TP"
       isAdmin
-      now={NOW}
       onOpenImport={() => {}}
       onOpenExport={() => {}}
       {...over}
@@ -88,22 +83,19 @@ describe("ProjectTree", () => {
     expect(screen.getByText("9")).toBeTruthy();
   });
 
-  it("shows Claude working inside the activity window", () => {
-    renderTree({ projects: [project({ _id: "1", key: "TP", lastTaskUpdate: ago(60_000) })] });
-    expect(screen.getByText("Claude working")).toBeTruthy();
-  });
-
-  it("shows Claude idle outside it", () => {
-    renderTree({
-      projects: [project({ _id: "1", key: "TP", lastTaskUpdate: ago(60 * 60_000) })],
-    });
-    expect(screen.getByText("Claude idle")).toBeTruthy();
-  });
-
-  it("shows no activity line for a project with no tasks", () => {
-    renderTree({ projects: [project({ _id: "1", key: "TP", lastTaskUpdate: null })] });
+  it("carries no Claude activity line in an expanded project", () => {
+    const { container } = renderTree();
     expect(screen.queryByText("Claude working")).toBeNull();
     expect(screen.queryByText("Claude idle")).toBeNull();
+    expect(container.querySelector(".bg-success")).toBeNull();
+  });
+
+  // The activity dot and the active-sprint dot looked alike; only the former went
+  it("still marks a project with an active sprint", () => {
+    const { container } = renderTree({
+      projects: [project({ _id: "1", key: "TP", hasActiveSprint: true })],
+    });
+    expect(container.querySelector(".bg-success")).toBeTruthy();
   });
 
   it("hides PM agent when the instance holds the lock", () => {
