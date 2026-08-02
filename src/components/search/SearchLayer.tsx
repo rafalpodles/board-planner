@@ -132,6 +132,8 @@ export function SearchLayer({ open, onOpen, onClose }: SearchLayerProps) {
         tabIndex={-1}
         className="flex h-dvh w-full flex-col overflow-hidden bg-bg-card sm:h-auto sm:max-h-[70vh] sm:w-[640px] sm:rounded-xl sm:border sm:border-border sm:shadow-2xl"
       >
+        {/* No focus-ring class on the input: it is focused from the moment the layer
+            opens and the caret marks it, where a 2px box would read as a validation error */}
         <div className="flex shrink-0 items-center gap-3 border-b border-border px-4">
           <svg
             className="h-5 w-5 shrink-0 text-text-muted"
@@ -154,7 +156,7 @@ export function SearchLayer({ open, onOpen, onClose }: SearchLayerProps) {
             onKeyDown={handleKeyDown}
             placeholder="Search tasks and projects"
             aria-label="Search tasks and projects"
-            className="focus-ring-inset min-w-0 flex-1 rounded bg-transparent py-3.5 text-sm text-text placeholder:text-text-muted"
+            className="min-w-0 flex-1 rounded bg-transparent py-3.5 text-sm text-text outline-none placeholder:text-text-muted"
           />
           <button
             type="button"
