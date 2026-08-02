@@ -3,18 +3,21 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup, waitFor, act } from "@testing-library/react";
 import { Sidebar } from "./Sidebar";
 
-const { api, auth, nav, theme } = vi.hoisted(() => ({
+const { api, auth, nav, theme, projectsState } = vi.hoisted(() => ({
   api: { get: vi.fn() },
   auth: {
     user: null as { fullName: string; role: string } | null,
+    isAdmin: true,
     logout: vi.fn(),
   },
   nav: { pathname: "/projects" },
   theme: { theme: "dark", toggle: vi.fn() },
+  projectsState: { projects: [] as unknown[], isLoading: false, reload: vi.fn() },
 }));
 
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
 vi.mock("@/hooks/use-auth", () => ({ useAuth: () => auth }));
+vi.mock("@/hooks/use-projects", () => ({ useProjects: () => projectsState }));
 vi.mock("@/components/ThemeProvider", () => ({ useTheme: () => theme }));
 vi.mock("next/navigation", () => ({
   usePathname: () => nav.pathname,
@@ -25,14 +28,23 @@ vi.mock("next/image", () => ({
 }));
 
 function renderSidebar(props: { mobileOpen?: boolean } = {}) {
-  return render(<Sidebar mobileOpen={props.mobileOpen ?? false} onNavigate={() => {}} />);
+  return render(
+    <Sidebar
+      mobileOpen={props.mobileOpen ?? false}
+      onNavigate={() => {}}
+      onOpenImport={() => {}}
+      onOpenExport={() => {}}
+    />
+  );
 }
 
 beforeEach(() => {
   api.get.mockReset();
   api.get.mockResolvedValue({ count: 0 });
   auth.user = { fullName: "Admin User", role: "admin" };
+  auth.isAdmin = true;
   nav.pathname = "/projects";
+  projectsState.projects = [];
   localStorage.clear();
 });
 
@@ -115,10 +127,13 @@ describe("Sidebar", () => {
     expect(myTasks.closest("a")?.getAttribute("aria-current")).toBeNull();
   });
 
-  it("marks Projects active on a project route", async () => {
+  // The expanded sidebar hands the Projects group to ProjectTree; only the
+  // collapsed rail still renders a single flat entry
+  it("falls back to one All projects entry on the collapsed rail", async () => {
+    localStorage.setItem("sidebar-collapsed", "1");
     nav.pathname = "/projects/TP/tasks/1";
-    renderSidebar();
-    const projects = await screen.findByText("All projects");
-    expect(projects.closest("a")?.getAttribute("aria-current")).toBe("page");
+    renderSidebar({ mobileOpen: false });
+    const entry = await screen.findByTitle("All projects");
+    expect(entry.getAttribute("aria-current")).toBe("page");
   });
 });

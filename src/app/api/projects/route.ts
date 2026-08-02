@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withAuth, withAdmin } from "@/lib/middleware";
 import { Project } from "@/models/project";
+import { Task } from "@/models/task";
+import { Sprint } from "@/models/sprint";
 import { sanitizeMcpServers } from "@/lib/pm/config";
 
 export const GET = withAuth(async (_request, { user }) => {
@@ -15,12 +17,39 @@ export const GET = withAuth(async (_request, { user }) => {
   const projects = await Project.find(filter)
     .populate("owner", "username fullName")
     .sort({ createdAt: -1 });
+
+  // The sidebar renders on every route, so its per-project badges have to come
+  // from this one request. Two flat queries joined in memory rather than a
+  // $lookup with an inline pipeline, which needs MongoDB 5.0.
+  const ids = projects.map((p) => p._id);
+  const [taskStats, activeSprints] = await Promise.all([
+    Task.aggregate([
+      { $match: { project: { $in: ids } } },
+      {
+        $group: {
+          _id: "$project",
+          taskCount: { $sum: 1 },
+          lastTaskUpdate: { $max: "$updatedAt" },
+        },
+      },
+    ]),
+    Sprint.find({ project: { $in: ids }, status: "active" }).select("project").lean(),
+  ]);
+
+  const statsByProject = new Map(taskStats.map((s) => [String(s._id), s]));
+  const withActiveSprint = new Set(activeSprints.map((s) => String(s.project)));
+
   const sanitized = projects.map((p) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const obj: any = p.toObject();
     obj.githubTokenSet = !!obj.githubToken;
     delete obj.githubToken;
     if (obj.pm) obj.pm.mcpServers = sanitizeMcpServers(obj.pm.mcpServers);
+
+    const stats = statsByProject.get(String(p._id));
+    obj.taskCount = stats?.taskCount ?? 0;
+    obj.lastTaskUpdate = stats?.lastTaskUpdate ?? null;
+    obj.hasActiveSprint = withActiveSprint.has(String(p._id));
     return obj;
   });
   return NextResponse.json(sanitized);
