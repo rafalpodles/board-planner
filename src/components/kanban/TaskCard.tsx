@@ -59,7 +59,7 @@ export function TaskCard({
         e.dataTransfer.effectAllowed = "move";
       }}
       className={`block bg-bg rounded-lg border p-3 cursor-pointer
-        transition-colors group active:cursor-grabbing
+        transition-colors group
         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary
         ${selected
           ? "border-primary bg-primary/5"
@@ -83,8 +83,10 @@ export function TaskCard({
       onKeyDown={(e) => {
         if (e.key !== "Enter" && e.key !== " ") return;
         e.preventDefault();
-        // The board also opens the J/K-focused task on Enter; the focused card wins
-        e.stopPropagation();
+        // The board's own Enter handler listens on `document` — the very node the
+        // App Router hydrates and React delegates from — so stopPropagation would
+        // not reach it; only stopping the native event immediately does
+        e.nativeEvent.stopImmediatePropagation();
         activate(e.shiftKey);
       }}
     >
@@ -249,7 +251,9 @@ export function TaskCard({
 
     {(selectionActive || selected) && (
       <button
+        type="button"
         aria-label={`Select ${projectKey}-${task.taskNumber}`}
+        aria-pressed={selected}
         onClick={() => onSelect?.(task._id)}
         className={`absolute top-2 right-2 w-5 h-5 rounded border flex items-center justify-center
           transition-colors text-[10px]

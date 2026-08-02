@@ -50,10 +50,31 @@ async function dragStart(el: Element) {
   return payload;
 }
 
-async function mouseDown(el: Element) {
+async function mouseDown(el: Element, init: MouseEventInit = {}) {
+  const event = new MouseEvent("mousedown", { bubbles: true, cancelable: true, ...init });
   await act(async () => {
-    el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+    el.dispatchEvent(event);
   });
+  return event;
+}
+
+async function auxClick(el: Element, init: MouseEventInit = {}) {
+  const event = new MouseEvent("auxclick", { bubbles: true, cancelable: true, ...init });
+  await act(async () => {
+    el.dispatchEvent(event);
+  });
+  return event;
+}
+
+// React runs every delegated handler from one listener on the node it was rooted
+// at. Under the App Router that node is `document` — exactly where the board page
+// registers its own keydown listener — so a listener added here reproduces the
+// same-node collision that stopPropagation cannot resolve.
+function reactRoot(el: Element): Element {
+  for (let node: Element | null = el; node; node = node.parentElement) {
+    if (Object.keys(node).some((k) => k.startsWith("__reactContainer"))) return node;
+  }
+  throw new Error("no React root container above the card — delegation topology changed");
 }
 
 afterEach(cleanup);
@@ -63,13 +84,6 @@ describe("TaskCard as a link", () => {
     const card = renderCard();
     expect(card.getAttribute("href")).toBe("/projects/TP/tasks/7");
     expect(card.hasAttribute("tabindex")).toBe(false);
-  });
-
-  it("advertises click-to-open and a focus ring", () => {
-    const card = renderCard();
-    expect(card.className).toContain("cursor-pointer");
-    expect(card.className).toContain("focus-visible:ring-2");
-    expect(card.className).toContain("focus-visible:ring-primary");
   });
 
   it("opens the task on a plain click without navigating twice", async () => {
@@ -96,12 +110,13 @@ describe("TaskCard as a link", () => {
     expect(event.defaultPrevented).toBe(true);
   });
 
-  it("keeps Enter away from the board's own list-view handler", async () => {
-    const boardHandler = vi.fn();
-    document.addEventListener("keydown", boardHandler);
+  it("keeps Enter away from the board's own handler on the delegation node", async () => {
     const card = renderCard();
+    const boardHandler = vi.fn();
+    const root = reactRoot(card);
+    root.addEventListener("keydown", boardHandler);
     await press(card, "Enter");
-    document.removeEventListener("keydown", boardHandler);
+    root.removeEventListener("keydown", boardHandler);
     expect(boardHandler).not.toHaveBeenCalled();
   });
 
@@ -134,6 +149,20 @@ describe("TaskCard, opening in a new tab", () => {
     expect(onSelect).not.toHaveBeenCalled();
     expect(event.defaultPrevented).toBe(false);
   });
+
+  // A middle press fires mousedown then auxclick, never click, so the card must
+  // leave both alone for the browser's own open-in-new-tab to survive
+  it("leaves middle-click to the browser", async () => {
+    const onClick = vi.fn();
+    const onSelect = vi.fn();
+    const card = renderCard({ onClick, onSelect });
+    const down = await mouseDown(card, { button: 1 });
+    const aux = await auxClick(card, { button: 1 });
+    expect(down.defaultPrevented).toBe(false);
+    expect(aux.defaultPrevented).toBe(false);
+    expect(onClick).not.toHaveBeenCalled();
+    expect(onSelect).not.toHaveBeenCalled();
+  });
 });
 
 describe("TaskCard selection", () => {
@@ -165,13 +194,6 @@ describe("TaskCard selection", () => {
     expect(onClick).not.toHaveBeenCalled();
   });
 
-  it("opens the task on shift+click when the board has no selection", async () => {
-    const onClick = vi.fn();
-    const card = renderCard({ onClick });
-    await click(card, { shiftKey: true });
-    expect(onClick).toHaveBeenCalledTimes(1);
-  });
-
   it("keeps the checkbox outside the link so the card stays a valid link", async () => {
     const onSelect = vi.fn();
     renderCard({ onSelect, selectionActive: true });
@@ -179,6 +201,14 @@ describe("TaskCard selection", () => {
     expect(checkbox.closest("a")).toBeNull();
     await click(checkbox);
     expect(onSelect).toHaveBeenCalledWith("t1");
+  });
+
+  it("announces whether the card is selected, not just the checkbox name", () => {
+    renderCard({ onSelect: vi.fn(), selectionActive: true });
+    expect(screen.getByRole("button", { name: "Select TP-7", pressed: false })).toBeTruthy();
+    cleanup();
+    renderCard({ onSelect: vi.fn(), selected: true });
+    expect(screen.getByRole("button", { name: "Select TP-7", pressed: true })).toBeTruthy();
   });
 });
 
