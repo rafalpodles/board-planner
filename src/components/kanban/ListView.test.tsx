@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, afterEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { render, screen, cleanup, act } from "@testing-library/react";
 import { ListView } from "./ListView";
 import { ApiSprint, ApiTask } from "@/types";
 
@@ -138,5 +138,76 @@ describe("ListView accessible names", () => {
       (el) => !el.getAttribute("aria-label") && !el.textContent?.trim() && !el.getAttribute("title")
     );
     expect(unnamed).toEqual([]);
+  });
+});
+
+// The list used to re-sort its rows with private state, silently discarding the
+// order the filter bar had just produced — the filter-bar sort control was inert
+describe("ListView sort ownership", () => {
+  const three = [3, 1, 2].map(
+    (n) => ({ ...tasks[0], _id: `t${n}`, taskNumber: n, title: `Task ${n}` }) as ApiTask
+  );
+
+  function keysOnScreen(container: HTMLElement) {
+    return [...container.querySelectorAll("tbody tr")].map((row) =>
+      row.querySelector("td")?.textContent?.trim()
+    );
+  }
+
+  it("renders the order it is given, however unsorted", () => {
+    const { container } = render(
+      <ListView tasks={three} projectKey="CP" sprints={sprints} onTaskClick={() => {}} />
+    );
+    expect(keysOnScreen(container)).toEqual(["CP-3", "CP-1", "CP-2"]);
+  });
+
+  it("does not quietly re-sort by key", () => {
+    const { container } = render(
+      <ListView
+        tasks={three}
+        projectKey="CP"
+        sprints={sprints}
+        sortField="priority"
+        sortDir="desc"
+        onSortChange={() => {}}
+        onTaskClick={() => {}}
+      />
+    );
+    expect(keysOnScreen(container)).not.toEqual(["CP-1", "CP-2", "CP-3"]);
+  });
+
+  it("asks its owner to sort instead of sorting itself", async () => {
+    const onSortChange = vi.fn();
+    renderList({ onSortChange, sortField: "manual", sortDir: "asc" });
+    await act(async () => {
+      screen.getByText("Priority").closest("button")!.click();
+    });
+    expect(onSortChange).toHaveBeenCalledWith("priority", "asc");
+  });
+
+  it("flips direction when the active column is clicked again", async () => {
+    const onSortChange = vi.fn();
+    renderList({ onSortChange, sortField: "priority", sortDir: "asc" });
+    await act(async () => {
+      screen.getByText("Priority").closest("button")!.click();
+    });
+    expect(onSortChange).toHaveBeenCalledWith("priority", "desc");
+  });
+
+  it("marks the active column with a direction arrow", () => {
+    const { container } = render(
+      <ListView
+        tasks={tasks}
+        projectKey="CP"
+        sprints={sprints}
+        sortField="priority"
+        sortDir="desc"
+        onSortChange={() => {}}
+        onTaskClick={() => {}}
+      />
+    );
+    const header = screen.getByText("Priority").closest("th")!;
+    expect(header.querySelector("svg")).toBeTruthy();
+    expect(container.querySelectorAll("th svg").length).toBe(1);
   });
 });

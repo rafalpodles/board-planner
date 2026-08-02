@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { usePollWhileVisible } from "@/hooks/use-poll-while-visible";
-import { ApiProject, ApiTask, ApiSprint } from "@/types";
+import { ApiProject, ApiTask, ApiSprint , BOARD_SORT_FIELDS, LIST_SORT_FIELDS, SortField, SortDir } from "@/types";
 import { effectiveColumns } from "@/lib/columns";
 import { subscribeBoardRefresh } from "@/lib/board-refresh";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -77,6 +77,11 @@ export default function KanbanPage() {
   const [contextMenu, setContextMenu] = useState<{ taskId: string; x: number; y: number } | null>(null);
   const [confirmContextDelete, setConfirmContextDelete] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  // One owner for both views: the filter bar's dropdown and the list's column
+  // headers set the same value, and it survives switching between them
+  const [sortField, setSortField] = useState<SortField>("manual");
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
+
   const [viewMode, setViewMode] = useState<"board" | "list">(() => {
     if (typeof window === "undefined") return "board";
     return localStorage.getItem(`view-mode:${projectId}`) === "list" ? "list" : "board";
@@ -96,6 +101,14 @@ export default function KanbanPage() {
       if (task) router.push(taskPath(projectId, task.taskNumber));
     },
     [tasks, router, projectId]
+  );
+
+  const sortContext = useMemo(
+    () => ({
+      statusOrder: new Map(effectiveColumns(project?.columns).map((c, i) => [c.id, i])),
+      sprintById: new Map(sprints.map((sp) => [sp._id, sp])),
+    }),
+    [project?.columns, sprints]
   );
 
   const doneCount = useMemo(() => {
@@ -427,6 +440,14 @@ export default function KanbanPage() {
         projectCategories={project.categories || []}
         projectId={projectId}
         currentUsername={user?.username}
+        sortField={sortField}
+        sortDir={sortDir}
+        onSortChange={(field, dir) => {
+          setSortField(field);
+          setSortDir(dir);
+        }}
+        sortFields={viewMode === "list" ? LIST_SORT_FIELDS : BOARD_SORT_FIELDS}
+        sortContext={sortContext}
         extraControls={
           <button
             onClick={() => {
@@ -487,6 +508,12 @@ export default function KanbanPage() {
           focusedIndex={focusedTaskIndex}
           selectedTasks={selectedTasks}
           selectionMode={selectionMode}
+          sortField={sortField}
+          sortDir={sortDir}
+          onSortChange={(field, dir) => {
+            setSortField(field);
+            setSortDir(dir);
+          }}
           onTaskClick={openTask}
           onStatusChange={handleStatusChange}
           onTaskSelect={handleTaskSelect}

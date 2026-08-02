@@ -2,13 +2,11 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { ApiProjectCategory, ApiProjectColumn, ApiSprint, ApiTask, PRIORITY_LABELS, PRIORITY_ORDER } from "@/types";
+import { ApiProjectCategory, ApiProjectColumn, ApiSprint, ApiTask, PRIORITY_LABELS, SortDir, SortField, defaultSortDir } from "@/types";
 import { effectiveColumns } from "@/lib/columns";
 import { Badge } from "@/components/ui/Badge";
 import { categoryColor, categoryTint } from "@/lib/category-colors";
 import { timeAgo } from "@/lib/time";
-
-type SortKey = "taskNumber" | "title" | "status" | "assignee" | "priority" | "sprint" | "difficulty" | "category" | "component" | "dueDate" | "updatedAt";
 
 interface ListViewProps {
   tasks: ApiTask[];
@@ -20,6 +18,10 @@ interface ListViewProps {
   focusedIndex?: number;
   selectedTasks?: Set<string>;
   selectionMode?: boolean;
+  /** Owned by the board page, so this and the filter bar cannot disagree */
+  sortField?: SortField;
+  sortDir?: SortDir;
+  onSortChange?: (field: SortField, dir: SortDir) => void;
   onTaskClick: (taskId: string) => void;
   onStatusChange?: (taskId: string, status: string) => void;
   onTaskSelect?: (taskId: string) => void;
@@ -38,18 +40,12 @@ function sprintTiming(sprint: ApiSprint): "active" | "past" | "upcoming" {
 
 const DIFFICULTY_ORDER: Record<string, number> = { S: 0, M: 1, L: 2, XL: 3 };
 
-export function ListView({ tasks, projectKey, projectId, sprints = [], categories = [], columns, focusedIndex = -1, selectedTasks, selectionMode, onTaskClick, onStatusChange, onTaskSelect, onTaskContextMenu }: ListViewProps) {
+export function ListView({ tasks, projectKey, projectId, sprints = [], categories = [], columns, focusedIndex = -1, selectedTasks, selectionMode, sortField = "manual", sortDir = "asc", onSortChange, onTaskClick, onStatusChange, onTaskSelect, onTaskContextMenu }: ListViewProps) {
   const selectionActive = selectionMode || (selectedTasks?.size ?? 0) > 0;
   const rowRefs = useRef<(HTMLTableRowElement | null)[]>([]);
-  const [sortKey, setSortKey] = useState<SortKey>("taskNumber");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const sprintById = useMemo(() => new Map(sprints.map((s) => [s._id, s])), [sprints]);
   const listColumns = useMemo(() => effectiveColumns(columns), [columns]);
   const columnById = useMemo(() => new Map(listColumns.map((c) => [c.id, c])), [listColumns]);
-  const statusOrder = useMemo(
-    () => new Map(listColumns.map((c, i) => [c.id, i])),
-    [listColumns]
-  );
 
   useEffect(() => {
     if (focusedIndex >= 0 && rowRefs.current[focusedIndex]) {
@@ -57,76 +53,29 @@ export function ListView({ tasks, projectKey, projectId, sprints = [], categorie
     }
   }, [focusedIndex]);
 
-  function handleSort(key: SortKey) {
-    if (sortKey === key) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSortKey(key);
-      setSortDir(key === "updatedAt" || key === "dueDate" ? "desc" : "asc");
-    }
+  function handleSort(field: SortField) {
+    if (!onSortChange) return;
+    onSortChange(field, sortField === field ? (sortDir === "asc" ? "desc" : "asc") : defaultSortDir(field));
   }
 
-  const sorted = useMemo(() => {
-    return [...tasks].sort((a, b) => {
-      let cmp = 0;
-      switch (sortKey) {
-        case "taskNumber":
-          cmp = a.taskNumber - b.taskNumber;
-          break;
-        case "title":
-          cmp = a.title.localeCompare(b.title);
-          break;
-        case "status":
-          cmp = (statusOrder.get(a.status) ?? 99) - (statusOrder.get(b.status) ?? 99);
-          break;
-        case "assignee": {
-          const aName = a.assignee && typeof a.assignee === "object" ? a.assignee.fullName : "";
-          const bName = b.assignee && typeof b.assignee === "object" ? b.assignee.fullName : "";
-          cmp = aName.localeCompare(bName);
-          break;
-        }
-        case "priority":
-          cmp = (PRIORITY_ORDER[a.priority] ?? 99) - (PRIORITY_ORDER[b.priority] ?? 99);
-          break;
-        case "sprint": {
-          const start = (task: ApiTask) => {
-            const sprint = task.sprint ? sprintById.get(task.sprint) : undefined;
-            return sprint ? new Date(sprint.startDate).getTime() : Number.MAX_SAFE_INTEGER;
-          };
-          cmp = start(a) - start(b);
-          break;
-        }
-        case "difficulty":
-          cmp = (DIFFICULTY_ORDER[a.difficulty] ?? 99) - (DIFFICULTY_ORDER[b.difficulty] ?? 99);
-          break;
-        case "category":
-          cmp = a.category.localeCompare(b.category);
-          break;
-        case "component":
-          cmp = (a.component || "").localeCompare(b.component || "");
-          break;
-        case "dueDate": {
-          const aDate = a.dueDate ? new Date(a.dueDate).getTime() : Infinity;
-          const bDate = b.dueDate ? new Date(b.dueDate).getTime() : Infinity;
-          cmp = aDate - bDate;
-          break;
-        }
-        case "updatedAt":
-          cmp = new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime();
-          break;
-      }
-      return sortDir === "asc" ? cmp : -cmp;
-    });
-  }, [tasks, sortKey, sortDir, sprintById, statusOrder]);
+  // No local sort: the rows arrive in the order the board page decided
+  const sorted = tasks;
 
-  function SortHeader({ label, column, className }: { label: string; column: SortKey; className?: string }) {
-    const active = sortKey === column;
+  function SortHeader({ label, column, className }: { label: string; column: SortField; className?: string }) {
+    const active = sortField === column;
     return (
       <th
-        className={`text-left px-2 py-2 font-medium cursor-pointer select-none hover:text-text transition-colors ${className || ""}`}
-        onClick={() => handleSort(column)}
+        // A clickable th is invisible to a keyboard and announces nothing; the
+        // button carries the interaction and aria-sort carries the state
+        aria-sort={active ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
+        className={`text-left px-2 py-2 font-medium ${className || ""}`}
       >
-        <span className="inline-flex items-center gap-0.5">
+        <button
+          type="button"
+          onClick={() => handleSort(column)}
+          aria-label={`Sort by ${label}`}
+          className="focus-ring inline-flex select-none items-center gap-0.5 rounded font-medium transition-colors hover:text-text"
+        >
           {label}
           {active && (
             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -137,7 +86,7 @@ export function ListView({ tasks, projectKey, projectId, sprints = [], categorie
               )}
             </svg>
           )}
-        </span>
+        </button>
       </th>
     );
   }
@@ -154,7 +103,7 @@ export function ListView({ tasks, projectKey, projectId, sprints = [], categorie
           <thead>
             <tr className="bg-bg-input text-text-muted text-xs border-b border-border">
               {selectionActive && <th className="w-8 px-2 py-2" />}
-              <SortHeader label="Key" column="taskNumber" />
+              <SortHeader label="Key" column="key" />
               <SortHeader label="Title" column="title" />
               <SortHeader label="Status" column="status" className="hidden sm:table-cell" />
               <SortHeader label="Assignee" column="assignee" className="hidden md:table-cell" />
