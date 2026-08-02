@@ -104,6 +104,9 @@ function DonutChart({
   );
 }
 
+const BAR_TRACK_PX = 112;
+const MIN_VISIBLE_BAR_PX = 4;
+
 function BarChart({
   data,
   label,
@@ -116,16 +119,20 @@ function BarChart({
   if (!data.some((d) => d.value > 0)) return <EmptyChart message={emptyMessage} />;
 
   const max = Math.max(...data.map((d) => d.value), 1);
+  // px, not %: each column sizes to its content, and a percentage height against
+  // an auto-height parent resolves to zero — every bar then collapsed to its minimum
+  const barHeight = (value: number) =>
+    value > 0 ? Math.max(Math.round((value / max) * BAR_TRACK_PX), MIN_VISIBLE_BAR_PX) : 0;
 
   return (
     <div>
-      <div className="flex items-end gap-1 h-32">
+      <div className="flex items-end gap-1">
         {data.map((d, i) => (
           <div key={i} className="flex-1 flex flex-col items-center gap-1">
             <span className="text-[10px] text-text-muted">{d.value || ""}</span>
             <div
               className="w-full bg-primary rounded-t transition-all"
-              style={{ height: `${(d.value / max) * 100}%`, minHeight: d.value > 0 ? 4 : 0 }}
+              style={{ height: barHeight(d.value) }}
             />
           </div>
         ))}
