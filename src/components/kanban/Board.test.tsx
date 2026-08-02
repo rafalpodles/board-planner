@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, afterEach } from "vitest";
-import { render, cleanup } from "@testing-library/react";
+import { render, screen, cleanup, act } from "@testing-library/react";
 import { Board } from "./Board";
 import { ApiTask, ApiProjectCategory } from "@/types";
 import { AnyColumn } from "@/lib/columns";
@@ -69,5 +69,58 @@ describe("Board category tinting", () => {
     const { container } = renderBoard(undefined);
     const el = card(container);
     expect(el.className).not.toContain("cat-card");
+  });
+});
+
+describe("Board empty-column rail", () => {
+  const twoColumns = [
+    { id: "todo", label: "To Do", color: "#0ea5e9", role: "approved", order: 0 },
+    { id: "done", label: "Done", color: "#22c55e", role: "done", order: 1 },
+  ] as AnyColumn[];
+
+  function renderTwoColumnBoard() {
+    return render(
+      <Board
+        tasks={tasks}
+        projectKey="TP"
+        columns={twoColumns}
+        onStatusChange={() => {}}
+        onTaskClick={() => {}}
+      />
+    );
+  }
+
+  const rail = (container: HTMLElement) =>
+    container.querySelector('[title="Done — 0 tasks. Click to expand."]') as HTMLElement | null;
+
+  it("starts the empty column as a rail and the populated one open", () => {
+    const { container } = renderTwoColumnBoard();
+    expect(rail(container)).toBeTruthy();
+    expect(screen.queryByLabelText("Collapse To Do")).toBeNull();
+  });
+
+  // CP-174 made expanding one-way: pinning had no inverse, so the only way back was a reload
+  it("round-trips between rail and open column", async () => {
+    const { container } = renderTwoColumnBoard();
+
+    for (let pass = 0; pass < 3; pass++) {
+      await act(async () => {
+        rail(container)!.click();
+      });
+      expect(rail(container)).toBeNull();
+
+      await act(async () => {
+        screen.getByLabelText("Collapse Done").click();
+      });
+      expect(rail(container)).toBeTruthy();
+    }
+  });
+
+  it("keeps the expansion out of localStorage", async () => {
+    const { container } = renderTwoColumnBoard();
+    await act(async () => {
+      rail(container)!.click();
+    });
+    expect(Object.keys(localStorage)).toHaveLength(0);
   });
 });

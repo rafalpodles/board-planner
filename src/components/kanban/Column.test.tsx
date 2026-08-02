@@ -73,21 +73,38 @@ describe("Column, collapsed to a rail", () => {
   });
 
   it("expands on click", async () => {
-    const onExpand = vi.fn();
-    const { container } = renderColumn({ collapsed: true, onExpand });
+    const onToggleCollapsed = vi.fn();
+    const { container } = renderColumn({ collapsed: true, onToggleCollapsed });
     await act(async () => {
       (container.firstElementChild as HTMLElement).click();
     });
-    expect(onExpand).toHaveBeenCalledTimes(1);
+    expect(onToggleCollapsed).toHaveBeenCalledTimes(1);
   });
 
-  it("does not fire expand when it is already open", async () => {
-    const onExpand = vi.fn();
-    const { container } = renderColumn({ collapsed: false, onExpand });
+  // Clicking anywhere in an open column would collapse it out from under a card click
+  it("does not toggle when the open column body is clicked", async () => {
+    const onToggleCollapsed = vi.fn();
+    const { container } = renderColumn({ collapsed: false, onToggleCollapsed });
     await act(async () => {
       (container.firstElementChild as HTMLElement).click();
     });
-    expect(onExpand).not.toHaveBeenCalled();
+    expect(onToggleCollapsed).not.toHaveBeenCalled();
+  });
+
+  it("offers a collapse control in the header of an open empty column", async () => {
+    const onToggleCollapsed = vi.fn();
+    renderColumn({ collapsed: false, onToggleCollapsed });
+    const button = screen.getByLabelText("Collapse Needs Human Review");
+    await act(async () => {
+      button.click();
+    });
+    expect(onToggleCollapsed).toHaveBeenCalledTimes(1);
+  });
+
+  // A column holding tasks never becomes a rail, so a collapse control would lie
+  it("offers no collapse control once the column holds a task", () => {
+    renderColumn({ collapsed: false, tasks: oneTask, onToggleCollapsed: () => {} });
+    expect(screen.queryByLabelText("Collapse Needs Human Review")).toBeNull();
   });
 
   // Without this there is nowhere to drop a card into an empty column
