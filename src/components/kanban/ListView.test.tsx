@@ -211,3 +211,36 @@ describe("ListView sort ownership", () => {
     expect(container.querySelectorAll("th svg").length).toBe(1);
   });
 });
+
+describe("ListView column visibility", () => {
+  const headers = () =>
+    [...screen.getByRole("table").querySelectorAll("th")].map((th) => th.textContent?.trim());
+
+  it("shows every column when nothing is hidden", () => {
+    renderList();
+    expect(headers()).toContain("Assignee");
+    expect(headers()).toContain("Sprint");
+  });
+
+  it("renders neither the header nor the cells of a hidden column", () => {
+    const { container } = renderList({ hiddenColumns: ["assignee", "sprint"] });
+    expect(headers()).not.toContain("Assignee");
+    expect(headers()).not.toContain("Sprint");
+    // header row plus one body row, both narrowed by the same two columns
+    const bodyCells = container.querySelectorAll("tbody tr:first-child td").length;
+    expect(bodyCells).toBe(container.querySelectorAll("thead th").length);
+  });
+
+  it("keeps title and key even if a stored blob asks to hide them", () => {
+    renderList({ hiddenColumns: ["title", "key"] as never });
+    expect(headers()).toContain("Title");
+    expect(headers()).toContain("Key");
+  });
+
+  // Hiding a column also removes its sort control, so the two must not disagree
+  it("removes the sort control along with its column", () => {
+    renderList({ hiddenColumns: ["priority"], onSortChange: () => {} });
+    expect(screen.queryByLabelText("Sort by Priority")).toBeNull();
+    expect(screen.getByLabelText("Sort by Title")).toBeTruthy();
+  });
+});
