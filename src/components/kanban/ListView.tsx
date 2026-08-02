@@ -250,12 +250,13 @@ export function ListView({ tasks, projectKey, projectId, sprints = [], categorie
                       <select
                         value={task.status}
                         title={statusLabel}
+                        aria-label={`Status for ${taskKey}: ${task.title}`}
                         onChange={(e) => {
                           e.stopPropagation();
                           onStatusChange(task._id, e.target.value);
                         }}
                         onClick={(e) => e.stopPropagation()}
-                        className="text-xs bg-bg-input border border-border rounded px-1.5 py-1 max-w-28 text-text focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+                        className="focus-ring text-xs bg-bg-input border border-border rounded px-1.5 py-1 max-w-28 text-text cursor-pointer"
                       >
                         {listColumns.map((c) => (
                           <option key={c.id} value={c.id}>{c.label}</option>
