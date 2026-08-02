@@ -8,6 +8,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useApi } from "@/hooks/use-api";
 import { useTheme } from "@/components/ThemeProvider";
 import { usePollWhileVisible } from "@/hooks/use-poll-while-visible";
+import { isNavItemActive } from "@/lib/nav-active";
 
 const ICONS = {
   myTasks:
@@ -132,8 +133,7 @@ export function Sidebar({ mobileOpen, onNavigate }: SidebarProps) {
   // The drawer is always full width, so the icon-only rail is a desktop-only state
   const compact = collapsed && !mobileOpen;
 
-  const isActive = (href: string) =>
-    href === "/projects" ? pathname.startsWith("/projects") : pathname.startsWith(href);
+  const isActive = (href: string) => isNavItemActive(pathname, href);
 
   return (
     <aside
