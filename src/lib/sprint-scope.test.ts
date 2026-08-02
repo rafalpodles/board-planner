@@ -4,6 +4,7 @@ import {
   sprintScopeToQuery,
   sprintScopeLabel,
   boardSubtitle,
+  sprintDefaultForNewTask,
 } from "./sprint-scope";
 import { ApiSprint } from "@/types";
 
@@ -68,6 +69,23 @@ describe("sprintScopeLabel", () => {
   it("has no label for a sprint that no longer exists", () => {
     expect(sprintScopeLabel("deleted-id", sprints)).toBeNull();
     expect(sprintScopeLabel("s1", [])).toBeNull();
+  });
+});
+
+describe("sprintDefaultForNewTask", () => {
+  // CP-176: without this the task saves with sprint null and the server filter
+  // hides it from the very board that created it
+  it("adopts the scoped sprint", () => {
+    expect(sprintDefaultForNewTask("s1")).toBe("s1");
+  });
+
+  it("means no sprint for the unscoped board", () => {
+    expect(sprintDefaultForNewTask("all")).toBe("");
+  });
+
+  // Backlog is defined as "no sprint", so adopting it would be self-contradictory
+  it("means no sprint for the backlog scope", () => {
+    expect(sprintDefaultForNewTask("backlog")).toBe("");
   });
 });
 
