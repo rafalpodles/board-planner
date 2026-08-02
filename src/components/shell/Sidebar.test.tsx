@@ -32,6 +32,7 @@ function renderSidebar(
     mobileOpen?: boolean;
     onCloseMobile?: () => void;
     menuButtonRef?: React.RefObject<HTMLElement | null>;
+    onOpenSearch?: () => void;
   } = {}
 ) {
   return render(
@@ -42,6 +43,7 @@ function renderSidebar(
       menuButtonRef={props.menuButtonRef}
       onOpenImport={() => {}}
       onOpenExport={() => {}}
+      onOpenSearch={props.onOpenSearch ?? (() => {})}
     />
   );
 }
@@ -260,120 +262,40 @@ describe("Sidebar as a mobile drawer", () => {
   });
 });
 
-// The search used to be a Link to /search with a dropdown palette behind ⌘K;
-// results now take over the sidebar's own nav area
-describe("Sidebar search", () => {
-  function type(value: string) {
-    const input = screen.getByLabelText("Search tasks and projects") as HTMLInputElement;
-    const setter = Object.getOwnPropertyDescriptor(
-      window.HTMLInputElement.prototype,
-      "value"
-    )!.set!;
-    setter.call(input, value);
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    return input;
-  }
+// CP-197 moved search out of the sidebar into a single centered layer; what is
+// left here is a trigger, and the nav must never be replaced by results again
+describe("Sidebar search trigger", () => {
+  it("opens the search layer instead of searching in place", async () => {
+    const onOpenSearch = vi.fn();
+    renderSidebar({ onOpenSearch });
+    const trigger = await screen.findByLabelText("Search tasks and projects");
 
-  it("offers a real input, not a link to another page", async () => {
-    renderSidebar();
-    const input = await screen.findByLabelText("Search tasks and projects");
-    expect(input.tagName).toBe("INPUT");
+    expect(trigger.tagName).toBe("BUTTON");
+    await act(async () => trigger.click());
+    expect(onOpenSearch).toHaveBeenCalled();
   });
 
-  it("leaves the nav alone below the minimum query length", async () => {
+  it("advertises the shortcut that actually reaches it", async () => {
+    renderSidebar();
+    const trigger = await screen.findByLabelText("Search tasks and projects");
+    expect(trigger.textContent).toContain("\u2318K");
+  });
+
+  it("never puts a search field or results in the nav", async () => {
     renderSidebar();
     await waitFor(() => expect(screen.getByText("My Tasks")).toBeTruthy());
-    await act(async () => void type("a"));
-    expect(screen.getByText("My Tasks")).toBeTruthy();
+    expect(screen.queryByRole("textbox")).toBeNull();
     expect(screen.queryByRole("listbox")).toBeNull();
   });
 
-  it("replaces the nav with results once the query is long enough", async () => {
-    projectsState.projects = [
-      { _id: "p1", key: "MOB", name: "Mobile App", icon: "📱" },
-    ] as unknown[];
-    renderSidebar();
-    await waitFor(() => expect(screen.getByText("My Tasks")).toBeTruthy());
-    await act(async () => void type("mob"));
+  it("keeps a way into search from the collapsed rail, where the field does not fit", async () => {
+    const onOpenSearch = vi.fn();
+    localStorage.setItem("sidebar-collapsed", "1");
+    renderSidebar({ onOpenSearch });
+    await waitFor(() => expect(screen.queryByText("My Tasks")).toBeNull());
 
-    await waitFor(() => expect(screen.getByRole("listbox")).toBeTruthy());
-    expect(screen.queryByText("My Tasks")).toBeNull();
-    expect(screen.queryByText("Instance")).toBeNull();
-  });
-
-  it("takes over the nav even when nothing matches, rather than showing both", async () => {
-    renderSidebar();
-    await waitFor(() => expect(screen.getByText("My Tasks")).toBeTruthy());
-    await act(async () => void type("zzzz"));
-
-    await waitFor(() => expect(screen.getByText("No matches")).toBeTruthy());
-    expect(screen.queryByText("My Tasks")).toBeNull();
-  });
-
-  it("finds a project by name and links it", async () => {
-    projectsState.projects = [
-      { _id: "p1", key: "MOB", name: "Mobile App", icon: "📱" },
-    ] as unknown[];
-    renderSidebar();
-    await act(async () => void type("mobile"));
-
-    await waitFor(() => expect(screen.getByRole("option")).toBeTruthy());
-    expect(screen.getByRole("option").textContent).toContain("Mobile App");
-  });
-
-  it("restores the nav when the query is cleared", async () => {
-    projectsState.projects = [
-      { _id: "p1", key: "MOB", name: "Mobile App", icon: "📱" },
-    ] as unknown[];
-    renderSidebar();
-    await act(async () => void type("mob"));
-    await waitFor(() => expect(screen.getByRole("listbox")).toBeTruthy());
-
-    await act(async () => void type(""));
-    await waitFor(() => expect(screen.getByText("My Tasks")).toBeTruthy());
-    expect(screen.queryByRole("listbox")).toBeNull();
-  });
-
-  it("restores the nav on Escape", async () => {
-    projectsState.projects = [
-      { _id: "p1", key: "MOB", name: "Mobile App", icon: "📱" },
-    ] as unknown[];
-    renderSidebar();
-    const input = await screen.findByLabelText("Search tasks and projects");
-    await act(async () => void type("mob"));
-    await waitFor(() => expect(screen.getByRole("listbox")).toBeTruthy());
-
-    await act(async () => {
-      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-    });
-    await waitFor(() => expect(screen.getByText("My Tasks")).toBeTruthy());
-    expect((input as HTMLInputElement).value).toBe("");
-  });
-
-  it("moves the selection with the arrow keys", async () => {
-    projectsState.projects = [
-      { _id: "p1", key: "MOB", name: "Mobile App", icon: "📱" },
-      { _id: "p2", key: "MOB2", name: "Mobile App Two", icon: "📱" },
-    ] as unknown[];
-    renderSidebar();
-    const input = await screen.findByLabelText("Search tasks and projects");
-    await act(async () => void type("mobile"));
-    await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(2));
-
-    const selectedLabel = () =>
-      screen.getAllByRole("option").find((o) => o.getAttribute("aria-selected") === "true")
-        ?.textContent;
-
-    expect(selectedLabel()).toContain("Mobile App");
-    await act(async () => {
-      input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
-    });
-    expect(selectedLabel()).toContain("Mobile App Two");
-
-    // Wraps rather than sticking at the end
-    await act(async () => {
-      input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
-    });
-    expect(selectedLabel()).toContain("Mobile App");
+    const trigger = screen.getByLabelText("Search tasks and projects");
+    await act(async () => trigger.click());
+    expect(onOpenSearch).toHaveBeenCalled();
   });
 });
