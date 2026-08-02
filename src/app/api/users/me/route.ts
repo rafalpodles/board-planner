@@ -15,6 +15,9 @@ export const PUT = withAuth(async (request, { user }) => {
   if (typeof body.emailNotifications === "boolean") {
     updates.emailNotifications = body.emailNotifications;
   }
+  if (typeof body.collapseEmptyColumns === "boolean") {
+    updates.collapseEmptyColumns = body.collapseEmptyColumns;
+  }
 
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ error: "No valid fields to update" }, { status: 400 });
