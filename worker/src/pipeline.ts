@@ -5,6 +5,7 @@ import { childEnv } from "./env.js";
 import { Runner } from "./exec.js";
 import { Executor } from "./executor.js";
 import { Reporter } from "./reporter.js";
+import { scrub } from "./scrub.js";
 import { Workspace } from "./workspace.js";
 import { ClaimedTask, DiffStats, Gate, GateContext, GateResult } from "./types.js";
 
@@ -104,9 +105,10 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
   try {
     statusIds = await resolveStatusIds(deps.api, deps.columnIds, task.projectId);
   } catch (error) {
-    // Without a validated review column the queue is the only move left that cannot strand the task
+    // Without a validated review column the queue is the only move left that cannot strand the task.
+    // This comment does not go through the reporter, so it needs its own scrub.
     await quietly(() =>
-      deps.api.comment(task.projectId, task.taskId, `Returned to the queue: ${String(error)}`)
+      deps.api.comment(task.projectId, task.taskId, scrub(`Returned to the queue: ${String(error)}`))
     );
     await quietly(() => deps.api.release(task.projectId, task.taskId));
     return;
