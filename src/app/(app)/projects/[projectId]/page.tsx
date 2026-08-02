@@ -1,14 +1,13 @@
 "use client";
 
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { usePollWhileVisible } from "@/hooks/use-poll-while-visible";
-import { ApiProject, ApiTask, ApiSprint, DEFAULT_PROJECT_ICON } from "@/types";
+import { ApiProject, ApiTask, ApiSprint } from "@/types";
 import { effectiveColumns } from "@/lib/columns";
-import { activityStatus as computeActivityStatus } from "@/lib/activity-status";
 import { subscribeBoardRefresh } from "@/lib/board-refresh";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Board } from "@/components/kanban/Board";
@@ -20,9 +19,10 @@ import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
 import { ShortcutHelp } from "@/components/ui/ShortcutHelp";
-import { SprintSelector } from "@/components/kanban/SprintSelector";
 import { useCanonicalUrl } from "@/hooks/use-canonical-url";
-import { taskPath } from "@/lib/urls";
+import { projectPath, taskPath } from "@/lib/urls";
+import { BoardHeader } from "@/components/kanban/BoardHeader";
+import { sprintScopeFromParam, sprintScopeToQuery } from "@/lib/sprint-scope";
 
 // "relates" is symmetric and "duplicates" has a readable inverse, so a card should
 // show a relation regardless of which side created it. Every task is already loaded,
@@ -53,6 +53,15 @@ export default function KanbanPage() {
   const router = useRouter();
   const api = useApi();
   const { user, isAdmin } = useAuth();
+  const searchParams = useSearchParams();
+
+  // Scope lives in the URL so it survives a reload and can be shared;
+  // filters stay in localStorage
+  const selectedSprint = sprintScopeFromParam(searchParams.get("sprint"));
+  const setSelectedSprint = useCallback(
+    (scope: string) => router.push(projectPath(projectId) + sprintScopeToQuery(scope)),
+    [router, projectId]
+  );
   const { toast } = useToast();
 
   const [project, setProject] = useState<ApiProject | null>(null);
@@ -74,7 +83,6 @@ export default function KanbanPage() {
     return localStorage.getItem(`view-mode:${projectId}`) === "list" ? "list" : "board";
   });
   const [sprints, setSprints] = useState<ApiSprint[]>([]);
-  const [selectedSprint, setSelectedSprint] = useState("all");
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
   const [focusedTaskIndex, setFocusedTaskIndex] = useState(-1);
 
@@ -82,11 +90,13 @@ export default function KanbanPage() {
   const tick = useCallback(() => setNow(Date.now()), []);
   usePollWhileVisible(tick, 60_000);
 
-  const activityStatus = useMemo(() => {
-    if (tasks.length === 0) return null;
-    const latest = Math.max(...tasks.map((t) => new Date(t.updatedAt).getTime()));
-    return computeActivityStatus(latest, now);
-  }, [tasks, now]);
+
+  const doneCount = useMemo(() => {
+    const doneIds = new Set(
+      effectiveColumns(project?.columns).filter((c) => c.role === "done").map((c) => c.id)
+    );
+    return tasks.filter((t) => doneIds.has(t.status)).length;
+  }, [tasks, project?.columns]);
 
   const loadData = useCallback(async () => {
     const seq = ++loadSeq.current;
@@ -384,104 +394,22 @@ export default function KanbanPage() {
 
   return (
     <div className="lg:flex-1 lg:min-h-0 lg:flex lg:flex-col lg:overflow-hidden">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-6 lg:shrink-0">
-        <div>
-          <div className="flex items-center gap-2">
-            <Link
-              href="/projects"
-              className="text-text-muted hover:text-text transition-colors"
-              title="All projects"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-              </svg>
-            </Link>
-            <h1 className="text-2xl font-bold flex items-center gap-2">
-              <span aria-hidden="true">{project.icon || DEFAULT_PROJECT_ICON}</span>
-              {project.name}
-            </h1>
-          </div>
-          <div className="flex items-center gap-2 ml-7">
-            <p className="text-sm text-text-muted">{project.key}</p>
-            {activityStatus && (
-              <span className="flex items-center gap-1 text-xs text-text-muted">
-                <span
-                  className={`w-2 h-2 rounded-full ${
-                    activityStatus === "working"
-                      ? "bg-green-500 animate-pulse"
-                      : "bg-gray-500"
-                  }`}
-                />
-                {activityStatus === "working" ? "Working" : "Idle"}
-              </span>
-            )}
-          </div>
-        </div>
-        <div className="flex flex-wrap gap-2 items-center">
-          <SprintSelector
-            sprints={sprints}
-            selected={selectedSprint}
-            onChange={setSelectedSprint}
-          />
-          <Button size="sm" onClick={() => setShowNewTask(true)} title="New Task (N)">
-            New Task <kbd className="ml-1 text-[10px] opacity-50 bg-bg-input px-1 rounded">N</kbd>
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => {
-              const next = viewMode === "board" ? "list" : "board";
-              setViewMode(next);
-              localStorage.setItem(`view-mode:${projectId}`, next);
-            }}
-            title={viewMode === "board" ? "Switch to list view (V)" : "Switch to board view (V)"}
-          >
-            {viewMode === "board" ? (
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" />
-              </svg>
-            ) : (
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
-              </svg>
-            )}
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={loadData}
-            title="Refresh board"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
-          </Button>
-          <Link href={`/projects/${projectId}/sprints`} title="Sprints">
-            <Button size="sm" variant="ghost">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-            </Button>
-          </Link>
-          <Link href={`/projects/${projectId}/dashboard`} title="Dashboard">
-            <Button size="sm" variant="ghost">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-              </svg>
-            </Button>
-          </Link>
-          {project.pm?.enabled && !project.pm?.lockedByInstance && (
-            <Link href={`/projects/${projectId}/pm`} title="PM Agent">
-              <Button size="sm" variant="ghost">PM</Button>
-            </Link>
-          )}
-          {isAdmin && (
-            <Link href={`/projects/${projectId}/settings`}>
-              <Button size="sm" variant="ghost">Settings</Button>
-            </Link>
-          )}
-        </div>
-      </div>
+      <BoardHeader
+        projectName={project.name}
+        projectIcon={project.icon}
+        taskCount={tasks.length}
+        doneCount={doneCount}
+        sprints={sprints}
+        scope={selectedSprint}
+        onScopeChange={setSelectedSprint}
+        viewMode={viewMode}
+        onViewModeChange={(mode) => {
+          setViewMode(mode);
+          localStorage.setItem(`view-mode:${projectId}`, mode);
+        }}
+        onRefresh={loadData}
+        onNewTask={() => setShowNewTask(true)}
+      />
 
       <BoardFilters
         tasks={tasks}
@@ -509,33 +437,6 @@ export default function KanbanPage() {
         }
         onFilter={setFilteredTasks}
       />
-
-      {tasks.length > 0 && (() => {
-        const doneIds = new Set(
-          effectiveColumns(project.columns).filter((c) => c.role === "done").map((c) => c.id)
-        );
-        const doneCount = tasks.filter((t) => doneIds.has(t.status)).length;
-        return (
-        <div className="mb-4">
-          <div className="flex items-center justify-between text-xs text-text-muted mb-1">
-            <span>
-              {doneCount}/{tasks.length} done
-            </span>
-            <span>
-              {Math.round((doneCount / tasks.length) * 100)}%
-            </span>
-          </div>
-          <div className="h-1.5 bg-bg-input rounded-full overflow-hidden">
-            <div
-              className="h-full bg-status-done rounded-full transition-all duration-300"
-              style={{
-                width: `${(doneCount / tasks.length) * 100}%`,
-              }}
-            />
-          </div>
-        </div>
-        );
-      })()}
 
       {tasks.length === 0 && (
         <div className="flex flex-col items-center justify-center py-16 text-center">
