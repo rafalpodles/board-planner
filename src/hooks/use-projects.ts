@@ -16,6 +16,7 @@ interface ProjectsState {
   projects: ApiProject[];
   isLoading: boolean;
   reload: () => Promise<void>;
+  reorder: (orderedIds: string[]) => Promise<void>;
 }
 
 const ProjectsContext = createContext<ProjectsState | null>(null);
@@ -48,9 +49,30 @@ export function useProjectsProvider(): ProjectsState {
     reload();
   }, [user, reload]);
 
+  // Applied locally first so the row lands where it was dropped; a failed write
+  // snaps back rather than leaving the sidebar disagreeing with the database
+  const reorder = useCallback(
+    async (orderedIds: string[]) => {
+      const previous = projects;
+      const byId = new Map(previous.map((p) => [p._id, p]));
+      const next = orderedIds
+        .map((id) => byId.get(id))
+        .filter((p): p is ApiProject => !!p);
+      if (next.length !== previous.length) return;
+
+      setProjects(next);
+      try {
+        await api.put("/api/projects/reorder", { order: orderedIds });
+      } catch {
+        setProjects(previous);
+      }
+    },
+    [api, projects]
+  );
+
   return useMemo(
-    () => ({ projects, isLoading, reload }),
-    [projects, isLoading, reload]
+    () => ({ projects, isLoading, reload, reorder }),
+    [projects, isLoading, reload, reorder]
   );
 }
 
