@@ -245,14 +245,22 @@ const PARTS: Record<string, () => Element> = {
   "new task icon": () => screen.getByLabelText("New task").querySelector("svg")!,
   "new task label": () => screen.getByText("New task", { selector: "span" }),
   refresh: () => screen.getByLabelText("Refresh board"),
+  "project icon": () => screen.getByText("📋"),
   "done meter": () => screen.getByText("12/30").parentElement!,
   "board prefix": () => screen.getByText("Board ·"),
   "task count": () => screen.getByText(/30 tasks/),
   "shortcut hint": () => screen.getByText("N"),
 };
 
-const ESSENTIAL = ["project name", "scope control", "view switcher", "new task button"];
-const NEEDS_448 = ["refresh", "new task label"];
+// rpo's call: refresh survives on a phone; the icon and the button label pay for it
+const ESSENTIAL = [
+  "project name",
+  "scope control",
+  "view switcher",
+  "new task button",
+  "refresh",
+];
+const NEEDS_448 = ["project icon", "new task label"];
 const NEEDS_576 = ["done meter", "board prefix", "task count", "shortcut hint"];
 
 // The board is narrower than the viewport by a sidebar that is 260px, 56px when collapsed, or

@@ -65,7 +65,7 @@ export function BoardHeader({
     // z-30 keeps the scope menu over the board: @container makes the header a stacking context
     <header className="@container relative z-30 flex h-14 shrink-0 items-center gap-3 border-b border-border bg-bg px-6">
       <div className="flex min-w-0 items-center gap-2">
-        <span aria-hidden className="shrink-0 text-[17px] leading-none">
+        <span aria-hidden className="hidden shrink-0 text-[17px] leading-none @md:inline">
           {projectIcon || DEFAULT_PROJECT_ICON}
         </span>
         <div className="min-w-0">
@@ -151,7 +151,7 @@ export function BoardHeader({
             type="button"
             onClick={() => onViewModeChange(mode)}
             aria-current={viewMode === mode ? "true" : undefined}
-            className={`rounded-md px-3 py-1.5 text-[13px] transition-colors ${
+            className={`rounded-md px-2 py-1.5 text-[13px] transition-colors @md:px-3 ${
               viewMode === mode
                 ? "bg-bg-input font-medium text-text"
                 : "text-text-muted hover:text-text"
@@ -167,7 +167,7 @@ export function BoardHeader({
         onClick={onRefresh}
         title="Refresh board (R)"
         aria-label="Refresh board"
-        className="hidden shrink-0 rounded-lg p-2 text-text-muted transition-colors hover:bg-bg-card hover:text-text @md:block"
+        className="block shrink-0 rounded-lg p-2 text-text-muted transition-colors hover:bg-bg-card hover:text-text"
       >
         <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path
