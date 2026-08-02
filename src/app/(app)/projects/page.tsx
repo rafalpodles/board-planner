@@ -1,29 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useApi } from "@/hooks/use-api";
-import { ApiProject, DEFAULT_PROJECT_ICON } from "@/types";
+import { DEFAULT_PROJECT_ICON } from "@/types";
 import { Button } from "@/components/ui/Button";
-import { useToast } from "@/components/ui/Toast";
 import { useAuth } from "@/hooks/use-auth";
+import { useProjects } from "@/hooks/use-projects";
 import { projectPath } from "@/lib/urls";
 
 export default function ProjectsPage() {
-  const [projects, setProjects] = useState<ApiProject[]>([]);
-  const [loading, setLoading] = useState(true);
-  const api = useApi();
-  const { toast } = useToast();
+  const { projects, isLoading: loading } = useProjects();
   const { isAdmin } = useAuth();
-
-  useEffect(() => {
-    api
-      .get("/api/projects")
-      .then(setProjects)
-      .catch(() => toast("Failed to load projects", "error"))
-      .finally(() => setLoading(false));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   if (loading) {
     return (

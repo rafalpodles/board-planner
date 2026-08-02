@@ -273,7 +273,7 @@ export default function ProjectSettingsPage() {
 
   return (
     <>
-      <div className="mx-auto max-w-[1160px] px-4 pb-32 sm:px-6">
+      <div className="pb-32">
         <button
           onClick={() => (total > 0 ? setConfirmLeave(true) : router.push(`/projects/${projectId}`))}
           className="mb-2 flex min-h-[44px] items-center text-sm text-text-muted hover:text-text"
