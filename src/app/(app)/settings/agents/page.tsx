@@ -219,6 +219,7 @@ export default function AdminAgentsPage() {
                   </td>
                   <td className="px-3 py-2">
                     <Input
+                      aria-label={`PM model for ${row.key} — ${row.name}`}
                       value={row.model}
                       onChange={(e) =>
                         setData((prev) =>
@@ -244,6 +245,7 @@ export default function AdminAgentsPage() {
                   <td className="px-3 py-2">
                     <Input
                       type="number"
+                      aria-label={`Daily turn cap for ${row.key} — ${row.name}`}
                       value={String(row.dailyTurnCap)}
                       onChange={(e) =>
                         setData((prev) =>

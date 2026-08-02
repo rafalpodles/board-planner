@@ -1,6 +1,6 @@
 "use client";
 
-import { TextareaHTMLAttributes, forwardRef, useRef, useState, useCallback, ClipboardEvent, DragEvent } from "react";
+import { TextareaHTMLAttributes, forwardRef, useRef, useState, useCallback, ClipboardEvent, DragEvent, useId } from "react";
 
 interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
   label?: string;
@@ -10,7 +10,9 @@ interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
 }
 
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
-  ({ label, error, dirty, className = "", onFileUpload, onChange, ...props }, ref) => {
+  ({ label, error, dirty, className = "", onFileUpload, onChange, id, ...props }, ref) => {
+    const generated = useId();
+    const textareaId = id ?? generated;
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [uploading, setUploading] = useState(false);
     const innerRef = useRef<HTMLTextAreaElement | null>(null);
@@ -101,7 +103,10 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
     return (
       <div className="w-full">
         {label && (
-          <label className="flex items-center gap-2 text-sm font-medium text-text-muted mb-1">
+          <label
+            htmlFor={textareaId}
+            className="flex items-center gap-2 text-sm font-medium text-text-muted mb-1"
+          >
             {label}
             {dirty && <span className="h-1.5 w-1.5 rounded-full bg-warning" title="Unsaved" />}
           </label>
@@ -109,6 +114,7 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
         <div className="relative">
           <textarea
             ref={setRefs}
+            id={textareaId}
             className={`w-full rounded-lg border bg-bg-input px-3 py-2 text-text min-h-[88px]
               placeholder:text-text-muted
               focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent resize-y
