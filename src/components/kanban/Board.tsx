@@ -87,8 +87,12 @@ export function Board({
               selectedTasks={selectedTasks}
               selectionMode={selectionMode}
               collapsed={collapsed[i]}
-              onExpand={() =>
-                setPinnedColumns((prev) => new Set(prev).add(column.id))
+              onToggleCollapsed={() =>
+                setPinnedColumns((prev) => {
+                  const next = new Set(prev);
+                  if (!next.delete(column.id)) next.add(column.id);
+                  return next;
+                })
               }
               onDragOverColumn={(over) =>
                 setDragOverColumn((prev) =>
