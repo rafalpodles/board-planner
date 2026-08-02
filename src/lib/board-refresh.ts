@@ -17,7 +17,7 @@ function getChannel(): BroadcastChannel | null {
   return sharedChannel;
 }
 
-// Lets the PM chat tell any mounted board/list/timeline view to reload
+// Lets the PM chat tell any mounted board/list view to reload
 // immediately after a write action, instead of waiting for the 10s poll
 export function emitBoardRefresh(projectId: string): void {
   if (typeof window === "undefined") return;
