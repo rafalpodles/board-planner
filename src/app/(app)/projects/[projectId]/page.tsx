@@ -465,6 +465,7 @@ export default function KanbanPage() {
           tasks={filteredTasks}
           projectKey={project.key}
           projectLabels={project.labels || []}
+          projectCategories={project.categories || []}
           columns={project.columns || []}
           selectedTasks={selectedTasks}
           selectionMode={selectionMode}
