@@ -69,7 +69,6 @@ export default function KanbanPage() {
   const [filteredTasks, setFilteredTasks] = useState<ApiTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [showNewTask, setShowNewTask] = useState(false);
-  const [editTaskId, setEditTaskId] = useState<string | null>(null);
   const loadSeq = useRef(0);
   const [selectedTasks, setSelectedTasks] = useState<Set<string>>(new Set());
   const [selectionMode, setSelectionMode] = useState(false);
@@ -90,6 +89,14 @@ export default function KanbanPage() {
   const tick = useCallback(() => setNow(Date.now()), []);
   usePollWhileVisible(tick, 60_000);
 
+
+  const openTask = useCallback(
+    (id: string) => {
+      const task = tasks.find((t) => t._id === id);
+      if (task) router.push(taskPath(projectId, task.taskNumber));
+    },
+    [tasks, router, projectId]
+  );
 
   const doneCount = useMemo(() => {
     const doneIds = new Set(
@@ -463,7 +470,7 @@ export default function KanbanPage() {
           selectionMode={selectionMode}
           onStatusChange={handleStatusChange}
           onTaskDrop={handleTaskDrop}
-          onTaskClick={(taskId) => setEditTaskId(taskId)}
+          onTaskClick={openTask}
           onTaskSelect={handleTaskSelect}
           onTaskContextMenu={(taskId, x, y) => setContextMenu({ taskId, x, y })}
         />
@@ -478,7 +485,7 @@ export default function KanbanPage() {
           focusedIndex={focusedTaskIndex}
           selectedTasks={selectedTasks}
           selectionMode={selectionMode}
-          onTaskClick={(taskId) => setEditTaskId(taskId)}
+          onTaskClick={openTask}
           onStatusChange={handleStatusChange}
           onTaskSelect={handleTaskSelect}
           onTaskContextMenu={(taskId, x, y) => setContextMenu({ taskId, x, y })}
@@ -576,44 +583,6 @@ export default function KanbanPage() {
         />
       </Modal>
 
-      {(() => {
-        const editTask = tasks.find((t) => t._id === editTaskId);
-        return (
-          <Modal
-            open={!!editTask}
-            onClose={() => setEditTaskId(null)}
-            title={editTask ? `${project.key}-${editTask.taskNumber}` : ""}
-            size="lg"
-          >
-            {editTask && (
-              <>
-                <Link
-                  href={taskPath(projectId, editTask.taskNumber)}
-                  className="text-xs text-primary hover:underline inline-block mb-3"
-                >
-                  Open full task page (comments, dependencies, activity) &rarr;
-                </Link>
-                <TaskForm
-                  projectId={projectId}
-                  projectKey={project.key}
-                  task={editTask}
-                  components={project.components}
-                  categories={(project.categories || []).map((c) => c.name)}
-                  columns={project.columns || []}
-                  projectLabels={project.labels || []}
-                  sprints={sprints}
-                  customFields={project.customFields || []}
-                  onSaved={() => {
-                    setEditTaskId(null);
-                    loadData();
-                  }}
-                  onCancel={() => setEditTaskId(null)}
-                />
-              </>
-            )}
-          </Modal>
-        );
-      })()}
 
       <ShortcutHelp
         open={showShortcutHelp}
