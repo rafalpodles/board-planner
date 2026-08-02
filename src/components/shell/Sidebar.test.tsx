@@ -59,7 +59,9 @@ function setViewport(mobile: boolean) {
 
 beforeEach(() => {
   api.get.mockReset();
-  api.get.mockResolvedValue({ count: 0 });
+  api.get.mockImplementation((url: string) =>
+    Promise.resolve(url.startsWith("/api/search") ? [] : { count: 0 })
+  );
   auth.user = { fullName: "Admin User", role: "admin" };
   auth.isAdmin = true;
   nav.pathname = "/projects";
@@ -255,5 +257,123 @@ describe("Sidebar as a mobile drawer", () => {
 
     expect(document.activeElement).toBe(trigger);
     trigger.remove();
+  });
+});
+
+// The search used to be a Link to /search with a dropdown palette behind ⌘K;
+// results now take over the sidebar's own nav area
+describe("Sidebar search", () => {
+  function type(value: string) {
+    const input = screen.getByLabelText("Search tasks and projects") as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      "value"
+    )!.set!;
+    setter.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    return input;
+  }
+
+  it("offers a real input, not a link to another page", async () => {
+    renderSidebar();
+    const input = await screen.findByLabelText("Search tasks and projects");
+    expect(input.tagName).toBe("INPUT");
+  });
+
+  it("leaves the nav alone below the minimum query length", async () => {
+    renderSidebar();
+    await waitFor(() => expect(screen.getByText("My Tasks")).toBeTruthy());
+    await act(async () => void type("a"));
+    expect(screen.getByText("My Tasks")).toBeTruthy();
+    expect(screen.queryByRole("listbox")).toBeNull();
+  });
+
+  it("replaces the nav with results once the query is long enough", async () => {
+    projectsState.projects = [
+      { _id: "p1", key: "MOB", name: "Mobile App", icon: "📱" },
+    ] as unknown[];
+    renderSidebar();
+    await waitFor(() => expect(screen.getByText("My Tasks")).toBeTruthy());
+    await act(async () => void type("mob"));
+
+    await waitFor(() => expect(screen.getByRole("listbox")).toBeTruthy());
+    expect(screen.queryByText("My Tasks")).toBeNull();
+    expect(screen.queryByText("Instance")).toBeNull();
+  });
+
+  it("takes over the nav even when nothing matches, rather than showing both", async () => {
+    renderSidebar();
+    await waitFor(() => expect(screen.getByText("My Tasks")).toBeTruthy());
+    await act(async () => void type("zzzz"));
+
+    await waitFor(() => expect(screen.getByText("No matches")).toBeTruthy());
+    expect(screen.queryByText("My Tasks")).toBeNull();
+  });
+
+  it("finds a project by name and links it", async () => {
+    projectsState.projects = [
+      { _id: "p1", key: "MOB", name: "Mobile App", icon: "📱" },
+    ] as unknown[];
+    renderSidebar();
+    await act(async () => void type("mobile"));
+
+    await waitFor(() => expect(screen.getByRole("option")).toBeTruthy());
+    expect(screen.getByRole("option").textContent).toContain("Mobile App");
+  });
+
+  it("restores the nav when the query is cleared", async () => {
+    projectsState.projects = [
+      { _id: "p1", key: "MOB", name: "Mobile App", icon: "📱" },
+    ] as unknown[];
+    renderSidebar();
+    await act(async () => void type("mob"));
+    await waitFor(() => expect(screen.getByRole("listbox")).toBeTruthy());
+
+    await act(async () => void type(""));
+    await waitFor(() => expect(screen.getByText("My Tasks")).toBeTruthy());
+    expect(screen.queryByRole("listbox")).toBeNull();
+  });
+
+  it("restores the nav on Escape", async () => {
+    projectsState.projects = [
+      { _id: "p1", key: "MOB", name: "Mobile App", icon: "📱" },
+    ] as unknown[];
+    renderSidebar();
+    const input = await screen.findByLabelText("Search tasks and projects");
+    await act(async () => void type("mob"));
+    await waitFor(() => expect(screen.getByRole("listbox")).toBeTruthy());
+
+    await act(async () => {
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    await waitFor(() => expect(screen.getByText("My Tasks")).toBeTruthy());
+    expect((input as HTMLInputElement).value).toBe("");
+  });
+
+  it("moves the selection with the arrow keys", async () => {
+    projectsState.projects = [
+      { _id: "p1", key: "MOB", name: "Mobile App", icon: "📱" },
+      { _id: "p2", key: "MOB2", name: "Mobile App Two", icon: "📱" },
+    ] as unknown[];
+    renderSidebar();
+    const input = await screen.findByLabelText("Search tasks and projects");
+    await act(async () => void type("mobile"));
+    await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(2));
+
+    const selectedLabel = () =>
+      screen.getAllByRole("option").find((o) => o.getAttribute("aria-selected") === "true")
+        ?.textContent;
+
+    expect(selectedLabel()).toContain("Mobile App");
+    await act(async () => {
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    });
+    expect(selectedLabel()).toContain("Mobile App Two");
+
+    // Wraps rather than sticking at the end
+    await act(async () => {
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    });
+    expect(selectedLabel()).toContain("Mobile App");
   });
 });
