@@ -264,21 +264,47 @@ describe("Sidebar as a mobile drawer", () => {
 
 // CP-197 moved search out of the sidebar into a single centered layer; what is
 // left here is a trigger, and the nav must never be replaced by results again
-describe("Sidebar search trigger", () => {
+describe("Sidebar search row", () => {
   it("opens the search layer instead of searching in place", async () => {
     const onOpenSearch = vi.fn();
     renderSidebar({ onOpenSearch });
-    const trigger = await screen.findByLabelText("Search tasks and projects");
+    const row = await screen.findByRole("button", { name: "Search" });
 
-    expect(trigger.tagName).toBe("BUTTON");
-    await act(async () => trigger.click());
+    await act(async () => row.click());
     expect(onOpenSearch).toHaveBeenCalled();
   });
 
-  it("advertises the shortcut that actually reaches it", async () => {
+  // It stopped being a field when it stopped searching; looking like one was the lie
+  it("looks like the other nav rows, not like an input", async () => {
     renderSidebar();
-    const trigger = await screen.findByLabelText("Search tasks and projects");
-    expect(trigger.textContent).toContain("\u2318K");
+    const row = await screen.findByRole("button", { name: "Search" });
+    const myTasks = screen.getByText("My Tasks").closest("a")!;
+
+    expect(row.className).toBe(myTasks.className);
+    expect(row.querySelector("kbd")).toBeNull();
+  });
+
+  it("still announces the shortcut that reaches it", async () => {
+    renderSidebar();
+    const row = await screen.findByRole("button", { name: "Search" });
+    expect(row.getAttribute("aria-keyshortcuts")).toBe("Meta+K Control+K");
+  });
+
+  it("sits in the same list position whether the rail is open or collapsed", async () => {
+    const namesInOrder = () =>
+      [...document.querySelectorAll("nav a, nav button")]
+        .map((el) => el.textContent?.trim() || el.getAttribute("aria-label"))
+        .slice(0, 3);
+
+    renderSidebar();
+    await waitFor(() => expect(screen.getByText("My Tasks")).toBeTruthy());
+    expect(namesInOrder()[0]).toBe("Search");
+
+    cleanup();
+    localStorage.setItem("sidebar-collapsed", "1");
+    renderSidebar();
+    await waitFor(() => expect(screen.queryByText("My Tasks")).toBeNull());
+    expect(namesInOrder()[0]).toBe("Search");
   });
 
   it("never puts a search field or results in the nav", async () => {
@@ -288,14 +314,13 @@ describe("Sidebar search trigger", () => {
     expect(screen.queryByRole("listbox")).toBeNull();
   });
 
-  it("keeps a way into search from the collapsed rail, where the field does not fit", async () => {
+  it("keeps a way into search from the collapsed rail", async () => {
     const onOpenSearch = vi.fn();
     localStorage.setItem("sidebar-collapsed", "1");
     renderSidebar({ onOpenSearch });
     await waitFor(() => expect(screen.queryByText("My Tasks")).toBeNull());
 
-    const trigger = screen.getByLabelText("Search tasks and projects");
-    await act(async () => trigger.click());
+    await act(async () => screen.getByRole("button", { name: "Search" }).click());
     expect(onOpenSearch).toHaveBeenCalled();
   });
 });
