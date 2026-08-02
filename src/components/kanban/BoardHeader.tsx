@@ -62,7 +62,8 @@ export function BoardHeader({
   }
 
   return (
-    <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border bg-bg px-6 lg:gap-3">
+    // z-30 keeps the scope menu over the board: @container makes the header a stacking context
+    <header className="@container relative z-30 flex h-14 shrink-0 items-center gap-3 border-b border-border bg-bg px-6">
       <div className="flex min-w-0 items-center gap-2">
         <span aria-hidden className="shrink-0 text-[17px] leading-none">
           {projectIcon || DEFAULT_PROJECT_ICON}
@@ -77,7 +78,7 @@ export function BoardHeader({
               <span className="truncate">{boardSubtitle(null, taskCount)}</span>
             ) : (
               <>
-                <span className="hidden truncate lg:inline">Board ·</span>
+                <span className="hidden truncate @xl:inline">Board ·</span>
                 <button
                   type="button"
                   onClick={() => setScopeOpen((v) => !v)}
@@ -87,7 +88,7 @@ export function BoardHeader({
                 >
                   {scopeLabel ?? "All tasks"}
                 </button>
-                <span className="hidden truncate lg:inline">
+                <span className="hidden truncate @xl:inline">
                   · {taskCount === 1 ? "1 task" : `${taskCount} tasks`}
                 </span>
               </>
@@ -130,7 +131,7 @@ export function BoardHeader({
       </div>
 
       {taskCount > 0 && (
-        <div className="hidden shrink-0 items-center gap-2 lg:flex">
+        <div className="hidden shrink-0 items-center gap-2 @xl:flex">
           <div className="h-[5px] w-16 overflow-hidden rounded-full bg-bg-input">
             <div
               className="h-full rounded-full bg-status-done transition-all duration-300"
@@ -166,7 +167,7 @@ export function BoardHeader({
         onClick={onRefresh}
         title="Refresh board (R)"
         aria-label="Refresh board"
-        className="hidden shrink-0 rounded-lg p-2 text-text-muted transition-colors hover:bg-bg-card hover:text-text sm:block"
+        className="hidden shrink-0 rounded-lg p-2 text-text-muted transition-colors hover:bg-bg-card hover:text-text @md:block"
       >
         <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path
@@ -187,15 +188,15 @@ export function BoardHeader({
       >
         <svg
           aria-hidden
-          className="h-4 w-4 sm:hidden"
+          className="h-4 w-4 @md:hidden"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
         >
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v14M5 12h14" />
         </svg>
-        <span className="hidden sm:inline">New task</span>
-        <kbd className="ml-1 hidden rounded bg-black/25 px-1 text-[11px] lg:inline">N</kbd>
+        <span className="hidden @md:inline">New task</span>
+        <kbd className="ml-1 hidden rounded bg-black/25 px-1 text-[11px] @xl:inline">N</kbd>
       </Button>
     </header>
   );
