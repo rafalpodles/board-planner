@@ -1,13 +1,15 @@
 export const COLLAPSED_COLUMN_PX = 44;
 export const MIN_EXPANDED_COLUMN_PX = 200;
 
-// A drag in progress expands the target so a card can be dropped into it
+// A drag in progress expands the target so a card can be dropped into it.
+// `enabled` is the user's preference; off, no column ever becomes a rail.
 export function isColumnCollapsed(
   taskCount: number,
   pinned: boolean,
-  dragOver: boolean
+  dragOver: boolean,
+  enabled = true
 ): boolean {
-  return taskCount === 0 && !pinned && !dragOver;
+  return enabled && taskCount === 0 && !pinned && !dragOver;
 }
 
 export function boardGridTemplate(collapsed: boolean[]): string {
