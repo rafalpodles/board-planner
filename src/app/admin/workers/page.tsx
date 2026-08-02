@@ -8,43 +8,16 @@ import { useToast } from "@/components/ui/Toast";
 import { Button } from "@/components/ui/Button";
 import { usePollWhileVisible } from "@/hooks/use-poll-while-visible";
 import { timeAgo } from "@/lib/time";
+import { commandStatus, WorkerCommand } from "@/lib/worker-command-status";
 import { ApiWorker } from "@/types";
 
 const POLL_MS = 5_000;
-const UNACKED_WARNING_MS = 60_000;
-
-type Command = "pause" | "resume" | "stop";
-
-const COMMAND_LABELS: Record<Command, { pending: string; applied: string }> = {
-  pause: { pending: "Pausing…", applied: "Paused" },
-  resume: { pending: "Resuming…", applied: "Resumed" },
-  stop: { pending: "Stopping…", applied: "Stopped" },
-};
 
 const TONE_CLASSES = {
   pending: "text-warning",
   applied: "text-text-muted",
   warning: "text-danger",
 };
-
-// The worker only proves a command took effect by acking it over heartbeat, so this
-// must never report "applied" from commandIssuedAt alone — that would claim a worker
-// is paused while it could still be mid-merge
-function commandStatus(worker: ApiWorker): { text: string; tone: keyof typeof TONE_CLASSES } | null {
-  if (!worker.command) return null;
-  const issuedAt = worker.commandIssuedAt ? new Date(worker.commandIssuedAt).getTime() : null;
-  const ackedAt = worker.commandAckedAt ? new Date(worker.commandAckedAt).getTime() : null;
-
-  if (ackedAt !== null && (issuedAt === null || ackedAt >= issuedAt)) {
-    return { text: COMMAND_LABELS[worker.command].applied, tone: "applied" };
-  }
-
-  const elapsedMs = issuedAt !== null ? Date.now() - issuedAt : 0;
-  if (elapsedMs >= UNACKED_WARNING_MS) {
-    return { text: `not acknowledged for ${Math.floor(elapsedMs / 1000)}s`, tone: "warning" };
-  }
-  return { text: COMMAND_LABELS[worker.command].pending, tone: "pending" };
-}
 
 export default function AdminWorkersPage() {
   const api = useApi();
@@ -88,10 +61,10 @@ export default function AdminWorkersPage() {
     }
   }
 
-  async function sendCommand(worker: ApiWorker, command: Command) {
+  async function sendCommand(worker: ApiWorker, command: WorkerCommand) {
     setSavingId(worker._id);
     try {
-      const res: { command: Command; issuedAt: string } = await api.post(
+      const res: { command: WorkerCommand; issuedAt: string } = await api.post(
         `/api/workers/${worker._id}/command`,
         { command }
       );
@@ -106,6 +79,7 @@ export default function AdminWorkersPage() {
       );
     } catch (err) {
       toast(err instanceof Error ? err.message : "Command failed", "error");
+      load();
     } finally {
       setSavingId(null);
     }
