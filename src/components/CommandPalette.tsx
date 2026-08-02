@@ -135,7 +135,7 @@ export function CommandPalette() {
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Search tasks by title or key (e.g. CP-12)..."
-            className="flex-1 bg-transparent py-3.5 text-sm focus:outline-none placeholder:text-text-muted"
+            className="focus-ring-inset flex-1 rounded bg-transparent py-3.5 text-sm placeholder:text-text-muted"
           />
           <kbd className="text-[10px] text-text-muted bg-bg-input border border-border px-1.5 py-0.5 rounded font-mono">
             ESC
