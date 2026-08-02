@@ -22,6 +22,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <AuthGuard>
       <ProjectsProvider>
+        <a
+          href="#main-content"
+          className="focus-ring sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-[60] focus:rounded-lg focus:border focus:border-border focus:bg-bg-card focus:px-3 focus:py-2 focus:text-sm focus:font-medium focus:text-text"
+        >
+          Skip to content
+        </a>
         <div className="flex">
           <Sidebar
             mobileOpen={navOpen}
@@ -59,7 +65,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               <span className="text-sm font-bold">ClaudePlanner</span>
             </div>
 
-            <main className="relative flex flex-1 flex-col overflow-y-auto px-4 py-6">
+            {/* tabIndex makes the target focusable, or the skip link moves the
+                viewport without moving focus and the next Tab starts from the top again */}
+            <main
+              id="main-content"
+              tabIndex={-1}
+              className="relative flex flex-1 flex-col overflow-y-auto px-4 py-6"
+            >
               {children}
             </main>
           </div>
