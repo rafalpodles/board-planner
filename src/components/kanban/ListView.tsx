@@ -215,7 +215,7 @@ export function ListView({ tasks, projectKey, projectId, sprints = [], categorie
                         }}
                         className={`w-5 h-5 rounded border flex items-center justify-center transition-colors text-[10px]
                           ${selected
-                            ? "bg-primary border-primary text-white"
+                            ? "bg-primary-solid border-primary text-white"
                             : "border-border bg-bg-input text-transparent hover:border-primary/50"
                           }`}
                       >
@@ -277,11 +277,7 @@ export function ListView({ tasks, projectKey, projectId, sprints = [], categorie
                       const inner = (
                         <span
                           className={`inline-flex items-center gap-1.5 ${
-                            timing === "active"
-                              ? "font-medium"
-                              : timing === "past"
-                                ? "text-text-muted/60"
-                                : "text-text-muted"
+                            timing === "active" ? "font-medium" : "text-text-muted"
                           }`}
                         >
                           {timing === "active" && (

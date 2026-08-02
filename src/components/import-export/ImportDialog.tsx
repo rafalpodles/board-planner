@@ -132,7 +132,7 @@ back to login page in a loop.`}</pre>
             }}
             className="block w-full text-sm text-text-muted file:mr-4 file:py-2 file:px-4
               file:rounded-lg file:border-0 file:text-sm file:font-medium
-              file:bg-primary file:text-white hover:file:bg-primary-hover
+              file:bg-primary-solid file:text-white hover:file:bg-primary-solid-hover
               file:min-h-[44px] file:cursor-pointer"
           />
         </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
 import { subscribeBoardRefresh } from "@/lib/board-refresh";
@@ -243,18 +243,25 @@ export function TaskDetail({
                     #{pr.number} {pr.title}
                   </span>
                   {pr.provider === "gitlab" && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded font-medium text-[#fc6d26] bg-[#fc6d26]/10">
+                    <span
+                      className="chip text-[11px] px-1.5 py-0.5 rounded font-medium"
+                      style={{ "--chip": "#fc6d26" } as CSSProperties}
+                    >
                       GitLab
                     </span>
                   )}
                   <span
-                    className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
-                      pr.state === "merged"
-                        ? "text-[#8b5cf6] bg-[#8b5cf6]/10"
-                        : pr.state === "open"
-                          ? "text-[#22c55e] bg-[#22c55e]/10"
-                          : "text-danger bg-danger/10"
-                    }`}
+                    className="chip text-[11px] px-1.5 py-0.5 rounded font-medium"
+                    style={
+                      {
+                        "--chip":
+                          pr.state === "merged"
+                            ? "#8b5cf6"
+                            : pr.state === "open"
+                              ? "var(--color-success)"
+                              : "var(--color-danger)",
+                      } as CSSProperties
+                    }
                   >
                     {pr.state}
                   </span>

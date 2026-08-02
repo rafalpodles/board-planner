@@ -54,7 +54,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
               aria-current={s.id === active ? "page" : undefined}
               className={`shrink-0 rounded-full border px-3.5 py-1.5 text-sm transition-colors ${
                 s.id === active
-                  ? "border-primary bg-primary font-semibold text-white"
+                  ? "border-primary bg-primary-solid font-semibold text-white"
                   : "border-border bg-bg-card text-text-muted"
               }`}
             >

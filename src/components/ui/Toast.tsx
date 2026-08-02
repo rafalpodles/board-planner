@@ -70,9 +70,9 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                 animate-slide-in cursor-pointer
                 ${
                   t.type === "success"
-                    ? "bg-success text-white"
+                    ? "bg-success-solid text-white"
                     : t.type === "error"
-                      ? "bg-danger text-white"
+                      ? "bg-danger-solid text-white"
                       : "bg-bg-card text-text border border-border"
                 }`}
               onClick={() => removeToast(t.id)}

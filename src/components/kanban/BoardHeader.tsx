@@ -183,7 +183,7 @@ export function BoardHeader({
         className="shrink-0 whitespace-nowrap"
       >
         New task
-        <kbd className="ml-1 rounded bg-bg-input px-1 text-[10px] opacity-50">N</kbd>
+        <kbd className="ml-1 rounded bg-black/25 px-1 text-[11px]">N</kbd>
       </Button>
     </header>
   );
