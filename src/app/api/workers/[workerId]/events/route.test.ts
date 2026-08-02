@@ -35,13 +35,33 @@ function request(headers: Record<string, string>, body: unknown) {
 
 const event = { taskId: TASK_ID, runId: "run-1", seq: 1, phase: "gates:build" };
 
+// enabled and lockedByInstance carry schema defaults, so a real Worker document always has them
+function workerDoc(overrides: Record<string, unknown> = {}) {
+  return { _id: WORKER_ID, credentialHash: "h", enabled: true, lockedByInstance: false, ...overrides };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
-  verifyWorkerCredential.mockResolvedValue({ _id: WORKER_ID, credentialHash: "h" });
+  verifyWorkerCredential.mockResolvedValue(workerDoc());
   updateOne.mockResolvedValue({ matchedCount: 1, modifiedCount: 1 });
 });
 
 describe("POST /api/workers/:workerId/events", () => {
+  // An abort is asynchronous, so a killed worker keeps running for a while. Without this the board
+  // would show that run advancing normally, right when the operator needs the badge to be true
+  it.each([
+    ["disabled", { enabled: false }],
+    ["locked by the instance", { lockedByInstance: true }],
+  ])("refuses a worker that is %s, without touching a task", async (_label, overrides) => {
+    verifyWorkerCredential.mockResolvedValue(workerDoc(overrides));
+    const { req, ctx } = request(authed, event);
+
+    const response = await POST(req, ctx);
+
+    expect(response.status).toBe(403);
+    expect(updateOne).not.toHaveBeenCalled();
+  });
+
   // Unauthenticated, this endpoint would let anyone write execution.phase on any task in the
   // instance — so the wrapper is the feature, not decoration
   it("refuses an unauthenticated caller without touching a task", async () => {

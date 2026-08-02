@@ -20,7 +20,12 @@ export const MAX_EXECUTION_ATTEMPTS = 3;
 export const MAX_PHASE_LENGTH = 120;
 
 const PHASE_FIELDS = ["execution.phase", "execution.phaseAt", "execution.phaseSeq"];
+// A run's identity has to die with the run. recordTaskPhase matches on runId, so a runId left
+// behind on a released task lets that worker replay its own old run onto a task it no longer holds
+// — and the release unsets phaseSeq, so the $exists branch would accept any seq, stale ones too.
+const RUN_FIELDS = [...PHASE_FIELDS, "execution.runId"];
 const UNSET_PHASE = Object.fromEntries(PHASE_FIELDS.map((field) => [field, ""]));
+const UNSET_RUN = Object.fromEntries(RUN_FIELDS.map((field) => [field, ""]));
 
 // Four times the worker's default task timeout. A worker killed mid-run leaves its task in the
 // active column, where claimNextTask can never see it again — nothing else reclaims it.
@@ -166,7 +171,7 @@ export async function changeStatus(
 
   const task = await Task.findOneAndUpdate(
     { _id: taskId, project: projectId },
-    { $set: { status }, $unset: UNSET_PHASE },
+    { $set: { status }, $unset: UNSET_RUN },
     { returnDocument: "after" }
   ).populate([
     { path: "assignee", select: "username fullName" },
@@ -310,7 +315,7 @@ export async function updateTask(
   // active column as changeStatus is — but only when the status is actually part of the edit
   const task = await Task.findOneAndUpdate(
     { _id: taskId, project: projectId },
-    updates.status === undefined ? { $set: updates } : { $set: updates, $unset: UNSET_PHASE },
+    updates.status === undefined ? { $set: updates } : { $set: updates, $unset: UNSET_RUN },
     { returnDocument: "after", runValidators: true }
   ).populate(taskPopulateFields);
 
@@ -560,11 +565,11 @@ export async function releaseExpiredTasks(projectId: string, now = new Date()): 
   const [spent, retryable] = await Promise.all([
     Task.updateMany(
       { ...expired, "execution.attempts": { $gte: MAX_EXECUTION_ATTEMPTS } },
-      { $set: { status: exhausted }, $unset: UNSET_PHASE }
+      { $set: { status: exhausted }, $unset: UNSET_RUN }
     ),
     Task.updateMany(
       { ...expired, "execution.attempts": { $lt: MAX_EXECUTION_ATTEMPTS } },
-      { $set: { status: approved }, $unset: UNSET_PHASE }
+      { $set: { status: approved }, $unset: UNSET_RUN }
     ),
   ]);
 
@@ -644,7 +649,7 @@ export async function releaseTask(
             },
           },
         },
-        { $unset: PHASE_FIELDS },
+        { $unset: RUN_FIELDS },
       ],
       { returnDocument: "after", updatePipeline: true }
     );
@@ -657,7 +662,7 @@ export async function releaseTask(
       status: { $in: active },
       "execution.attempts": { $gt: 0 },
     },
-    { $set: { status: approved }, $inc: { "execution.attempts": -1 }, $unset: UNSET_PHASE },
+    { $set: { status: approved }, $inc: { "execution.attempts": -1 }, $unset: UNSET_RUN },
     { returnDocument: "after" }
   );
 }
