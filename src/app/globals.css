@@ -25,22 +25,22 @@
   --color-text-muted: #a9b6c8;
 
   --color-status-planned: #9ca3af;
-  --color-status-todo: #3b82f6;
-  --color-status-in-progress: #f59e0b;
-  --color-status-in-review: #a855f7;
-  --color-status-needs-human-review: #f43f5e;
-  --color-status-ready-to-test: #06b6d4;
-  --color-status-done: #22c55e;
+  --color-status-todo: #60a5fa;
+  --color-status-in-progress: #fbbf24;
+  --color-status-in-review: #c084fc;
+  --color-status-needs-human-review: #fb7185;
+  --color-status-ready-to-test: #22d3ee;
+  --color-status-done: #4ade80;
 
-  --color-difficulty-s: #22c55e;
-  --color-difficulty-m: #3b82f6;
-  --color-difficulty-l: #f59e0b;
-  --color-difficulty-xl: #ef4444;
+  --color-difficulty-s: #4ade80;
+  --color-difficulty-m: #60a5fa;
+  --color-difficulty-l: #fbbf24;
+  --color-difficulty-xl: #f87171;
 
   --color-priority-low: #9ca3af;
-  --color-priority-medium: #3b82f6;
-  --color-priority-high: #f59e0b;
-  --color-priority-urgent: #ef4444;
+  --color-priority-medium: #60a5fa;
+  --color-priority-high: #fbbf24;
+  --color-priority-urgent: #f87171;
 }
 
 body {
@@ -83,12 +83,18 @@ body {
   --color-priority-urgent: #b91c1c;
 }
 
-/* Tinted chips: --chip carries the accent. Mixing the surface toward the card and
-   the label toward the foreground keeps one rule readable in both themes, and
-   works for project-defined category and label colours as well as the tokens. */
+/* Tinted chips: --chip carries the accent, the surface is a tint of it against
+   the card. The semantic tokens are tuned per theme, so the label stays close to
+   the accent — enough hue to tell categories apart at a glance. */
 .chip {
   --chip: var(--color-primary);
   background-color: color-mix(in srgb, var(--chip) 18%, var(--color-bg-card));
+  color: color-mix(in srgb, var(--chip) 85%, var(--color-text));
+}
+
+/* Project-defined category and label colours are arbitrary and not theme-tuned,
+   so the label is pulled toward the foreground far enough to stay readable */
+.chip-custom {
   color: color-mix(in srgb, var(--chip) 55%, var(--color-text));
 }
 

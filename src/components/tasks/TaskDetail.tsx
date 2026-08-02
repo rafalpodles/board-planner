@@ -244,14 +244,14 @@ export function TaskDetail({
                   </span>
                   {pr.provider === "gitlab" && (
                     <span
-                      className="chip text-[11px] px-1.5 py-0.5 rounded font-medium"
+                      className="chip chip-custom text-[11px] px-1.5 py-0.5 rounded font-medium"
                       style={{ "--chip": "#fc6d26" } as CSSProperties}
                     >
                       GitLab
                     </span>
                   )}
                   <span
-                    className="chip text-[11px] px-1.5 py-0.5 rounded font-medium"
+                    className="chip chip-custom text-[11px] px-1.5 py-0.5 rounded font-medium"
                     style={
                       {
                         "--chip":

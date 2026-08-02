@@ -124,7 +124,7 @@ export function TaskCard({
           {taskLabels.map((label) => (
             <span
               key={label._id}
-              className="chip text-[11px] px-1.5 py-0.5 rounded-full font-medium"
+              className="chip chip-custom text-[11px] px-1.5 py-0.5 rounded-full font-medium"
               style={{ "--chip": label.color } as CSSProperties}
             >
               {label.name}
@@ -187,7 +187,7 @@ export function TaskCard({
           {task.linkedPRs.map((pr) => (
             <span
               key={`${pr.provider ?? "github"}-${pr.number}`}
-              className="chip text-[11px] px-1.5 py-0.5 rounded font-medium inline-flex items-center gap-1"
+              className="chip chip-custom text-[11px] px-1.5 py-0.5 rounded font-medium inline-flex items-center gap-1"
               style={
                 {
                   "--chip":
