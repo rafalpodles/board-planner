@@ -431,6 +431,7 @@ export default function KanbanPage() {
       <BoardHeader
         projectName={project.name}
         projectIcon={project.icon}
+        projectDescription={project.description}
         sprints={sprints}
         scope={selectedSprint}
         onScopeChange={setSelectedSprint}
