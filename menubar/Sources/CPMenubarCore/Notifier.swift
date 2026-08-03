@@ -25,6 +25,12 @@ public func notification(for event: TelemetryEvent) -> NotificationRequest? {
             return NotificationRequest(
                 title: "\(outcome.taskKey) merged",
                 body: "The worker is free again.")
+        // With autoMerge off this replaces "merged" as the end of a successful run, so without it
+        // the operator would get no notification at all for work that went well.
+        case "delivered":
+            return NotificationRequest(
+                title: "\(outcome.taskKey) is ready for review",
+                body: outcome.detail ?? "A pull request is open; the worker did not merge it.")
         case "gateRejected":
             return NotificationRequest(
                 title: "\(outcome.taskKey) rejected by the \(outcome.detail ?? "unknown") gate",

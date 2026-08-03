@@ -544,3 +544,41 @@ describe("PATCH /api/workers/:workerId — recording what the operator set", () 
     expect(workerFindByIdAndUpdate.mock.calls[0][1].$set).not.toHaveProperty("policyOverrides");
   });
 });
+
+describe("PATCH /api/workers/:workerId — autoMerge", () => {
+  it("accepts a boolean and records the override", async () => {
+    getAuthUser.mockResolvedValue(INSTANCE_ADMIN);
+
+    const response = await PATCH(patchRequest({ autoMerge: true }), ctx());
+
+    expect(response.status).toBe(200);
+    expect(workerFindByIdAndUpdate).toHaveBeenCalledWith(
+      WORKER_ID,
+      { $set: { "policy.autoMerge": true, policyOverrides: ["autoMerge"] } },
+      { new: true }
+    );
+  });
+
+  // Turning merging off explicitly is a real choice, and must be recorded as one
+  it("records autoMerge: false as deliberately set, not inherited", async () => {
+    getAuthUser.mockResolvedValue(INSTANCE_ADMIN);
+
+    await PATCH(patchRequest({ autoMerge: false }), ctx());
+
+    expect(workerFindByIdAndUpdate.mock.calls[0][1].$set).toMatchObject({
+      "policy.autoMerge": false,
+      policyOverrides: ["autoMerge"],
+    });
+  });
+
+  // A worker that merges because someone sent the string "false" is the failure this prevents
+  it("refuses anything that is not a boolean", async () => {
+    getAuthUser.mockResolvedValue(INSTANCE_ADMIN);
+
+    for (const bad of ["true", "false", 1, 0]) {
+      const response = await PATCH(patchRequest({ autoMerge: bad }), ctx());
+      expect(response.status).toBe(400);
+    }
+    expect(workerFindByIdAndUpdate).not.toHaveBeenCalled();
+  });
+});

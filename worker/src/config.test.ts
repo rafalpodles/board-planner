@@ -108,6 +108,7 @@ describe("the api token", () => {
 describe("applyPolicy", () => {
   it("adopts every known field from a well-formed patch", () => {
     const next = applyPolicy(DEFAULT_POLICY, {
+      autoMerge: true,
       baseBranch: "develop",
       pollIntervalMs: 5_000,
       taskTimeoutMs: 60_000,
@@ -119,6 +120,7 @@ describe("applyPolicy", () => {
     });
 
     expect(next).toEqual({
+      autoMerge: true,
       baseBranch: "develop",
       pollIntervalMs: 5_000,
       taskTimeoutMs: 60_000,
@@ -196,5 +198,31 @@ describe("parseAssignments", () => {
     expect(parseAssignments(undefined)).toEqual([]);
     expect(parseAssignments(null)).toEqual([]);
     expect(parseAssignments("nope")).toEqual([]);
+  });
+});
+
+describe("autoMerge", () => {
+  // A worker nobody has configured must not merge to a base branch on its own.
+  it("is off unless the server says otherwise", () => {
+    expect(DEFAULT_POLICY.autoMerge).toBe(false);
+    expect(applyPolicy(DEFAULT_POLICY, {}).autoMerge).toBe(false);
+  });
+
+  it("is turned on by the server's policy", () => {
+    expect(applyPolicy(DEFAULT_POLICY, { autoMerge: true }).autoMerge).toBe(true);
+  });
+
+  it("can be turned back off", () => {
+    const on = applyPolicy(DEFAULT_POLICY, { autoMerge: true });
+
+    expect(applyPolicy(on, { autoMerge: false }).autoMerge).toBe(false);
+  });
+
+  // Anything but a boolean is ignored rather than coerced: "false" and 0 are both truthy-adjacent
+  // mistakes that would silently flip a safety default.
+  it("ignores a value that is not a boolean", () => {
+    for (const bad of ["true", "false", 1, 0, null, "yes"]) {
+      expect(applyPolicy(DEFAULT_POLICY, { autoMerge: bad }).autoMerge).toBe(false);
+    }
   });
 });
