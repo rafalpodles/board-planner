@@ -86,7 +86,7 @@ function SearchContent() {
   }
 
   return (
-    <div className="max-w-3xl mx-auto">
+    <div className="w-full max-w-3xl mx-auto">
       <PageHeader title="Search" />
 
       <form onSubmit={handleSubmit} className="mb-6">

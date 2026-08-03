@@ -38,7 +38,7 @@ export default function NewProjectPage() {
   }
 
   return (
-    <div className="max-w-lg mx-auto">
+    <div className="w-full max-w-lg mx-auto">
       <PageHeader title="New project" />
 
       <form onSubmit={handleSubmit} className="space-y-4">
