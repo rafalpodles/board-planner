@@ -388,6 +388,8 @@ export default function KanbanPage() {
     const task = tasks.find((t) => t._id === taskId);
     if (!task) return;
     try {
+      // No status: columns are per project since CP-128, so a literal "planned" is a 400
+      // in any project that renamed or rebuilt its board
       await api.post(`/api/projects/${projectId}/tasks`, {
         title: `Copy of ${task.title}`,
         description: task.description,
@@ -395,7 +397,7 @@ export default function KanbanPage() {
         category: task.category,
         checklist: task.checklist,
         dueDate: task.dueDate,
-        status: "planned",
+        customFieldValues: task.customFieldValues,
       });
       toast("Task duplicated", "success");
       loadData();
