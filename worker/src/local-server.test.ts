@@ -325,6 +325,21 @@ describe("the progress stream", () => {
     expect(body.recent).toEqual([{ phase: "push" }]);
   });
 
+  // The live rig showed a worker reporting current: {phase: "push"} six hours after its run ended,
+  // because /status served the last phase ever emitted. A client reading that shows "working" for
+  // as long as the worker stays up.
+  it("stops reporting a current phase once the run has settled", async () => {
+    const telemetry = createTelemetry();
+    const { socketPath } = await serve({ telemetry });
+    telemetry.emit({ phase: "push", taskKey: "CP-1" });
+    telemetry.emit({ outcome: "merged", taskKey: "CP-1" });
+
+    const body = JSON.parse((await call(socketPath, "GET", "/status")).body);
+
+    expect(body.current).toBeNull();
+    expect(body.recent).toEqual([{ phase: "push", taskKey: "CP-1" }]);
+  });
+
   it("serves the effective config the worker is actually running under", async () => {
     const { socketPath } = await serve({
       config: () => ({
