@@ -3,7 +3,7 @@ import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
 import { Task } from "@/models/task";
 import { DEFAULT_PRIORITY } from "@/types";
-import { createTask } from "@/lib/task-service";
+import { createTask, toApiExecution } from "@/lib/task-service";
 
 const populateFields = [
   { path: "assignee", select: "username fullName" },
@@ -77,7 +77,11 @@ export const GET = withProjectAccess(async (request, { params }) => {
     .sort({ order: 1, createdAt: -1 })
     .populate(populateFields);
 
-  return NextResponse.json(tasks);
+  // The board loads every task, so a raw document here would publish each one's whole execution
+  // subdocument — run identity included — to every project member on every page load
+  return NextResponse.json(
+    tasks.map((task) => ({ ...task.toObject(), execution: toApiExecution(task.execution) }))
+  );
 });
 
 export const POST = withProjectAccess(async (request, { params, user }) => {

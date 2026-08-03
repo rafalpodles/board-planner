@@ -147,6 +147,8 @@ taskSchema.index({ project: 1, taskNumber: 1 }, { unique: true });
 taskSchema.index({ project: 1, status: 1 });
 taskSchema.index({ assignee: 1 });
 taskSchema.index({ sprint: 1 });
+// The fleet console polls the worker join every 5s; unindexed, each poll scans the collection
+taskSchema.index({ "execution.workerId": 1 });
 
 export const Task: Model<ITask> =
   mongoose.models.Task || mongoose.model<ITask>("Task", taskSchema);

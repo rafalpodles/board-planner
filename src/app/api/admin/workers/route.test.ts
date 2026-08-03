@@ -56,9 +56,26 @@ function mockFleet(list: unknown[]) {
   workerFind.mockReturnValue({ sort: () => Promise.resolve(list) });
 }
 
+const sorts: unknown[] = [];
+const selects: unknown[] = [];
+const populates: unknown[] = [];
+
 function mockRunning(list: unknown[]) {
   taskFind.mockReturnValue({
-    select: () => ({ populate: () => ({ lean: () => Promise.resolve(list) }) }),
+    sort: (spec: unknown) => {
+      sorts.push(spec);
+      return {
+        select: (fields: unknown) => {
+          selects.push(fields);
+          return {
+            populate: (...args: unknown[]) => {
+              populates.push(args);
+              return { lean: () => Promise.resolve(list) };
+            },
+          };
+        },
+      };
+    },
   });
 }
 
@@ -80,6 +97,9 @@ function runningTask(workerId: string, overrides: Record<string, unknown> = {}) 
 
 beforeEach(() => {
   vi.clearAllMocks();
+  sorts.length = 0;
+  selects.length = 0;
+  populates.length = 0;
   getAuthUser.mockResolvedValue(ADMIN);
   mockFleet([]);
   mockRunning([]);
@@ -170,5 +190,39 @@ describe("GET /api/admin/workers", () => {
     await GET(request(), { params: Promise.resolve({}) });
 
     expect(taskFind.mock.calls[0][0]["execution.runId"]).toEqual({ $nin: [null, ""] });
+  });
+
+  // A worker killed mid-run leaves its task claimed until the lease is swept, so the same worker
+  // can match an abandoned task and the one it is really running. Without an order the server
+  // decides, and it can settle on the dead one — reporting work the worker gave up hours ago.
+  it("prefers the newest claim when a worker matches more than one task", async () => {
+    mockFleet([workerDoc({ _id: "a1" })]);
+    mockRunning([runningTask("a1")]);
+
+    await GET(request(), { params: Promise.resolve({}) });
+
+    expect(sorts[0]).toEqual({ "execution.startedAt": -1 });
+  });
+
+  // The projection and the populate path are invisible to this mock, so they are asserted rather
+  // than exercised: dropping project from the select would degrade every taskKey to "?-161" in
+  // production while every test here stayed green.
+  it("asks for the fields the task key is built from", async () => {
+    mockFleet([workerDoc({ _id: "a1" })]);
+    mockRunning([runningTask("a1")]);
+
+    await GET(request(), { params: Promise.resolve({}) });
+
+    expect(String(selects[0])).toContain("project");
+    expect(populates[0]).toEqual(["project", "key"]);
+  });
+
+  it("scopes the query to the fleet it was given", async () => {
+    mockFleet([workerDoc({ _id: "a1" })]);
+    mockRunning([runningTask("a1")]);
+
+    await GET(request(), { params: Promise.resolve({}) });
+
+    expect(taskFind.mock.calls[0][0]["execution.workerId"]).toEqual({ $in: ["a1"] });
   });
 });

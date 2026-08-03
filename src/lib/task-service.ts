@@ -3,7 +3,7 @@ import { Task } from "@/models/task";
 import { Project } from "@/models/project";
 import { User } from "@/models/user";
 import { Comment } from "@/models/comment";
-import { ITask, DEFAULT_PRIORITY } from "@/types";
+import { ApiTaskExecution, ITask, ITaskExecution, DEFAULT_PRIORITY } from "@/types";
 import { getColumnIds, defaultStatusFor, roleOf, getProjectColumns } from "@/lib/columns";
 import { logActivity } from "@/lib/activity";
 import { dispatchWebhooks } from "@/lib/webhooks";
@@ -713,4 +713,22 @@ export async function recordTaskPhase(event: TaskPhaseUpdate): Promise<boolean> 
   );
 
   return result.matchedCount > 0;
+}
+
+// What a reader may see of a run. The subdocument carries more — runId is the authorization scope
+// recordTaskPhase matches on, phaseSeq is an ordering detail, lastError is only ever "" and
+// attempts counts attempts spent rather than an attempt number — and none of it belongs in a
+// browser. Returning the raw document would publish all of it to every project member.
+export function toApiExecution(execution: ITaskExecution | undefined): ApiTaskExecution | undefined {
+  if (!execution?.phase && !execution?.workerId) return undefined;
+  return {
+    ...(execution.workerId ? { workerId: execution.workerId } : {}),
+    ...(execution.phase ? { phase: execution.phase } : {}),
+    phaseAt: execution.phaseAt ? new Date(execution.phaseAt).toISOString() : null,
+    startedAt: execution.startedAt ? new Date(execution.startedAt).toISOString() : null,
+    // Both timestamps come from this clock, so a reader's clock must never be compared against
+    // them: a browser five minutes fast would call a healthy run silent, and one running behind
+    // would show a run dead for hours as alive. Ages are measured here and only advanced there.
+    asOf: new Date().toISOString(),
+  };
 }

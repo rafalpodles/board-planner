@@ -16,6 +16,11 @@ async function currentTasks(workerIds: string[]): Promise<Map<string, ApiWorkerT
     "execution.workerId": { $in: workerIds },
     "execution.runId": { $nin: [null, ""] },
   })
+    // A worker killed mid-run leaves its task claimed until the lease is swept, and the sweep only
+    // happens when someone claims from that project again — so the same worker can match an
+    // abandoned task and the one it is really running. Newest claim first, so the live run wins,
+    // and deterministically rather than by whatever order the server happens to return.
+    .sort({ "execution.startedAt": -1 })
     .select("_id taskNumber title project execution")
     .populate("project", "key")
     .lean();
