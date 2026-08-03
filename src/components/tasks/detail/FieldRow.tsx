@@ -7,7 +7,7 @@ interface FieldRowProps {
   label: string;
   children: ReactNode;
   onClick?: () => void;
-  /** Sheet sizing: a 46px row is the smallest comfortable tap target here */
+  /** Sheet sizing: the repo's 44px tap target */
   touch?: boolean;
   align?: "center" | "start";
   /** Set when the row opens a popup, so the row announces itself as one */
@@ -23,7 +23,7 @@ export function FieldRow({
   expanded,
 }: FieldRowProps) {
   const shared = `flex w-full gap-2.5 rounded-lg px-2.5 text-left ${
-    touch ? "min-h-[46px] py-2.5" : "py-1.5"
+    touch ? "min-h-[44px] py-2.5" : "py-1.5"
   } ${align === "center" ? "items-center" : "items-start"}`;
 
   const body = (

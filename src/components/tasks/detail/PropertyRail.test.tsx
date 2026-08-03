@@ -10,14 +10,11 @@ afterEach(cleanup);
 const draft: TaskDraft = {
   title: "A task",
   description: "",
-  difficulty: "M",
   priority: "medium",
-  component: "",
   category: "user-story",
   assignee: null,
   dueDate: null,
   checklist: [],
-  labels: [],
   sprint: null,
   recurrence: null,
   customFieldValues: {},
@@ -57,9 +54,7 @@ function renderRail(over: Partial<React.ComponentProps<typeof PropertyRail>> = {
       set={set}
       users={users}
       sprints={sprints}
-      components={["ui", "api"]}
       categories={["user-story", "bug"]}
-      projectLabels={[]}
       customFields={[]}
       reporter="Claude Code"
       onDelete={() => {}}
@@ -152,21 +147,22 @@ describe("PropertyRail", () => {
     expect(screen.getByText("Team *")).toBeTruthy();
   });
 
-  // CP-213: once the project has a migrated Difficulty, the hardcoded row would be
-  // a second control for the same value
-  it("stands the fixed row down when the field has been migrated", () => {
-    renderRail({ customFields: [field({ _id: "f2", name: "Difficulty" })] });
-    const rows = screen.getAllByText("Difficulty");
-    expect(rows).toHaveLength(1);
+  // CP-214 turned Difficulty into an ordinary project field, so it arrives through
+  // the custom-fields group like any other
+  it("renders a migrated field as a plain custom field", async () => {
+    const set = renderRail({
+      customFields: [
+        field({
+          _id: "f2",
+          name: "Difficulty",
+          options: [{ id: "XL", value: "XL", color: "#f87171", order: 0 }],
+        }),
+      ],
+    });
     expect(screen.getByText("Custom fields")).toBeTruthy();
-  });
-
-  it("keeps the fixed Difficulty row until then", () => {
-    const set = renderRail();
-    expect(screen.getByText("Difficulty")).toBeTruthy();
-    return openRow("Difficulty")
-      .then(() => pick(/^XL$/))
-      .then(() => expect(set).toHaveBeenCalledWith("difficulty", "XL"));
+    await openRow("Difficulty");
+    await pick(/^XL$/);
+    expect(set).toHaveBeenCalledWith("customFieldValues", { f2: "XL" });
   });
 
   it("announces a row as something that opens a popup", async () => {

@@ -45,7 +45,7 @@ export function GrowingTextarea({
 
 export function SectionLabel({ children }: { children: ReactNode }) {
   return (
-    <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-text-muted">
+    <div className="text-[11px] font-bold uppercase tracking-widest text-text-muted">
       {children}
     </div>
   );
