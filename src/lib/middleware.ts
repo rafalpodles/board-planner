@@ -2,9 +2,10 @@ import { NextResponse } from "next/server";
 import { isValidObjectId, Types } from "mongoose";
 import { getAuthUser, RateLimitError } from "./auth";
 import { connectDB } from "./db";
+import { verifyWorkerCredential } from "./worker-service";
 import { Project } from "@/models/project";
 import { Task } from "@/models/task";
-import { IProject, IUser } from "@/types";
+import { IProject, IUser, IWorker } from "@/types";
 import { PROJECT_KEY_PATTERN } from "./urls";
 
 type AuthenticatedHandler = (
@@ -42,6 +43,42 @@ export function withAdmin(handler: AuthenticatedHandler) {
     }
     return handler(request, context);
   });
+}
+
+export function protocolOf(request: Request): number {
+  return Number(request.headers.get("x-cp-protocol") ?? NaN);
+}
+
+export function withWorker(
+  handler: (
+    request: Request,
+    context: { params: Promise<Record<string, string>>; worker: IWorker }
+  ) => Promise<Response>
+) {
+  return async (request: Request, context: { params: Promise<Record<string, string>> }) => {
+    const header = request.headers.get("authorization") ?? "";
+    const workerId = request.headers.get("x-worker-id") ?? "";
+    if (!header.startsWith("Bearer ") || !workerId) {
+      return NextResponse.json({ error: "Worker credential required" }, { status: 401 });
+    }
+
+    const worker = await verifyWorkerCredential(workerId, header.slice("Bearer ".length));
+    if (!worker) {
+      return NextResponse.json({ error: "Worker credential rejected" }, { status: 401 });
+    }
+    // credentialHash is only loaded to verify the credential above; clear it so no
+    // downstream handler can spread it into a response
+    worker.credentialHash = "";
+
+    // The path segment is authoritative on /api/workers/:id, so a credential must not act on
+    // someone else's record just because the route happens to carry an id
+    const params = await context.params;
+    if (params.workerId && params.workerId !== String(worker._id)) {
+      return NextResponse.json({ error: "Not your worker" }, { status: 403 });
+    }
+
+    return handler(request, { ...context, worker });
+  };
 }
 
 function refId(ref: Types.ObjectId | IUser): string {

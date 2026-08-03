@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.claudeplanner.worker</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/node</string>
+    <string>/Users/rpo/Documents/Projects/ClaudePlanner/worker/dist/main.js</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/rpo/Documents/Projects/ClaudePlanner/worker</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>CP_API_URL</key>
+    <string>https://claude-planner-production.up.railway.app</string>
+    <key>CP_API_TOKEN_FILE</key>
+    <string>/Users/rpo/.claudeplanner/token</string>
+    <key>CP_WORKER_NAME</key>
+    <string>rpo-laptop</string>
+    <key>CP_STATE_DIR</key>
+    <string>/Users/rpo/.claudeplanner</string>
+    <key>HOME</key>
+    <string>/Users/rpo</string>
+    <key>PATH</key>
+    <string>/Users/rpo/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+  <key>StandardOutPath</key>
+  <string>/tmp/claudeplanner-worker.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/claudeplanner-worker.error.log</string>
+</dict>
+</plist>

@@ -6,7 +6,9 @@ import { Task } from "@/models/task";
 import { Comment } from "@/models/comment";
 import { ActivityLog } from "@/models/activityLog";
 import { Notification } from "@/models/notification";
-import { updateTask } from "@/lib/task-service";
+import { toApiExecution, updateTask } from "@/lib/task-service";
+import { Worker } from "@/models/worker";
+import { ITaskExecution } from "@/types";
 
 const populateFields = [
   { path: "assignee", select: "username fullName" },
@@ -50,8 +52,20 @@ export const GET = withProjectAccess(async (_request, { params }) => {
       }))
   );
 
+  taskObj.execution = toApiExecution(task.execution, await workerNamesFor([task.execution]));
+
   return NextResponse.json(taskObj);
 });
+
+
+// Only runs still holding a task carry a workerId, so this reads a handful of documents at most —
+// and skips the query entirely when nothing is running.
+async function workerNamesFor(executions: (ITaskExecution | undefined)[]): Promise<Map<string, string>> {
+  const ids = [...new Set(executions.filter((e) => e?.runId && e.workerId).map((e) => e!.workerId))];
+  if (ids.length === 0) return new Map();
+  const workers = await Worker.find({ _id: { $in: ids } }).select("name").lean();
+  return new Map(workers.map((w) => [String(w._id), w.name as string]));
+}
 
 export const PUT = withProjectAccess(async (request, { params, user }) => {
   const { projectId, taskId } = await params;
