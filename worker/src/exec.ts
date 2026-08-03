@@ -1,4 +1,4 @@
-import { spawn } from "child_process";
+import { ChildProcess, spawn } from "child_process";
 import { childEnv } from "./env.js";
 
 export interface CommandResult {
@@ -26,6 +26,32 @@ export interface Runner {
 
 const SIGKILL_GRACE_MS = 5000;
 const STDIO_DRAIN_GRACE_MS = 200;
+
+// Every child below is spawned into a process group of its own, so -pid reaches the git, npm and
+// test runners `claude -p` spawns underneath itself. Signalling only the direct child leaves those
+// running inside a worktree the pipeline removes the moment this run resolves.
+export function killGroup(
+  child: Pick<ChildProcess, "pid" | "kill">,
+  signal: NodeJS.Signals
+): void {
+  const { pid } = child;
+  // -0 is 0, which is every process in the worker's own group — the worker included. A child that
+  // never spawned has no pid at all. Neither has a group of its own to signal.
+  if (!pid || pid < 0) {
+    child.kill(signal);
+    return;
+  }
+
+  try {
+    process.kill(-pid, signal);
+  } catch (error) {
+    // ESRCH is the ordinary case, not a failure: the group is gone because the child exited
+    // between the decision to kill it and the kill itself. Anything else falls back to the direct
+    // child rather than throwing — both callers run from a timer or an abort listener, where a
+    // throw is an uncaught exception that ends the worker.
+    if ((error as NodeJS.ErrnoException | undefined)?.code !== "ESRCH") child.kill(signal);
+  }
+}
 
 export function createRunner(): Runner {
   return {
@@ -62,14 +88,19 @@ export function createRunner(): Runner {
             cwd: opts.cwd,
             env: opts.env ?? childEnv(),
             stdio: ["pipe", "pipe", "pipe"],
+            // Makes the child a process group leader so killGroup has a group to reach. Never
+            // unref'd to go with it: the promise settles off this child's own exit, which the
+            // event loop still has to stay alive to hear. stdio stays piped, so detaching costs
+            // the child only its controlling terminal, which nothing here was reading anyway.
+            detached: true,
           });
 
           let terminating = false;
           function terminate(): void {
             if (terminating) return;
             terminating = true;
-            child.kill("SIGTERM");
-            killTimer = setTimeout(() => child.kill("SIGKILL"), SIGKILL_GRACE_MS);
+            killGroup(child, "SIGTERM");
+            killTimer = setTimeout(() => killGroup(child, "SIGKILL"), SIGKILL_GRACE_MS);
           }
 
           timer = setTimeout(() => {
