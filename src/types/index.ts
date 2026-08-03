@@ -118,6 +118,10 @@ export interface IUser {
   allowedProjects: Types.ObjectId[];
   // Runtime-only, set for project-scoped tokens — a scoped token never gets project-admin
   tokenScoped?: boolean;
+  // Runtime-only, set for every API and OAuth token. Distinct from tokenScoped, which answers only
+  // whether project access was narrowed: an unscoped admin token is still a machine credential, and
+  // acts that need a person at a keyboard must key on this instead.
+  viaMachineCredential?: boolean;
   createdAt: Date;
 }
 
