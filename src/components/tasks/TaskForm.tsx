@@ -266,23 +266,44 @@ export function TaskForm({
   };
 
   const signature = JSON.stringify(editedFields());
+
+  async function persist(edited: Record<string, unknown>) {
+    if (!task) return;
+    setAutoSaveState("saving");
+    try {
+      await api.put(`/api/projects/${projectId}/tasks/${task._id}`, edited);
+      serverValues.current = { ...(serverValues.current || {}), ...edited };
+      setAutoSaveState("saved");
+      emitBoardRefresh(projectId);
+    } catch {
+      setAutoSaveState("error");
+    }
+  }
+
   useEffect(() => {
     if (!task || signature === "{}") return;
-    const timer = setTimeout(async () => {
-      const edited = JSON.parse(signature) as Record<string, unknown>;
-      setAutoSaveState("saving");
-      try {
-        await api.put(`/api/projects/${projectId}/tasks/${task._id}`, edited);
-        serverValues.current = { ...(serverValues.current || {}), ...edited };
-        setAutoSaveState("saved");
-        emitBoardRefresh(projectId);
-      } catch {
-        setAutoSaveState("error");
-      }
-    }, AUTOSAVE_DEBOUNCE_MS);
+    const timer = setTimeout(() => persist(JSON.parse(signature)), AUTOSAVE_DEBOUNCE_MS);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signature, task?._id, projectId]);
+
+  // Closing within the debounce window used to drop the edit on the floor: the
+  // cleanup above also runs on unmount. Now the pending edit goes out on the way.
+  const pendingRef = useRef("{}");
+  pendingRef.current = signature;
+  useEffect(() => {
+    if (!task) return;
+    const taskId = task._id;
+    return () => {
+      const pending = pendingRef.current;
+      if (pending === "{}") return;
+      api
+        .put(`/api/projects/${projectId}/tasks/${taskId}`, JSON.parse(pending))
+        .then(() => emitBoardRefresh(projectId))
+        .catch(() => {});
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [task?._id, projectId]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -322,6 +343,34 @@ export function TaskForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
+      {task && (
+        <div className="flex justify-end">
+          {autoSaveState === "error" ? (
+            <button
+              type="button"
+              onClick={() => persist(editedFields())}
+              className="focus-ring flex items-center gap-1.5 rounded px-1.5 py-0.5 text-xs text-danger hover:underline"
+            >
+              ⚠ Save failed — retry
+            </button>
+          ) : (
+            <span
+              aria-live="polite"
+              className="flex items-center gap-1.5 px-1.5 py-0.5 text-xs text-text-muted"
+            >
+              {autoSaveState === "saving" && (
+                <span className="h-3 w-3 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+              )}
+              {autoSaveState === "saving"
+                ? "Saving…"
+                : autoSaveState === "saved"
+                  ? "✓ Saved"
+                  : "Saves automatically"}
+            </span>
+          )}
+        </div>
+      )}
+
       {!task && taskTemplates.length > 0 && (
         <Select
           label="Template"
@@ -712,29 +761,15 @@ export function TaskForm({
       {error && <p className="text-sm text-danger">{error}</p>}
 
       <div className="flex gap-3 items-center">
-        <Button type="submit" disabled={loading}>
-          {loading ? "Saving..." : task ? "Update Task" : "Create Task"}
-        </Button>
+        {/* An existing task saves itself; only creation still needs a verb */}
+        {!task && (
+          <Button type="submit" disabled={loading}>
+            {loading ? "Saving..." : "Create Task"}
+          </Button>
+        )}
         <Button type="button" variant="secondary" onClick={onCancel}>
           {task ? "Close" : "Cancel"}
         </Button>
-        {task && autoSaveState !== "idle" && (
-          <span
-            className={`text-xs flex items-center gap-1.5 ${
-              autoSaveState === "error" ? "text-danger" : "text-text-muted"
-            }`}
-            aria-live="polite"
-          >
-            {autoSaveState === "saving" && (
-              <span className="animate-spin rounded-full h-3 w-3 border-2 border-primary border-t-transparent" />
-            )}
-            {autoSaveState === "saving"
-              ? "Saving…"
-              : autoSaveState === "saved"
-                ? "\u2713 Saved"
-                : "Auto-save failed — use Update Task"}
-          </span>
-        )}
       </div>
     </form>
   );
