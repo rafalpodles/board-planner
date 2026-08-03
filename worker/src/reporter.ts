@@ -17,8 +17,10 @@ export interface Reporter {
 type Log = (message: string) => void;
 
 // Every agent- and gate-authored string entering a board comment goes through here. Redacted
-// before the cut, not after: a secret straddling it would otherwise survive as a prefix too short
-// for any pattern to match — up to 60 of a worker credential's 64 hex characters.
+// before the cut, not after: a secret straddling the cut would otherwise survive as a prefix too
+// short for its pattern to match. The dangerous shape is the length-exact one — a ghp_ PAT that
+// loses a single trailing character stops matching entirely and publishes 35 of its 36 characters,
+// which is 62 guesses. (The {32,} shapes degrade gracefully; at worst half a cpw_ credential.)
 function safeText(text: string): string {
   const safe = scrub(text);
   if (safe.length <= MAX_REASON_CHARS) return safe;
@@ -129,7 +131,9 @@ export function createReporter(
     },
 
     async merged(task, prUrl, summary) {
-      await report(task, statusIds.done, `Merged ${prUrl}\n\n${safeText(summary)}`);
+      // The url is built by delivery.ts from gh output and its regex admits userinfo, so a
+      // credential-bearing remote would otherwise publish its token as a permanent comment
+      await report(task, statusIds.done, `Merged ${scrub(prUrl)}\n\n${safeText(summary)}`);
     },
 
     async failed(task, reason) {

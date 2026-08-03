@@ -93,6 +93,23 @@ describe("createReporter", () => {
     expect(api.comment.mock.calls[0][2]).toMatch(/added the thing/);
   });
 
+  // The url is not free text and so does not go through safeText, which made it a path around the
+  // one place everything else is scrubbed. delivery.ts builds it from gh output with a regex that
+  // admits userinfo, so a credential-bearing remote publishes its token permanently.
+  it("redacts a credential the PR url carries in its userinfo", async () => {
+    const api = apiSpy();
+    await createReporter(api, statuses).merged(
+      task,
+      "https://x-access-token:ghp_0123456789abcdefghijABCDEFGHIJ012345@github.com/o/r/pull/7",
+      "done"
+    );
+
+    const body = api.comment.mock.calls[0][2];
+    expect(body).not.toContain("ghp_0123456789");
+    expect(body).not.toContain("x-access-token");
+    expect(body).toContain("github.com/o/r/pull/7");
+  });
+
   it("comments before it moves the task, so the reason survives a failed status update", async () => {
     const api = apiSpy();
     await createReporter(api, statuses).merged(task, "https://x/pull/7", "done");
