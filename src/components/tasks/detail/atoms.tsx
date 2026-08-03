@@ -1,7 +1,37 @@
 "use client";
 
-import { useEffect, useRef, type CSSProperties, type ReactNode } from "react";
+import { useEffect, type RefObject, useRef, type CSSProperties, type ReactNode } from "react";
 import { PRIORITIES, Priority } from "@/types";
+
+/**
+ * Grows a textarea to fit its text. Measured before layout gives the element a width,
+ * every character wraps onto its own line and the bogus height gets baked in — so the
+ * measurement is skipped until there is a width, and repeated whenever the width changes.
+ */
+export function useAutoGrow(ref: RefObject<HTMLTextAreaElement | null>, value: string) {
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+
+    const fit = () => {
+      if (el.clientWidth === 0) return;
+      el.style.height = "auto";
+      el.style.height = `${el.scrollHeight}px`;
+    };
+
+    fit();
+
+    // Width only: reacting to our own height change would loop
+    let lastWidth = el.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (el.clientWidth === lastWidth) return;
+      lastWidth = el.clientWidth;
+      fit();
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [ref, value]);
+}
 
 /** A one-line-looking field that wraps instead of scrolling its text out of sight */
 export function GrowingTextarea({
@@ -21,13 +51,7 @@ export function GrowingTextarea({
   "aria-label"?: string;
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${el.scrollHeight}px`;
-  }, [value]);
+  useAutoGrow(ref, value);
 
   return (
     <textarea

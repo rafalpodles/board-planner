@@ -72,51 +72,55 @@ export function TaskTopBar({
         Duplicate
       </button>
 
-      <Popover
-        label="More actions"
-        align="right"
-        trigger={({ toggle, open }) => (
-          <button
-            type="button"
-            onClick={toggle}
-            aria-haspopup="menu"
-            aria-expanded={open}
-            aria-label="More actions"
-            className={`${ghost} min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0`}
-          >
-            ···
-          </button>
-        )}
-      >
-        {({ close }) => (
-          <OptionList label="More actions">
-            <OptionItem
-              onClick={() => {
-                onToggleWatch();
-                close();
-              }}
+      {/* Narrow screens only: everything in here has its own control once there is
+          room — Watch and Duplicate above, Add subtask in the linked-work section */}
+      <div className="sm:hidden">
+        <Popover
+          label="More actions"
+          align="right"
+          trigger={({ toggle, open }) => (
+            <button
+              type="button"
+              onClick={toggle}
+              aria-haspopup="menu"
+              aria-expanded={open}
+              aria-label="More actions"
+              className={`${ghost} flex min-h-[44px] min-w-[44px] items-center justify-center`}
             >
-              {watching ? "Stop watching" : "Watch for changes"}
-            </OptionItem>
-            <OptionItem
-              onClick={() => {
-                onDuplicate();
-                close();
-              }}
-            >
-              Duplicate
-            </OptionItem>
-            <OptionItem
-              onClick={() => {
-                onAddChild();
-                close();
-              }}
-            >
-              Add subtask
-            </OptionItem>
-          </OptionList>
-        )}
-      </Popover>
+              ···
+            </button>
+          )}
+        >
+          {({ close }) => (
+            <OptionList label="More actions">
+              <OptionItem
+                onClick={() => {
+                  onToggleWatch();
+                  close();
+                }}
+              >
+                {watching ? "Stop watching" : "Watch for changes"}
+              </OptionItem>
+              <OptionItem
+                onClick={() => {
+                  onDuplicate();
+                  close();
+                }}
+              >
+                Duplicate
+              </OptionItem>
+              <OptionItem
+                onClick={() => {
+                  onAddChild();
+                  close();
+                }}
+              >
+                Add subtask
+              </OptionItem>
+            </OptionList>
+          )}
+        </Popover>
+      </div>
 
       <span aria-hidden className="hidden h-5 w-px bg-border sm:block" />
       <button
