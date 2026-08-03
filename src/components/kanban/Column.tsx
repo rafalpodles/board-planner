@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ApiTask, ApiLabel, ApiProjectCategory } from "@/types";
+import { ApiTask, ApiLabel, ApiCustomField, ApiProjectCategory } from "@/types";
 import { AnyColumn } from "@/lib/columns";
 import { TaskCard } from "./TaskCard";
 
@@ -10,6 +10,7 @@ interface ColumnProps {
   tasks: ApiTask[];
   projectKey: string;
   projectLabels?: ApiLabel[];
+  customFields?: ApiCustomField[];
   projectCategories?: ApiProjectCategory[];
   selectedTasks?: Set<string>;
   selectionMode?: boolean;
@@ -28,6 +29,7 @@ export function Column({
   tasks,
   projectKey,
   projectLabels,
+  customFields,
   projectCategories,
   selectedTasks,
   selectionMode,
@@ -170,6 +172,7 @@ export function Column({
                 task={task}
                 projectKey={projectKey}
                 projectLabels={projectLabels}
+                customFields={customFields}
                 projectCategories={projectCategories}
                 selected={selectedTasks?.has(task._id)}
                 selectionActive={selectionMode || (selectedTasks?.size ?? 0) > 0}
