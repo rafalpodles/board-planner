@@ -57,3 +57,29 @@ func openingTheStreamAgainstARunningWorkerDoesNotFailImmediately() async throws 
 
     #expect(Bool(true))
 }
+
+// The whole path the panel depends on, against a real worker: chunked framing, SSE framing, the
+// union decode, and the reducer. Needs a task to be claimed while it runs.
+//
+//   CP_LIVE_SOCKET=... CP_LIVE_RUN=1 swift test --filter followsARealRun
+@Test(.enabled(if: liveSocket != nil && ProcessInfo.processInfo.environment["CP_LIVE_RUN"] != nil),
+      .timeLimit(.minutes(5)))
+func followsARealRun() async throws {
+    let client = liveClient()
+    var state = WorkerState()
+    var events: [TelemetryEvent] = []
+
+    for await event in client.stream() {
+        events.append(event)
+        state.apply(event, at: Date())
+        if case .outcome = event { break }
+    }
+
+    let phases = events.compactMap { if case .progress(let p) = $0 { return p } else { return nil } }
+    print("LIVE phases: \(phases.map(\.phase))")
+    print("LIVE title: \(state.title(now: Date()) ?? "nil"), health: \(state.health)")
+
+    #expect(!phases.isEmpty, "the run emitted no phases")
+    #expect(phases.contains { $0.taskKey != nil }, "no phase named its task")
+    #expect(events.contains { if case .outcome = $0 { return true } else { return false } })
+}
