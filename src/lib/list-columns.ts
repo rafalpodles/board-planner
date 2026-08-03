@@ -1,5 +1,6 @@
 import { ApiCustomField, SortField } from "@/types";
 import { activeFields, sortedFields } from "./custom-fields";
+import { legacyRenderingSuppressed } from "./legacy-fields";
 
 /**
  * A column id is either a built-in sort field or a project field's id. It stopped
@@ -48,10 +49,19 @@ export const BUILT_IN_COLUMNS: ListColumnDef[] = [
 
 /** Built-in columns first, then whatever the project marked `showInList` */
 export function listColumns(fields: ApiCustomField[] = []): ListColumnDef[] {
+  // Once difficulty or component is a project field, its built-in column would be
+  // a second column of the same values (CP-213)
+  const builtIn = BUILT_IN_COLUMNS.filter(
+    (c) =>
+      !(
+        (c.id === "difficulty" && legacyRenderingSuppressed(fields, "difficulty")) ||
+        (c.id === "component" && legacyRenderingSuppressed(fields, "component"))
+      )
+  );
   const fieldColumns = sortedFields(activeFields(fields))
     .filter((f) => f.showInList)
     .map((f) => ({ id: f._id, label: f.name, field: f }));
-  return [...BUILT_IN_COLUMNS, ...fieldColumns];
+  return [...builtIn, ...fieldColumns];
 }
 
 export function hideableColumns(fields: ApiCustomField[] = []): ListColumnDef[] {

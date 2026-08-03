@@ -30,6 +30,7 @@ import {
 import { effectiveColumns } from "@/lib/columns";
 import { parseChecklistString } from "@/lib/checklist";
 import { activeFields, sortedFields, orderedOptions } from "@/lib/custom-fields";
+import { legacyRenderingSuppressed } from "@/lib/legacy-fields";
 import type { GeneratedTask } from "@/lib/ai";
 
 const AUTOSAVE_DEBOUNCE_MS = 700;
@@ -141,6 +142,10 @@ export function TaskForm({
   const [autoSaveState, setAutoSaveState] = useState<AutoSaveState>("idle");
   const api = useApi();
   const { toast } = useToast();
+  // The migrated field carries its own control; the hardcoded one would be a
+  // second input for the same value (CP-213)
+  const migrated = (key: "component" | "difficulty" | "labels") =>
+    legacyRenderingSuppressed(customFields, key);
 
   useEffect(() => {
     api.get("/api/users").then(setUsers).catch(() => toast("Failed to load users", "error"));
@@ -489,12 +494,14 @@ export function TaskForm({
             label: c.label,
           }))}
         />
-        <Select
-          label="Difficulty"
-          value={difficulty}
-          onChange={(e) => setDifficulty(e.target.value as Difficulty)}
-          options={DIFFICULTIES.map((d) => ({ value: d, label: d }))}
-        />
+        {!migrated("difficulty") && (
+          <Select
+            label="Difficulty"
+            value={difficulty}
+            onChange={(e) => setDifficulty(e.target.value as Difficulty)}
+            options={DIFFICULTIES.map((d) => ({ value: d, label: d }))}
+          />
+        )}
         <Select
           label="Priority"
           value={priority}
@@ -510,13 +517,15 @@ export function TaskForm({
           onChange={(e) => setCategory(e.target.value as Category)}
           options={(categories.length > 0 ? categories : CATEGORIES).map((c) => ({ value: c, label: c }))}
         />
-        <Select
-          label="Component"
-          value={component}
-          onChange={(e) => setComponent(e.target.value)}
-          options={components.map((c) => ({ value: c, label: c }))}
-          placeholder="None"
-        />
+        {!migrated("component") && (
+          <Select
+            label="Component"
+            value={component}
+            onChange={(e) => setComponent(e.target.value)}
+            options={components.map((c) => ({ value: c, label: c }))}
+            placeholder="None"
+          />
+        )}
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -677,7 +686,7 @@ export function TaskForm({
         </div>
       )}
 
-      {projectLabels.length > 0 && (
+      {projectLabels.length > 0 && !migrated("labels") && (
         <div>
           <label className="block text-sm font-medium mb-1">Labels</label>
           <div className="flex flex-wrap gap-2">

@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { DIFFICULTIES } from "@/types";
 
 const apiKey = process.env.OPENAI_API_KEY || process.env.OPENAPI_KEY;
 
@@ -38,6 +39,8 @@ interface ProjectContext {
   name: string;
   description: string;
   components: string[];
+  /** Since CP-213 both live as project fields; the fixed lists are only a fallback */
+  difficulties?: string[];
   categories?: string[];
   readme?: string;
   existingTasks?: ExistingTaskSummary[];
@@ -59,6 +62,20 @@ export async function generateTask(
     context.components.length > 0
       ? `Available components: ${context.components.join(", ")}`
       : "No components defined yet.";
+
+  // Driven by the project's own field, so a project that renamed or reordered its
+  // sizes still gets a value it can store (CP-213)
+  const difficultyList = context.difficulties?.length ? context.difficulties : DIFFICULTIES;
+  const usingDefaultSizes =
+    difficultyList.length === DIFFICULTIES.length &&
+    difficultyList.every((d, i) => d === DIFFICULTIES[i]);
+  const difficultyGuide = usingDefaultSizes
+    ? `
+  - S = trivial, few lines of code or config change
+  - M = moderate, a few files, clear approach
+  - L = significant, multiple components, some design decisions
+  - XL = major feature, architectural changes, many files`
+    : "";
 
   const readmeSection = context.readme
     ? `\n\nProject README (truncated):\n${context.readme}`
@@ -83,11 +100,7 @@ ${componentList}${readmeSection}${existingTasksSection}
 You must respond with a JSON object with these exact fields:
 - title: concise imperative task title (max 80 chars)
 - description: detailed description explaining what needs to be done, context, and implementation hints. Use markdown formatting.
-- difficulty: one of "S", "M", "L", "XL" based on estimated complexity
-  - S = trivial, few lines of code or config change
-  - M = moderate, a few files, clear approach
-  - L = significant, multiple components, some design decisions
-  - XL = major feature, architectural changes, many files
+- difficulty: one of ${difficultyList.map((d) => `"${d}"`).join(", ")} based on estimated complexity${difficultyGuide}
 - category: one of ${categoryList.map((c) => `"${c}"`).join(", ")}
 - acceptanceCriteria: markdown checklist of acceptance criteria (use "- [ ]" format)
 - component: best matching component from the available list, or empty string if none match
@@ -119,11 +132,13 @@ When analyzing duplicates and dependencies, consider the semantic meaning, not j
   const parsed = JSON.parse(content) as GeneratedTask;
 
   // Validate and sanitize
-  const validDifficulties = ["S", "M", "L", "XL"];
+  const validDifficulties = difficultyList;
   const validCategories = categoryList;
 
   if (!validDifficulties.includes(parsed.difficulty)) {
-    parsed.difficulty = "M";
+    // Middle of whatever the project's scale is, not a hardcoded "M"
+    parsed.difficulty = (validDifficulties[Math.floor(validDifficulties.length / 2)] ??
+      validDifficulties[0]) as GeneratedTask["difficulty"];
   }
   if (!validCategories.includes(parsed.category)) {
     parsed.category = validCategories.includes("user-story") ? "user-story" : validCategories[0];

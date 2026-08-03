@@ -327,3 +327,66 @@ export function fieldCellText(
   if (field.fieldType === "checkbox") return value === true ? "Yes" : "No";
   return String(value);
 }
+
+/**
+ * Turns `{ "Owoce": "Apples" }` into `{ <fieldId>: <optionId> }`. An MCP client
+ * knows a field by the name a human gave it, never by its id, so the generic
+ * `fields` parameter is resolved here rather than at every call site.
+ *
+ * Throws rather than silently dropping: a caller that names a field wrong should
+ * hear about it, not watch the value vanish.
+ */
+export function resolveFieldsByName(
+  input: Record<string, unknown>,
+  definitions: { _id: string; name: string; fieldType: ICustomField["fieldType"]; options?: LegacyOption[]; archived?: boolean }[]
+): Record<string, unknown> {
+  const byName = new Map(
+    definitions.filter((f) => !f.archived).map((f) => [f.name.toLowerCase(), f])
+  );
+  const values: Record<string, unknown> = {};
+
+  for (const [name, raw] of Object.entries(input || {})) {
+    const field = byName.get(name.trim().toLowerCase());
+    if (!field) {
+      throw new Error(
+        `Unknown field "${name}". Available: ${[...byName.values()].map((f) => f.name).join(", ") || "none"}`
+      );
+    }
+
+    if (field.fieldType === "dropdown" || field.fieldType === "multiselect") {
+      const options = normalizeOptions(field.options);
+      const resolve = (value: unknown) => {
+        const text = String(value).trim().toLowerCase();
+        // Accept the option's own id too, so a client can round-trip what it read
+        const match =
+          options.find((o) => o.id.toLowerCase() === text) ||
+          options.find((o) => o.value.trim().toLowerCase() === text);
+        if (!match) {
+          throw new Error(
+            `"${value}" is not an option of ${field.name}. Available: ${options.map((o) => o.value).join(", ")}`
+          );
+        }
+        return match.id;
+      };
+      values[field._id] =
+        field.fieldType === "multiselect"
+          ? (Array.isArray(raw) ? raw : [raw]).map(resolve)
+          : resolve(raw);
+      continue;
+    }
+
+    if (field.fieldType === "number") {
+      const num = Number(raw);
+      if (Number.isNaN(num)) throw new Error(`${field.name} must be a number`);
+      values[field._id] = num;
+      continue;
+    }
+    if (field.fieldType === "checkbox") {
+      values[field._id] = raw === true || raw === "true";
+      continue;
+    }
+    values[field._id] = String(raw);
+  }
+
+  return values;
+}

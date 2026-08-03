@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withAuth, withAdmin } from "@/lib/middleware";
 import { Project } from "@/models/project";
+import { legacyFieldSeeds } from "@/lib/legacy-fields";
 import { Task } from "@/models/task";
 import { Sprint } from "@/models/sprint";
 import { sanitizeMcpServers } from "@/lib/pm/config";
@@ -72,6 +73,9 @@ export const POST = withAdmin(async (request, { user }) => {
     key,
     description: description || "",
     owner: user._id,
+    // A fresh project looks like a fresh project always did — the difference is
+    // that all three are now editable and removable (CP-213)
+    customFields: legacyFieldSeeds({}),
   });
 
   const populated = await project.populate("owner", "username fullName");
