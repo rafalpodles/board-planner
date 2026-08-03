@@ -10,6 +10,8 @@ vi.mock("@/models/worker", () => ({ Worker: { findById, findOneAndUpdate, update
 
 const {
   collidingAssignment,
+  overriddenPolicy,
+  POLICY_DEFAULTS,
   verdictFor,
   verifyWorkerCredential,
   PROTOCOL_VERSION,
@@ -241,5 +243,40 @@ describe("collidingAssignment", () => {
     );
 
     expect(collision?.assignment.proposedPath).toBe("/repo");
+  });
+});
+
+// The point of tracking overrides: a field nobody set must follow the default, so raising a default
+// reaches every worker that never pinned it. Sending the whole stored policy defeats that — the
+// worker's applyPolicy takes every field present and the default never wins again.
+describe("overriddenPolicy", () => {
+  const policy = { ...POLICY_DEFAULTS, model: "haiku", maxDiffLines: 900 };
+
+  it("sends nothing at all when the operator has set nothing", () => {
+    expect(overriddenPolicy(worker({ policy, policyOverrides: [] }))).toEqual({});
+  });
+
+  it("sends only the fields the operator actually set", () => {
+    expect(overriddenPolicy(worker({ policy, policyOverrides: ["model"] }))).toEqual({
+      model: "haiku",
+    });
+  });
+
+  it("sends a pinned field even when it equals the default", () => {
+    const pinned = { ...POLICY_DEFAULTS, maxDiffLines: POLICY_DEFAULTS.maxDiffLines };
+
+    expect(overriddenPolicy(worker({ policy: pinned, policyOverrides: ["maxDiffLines"] }))).toEqual({
+      maxDiffLines: POLICY_DEFAULTS.maxDiffLines,
+    });
+  });
+
+  it("ignores a name that is not a policy field", () => {
+    expect(overriddenPolicy(worker({ policy, policyOverrides: ["enabled", "model"] }))).toEqual({
+      model: "haiku",
+    });
+  });
+
+  it("treats a worker with no overrides recorded as fully inherited", () => {
+    expect(overriddenPolicy(worker({ policy, policyOverrides: undefined }))).toEqual({});
   });
 });

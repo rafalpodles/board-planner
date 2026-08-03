@@ -401,6 +401,8 @@ export interface IWorker {
   credentialHash: string;
   assignments: WorkerAssignment[];
   policy: WorkerPolicy;
+  // Which policy fields an operator actually set; everything else follows the default
+  policyOverrides: string[];
   enabled: boolean;
   lockedByInstance: boolean;
   lastSeenAt: Date | null;
@@ -421,6 +423,7 @@ export interface ApiWorker {
   protocolVersion: number;
   assignments: Array<{ project: string; proposedPath: string }>;
   policy: WorkerPolicy;
+  policyOverrides: string[];
   enabled: boolean;
   lockedByInstance: boolean;
   lastSeenAt: string | null;

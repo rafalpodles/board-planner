@@ -128,6 +128,7 @@ export const PATCH = withAuth(async (request, { params, user }) => {
   // assigned project reaches into every other project sharing the worker.
   // Resolved lazily and only once. `[].every(...)` is vacuously true, so an
   // unassigned worker is excluded explicitly rather than falling through it.
+  const touchedPolicyFields = new Set<string>();
   let allowedForPolicy: boolean | null = isAdmin ? true : null;
   let verifiedProjectIds = new Set<string>();
   for (const field of POLICY_FIELDS) {
@@ -164,6 +165,13 @@ export const PATCH = withAuth(async (request, { params, user }) => {
       }
       update[`policy.${field}`] = body[field];
     }
+    touchedPolicyFields.add(field);
+  }
+
+  // Recorded even when the value matches the default: pinning a field so a later change to the
+  // default does not move it is exactly what an operator may be doing here.
+  if (touchedPolicyFields.size > 0) {
+    update.policyOverrides = [...new Set([...(worker.policyOverrides ?? []), ...touchedPolicyFields])];
   }
 
   if (Object.keys(update).length === 0) {
