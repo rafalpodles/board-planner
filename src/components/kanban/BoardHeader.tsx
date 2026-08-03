@@ -58,61 +58,65 @@ export function BoardHeader({
   return (
     // z-30 keeps the scope menu over the board: @container makes the header a stacking context
     <header className="@container relative z-30 flex h-14 shrink-0 items-center gap-3 border-b border-border bg-bg px-6">
-      <div className="flex min-w-0 items-center gap-2">
-        <span aria-hidden className="hidden shrink-0 text-[17px] leading-none @md:inline">
-          {projectIcon || DEFAULT_PROJECT_ICON}
-        </span>
-        <div className="min-w-0">
-          <h1 className="truncate text-[15px] font-semibold leading-tight">{projectName}</h1>
-          <div
-            ref={scopeRef}
-            className="relative flex items-center gap-1 text-[11px] leading-tight text-text-muted"
-          >
-            {sprints.length > 0 && (
-              <button
-                type="button"
-                onClick={() => setScopeOpen((v) => !v)}
-                aria-expanded={scopeOpen}
-                aria-label="Change sprint scope"
-                className="focus-ring max-w-[12rem] truncate rounded px-1 py-0.5 text-text-muted underline decoration-dotted underline-offset-2 transition-colors hover:text-text"
-              >
-                {scopeLabel ?? "All tasks"}
-              </button>
-            )}
+      <div className="min-w-0">
+        {/* Own row: centred on the title+scope block the icon hangs below the title */}
+        <div className="flex items-center gap-2">
+          <span aria-hidden className="hidden shrink-0 text-2xl leading-none @md:inline">
+            {projectIcon || DEFAULT_PROJECT_ICON}
+          </span>
+          {/* 24px fits five characters in the ~90px a narrow header leaves the title */}
+          <h1 className="truncate text-[15px] font-bold leading-tight @md:text-2xl">
+            {projectName}
+          </h1>
+        </div>
+        <div
+          ref={scopeRef}
+          className="relative flex items-center gap-1 text-[11px] leading-tight text-text-muted"
+        >
+          {sprints.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setScopeOpen((v) => !v)}
+              aria-expanded={scopeOpen}
+              aria-label="Change sprint scope"
+              className="focus-ring max-w-[12rem] truncate rounded px-1 py-0.5 text-text-muted underline decoration-dotted underline-offset-2 transition-colors hover:text-text"
+            >
+              {scopeLabel ?? "All tasks"}
+            </button>
+          )}
 
-            {scopeOpen && (
-              <div
-                role="menu"
-                aria-label="Sprint scope"
-                className="absolute left-0 top-full z-40 mt-1 w-56 overflow-hidden rounded-lg border border-border bg-bg-card py-1 shadow-lg"
-              >
-                <ScopeOption label="All tasks" value={ALL_TASKS} scope={scope} onPick={pick} />
+          {scopeOpen && (
+            <div
+              role="menu"
+              aria-label="Sprint scope"
+              className="absolute left-0 top-full z-40 mt-1 w-56 overflow-hidden rounded-lg border border-border bg-bg-card py-1 shadow-lg"
+            >
+              <ScopeOption label="All tasks" value={ALL_TASKS} scope={scope} onPick={pick} />
+              <ScopeOption
+                label="Backlog (no sprint)"
+                value={BACKLOG}
+                scope={scope}
+                onPick={pick}
+              />
+              {activeSprint && (
                 <ScopeOption
-                  label="Backlog (no sprint)"
-                  value={BACKLOG}
+                  label={`${activeSprint.name} (Active)`}
+                  value={activeSprint._id}
                   scope={scope}
                   onPick={pick}
                 />
-                {activeSprint && (
-                  <ScopeOption
-                    label={`${activeSprint.name} (Active)`}
-                    value={activeSprint._id}
-                    scope={scope}
-                    onPick={pick}
-                  />
-                )}
-                {plannedSprints.map((s) => (
-                  <ScopeOption
-                    key={s._id}
-                    label={s.name}
-                    value={s._id}
-                    scope={scope}
-                    onPick={pick}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
+              )}
+              {plannedSprints.map((s) => (
+                <ScopeOption
+                  key={s._id}
+                  label={s.name}
+                  value={s._id}
+                  scope={scope}
+                  onPick={pick}
+                />
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
