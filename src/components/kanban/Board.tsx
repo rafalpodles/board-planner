@@ -68,7 +68,9 @@ export function Board({
   return (
     <div className="relative lg:h-full">
       <div
-        className="overflow-x-auto pb-4 overscroll-x-contain lg:h-full"
+        // pt-4 matches pb-4: without it the columns' coloured top border lands on
+        // the exact pixel row as the filter bar's divider, reading as one thick line
+        className="overflow-x-auto py-4 overscroll-x-contain lg:h-full"
         style={{ WebkitOverflowScrolling: "touch" }}
       >
         <div
