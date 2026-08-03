@@ -20,7 +20,7 @@ function getClient(): OpenAI {
 export interface GeneratedTask {
   title: string;
   description: string;
-  difficulty: "S" | "M" | "L" | "XL";
+  difficulty: string;
   category: string;
   acceptanceCriteria: string;
   component: string;
@@ -29,6 +29,8 @@ export interface GeneratedTask {
   suggestedBlockedBy: number[];
   suggestedBlocking: number[];
   dependencyReason: string;
+  /** Difficulty and Component resolved to option ids by the route that knows the project */
+  customFieldValues?: Record<string, unknown>;
 }
 
 export interface ExistingTaskSummary {
