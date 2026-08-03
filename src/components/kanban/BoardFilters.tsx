@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
-  ApiTask,
+  ApiTask, ApiCustomField,
   ApiLabel,
   ApiProjectCategory,
   DIFFICULTIES,
@@ -12,7 +12,7 @@ import {
   PRIORITY_ORDER,
   SORT_OPTIONS,
   BOARD_SORT_FIELDS,
-  SortField,
+  SortField, SortKey,
   SortDir,
   Difficulty,
   Category,
@@ -29,7 +29,16 @@ import {
   EMPTY_FILTERS,
   countActiveFilters,
   migratePersistedFilters,
+  isFieldFilterSet,
+  type FieldFilter,
+  type BuiltInFilterKey,
 } from "@/lib/board-filters-state";
+import {
+  activeFields,
+  matchesAllFieldFilters,
+  orderedOptions,
+  sortedFields,
+} from "@/lib/custom-fields";
 
 interface Filters extends BoardFilterValues {
   search: string;
@@ -67,13 +76,14 @@ interface BoardFiltersProps {
   extraControls?: React.ReactNode;
   /** Sort is owned above this component so the list view's column headers and
       this dropdown drive the same value */
-  sortField: SortField;
+  sortField: SortKey;
   sortDir: SortDir;
-  onSortChange: (field: SortField, dir: SortDir) => void;
+  onSortChange: (field: SortKey, dir: SortDir) => void;
   /** Which fields the dropdown offers; the current value is always included */
   sortFields?: SortField[];
   sortContext?: SortContext;
   hiddenColumns?: ListColumnId[];
+  customFields?: ApiCustomField[];
   onHiddenColumnsChange?: (hidden: ListColumnId[]) => void;
   onFilter: (filtered: ApiTask[]) => void;
 }
@@ -96,6 +106,7 @@ export function BoardFilters({
   hiddenColumns,
   onHiddenColumnsChange,
   onFilter,
+  customFields = [],
 }: BoardFiltersProps) {
   const [initialized, setInitialized] = useState(false);
   const [filters, setFilters] = useState<Filters>({ search: "", ...EMPTY_FILTERS });
@@ -111,7 +122,7 @@ export function BoardFilters({
     } catch {
       raw = null;
     }
-    const state = migratePersistedFilters(raw, currentUsername);
+    const state = migratePersistedFilters(raw, currentUsername, customFields);
     setFilters((f) => ({ ...f, ...state.filters }));
     onSortChange(state.sortField, state.sortDir);
     onHiddenColumnsChange?.(state.hiddenColumns);
@@ -198,6 +209,11 @@ export function BoardFilters({
     if (filters.label) {
       result = result.filter((t) => (t.labels || []).includes(filters.label));
     }
+    if (Object.keys(filters.fields || {}).length) {
+      result = result.filter((t) =>
+        matchesAllFieldFilters(t.customFieldValues, filters.fields, customFields)
+      );
+    }
     if (filters.dateRange) {
       const now = Date.now();
       const DAY = 86_400_000;
@@ -237,11 +253,41 @@ export function BoardFilters({
     setFilters((f) => ({ ...EMPTY_FILTERS, search: f.search }));
   }
 
-  function unset(key: keyof BoardFilterValues) {
+  function unset(key: BuiltInFilterKey) {
     setFilters((f) => ({ ...f, [key]: "" }));
   }
 
-  const chips: { key: keyof BoardFilterValues; label: string; colour?: string; initial?: string }[] =
+  const filterableFields = sortedFields(activeFields(customFields)).filter((f) => f.filterable);
+
+  function fieldFilter(fieldId: string): FieldFilter {
+    return filters.fields?.[fieldId] ?? {};
+  }
+
+  function clearFieldFilter(fieldId: string) {
+    setFilters((f) => {
+      const fields = { ...(f.fields ?? {}) };
+      delete fields[fieldId];
+      return { ...f, fields };
+    });
+  }
+
+  function setFieldFilter(fieldId: string, patch: FieldFilter) {
+    setFilters((f) => {
+      const next = { ...(f.fields?.[fieldId] ?? {}), ...patch };
+      const fields = { ...(f.fields ?? {}) };
+      if (isFieldFilterSet(next)) fields[fieldId] = next;
+      else delete fields[fieldId];
+      return { ...f, fields };
+    });
+  }
+
+  const chips: {
+    key: BuiltInFilterKey | string;
+    label: string;
+    colour?: string;
+    initial?: string;
+    fieldId?: string;
+  }[] =
     [];
   if (filters.assignee) {
     chips.push({
@@ -273,6 +319,20 @@ export function BoardFilters({
       key: "dateRange",
       label: DATE_PRESETS.find((p) => p.value === filters.dateRange)?.label ?? filters.dateRange,
     });
+  }
+
+  // Field chips carry the field's name, because "5" on its own says nothing
+  for (const field of filterableFields) {
+    const filter = filters.fields?.[field._id];
+    if (!isFieldFilterSet(filter)) continue;
+    const option = orderedOptions(field).find((o) => o.id === filter?.value);
+    const range = [filter?.from, filter?.to];
+    const label = option
+      ? `${field.name}: ${option.value}`
+      : filter?.value
+        ? `${field.name}: ${filter.value}`
+        : `${field.name}: ${range[0] || "…"}–${range[1] || "…"}`;
+    chips.push({ key: `field:${field._id}`, label, colour: option?.color, fieldId: field._id });
   }
 
   const selectClass =
@@ -361,7 +421,11 @@ export function BoardFilters({
                       colour={chip.colour}
                       initial={chip.initial}
                       isAssignee={chip.key === "assignee"}
-                      onRemove={() => unset(chip.key)}
+                      onRemove={() =>
+                        chip.fieldId
+                          ? clearFieldFilter(chip.fieldId)
+                          : unset(chip.key as BuiltInFilterKey)
+                      }
                     />
                   ))}
                 </div>
@@ -476,6 +540,69 @@ export function BoardFilters({
                 </select>
               </Field>
             </div>
+
+            {filterableFields.length > 0 && (
+              <>
+                <div className="my-3 h-px bg-border" />
+                <div className="grid grid-cols-2 gap-2">
+                  {filterableFields.map((field) => (
+                    <Field key={field._id} label={field.name}>
+                      {field.fieldType === "number" || field.fieldType === "date" ? (
+                        // From/to rather than one box: a range is what people want from
+                        // a number, and one input cannot express it
+                        <div className="flex items-center gap-1">
+                          <input
+                            type={field.fieldType === "date" ? "date" : "number"}
+                            value={fieldFilter(field._id).from ?? ""}
+                            onChange={(e) => setFieldFilter(field._id, { from: e.target.value })}
+                            aria-label={`${field.name} from`}
+                            placeholder="from"
+                            className={`${selectClass} min-w-0`}
+                          />
+                          <input
+                            type={field.fieldType === "date" ? "date" : "number"}
+                            value={fieldFilter(field._id).to ?? ""}
+                            onChange={(e) => setFieldFilter(field._id, { to: e.target.value })}
+                            aria-label={`${field.name} to`}
+                            placeholder="to"
+                            className={`${selectClass} min-w-0`}
+                          />
+                        </div>
+                      ) : field.fieldType === "text" ? (
+                        <input
+                          value={fieldFilter(field._id).value ?? ""}
+                          onChange={(e) => setFieldFilter(field._id, { value: e.target.value })}
+                          aria-label={field.name}
+                          placeholder="contains…"
+                          className={selectClass}
+                        />
+                      ) : (
+                        <select
+                          value={fieldFilter(field._id).value ?? ""}
+                          onChange={(e) => setFieldFilter(field._id, { value: e.target.value })}
+                          aria-label={field.name}
+                          className={selectClass}
+                        >
+                          <option value="">All</option>
+                          {field.fieldType === "checkbox" ? (
+                            <>
+                              <option value="true">Yes</option>
+                              <option value="false">No</option>
+                            </>
+                          ) : (
+                            orderedOptions(field).map((option) => (
+                              <option key={option.id} value={option.id}>
+                                {option.value}
+                              </option>
+                            ))
+                          )}
+                        </select>
+                      )}
+                    </Field>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         )}
       </div>
@@ -519,7 +646,11 @@ export function BoardFilters({
       </div>
 
       {onHiddenColumnsChange && (
-        <ColumnPicker hidden={hiddenColumns ?? []} onChange={onHiddenColumnsChange} />
+        <ColumnPicker
+          hidden={hiddenColumns ?? []}
+          onChange={onHiddenColumnsChange}
+          customFields={customFields}
+        />
       )}
 
       {extraControls}

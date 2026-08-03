@@ -7,6 +7,8 @@ import {
   orderedOptions,
   validateCustomFieldValues,
   sanitizeCustomFieldValues,
+  matchesFieldFilter,
+  matchesAllFieldFilters,
 } from "./custom-fields";
 import { DEFAULT_OPTION_COLOR, ICustomField } from "@/types";
 
@@ -167,5 +169,72 @@ describe("sanitizeCustomFieldValues", () => {
     expect(sanitizeCustomFieldValues({ a1: "x", gone: "y" }, [field({ _id: "a1" })])).toEqual({
       a1: "x",
     });
+  });
+});
+
+describe("matchesFieldFilter", () => {
+  const number = { fieldType: "number" as const };
+  const date = { fieldType: "date" as const };
+  const text = { fieldType: "text" as const };
+  const check = { fieldType: "checkbox" as const };
+  const multi = { fieldType: "multiselect" as const };
+
+  it("treats a range as inclusive and open-ended at either end", () => {
+    expect(matchesFieldFilter(5, { from: "3", to: "8" }, number)).toBe(true);
+    expect(matchesFieldFilter(3, { from: "3", to: "8" }, number)).toBe(true);
+    expect(matchesFieldFilter(8, { from: "3", to: "8" }, number)).toBe(true);
+    expect(matchesFieldFilter(2, { from: "3" }, number)).toBe(false);
+    expect(matchesFieldFilter(99, { from: "3" }, number)).toBe(true);
+    expect(matchesFieldFilter(2, { to: "3" }, number)).toBe(true);
+  });
+
+  // A blank has no position on a number line, so a range must exclude it
+  it("excludes an empty value from any range", () => {
+    expect(matchesFieldFilter(undefined, { from: "3" }, number)).toBe(false);
+    expect(matchesFieldFilter("", { to: "9" }, number)).toBe(false);
+  });
+
+  it("lets everything through when the range is unset", () => {
+    expect(matchesFieldFilter(undefined, {}, number)).toBe(true);
+  });
+
+  it("compares dates chronologically", () => {
+    expect(matchesFieldFilter("2026-05-01", { from: "2026-01-01", to: "2026-12-31" }, date)).toBe(true);
+    expect(matchesFieldFilter("2025-05-01", { from: "2026-01-01" }, date)).toBe(false);
+  });
+
+  it("matches text by case-insensitive substring", () => {
+    expect(matchesFieldFilter("Hello World", { value: "wor" }, text)).toBe(true);
+    expect(matchesFieldFilter("Hello", { value: "zzz" }, text)).toBe(false);
+  });
+
+  it("matches a checkbox on both true and false", () => {
+    expect(matchesFieldFilter(true, { value: "true" }, check)).toBe(true);
+    expect(matchesFieldFilter(false, { value: "false" }, check)).toBe(true);
+    expect(matchesFieldFilter(true, { value: "false" }, check)).toBe(false);
+  });
+
+  it("matches a multiselect when the option is among the picked ones", () => {
+    expect(matchesFieldFilter(["a", "b"], { value: "b" }, multi)).toBe(true);
+    expect(matchesFieldFilter(["a"], { value: "b" }, multi)).toBe(false);
+    expect(matchesFieldFilter(undefined, { value: "b" }, multi)).toBe(false);
+  });
+});
+
+describe("matchesAllFieldFilters", () => {
+  const definitions = [
+    { _id: "f1", fieldType: "number" as const },
+    { _id: "f2", fieldType: "text" as const },
+  ];
+
+  it("requires every filter to pass", () => {
+    const values = { f1: 5, f2: "hello" };
+    expect(matchesAllFieldFilters(values, { f1: { from: "3" }, f2: { value: "hell" } }, definitions)).toBe(true);
+    expect(matchesAllFieldFilters(values, { f1: { from: "9" }, f2: { value: "hell" } }, definitions)).toBe(false);
+  });
+
+  // A stale filter should not blank the board while it is being cleaned up
+  it("ignores a filter whose field is gone rather than hiding everything", () => {
+    expect(matchesAllFieldFilters({ f1: 5 }, { ghost: { value: "x" } }, definitions)).toBe(true);
   });
 });

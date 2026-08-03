@@ -1,7 +1,14 @@
-import { SortField } from "@/types";
+import { ApiCustomField, SortField } from "@/types";
+import { activeFields, sortedFields } from "./custom-fields";
 
-/** Column ids double as sort fields, so hiding one also hides its sort control */
-export type ListColumnId = Extract<
+/**
+ * A column id is either a built-in sort field or a project field's id. It stopped
+ * being a closed union in CP-212: a project can add a column, so the set is a
+ * function of the project rather than a constant.
+ */
+export type ListColumnId = string;
+
+export type BuiltInColumnId = Extract<
   SortField,
   | "key"
   | "title"
@@ -21,9 +28,11 @@ export interface ListColumnDef {
   label: string;
   /** Cannot be hidden — a row with no title is not a row */
   fixed?: boolean;
+  /** Set for a project field, so the picker can group the two apart */
+  field?: ApiCustomField;
 }
 
-export const LIST_COLUMNS: ListColumnDef[] = [
+export const BUILT_IN_COLUMNS: ListColumnDef[] = [
   { id: "key", label: "Key", fixed: true },
   { id: "title", label: "Title", fixed: true },
   { id: "status", label: "Status" },
@@ -37,30 +46,44 @@ export const LIST_COLUMNS: ListColumnDef[] = [
   { id: "updatedAt", label: "Updated" },
 ];
 
-export const HIDEABLE_COLUMNS = LIST_COLUMNS.filter((c) => !c.fixed);
+/** Built-in columns first, then whatever the project marked `showInList` */
+export function listColumns(fields: ApiCustomField[] = []): ListColumnDef[] {
+  const fieldColumns = sortedFields(activeFields(fields))
+    .filter((f) => f.showInList)
+    .map((f) => ({ id: f._id, label: f.name, field: f }));
+  return [...BUILT_IN_COLUMNS, ...fieldColumns];
+}
+
+export function hideableColumns(fields: ApiCustomField[] = []): ListColumnDef[] {
+  return listColumns(fields).filter((c) => !c.fixed);
+}
 
 /** Every column on by default, which is what the list showed before this existed */
 export const DEFAULT_HIDDEN: ListColumnId[] = [];
 
 export function isColumnVisible(id: ListColumnId, hidden: ListColumnId[]): boolean {
-  const column = LIST_COLUMNS.find((c) => c.id === id);
+  const column = BUILT_IN_COLUMNS.find((c) => c.id === id);
   if (column?.fixed) return true;
   return !hidden.includes(id);
 }
 
 export function toggleColumn(hidden: ListColumnId[], id: ListColumnId): ListColumnId[] {
-  const column = LIST_COLUMNS.find((c) => c.id === id);
+  const column = BUILT_IN_COLUMNS.find((c) => c.id === id);
   if (column?.fixed) return hidden;
   return hidden.includes(id) ? hidden.filter((h) => h !== id) : [...hidden, id];
 }
 
 /** Drops ids that are unknown or fixed, so a stale stored blob cannot hide the title */
-export function sanitizeHidden(raw: unknown): ListColumnId[] {
+/**
+ * Drops ids that are no longer columns. Passing the project's fields is what stops
+ * an archived field from leaving a hidden-column entry nobody can see or clear.
+ */
+export function sanitizeHidden(raw: unknown, fields: ApiCustomField[] = []): ListColumnId[] {
   if (!Array.isArray(raw)) return DEFAULT_HIDDEN;
-  const hideable = new Set(HIDEABLE_COLUMNS.map((c) => c.id as string));
+  const hideable = new Set(hideableColumns(fields).map((c) => c.id));
   return [...new Set(raw.filter((id): id is ListColumnId => typeof id === "string" && hideable.has(id)))];
 }
 
-export function visibleCount(hidden: ListColumnId[]): number {
-  return LIST_COLUMNS.length - sanitizeHidden(hidden).length;
+export function visibleCount(hidden: ListColumnId[], fields: ApiCustomField[] = []): number {
+  return listColumns(fields).length - sanitizeHidden(hidden, fields).length;
 }

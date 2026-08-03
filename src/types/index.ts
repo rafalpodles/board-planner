@@ -816,6 +816,10 @@ export type SortField =
   | "component";
 export type SortDir = "asc" | "desc";
 
+/** A sort key is a built-in field or a project field's id (CP-212). The `string & {}`
+ * keeps editor completion for the built-ins instead of collapsing to plain string. */
+export type SortKey = SortField | (string & {});
+
 export const SORT_OPTIONS: { value: SortField; label: string; defaultDir: SortDir }[] = [
   { value: "manual", label: "Manual order", defaultDir: "asc" },
   { value: "key", label: "Key", defaultDir: "asc" },
@@ -848,7 +852,7 @@ export const BOARD_SORT_FIELDS: SortField[] = [
 
 export const LIST_SORT_FIELDS: SortField[] = SORT_OPTIONS.map((o) => o.value);
 
-export function defaultSortDir(field: SortField): SortDir {
+export function defaultSortDir(field: SortKey): SortDir {
   return SORT_OPTIONS.find((o) => o.value === field)?.defaultDir ?? "asc";
 }
 

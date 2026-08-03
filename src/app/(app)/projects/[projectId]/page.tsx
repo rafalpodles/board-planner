@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { usePollWhileVisible } from "@/hooks/use-poll-while-visible";
-import { ApiProject, ApiTask, ApiSprint , BOARD_SORT_FIELDS, LIST_SORT_FIELDS, SortField, SortDir } from "@/types";
+import { ApiProject, ApiTask, ApiSprint , BOARD_SORT_FIELDS, LIST_SORT_FIELDS, SortField, SortKey, SortDir } from "@/types";
 import { effectiveColumns } from "@/lib/columns";
 import { ListColumnId } from "@/lib/list-columns";
 import { subscribeBoardRefresh } from "@/lib/board-refresh";
@@ -80,7 +80,7 @@ export default function KanbanPage() {
   const [now, setNow] = useState(() => Date.now());
   // One owner for both views: the filter bar's dropdown and the list's column
   // headers set the same value, and it survives switching between them
-  const [sortField, setSortField] = useState<SortField>("manual");
+  const [sortField, setSortField] = useState<SortKey>("manual");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [hiddenColumns, setHiddenColumns] = useState<ListColumnId[]>([]);
 
@@ -109,8 +109,9 @@ export default function KanbanPage() {
     () => ({
       statusOrder: new Map(effectiveColumns(project?.columns).map((c, i) => [c.id, i])),
       sprintById: new Map(sprints.map((sp) => [sp._id, sp])),
+      fieldById: new Map((project?.customFields || []).map((f) => [f._id, f])),
     }),
-    [project?.columns, sprints]
+    [project?.columns, project?.customFields, sprints]
   );
 
   const loadData = useCallback(async () => {
@@ -420,6 +421,7 @@ export default function KanbanPage() {
 
       <BoardFilters
         tasks={tasks}
+        customFields={project.customFields || []}
         components={project.components}
         projectKey={project.key}
         labels={project.labels || []}
@@ -492,6 +494,7 @@ export default function KanbanPage() {
           tasks={filteredTasks}
           projectKey={project.key}
           projectId={projectId}
+          customFields={project.customFields || []}
           sprints={sprints}
           categories={project.categories || []}
           columns={project.columns || []}
