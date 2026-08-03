@@ -49,7 +49,7 @@ const task = {
   linkedPRs: [],
   relations: [],
   blockedBy: [],
-  customFieldValues: {},
+  customFieldValues: { f1: "XL" },
   recurrence: null,
   sprint: null,
   createdBy: { _id: "u2", username: "claude", fullName: "Claude Code" },
@@ -159,6 +159,22 @@ describe("TaskDetail", () => {
     await act(async () => del.click());
     expect(screen.getByText(/cannot be undone/)).toBeTruthy();
     expect(api.del).not.toHaveBeenCalled();
+  });
+
+  // Columns are per project since CP-128, so sending a literal "planned" is a 400 in any
+  // project that renamed or rebuilt its board — the server picks the backlog column itself
+  it("duplicates without dictating a status, and carries the custom fields over", async () => {
+    api.post.mockResolvedValue({ taskNumber: 7 });
+    renderDetail();
+    await loaded();
+
+    await act(async () => screen.getByRole("button", { name: /^Duplicate$/ }).click());
+
+    const [url, body] = api.post.mock.calls.at(-1)!;
+    expect(url).toBe("/api/projects/TP/tasks");
+    expect(body).not.toHaveProperty("status");
+    expect(body.customFieldValues).toEqual(task.customFieldValues);
+    expect(body.title).toBe("Copy of Recurring one");
   });
 
   it("closes rather than navigating when the top bar is dismissed", async () => {
