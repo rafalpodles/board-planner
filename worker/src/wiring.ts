@@ -133,6 +133,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       repoPath: repo.path,
       worktreeRoot: repo.worktreeRoot,
       workerId: identity.workerId,
+      autoMerge: policy.autoMerge,
       baseBranch: policy.baseBranch,
       pollIntervalMs: policy.pollIntervalMs,
       taskTimeoutMs: policy.taskTimeoutMs,

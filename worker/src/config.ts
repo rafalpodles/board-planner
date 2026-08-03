@@ -6,6 +6,7 @@ import { join } from "path";
 // task: Bootstrap's connection details plus the current EffectiveConfig policy plus one assignment's
 // bound repository. main.ts assembles it at runtime; nothing loads it from the environment anymore.
 export interface WorkerConfig {
+  autoMerge: boolean;
   apiBaseUrl: string;
   apiToken: string;
   repoPath: string;
@@ -49,6 +50,7 @@ export interface Bootstrap {
 // Mirrors the server's WorkerPolicy (src/types/index.ts): worker-wide settings an instance or
 // project admin edits in /settings/workers, never the laptop's own environment.
 export interface EffectiveConfig {
+  autoMerge: boolean;
   baseBranch: string;
   pollIntervalMs: number;
   taskTimeoutMs: number;
@@ -60,6 +62,9 @@ export interface EffectiveConfig {
 }
 
 export const DEFAULT_POLICY: EffectiveConfig = {
+  // Off by default, deliberately: a worker nobody has configured pushes a branch and opens a pull
+  // request, and stops there. Merging is a thing an operator turns on.
+  autoMerge: false,
   baseBranch: "main",
   pollIntervalMs: 30_000,
   taskTimeoutMs: 1_800_000,
@@ -162,6 +167,7 @@ export function applyPolicy(current: EffectiveConfig, patch: unknown): Effective
   const source = patch as Record<string, unknown>;
   const next = { ...current };
 
+  if (typeof source.autoMerge === "boolean") next.autoMerge = source.autoMerge;
   if (isNonEmptyString(source.baseBranch)) next.baseBranch = source.baseBranch.trim();
   if (isPositiveNumber(source.pollIntervalMs)) next.pollIntervalMs = source.pollIntervalMs;
   if (isPositiveNumber(source.taskTimeoutMs)) next.taskTimeoutMs = source.taskTimeoutMs;

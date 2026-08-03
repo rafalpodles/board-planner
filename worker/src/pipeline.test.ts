@@ -37,6 +37,7 @@ const board = ["ready", "doing", "checking", "shipped"];
 const diff: DiffStats = { changedLines: 10, changedFiles: ["a.ts"], patch: "d", truncated: false };
 
 const config: WorkerConfig = {
+  autoMerge: true,
   apiBaseUrl: "http://localhost:3000",
   apiToken: "token",
   repoPath: "/repo",
@@ -87,6 +88,7 @@ function harness(overrides: Partial<PipelineDeps> = {}) {
     released: vi.fn<Reporter["released"]>().mockResolvedValue(undefined),
     requeued: vi.fn<Reporter["requeued"]>().mockResolvedValue(undefined),
     merged: vi.fn<Reporter["merged"]>().mockResolvedValue(undefined),
+    delivered: vi.fn<Reporter["delivered"]>().mockResolvedValue(undefined),
     failed: vi.fn<Reporter["failed"]>().mockResolvedValue(undefined),
   };
   const createReporter = vi.fn<PipelineDeps["createReporter"]>(() => reporter);
@@ -793,5 +795,65 @@ describe("what the run says it is doing", () => {
 
     expect(h.executor.execute.mock.calls[0][3]).toBeUndefined();
     expect(h.reporter.merged).toHaveBeenCalled();
+  });
+});
+
+// Off by default: a worker nobody configured pushes a branch, opens a pull request and stops.
+describe("autoMerge", () => {
+  const manual = { ...config, autoMerge: false };
+
+  it("opens the pull request and stops, without merging", async () => {
+    const h = harness({ config: manual });
+
+    await runTask(h.deps, task);
+
+    expect(h.delivery.push).toHaveBeenCalled();
+    expect(h.delivery.openPr).toHaveBeenCalled();
+    expect(h.delivery.merge).not.toHaveBeenCalled();
+  });
+
+  it("reports it as delivered for review, never as merged", async () => {
+    const h = harness({ config: manual });
+
+    await runTask(h.deps, task);
+
+    expect(h.reporter.delivered).toHaveBeenCalledWith(task, "https://x/pull/7", "did it");
+    expect(h.reporter.merged).not.toHaveBeenCalled();
+  });
+
+  it("never reaches the merge phase", async () => {
+    const telemetry = createTelemetry();
+    const seen: TelemetryUpdate[] = [];
+    telemetry.subscribe((u) => seen.push(u));
+    const h = harness({ config: manual, telemetry });
+
+    await runTask(h.deps, task);
+
+    const phases = seen.filter((u): u is Progress => !isQuota(u) && !isOutcome(u)).map((u) => u.phase);
+    expect(phases).toContain("pr");
+    expect(phases).not.toContain("merge");
+  });
+
+  it("emits a delivered outcome carrying the pull request url", async () => {
+    const telemetry = createTelemetry();
+    const seen: TelemetryUpdate[] = [];
+    telemetry.subscribe((u) => seen.push(u));
+    const h = harness({ config: manual, telemetry });
+
+    await runTask(h.deps, task);
+
+    expect(seen.filter(isOutcome)).toEqual([
+      { outcome: "delivered", taskKey: "CP-158", detail: "https://x/pull/7" },
+    ]);
+  });
+
+  it("still merges when the operator has turned it on", async () => {
+    const h = harness({ config: { ...config, autoMerge: true } });
+
+    await runTask(h.deps, task);
+
+    expect(h.delivery.merge).toHaveBeenCalled();
+    expect(h.reporter.merged).toHaveBeenCalled();
+    expect(h.reporter.delivered).not.toHaveBeenCalled();
   });
 });

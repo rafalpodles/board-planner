@@ -14,6 +14,7 @@ const MILLISECOND_FIELDS: ReadonlySet<string> = new Set([
 ]);
 
 function format(field: PolicyField, value: unknown): string {
+  if (typeof value === "boolean") return value ? "on" : "off";
   if (value === undefined || value === null || value === "") return "—";
   if (MILLISECOND_FIELDS.has(field)) return `${Math.round(Number(value) / 1000)}s`;
   return String(value);

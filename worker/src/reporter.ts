@@ -11,6 +11,7 @@ export interface Reporter {
   released(task: ClaimedTask, reason: string): Promise<void>;
   requeued(task: ClaimedTask, reason: string): Promise<void>;
   merged(task: ClaimedTask, prUrl: string, summary: string): Promise<void>;
+  delivered(task: ClaimedTask, prUrl: string, summary: string): Promise<void>;
   failed(task: ClaimedTask, reason: string): Promise<void>;
 }
 
@@ -134,6 +135,16 @@ export function createReporter(
       // The url is built by delivery.ts from gh output and its regex admits userinfo, so a
       // credential-bearing remote would otherwise publish its token as a permanent comment
       await report(task, statusIds.done, `Merged ${scrub(prUrl)}\n\n${safeText(summary)}`);
+    },
+
+    // autoMerge off: the branch is pushed and a pull request is open, so the work is safe and a
+    // human decides. Review, not done — nothing has landed on the base branch.
+    async delivered(task, prUrl, summary) {
+      await report(
+        task,
+        statusIds.review,
+        `Opened ${scrub(prUrl)} for review. The worker did not merge it.\n\n${safeText(summary)}`
+      );
     },
 
     async failed(task, reason) {
