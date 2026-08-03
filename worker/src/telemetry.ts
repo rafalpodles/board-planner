@@ -9,6 +9,9 @@ export interface ToolActivity {
 
 export interface Progress {
   phase: Phase;
+  // Optional because summarise() builds a Progress from an agent stream event, which has no task in
+  // scope; the pipeline's own emits carry it.
+  taskKey?: string;
   tool?: ToolActivity;
   turns?: number;
   costUsd?: number;
@@ -21,7 +24,21 @@ export interface Quota {
   rateLimitType?: string;
 }
 
-export type TelemetryUpdate = Progress | Quota;
+export type OutcomeKind =
+  | "merged"
+  | "gateRejected"
+  | "blocked"
+  | "released"
+  | "requeued"
+  | "failed";
+
+export interface Outcome {
+  outcome: OutcomeKind;
+  taskKey: string;
+  detail?: string;
+}
+
+export type TelemetryUpdate = Progress | Quota | Outcome;
 
 export type TelemetryListener = (update: TelemetryUpdate) => void;
 
@@ -60,6 +77,10 @@ const KNOWN_STATUSES: readonly RateLimitStatus[] = ["allowed", "allowed_warning"
 
 export function isQuota(update: TelemetryUpdate): update is Quota {
   return "status" in update;
+}
+
+export function isOutcome(update: TelemetryUpdate): update is Outcome {
+  return "outcome" in update;
 }
 
 // The only values that ever leave a tool input. Read by name and never spread, so an unlisted key
@@ -146,7 +167,7 @@ export function createTelemetry(): Telemetry {
   const ring: Progress[] = [];
 
   function emit(update: TelemetryUpdate): void {
-    if (!isQuota(update)) {
+    if (!isQuota(update) && !isOutcome(update)) {
       ring.push(update);
       if (ring.length > RECENT_LIMIT) ring.shift();
     }

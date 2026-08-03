@@ -6,7 +6,7 @@ import { Delivery } from "./delivery.js";
 import { CommandResult, Runner } from "./exec.js";
 import { Executor } from "./executor.js";
 import { Reporter } from "./reporter.js";
-import { createTelemetry, isQuota, TelemetryUpdate } from "./telemetry.js";
+import { createTelemetry, isOutcome, isQuota, Progress, TelemetryUpdate } from "./telemetry.js";
 import { Workspace } from "./workspace.js";
 import { ClaimedTask, DiffStats, ExecutionResult, Gate } from "./types.js";
 import { PipelineDeps, resolveStatusIds, runTask } from "./pipeline.js";
@@ -620,7 +620,14 @@ describe("what the run says it is doing", () => {
     const seen: TelemetryUpdate[] = [];
     telemetry.subscribe((update) => seen.push(update));
     const h = harness({ telemetry, ...overrides });
-    return { h, seen, phases: () => seen.map((update) => (isQuota(update) ? "" : update.phase)) };
+    const progress = () =>
+      seen.filter((update): update is Progress => !isQuota(update) && !isOutcome(update));
+    return {
+      h,
+      seen,
+      phases: () => progress().map((update) => update.phase),
+      outcomes: () => seen.filter(isOutcome),
+    };
   }
 
   it("names every stage boundary, in order, all the way through a merge", async () => {
@@ -638,6 +645,93 @@ describe("what the run says it is doing", () => {
       "pr",
       "merge",
     ]);
+  });
+
+  it("names the task on every phase, so a panel can say what is running", async () => {
+    const { h, seen } = watched();
+
+    await runTask(h.deps, task);
+
+    expect(seen).toContainEqual({ phase: "claiming", taskKey: "CP-158" });
+    expect(seen).toContainEqual({ phase: "merge", taskKey: "CP-158" });
+  });
+
+  it("emits exactly one merged outcome when the run completes", async () => {
+    const { h, outcomes } = watched({ gates: [passingGate("build")] });
+
+    await runTask(h.deps, task);
+
+    expect(outcomes()).toEqual([{ outcome: "merged", taskKey: "CP-158" }]);
+  });
+
+  it("emits a gateRejected outcome that names the gate", async () => {
+    const { h, outcomes } = watched({
+      gates: [rejectingGate("test-presence", "no test file was added")],
+    });
+
+    await runTask(h.deps, task);
+
+    expect(outcomes()).toEqual([
+      { outcome: "gateRejected", taskKey: "CP-158", detail: "test-presence" },
+    ]);
+  });
+
+  it("emits a blocked outcome, the one the operator has to act on", async () => {
+    const executor = {
+      execute: vi.fn<Executor["execute"]>().mockResolvedValue({
+        kind: "result",
+        result: { ...completed, status: "blocked", blockedReason: "the scope is ambiguous" },
+      }),
+    };
+    const { h, outcomes } = watched({ executor });
+
+    await runTask(h.deps, task);
+
+    expect(outcomes()).toEqual([
+      { outcome: "blocked", taskKey: "CP-158", detail: "the scope is ambiguous" },
+    ]);
+  });
+
+  it("emits a released outcome when the usage limit ends the run", async () => {
+    const executor = {
+      execute: vi.fn<Executor["execute"]>().mockResolvedValue({ kind: "usage_limit" }),
+    };
+    const { h, outcomes } = watched({ executor });
+
+    await runTask(h.deps, task);
+
+    expect(outcomes()).toEqual([
+      { outcome: "released", taskKey: "CP-158", detail: "usage limit reached" },
+    ]);
+  });
+
+  // The detail reaches a Notification Center database that outlives the run, so it takes the same
+  // route as board-bound text rather than a shorter one.
+  it("scrubs a secret out of an outcome detail", async () => {
+    const executor = {
+      execute: vi.fn<Executor["execute"]>().mockResolvedValue({
+        kind: "result",
+        result: {
+          ...completed,
+          status: "blocked",
+          blockedReason: "could not auth with cpw_deadbeef0123456789abcdef01234567",
+        },
+      }),
+    };
+    const { h, outcomes } = watched({ executor });
+
+    await runTask(h.deps, task);
+
+    // Asserted positively first: an empty outcome list would satisfy the negative on its own
+    expect(outcomes()).toHaveLength(1);
+    expect(outcomes()[0]).toMatchObject({ outcome: "blocked", taskKey: "CP-158" });
+    expect(JSON.stringify(outcomes())).not.toContain("cpw_deadbeef");
+  });
+
+  it("emits no outcome at all when no bus is attached", async () => {
+    const h = harness();
+
+    await expect(runTask(h.deps, task)).resolves.toBeUndefined();
   });
 
   it("stops at the gate that rejected, which is the phase a human needs to see", async () => {
