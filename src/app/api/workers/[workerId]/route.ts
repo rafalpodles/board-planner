@@ -12,6 +12,7 @@ import { logProjectAudit } from "@/lib/projectAudit";
 const ADMIN_FIELDS = ["assignments", "enabled", "lockedByInstance", "name"] as const;
 // Project-admin territory: how the worker behaves once it is already assigned
 const POLICY_FIELDS = [
+  "autoMerge",
   "baseBranch",
   "pollIntervalMs",
   "taskTimeoutMs",
@@ -21,6 +22,7 @@ const POLICY_FIELDS = [
   "fallbackModel",
   "reviewModel",
 ] as const;
+const BOOLEAN_POLICY_FIELDS: ReadonlySet<string> = new Set(["autoMerge"]);
 const STRING_POLICY_FIELDS: ReadonlySet<string> = new Set([
   "baseBranch",
   "model",
@@ -155,7 +157,12 @@ export const PATCH = withAuth(async (request, { params, user }) => {
       );
     }
 
-    if (STRING_POLICY_FIELDS.has(field)) {
+    if (BOOLEAN_POLICY_FIELDS.has(field)) {
+      if (typeof body[field] !== "boolean") {
+        return NextResponse.json({ error: `${field} must be a boolean` }, { status: 400 });
+      }
+      update[`policy.${field}`] = body[field];
+    } else if (STRING_POLICY_FIELDS.has(field)) {
       if (typeof body[field] !== "string" || !body[field].trim()) {
         return NextResponse.json({ error: `${field} must be a non-empty string` }, { status: 400 });
       }

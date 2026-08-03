@@ -267,6 +267,12 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
         return;
       }
 
+      if (!config.autoMerge) {
+        settle("delivered", prUrl);
+        await reporter.delivered(task, prUrl, outcome.result.summary);
+        return;
+      }
+
       // No signal on the merge call itself: killing "gh pr merge" mid-flight leaves ambiguous
       // remote state that only mergeState() can untangle — better not to create it
       enter("merge");

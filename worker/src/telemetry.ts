@@ -26,6 +26,7 @@ export interface Quota {
 
 export type OutcomeKind =
   | "merged"
+  | "delivered"
   | "gateRejected"
   | "blocked"
   | "released"

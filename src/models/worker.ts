@@ -19,6 +19,7 @@ const workerSchema = new Schema<IWorker>(
       default: [],
     },
     policy: {
+      autoMerge: { type: Boolean, default: false },
       baseBranch: { type: String, default: "main" },
       pollIntervalMs: { type: Number, default: 30_000 },
       taskTimeoutMs: { type: Number, default: 1_800_000 },

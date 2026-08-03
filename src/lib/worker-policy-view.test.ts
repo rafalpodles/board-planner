@@ -69,3 +69,24 @@ describe("policyRows", () => {
     expect(row(rows, "model").value).toBe("—");
   });
 });
+
+describe("boolean policy fields", () => {
+  // "false" is not a value an operator can read at a glance, and an empty cell would look like a
+  // missing setting rather than a deliberate off.
+  it("renders a boolean as on or off, never as a raw value", () => {
+    expect(row(view({}), "autoMerge").value).toBe("off");
+    expect(row(view({ policy: { autoMerge: true }, policyOverrides: ["autoMerge"] }), "autoMerge").value)
+      .toBe("on");
+  });
+
+  it("defaults autoMerge to off, so an unconfigured worker never merges", () => {
+    expect(row(view({}), "autoMerge")).toMatchObject({ value: "off", overridden: false });
+  });
+
+  // The case the override list exists for: turning it off explicitly must not read as "inherited"
+  it("marks autoMerge explicitly set to off as overridden", () => {
+    const r = row(view({ policy: { autoMerge: false }, policyOverrides: ["autoMerge"] }), "autoMerge");
+
+    expect(r).toMatchObject({ value: "off", overridden: true });
+  });
+});
