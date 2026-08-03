@@ -11,7 +11,7 @@ const { api, auth, nav, theme, projectsState } = vi.hoisted(() => ({
     logout: vi.fn(),
   },
   nav: { pathname: "/projects" },
-  theme: { theme: "dark", toggle: vi.fn() },
+  theme: { theme: "dark", preference: "system", setPreference: vi.fn() },
   projectsState: { projects: [] as unknown[], isLoading: false, reload: vi.fn() },
 }));
 
