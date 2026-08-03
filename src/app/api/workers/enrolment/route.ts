@@ -9,7 +9,7 @@ import { mintEnrolmentToken } from "@/lib/enrolment";
 export const POST = withAdmin(async (request, { user }) => {
   await connectDB();
 
-  if (user.tokenScoped) {
+  if (user.viaMachineCredential) {
     return NextResponse.json({ error: "Interactive admin session required" }, { status: 403 });
   }
 

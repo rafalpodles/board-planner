@@ -38,11 +38,23 @@ const PROJECT_ADMIN = {
   tokenScoped: false,
   allowedProjects: [PROJECT_A],
 };
+// A scoped token is an API token, so both flags are set — the fixture said only tokenScoped and so
+// could not have caught the unscoped-admin case below.
 const SCOPED_TOKEN = {
   _id: "member-1",
   role: "member",
   tokenScoped: true,
+  viaMachineCredential: true,
   allowedProjects: [PROJECT_A],
+};
+
+// The credential the worker used to have to hold: an API token with no project scope. It never
+// reaches applyTokenScope, so tokenScoped stays false and it stayed an instance admin.
+const UNSCOPED_ADMIN_TOKEN = {
+  _id: "admin-1",
+  role: "admin",
+  viaMachineCredential: true,
+  allowedProjects: [],
 };
 
 function workerDoc(overrides: Record<string, unknown> = {}) {
@@ -133,6 +145,17 @@ describe("PATCH /api/workers/:workerId — authorization matrix", () => {
     expect(response.status).toBe(403);
     expect((await response.json()).error).toMatch(/interactive admin session/i);
     expect(workerFindById).not.toHaveBeenCalled();
+  });
+
+  // Found by driving a real server: an unscoped admin API token passed the tokenScoped guard and
+  // cleared lockedByInstance — the kill switch, lifted by exactly the credential the worker held.
+  it("refuses an unscoped admin API token, which is still a machine credential", async () => {
+    getAuthUser.mockResolvedValue(UNSCOPED_ADMIN_TOKEN);
+
+    const response = await PATCH(patchRequest({ lockedByInstance: false }), ctx());
+
+    expect(response.status).toBe(403);
+    expect(workerFindByIdAndUpdate).not.toHaveBeenCalled();
   });
 
   it("refuses a plain member on an admin-only field", async () => {
