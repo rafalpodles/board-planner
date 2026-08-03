@@ -799,7 +799,6 @@ export type SortField =
   | "createdAt"
   | "dueDate"
   | "priority"
-  | "difficulty"
   | "category"
   | "title"
   | "status"
