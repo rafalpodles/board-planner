@@ -9,7 +9,6 @@ interface ColumnProps {
   column: AnyColumn;
   tasks: ApiTask[];
   projectKey: string;
-  projectLabels?: ApiLabel[];
   customFields?: ApiCustomField[];
   projectCategories?: ApiProjectCategory[];
   selectedTasks?: Set<string>;
@@ -28,7 +27,6 @@ export function Column({
   column,
   tasks,
   projectKey,
-  projectLabels,
   customFields,
   projectCategories,
   selectedTasks,
@@ -171,7 +169,6 @@ export function Column({
               <TaskCard
                 task={task}
                 projectKey={projectKey}
-                projectLabels={projectLabels}
                 customFields={customFields}
                 projectCategories={projectCategories}
                 selected={selectedTasks?.has(task._id)}

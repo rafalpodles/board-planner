@@ -213,9 +213,7 @@ export interface ITaskTemplate {
   name: string;
   title: string;
   description: string;
-  difficulty: Difficulty;
   category: Category;
-  component: string;
   acceptanceCriteria: string;
 }
 
@@ -405,8 +403,6 @@ export interface IProject {
   key: string;
   description: string;
   icon: string;
-  components: string[];
-  labels: ILabel[];
   categories: IProjectCategory[];
   columns: IProjectColumn[];
   taskTemplates: ITaskTemplate[];
@@ -559,16 +555,13 @@ export interface ITask {
   taskNumber: number;
   title: string;
   description: string;
-  difficulty: Difficulty;
   priority: Priority;
-  component: string;
   category: Category;
   status: TaskStatus;
   assignee: Types.ObjectId | IUser | null;
   dueDate: Date | null;
   checklist: IChecklistItem[];
   linkedPRs: ILinkedPR[];
-  labels: Types.ObjectId[];
   pinned: boolean;
   blockedBy: (Types.ObjectId | ITask)[];
   relations: ITaskRelation[];
@@ -629,9 +622,7 @@ export interface ApiTaskTemplate {
   name: string;
   title: string;
   description: string;
-  difficulty: Difficulty;
   category: Category;
-  component: string;
   acceptanceCriteria: string;
 }
 
@@ -641,8 +632,6 @@ export interface ApiProject {
   key: string;
   description: string;
   icon: string;
-  components: string[];
-  labels: ApiLabel[];
   categories?: ApiProjectCategory[];
   columns?: ApiProjectColumn[];
   taskTemplates: ApiTaskTemplate[];
@@ -765,16 +754,13 @@ export interface ApiTask {
   taskNumber: number;
   title: string;
   description: string;
-  difficulty: Difficulty;
   priority: Priority;
-  component: string;
   category: Category;
   status: TaskStatus;
   assignee: ApiUser | null;
   dueDate: string | null;
   checklist: ApiChecklistItem[];
   linkedPRs: ApiLinkedPR[];
-  labels: string[];
   pinned: boolean;
   blockedBy: ApiTaskLink[];
   blocking: ApiTaskLink[];

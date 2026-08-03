@@ -1,8 +1,6 @@
 import { ApiCustomField, ApiSprint, ApiTask, PRIORITY_ORDER, SortDir, SortField } from "@/types";
 import { normalizeOptions } from "./custom-fields";
 
-const DIFFICULTY_ORDER: Record<string, number> = { S: 0, M: 1, L: 2, XL: 3 };
-
 export interface SortContext {
   /** Board columns in board order — the only sensible ordering for a status */
   statusOrder?: Map<string, number>;
@@ -83,12 +81,8 @@ function compare(a: ApiTask, b: ApiTask, field: string, ctx: SortContext): numbe
       };
       return start(a) - start(b);
     }
-    case "difficulty":
-      return (DIFFICULTY_ORDER[a.difficulty] ?? 99) - (DIFFICULTY_ORDER[b.difficulty] ?? 99);
     case "category":
       return a.category.localeCompare(b.category);
-    case "component":
-      return (a.component || "").localeCompare(b.component || "");
     // Undated sorts last ascending, which is what "soonest first" means
     case "dueDate": {
       const at = a.dueDate ? new Date(a.dueDate).getTime() : Infinity;
