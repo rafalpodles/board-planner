@@ -21,7 +21,10 @@ export interface RegistrationInfo {
 
 export interface HeartbeatDeps {
   apiBaseUrl: string;
-  apiToken: string;
+  enrolmentToken: string;
+  // Removed after a successful registration: the token is already spent server-side, and leaving a
+  // dead secret on a disk the agent can read is pointless risk.
+  forgetEnrolmentToken?: () => void;
   registration: RegistrationInfo;
   store: Store;
   // The command channel that survives SSE loss and a restart, so this is the durable one
@@ -91,11 +94,18 @@ export function startHeartbeat(deps: HeartbeatDeps): Heartbeat {
   let bindingError = "";
 
   async function register(): Promise<StoredIdentity | null> {
+    if (!deps.enrolmentToken) {
+      log(
+        "no identity on disk and no CP_ENROLMENT_TOKEN: mint one in Settings -> Workers and set " +
+          "CP_ENROLMENT_TOKEN_FILE. It is spent by the first registration; delete it afterwards."
+      );
+      return null;
+    }
     try {
       const response = await fetchImpl(`${deps.apiBaseUrl}/api/workers/register`, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${deps.apiToken}`,
+          Authorization: `Bearer ${deps.enrolmentToken}`,
           "Content-Type": "application/json",
           "X-CP-Protocol": String(PROTOCOL_VERSION),
         },
@@ -123,7 +133,14 @@ export function startHeartbeat(deps: HeartbeatDeps): Heartbeat {
         credential: body.credential,
         heartbeatMs: body.heartbeatMs,
       };
+      // Identity first: losing the credential would strand this worker with a spent token and no
+      // way to register again. Only once it is safely on disk is the enrolment token removed.
       deps.store.write(JSON.stringify(identity), { mode: 0o600 });
+      try {
+        deps.forgetEnrolmentToken?.();
+      } catch (error) {
+        log(`could not remove the spent enrolment token: ${String(error)}`);
+      }
       return identity;
     } catch (error) {
       log(`worker registration failed: ${String(error)}`);

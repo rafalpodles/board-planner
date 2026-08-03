@@ -94,6 +94,10 @@ async function verifyBearerToken(token: string): Promise<IUser | null> {
       const user = await User.findById(candidate.user);
       if (!user) return null;
 
+      // Every API token is a machine credential, scoped or not. tokenScoped answers a narrower
+      // question — whether project access was narrowed — and an unscoped admin token leaves it
+      // false, which is exactly the credential that must not reach the kill switch.
+      user.viaMachineCredential = true;
       const scope = candidate.allowedProjects || [];
       return scope.length > 0 ? applyTokenScope(user, scope) : user;
     }
@@ -112,6 +116,8 @@ async function verifyOAuthAccessToken(token: string): Promise<IUser | null> {
   const user = await User.findById(record.user);
   if (!user) return null;
 
+  // An OAuth access token is held by an application, not typed by a person at a keyboard
+  user.viaMachineCredential = true;
   const scope = record.allowedProjects || [];
   return scope.length > 0 ? applyTokenScope(user, scope) : user;
 }
