@@ -37,6 +37,7 @@ final class AppModel {
                 config = try? await client.config()
                 for await event in client.stream() {
                     state.apply(event, at: Date())
+                    Notifier.shared.handle(event)
                 }
             } catch {}
             if Task.isCancelled { return }
