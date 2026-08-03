@@ -6,6 +6,7 @@ import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/components/ui/Toast";
 import { Button } from "@/components/ui/Button";
+import { EnrolWorkerModal } from "@/components/settings/EnrolWorkerModal";
 import { usePollWhileVisible } from "@/hooks/use-poll-while-visible";
 import { timeAgo } from "@/lib/time";
 import { policyRows } from "@/lib/worker-policy-view";
@@ -29,6 +30,7 @@ export default function AdminWorkersPage() {
   const [workers, setWorkers] = useState<ApiWorker[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [enrolling, setEnrolling] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -97,10 +99,17 @@ export default function AdminWorkersPage() {
 
   return (
     <div className="max-w-6xl mx-auto">
-      <h2 className="text-lg font-semibold mb-1">Worker fleet</h2>
-      <p className="text-sm text-text-muted mb-6">
-        Every worker registered on this instance. Only an instance admin can change what is on this page.
-      </p>
+      <div className="flex items-start justify-between gap-4 mb-6">
+        <div>
+          <h2 className="text-lg font-semibold mb-1">Worker fleet</h2>
+          <p className="text-sm text-text-muted">
+            Every worker registered on this instance. Only an instance admin can change what is on this page.
+          </p>
+        </div>
+        <Button onClick={() => setEnrolling(true)}>Enrol a worker</Button>
+      </div>
+
+      <EnrolWorkerModal open={enrolling} onClose={() => setEnrolling(false)} />
 
       <div className="border border-border rounded-lg overflow-hidden">
         <div className="overflow-x-auto">
