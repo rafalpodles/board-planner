@@ -9,7 +9,7 @@ export default function PmChatPage() {
 
   return (
     <div
-      className="max-w-3xl mx-auto flex flex-col"
+      className="w-full max-w-3xl mx-auto flex flex-col"
       style={{ height: "calc(100vh - 3.5rem - 3.5rem)" }}
     >
       <div className="flex-1 min-h-0">

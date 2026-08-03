@@ -49,7 +49,7 @@ export default function PreferencesPage() {
   }
 
   return (
-    <div className="max-w-md mx-auto">
+    <div className="w-full max-w-md mx-auto">
       <h2 className="text-lg font-semibold mb-6">Preferences</h2>
 
       <div className="space-y-4">
