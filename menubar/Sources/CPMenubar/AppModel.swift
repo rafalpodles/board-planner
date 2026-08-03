@@ -13,7 +13,7 @@ final class AppModel {
     init(
         client: SocketClient = SocketClient(
             socketPath: SocketClient.defaultSocketPath(),
-            transport: NWTransport())
+            transport: POSIXTransport())
     ) {
         self.client = client
     }
