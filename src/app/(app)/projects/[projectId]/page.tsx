@@ -496,6 +496,9 @@ export default function KanbanPage() {
         </div>
       )}
 
+      {/* Without this the empty state sits above a strip of zero-count columns.
+          ListView already returns null when it has no tasks; Board did not. */}
+      {tasks.length > 0 && (
       <div className={`lg:flex-1 lg:min-h-0 ${viewMode === "board" ? "lg:overflow-hidden" : "lg:overflow-y-auto"}`}>
       {viewMode === "board" ? (
         <Board
@@ -542,6 +545,7 @@ export default function KanbanPage() {
         />
       )}
       </div>
+      )}
 
       {contextMenu && (() => {
         const task = tasks.find((t) => t._id === contextMenu.taskId);
