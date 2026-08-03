@@ -8,6 +8,7 @@ import {
   ApiSprint,
   ApiTask,
   ApiCustomField,
+  ApiUserSummary,
   PRIORITY_LABELS,
   SortDir,
   SortField,
@@ -38,8 +39,11 @@ interface ListViewProps {
   onSortChange?: (field: SortKey, dir: SortDir) => void;
   hiddenColumns?: ListColumnId[];
   customFields?: ApiCustomField[];
+  /** Empty for anyone whose user list failed to load; the cell stays read-only */
+  assignableUsers?: ApiUserSummary[];
   onTaskClick: (taskId: string) => void;
   onStatusChange?: (taskId: string, status: string) => void;
+  onAssigneeChange?: (taskId: string, username: string) => void | Promise<void>;
   onTaskSelect?: (taskId: string) => void;
   onTaskContextMenu?: (taskId: string, x: number, y: number) => void;
 }
@@ -70,8 +74,10 @@ export function ListView({
   sortDir = "asc",
   onSortChange,
   hiddenColumns = [],
+  assignableUsers = [],
   onTaskClick,
   onStatusChange,
+  onAssigneeChange,
   onTaskSelect,
   onTaskContextMenu,
   customFields = [],
@@ -412,7 +418,16 @@ export function ListView({
                       className="px-2 py-2 hidden md:table-cell text-text-muted max-w-32"
                       title={assigneeName}
                     >
-                      <div className="truncate">{assigneeName}</div>
+                      {onAssigneeChange && assignableUsers.length > 0 ? (
+                        <AssigneeCell
+                          task={task}
+                          taskKey={taskKey}
+                          users={assignableUsers}
+                          onChange={onAssigneeChange}
+                        />
+                      ) : (
+                        <div className="truncate">{assigneeName}</div>
+                      )}
                     </td>
                   )}
                   {show("priority") && (
@@ -523,5 +538,56 @@ export function ListView({
         </table>
       </div>
     </div>
+  );
+}
+
+function AssigneeCell({
+  task,
+  taskKey,
+  users,
+  onChange,
+}: {
+  task: ApiTask;
+  taskKey: string;
+  users: ApiUserSummary[];
+  onChange: (taskId: string, username: string) => void | Promise<void>;
+}) {
+  const [saving, setSaving] = useState(false);
+  const current =
+    task.assignee && typeof task.assignee === "object" ? task.assignee.username : "";
+
+  // Someone assigned before they lost access is still this task's assignee, and a
+  // select whose value is absent from its options silently shows the wrong person
+  const options =
+    !current || users.some((u) => u.username === current)
+      ? users
+      : [...users, { _id: current, username: current, fullName: current }];
+
+  return (
+    <select
+      value={current}
+      disabled={saving}
+      aria-label={`Assignee for ${taskKey}: ${task.title}`}
+      onClick={(e) => e.stopPropagation()}
+      onChange={async (e) => {
+        e.stopPropagation();
+        setSaving(true);
+        try {
+          await onChange(task._id, e.target.value);
+        } finally {
+          setSaving(false);
+        }
+      }}
+      className={`focus-ring text-xs bg-bg-input border border-border rounded px-1.5 py-1 max-w-28 text-text cursor-pointer ${
+        saving ? "opacity-50" : ""
+      }`}
+    >
+      <option value="">Unassigned</option>
+      {options.map((u) => (
+        <option key={u._id} value={u.username}>
+          {u.fullName}
+        </option>
+      ))}
+    </select>
   );
 }
