@@ -6,6 +6,7 @@ import {
   migratedValuesFor,
   withValuesInUse,
   legacyRenderingSuppressed,
+  dualWriteLegacyColumns,
 } from "./legacy-fields";
 import { ApiCustomField, ApiLabel } from "@/types";
 
@@ -161,5 +162,37 @@ describe("legacyRenderingSuppressed", () => {
   it("stays suppressed when the field exists but its switches are off", () => {
     const off = seeded.map((f) => ({ ...f, showOnCard: false, showInList: false }));
     expect(legacyRenderingSuppressed(off, "difficulty")).toBe(true);
+  });
+});
+
+describe("dualWriteLegacyColumns", () => {
+  const fields = seededFields();
+
+  // CP-214 removes this; until then a rollback has to find the columns current
+  it("mirrors a migrated edit back onto the legacy column", () => {
+    expect(dualWriteLegacyColumns({ f0: "backend", f1: "XL", f2: ["lab1"] }, fields)).toEqual({
+      component: "backend",
+      difficulty: "XL",
+      labels: ["lab1"],
+    });
+  });
+
+  it("touches only the columns whose field was edited", () => {
+    expect(dualWriteLegacyColumns({ f1: "S" }, fields)).toEqual({ difficulty: "S" });
+  });
+
+  it("clears the column when the value was cleared", () => {
+    expect(dualWriteLegacyColumns({ f0: "" }, fields)).toEqual({ component: "" });
+    expect(dualWriteLegacyColumns({ f2: [] }, fields)).toEqual({ labels: [] });
+  });
+
+  // The column is an enum: a renamed difficulty option would not be a valid value,
+  // and writing it would make the document fail validation
+  it("refuses to write a difficulty the enum does not know", () => {
+    expect(dualWriteLegacyColumns({ f1: "Enormous" }, fields)).toEqual({});
+  });
+
+  it("does nothing on a project that was never migrated", () => {
+    expect(dualWriteLegacyColumns({ anything: "x" }, [])).toEqual({});
   });
 });
