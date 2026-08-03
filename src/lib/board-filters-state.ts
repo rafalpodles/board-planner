@@ -1,4 +1,4 @@
-import { SortDir, SortField } from "@/types";
+import { ApiCustomField, SortDir, SortField, SortKey } from "@/types";
 import { ListColumnId, DEFAULT_HIDDEN, sanitizeHidden } from "./list-columns";
 
 export interface BoardFilterValues {
@@ -13,7 +13,7 @@ export interface BoardFilterValues {
 
 export interface PersistedBoardFilters {
   filters: BoardFilterValues;
-  sortField: SortField;
+  sortField: SortKey;
   sortDir: SortDir;
   showFilters: boolean;
   hiddenColumns: ListColumnId[];
@@ -47,7 +47,10 @@ function str(value: unknown): string {
 // has to carry over, or everyone using it silently loses their filter on upgrade.
 export function migratePersistedFilters(
   raw: unknown,
-  currentUsername?: string
+  currentUsername?: string,
+  // Passed so a hidden project-field column survives a reload, and an archived
+  // field's entry is dropped instead of lingering where nobody can clear it
+  customFields: ApiCustomField[] = []
 ): PersistedBoardFilters {
   if (!raw || typeof raw !== "object") return DEFAULTS;
   const blob = raw as Record<string, unknown>;
@@ -66,7 +69,7 @@ export function migratePersistedFilters(
     sortField: (str(blob.sortField) || DEFAULTS.sortField) as SortField,
     sortDir: str(blob.sortDir) === "desc" ? "desc" : "asc",
     showFilters: blob.showFilters === true,
-    hiddenColumns: sanitizeHidden(blob.hiddenColumns),
+    hiddenColumns: sanitizeHidden(blob.hiddenColumns, customFields),
   };
 }
 

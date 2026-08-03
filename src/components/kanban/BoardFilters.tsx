@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
-  ApiTask,
+  ApiTask, ApiCustomField,
   ApiLabel,
   ApiProjectCategory,
   DIFFICULTIES,
@@ -12,7 +12,7 @@ import {
   PRIORITY_ORDER,
   SORT_OPTIONS,
   BOARD_SORT_FIELDS,
-  SortField,
+  SortField, SortKey,
   SortDir,
   Difficulty,
   Category,
@@ -67,13 +67,14 @@ interface BoardFiltersProps {
   extraControls?: React.ReactNode;
   /** Sort is owned above this component so the list view's column headers and
       this dropdown drive the same value */
-  sortField: SortField;
+  sortField: SortKey;
   sortDir: SortDir;
-  onSortChange: (field: SortField, dir: SortDir) => void;
+  onSortChange: (field: SortKey, dir: SortDir) => void;
   /** Which fields the dropdown offers; the current value is always included */
   sortFields?: SortField[];
   sortContext?: SortContext;
   hiddenColumns?: ListColumnId[];
+  customFields?: ApiCustomField[];
   onHiddenColumnsChange?: (hidden: ListColumnId[]) => void;
   onFilter: (filtered: ApiTask[]) => void;
 }
@@ -96,6 +97,7 @@ export function BoardFilters({
   hiddenColumns,
   onHiddenColumnsChange,
   onFilter,
+  customFields = [],
 }: BoardFiltersProps) {
   const [initialized, setInitialized] = useState(false);
   const [filters, setFilters] = useState<Filters>({ search: "", ...EMPTY_FILTERS });
@@ -111,7 +113,7 @@ export function BoardFilters({
     } catch {
       raw = null;
     }
-    const state = migratePersistedFilters(raw, currentUsername);
+    const state = migratePersistedFilters(raw, currentUsername, customFields);
     setFilters((f) => ({ ...f, ...state.filters }));
     onSortChange(state.sortField, state.sortDir);
     onHiddenColumnsChange?.(state.hiddenColumns);
@@ -519,7 +521,11 @@ export function BoardFilters({
       </div>
 
       {onHiddenColumnsChange && (
-        <ColumnPicker hidden={hiddenColumns ?? []} onChange={onHiddenColumnsChange} />
+        <ColumnPicker
+          hidden={hiddenColumns ?? []}
+          onChange={onHiddenColumnsChange}
+          customFields={customFields}
+        />
       )}
 
       {extraControls}
