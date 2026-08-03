@@ -12,6 +12,8 @@ import {
 interface BoardHeaderProps {
   projectName: string;
   projectIcon?: string;
+  /** The only place the project's description is shown anywhere in the app */
+  projectDescription?: string;
   sprints: ApiSprint[];
   scope: string;
   onScopeChange: (scope: string) => void;
@@ -24,6 +26,7 @@ interface BoardHeaderProps {
 export function BoardHeader({
   projectName,
   projectIcon,
+  projectDescription,
   sprints,
   scope,
   onScopeChange,
@@ -71,15 +74,27 @@ export function BoardHeader({
         </div>
         <div
           ref={scopeRef}
-          className="relative flex items-center gap-1 text-[11px] leading-tight text-text-muted"
+          className="relative flex items-center gap-1.5 text-[11px] leading-tight text-text-muted"
         >
+          {/* The description truncates and the scope does not: one is prose, the
+              other is the control that decides which tasks the board is showing */}
+          {projectDescription && (
+            <span className="truncate" title={projectDescription}>
+              {projectDescription}
+            </span>
+          )}
+          {projectDescription && sprints.length > 0 && (
+            <span aria-hidden className="shrink-0">
+              ·
+            </span>
+          )}
           {sprints.length > 0 && (
             <button
               type="button"
               onClick={() => setScopeOpen((v) => !v)}
               aria-expanded={scopeOpen}
               aria-label="Change sprint scope"
-              className="focus-ring max-w-[12rem] truncate rounded px-1 py-0.5 text-text-muted underline decoration-dotted underline-offset-2 transition-colors hover:text-text"
+              className="focus-ring max-w-[12rem] shrink-0 truncate rounded px-1 py-0.5 text-text-muted underline decoration-dotted underline-offset-2 transition-colors hover:text-text"
             >
               {scopeLabel ?? "All tasks"}
             </button>
