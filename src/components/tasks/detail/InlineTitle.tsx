@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
+import { useAutoGrow } from "./atoms";
 
 interface InlineTitleProps {
   value: string;
@@ -8,16 +9,10 @@ interface InlineTitleProps {
 }
 
 export function InlineTitle({ value, onChange }: InlineTitleProps) {
-  const ref = useRef<HTMLTextAreaElement>(null);
-
   // A textarea rather than contenteditable — it wraps like the heading it replaces
   // while staying an ordinary controlled input
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${el.scrollHeight}px`;
-  }, [value]);
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useAutoGrow(ref, value);
 
   return (
     <textarea
