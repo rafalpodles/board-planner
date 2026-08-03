@@ -66,10 +66,15 @@ export function Modal({
         aria-labelledby={named && !bare ? titleId : undefined}
         aria-label={named && !bare ? undefined : named ? title : UNNAMED_DIALOG_LABEL}
         tabIndex={-1}
-        className={`flex flex-col w-full ${SIZE_CLASSES[size]} max-h-[90vh]
-        bg-bg-card border border-border rounded-t-2xl sm:rounded-2xl sm:mx-4
-        ${bare ? "overflow-hidden" : "p-4 sm:p-6"}
-        animate-in slide-in-from-bottom sm:slide-in-from-bottom-0`}>
+        className={`flex w-full flex-col bg-bg-card ${SIZE_CLASSES[size]} sm:mx-4
+        animate-in slide-in-from-bottom sm:slide-in-from-bottom-0
+        ${
+          bare
+            ? // A phone has no room to spend on a backdrop around a whole page of content
+              `h-dvh overflow-hidden rounded-none border-0
+               sm:h-auto sm:max-h-[90vh] sm:rounded-2xl sm:border sm:border-border`
+            : "max-h-[90vh] rounded-t-2xl border border-border p-4 sm:rounded-2xl sm:p-6"
+        }`}>
         {!bare && (
           <div className="flex shrink-0 items-center justify-between mb-4">
             <h2 id={titleId} className="text-lg font-semibold">{title}</h2>
@@ -82,7 +87,7 @@ export function Modal({
             </button>
           </div>
         )}
-        <div className="min-h-0 overflow-y-auto">{children}</div>
+        <div className={`min-h-0 overflow-y-auto ${bare ? "flex-1" : ""}`}>{children}</div>
       </div>
     </div>
   );

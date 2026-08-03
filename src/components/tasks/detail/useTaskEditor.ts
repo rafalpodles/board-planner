@@ -6,7 +6,6 @@ import { emitBoardRefresh } from "@/lib/board-refresh";
 import {
   ApiTask,
   Category,
-  Difficulty,
   Priority,
   RecurrenceFrequency,
 } from "@/types";
@@ -26,14 +25,11 @@ export type ChecklistDraftItem = { _id?: string; text: string; done: boolean };
 export interface TaskDraft {
   title: string;
   description: string;
-  difficulty: Difficulty;
   priority: Priority;
-  component: string;
   category: Category;
   assignee: string | null;
   dueDate: string | null;
   checklist: ChecklistDraftItem[];
-  labels: string[];
   sprint: string | null;
   recurrence: { frequency: RecurrenceFrequency; interval: number } | null;
   customFieldValues: Record<string, unknown>;
@@ -44,15 +40,12 @@ export function draftFromTask(task: ApiTask): TaskDraft {
   return {
     title: task.title || "",
     description: task.description || "",
-    difficulty: task.difficulty || "M",
     priority: task.priority || "medium",
-    component: task.component || "",
     category: task.category,
     assignee:
       (task.assignee && typeof task.assignee === "object" ? task.assignee.username : "") || null,
     dueDate: (task.dueDate ? task.dueDate.substring(0, 10) : "") || null,
     checklist: task.checklist || [],
-    labels: task.labels || [],
     sprint: task.sprint || null,
     recurrence: task.recurrence
       ? { frequency: task.recurrence.frequency, interval: task.recurrence.interval }

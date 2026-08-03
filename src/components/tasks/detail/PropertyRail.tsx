@@ -3,19 +3,15 @@
 import type { CSSProperties } from "react";
 import {
   ApiCustomField,
-  ApiLabel,
   ApiSprint,
   ApiUser,
   Category,
-  Difficulty,
-  DIFFICULTIES,
   PRIORITIES,
   PRIORITY_LABELS,
   Priority,
   RecurrenceFrequency,
 } from "@/types";
 import { activeFields, orderedOptions, sortedFields } from "@/lib/custom-fields";
-import { legacyRenderingSuppressed } from "@/lib/legacy-fields";
 import { Avatar, PriorityBars, SectionLabel } from "./atoms";
 import { EmptyValue, FieldRow, OptionItem, OptionList, PickerRow } from "./FieldRow";
 import type { TaskDraft } from "./useTaskEditor";
@@ -47,9 +43,7 @@ interface PropertyRailProps {
   set: <K extends keyof TaskDraft>(key: K, value: TaskDraft[K]) => void;
   users: ApiUser[];
   sprints: ApiSprint[];
-  components: string[];
   categories: string[];
-  projectLabels: ApiLabel[];
   customFields: ApiCustomField[];
   reporter: string | null;
   onDelete: () => void;
@@ -62,25 +56,16 @@ export function PropertyRail({
   set,
   users,
   sprints,
-  components,
   categories,
-  projectLabels,
   customFields,
   reporter,
   onDelete,
   touch = false,
 }: PropertyRailProps) {
-  const migrated = (key: "component" | "difficulty" | "labels") =>
-    legacyRenderingSuppressed(customFields, key);
-
   const assignedUser = users.find((u) => u.username === draft.assignee);
   const sprint = sprints.find((s) => s._id === draft.sprint);
   const fields = sortedFields(activeFields(customFields));
   const selectableSprints = sprints.filter((s) => s.status !== "completed");
-
-  function labelName(id: string) {
-    return projectLabels.find((l) => l._id === id);
-  }
 
   return (
     <div className="flex h-full flex-col gap-6">
@@ -187,63 +172,6 @@ export function PropertyRail({
             </OptionList>
           )}
         />
-
-        {!migrated("difficulty") && (
-          <PickerRow
-            label="Difficulty"
-            touch={touch}
-            value={draft.difficulty}
-            panel={(close) => (
-              <OptionList label="Difficulty">
-                {DIFFICULTIES.map((difficulty) => (
-                  <OptionItem
-                    key={difficulty}
-                    selected={difficulty === draft.difficulty}
-                    onClick={() => {
-                      set("difficulty", difficulty as Difficulty);
-                      close();
-                    }}
-                  >
-                    {difficulty}
-                  </OptionItem>
-                ))}
-              </OptionList>
-            )}
-          />
-        )}
-
-        {!migrated("component") && components.length > 0 && (
-          <PickerRow
-            label="Component"
-            touch={touch}
-            value={draft.component || <EmptyValue>None</EmptyValue>}
-            panel={(close) => (
-              <OptionList label="Component">
-                <OptionItem
-                  selected={!draft.component}
-                  onClick={() => {
-                    set("component", "");
-                    close();
-                  }}
-                >
-                  None
-                </OptionItem>
-                {components.map((component) => (
-                  <OptionItem
-                    key={component}
-                    selected={component === draft.component}
-                    onClick={() => {
-                      set("component", component);
-                      close();
-                    }}
-                  >
-                    {component}
-                  </OptionItem>
-                ))}
-              </OptionList>
-            )}
-          />
-        )}
 
         <PickerRow
           label="Due date"
@@ -359,62 +287,6 @@ export function PropertyRail({
           )}
         />
 
-        {!migrated("labels") && projectLabels.length > 0 && (
-          <PickerRow
-            label="Labels"
-            touch={touch}
-            align="start"
-            value={
-              draft.labels.length === 0 ? (
-                <EmptyValue>None</EmptyValue>
-              ) : (
-                <span className="flex flex-wrap gap-1.5">
-                  {draft.labels.map((id) => {
-                    const label = labelName(id);
-                    if (!label) return null;
-                    return (
-                      <span
-                        key={id}
-                        className="chip chip-custom rounded px-2 py-0.5 text-xs"
-                        style={{ "--chip": label.color } as CSSProperties}
-                      >
-                        {label.name}
-                      </span>
-                    );
-                  })}
-                </span>
-              )
-            }
-            panel={() => (
-              <div className="flex flex-wrap gap-1.5 p-1.5">
-                {projectLabels.map((label) => {
-                  const on = draft.labels.includes(label._id);
-                  return (
-                    <button
-                      key={label._id}
-                      type="button"
-                      aria-pressed={on}
-                      onClick={() =>
-                        set(
-                          "labels",
-                          on
-                            ? draft.labels.filter((id) => id !== label._id)
-                            : [...draft.labels, label._id]
-                        )
-                      }
-                      className={`focus-ring chip chip-custom rounded-full px-2.5 py-1 text-xs transition-opacity ${
-                        on ? "" : "opacity-40"
-                      }`}
-                      style={{ "--chip": label.color } as CSSProperties}
-                    >
-                      {label.name}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          />
-        )}
       </div>
 
       {fields.length > 0 && (
@@ -447,7 +319,7 @@ export function PropertyRail({
           type="button"
           onClick={onDelete}
           className={`focus-ring -mx-2.5 rounded-lg px-2.5 text-left text-sm text-danger transition-colors hover:bg-danger/10 ${
-            touch ? "min-h-[46px]" : "py-1.5"
+            touch ? "min-h-[44px]" : "py-1.5"
           }`}
         >
           Delete task
