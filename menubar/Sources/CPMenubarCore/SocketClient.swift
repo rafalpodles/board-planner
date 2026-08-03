@@ -10,8 +10,10 @@ public struct ConfigResponse: Decodable, Sendable {
     public let taskTimeoutMs: Int
 }
 
-public enum SocketError: Error {
+public enum SocketError: Error, Equatable {
     case malformedResponse
+    case pathTooLong
+    case io(Int32)
 }
 
 public func sseEvents(from buffer: inout Data) -> [Data] {
@@ -56,7 +58,13 @@ public struct SocketClient: Sendable {
             bytes.append(chunk)
         }
         guard let head = parseHead(bytes) else { throw SocketError.malformedResponse }
-        return HTTPResponse(status: head.status, body: bytes.dropFirst(head.headerLength))
+
+        var body = bytes.dropFirst(head.headerLength)
+        if head.chunked {
+            var framed = Data(body)
+            body = dechunk(from: &framed).data[...]
+        }
+        return HTTPResponse(status: head.status, body: Data(body))
     }
 
     public func status() async throws -> StatusResponse {
@@ -79,7 +87,9 @@ public struct SocketClient: Sendable {
             let task = Task {
                 do {
                     var buffer = Data()
+                    var events = Data()
                     var headerSeen = false
+                    var chunked = false
                     let decoder = JSONDecoder()
                     for try await chunk in try await transport.send(request("GET", "/stream"), to: socketPath) {
                         buffer.append(chunk)
@@ -88,8 +98,15 @@ public struct SocketClient: Sendable {
                             buffer.removeSubrange(
                                 ..<buffer.index(buffer.startIndex, offsetBy: head.headerLength))
                             headerSeen = true
+                            chunked = head.chunked
                         }
-                        for payload in sseEvents(from: &buffer) {
+                        if chunked {
+                            events.append(dechunk(from: &buffer).data)
+                        } else {
+                            events.append(buffer)
+                            buffer.removeAll()
+                        }
+                        for payload in sseEvents(from: &events) {
                             // One unparseable frame must not end a stream the panel depends on
                             if let event = try? decoder.decode(TelemetryEvent.self, from: payload) {
                                 continuation.yield(event)

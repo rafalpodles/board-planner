@@ -126,3 +126,40 @@ private struct RecordingTransport: Transport {
 @Test func defaultsToTheWorkersOwnStateDirectory() {
     #expect(SocketClient.defaultSocketPath().hasSuffix("/worker.sock"))
 }
+
+// The shape the worker actually sends: chunked framing wrapped around each SSE write, with the
+// read(2) boundary landing wherever it lands.
+@Test func surfacesEventsFromAChunkedStream() async throws {
+    let head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n"
+    let first = "data: {\"phase\":\"agent\",\"taskKey\":\"CP-2\"}\n\n"
+    let second = "data: {\"outcome\":\"merged\",\"taskKey\":\"CP-2\"}\n\n"
+    let framed = "\(String(first.utf8.count, radix: 16))\r\n\(first)\r\n"
+        + "\(String(second.utf8.count, radix: 16))\r\n\(second)\r\n"
+    let cut = framed.index(framed.startIndex, offsetBy: 20)
+
+    let client = SocketClient(socketPath: "/x", transport: FakeTransport(chunks: [
+        head + String(framed[..<cut]),
+        String(framed[cut...]),
+    ]))
+
+    var seen: [TelemetryEvent] = []
+    for await event in client.stream() { seen.append(event) }
+
+    #expect(seen == [
+        .progress(Progress(phase: "agent", taskKey: "CP-2")),
+        .outcome(Outcome(outcome: "merged", taskKey: "CP-2")),
+    ])
+}
+
+@Test func decodesAChunkedStatusBody() async throws {
+    let body = #"{"paused":false,"current":null,"recent":[]}"#
+    let client = SocketClient(socketPath: "/x", transport: FakeTransport(chunks: [
+        "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n"
+            + "\(String(body.utf8.count, radix: 16))\r\n\(body)\r\n0\r\n\r\n",
+    ]))
+
+    let status = try await client.status()
+
+    #expect(status.paused == false)
+    #expect(status.recent.isEmpty)
+}
