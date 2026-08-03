@@ -848,6 +848,7 @@ export interface ApiTaskExecution {
   workerId?: string;
   phase?: string;
   phaseAt?: string | null;
+  startedAt?: string | null;
 }
 
 export interface ApiReaction {

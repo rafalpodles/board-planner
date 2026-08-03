@@ -43,6 +43,42 @@ describe("ExecutionPanel", () => {
 
   // A task that is not running has no phase field at all — task-service unsets the trio on every
   // exit from the active column — so an absent phase is current, never stale
+  // Two clocks that mean different things: during the agent stage every tool call refreshes
+  // phaseAt, so its age is time since the last sign of life, never time spent. Showing one number
+  // for both would read as a run that just started, forever.
+  it("separates how long the run has been going from how long it has been quiet", () => {
+    render(
+      <ExecutionPanel
+        execution={{
+          phase: "agent",
+          startedAt: new Date(Date.now() - 55 * 60_000).toISOString(),
+          phaseAt: new Date(Date.now() - 12_000).toISOString(),
+        }}
+      />
+    );
+
+    expect(screen.getByText(/running 55m/)).toBeTruthy();
+    expect(screen.getByText(/last sign of life 12s ago/)).toBeTruthy();
+  });
+
+  // A worker killed mid-run keeps its phase until the lease expires, and the lease is only swept
+  // when some worker next polls that project — so a pulsing "live" dot would lie for up to 2h
+  it("stops claiming a run is alive once it has gone quiet", () => {
+    const { container } = render(
+      <ExecutionPanel execution={{ phase: "agent", phaseAt: new Date(Date.now() - 20 * 60_000).toISOString() }} />
+    );
+
+    expect(container.querySelector(".animate-pulse")).toBeNull();
+  });
+
+  it("shows a live run as live", () => {
+    const { container } = render(
+      <ExecutionPanel execution={{ phase: "agent", phaseAt: new Date(Date.now() - 3_000).toISOString() }} />
+    );
+
+    expect(container.querySelector(".animate-pulse")).toBeTruthy();
+  });
+
   it("renders nothing at all when no run holds the task", () => {
     const { container } = render(<ExecutionPanel execution={{ workerId: "w-laptop" }} />);
 
