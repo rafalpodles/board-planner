@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   DEFAULT_HIDDEN,
-  HIDEABLE_COLUMNS,
-  LIST_COLUMNS,
+  hideableColumns,
+  listColumns,
   ListColumnId,
   isColumnVisible,
   sanitizeHidden,
@@ -14,19 +14,19 @@ import { SORT_OPTIONS } from "@/types";
 describe("column definitions", () => {
   // A row with no title is not a row, and the key is how you open it
   it("keeps key and title unhideable", () => {
-    expect(LIST_COLUMNS.filter((c) => c.fixed).map((c) => c.id)).toEqual(["key", "title"]);
-    expect(HIDEABLE_COLUMNS.map((c) => c.id)).not.toContain("title");
+    expect(listColumns().filter((c) => c.fixed).map((c) => c.id)).toEqual(["key", "title"]);
+    expect(hideableColumns().map((c) => c.id)).not.toContain("title");
   });
 
   it("shows everything by default, which is what the list did before", () => {
     expect(DEFAULT_HIDDEN).toEqual([]);
-    expect(visibleCount(DEFAULT_HIDDEN)).toBe(LIST_COLUMNS.length);
+    expect(visibleCount(DEFAULT_HIDDEN)).toBe(listColumns().length);
   });
 
   // Column ids double as sort fields, so a typo would silently break sorting
   it("names every column after a real sort field", () => {
     const fields = new Set(SORT_OPTIONS.map((o) => o.value));
-    for (const column of LIST_COLUMNS) expect(fields).toContain(column.id);
+    for (const column of listColumns()) expect(fields).toContain(column.id);
   });
 });
 

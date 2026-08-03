@@ -7,12 +7,15 @@ import {
   ApiProjectColumn,
   ApiSprint,
   ApiTask,
+  ApiCustomField,
   PRIORITY_LABELS,
   SortDir,
   SortField,
+  SortKey,
   defaultSortDir,
 } from "@/types";
-import { ListColumnId, isColumnVisible } from "@/lib/list-columns";
+import { ListColumnId, isColumnVisible, listColumns as projectListColumns } from "@/lib/list-columns";
+import { fieldCellText } from "@/lib/custom-fields";
 import { effectiveColumns } from "@/lib/columns";
 import { Badge } from "@/components/ui/Badge";
 import { categoryColor, categoryTint } from "@/lib/category-colors";
@@ -29,10 +32,11 @@ interface ListViewProps {
   selectedTasks?: Set<string>;
   selectionMode?: boolean;
   /** Owned by the board page, so this and the filter bar cannot disagree */
-  sortField?: SortField;
+  sortField?: SortKey;
   sortDir?: SortDir;
-  onSortChange?: (field: SortField, dir: SortDir) => void;
+  onSortChange?: (field: SortKey, dir: SortDir) => void;
   hiddenColumns?: ListColumnId[];
+  customFields?: ApiCustomField[];
   onTaskClick: (taskId: string) => void;
   onStatusChange?: (taskId: string, status: string) => void;
   onTaskSelect?: (taskId: string) => void;
@@ -69,9 +73,15 @@ export function ListView({
   onStatusChange,
   onTaskSelect,
   onTaskContextMenu,
+  customFields = [],
 }: ListViewProps) {
   const selectionActive = selectionMode || (selectedTasks?.size ?? 0) > 0;
   const show = (id: ListColumnId) => isColumnVisible(id, hiddenColumns);
+  const fieldColumns = useMemo(
+    () => projectListColumns(customFields).filter((c) => c.field && show(c.id)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [customFields, hiddenColumns]
+  );
   const rowRefs = useRef<(HTMLTableRowElement | null)[]>([]);
   const sprintById = useMemo(
     () => new Map(sprints.map((s) => [s._id, s])),
@@ -89,7 +99,7 @@ export function ListView({
     }
   }, [focusedIndex]);
 
-  function handleSort(field: SortField) {
+  function handleSort(field: SortKey) {
     if (!onSortChange) return;
     onSortChange(
       field,
@@ -110,7 +120,7 @@ export function ListView({
     className,
   }: {
     label: string;
-    column: SortField;
+    column: SortKey;
     className?: string;
   }) {
     const active = sortField === column;
@@ -235,6 +245,14 @@ export function ListView({
                   className="hidden sm:table-cell"
                 />
               )}
+              {fieldColumns.map((column) => (
+                <SortHeader
+                  key={column.id}
+                  label={column.label}
+                  column={column.id}
+                  className="hidden lg:table-cell"
+                />
+              ))}
             </tr>
           </thead>
           <tbody>
@@ -476,6 +494,18 @@ export function ListView({
                       {timeAgo(task.updatedAt)}
                     </td>
                   )}
+                  {fieldColumns.map((column) => {
+                    const text = fieldCellText(task.customFieldValues, column.field!);
+                    return (
+                      <td
+                        key={column.id}
+                        className="px-2 py-2 hidden lg:table-cell text-text-muted max-w-32"
+                        title={text || undefined}
+                      >
+                        <div className="truncate">{text || "—"}</div>
+                      </td>
+                    );
+                  })}
                 </tr>
               );
             })}

@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { ApiCustomField } from "@/types";
 import {
   DEFAULT_HIDDEN,
-  HIDEABLE_COLUMNS,
-  LIST_COLUMNS,
+  hideableColumns,
+  listColumns,
   ListColumnId,
   toggleColumn,
   visibleCount,
@@ -13,9 +14,10 @@ import {
 interface ColumnPickerProps {
   hidden: ListColumnId[];
   onChange: (hidden: ListColumnId[]) => void;
+  customFields?: ApiCustomField[];
 }
 
-export function ColumnPicker({ hidden, onChange }: ColumnPickerProps) {
+export function ColumnPicker({ hidden, onChange, customFields = [] }: ColumnPickerProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -35,7 +37,10 @@ export function ColumnPicker({ hidden, onChange }: ColumnPickerProps) {
     };
   }, [open]);
 
-  const shown = visibleCount(hidden);
+  const shown = visibleCount(hidden, customFields);
+  const columns = hideableColumns(customFields);
+  const builtIn = columns.filter((c) => !c.field);
+  const fromProject = columns.filter((c) => c.field);
   const isDefault = hidden.length === DEFAULT_HIDDEN.length;
 
   return (
@@ -54,7 +59,7 @@ export function ColumnPicker({ hidden, onChange }: ColumnPickerProps) {
         Columns
         {!isDefault && (
           <span className="text-[11px]">
-            {shown}/{LIST_COLUMNS.length}
+            {shown}/{listColumns(customFields).length}
           </span>
         )}
       </button>
@@ -65,23 +70,43 @@ export function ColumnPicker({ hidden, onChange }: ColumnPickerProps) {
           aria-label="Columns"
           className="absolute right-0 top-full z-40 mt-1 w-56 rounded-xl border border-border bg-bg-card p-2 shadow-lg"
         >
-          {HIDEABLE_COLUMNS.map((column) => {
-            const checked = !hidden.includes(column.id);
-            return (
-              <label
-                key={column.id}
-                className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[13px] hover:bg-bg-hover"
-              >
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  onChange={() => onChange(toggleColumn(hidden, column.id))}
-                  className="focus-ring rounded border-border"
-                />
-                {column.label}
-              </label>
-            );
-          })}
+          {builtIn.map((column) => (
+            <label
+              key={column.id}
+              className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[13px] hover:bg-bg-hover"
+            >
+              <input
+                type="checkbox"
+                checked={!hidden.includes(column.id)}
+                onChange={() => onChange(toggleColumn(hidden, column.id))}
+                className="focus-ring rounded border-border"
+              />
+              {column.label}
+            </label>
+          ))}
+
+          {/* Kept apart, so it is obvious which columns this project invented */}
+          {fromProject.length > 0 && (
+            <>
+              <p className="mt-2 px-2 pb-1 pt-1 text-[10.5px] font-bold uppercase tracking-wider text-text-muted">
+                Project fields
+              </p>
+              {fromProject.map((column) => (
+                <label
+                  key={column.id}
+                  className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[13px] hover:bg-bg-hover"
+                >
+                  <input
+                    type="checkbox"
+                    checked={!hidden.includes(column.id)}
+                    onChange={() => onChange(toggleColumn(hidden, column.id))}
+                    className="focus-ring rounded border-border"
+                  />
+                  {column.label}
+                </label>
+              ))}
+            </>
+          )}
 
           <div className="mt-1 border-t border-border pt-1">
             <button
