@@ -42,15 +42,6 @@ describe("sortTasks", () => {
     expect(keys(sortTasks(tasks, "priority", "asc"))).toEqual([2, 3, 1]);
   });
 
-  it("sizes S before XL", () => {
-    const tasks = [
-      task({ taskNumber: 1, difficulty: "XL" }),
-      task({ taskNumber: 2, difficulty: "S" }),
-      task({ taskNumber: 3, difficulty: "L" }),
-    ];
-    expect(keys(sortTasks(tasks, "difficulty", "asc"))).toEqual([2, 3, 1]);
-  });
-
   // Ascending due date means "soonest first", so an undated task belongs last
   it("sorts undated tasks last by due date", () => {
     const tasks = [

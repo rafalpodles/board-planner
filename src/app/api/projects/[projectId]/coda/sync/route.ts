@@ -50,7 +50,7 @@ export const POST = withProjectAdmin(async (_request, { params }) => {
 
   const tasks = await Task.find(
     { project: projectId },
-    "taskNumber title status assignee priority difficulty category dueDate"
+    "taskNumber title status assignee priority category dueDate customFieldValues"
   )
     .sort({ taskNumber: 1 })
     .populate<{ assignee: { fullName?: string; username: string } | null }>(
@@ -60,6 +60,18 @@ export const POST = withProjectAdmin(async (_request, { params }) => {
     .lean();
 
   const columnLabels = new Map(getProjectColumns(project).map((c) => [c.id, c.label]));
+  // Difficulty is a project field since CP-213; the Coda table still has a column
+  // for it, so it is read from the field rather than left blank
+  const difficultyField = (project.customFields || []).find(
+    (f: { name: string }) => f.name.toLowerCase() === "difficulty"
+  );
+  // Mongoose hands customFieldValues back as a Map; a lean or raw read gives a
+  // plain object, and both shapes reach this route depending on the caller
+  const fieldValue = (values: unknown, id: string): string => {
+    if (values instanceof Map) return String(values.get(id) ?? "");
+    const record = values as Record<string, unknown> | undefined;
+    return String(record?.[id] ?? "");
+  };
   const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/+$/, "");
 
   const rows: CodaTaskRow[] = tasks.map((task) => ({
@@ -68,7 +80,9 @@ export const POST = withProjectAdmin(async (_request, { params }) => {
     status: columnLabels.get(task.status) || task.status,
     assignee: task.assignee ? task.assignee.fullName || task.assignee.username : "",
     priority: task.priority || "",
-    difficulty: task.difficulty || "",
+    difficulty: difficultyField
+      ? fieldValue(task.customFieldValues, String(difficultyField._id))
+      : "",
     category: task.category || "",
     due: task.dueDate ? new Date(task.dueDate).toISOString().slice(0, 10) : "",
     link: appUrl ? `${appUrl}/projects/${project.key}/tasks/${task.taskNumber}` : "",

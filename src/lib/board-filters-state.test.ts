@@ -25,7 +25,6 @@ describe("migratePersistedFilters", () => {
     );
     expect(state.filters.assignee).toBe("claude");
     expect(state.filters.priority).toBe("high");
-    expect(state.filters.component).toBe("");
     expect(state.sortField).toBe("priority");
     expect(state.sortDir).toBe("desc");
   });
@@ -76,7 +75,6 @@ describe("migratePersistedFilters", () => {
     );
     expect(state.filters.assignee).toBe("");
     expect(state.filters.priority).toBe("");
-    expect(state.filters.label).toBe("");
   });
 
   it("treats any sortDir other than desc as asc", () => {
@@ -98,7 +96,7 @@ describe("countActiveFilters", () => {
   it("counts each set dimension once", () => {
     expect(countActiveFilters({ ...EMPTY_FILTERS, assignee: "rpo" })).toBe(1);
     expect(
-      countActiveFilters({ ...EMPTY_FILTERS, assignee: "rpo", priority: "high", label: "ui" })
+      countActiveFilters({ ...EMPTY_FILTERS, assignee: "rpo", priority: "high", category: "bug" })
     ).toBe(3);
   });
 

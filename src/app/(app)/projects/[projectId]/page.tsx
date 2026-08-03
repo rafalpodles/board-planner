@@ -391,10 +391,8 @@ export default function KanbanPage() {
       await api.post(`/api/projects/${projectId}/tasks`, {
         title: `Copy of ${task.title}`,
         description: task.description,
-        difficulty: task.difficulty,
         priority: task.priority,
         category: task.category,
-        component: task.component,
         checklist: task.checklist,
         dueDate: task.dueDate,
         status: "planned",
@@ -447,9 +445,7 @@ export default function KanbanPage() {
       <BoardFilters
         tasks={tasks}
         customFields={project.customFields || []}
-        components={project.components}
         projectKey={project.key}
-        labels={project.labels || []}
         categories={(project.categories || []).map((c) => c.name)}
         projectCategories={project.categories || []}
         projectId={projectId}
@@ -504,7 +500,6 @@ export default function KanbanPage() {
         <Board
           tasks={filteredTasks}
           projectKey={project.key}
-          projectLabels={project.labels || []}
           customFields={project.customFields || []}
           projectCategories={project.categories || []}
           columns={project.columns || []}
@@ -622,10 +617,8 @@ export default function KanbanPage() {
         <TaskForm
           projectId={projectId}
           projectKey={project.key}
-          components={project.components}
-          categories={(project.categories || []).map((c) => c.name)}
+            categories={(project.categories || []).map((c) => c.name)}
           columns={project.columns || []}
-          projectLabels={project.labels || []}
           taskTemplates={project.taskTemplates || []}
           sprints={sprints}
           defaultSprint={sprintDefaultForNewTask(selectedSprint)}

@@ -15,12 +15,9 @@ const tasks = [
     title: "Pages do not use the width the sidebar redesign freed up, and the list view scrolls sideways",
     status: "todo",
     priority: "medium",
-    difficulty: "M",
     category: "bug",
-    component: "kanban-list-view",
     assignee: { _id: "u1", username: "rpo", fullName: "Rafał Podleś-Wojciechowski" },
     sprint: "s1",
-    labels: [],
     createdAt: "2026-08-01T00:00:00Z",
     updatedAt: "2026-08-01T00:00:00Z",
   },
@@ -47,9 +44,7 @@ describe("ListView columns", () => {
       "Assignee",
       "Priority",
       "Sprint",
-      "Difficulty",
       "Category",
-      "Component",
       "Due",
       "Updated",
     ]);
@@ -98,11 +93,6 @@ describe("ListView truncated cells", () => {
   it("keeps the whole sprint name reachable", () => {
     renderList();
     expect(screen.getByTitle(sprints[0].name).textContent).toBe(sprints[0].name);
-  });
-
-  it("keeps the whole component reachable", () => {
-    renderList();
-    expect(screen.getByTitle("kanban-list-view").textContent).toBe("kanban-list-view");
   });
 
   it("keeps the whole category reachable", () => {

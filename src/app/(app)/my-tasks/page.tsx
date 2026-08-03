@@ -14,10 +14,8 @@ interface MyTask {
   taskNumber: number;
   title: string;
   status: TaskStatus;
-  difficulty: string;
   priority: Priority;
   category: string;
-  component: string;
   updatedAt: string;
   project: { _id: string; name: string; key: string; icon?: string };
 }
@@ -128,9 +126,6 @@ export default function MyTasksPage() {
                     <div className="flex gap-1 flex-shrink-0">
                       <Badge variant="priority" value={task.priority}>
                         {PRIORITY_LABELS[task.priority] ?? task.priority}
-                      </Badge>
-                      <Badge variant="difficulty" value={task.difficulty}>
-                        {task.difficulty}
                       </Badge>
                     </div>
                   </Link>

@@ -1,10 +1,7 @@
-import {
-  ApiCustomField,
-  ApiLabel,
-  DEFAULT_OPTION_COLOR,
-  DIFFICULTIES,
-  ICustomField,
-} from "@/types";
+import { ApiCustomField, ApiLabel, DEFAULT_OPTION_COLOR, Difficulty, ICustomField } from "@/types";
+
+/** The sizes the seeded Difficulty field offers; nothing else keys on them now */
+const DIFFICULTIES: Difficulty[] = ["S", "M", "L", "XL"];
 import { normalizeOptions } from "./custom-fields";
 
 /**
@@ -13,8 +10,8 @@ import { normalizeOptions } from "./custom-fields";
  * morning after the migration nothing looks different — the three are simply
  * editable now.
  *
- * Reads fall back to the legacy column, so the migration script is an optimisation
- * rather than a prerequisite: an unmigrated database still renders correctly.
+ * CP-214 removed the columns themselves; what is left here is the seeding a new
+ * project still needs and the helpers the migration script uses.
  */
 export const LEGACY_FIELD_NAMES = {
   component: "Component",
@@ -105,27 +102,6 @@ export function findLegacyField<T extends FieldLike>(
   return (fields || []).find((f) => f.name.toLowerCase() === name);
 }
 
-/**
- * A task's value for one of the three, taken from the migrated field when it is
- * there and from the legacy column otherwise. Every reader goes through this, so
- * nothing else has to know the value can live in two places.
- */
-export function legacyFieldValue(
-  task: { component?: string; difficulty?: string; labels?: string[]; customFieldValues?: Record<string, unknown> },
-  fields: ApiCustomField[] | undefined,
-  key: LegacyFieldKey
-): string | string[] | undefined {
-  const field = findLegacyField(fields, key);
-  const migrated = field ? task.customFieldValues?.[field._id] : undefined;
-
-  if (key === "labels") {
-    if (Array.isArray(migrated) && migrated.length) return migrated as string[];
-    return task.labels || [];
-  }
-  if (typeof migrated === "string" && migrated) return migrated;
-  return key === "component" ? task.component : task.difficulty;
-}
-
 /** The values the migration writes for one task, keyed by the seeded field ids */
 export function migratedValuesFor(
   task: { component?: string; difficulty?: string; labels?: string[] },
@@ -164,48 +140,3 @@ export function withValuesInUse(
   return { ...field, options: [...options, ...extra] };
 }
 
-/**
- * Whether the migrated field now renders this value, so the hardcoded rendering
- * must stand down. Keyed on the field existing rather than on its switches: if the
- * user turns the badge off, that is a choice, not a reason to bring the old one back.
- */
-export function legacyRenderingSuppressed(
-  fields: FieldLike[] | undefined,
-  key: LegacyFieldKey
-): boolean {
-  return !!findLegacyField(fields, key);
-}
-
-/**
- * Mirrors a migrated field's value back onto its legacy column. CP-213 keeps those
- * columns written for one release so a rollback loses nothing — without this, every
- * edit made through the migrated field would leave the old column stale.
- *
- * Removed by CP-214 together with the columns themselves.
- */
-export function dualWriteLegacyColumns(
-  customFieldValues: Record<string, unknown>,
-  fields: FieldLike[] | undefined
-): Partial<{ component: string; difficulty: string; labels: string[] }> {
-  const mirrored: Record<string, unknown> = {};
-
-  const component = findLegacyField(fields, "component");
-  if (component && String(component._id) in customFieldValues) {
-    mirrored.component = String(customFieldValues[String(component._id)] ?? "");
-  }
-  const difficulty = findLegacyField(fields, "difficulty");
-  if (difficulty && String(difficulty._id) in customFieldValues) {
-    const value = customFieldValues[String(difficulty._id)];
-    // The column is an enum; an option the project renamed would not be valid there
-    if (typeof value === "string" && (DIFFICULTIES as string[]).includes(value)) {
-      mirrored.difficulty = value;
-    }
-  }
-  const labels = findLegacyField(fields, "labels");
-  if (labels && String(labels._id) in customFieldValues) {
-    const value = customFieldValues[String(labels._id)];
-    mirrored.labels = Array.isArray(value) ? (value as string[]) : [];
-  }
-
-  return mirrored;
-}

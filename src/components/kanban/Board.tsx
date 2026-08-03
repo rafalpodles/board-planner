@@ -9,7 +9,6 @@ import { Column } from "./Column";
 interface BoardProps {
   tasks: ApiTask[];
   projectKey: string;
-  projectLabels?: ApiLabel[];
   customFields?: ApiCustomField[];
   projectCategories?: ApiProjectCategory[];
   columns?: ApiProjectColumn[];
@@ -26,7 +25,6 @@ interface BoardProps {
 export function Board({
   tasks,
   projectKey,
-  projectLabels,
   customFields,
   projectCategories,
   columns,
@@ -89,7 +87,6 @@ export function Board({
               column={column}
               tasks={grouped[column.id]}
               projectKey={projectKey}
-              projectLabels={projectLabels}
               customFields={customFields}
               projectCategories={projectCategories}
               selectedTasks={selectedTasks}
