@@ -9,6 +9,7 @@ import {
   sanitizeCustomFieldValues,
   matchesFieldFilter,
   matchesAllFieldFilters,
+  resolveFieldsByName,
 } from "./custom-fields";
 import { DEFAULT_OPTION_COLOR, ICustomField } from "@/types";
 
@@ -236,5 +237,70 @@ describe("matchesAllFieldFilters", () => {
   // A stale filter should not blank the board while it is being cleaned up
   it("ignores a filter whose field is gone rather than hiding everything", () => {
     expect(matchesAllFieldFilters({ f1: 5 }, { ghost: { value: "x" } }, definitions)).toBe(true);
+  });
+});
+
+describe("resolveFieldsByName", () => {
+  const definitions = [
+    {
+      _id: "f1",
+      name: "Owoce",
+      fieldType: "dropdown" as const,
+      options: [{ id: "opt-a", value: "Apples", color: "#000", order: 0 }],
+    },
+    { _id: "f2", name: "Points", fieldType: "number" as const, options: [] },
+    { _id: "f3", name: "Done", fieldType: "checkbox" as const, options: [] },
+    {
+      _id: "f4",
+      name: "Tags",
+      fieldType: "multiselect" as const,
+      options: [
+        { id: "t1", value: "one", color: "#000", order: 0 },
+        { id: "t2", value: "two", color: "#000", order: 1 },
+      ],
+    },
+    { _id: "f5", name: "Gone", fieldType: "text" as const, options: [], archived: true },
+  ];
+
+  // An MCP client knows the name a human gave the field, never its id
+  it("resolves a field name and an option name to their ids", () => {
+    expect(resolveFieldsByName({ Owoce: "Apples" }, definitions)).toEqual({ f1: "opt-a" });
+  });
+
+  it("matches case-insensitively on both the field and the option", () => {
+    expect(resolveFieldsByName({ owoce: "apples" }, definitions)).toEqual({ f1: "opt-a" });
+  });
+
+  // So a client can send back exactly what it read
+  it("accepts an option id as well as its name", () => {
+    expect(resolveFieldsByName({ Owoce: "opt-a" }, definitions)).toEqual({ f1: "opt-a" });
+  });
+
+  it("takes a list for a multiselect, and a bare value as a list of one", () => {
+    expect(resolveFieldsByName({ Tags: ["one", "two"] }, definitions)).toEqual({ f4: ["t1", "t2"] });
+    expect(resolveFieldsByName({ Tags: "two" }, definitions)).toEqual({ f4: ["t2"] });
+  });
+
+  it("coerces numbers and checkboxes", () => {
+    expect(resolveFieldsByName({ Points: "8" }, definitions)).toEqual({ f2: 8 });
+    expect(resolveFieldsByName({ Done: "true" }, definitions)).toEqual({ f3: true });
+  });
+
+  // Silently dropping would leave the caller thinking the value was stored
+  it("throws on an unknown field, and lists what is available", () => {
+    expect(() => resolveFieldsByName({ Nope: "x" }, definitions)).toThrow(/Unknown field "Nope"/);
+    expect(() => resolveFieldsByName({ Nope: "x" }, definitions)).toThrow(/Owoce/);
+  });
+
+  it("throws on a value that is not one of the field's options", () => {
+    expect(() => resolveFieldsByName({ Owoce: "Bananas" }, definitions)).toThrow(/not an option/);
+  });
+
+  it("throws on a number that is not a number", () => {
+    expect(() => resolveFieldsByName({ Points: "eight" }, definitions)).toThrow(/must be a number/);
+  });
+
+  it("refuses to write to an archived field", () => {
+    expect(() => resolveFieldsByName({ Gone: "x" }, definitions)).toThrow(/Unknown field/);
   });
 });
