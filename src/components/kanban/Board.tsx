@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ApiTask, ApiLabel, ApiProjectCategory, ApiProjectColumn } from "@/types";
+import { ApiTask, ApiLabel, ApiCustomField, ApiProjectCategory, ApiProjectColumn } from "@/types";
 import { effectiveColumns } from "@/lib/columns";
 import { boardGridTemplate, boardMinWidth, isColumnCollapsed } from "@/lib/board-grid";
 import { Column } from "./Column";
@@ -10,6 +10,7 @@ interface BoardProps {
   tasks: ApiTask[];
   projectKey: string;
   projectLabels?: ApiLabel[];
+  customFields?: ApiCustomField[];
   projectCategories?: ApiProjectCategory[];
   columns?: ApiProjectColumn[];
   selectedTasks?: Set<string>;
@@ -26,6 +27,7 @@ export function Board({
   tasks,
   projectKey,
   projectLabels,
+  customFields,
   projectCategories,
   columns,
   selectedTasks,
@@ -86,6 +88,7 @@ export function Board({
               tasks={grouped[column.id]}
               projectKey={projectKey}
               projectLabels={projectLabels}
+              customFields={customFields}
               projectCategories={projectCategories}
               selectedTasks={selectedTasks}
               selectionMode={selectionMode}

@@ -3,9 +3,9 @@ import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { CUSTOM_FIELD_TYPES, CustomFieldType } from "@/types";
+import { isOptionField, parseOptions, MAX_FIELD_NAME_LENGTH } from "@/lib/custom-fields";
 
 const MAX_FIELDS = 50;
-const MAX_NAME_LENGTH = 100;
 
 export const GET = withProjectAccess(async (_request, { params }) => {
   const { projectId } = await params;
@@ -24,33 +24,37 @@ export const POST = withProjectAccess(async (request, { params }) => {
   await connectDB();
 
   const body = await request.json();
-  const { name, fieldType, options, required: isRequired } = body;
+  const {
+    name,
+    fieldType,
+    options,
+    required: isRequired,
+    showOnCard,
+    showInList,
+    filterable,
+  } = body;
 
   if (!name || typeof name !== "string" || !name.trim()) {
     return NextResponse.json({ error: "Field name is required" }, { status: 400 });
   }
-  if (name.trim().length > MAX_NAME_LENGTH) {
-    return NextResponse.json({ error: `Field name must be ${MAX_NAME_LENGTH} characters or less` }, { status: 400 });
+  if (name.trim().length > MAX_FIELD_NAME_LENGTH) {
+    return NextResponse.json({ error: `Field name must be ${MAX_FIELD_NAME_LENGTH} characters or less` }, { status: 400 });
   }
   if (!fieldType || !CUSTOM_FIELD_TYPES.includes(fieldType as CustomFieldType)) {
     return NextResponse.json({ error: "Invalid field type" }, { status: 400 });
   }
 
-  // Validate dropdown options
-  let parsedOptions: string[] = [];
-  if (fieldType === "dropdown") {
+  let parsedOptions: ReturnType<typeof parseOptions>["options"] = [];
+  if (isOptionField({ fieldType })) {
     if (!Array.isArray(options) || options.length === 0) {
-      return NextResponse.json({ error: "Dropdown fields require at least one option" }, { status: 400 });
+      return NextResponse.json(
+        { error: "This field type needs at least one option" },
+        { status: 400 }
+      );
     }
-    parsedOptions = options
-      .filter((o: unknown) => typeof o === "string" && o.trim())
-      .map((o: string) => o.trim());
-    if (parsedOptions.length === 0) {
-      return NextResponse.json({ error: "Dropdown options must be non-empty strings" }, { status: 400 });
-    }
-    if (new Set(parsedOptions).size !== parsedOptions.length) {
-      return NextResponse.json({ error: "Dropdown options must be unique" }, { status: 400 });
-    }
+    const parsed = parseOptions(options);
+    if (parsed.error) return NextResponse.json({ error: parsed.error }, { status: 400 });
+    parsedOptions = parsed.options;
   }
 
   const project = await Project.findById(projectId);
@@ -72,6 +76,12 @@ export const POST = withProjectAccess(async (request, { params }) => {
     fieldType,
     options: parsedOptions,
     required: !!isRequired,
+    // A new field lands at the end of the form rather than jumping to the top
+    order: fields.length,
+    showOnCard: !!showOnCard,
+    showInList: !!showInList,
+    filterable: !!filterable,
+    archived: false,
   } as any);
   project.customFields = fields;
   await project.save();

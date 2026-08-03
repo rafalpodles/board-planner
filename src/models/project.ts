@@ -42,8 +42,16 @@ const customFieldSchema = new Schema(
   {
     name: { type: String, required: true, trim: true },
     fieldType: { type: String, enum: CUSTOM_FIELD_TYPES, required: true },
-    options: { type: [String], default: [] },
+    // Mixed, not a subdocument schema: options stored before CP-211 are plain
+    // strings, and casting them to the new shape silently discards them. Shape is
+    // enforced in lib/custom-fields.ts, which also converts the legacy form.
+    options: { type: [Schema.Types.Mixed], default: [] },
     required: { type: Boolean, default: false },
+    order: { type: Number, default: 0 },
+    showOnCard: { type: Boolean, default: false },
+    showInList: { type: Boolean, default: false },
+    filterable: { type: Boolean, default: false },
+    archived: { type: Boolean, default: false },
   }
 );
 
