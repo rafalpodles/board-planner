@@ -33,6 +33,7 @@ const {
   releaseTask,
   releaseExpiredTasks,
   recordTaskPhase,
+  toApiExecution,
   phaseFrom,
   changeStatus,
   updateTask,
@@ -561,5 +562,48 @@ describe("clearing the phase on every exit from the active column", () => {
     for (const [, update] of updateMany.mock.calls) {
       expect(Object.keys(update.$unset)).toEqual(RUN_KEYS);
     }
+  });
+});
+
+describe("toApiExecution", () => {
+  const running = {
+    runId: "run-1",
+    workerId: "w1",
+    attempts: 1,
+    startedAt: new Date("2026-08-03T09:00:00.000Z"),
+    lastError: "",
+    phase: "gates:build",
+    phaseAt: new Date("2026-08-03T09:05:00.000Z"),
+    phaseSeq: 7,
+  };
+
+  // workerId and startedAt survive a run; only the run identity is cleared. Keying on those would
+  // leave a finished task rendering as one that had just started, forever.
+  it("says nothing about a task no run is holding", () => {
+    expect(toApiExecution({ ...running, runId: "", phase: undefined })).toBeUndefined();
+    expect(toApiExecution(undefined)).toBeUndefined();
+  });
+
+  it("publishes only what a reader may see", () => {
+    const api = toApiExecution(running)!;
+
+    expect(Object.keys(api).sort()).toEqual(["asOf", "phase", "phaseAt", "startedAt", "workerId"]);
+  });
+
+  // runId is the scope recordTaskPhase authorises against; attempts counts attempts spent and
+  // lastError is only ever "", so neither can be rendered as if it meant something
+  it("keeps the run identity and the misleading counters off the wire", () => {
+    const serialised = JSON.stringify(toApiExecution(running));
+
+    expect(serialised).not.toContain("run-1");
+    expect(serialised).not.toContain("phaseSeq");
+    expect(serialised).not.toContain("attempts");
+    expect(serialised).not.toContain("lastError");
+  });
+
+  it("carries the clock the ages were measured against", () => {
+    const api = toApiExecution(running)!;
+
+    expect(Number.isFinite(Date.parse(api.asOf!))).toBe(true);
   });
 });

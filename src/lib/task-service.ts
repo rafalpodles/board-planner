@@ -720,7 +720,10 @@ export async function recordTaskPhase(event: TaskPhaseUpdate): Promise<boolean> 
 // attempts counts attempts spent rather than an attempt number — and none of it belongs in a
 // browser. Returning the raw document would publish all of it to every project member.
 export function toApiExecution(execution: ITaskExecution | undefined): ApiTaskExecution | undefined {
-  if (!execution?.phase && !execution?.workerId) return undefined;
+  // runId is what says a run still holds this task: every exit from the active column clears it,
+  // while workerId and startedAt are left behind as history. Keying on those instead would leave a
+  // finished task claiming to be starting forever, which is what live testing caught.
+  if (!execution?.runId) return undefined;
   return {
     ...(execution.workerId ? { workerId: execution.workerId } : {}),
     ...(execution.phase ? { phase: execution.phase } : {}),
