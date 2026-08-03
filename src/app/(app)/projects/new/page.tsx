@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
 import { Button } from "@/components/ui/Button";
 import { projectPath } from "@/lib/urls";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export default function NewProjectPage() {
   const [name, setName] = useState("");
@@ -37,8 +38,8 @@ export default function NewProjectPage() {
   }
 
   return (
-    <div className="max-w-lg mx-auto">
-      <h1 className="text-2xl font-bold mb-6">New Project</h1>
+    <div className="w-full max-w-lg mx-auto">
+      <PageHeader title="New project" />
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <Input

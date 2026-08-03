@@ -7,6 +7,7 @@ import { useApi } from "@/hooks/use-api";
 import { ApiTask, STATUS_LABELS, PRIORITY_LABELS } from "@/types";
 import { Badge } from "@/components/ui/Badge";
 import { taskPath } from "@/lib/urls";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 interface GroupedResult {
   projectId: string;
@@ -42,7 +43,9 @@ function SearchContent() {
     setLoading(true);
     setSearched(true);
     try {
-      const data = await api.get(`/api/search?q=${encodeURIComponent(q.trim())}`);
+      const data = await api.get(
+        `/api/search?q=${encodeURIComponent(q.trim())}`,
+      );
       setResults(data);
     } catch {
       setResults([]);
@@ -62,11 +65,20 @@ function SearchContent() {
   const projectMap = new Map<string, GroupedResult>();
 
   for (const task of results) {
-    const proj = task.project as unknown as { _id: string; name: string; key: string };
+    const proj = task.project as unknown as {
+      _id: string;
+      name: string;
+      key: string;
+    };
     if (!proj || typeof proj !== "object") continue;
     let group = projectMap.get(proj._id);
     if (!group) {
-      group = { projectId: proj._id, projectName: proj.name, projectKey: proj.key, tasks: [] };
+      group = {
+        projectId: proj._id,
+        projectName: proj.name,
+        projectKey: proj.key,
+        tasks: [],
+      };
       projectMap.set(proj._id, group);
       grouped.push(group);
     }
@@ -74,8 +86,8 @@ function SearchContent() {
   }
 
   return (
-    <div className="max-w-3xl mx-auto">
-      <h1 className="text-2xl font-bold mb-6">Search</h1>
+    <div className="w-full max-w-3xl mx-auto">
+      <PageHeader title="Search" />
 
       <form onSubmit={handleSubmit} className="mb-6">
         <div className="relative">
@@ -85,7 +97,12 @@ function SearchContent() {
             stroke="currentColor"
             viewBox="0 0 24 24"
           >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+            />
           </svg>
           <input
             ref={inputRef}
@@ -109,51 +126,51 @@ function SearchContent() {
         <p className="text-center text-text-muted py-8">No tasks found</p>
       )}
 
-      {!loading && grouped.map((group) => (
-        <div key={group.projectId} className="mb-6">
-          <h2 className="text-sm font-semibold text-text-muted mb-2">
-            {group.projectName}{" "}
-            <span className="font-mono text-xs">({group.projectKey})</span>
-          </h2>
-          <div className="border border-border rounded-lg overflow-hidden">
-            {group.tasks.map((task, i) => (
-              <Link
-                key={task._id}
-                href={taskPath(group.projectKey, task.taskNumber)}
-                className={`flex items-center gap-3 px-4 py-3 hover:bg-bg-input/50 transition-colors block
+      {!loading &&
+        grouped.map((group) => (
+          <div key={group.projectId} className="mb-6">
+            <h2 className="text-sm font-semibold text-text-muted mb-2">
+              {group.projectName}{" "}
+              <span className="font-mono text-xs">({group.projectKey})</span>
+            </h2>
+            <div className="border border-border rounded-lg overflow-hidden">
+              {group.tasks.map((task, i) => (
+                <Link
+                  key={task._id}
+                  href={taskPath(group.projectKey, task.taskNumber)}
+                  className={`flex items-center gap-3 px-4 py-3 hover:bg-bg-input/50 transition-colors block
                   ${i > 0 ? "border-t border-border" : ""}`}
-              >
-                <span className="text-xs font-mono text-text-muted whitespace-nowrap">
-                  {group.projectKey}-{task.taskNumber}
-                </span>
-                <span className="text-sm font-medium truncate flex-1">
-                  {task.title}
-                </span>
-                <Badge variant="status" value={task.status}>
-                  {STATUS_LABELS[task.status]}
-                </Badge>
-                <Badge variant="priority" value={task.priority}>
-                  {PRIORITY_LABELS[task.priority] ?? task.priority}
-                </Badge>
-                <Badge variant="difficulty" value={task.difficulty}>
-                  {task.difficulty}
-                </Badge>
-              </Link>
-            ))}
+                >
+                  <span className="text-xs font-mono text-text-muted whitespace-nowrap">
+                    {group.projectKey}-{task.taskNumber}
+                  </span>
+                  <span className="text-sm font-medium truncate flex-1">
+                    {task.title}
+                  </span>
+                  <Badge variant="status" value={task.status}>
+                    {STATUS_LABELS[task.status]}
+                  </Badge>
+                  <Badge variant="priority" value={task.priority}>
+                    {PRIORITY_LABELS[task.priority] ?? task.priority}
+                  </Badge>
+                </Link>
+              ))}
+            </div>
           </div>
-        </div>
-      ))}
+        ))}
     </div>
   );
 }
 
 export default function SearchPage() {
   return (
-    <Suspense fallback={
-      <div className="flex justify-center py-12">
-        <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary border-t-transparent" />
-      </div>
-    }>
+    <Suspense
+      fallback={
+        <div className="flex justify-center py-12">
+          <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary border-t-transparent" />
+        </div>
+      }
+    >
       <SearchContent />
     </Suspense>
   );

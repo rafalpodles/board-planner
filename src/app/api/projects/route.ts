@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withAuth, withAdmin } from "@/lib/middleware";
 import { Project } from "@/models/project";
+import { legacyFieldSeeds } from "@/lib/legacy-fields";
 import { Task } from "@/models/task";
 import { Sprint } from "@/models/sprint";
 import { sanitizeMcpServers } from "@/lib/pm/config";
@@ -14,9 +15,11 @@ export const GET = withAuth(async (_request, { user }) => {
       ? {}
       : { _id: { $in: user.allowedProjects || [] } };
 
+  // Manual order first; anything never dragged keeps its default 0 and falls
+  // back to newest-first, which is the order this list had before CP-180
   const projects = await Project.find(filter)
     .populate("owner", "username fullName")
-    .sort({ createdAt: -1 });
+    .sort({ sortOrder: 1, createdAt: -1 });
 
   // The sidebar renders on every route, so its per-project badges have to come
   // from this one request. Two flat queries joined in memory rather than a
@@ -70,6 +73,9 @@ export const POST = withAdmin(async (request, { user }) => {
     key,
     description: description || "",
     owner: user._id,
+    // A fresh project looks like a fresh project always did — the difference is
+    // that all three are now editable and removable (CP-213)
+    customFields: legacyFieldSeeds({}),
   });
 
   const populated = await project.populate("owner", "username fullName");

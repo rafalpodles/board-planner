@@ -99,9 +99,7 @@ export async function createTask(
     taskNumber: project.taskCounter,
     title: body.title,
     description: body.description ?? "",
-    difficulty: body.difficulty ?? "M",
     priority: body.priority ?? DEFAULT_PRIORITY,
-    component: body.component ?? "",
     category,
     status,
     assignee: assigneeId,
@@ -113,7 +111,6 @@ export async function createTask(
             ? body.acceptanceCriteria.join("\n")
             : (body.acceptanceCriteria ?? "")
         ),
-    labels: Array.isArray(body.labels) ? body.labels : [],
     sprint: body.sprint || null,
     customFieldValues: (() => {
       const raw = body.customFieldValues || {};
@@ -238,8 +235,8 @@ export async function updateTask(
 
   // Whitelist allowed fields to prevent overwriting protected fields
   const allowed = [
-    "title", "description", "difficulty", "priority", "component", "category",
-    "status", "assignee", "dueDate", "checklist", "labels", "order", "pinned", "sprint", "customFieldValues", "recurrence",
+    "title", "description", "priority", "category",
+    "status", "assignee", "dueDate", "checklist", "order", "pinned", "sprint", "customFieldValues", "recurrence",
   ];
   const updates: Record<string, unknown> = {};
   for (const field of allowed) {
@@ -325,7 +322,7 @@ export async function updateTask(
 
   // Log field changes (parallel)
   const activities: Promise<void>[] = [];
-  const trackFields = ["title", "difficulty", "priority", "component", "category", "status"];
+  const trackFields = ["title", "priority", "category", "status"];
   for (const field of trackFields) {
     const oldVal = String(oldTask[field as keyof typeof oldTask] ?? "");
     const newVal = String(task[field as keyof typeof task] ?? "");
@@ -518,15 +515,12 @@ async function createNextRecurrence(
     taskNumber: project.taskCounter,
     title: oldTask.title,
     description: oldTask.description || "",
-    difficulty: oldTask.difficulty || "M",
     priority: oldTask.priority || DEFAULT_PRIORITY,
-    component: oldTask.component || "",
     category: oldTask.category || "user-story",
     status: defaultStatusFor(project),
     assignee: oldTask.assignee,
     dueDate: nextDue,
     checklist,
-    labels: oldTask.labels || [],
     recurrence: oldTask.recurrence,
     recurringParentId: oldTask._id,
     order: 0,

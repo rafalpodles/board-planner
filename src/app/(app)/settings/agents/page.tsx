@@ -122,7 +122,7 @@ export default function AdminAgentsPage() {
   const effectiveDefault = data.defaults.pmDefaultModel || data.defaults.envModel;
 
   return (
-    <div className="max-w-5xl mx-auto">
+    <div className="w-full max-w-5xl mx-auto">
       <h2 className="text-lg font-semibold mb-1">PM agents</h2>
       <p className="text-sm text-text-muted mb-6">
         Every project on this instance. Only an instance admin can change what is on this page.

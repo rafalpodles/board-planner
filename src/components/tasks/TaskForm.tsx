@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, FormEvent, useEffect } from "react";
+import { useState, useCallback, useRef, FormEvent, useEffect, type CSSProperties } from "react";
 import { useApi } from "@/hooks/use-api";
 import { emitBoardRefresh } from "@/lib/board-refresh";
 import { Input } from "@/components/ui/Input";
@@ -11,24 +11,22 @@ import { useToast } from "@/components/ui/Toast";
 import {
   ApiTask,
   ApiUser,
-  ApiLabel,
   ApiTaskTemplate,
   ApiSprint,
   ApiCustomField,
   ApiChecklistItem,
   RecurrenceFrequency,
   TaskStatus,
-  Difficulty,
   Priority,
   Category,
   ApiProjectColumn,
-  DIFFICULTIES,
   PRIORITIES,
   PRIORITY_LABELS,
   CATEGORIES,
 } from "@/types";
 import { effectiveColumns } from "@/lib/columns";
 import { parseChecklistString } from "@/lib/checklist";
+import { activeFields, sortedFields, orderedOptions } from "@/lib/custom-fields";
 import type { GeneratedTask } from "@/lib/ai";
 
 const AUTOSAVE_DEBOUNCE_MS = 700;
@@ -40,16 +38,13 @@ function serverSnapshot(task: ApiTask): Record<string, unknown> {
   return {
     title: task.title || "",
     description: task.description || "",
-    difficulty: task.difficulty || "M",
     priority: task.priority || "medium",
-    component: task.component || "",
     category: task.category,
     status: task.status,
     assignee:
       (task.assignee && typeof task.assignee === "object" ? task.assignee.username : "") || null,
     dueDate: (task.dueDate ? task.dueDate.substring(0, 10) : "") || null,
     checklist: task.checklist || [],
-    labels: task.labels || [],
     sprint: task.sprint || null,
     recurrence: task.recurrence
       ? { frequency: task.recurrence.frequency, interval: task.recurrence.interval }
@@ -62,10 +57,8 @@ interface TaskFormProps {
   projectId: string;
   projectKey?: string;
   task?: ApiTask;
-  components: string[];
   categories?: string[];
   columns?: ApiProjectColumn[];
-  projectLabels?: ApiLabel[];
   taskTemplates?: ApiTaskTemplate[];
   sprints?: ApiSprint[];
   /** Pre-selects a sprint when creating; ignored when editing an existing task */
@@ -81,10 +74,8 @@ export function TaskForm({
   projectId,
   projectKey,
   task,
-  components,
   categories = [],
   columns,
-  projectLabels = [],
   taskTemplates = [],
   sprints = [],
   defaultSprint = "",
@@ -95,9 +86,7 @@ export function TaskForm({
 }: TaskFormProps) {
   const [title, setTitle] = useState(task?.title || "");
   const [description, setDescription] = useState(task?.description || "");
-  const [difficulty, setDifficulty] = useState<Difficulty>(task?.difficulty || "M");
   const [priority, setPriority] = useState<Priority>(task?.priority || "medium");
-  const [component, setComponent] = useState(task?.component || "");
   const [category, setCategory] = useState<Category>(
     task?.category || (categories.includes("user-story") ? "user-story" : categories[0] || "user-story")
   );
@@ -117,9 +106,6 @@ export function TaskForm({
     task?.checklist || []
   );
   const [newChecklistItem, setNewChecklistItem] = useState("");
-  const [selectedLabels, setSelectedLabels] = useState<string[]>(
-    task?.labels || []
-  );
   const [sprint, setSprint] = useState(task?.sprint || defaultSprint || "");
   const [customFieldValues, setCustomFieldValues] = useState<Record<string, unknown>>(
     task?.customFieldValues || {}
@@ -172,9 +158,7 @@ export function TaskForm({
       );
       setTitle(result.title || "");
       setDescription(result.description || "");
-      setDifficulty(result.difficulty || "M");
       setCategory(result.category || "user-story");
-      setComponent(result.component || "");
       setChecklist(parseChecklistString(result.acceptanceCriteria || ""));
       setAiInsights(result);
       toast("Fields filled by AI — review and save", "success");
@@ -188,15 +172,12 @@ export function TaskForm({
   const body = {
     title,
     description,
-    difficulty,
     priority,
-    component,
     category,
     status,
     assignee: assignee || null,
     dueDate: dueDate || null,
     checklist,
-    labels: selectedLabels,
     sprint: sprint || null,
     recurrence: recurrenceFreq
       ? { frequency: recurrenceFreq, interval: recurrenceInterval }
@@ -215,15 +196,12 @@ export function TaskForm({
     switch (key) {
       case "title": return setTitle(value as string);
       case "description": return setDescription(value as string);
-      case "difficulty": return setDifficulty(value as Difficulty);
       case "priority": return setPriority(value as Priority);
-      case "component": return setComponent(value as string);
       case "category": return setCategory(value as Category);
       case "status": return setStatus(value as TaskStatus);
       case "assignee": return setAssignee((value as string) ?? "");
       case "dueDate": return setDueDate((value as string) ?? "");
       case "checklist": return setChecklist(value as { text: string; done: boolean }[]);
-      case "labels": return setSelectedLabels(value as string[]);
       case "sprint": return setSprint((value as string) ?? "");
       case "customFieldValues": return setCustomFieldValues(value as Record<string, unknown>);
       case "recurrence": {
@@ -266,23 +244,44 @@ export function TaskForm({
   };
 
   const signature = JSON.stringify(editedFields());
+
+  async function persist(edited: Record<string, unknown>) {
+    if (!task) return;
+    setAutoSaveState("saving");
+    try {
+      await api.put(`/api/projects/${projectId}/tasks/${task._id}`, edited);
+      serverValues.current = { ...(serverValues.current || {}), ...edited };
+      setAutoSaveState("saved");
+      emitBoardRefresh(projectId);
+    } catch {
+      setAutoSaveState("error");
+    }
+  }
+
   useEffect(() => {
     if (!task || signature === "{}") return;
-    const timer = setTimeout(async () => {
-      const edited = JSON.parse(signature) as Record<string, unknown>;
-      setAutoSaveState("saving");
-      try {
-        await api.put(`/api/projects/${projectId}/tasks/${task._id}`, edited);
-        serverValues.current = { ...(serverValues.current || {}), ...edited };
-        setAutoSaveState("saved");
-        emitBoardRefresh(projectId);
-      } catch {
-        setAutoSaveState("error");
-      }
-    }, AUTOSAVE_DEBOUNCE_MS);
+    const timer = setTimeout(() => persist(JSON.parse(signature)), AUTOSAVE_DEBOUNCE_MS);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signature, task?._id, projectId]);
+
+  // Closing within the debounce window used to drop the edit on the floor: the
+  // cleanup above also runs on unmount. Now the pending edit goes out on the way.
+  const pendingRef = useRef("{}");
+  pendingRef.current = signature;
+  useEffect(() => {
+    if (!task) return;
+    const taskId = task._id;
+    return () => {
+      const pending = pendingRef.current;
+      if (pending === "{}") return;
+      api
+        .put(`/api/projects/${projectId}/tasks/${taskId}`, JSON.parse(pending))
+        .then(() => emitBoardRefresh(projectId))
+        .catch(() => {});
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [task?._id, projectId]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -322,6 +321,34 @@ export function TaskForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
+      {task && (
+        <div className="flex justify-end">
+          {autoSaveState === "error" ? (
+            <button
+              type="button"
+              onClick={() => persist(editedFields())}
+              className="focus-ring flex items-center gap-1.5 rounded px-1.5 py-0.5 text-xs text-danger hover:underline"
+            >
+              ⚠ Save failed — retry
+            </button>
+          ) : (
+            <span
+              aria-live="polite"
+              className="flex items-center gap-1.5 px-1.5 py-0.5 text-xs text-text-muted"
+            >
+              {autoSaveState === "saving" && (
+                <span className="h-3 w-3 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+              )}
+              {autoSaveState === "saving"
+                ? "Saving…"
+                : autoSaveState === "saved"
+                  ? "✓ Saved"
+                  : "Saves automatically"}
+            </span>
+          )}
+        </div>
+      )}
+
       {!task && taskTemplates.length > 0 && (
         <Select
           label="Template"
@@ -331,9 +358,7 @@ export function TaskForm({
             if (tpl) {
               if (tpl.title) setTitle(tpl.title);
               if (tpl.description) setDescription(tpl.description);
-              setDifficulty(tpl.difficulty);
               setCategory(tpl.category);
-              if (tpl.component) setComponent(tpl.component);
               if (tpl.acceptanceCriteria) setChecklist(parseChecklistString(tpl.acceptanceCriteria));
             }
           }}
@@ -440,12 +465,6 @@ export function TaskForm({
           }))}
         />
         <Select
-          label="Difficulty"
-          value={difficulty}
-          onChange={(e) => setDifficulty(e.target.value as Difficulty)}
-          options={DIFFICULTIES.map((d) => ({ value: d, label: d }))}
-        />
-        <Select
           label="Priority"
           value={priority}
           onChange={(e) => setPriority(e.target.value as Priority)}
@@ -459,13 +478,6 @@ export function TaskForm({
           value={category}
           onChange={(e) => setCategory(e.target.value as Category)}
           options={(categories.length > 0 ? categories : CATEGORIES).map((c) => ({ value: c, label: c }))}
-        />
-        <Select
-          label="Component"
-          value={component}
-          onChange={(e) => setComponent(e.target.value)}
-          options={components.map((c) => ({ value: c, label: c }))}
-          placeholder="None"
         />
       </div>
 
@@ -535,10 +547,10 @@ export function TaskForm({
         />
       )}
 
-      {customFields.length > 0 && (
+      {activeFields(customFields).length > 0 && (
         <div className="space-y-3">
           <label className="block text-sm font-medium">Custom Fields</label>
-          {customFields.map((field) => {
+          {sortedFields(activeFields(customFields)).map((field) => {
             const val = customFieldValues[field._id];
             if (field.fieldType === "checkbox") {
               return (
@@ -565,10 +577,47 @@ export function TaskForm({
                   onChange={(e) =>
                     setCustomFieldValues((prev) => ({ ...prev, [field._id]: e.target.value }))
                   }
-                  options={field.options.map((o) => ({ value: o, label: o }))}
+                  options={orderedOptions(field).map((o) => ({ value: o.id, label: o.value }))}
                   placeholder="Select..."
                   required={field.required}
                 />
+              );
+            }
+            if (field.fieldType === "multiselect") {
+              const picked = Array.isArray(val) ? (val as string[]) : [];
+              return (
+                <div key={field._id}>
+                  <label className="block text-sm font-medium mb-1">
+                    {field.name}
+                    {field.required && <span className="text-danger">*</span>}
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    {orderedOptions(field).map((option) => {
+                      const on = picked.includes(option.id);
+                      return (
+                        <button
+                          key={option.id}
+                          type="button"
+                          onClick={() =>
+                            setCustomFieldValues((prev) => ({
+                              ...prev,
+                              [field._id]: on
+                                ? picked.filter((id) => id !== option.id)
+                                : [...picked, option.id],
+                            }))
+                          }
+                          aria-pressed={on}
+                          className={`focus-ring chip chip-custom rounded-full px-2.5 py-1 text-xs transition-opacity ${
+                            on ? "" : "opacity-40"
+                          }`}
+                          style={{ "--chip": option.color } as CSSProperties}
+                        >
+                          {option.value}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               );
             }
             return (
@@ -587,38 +636,6 @@ export function TaskForm({
               />
             );
           })}
-        </div>
-      )}
-
-      {projectLabels.length > 0 && (
-        <div>
-          <label className="block text-sm font-medium mb-1">Labels</label>
-          <div className="flex flex-wrap gap-2">
-            {projectLabels.map((label) => {
-              const isSelected = selectedLabels.includes(label._id);
-              return (
-                <button
-                  key={label._id}
-                  type="button"
-                  onClick={() =>
-                    setSelectedLabels((prev) =>
-                      isSelected
-                        ? prev.filter((id) => id !== label._id)
-                        : [...prev, label._id]
-                    )
-                  }
-                  className={`text-xs px-2.5 py-1 rounded-full border transition-colors font-medium ${
-                    isSelected
-                      ? "text-white border-transparent"
-                      : "border-border text-text-muted hover:border-primary/50"
-                  }`}
-                  style={isSelected ? { backgroundColor: label.color } : undefined}
-                >
-                  {label.name}
-                </button>
-              );
-            })}
-          </div>
         </div>
       )}
 
@@ -712,29 +729,15 @@ export function TaskForm({
       {error && <p className="text-sm text-danger">{error}</p>}
 
       <div className="flex gap-3 items-center">
-        <Button type="submit" disabled={loading}>
-          {loading ? "Saving..." : task ? "Update Task" : "Create Task"}
-        </Button>
+        {/* An existing task saves itself; only creation still needs a verb */}
+        {!task && (
+          <Button type="submit" disabled={loading}>
+            {loading ? "Saving..." : "Create Task"}
+          </Button>
+        )}
         <Button type="button" variant="secondary" onClick={onCancel}>
           {task ? "Close" : "Cancel"}
         </Button>
-        {task && autoSaveState !== "idle" && (
-          <span
-            className={`text-xs flex items-center gap-1.5 ${
-              autoSaveState === "error" ? "text-danger" : "text-text-muted"
-            }`}
-            aria-live="polite"
-          >
-            {autoSaveState === "saving" && (
-              <span className="animate-spin rounded-full h-3 w-3 border-2 border-primary border-t-transparent" />
-            )}
-            {autoSaveState === "saving"
-              ? "Saving…"
-              : autoSaveState === "saved"
-                ? "\u2713 Saved"
-                : "Auto-save failed — use Update Task"}
-          </span>
-        )}
       </div>
     </form>
   );

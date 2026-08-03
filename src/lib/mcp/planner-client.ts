@@ -1,3 +1,10 @@
+import type { ApiCustomField } from "@/types";
+/** Only what the tools read: the id, and the field definitions the `fields` parameter resolves against */
+export interface McpProject {
+  _id: string;
+  customFields?: ApiCustomField[];
+}
+
 export class PlannerClient {
   private baseUrl: string;
   private token: string;
@@ -29,15 +36,15 @@ export class PlannerClient {
     return this.request("GET", "/api/projects") as Promise<unknown[]>;
   }
 
-  async getProject(id: string): Promise<unknown> {
-    return this.request("GET", `/api/projects/${id}`);
+  async getProject(id: string): Promise<McpProject> {
+    return (await this.request("GET", `/api/projects/${id}`)) as McpProject;
   }
 
-  async getProjectByKey(key: string): Promise<{ _id: string }> {
+  async getProjectByKey(key: string): Promise<McpProject> {
     const projects = await this.listProjects();
     const project = projects.find((p) => (p as { key: string }).key === key.toUpperCase());
     if (!project) throw new Error(`Project with key "${key}" not found`);
-    return project as { _id: string };
+    return project as McpProject;
   }
 
   async listTasks(projectId: string, filters?: Record<string, string>): Promise<unknown[]> {

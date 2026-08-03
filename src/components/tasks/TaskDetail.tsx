@@ -14,6 +14,7 @@ import { Modal } from "@/components/ui/Modal";
 import { TaskForm } from "@/components/tasks/TaskForm";
 import { TaskActivityPanel } from "@/components/tasks/TaskActivityPanel";
 import { ExecutionPanel } from "@/components/tasks/ExecutionPanel";
+import { ResizableSplit } from "@/components/tasks/ResizableSplit";
 import { TaskLinks } from "@/components/tasks/TaskLinks";
 import { useToast } from "@/components/ui/Toast";
 import { GitlabActivity } from "@/components/tasks/GitlabActivity";
@@ -96,9 +97,7 @@ export function TaskDetail({
       const created = await api.post(`/api/projects/${projectId}/tasks`, {
         title: `Copy of ${task!.title}`,
         description: task!.description,
-        difficulty: task!.difficulty,
         category: task!.category,
-        component: task!.component,
         checklist: task!.checklist,
         dueDate: task!.dueDate,
         status: "planned",
@@ -142,8 +141,11 @@ export function TaskDetail({
         </button>
       )}
 
-      <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start lg:gap-6">
-      <div className="space-y-6">
+      <ResizableSplit
+        asideLabel="activity"
+        aside={<TaskActivityPanel projectId={projectId} taskId={taskId} />}
+      >
+      <>
         {/* Header */}
         <div>
           <div className="flex flex-wrap items-center gap-2 mb-2">
@@ -205,10 +207,8 @@ export function TaskDetail({
           projectId={projectId}
           projectKey={project.key}
           task={task}
-          components={project.components}
           categories={(project.categories || []).map((c) => c.name)}
           columns={project.columns || []}
-          projectLabels={project.labels || []}
           sprints={sprints}
           customFields={project.customFields || []}
           onSaved={loadData}
@@ -303,12 +303,8 @@ export function TaskDetail({
           </Button>
         </div>
 
-      </div>
-
-      <aside className="mt-6 border-t border-border pt-6 lg:mt-0 lg:border-l lg:border-t-0 lg:pl-6 lg:pt-0">
-        <TaskActivityPanel projectId={projectId} taskId={taskId} />
-      </aside>
-      </div>
+      </>
+      </ResizableSplit>
 
       <Modal
         open={addingChild}
@@ -320,10 +316,8 @@ export function TaskDetail({
           projectId={projectId}
           projectKey={project.key}
           parentTaskId={task._id}
-          components={project.components}
           categories={(project.categories || []).map((c) => c.name)}
           columns={project.columns || []}
-          projectLabels={project.labels || []}
           sprints={sprints}
           customFields={project.customFields || []}
           onSaved={() => {

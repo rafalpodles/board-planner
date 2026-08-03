@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
 import { Task } from "@/models/task";
+import { Project } from "@/models/project";
 import { User } from "@/models/user";
 import { TASK_STATUSES } from "@/types";
 import mongoose from "mongoose";
@@ -20,6 +21,14 @@ export const GET = withProjectAccess(async (_request, { params }) => {
   const weekStarts = Array.from({ length: WEEKS }, (_, i) => now - (WEEKS - i) * WEEK_MS);
   const since = new Date(weekStarts[0]);
 
+  // Difficulty is an ordinary project field since CP-213. Reading the old column
+  // here would report values frozen at the moment CP-214 removed the dual-write.
+  const project = await Project.findById(projectId, "customFields").lean();
+  const difficultyField = (project?.customFields || []).find(
+    (f) => f.name.toLowerCase() === "difficulty"
+  );
+  const difficultyPath = difficultyField ? `$customFieldValues.${difficultyField._id}` : null;
+
   const [breakdowns, recentTasks] = await Promise.all([
     Task.aggregate([
       { $match: { project: projectOid } },
@@ -30,7 +39,7 @@ export const GET = withProjectAccess(async (_request, { params }) => {
           done: { $sum: { $cond: [{ $eq: ["$status", "done"] }, 1, 0] } },
           statusPairs: { $push: "$status" },
           categoryPairs: { $push: "$category" },
-          difficultyPairs: { $push: "$difficulty" },
+          ...(difficultyPath ? { difficultyPairs: { $push: difficultyPath } } : {}),
           assigneePairs: { $push: "$assignee" },
         },
       },
@@ -57,8 +66,13 @@ export const GET = withProjectAccess(async (_request, { params }) => {
   const categoryBreakdown: Record<string, number> = {};
   for (const c of data.categoryPairs) categoryBreakdown[c] = (categoryBreakdown[c] || 0) + 1;
 
+  // A project that renamed or removed the field has no split to show, which the
+  // chart renders as its empty state rather than as zeroes
   const difficultyBreakdown: Record<string, number> = {};
-  for (const d of data.difficultyPairs) difficultyBreakdown[d] = (difficultyBreakdown[d] || 0) + 1;
+  for (const d of data.difficultyPairs || []) {
+    if (d === null || d === undefined || d === "") continue;
+    difficultyBreakdown[String(d)] = (difficultyBreakdown[String(d)] || 0) + 1;
+  }
 
   // assigneePairs is already in hand, so names are the only thing still missing
   const assigneeCounts = new Map<string, number>();

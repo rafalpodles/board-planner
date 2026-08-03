@@ -6,8 +6,9 @@ import Link from "next/link";
 import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { usePollWhileVisible } from "@/hooks/use-poll-while-visible";
-import { ApiProject, ApiTask, ApiSprint } from "@/types";
+import { ApiProject, ApiTask, ApiSprint , ApiUserSummary, BOARD_SORT_FIELDS, LIST_SORT_FIELDS, SortField, SortKey, SortDir } from "@/types";
 import { effectiveColumns } from "@/lib/columns";
+import { ListColumnId } from "@/lib/list-columns";
 import { subscribeBoardRefresh } from "@/lib/board-refresh";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Board } from "@/components/kanban/Board";
@@ -77,11 +78,18 @@ export default function KanbanPage() {
   const [contextMenu, setContextMenu] = useState<{ taskId: string; x: number; y: number } | null>(null);
   const [confirmContextDelete, setConfirmContextDelete] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  // One owner for both views: the filter bar's dropdown and the list's column
+  // headers set the same value, and it survives switching between them
+  const [sortField, setSortField] = useState<SortKey>("manual");
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [hiddenColumns, setHiddenColumns] = useState<ListColumnId[]>([]);
+
   const [viewMode, setViewMode] = useState<"board" | "list">(() => {
     if (typeof window === "undefined") return "board";
     return localStorage.getItem(`view-mode:${projectId}`) === "list" ? "list" : "board";
   });
   const [sprints, setSprints] = useState<ApiSprint[]>([]);
+  const [assignableUsers, setAssignableUsers] = useState<ApiUserSummary[]>([]);
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
   const [focusedTaskIndex, setFocusedTaskIndex] = useState(-1);
 
@@ -98,12 +106,14 @@ export default function KanbanPage() {
     [tasks, router, projectId]
   );
 
-  const doneCount = useMemo(() => {
-    const doneIds = new Set(
-      effectiveColumns(project?.columns).filter((c) => c.role === "done").map((c) => c.id)
-    );
-    return tasks.filter((t) => doneIds.has(t.status)).length;
-  }, [tasks, project?.columns]);
+  const sortContext = useMemo(
+    () => ({
+      statusOrder: new Map(effectiveColumns(project?.columns).map((c, i) => [c.id, i])),
+      sprintById: new Map(sprints.map((sp) => [sp._id, sp])),
+      fieldById: new Map((project?.customFields || []).map((f) => [f._id, f])),
+    }),
+    [project?.columns, project?.customFields, sprints]
+  );
 
   const loadData = useCallback(async () => {
     const seq = ++loadSeq.current;
@@ -127,6 +137,12 @@ export default function KanbanPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, selectedSprint]);
+
+  // Once, not on the board poll: the roster does not change while you work
+  useEffect(() => {
+    api.get("/api/users/list").then(setAssignableUsers).catch(() => setAssignableUsers([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useCanonicalUrl(project?.key);
 
@@ -170,12 +186,6 @@ export default function KanbanPage() {
       if (e.key === "?" && noMod) {
         e.preventDefault();
         setShowShortcutHelp((v) => !v);
-        return;
-      }
-      if (e.key === "/" && noMod) {
-        e.preventDefault();
-        const searchInput = document.querySelector<HTMLInputElement>('input[placeholder*="Search"]');
-        searchInput?.focus();
         return;
       }
       if (e.key === "v" && noMod) {
@@ -302,6 +312,23 @@ export default function KanbanPage() {
     }
   }
 
+  async function handleAssigneeChange(taskId: string, username: string) {
+    try {
+      // PUT, not PATCH: the task route exposes GET/PUT/DELETE, and updateTask
+      // copies only the fields present in the body, so this stays a partial update.
+      // null, not "": task-service only resolves a non-empty string, so "" would
+      // reach Mongoose as a cast error instead of clearing the field
+      const updated = await api.put(`/api/projects/${projectId}/tasks/${taskId}`, {
+        assignee: username || null,
+      });
+      setTasks((prev) =>
+        prev.map((t) => (t._id === taskId ? { ...t, assignee: updated.assignee } : t))
+      );
+    } catch {
+      toast("Failed to update assignee", "error");
+    }
+  }
+
   async function handleStatusChange(taskId: string, status: string) {
     try {
       await api.patch(
@@ -364,10 +391,8 @@ export default function KanbanPage() {
       await api.post(`/api/projects/${projectId}/tasks`, {
         title: `Copy of ${task.title}`,
         description: task.description,
-        difficulty: task.difficulty,
         priority: task.priority,
         category: task.category,
-        component: task.component,
         checklist: task.checklist,
         dueDate: task.dueDate,
         status: "planned",
@@ -404,8 +429,7 @@ export default function KanbanPage() {
       <BoardHeader
         projectName={project.name}
         projectIcon={project.icon}
-        taskCount={tasks.length}
-        doneCount={doneCount}
+        projectDescription={project.description}
         sprints={sprints}
         scope={selectedSprint}
         onScopeChange={setSelectedSprint}
@@ -420,13 +444,22 @@ export default function KanbanPage() {
 
       <BoardFilters
         tasks={tasks}
-        components={project.components}
+        customFields={project.customFields || []}
         projectKey={project.key}
-        labels={project.labels || []}
         categories={(project.categories || []).map((c) => c.name)}
         projectCategories={project.categories || []}
         projectId={projectId}
         currentUsername={user?.username}
+        sortField={sortField}
+        sortDir={sortDir}
+        onSortChange={(field, dir) => {
+          setSortField(field);
+          setSortDir(dir);
+        }}
+        sortFields={viewMode === "list" ? LIST_SORT_FIELDS : BOARD_SORT_FIELDS}
+        sortContext={sortContext}
+        hiddenColumns={hiddenColumns}
+        {...(viewMode === "list" ? { onHiddenColumnsChange: setHiddenColumns } : {})}
         extraControls={
           <button
             onClick={() => {
@@ -459,12 +492,15 @@ export default function KanbanPage() {
         </div>
       )}
 
+      {/* Without this the empty state sits above a strip of zero-count columns.
+          ListView already returns null when it has no tasks; Board did not. */}
+      {tasks.length > 0 && (
       <div className={`lg:flex-1 lg:min-h-0 ${viewMode === "board" ? "lg:overflow-hidden" : "lg:overflow-y-auto"}`}>
       {viewMode === "board" ? (
         <Board
           tasks={filteredTasks}
           projectKey={project.key}
-          projectLabels={project.labels || []}
+          customFields={project.customFields || []}
           projectCategories={project.categories || []}
           columns={project.columns || []}
           selectedTasks={selectedTasks}
@@ -481,19 +517,30 @@ export default function KanbanPage() {
           tasks={filteredTasks}
           projectKey={project.key}
           projectId={projectId}
+          customFields={project.customFields || []}
           sprints={sprints}
           categories={project.categories || []}
           columns={project.columns || []}
           focusedIndex={focusedTaskIndex}
           selectedTasks={selectedTasks}
           selectionMode={selectionMode}
+          sortField={sortField}
+          sortDir={sortDir}
+          onSortChange={(field, dir) => {
+            setSortField(field);
+            setSortDir(dir);
+          }}
+          hiddenColumns={hiddenColumns}
+          assignableUsers={assignableUsers}
           onTaskClick={openTask}
           onStatusChange={handleStatusChange}
+          onAssigneeChange={handleAssigneeChange}
           onTaskSelect={handleTaskSelect}
           onTaskContextMenu={(taskId, x, y) => setContextMenu({ taskId, x, y })}
         />
       )}
       </div>
+      )}
 
       {contextMenu && (() => {
         const task = tasks.find((t) => t._id === contextMenu.taskId);
@@ -570,10 +617,8 @@ export default function KanbanPage() {
         <TaskForm
           projectId={projectId}
           projectKey={project.key}
-          components={project.components}
-          categories={(project.categories || []).map((c) => c.name)}
+            categories={(project.categories || []).map((c) => c.name)}
           columns={project.columns || []}
-          projectLabels={project.labels || []}
           taskTemplates={project.taskTemplates || []}
           sprints={sprints}
           defaultSprint={sprintDefaultForNewTask(selectedSprint)}

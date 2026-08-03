@@ -10,10 +10,7 @@ function task(over: Partial<ApiTask> & { _id: string }): ApiTask {
     title: "A task",
     status: "todo",
     priority: "medium",
-    difficulty: "M",
     category: "bug",
-    component: "ui",
-    labels: [],
     order: 0,
     createdAt: "2026-08-01T00:00:00Z",
     updatedAt: "2026-08-01T00:00:00Z",
@@ -34,20 +31,22 @@ const tasks = [
 
 function renderFilters(over: Partial<React.ComponentProps<typeof BoardFilters>> = {}) {
   const onFilter = vi.fn();
+  const onSortChange = vi.fn();
   const utils = render(
     <BoardFilters
       tasks={tasks}
-      components={["ui", "backend"]}
-      labels={[]}
       categories={["bug", "doc"]}
       projectKey="TP"
       projectId="TP"
       currentUsername="rpo"
+      sortField="manual"
+      sortDir="asc"
+      onSortChange={onSortChange}
       onFilter={onFilter}
       {...over}
     />
   );
-  return { ...utils, onFilter };
+  return { ...utils, onFilter, onSortChange };
 }
 
 beforeEach(() => localStorage.clear());
@@ -77,21 +76,13 @@ describe("BoardFilters", () => {
     expect(searchBox.className).toContain("min-w-0");
   });
 
-  it("holds exactly seven controls in the popover", async () => {
+  it("holds exactly four controls in the popover", async () => {
     renderFilters();
     await openPopover();
     const popover = screen.getByRole("dialog", { name: "Filters" });
     const labels = [...popover.querySelectorAll("label > span")].map((s) => s.textContent);
-    expect(labels).toEqual([
-      "Assignee",
-      "Category",
-      "Component",
-      "Difficulty",
-      "Priority",
-      "Label",
-      "Updated",
-    ]);
-    expect(popover.querySelectorAll("select").length).toBe(7);
+    expect(labels).toEqual(["Assignee", "Category", "Priority", "Updated"]);
+    expect(popover.querySelectorAll("select").length).toBe(4);
   });
 
   // Sprint is scope and lives in the board header — it must not reappear here
@@ -115,7 +106,7 @@ describe("BoardFilters", () => {
     renderFilters();
     await openPopover();
 
-    const priority = screen.getByRole("dialog").querySelectorAll("select")[4];
+    const priority = screen.getByRole("dialog").querySelectorAll("select")[2];
     await act(async () => {
       priority.value = "urgent";
       priority.dispatchEvent(new Event("change", { bubbles: true }));
@@ -151,7 +142,7 @@ describe("BoardFilters", () => {
     const { onFilter } = renderFilters();
     await openPopover();
 
-    const priority = screen.getByRole("dialog").querySelectorAll("select")[4];
+    const priority = screen.getByRole("dialog").querySelectorAll("select")[2];
     await act(async () => {
       priority.value = "urgent";
       priority.dispatchEvent(new Event("change", { bubbles: true }));
@@ -214,7 +205,7 @@ describe("BoardFilters", () => {
     });
 
     await openPopover();
-    const priority = screen.getByRole("dialog").querySelectorAll("select")[4];
+    const priority = screen.getByRole("dialog").querySelectorAll("select")[2];
     await act(async () => {
       priority.value = "low";
       priority.dispatchEvent(new Event("change", { bubbles: true }));

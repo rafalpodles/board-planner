@@ -4,6 +4,8 @@ import { withProjectAccess } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { Task } from "@/models/task";
 import { isAIEnabled, generateTask, ExistingTaskSummary } from "@/lib/ai";
+import { findLegacyField } from "@/lib/legacy-fields";
+import { orderedOptions } from "@/lib/custom-fields";
 import { getSettings } from "@/models/settings";
 
 async function fetchReadme(githubRepo: string): Promise<string | undefined> {
@@ -78,6 +80,15 @@ export const POST = withProjectAccess(async (request, { params }) => {
     description: t.description || "",
   }));
 
+  const componentField = findLegacyField(project.customFields || [], "component");
+  const difficultyField = findLegacyField(project.customFields || [], "difficulty");
+  const componentOptions = componentField
+    ? orderedOptions(componentField).map((o) => o.value)
+    : [];
+  const difficultyOptions = difficultyField
+    ? orderedOptions(difficultyField).map((o) => o.value)
+    : undefined;
+
   try {
     const settings = await getSettings();
     const task = await generateTask(
@@ -85,7 +96,8 @@ export const POST = withProjectAccess(async (request, { params }) => {
       {
         name: project.name,
         description: project.description || "",
-        components: project.components || [],
+        components: componentOptions,
+        difficulties: difficultyOptions,
         categories: (project.categories || []).map((c) => c.name),
         readme,
         existingTasks,

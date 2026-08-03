@@ -4,19 +4,18 @@ import { useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { useToast } from "@/components/ui/Toast";
 import {
-  ApiLabel,
   ApiCustomField,
   ApiTaskTemplate,
   CUSTOM_FIELD_TYPES,
-  DIFFICULTIES,
   CATEGORIES,
   Category,
   CustomFieldType,
-  Difficulty,
 } from "@/types";
 import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
 import { Button } from "@/components/ui/Button";
+import { CustomFieldEditor } from "./CustomFieldEditor";
+import { sortedFields } from "@/lib/custom-fields";
 import { SettingsCard, EmptyState, ListRow } from "@/components/settings/SettingsCard";
 import { SectionProps } from "./types";
 
@@ -26,9 +25,6 @@ export function TaskFieldsSection({ projectId, project, patchProject }: SectionP
 
   const [newCategoryName, setNewCategoryName] = useState("");
   const [newCategoryColor, setNewCategoryColor] = useState("#3b82f6");
-  const [newComponent, setNewComponent] = useState("");
-  const [newLabelName, setNewLabelName] = useState("");
-  const [newLabelColor, setNewLabelColor] = useState("#3b82f6");
   const [newFieldName, setNewFieldName] = useState("");
   const [newFieldType, setNewFieldType] = useState<CustomFieldType>("text");
   const [newFieldOptions, setNewFieldOptions] = useState("");
@@ -63,50 +59,6 @@ export function TaskFieldsSection({ projectId, project, patchProject }: SectionP
     }
   }
 
-  async function addComponent() {
-    if (!newComponent.trim()) return;
-    try {
-      const added = newComponent.trim();
-      await api.post(`/api/projects/${projectId}/components`, { name: added });
-      patchProject((p) => ({ components: [...p.components, added] }));
-      setNewComponent("");
-    } catch (err) {
-      fail(err, "Failed to add component");
-    }
-  }
-
-  async function removeComponent(comp: string) {
-    try {
-      await api.del(`/api/projects/${projectId}/components`, { name: comp });
-      patchProject((p) => ({ components: p.components.filter((c) => c !== comp) }));
-    } catch (err) {
-      fail(err, "Failed to remove component");
-    }
-  }
-
-  async function addLabel() {
-    if (!newLabelName.trim()) return;
-    try {
-      const labels: ApiLabel[] = await api.post(`/api/projects/${projectId}/labels`, {
-        name: newLabelName.trim(),
-        color: newLabelColor,
-      });
-      patchProject({ labels });
-      setNewLabelName("");
-      setNewLabelColor("#3b82f6");
-    } catch (err) {
-      fail(err, "Failed to add label");
-    }
-  }
-
-  async function removeLabel(labelId: string) {
-    try {
-      patchProject({ labels: await api.del(`/api/projects/${projectId}/labels`, { labelId }) });
-    } catch (err) {
-      fail(err, "Failed to remove label");
-    }
-  }
-
   async function addCustomField() {
     if (!newFieldName.trim()) return;
     try {
@@ -128,6 +80,19 @@ export function TaskFieldsSection({ projectId, project, patchProject }: SectionP
       setNewFieldRequired(false);
     } catch (err) {
       fail(err, "Failed to add custom field");
+    }
+  }
+
+  async function saveCustomField(fieldId: string, patch: Record<string, unknown>) {
+    try {
+      patchProject({
+        customFields: await api.patch(
+          `/api/projects/${projectId}/custom-fields/${fieldId}`,
+          patch
+        ),
+      });
+    } catch (err) {
+      fail(err, "Failed to save custom field");
     }
   }
 
@@ -232,99 +197,6 @@ export function TaskFieldsSection({ projectId, project, patchProject }: SectionP
         </div>
       </SettingsCard>
 
-      <SettingsCard
-        title="Components"
-        contract="live"
-        description="The part of the product a task touches."
-      >
-        <div className="flex flex-wrap gap-2">
-          {project.components.map((comp) => (
-            <span
-              key={comp}
-              className="inline-flex items-center gap-1 rounded-full bg-bg-input px-3 py-1 text-sm"
-            >
-              {comp}
-              <button
-                onClick={() => removeComponent(comp)}
-                aria-label={`Remove ${comp}`}
-                className="ml-1 flex min-h-[24px] min-w-[24px] items-center justify-center text-text-muted hover:text-danger"
-              >
-                &times;
-              </button>
-            </span>
-          ))}
-          {project.components.length === 0 && (
-            <EmptyState>No components yet. Add one to say which part of the product a task touches.</EmptyState>
-          )}
-        </div>
-        <div className="flex gap-2">
-          <Input
-            value={newComponent}
-            onChange={(e) => setNewComponent(e.target.value)}
-            placeholder="Component name..."
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                addComponent();
-              }
-            }}
-          />
-          <Button variant="secondary" onClick={addComponent}>
-            Add
-          </Button>
-        </div>
-      </SettingsCard>
-
-      <SettingsCard
-        title="Labels"
-        contract="live"
-        description="Free-form tags for cutting across categories."
-      >
-        <div className="flex flex-wrap gap-2">
-          {(project.labels || []).map((label) => (
-            <span
-              key={label._id}
-              className="inline-flex items-center gap-1 rounded-full px-3 py-1 text-sm text-white"
-              style={{ backgroundColor: label.color }}
-            >
-              {label.name}
-              <button
-                onClick={() => removeLabel(label._id)}
-                aria-label={`Remove ${label.name}`}
-                className="ml-1 flex min-h-[24px] min-w-[24px] items-center justify-center hover:opacity-70"
-              >
-                &times;
-              </button>
-            </span>
-          ))}
-          {(project.labels || []).length === 0 && (
-            <EmptyState>No labels yet. Add one to tag tasks across categories.</EmptyState>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          <Input
-            value={newLabelName}
-            onChange={(e) => setNewLabelName(e.target.value)}
-            placeholder="Label name..."
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                addLabel();
-              }
-            }}
-          />
-          <input
-            type="color"
-            value={newLabelColor}
-            onChange={(e) => setNewLabelColor(e.target.value)}
-            aria-label="Label colour"
-            className="h-10 w-10 cursor-pointer rounded-lg border border-border bg-transparent"
-          />
-          <Button variant="secondary" onClick={addLabel}>
-            Add
-          </Button>
-        </div>
-      </SettingsCard>
 
       <SettingsCard
         title="Custom fields"
@@ -332,24 +204,13 @@ export function TaskFieldsSection({ projectId, project, patchProject }: SectionP
         description="Extra fields shown on every task in this project."
       >
         <div className="space-y-2">
-          {(project.customFields || []).map((field) => (
-            <ListRow key={field._id}>
-              <span className="text-sm font-medium">{field.name}</span>
-              <span className="rounded bg-bg-input px-2 py-0.5 text-xs text-text-muted">
-                {field.fieldType}
-              </span>
-              {field.required && <span className="text-xs text-warning">required</span>}
-              {field.fieldType === "dropdown" && field.options.length > 0 && (
-                <span className="text-xs text-text-muted">[{field.options.join(", ")}]</span>
-              )}
-              <span className="flex-1" />
-              <button
-                onClick={() => removeCustomField(field._id)}
-                className="px-2 py-1 text-xs text-text-muted hover:text-danger"
-              >
-                Delete
-              </button>
-            </ListRow>
+          {sortedFields(project.customFields || []).map((field) => (
+            <CustomFieldEditor
+              key={field._id}
+              field={field}
+              onSave={(patch) => saveCustomField(field._id, patch)}
+              onDelete={() => removeCustomField(field._id)}
+            />
           ))}
           {(project.customFields || []).length === 0 && (
             <EmptyState>No custom fields yet. Add one to capture something the built-in fields don&apos;t.</EmptyState>
@@ -421,25 +282,6 @@ export function TaskFieldsSection({ projectId, project, patchProject }: SectionP
                   />
                   <div className="grid gap-2 sm:grid-cols-2">
                     <div>
-                      <label className="mb-1 block text-sm font-medium text-text-muted">Difficulty</label>
-                      <select
-                        value={editingTemplate.difficulty}
-                        onChange={(e) =>
-                          setEditingTemplate({
-                            ...editingTemplate,
-                            difficulty: e.target.value as Difficulty,
-                          })
-                        }
-                        className="w-full rounded-lg border border-border bg-bg-input px-3 py-2 text-sm"
-                      >
-                        {DIFFICULTIES.map((d) => (
-                          <option key={d} value={d}>
-                            {d}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
                       <label className="mb-1 block text-sm font-medium text-text-muted">Category</label>
                       <select
                         value={editingTemplate.category}
@@ -459,13 +301,6 @@ export function TaskFieldsSection({ projectId, project, patchProject }: SectionP
                       </select>
                     </div>
                   </div>
-                  <Input
-                    label="Component"
-                    value={editingTemplate.component}
-                    onChange={(e) =>
-                      setEditingTemplate({ ...editingTemplate, component: e.target.value })
-                    }
-                  />
                   <Textarea
                     label="Description"
                     value={editingTemplate.description}
@@ -496,8 +331,7 @@ export function TaskFieldsSection({ projectId, project, patchProject }: SectionP
                   <div>
                     <span className="text-sm font-medium">{tpl.name}</span>
                     <span className="ml-2 text-xs text-text-muted">
-                      {tpl.category} &middot; {tpl.difficulty}
-                      {tpl.component ? ` · ${tpl.component}` : ""}
+                      {tpl.category}
                     </span>
                   </div>
                   <div className="flex gap-1">

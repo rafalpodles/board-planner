@@ -15,8 +15,6 @@ function renderHeader(over: Partial<React.ComponentProps<typeof BoardHeader>> = 
     <BoardHeader
       projectName="Test Project"
       projectIcon="📋"
-      taskCount={30}
-      doneCount={12}
       sprints={sprints}
       scope="all"
       onScopeChange={() => {}}
@@ -111,16 +109,22 @@ describe("BoardHeader", () => {
     expect(screen.getByRole("heading", { name: "Test Project" })).toBeTruthy();
   });
 
-  it("reads Board · N tasks when unscoped", () => {
+  it("names the scope when unscoped", () => {
     renderHeader();
     expect(screen.getByLabelText("Change sprint scope").textContent).toBe("All tasks");
-    expect(screen.getByText(/30 tasks/)).toBeTruthy();
+  });
+
+  // CP-206 stripped the label, the count and the meter; only the scope survives
+  it("carries no board label, task count or done meter", () => {
+    renderHeader();
+    expect(screen.queryByText(/Board ·/)).toBeNull();
+    expect(screen.queryByText(/\d+ tasks?$/)).toBeNull();
+    expect(screen.queryByText("12/30")).toBeNull();
   });
 
   it("names the sprint in the subtitle when scoped", () => {
-    renderHeader({ scope: "s1", taskCount: 8 });
+    renderHeader({ scope: "s1" });
     expect(screen.getByLabelText("Change sprint scope").textContent).toBe("Sprint 12");
-    expect(screen.getByText(/8 tasks/)).toBeTruthy();
   });
 
   it("names the backlog scope", () => {
@@ -128,16 +132,10 @@ describe("BoardHeader", () => {
     expect(screen.getByLabelText("Change sprint scope").textContent).toBe("Backlog");
   });
 
-  it("says one task, not 1 tasks", () => {
-    renderHeader({ taskCount: 1, sprints: [] });
-    expect(screen.getByText("Board · 1 task")).toBeTruthy();
-  });
-
   // Matches SprintSelector returning null when a project has no sprints
   it("shows no scope control at all for a project with no sprints", () => {
     renderHeader({ sprints: [] });
     expect(screen.queryByLabelText("Change sprint scope")).toBeNull();
-    expect(screen.getByText("Board · 30 tasks")).toBeTruthy();
   });
 
   it("offers all tasks, backlog, the active sprint and planned sprints", async () => {
@@ -180,16 +178,6 @@ describe("BoardHeader", () => {
     const trigger = screen.getByLabelText("Change sprint scope");
     expect(trigger.className).toContain("truncate");
     expect(trigger.className).toContain("max-w-");
-  });
-
-  it("shows the done meter against the total", () => {
-    renderHeader();
-    expect(screen.getByText("12/30")).toBeTruthy();
-  });
-
-  it("hides the meter on an empty board", () => {
-    renderHeader({ taskCount: 0, doneCount: 0 });
-    expect(screen.queryByText("0/0")).toBeNull();
   });
 
   it("has exactly two view segments and marks the current one", () => {
@@ -246,9 +234,6 @@ const PARTS: Record<string, () => Element> = {
   "new task label": () => screen.getByText("New task", { selector: "span" }),
   refresh: () => screen.getByLabelText("Refresh board"),
   "project icon": () => screen.getByText("📋"),
-  "done meter": () => screen.getByText("12/30").parentElement!,
-  "board prefix": () => screen.getByText("Board ·"),
-  "task count": () => screen.getByText(/30 tasks/),
   "shortcut hint": () => screen.getByText("N"),
 };
 
@@ -261,7 +246,9 @@ const ESSENTIAL = [
   "refresh",
 ];
 const NEEDS_448 = ["project icon", "new task label"];
-const NEEDS_576 = ["done meter", "board prefix", "task count", "shortcut hint"];
+// CP-206 removed the meter, the "Board ·" prefix and the task count; the
+// shortcut hint is the last thing the header buys back with width
+const NEEDS_576 = ["shortcut hint"];
 
 // The board is narrower than the viewport by a sidebar that is 260px, 56px when collapsed, or
 // absent below md — so what the header can afford is its own width, never the viewport's.

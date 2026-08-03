@@ -2,28 +2,40 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
-  ApiTask,
-  ApiLabel,
+  ApiTask, ApiCustomField,
   ApiProjectCategory,
-  DIFFICULTIES,
   CATEGORIES,
   PRIORITIES,
   PRIORITY_LABELS,
   PRIORITY_ORDER,
   SORT_OPTIONS,
-  SortField,
+  BOARD_SORT_FIELDS,
+  SortField, SortKey,
   SortDir,
-  Difficulty,
   Category,
   Priority,
+  defaultSortDir
 } from "@/types";
 import { categoryColor } from "@/lib/category-colors";
+import { SortContext, sortTasks } from "@/lib/task-sort";
+import { ListColumnId } from "@/lib/list-columns";
+import { ColumnPicker } from "./ColumnPicker";
 import {
   BoardFilterValues,
+  PersistedBoardFilters,
   EMPTY_FILTERS,
   countActiveFilters,
   migratePersistedFilters,
+  isFieldFilterSet,
+  type FieldFilter,
+  type BuiltInFilterKey,
 } from "@/lib/board-filters-state";
+import {
+  activeFields,
+  matchesAllFieldFilters,
+  orderedOptions,
+  sortedFields,
+} from "@/lib/custom-fields";
 
 interface Filters extends BoardFilterValues {
   search: string;
@@ -40,7 +52,7 @@ const DATE_PRESETS = [
 
 function savePersistedState(
   projectId: string,
-  state: { filters: BoardFilterValues; sortField: SortField; sortDir: SortDir; showFilters: boolean }
+  state: PersistedBoardFilters
 ) {
   try {
     localStorage.setItem(`board-filters:${projectId}`, JSON.stringify(state));
@@ -51,33 +63,46 @@ function savePersistedState(
 
 interface BoardFiltersProps {
   tasks: ApiTask[];
-  components: string[];
-  labels?: ApiLabel[];
   categories?: string[];
   projectKey?: string;
   projectId: string;
   currentUsername?: string;
   projectCategories?: ApiProjectCategory[];
   extraControls?: React.ReactNode;
+  /** Sort is owned above this component so the list view's column headers and
+      this dropdown drive the same value */
+  sortField: SortKey;
+  sortDir: SortDir;
+  onSortChange: (field: SortKey, dir: SortDir) => void;
+  /** Which fields the dropdown offers; the current value is always included */
+  sortFields?: SortField[];
+  sortContext?: SortContext;
+  hiddenColumns?: ListColumnId[];
+  customFields?: ApiCustomField[];
+  onHiddenColumnsChange?: (hidden: ListColumnId[]) => void;
   onFilter: (filtered: ApiTask[]) => void;
 }
 
 export function BoardFilters({
   tasks,
-  components,
-  labels = [],
   categories = [],
   projectKey,
   projectId,
   currentUsername,
   projectCategories,
   extraControls,
+  sortField,
+  sortDir,
+  onSortChange,
+  sortFields = BOARD_SORT_FIELDS,
+  sortContext,
+  hiddenColumns,
+  onHiddenColumnsChange,
   onFilter,
+  customFields = [],
 }: BoardFiltersProps) {
   const [initialized, setInitialized] = useState(false);
   const [filters, setFilters] = useState<Filters>({ search: "", ...EMPTY_FILTERS });
-  const [sortField, setSortField] = useState<SortField>("manual");
-  const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [showFilters, setShowFilters] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
 
@@ -90,19 +115,28 @@ export function BoardFilters({
     } catch {
       raw = null;
     }
-    const state = migratePersistedFilters(raw, currentUsername);
+    const state = migratePersistedFilters(raw, currentUsername, customFields);
     setFilters((f) => ({ ...f, ...state.filters }));
-    setSortField(state.sortField);
-    setSortDir(state.sortDir);
+    onSortChange(state.sortField, state.sortDir);
+    onHiddenColumnsChange?.(state.hiddenColumns);
     setShowFilters(state.showFilters);
     setInitialized(true);
+    // onSortChange is the owner's setter; re-running on its identity would
+    // re-hydrate over whatever the user has since chosen
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, currentUsername]);
 
   const persistState = useCallback(() => {
     const { search: _search, ...rest } = filters;
     void _search;
-    savePersistedState(projectId, { filters: rest, sortField, sortDir, showFilters });
-  }, [projectId, filters, sortField, sortDir, showFilters]);
+    savePersistedState(projectId, {
+      filters: rest,
+      sortField,
+      sortDir,
+      showFilters,
+      hiddenColumns: hiddenColumns ?? [],
+    });
+  }, [projectId, filters, sortField, sortDir, showFilters, hiddenColumns]);
 
   useEffect(() => {
     if (initialized) persistState();
@@ -153,20 +187,16 @@ export function BoardFilters({
           t.assignee.username === filters.assignee
       );
     }
-    if (filters.component) {
-      result = result.filter((t) => t.component === filters.component);
-    }
     if (filters.category) {
       result = result.filter((t) => t.category === filters.category);
-    }
-    if (filters.difficulty) {
-      result = result.filter((t) => t.difficulty === filters.difficulty);
     }
     if (filters.priority) {
       result = result.filter((t) => t.priority === filters.priority);
     }
-    if (filters.label) {
-      result = result.filter((t) => (t.labels || []).includes(filters.label));
+    if (Object.keys(filters.fields || {}).length) {
+      result = result.filter((t) =>
+        matchesAllFieldFilters(t.customFieldValues, filters.fields, customFields)
+      );
     }
     if (filters.dateRange) {
       const now = Date.now();
@@ -197,51 +227,51 @@ export function BoardFilters({
       });
     }
 
-    const difficultyOrder: Record<string, number> = { S: 0, M: 1, L: 2, XL: 3 };
-    const dir = sortDir === "asc" ? 1 : -1;
-
-    result = [...result].sort((a, b) => {
-      let cmp = 0;
-      switch (sortField) {
-        // Mirrors the API's own ordering, so drag-and-drop reordering survives
-        case "manual":
-          cmp =
-            (a.order ?? 0) - (b.order ?? 0) ||
-            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-          break;
-        case "updatedAt":
-        case "createdAt":
-          cmp = new Date(a[sortField]).getTime() - new Date(b[sortField]).getTime();
-          break;
-        case "priority":
-          cmp = (PRIORITY_ORDER[a.priority] ?? 99) - (PRIORITY_ORDER[b.priority] ?? 99);
-          break;
-        case "difficulty":
-          cmp = (difficultyOrder[a.difficulty] ?? 0) - (difficultyOrder[b.difficulty] ?? 0);
-          break;
-        case "category":
-          cmp = a.category.localeCompare(b.category);
-          break;
-        case "title":
-          cmp = a.title.localeCompare(b.title);
-          break;
-      }
-      return cmp * dir;
-    });
+    result = sortTasks(result, sortField, sortDir, sortContext);
 
     onFilter(result);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters, tasks, sortField, sortDir, currentUsername, labels, projectKey]);
+  }, [filters, tasks, sortField, sortDir, sortContext, currentUsername, projectKey]);
 
   function clearFilters() {
     setFilters((f) => ({ ...EMPTY_FILTERS, search: f.search }));
   }
 
-  function unset(key: keyof BoardFilterValues) {
+  function unset(key: BuiltInFilterKey) {
     setFilters((f) => ({ ...f, [key]: "" }));
   }
 
-  const chips: { key: keyof BoardFilterValues; label: string; colour?: string; initial?: string }[] =
+  const filterableFields = sortedFields(activeFields(customFields)).filter((f) => f.filterable);
+
+  function fieldFilter(fieldId: string): FieldFilter {
+    return filters.fields?.[fieldId] ?? {};
+  }
+
+  function clearFieldFilter(fieldId: string) {
+    setFilters((f) => {
+      const fields = { ...(f.fields ?? {}) };
+      delete fields[fieldId];
+      return { ...f, fields };
+    });
+  }
+
+  function setFieldFilter(fieldId: string, patch: FieldFilter) {
+    setFilters((f) => {
+      const next = { ...(f.fields?.[fieldId] ?? {}), ...patch };
+      const fields = { ...(f.fields ?? {}) };
+      if (isFieldFilterSet(next)) fields[fieldId] = next;
+      else delete fields[fieldId];
+      return { ...f, fields };
+    });
+  }
+
+  const chips: {
+    key: BuiltInFilterKey | string;
+    label: string;
+    colour?: string;
+    initial?: string;
+    fieldId?: string;
+  }[] =
     [];
   if (filters.assignee) {
     chips.push({
@@ -257,22 +287,28 @@ export function BoardFilters({
       colour: categoryColor(projectCategories, filters.category) || undefined,
     });
   }
-  if (filters.component) chips.push({ key: "component", label: filters.component });
-  if (filters.difficulty) chips.push({ key: "difficulty", label: filters.difficulty });
   if (filters.priority) {
     chips.push({ key: "priority", label: PRIORITY_LABELS[filters.priority as Priority] });
-  }
-  if (filters.label) {
-    chips.push({
-      key: "label",
-      label: labels.find((l) => l._id === filters.label)?.name ?? filters.label,
-    });
   }
   if (filters.dateRange) {
     chips.push({
       key: "dateRange",
       label: DATE_PRESETS.find((p) => p.value === filters.dateRange)?.label ?? filters.dateRange,
     });
+  }
+
+  // Field chips carry the field's name, because "5" on its own says nothing
+  for (const field of filterableFields) {
+    const filter = filters.fields?.[field._id];
+    if (!isFieldFilterSet(filter)) continue;
+    const option = orderedOptions(field).find((o) => o.id === filter?.value);
+    const range = [filter?.from, filter?.to];
+    const label = option
+      ? `${field.name}: ${option.value}`
+      : filter?.value
+        ? `${field.name}: ${filter.value}`
+        : `${field.name}: ${range[0] || "…"}–${range[1] || "…"}`;
+    chips.push({ key: `field:${field._id}`, label, colour: option?.color, fieldId: field._id });
   }
 
   const selectClass =
@@ -361,7 +397,11 @@ export function BoardFilters({
                       colour={chip.colour}
                       initial={chip.initial}
                       isAssignee={chip.key === "assignee"}
-                      onRemove={() => unset(chip.key)}
+                      onRemove={() =>
+                        chip.fieldId
+                          ? clearFieldFilter(chip.fieldId)
+                          : unset(chip.key as BuiltInFilterKey)
+                      }
                     />
                   ))}
                 </div>
@@ -400,37 +440,6 @@ export function BoardFilters({
                 </select>
               </Field>
 
-              <Field label="Component">
-                <select
-                  value={filters.component}
-                  onChange={(e) => setFilters((f) => ({ ...f, component: e.target.value }))}
-                  className={selectClass}
-                  disabled={components.length === 0}
-                >
-                  <option value="">All components</option>
-                  {components.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-
-              <Field label="Difficulty">
-                <select
-                  value={filters.difficulty}
-                  onChange={(e) => setFilters((f) => ({ ...f, difficulty: e.target.value }))}
-                  className={selectClass}
-                >
-                  <option value="">All sizes</option>
-                  {DIFFICULTIES.map((d: Difficulty) => (
-                    <option key={d} value={d}>
-                      {d}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-
               <Field label="Priority">
                 <select
                   value={filters.priority}
@@ -446,21 +455,6 @@ export function BoardFilters({
                 </select>
               </Field>
 
-              <Field label="Label">
-                <select
-                  value={filters.label}
-                  onChange={(e) => setFilters((f) => ({ ...f, label: e.target.value }))}
-                  className={selectClass}
-                  disabled={labels.length === 0}
-                >
-                  <option value="">All labels</option>
-                  {labels.map((l) => (
-                    <option key={l._id} value={l._id}>
-                      {l.name}
-                    </option>
-                  ))}
-                </select>
-              </Field>
 
               <Field label="Updated">
                 <select
@@ -476,6 +470,69 @@ export function BoardFilters({
                 </select>
               </Field>
             </div>
+
+            {filterableFields.length > 0 && (
+              <>
+                <div className="my-3 h-px bg-border" />
+                <div className="grid grid-cols-2 gap-2">
+                  {filterableFields.map((field) => (
+                    <Field key={field._id} label={field.name}>
+                      {field.fieldType === "number" || field.fieldType === "date" ? (
+                        // From/to rather than one box: a range is what people want from
+                        // a number, and one input cannot express it
+                        <div className="flex items-center gap-1">
+                          <input
+                            type={field.fieldType === "date" ? "date" : "number"}
+                            value={fieldFilter(field._id).from ?? ""}
+                            onChange={(e) => setFieldFilter(field._id, { from: e.target.value })}
+                            aria-label={`${field.name} from`}
+                            placeholder="from"
+                            className={`${selectClass} min-w-0`}
+                          />
+                          <input
+                            type={field.fieldType === "date" ? "date" : "number"}
+                            value={fieldFilter(field._id).to ?? ""}
+                            onChange={(e) => setFieldFilter(field._id, { to: e.target.value })}
+                            aria-label={`${field.name} to`}
+                            placeholder="to"
+                            className={`${selectClass} min-w-0`}
+                          />
+                        </div>
+                      ) : field.fieldType === "text" ? (
+                        <input
+                          value={fieldFilter(field._id).value ?? ""}
+                          onChange={(e) => setFieldFilter(field._id, { value: e.target.value })}
+                          aria-label={field.name}
+                          placeholder="contains…"
+                          className={selectClass}
+                        />
+                      ) : (
+                        <select
+                          value={fieldFilter(field._id).value ?? ""}
+                          onChange={(e) => setFieldFilter(field._id, { value: e.target.value })}
+                          aria-label={field.name}
+                          className={selectClass}
+                        >
+                          <option value="">All</option>
+                          {field.fieldType === "checkbox" ? (
+                            <>
+                              <option value="true">Yes</option>
+                              <option value="false">No</option>
+                            </>
+                          ) : (
+                            orderedOptions(field).map((option) => (
+                              <option key={option.id} value={option.id}>
+                                {option.value}
+                              </option>
+                            ))
+                          )}
+                        </select>
+                      )}
+                    </Field>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         )}
       </div>
@@ -493,10 +550,15 @@ export function BoardFilters({
         <select
           value={sortField}
           aria-label="Sort tasks by"
-          onChange={(e) => setSortField(e.target.value as SortField)}
+          onChange={(e) => {
+            const next = e.target.value as SortField;
+            onSortChange(next, defaultSortDir(next));
+          }}
           className="focus-ring-inset h-full rounded-l-lg bg-transparent px-2.5 text-[13px] text-text-muted"
         >
-          {SORT_OPTIONS.map((o) => (
+          {SORT_OPTIONS.filter(
+            (o) => sortFields.includes(o.value) || o.value === sortField
+          ).map((o) => (
             <option key={o.value} value={o.value}>
               {o.label}
             </option>
@@ -504,7 +566,7 @@ export function BoardFilters({
         </select>
         <div className="h-full w-px bg-border" />
         <button
-          onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}
+          onClick={() => onSortChange(sortField, sortDir === "asc" ? "desc" : "asc")}
           title={sortDir === "asc" ? "Ascending" : "Descending"}
           aria-label={sortDir === "asc" ? "Sort ascending" : "Sort descending"}
           className="focus-ring-inset h-full w-[30px] rounded-r-lg text-[13px] text-text-muted transition-colors hover:text-text"
@@ -512,6 +574,14 @@ export function BoardFilters({
           {sortDir === "asc" ? "↑" : "↓"}
         </button>
       </div>
+
+      {onHiddenColumnsChange && (
+        <ColumnPicker
+          hidden={hiddenColumns ?? []}
+          onChange={onHiddenColumnsChange}
+          customFields={customFields}
+        />
+      )}
 
       {extraControls}
     </div>

@@ -7,16 +7,15 @@ import { useToast } from "@/components/ui/Toast";
 import { Badge } from "@/components/ui/Badge";
 import { STATUS_LABELS, PRIORITY_LABELS, DEFAULT_PROJECT_ICON, Priority, TaskStatus } from "@/types";
 import { projectPath, taskPath } from "@/lib/urls";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 interface MyTask {
   _id: string;
   taskNumber: number;
   title: string;
   status: TaskStatus;
-  difficulty: string;
   priority: Priority;
   category: string;
-  component: string;
   updatedAt: string;
   project: { _id: string; name: string; key: string; icon?: string };
 }
@@ -71,19 +70,22 @@ export default function MyTasksPage() {
   }
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold">My Tasks</h1>
-        <label className="flex items-center gap-2 text-sm text-text-muted cursor-pointer">
-          <input
-            type="checkbox"
-            checked={hideDone}
-            onChange={(e) => setHideDone(e.target.checked)}
-            className="rounded border-border"
-          />
-          Hide done
-        </label>
-      </div>
+    <div className="max-w-4xl mx-auto w-full">
+      <PageHeader
+        title="My Tasks"
+        subtitle={sorted.length === 1 ? "1 task" : `${sorted.length} tasks`}
+        actions={
+          <label className="flex cursor-pointer items-center gap-2 text-sm text-text-muted">
+            <input
+              type="checkbox"
+              checked={hideDone}
+              onChange={(e) => setHideDone(e.target.checked)}
+              className="focus-ring rounded border-border"
+            />
+            Hide done
+          </label>
+        }
+      />
 
       {sorted.length === 0 ? (
         <div className="text-center py-12 text-text-muted">
@@ -124,9 +126,6 @@ export default function MyTasksPage() {
                     <div className="flex gap-1 flex-shrink-0">
                       <Badge variant="priority" value={task.priority}>
                         {PRIORITY_LABELS[task.priority] ?? task.priority}
-                      </Badge>
-                      <Badge variant="difficulty" value={task.difficulty}>
-                        {task.difficulty}
                       </Badge>
                     </div>
                   </Link>

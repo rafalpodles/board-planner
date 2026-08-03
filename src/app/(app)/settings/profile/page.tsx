@@ -52,7 +52,7 @@ export default function ProfilePage() {
   }
 
   return (
-    <div className="max-w-md mx-auto">
+    <div className="w-full max-w-md mx-auto">
       <h2 className="text-lg font-semibold mb-6">Profile</h2>
 
       <div className="space-y-4">

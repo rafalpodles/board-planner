@@ -1,5 +1,5 @@
 import mongoose, { Schema, Model } from "mongoose";
-import { ITask, DIFFICULTIES, PRIORITIES, DEFAULT_PRIORITY } from "@/types";
+import { ITask, PRIORITIES, DEFAULT_PRIORITY } from "@/types";
 
 const taskSchema = new Schema<ITask>(
   {
@@ -21,19 +21,10 @@ const taskSchema = new Schema<ITask>(
       type: String,
       default: "",
     },
-    difficulty: {
-      type: String,
-      enum: DIFFICULTIES,
-      default: "M",
-    },
     priority: {
       type: String,
       enum: PRIORITIES,
       default: DEFAULT_PRIORITY,
-    },
-    component: {
-      type: String,
-      default: "",
     },
     category: {
       type: String,
@@ -69,10 +60,6 @@ const taskSchema = new Schema<ITask>(
         mergedAt: { type: Date, default: null },
         updatedAt: { type: Date, default: Date.now },
       }],
-      default: [],
-    },
-    labels: {
-      type: [{ type: Schema.Types.ObjectId }],
       default: [],
     },
     pinned: {
@@ -140,7 +127,9 @@ const taskSchema = new Schema<ITask>(
       required: true,
     },
   },
-  { timestamps: true }
+  // customFieldValues is a Map, and JSON.stringify turns a Map into {} — every
+  // custom field value was silently absent from every API response without this
+  { timestamps: true, toJSON: { flattenMaps: true }, toObject: { flattenMaps: true } }
 );
 
 taskSchema.index({ project: 1, taskNumber: 1 }, { unique: true });

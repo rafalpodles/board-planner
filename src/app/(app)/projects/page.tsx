@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/Button";
 import { useAuth } from "@/hooks/use-auth";
 import { useProjects } from "@/hooks/use-projects";
 import { projectPath } from "@/lib/urls";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export default function ProjectsPage() {
   const { projects, isLoading: loading } = useProjects();
@@ -21,14 +22,19 @@ export default function ProjectsPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold">Projects</h1>
-        {isAdmin && (
-          <Link href="/projects/new">
-            <Button>New Project</Button>
-          </Link>
-        )}
-      </div>
+      <PageHeader
+        title="Projects"
+        subtitle={
+          projects.length === 1 ? "1 project" : `${projects.length} projects`
+        }
+        actions={
+          isAdmin ? (
+            <Link href="/projects/new">
+              <Button size="sm">New Project</Button>
+            </Link>
+          ) : undefined
+        }
+      />
 
       {projects.length === 0 ? (
         <div className="text-center py-12 text-text-muted">
@@ -49,7 +55,10 @@ export default function ProjectsPage() {
             >
               <div className="flex items-start justify-between gap-2 mb-2">
                 <h2 className="font-semibold text-lg flex items-center gap-2 min-w-0">
-                  <span className="text-xl leading-none shrink-0" aria-hidden="true">
+                  <span
+                    className="text-xl leading-none shrink-0"
+                    aria-hidden="true"
+                  >
                     {project.icon || DEFAULT_PROJECT_ICON}
                   </span>
                   <span className="truncate">{project.name}</span>
@@ -62,18 +71,6 @@ export default function ProjectsPage() {
                 <p className="text-sm text-text-muted line-clamp-2">
                   {project.description}
                 </p>
-              )}
-              {project.components.length > 0 && (
-                <div className="mt-3 flex flex-wrap gap-1">
-                  {project.components.map((c) => (
-                    <span
-                      key={c}
-                      className="text-xs bg-bg-input px-2 py-0.5 rounded"
-                    >
-                      {c}
-                    </span>
-                  ))}
-                </div>
               )}
             </Link>
           ))}

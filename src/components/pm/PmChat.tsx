@@ -16,6 +16,7 @@ import { Modal } from "@/components/ui/Modal";
 import { AuthedImage } from "@/components/ui/AuthedImage";
 
 const MAX_ATTACHMENTS = 4;
+const MAX_INPUT_HEIGHT = 200;
 
 interface PendingAttachment {
   fileId: string;
@@ -57,6 +58,7 @@ export function PmChat({
   const [dragOver, setDragOver] = useState(false);
   const [expandedImage, setExpandedImage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const [liveActions, setLiveActions] = useState<{ tool: string; taskKey?: string; summary: string }[]>([]);
   const [recovering, setRecovering] = useState(false);
   const [stopping, setStopping] = useState(false);
@@ -64,6 +66,15 @@ export function PmChat({
   const [lastFailedInput, setLastFailedInput] = useState("");
   const [loading, setLoading] = useState(true);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+
+  // Height is measured, not declared: `auto` first so shrinking is possible, then
+  // the content height capped, past which the textarea scrolls on its own
+  useEffect(() => {
+    const field = inputRef.current;
+    if (!field) return;
+    field.style.height = "auto";
+    field.style.height = `${Math.min(field.scrollHeight, MAX_INPUT_HEIGHT)}px`;
+  }, [input]);
 
   const refreshTaskMap = useCallback(async () => {
     try {
@@ -507,44 +518,51 @@ export function PmChat({
             e.target.value = "";
           }}
         />
-        <button
-          onClick={() => fileInputRef.current?.click()}
-          disabled={working || uploading || pending.length >= MAX_ATTACHMENTS}
-          title="Attach an image"
-          aria-label="Attach an image"
-          className="h-9 w-9 shrink-0 flex items-center justify-center rounded border border-border
-            bg-bg-input text-text-muted hover:text-text transition-colors cursor-pointer
-            disabled:opacity-50 disabled:cursor-default"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"
-            />
-          </svg>
-        </button>
-        <textarea
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          onPaste={(e) => {
-            // How people actually attach a screenshot
-            const files = [...e.clipboardData.files];
-            if (files.some((f) => f.type.startsWith("image/"))) {
-              e.preventDefault();
-              addFiles(files);
+        {/* Inside the field, pinned to its bottom edge: the field grows with the
+            message, so a centred icon would drift away from the caret */}
+        <div className="relative flex-1">
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={working || uploading || pending.length >= MAX_ATTACHMENTS}
+            title="Attach an image"
+            aria-label="Attach an image"
+            className="focus-ring absolute bottom-1.5 left-1.5 flex h-7 w-7 items-center justify-center rounded
+              text-text-muted hover:bg-bg-hover hover:text-text transition-colors cursor-pointer
+              disabled:opacity-50 disabled:cursor-default disabled:hover:bg-transparent
+              after:absolute after:-inset-2 after:content-['']"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"
+              />
+            </svg>
+          </button>
+          <textarea
+            ref={inputRef}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            onPaste={(e) => {
+              // How people actually attach a screenshot
+              const files = [...e.clipboardData.files];
+              if (files.some((f) => f.type.startsWith("image/"))) {
+                e.preventDefault();
+                addFiles(files);
+              }
+            }}
+            placeholder={
+              uploading
+                ? "Attaching image…"
+                : "Message the PM… (Enter sends, Shift+Enter for a new line, paste to attach)"
             }
-          }}
-          placeholder={
-            uploading
-              ? "Attaching image…"
-              : "Message the PM… (Enter sends, Shift+Enter for a new line, paste to attach)"
-          }
-          rows={2}
-          disabled={working}
-          className="flex-1 bg-bg-input border border-border rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary resize-none disabled:opacity-60"
-        />
+            rows={2}
+            disabled={working}
+            style={{ maxHeight: MAX_INPUT_HEIGHT }}
+            className="block w-full overflow-y-auto bg-bg-input border border-border rounded py-2 pl-10 pr-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary resize-none disabled:opacity-60"
+          />
+        </div>
         {working ? (
           <button
             onClick={interrupt}

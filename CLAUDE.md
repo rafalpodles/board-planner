@@ -39,6 +39,7 @@ Since CP-128, statuses are project-defined **board columns** mapped to semantic 
 Claude automatically picks up tasks in `todo` status (assigned to `claude` or unassigned) and processes them through the pipeline. No user confirmation needed for `todo` tasks.
 
 #### Size-based approach
+Size comes from the project's **Difficulty** field — an ordinary project-defined field since CP-213, not a column on the task. Read it from `customFieldValues`; a project that renamed or removed it has no size, and those tasks are treated as S/M.
 - **S/M tasks** — Claude implements immediately, no upfront plan needed.
 - **L/XL tasks** — Claude first writes a plan as a task comment and **waits for user approval** before writing any code.
 
@@ -79,6 +80,7 @@ Claude automatically picks up tasks in `todo` status (assigned to `claude` or un
 
 ### Conventions
 - Task keys: `CP-1`, `CP-2` — use these when referencing tasks.
+- **Project-defined fields go through the generic `fields` parameter**, keyed by field name: `fields: { "Difficulty": "L", "Component": "ui" }`. CP-214 removed the `difficulty` and `component` parameters that used to exist alongside it — a client still passing them gets nothing set. `get_project` lists the field names a project actually has.
 - Assignees use **usernames** (not IDs). `claude` = Claude Code, `rpo` = you.
 - Branch naming: `cp-<number>/<short-slug>` (e.g. `cp-3/dropdown-menu`)
 
@@ -97,11 +99,14 @@ src/
     projects/         # Project pages (kanban, task detail, settings)
     login/, profile/, users/, tokens/, notifications/, search/, my-tasks/
   components/
-    kanban/           # Board, Column, TaskCard, ListView, TimelineView
+    kanban/           # Board, Column, TaskCard, ListView
     tasks/            # TaskForm, Comments, TaskLinks, ActivityTimeline
-    import-export/    # Markdown import/export
+    search/           # SearchLayer (⌘K), search core
+    shell/            # Sidebar, ProjectTree, PageHeader
+    pm/               # PM agent chat
+    settings/         # Project settings sections
     ui/               # Button, Modal, Badge, Toast, etc.
-    Navbar.tsx, CommandPalette.tsx, AuthGuard.tsx, AuthProvider.tsx
+    AuthGuard.tsx, AuthProvider.tsx, ThemeProvider.tsx
   hooks/
     use-api.ts        # HTTP client with auth headers
     use-auth.ts       # Auth state management
@@ -114,7 +119,7 @@ src/
     in-app-notifications.ts
     github.ts         # GitHub PR linking
     custom-fields.ts  # Custom field validation
-    webhooks.ts, activity.ts, projectAudit.ts, markdown.ts, checklist.ts
+    webhooks.ts, activity.ts, projectAudit.ts, checklist.ts
   models/             # Mongoose schemas
     user.ts, task.ts, project.ts, comment.ts, sprint.ts,
     apiToken.ts, notification.ts, activityLog.ts, projectAuditLog.ts, settings.ts

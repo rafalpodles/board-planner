@@ -92,6 +92,25 @@ function buildSystemPrompt(
     `- You can execute at most ${MAX_WRITE_ACTIONS} write actions per turn; plan accordingly.`,
     `- Task categories in this project: ${(project.categories || []).map((c: { name: string }) => c.name).join(", ") || "bug, doc, user-story, idea"}.`
   );
+  // Without the names and options the `fields` parameter is unusable — the model
+  // would be guessing at both. Size and component live here since CP-213.
+  const fields = (project.customFields || []).filter((f: { archived?: boolean }) => !f.archived);
+  if (fields.length > 0) {
+    lines.push(
+      `- Project fields, set with the \`fields\` parameter on create_task/update_task: ` +
+        fields
+          .map((f: { name: string; fieldType: string; options?: { value?: string }[] }) => {
+            const options = (f.options || [])
+              .map((o) => (typeof o === "string" ? o : o?.value))
+              .filter(Boolean);
+            return options.length
+              ? `${f.name} (${options.join(" | ")})`
+              : `${f.name} (${f.fieldType})`;
+          })
+          .join("; ") +
+        `.`
+    );
+  }
   if (disallowedTools.length > 0) {
     lines.push(
       `- Not available in this turn: ${disallowedTools.join(", ")}. Recommend those changes in your answer instead of making them.`

@@ -1,12 +1,5 @@
 import mongoose, { Schema, Model } from "mongoose";
-import { IProject, DIFFICULTIES, DEFAULT_PROJECT_CATEGORIES, DEFAULT_PROJECT_COLUMNS, COLUMN_ROLES, WEBHOOK_EVENTS, NOTIFICATION_CHANNEL_TYPES, CUSTOM_FIELD_TYPES } from "@/types";
-
-const labelSchema = new Schema(
-  {
-    name: { type: String, required: true, trim: true },
-    color: { type: String, required: true, default: "#3b82f6" },
-  }
-);
+import { IProject, DEFAULT_PROJECT_CATEGORIES, DEFAULT_PROJECT_COLUMNS, COLUMN_ROLES, WEBHOOK_EVENTS, NOTIFICATION_CHANNEL_TYPES, CUSTOM_FIELD_TYPES } from "@/types";
 
 const categorySchema = new Schema(
   {
@@ -31,9 +24,7 @@ const taskTemplateSchema = new Schema(
     name: { type: String, required: true, trim: true },
     title: { type: String, default: "" },
     description: { type: String, default: "" },
-    difficulty: { type: String, enum: DIFFICULTIES, default: "M" },
     category: { type: String, default: "user-story" },
-    component: { type: String, default: "" },
     acceptanceCriteria: { type: String, default: "" },
   }
 );
@@ -42,8 +33,16 @@ const customFieldSchema = new Schema(
   {
     name: { type: String, required: true, trim: true },
     fieldType: { type: String, enum: CUSTOM_FIELD_TYPES, required: true },
-    options: { type: [String], default: [] },
+    // Mixed, not a subdocument schema: options stored before CP-211 are plain
+    // strings, and casting them to the new shape silently discards them. Shape is
+    // enforced in lib/custom-fields.ts, which also converts the legacy form.
+    options: { type: [Schema.Types.Mixed], default: [] },
     required: { type: Boolean, default: false },
+    order: { type: Number, default: 0 },
+    showOnCard: { type: Boolean, default: false },
+    showInList: { type: Boolean, default: false },
+    filterable: { type: Boolean, default: false },
+    archived: { type: Boolean, default: false },
   }
 );
 
@@ -69,14 +68,6 @@ const projectSchema = new Schema<IProject>(
       type: String,
       default: "",
       trim: true,
-    },
-    components: {
-      type: [String],
-      default: [],
-    },
-    labels: {
-      type: [labelSchema],
-      default: [],
     },
     categories: {
       type: [categorySchema],
@@ -216,6 +207,11 @@ const projectSchema = new Schema<IProject>(
     repository: {
       url: { type: String, default: "" },
       defaultBranch: { type: String, default: "main" },
+    },
+    // Sparse ordering: reordering rewrites only the projects that moved
+    sortOrder: {
+      type: Number,
+      default: 0,
     },
     owner: {
       type: Schema.Types.ObjectId,
