@@ -17,6 +17,8 @@ import {
 import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
 import { Button } from "@/components/ui/Button";
+import { CustomFieldEditor } from "./CustomFieldEditor";
+import { sortedFields } from "@/lib/custom-fields";
 import { SettingsCard, EmptyState, ListRow } from "@/components/settings/SettingsCard";
 import { SectionProps } from "./types";
 
@@ -128,6 +130,19 @@ export function TaskFieldsSection({ projectId, project, patchProject }: SectionP
       setNewFieldRequired(false);
     } catch (err) {
       fail(err, "Failed to add custom field");
+    }
+  }
+
+  async function saveCustomField(fieldId: string, patch: Record<string, unknown>) {
+    try {
+      patchProject({
+        customFields: await api.patch(
+          `/api/projects/${projectId}/custom-fields/${fieldId}`,
+          patch
+        ),
+      });
+    } catch (err) {
+      fail(err, "Failed to save custom field");
     }
   }
 
@@ -332,24 +347,13 @@ export function TaskFieldsSection({ projectId, project, patchProject }: SectionP
         description="Extra fields shown on every task in this project."
       >
         <div className="space-y-2">
-          {(project.customFields || []).map((field) => (
-            <ListRow key={field._id}>
-              <span className="text-sm font-medium">{field.name}</span>
-              <span className="rounded bg-bg-input px-2 py-0.5 text-xs text-text-muted">
-                {field.fieldType}
-              </span>
-              {field.required && <span className="text-xs text-warning">required</span>}
-              {field.fieldType === "dropdown" && field.options.length > 0 && (
-                <span className="text-xs text-text-muted">[{field.options.join(", ")}]</span>
-              )}
-              <span className="flex-1" />
-              <button
-                onClick={() => removeCustomField(field._id)}
-                className="px-2 py-1 text-xs text-text-muted hover:text-danger"
-              >
-                Delete
-              </button>
-            </ListRow>
+          {sortedFields(project.customFields || []).map((field) => (
+            <CustomFieldEditor
+              key={field._id}
+              field={field}
+              onSave={(patch) => saveCustomField(field._id, patch)}
+              onDelete={() => removeCustomField(field._id)}
+            />
           ))}
           {(project.customFields || []).length === 0 && (
             <EmptyState>No custom fields yet. Add one to capture something the built-in fields don&apos;t.</EmptyState>
