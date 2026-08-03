@@ -187,13 +187,27 @@ describe("killGroup", () => {
       return false;
     };
 
-    // pid 0 deliberately gets the signal a broken guard would leave survivable, and -1 the one
-    // that would otherwise be negated into an unrelated process to kill outright
-    killGroup({ pid: undefined, kill: record }, "SIGKILL");
-    killGroup({ pid: 0, kill: record }, "SIGTERM");
-    killGroup({ pid: -1, kill: record }, "SIGTERM");
+    // Asserting on the fallback alone cannot tell "the guard caught it" from "we signalled some
+    // other process and then fell back" — as non-root pid -1 negates to 1 and fails EPERM, which
+    // falls back and looks identical, while as root it would succeed and this test would fail on
+    // correct source. So watch the syscall itself: the guard means it is never reached.
+    const realKill = process.kill;
+    const groupKills: number[] = [];
+    process.kill = ((pid: number, signal?: number | NodeJS.Signals) => {
+      groupKills.push(pid);
+      return realKill.call(process, pid, signal);
+    }) as typeof process.kill;
+
+    try {
+      killGroup({ pid: undefined, kill: record }, "SIGKILL");
+      killGroup({ pid: 0, kill: record }, "SIGTERM");
+      killGroup({ pid: -1, kill: record }, "SIGTERM");
+    } finally {
+      process.kill = realKill;
+    }
 
     expect(signalled).toEqual(["SIGKILL", "SIGTERM", "SIGTERM"]);
+    expect(groupKills).toEqual([]);
   });
 
   it("falls back to the direct child when the group cannot be signalled for any other reason", () => {
