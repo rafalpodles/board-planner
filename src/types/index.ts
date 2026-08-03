@@ -827,6 +827,16 @@ export interface ApiTask {
   createdBy: ApiUser | string;
   createdAt: string;
   updatedAt: string;
+  execution?: ApiTaskExecution;
+}
+
+// Only what a reader needs. lastError is deliberately absent — task-service writes it as "" and
+// never anything else — and so is attempts, which is decremented on refund and therefore counts
+// remaining budget, not the attempt number.
+export interface ApiTaskExecution {
+  workerId?: string;
+  phase?: string;
+  phaseAt?: string | null;
 }
 
 export interface ApiReaction {
