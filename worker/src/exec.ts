@@ -14,6 +14,10 @@ export interface RunOpts {
   env?: NodeJS.ProcessEnv;
   signal?: AbortSignal;
   stdin?: string;
+  // Observing only, and only additive: CommandResult.stdout still carries every chunk this saw, so
+  // nothing downstream reads a different output because an observer was attached. Without it the
+  // whole run is invisible until it ends, which for a 30-minute task is the entire point missed.
+  onStdout?: (chunk: string) => void;
 }
 
 export interface Runner {
@@ -86,7 +90,15 @@ export function createRunner(): Runner {
           child.stdin.end(opts.stdin);
 
           child.stdout.on("data", (chunk: Buffer | string) => {
-            stdout += chunk.toString();
+            const text = chunk.toString();
+            stdout += text;
+            if (!opts.onStdout) return;
+            try {
+              opts.onStdout(text);
+            } catch {
+              // this runs inside a stream handler, where a throw is an uncaught exception that
+              // takes the whole worker down — watching a run must not be able to end it
+            }
           });
           child.stderr.on("data", (chunk: Buffer | string) => {
             stderr += chunk.toString();

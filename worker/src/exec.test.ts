@@ -206,6 +206,70 @@ describe("createRunner", () => {
   });
 });
 
+describe("watching stdout while it is still being written", () => {
+  // The whole point: a 30-minute agent run is invisible until it ends if output is only read at exit
+  it("hands a chunk over before the process has exited", async () => {
+    const chunks: string[] = [];
+    let settled = false;
+
+    const running = createRunner()
+      .run(
+        process.execPath,
+        [
+          "-e",
+          "process.stdout.write('first\\n'); setTimeout(() => process.stdout.write('second\\n'), 600)",
+        ],
+        { cwd: process.cwd(), timeoutMs: 10_000, onStdout: (chunk) => chunks.push(chunk) }
+      )
+      .then((result) => {
+        settled = true;
+        return result;
+      });
+
+    await vi.waitFor(() => expect(chunks.join("")).toContain("first"));
+    expect(settled).toBe(false);
+
+    const result = await running;
+
+    expect(chunks.join("")).toBe("first\nsecond\n");
+    // observing is additive: every consumer downstream still reads the whole output
+    expect(result.stdout).toBe("first\nsecond\n");
+  });
+
+  // A "data" handler runs on the stream's own stack, so a throw there is an uncaught exception and
+  // ends the worker process. Asserted on the process, not on the result: the result comes back
+  // intact either way, so only the absence of the exception distinguishes the two.
+  it("keeps an observer's throw out of the process", async () => {
+    const uncaught: unknown[] = [];
+    const record = (error: unknown): void => {
+      uncaught.push(error);
+    };
+
+    process.on("uncaughtException", record);
+    try {
+      const result = await createRunner().run(
+        process.execPath,
+        ["-e", "process.stdout.write('payload')"],
+        {
+          cwd: process.cwd(),
+          timeoutMs: 10_000,
+          onStdout: () => {
+            throw new Error("the observer exploded");
+          },
+        }
+      );
+
+      expect(result.code).toBe(0);
+      expect(result.stdout).toBe("payload");
+      expect(result.timedOut).toBe(false);
+    } finally {
+      process.off("uncaughtException", record);
+    }
+
+    expect(uncaught).toEqual([]);
+  });
+});
+
 describe("the default child environment", () => {
   // Every gate calls runner.run without an env of its own, so this default is what npm ci,
   // npm run build and npm test actually inherit — including any dependency's lifecycle script

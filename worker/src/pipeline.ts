@@ -6,6 +6,7 @@ import { Runner } from "./exec.js";
 import { Executor } from "./executor.js";
 import { Reporter } from "./reporter.js";
 import { scrub } from "./scrub.js";
+import { Phase, Telemetry } from "./telemetry.js";
 import { Workspace } from "./workspace.js";
 import { ClaimedTask, DiffStats, Gate, GateContext, GateResult } from "./types.js";
 
@@ -21,6 +22,9 @@ export interface PipelineDeps {
   runner: Runner;
   gates: Gate[];
   signal?: AbortSignal;
+  // Where the run says what it is doing. Left out entirely, the run behaves exactly as it did
+  // before there was anything to say it to.
+  telemetry?: Pick<Telemetry, "emit" | "emitEvent">;
 }
 
 const SLUG = "worker";
@@ -98,8 +102,14 @@ async function releaseIfAborted(
 }
 
 export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<void> {
-  const { config, workspace, executor, gates, runner } = deps;
+  const { config, workspace, executor, gates, runner, telemetry } = deps;
   const branch = `${task.taskKey.toLowerCase()}/${SLUG}`;
+
+  // Coarse on purpose: a phase names the stage a run is in, and every stage below either finishes
+  // or ends the run, so the last one emitted is always where the run actually is.
+  const enter = (phase: Phase): void => telemetry?.emit({ phase });
+
+  enter("claiming");
 
   let statusIds: StatusIds;
   try {
@@ -119,6 +129,7 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
 
   let worktreePath: string;
   try {
+    enter("worktree");
     worktreePath = await workspace.create(task.taskKey, SLUG);
   } catch (error) {
     await quietly(() => workspace.destroy(task.taskKey));
@@ -128,7 +139,15 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
 
   let keepWorktree = false;
   try {
-    const outcome = await executor.execute(task, worktreePath, deps.signal);
+    enter("agent");
+    // The only agent-authored material that reaches a sink, and it reaches one only through
+    // summarise(), whose result type cannot hold a file body, a prompt or a diff
+    const outcome = await executor.execute(
+      task,
+      worktreePath,
+      deps.signal,
+      telemetry && ((event) => telemetry.emitEvent(event))
+    );
     if (await releaseIfAborted(deps, reporter, task)) return;
 
     if (outcome.kind === "usage_limit") {
@@ -164,6 +183,7 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
     for (const gate of gates) {
       if (await releaseIfAborted(deps, reporter, task)) return;
 
+      enter(`gates:${gate.name}`);
       const verdict = await gate.run(context);
       if (await releaseIfAborted(deps, reporter, task)) return;
       if (verdict.ok) continue;
@@ -191,6 +211,7 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
 
     let prUrl = "";
     try {
+      enter("push");
       await delivery.push(worktreePath, branch);
       if (
         await releaseIfAborted(
@@ -203,6 +224,7 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
         return;
       }
 
+      enter("pr");
       prUrl = await delivery.openPr(worktreePath, task, outcome.result.summary);
       if (
         await releaseIfAborted(
@@ -217,6 +239,7 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
 
       // No signal on the merge call itself: killing "gh pr merge" mid-flight leaves ambiguous
       // remote state that only mergeState() can untangle — better not to create it
+      enter("merge");
       await delivery.merge(worktreePath, prUrl);
     } catch (error) {
       keepWorktree = true;

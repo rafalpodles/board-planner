@@ -5,6 +5,7 @@ import { Delivery } from "./delivery.js";
 import { CommandResult, Runner } from "./exec.js";
 import { Executor } from "./executor.js";
 import { Reporter } from "./reporter.js";
+import { createTelemetry, isQuota, TelemetryUpdate } from "./telemetry.js";
 import { Workspace } from "./workspace.js";
 import { ClaimedTask, DiffStats, ExecutionResult, Gate } from "./types.js";
 import { PipelineDeps, resolveStatusIds, runTask } from "./pipeline.js";
@@ -444,7 +445,8 @@ describe("runTask", () => {
 
     await runTask(h.deps, task);
 
-    expect(execute).toHaveBeenCalledWith(task, "/wt", controller.signal);
+    // The trailing undefined is the stream listener: this harness attaches no telemetry bus
+    expect(execute).toHaveBeenCalledWith(task, "/wt", controller.signal, undefined);
   });
 
   it("gives every gate the signal, so a build or review gate can honour a stop", async () => {
@@ -589,5 +591,93 @@ describe("runTask", () => {
 
     expect(h.reporter.requeued.mock.calls[0][1]).toMatch(/disk full/);
     expect(h.executor.execute).not.toHaveBeenCalled();
+  });
+});
+
+describe("what the run says it is doing", () => {
+  function watched(overrides: Partial<PipelineDeps> = {}) {
+    const telemetry = createTelemetry();
+    const seen: TelemetryUpdate[] = [];
+    telemetry.subscribe((update) => seen.push(update));
+    const h = harness({ telemetry, ...overrides });
+    return { h, seen, phases: () => seen.map((update) => (isQuota(update) ? "" : update.phase)) };
+  }
+
+  it("names every stage boundary, in order, all the way through a merge", async () => {
+    const { h, phases } = watched({ gates: [passingGate("build"), passingGate("review")] });
+
+    await runTask(h.deps, task);
+
+    expect(phases()).toEqual([
+      "claiming",
+      "worktree",
+      "agent",
+      "gates:build",
+      "gates:review",
+      "push",
+      "pr",
+      "merge",
+    ]);
+  });
+
+  it("stops at the gate that rejected, which is the phase a human needs to see", async () => {
+    const { h, phases } = watched({
+      gates: [passingGate("diff-size"), rejectingGate("test-presence", "no test file was added")],
+    });
+
+    await runTask(h.deps, task);
+
+    expect(h.reporter.gateRejected).toHaveBeenCalled();
+    expect(phases().at(-1)).toBe("gates:test-presence");
+  });
+
+  it("says nothing beyond the stage it never got past when the worktree cannot be created", async () => {
+    const workspace = {
+      create: vi.fn<Workspace["create"]>().mockRejectedValue(new Error("disk full")),
+      destroy: vi.fn<Workspace["destroy"]>().mockResolvedValue(undefined),
+      listWorktrees: vi.fn<Workspace["listWorktrees"]>().mockResolvedValue([]),
+    };
+    const { h, phases } = watched({ workspace });
+
+    await runTask(h.deps, task);
+
+    expect(phases()).toEqual(["claiming", "worktree"]);
+  });
+
+  // The run's only agent-authored input, and the only route it may take: summarise() bounds it into
+  // a name and a path. Handing the raw event to a sink instead would put file bodies on the board.
+  it("puts the agent's own stream on the bus through the summarising entry point", async () => {
+    const execute = vi.fn<Executor["execute"]>(async (_task, _worktree, _signal, onEvent) => {
+      onEvent?.({
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "toolu_1",
+              name: "Edit",
+              input: { file_path: "src/a.ts", content: "TOKEN=cpw_deadbeef0123456789abcdef01234567" },
+            },
+          ],
+        },
+      } as never);
+      return { kind: "result", result: completed };
+    });
+    const { h, seen } = watched({ executor: { execute } });
+
+    await runTask(h.deps, task);
+
+    expect(seen).toContainEqual({ phase: "agent", tool: { name: "Edit", target: "src/a.ts" } });
+    expect(JSON.stringify(seen)).not.toContain("cpw_deadbeef");
+  });
+
+  it("hands the executor no listener at all when no bus is attached", async () => {
+    const h = harness();
+
+    await runTask(h.deps, task);
+
+    expect(h.executor.execute.mock.calls[0][3]).toBeUndefined();
+    expect(h.reporter.merged).toHaveBeenCalled();
   });
 });

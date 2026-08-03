@@ -27,7 +27,7 @@ import { PipelineDeps, runTask } from "./pipeline.js";
 import { createReporter } from "./reporter.js";
 import { HeartbeatDeps, loadIdentity, PROTOCOL_VERSION, startHeartbeat } from "./registration.js";
 import { bindRepository, createAllowlistReader } from "./repos.js";
-import { createTelemetry, Telemetry } from "./telemetry.js";
+import { createTelemetry, dropWhenBusy, isQuota, Telemetry } from "./telemetry.js";
 import { ClaimedTask } from "./types.js";
 import { createWorkspace, reapOrphans } from "./workspace.js";
 
@@ -213,6 +213,30 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
 
   const runs = createRunGuard();
 
+  // One bus, two sinks, and this is the only place either is attached. The socket subscribes to the
+  // whole bounded Progress; the server gets the phase alone, since PhaseEvent has nowhere to put
+  // anything else. Both read what the run emits — nothing here reads the run's output itself.
+  const telemetry = deps.createTelemetry();
+
+  // Which task the updates on the bus belong to. The server authorizes an event against the run
+  // recorded on the task, so a phase emitted once the run is over — a late stdout chunk, a sink
+  // still draining — is a write against a task this worker no longer holds. Refused here rather
+  // than relying on the server to notice.
+  let currentRun: { taskId: string; runId: string } | null = null;
+
+  const postPhase = dropWhenBusy((update) => {
+    const run = currentRun;
+    if (!run || isQuota(update)) return Promise.resolve();
+    return api.postEvent({ taskId: run.taskId, runId: run.runId, phase: update.phase });
+  });
+
+  telemetry.subscribe((update) => {
+    // Filtered before dropWhenBusy, not inside it: an update with nowhere to go must not spend the
+    // single in-flight slot that the next real phase needs.
+    if (isQuota(update) || !currentRun) return;
+    postPhase(update);
+  });
+
   async function execute(task: ClaimedTask): Promise<void> {
     const taskConfig = configFor(task.projectId);
     if (!taskConfig) {
@@ -222,23 +246,29 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       return;
     }
 
-    await runs.under((signal) => {
-      const pipeline: PipelineDeps = {
-        config: taskConfig,
-        api,
-        columnIds: (projectId) => api.columnIds(projectId),
-        createReporter: (client, statusIds) =>
-          createReporter(client, statusIds, (message) => deps.logError(message), outbox),
-        createDelivery,
-        workspace: createWorkspace(taskConfig, deps.runner),
-        executor: createExecutor(taskConfig, deps.runner),
-        collectDiff,
-        runner: deps.runner,
-        gates: buildGates(taskConfig, deps.runner),
-        signal,
-      };
-      return runTask(pipeline, task);
-    });
+    currentRun = { taskId: task.taskId, runId: task.runId };
+    try {
+      await runs.under((signal) => {
+        const pipeline: PipelineDeps = {
+          config: taskConfig,
+          api,
+          columnIds: (projectId) => api.columnIds(projectId),
+          createReporter: (client, statusIds) =>
+            createReporter(client, statusIds, (message) => deps.logError(message), outbox),
+          createDelivery,
+          workspace: createWorkspace(taskConfig, deps.runner),
+          executor: createExecutor(taskConfig, deps.runner),
+          collectDiff,
+          runner: deps.runner,
+          gates: buildGates(taskConfig, deps.runner),
+          signal,
+          telemetry,
+        };
+        return runTask(pipeline, task);
+      });
+    } finally {
+      currentRun = null;
+    }
   }
 
   async function drain(): Promise<void> {
@@ -294,10 +324,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     log: deps.logError,
   });
 
-  // Nothing emits into this yet — the run reports into it in a later task. The socket is given the
-  // bus, not the right to write to it: its dependency is subscribe/recent only.
-  const telemetry = deps.createTelemetry();
-
+  // The socket is given the bus, not the right to write to it: its dependency is subscribe/recent.
   const local = deps.startLocalServer({
     socketPath: localSocketPath(bootstrap.stateDir),
     handlers: channels.local,

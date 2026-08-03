@@ -90,17 +90,56 @@ function parseExecutionResult(final: ResultEvent | undefined): RunOutcome {
   }
 }
 
+export type StreamListener = (event: StreamEvent) => void;
+
+// The CLI writes one JSON object per line, but a chunk boundary falls wherever the pipe flushes —
+// mid-object as readily as after a newline. Only whole lines are handed on; a half line waits for
+// the rest of itself instead of being parsed as garbage or thrown away.
+function incrementalParser(onEvent: StreamListener) {
+  let buffer = "";
+  let live = true;
+
+  return {
+    push(chunk: string): void {
+      if (!live) return;
+      buffer += chunk;
+      const lastNewline = buffer.lastIndexOf("\n");
+      if (lastNewline === -1) return;
+      const whole = buffer.slice(0, lastNewline);
+      buffer = buffer.slice(lastNewline + 1);
+      for (const event of parseStream(whole)) onEvent(event);
+    },
+
+    // The final line need not end in a newline. Closing also stops forwarding: stdout can still
+    // arrive after the run has settled, and by then the phase would describe a task the worker is
+    // no longer holding.
+    close(): void {
+      if (!live) return;
+      live = false;
+      const rest = buffer;
+      buffer = "";
+      for (const event of parseStream(rest)) onEvent(event);
+    },
+  };
+}
+
 export interface Executor {
-  execute(task: ClaimedTask, worktreePath: string, signal?: AbortSignal): Promise<RunOutcome>;
+  execute(
+    task: ClaimedTask,
+    worktreePath: string,
+    signal?: AbortSignal,
+    onEvent?: StreamListener
+  ): Promise<RunOutcome>;
 }
 
 export function createExecutor(config: WorkerConfig, runner: Runner): Executor {
   return {
-    async execute(task, worktreePath, signal) {
+    async execute(task, worktreePath, signal, onEvent) {
       // The CLI authenticates from its logged-in session under HOME, so the allowlist both keeps
       // ANTHROPIC_API_KEY out (which would bill per token) and keeps CP_API_TOKEN out of the
       // hands of the agent it is about to run with bypassPermissions
       const env = childEnv();
+      const parser = onEvent ? incrementalParser(onEvent) : undefined;
 
       const result = await runner.run(
         "claude",
@@ -124,8 +163,15 @@ export function createExecutor(config: WorkerConfig, runner: Runner): Executor {
           "--fallback-model",
           "sonnet",
         ],
-        { cwd: worktreePath, timeoutMs: config.taskTimeoutMs, env, signal }
+        {
+          cwd: worktreePath,
+          timeoutMs: config.taskTimeoutMs,
+          env,
+          signal,
+          onStdout: parser && ((chunk: string) => parser.push(chunk)),
+        }
       );
+      parser?.close();
 
       if (result.timedOut) return { kind: "timeout" };
 

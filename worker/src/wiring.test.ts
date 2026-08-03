@@ -1,12 +1,15 @@
+import { mkdtempSync, rmSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
 import { join } from "path";
 import { describe, expect, it, vi } from "vitest";
-import { ApiClient } from "./api.js";
+import { ApiClient, PhaseEvent } from "./api.js";
 import { ControlDeps } from "./control.js";
 import { Runner } from "./exec.js";
 import { LocalServer, LocalServerDeps } from "./local-server.js";
 import { Store } from "./outbox.js";
 import { Heartbeat, HeartbeatDeps } from "./registration.js";
 import { createTelemetry } from "./telemetry.js";
+import { ClaimedTask } from "./types.js";
 import { createWorker, WorkerDeps } from "./wiring.js";
 
 const STATE_DIR = "/tmp/cp-wiring-test-state";
@@ -162,5 +165,255 @@ describe("the worker's lifecycle", () => {
     await running;
 
     expect(logError).toHaveBeenCalledWith(expect.stringContaining("local control socket unavailable"));
+  });
+});
+
+// Nothing below is mocked between the agent's stdout and the two sinks. Everything part B built is
+// inert until this join exists, and in part A every whole-branch defect lived in exactly this kind
+// of seam: a producer in one task, a consumer in another, and no test that ran both at once.
+describe("telemetry, from the agent's stdout to the two sinks", () => {
+  const REPO = "/repos/demo";
+  const SERVER_RUN_ID = "run-minted-by-the-server";
+  const AGENT_SECRET = "cpw_deadbeef0123456789abcdef01234567";
+
+  const CLAIMED: ClaimedTask = {
+    taskId: "t1",
+    projectId: "p1",
+    taskKey: "CP-9",
+    taskNumber: 9,
+    title: "Add a thing",
+    description: "body",
+    acceptanceCriteria: [],
+    attempts: 1,
+    runId: SERVER_RUN_ID,
+  };
+
+  const RESULT_PAYLOAD = {
+    status: "completed",
+    summary: "did it",
+    filesChanged: ["src/a.ts"],
+    testsAdded: [],
+    blockedReason: "",
+  };
+
+  // Shaped like the captured fixture: an init event that summarises to nothing, one tool call whose
+  // input carries a secret, and the final result.
+  const AGENT_STREAM = `${[
+    { type: "system", subtype: "init" },
+    {
+      type: "assistant",
+      message: {
+        role: "assistant",
+        content: [
+          {
+            type: "tool_use",
+            id: "toolu_1",
+            name: "Edit",
+            input: { file_path: "src/a.ts", content: `TOKEN=${AGENT_SECRET}` },
+          },
+        ],
+      },
+    },
+    {
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      num_turns: 3,
+      total_cost_usd: 0.42,
+      result: JSON.stringify(RESULT_PAYLOAD),
+    },
+  ]
+    .map((event) => JSON.stringify(event))
+    .join("\n")}\n`;
+
+  // 17 bytes: small enough that every line is cut, and a tick apart, the way a real pipe flushes
+  function pipeFlushes(text: string): string[] {
+    const parts: string[] = [];
+    for (let index = 0; index < text.length; index += 17) parts.push(text.slice(index, index + 17));
+    return parts;
+  }
+
+  function streamingRunner(): Runner {
+    return {
+      async run(command, args, opts) {
+        if (command === "claude") {
+          for (const part of pipeFlushes(AGENT_STREAM)) {
+            opts.onStdout?.(part);
+            await new Promise((resolve) => setImmediate(resolve));
+          }
+          return { code: 0, stdout: AGENT_STREAM, stderr: "", timedOut: false };
+        }
+        // bindRepository insists the path is its own toplevel; every other git call is content-free
+        return {
+          code: 0,
+          stdout: args.includes("rev-parse") ? REPO : "",
+          stderr: "",
+          timedOut: false,
+        };
+      },
+    };
+  }
+
+  // One full pass of the real loop: register, refresh, bind, claim, run, and stop. The diff comes
+  // back empty, so the run ends where most real ones do — rejected at a gate, not merged.
+  // postEvent is deliberately a plain function, never a vi.fn: a spy attaches its own handler to
+  // whatever it returns, which quietly settles a rejection the source left unhandled — and that is
+  // exactly the failure this suite has to be able to see.
+  async function runOneTask(postEvent: ApiClient["postEvent"] = async () => {}) {
+    const stateDir = mkdtempSync(join(tmpdir(), "cp-wiring-run-"));
+    writeFileSync(join(stateDir, "repos.json"), JSON.stringify({ repos: [REPO] }), { mode: 0o600 });
+
+    const telemetry = createTelemetry();
+    const posted: PhaseEvent[] = [];
+    let claims = 0;
+
+    const api = {
+      claim: vi.fn<ApiClient["claim"]>(async () => (claims++ === 0 ? CLAIMED : null)),
+      setStatus: vi.fn<ApiClient["setStatus"]>().mockResolvedValue(undefined),
+      comment: vi.fn<ApiClient["comment"]>().mockResolvedValue(undefined),
+      release: vi.fn<ApiClient["release"]>().mockResolvedValue(undefined),
+      statusIds: vi
+        .fn<ApiClient["statusIds"]>()
+        .mockResolvedValue({ approved: "todo", review: "in_review", done: "done" }),
+      columnIds: vi
+        .fn<ApiClient["columnIds"]>()
+        .mockResolvedValue(["todo", "in_progress", "in_review", "done"]),
+      postEvent: (event: PhaseEvent) => {
+        posted.push(event);
+        return postEvent(event);
+      },
+    };
+
+    let stop = (): void => {};
+    const worker = createWorker({
+      env: { ...ENV, CP_STATE_DIR: stateDir },
+      runner: streamingRunner(),
+      hostname: () => "host-1",
+      // the loop only sleeps once it has nothing left to claim, which is one pass after the run
+      sleep: async () => stop(),
+      log: vi.fn(),
+      logError: vi.fn(),
+      uid: 501,
+      realpath: (path) => path,
+      stat: () => ({ uid: 501, mode: 0o40700 }),
+      fetchImpl: vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ assignments: [{ project: "p1", proposedPath: REPO }] }),
+      }) as unknown as typeof fetch,
+      createStore: (path) => memoryStore(path.endsWith("worker.json") ? IDENTITY : ""),
+      createApi: () => api as unknown as ApiClient,
+      createTelemetry: () => telemetry,
+      startHeartbeat: () => fakeHeartbeat(),
+      connectControl: () => ({ close: vi.fn() }),
+      startLocalServer: () => ({ ready: Promise.resolve(), close: vi.fn().mockResolvedValue(undefined) }),
+    });
+    stop = () => worker.shutdown();
+
+    try {
+      await worker.run();
+    } finally {
+      rmSync(stateDir, { recursive: true, force: true });
+    }
+
+    return { api, posted, phases: posted.map((event) => event.phase), telemetry, worker };
+  }
+
+  // The whole run, as the board would see it: the three stage boundaries it got past, the three
+  // events its own agent produced, and the three gates it reached before the empty diff was
+  // rejected. Nothing is dropped here because every emission is separated by at least one await,
+  // which is all dropWhenBusy's single in-flight slot needs to clear.
+  it("carries a pipeline stage boundary to the server", async () => {
+    const { api, phases } = await runOneTask();
+
+    expect(api.claim).toHaveBeenCalled();
+    expect(phases).toEqual([
+      "claiming",
+      "worktree",
+      "agent",
+      "agent",
+      "agent",
+      "gates:diff-size",
+      "gates:protected-paths",
+      "gates:test-presence",
+    ]);
+  });
+
+  // The pipeline names "agent" exactly once, at the stage boundary. Every further one was produced
+  // by parsing the agent's stdout mid-run, so more than one is proof the stream reached the server.
+  it("carries an event off the agent's own stream to the server", async () => {
+    const { phases, telemetry } = await runOneTask();
+
+    expect(phases.filter((phase) => phase === "agent").length).toBeGreaterThan(1);
+    // and it really is the stream: only a parsed tool_use can produce a tool
+    expect(telemetry.recent()).toContainEqual({
+      phase: "agent",
+      tool: { name: "Edit", target: "src/a.ts" },
+    });
+  });
+
+  it("addresses every event to the task and the run the server itself minted", async () => {
+    const { posted } = await runOneTask();
+
+    expect(posted.length).toBeGreaterThan(0);
+    for (const event of posted) {
+      expect(event.taskId).toBe("t1");
+      expect(event.runId).toBe(SERVER_RUN_ID);
+    }
+  });
+
+  it("sends the server nothing the agent wrote", async () => {
+    const { posted, telemetry } = await runOneTask();
+
+    expect(JSON.stringify(posted)).not.toContain(AGENT_SECRET);
+    expect(JSON.stringify(posted)).not.toContain("TOKEN=");
+    expect(JSON.stringify(telemetry.recent())).not.toContain(AGENT_SECRET);
+  });
+
+  it("fills the socket's own view of the run from the same bus", async () => {
+    const { telemetry } = await runOneTask();
+
+    const phases = telemetry.recent().map((progress) => progress.phase);
+    expect(phases).toContain("claiming");
+    expect(phases).toContain("gates:diff-size");
+    expect(telemetry.recent().at(-1)).toBeDefined();
+  });
+
+  it("posts nothing once the run is over, when the worker no longer holds the task", async () => {
+    const { posted, telemetry } = await runOneTask();
+
+    const afterTheRun = posted.length;
+    telemetry.emit({ phase: "merge" });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(afterTheRun).toBeGreaterThan(0);
+    expect(posted.length).toBe(afterTheRun);
+  });
+
+  // emit() is called synchronously from inside a pipeline stage, so a rejection nobody handles is
+  // an unhandledRejection, and Node's default action for one is to end the process. Asserted on the
+  // process, because the run finishes either way and only the missing rejection tells them apart.
+  it("leaves no unhandled rejection when the server refuses every event", async () => {
+    const unhandled: unknown[] = [];
+    const record = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    const refusing: ApiClient["postEvent"] = () =>
+      Promise.reject(new Error("403: that run no longer holds this task"));
+
+    process.on("unhandledRejection", record);
+    let run;
+    try {
+      run = await runOneTask(refusing);
+      // unhandledRejection is reported at the end of a turn, so give it one
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    } finally {
+      process.off("unhandledRejection", record);
+    }
+
+    expect(unhandled).toEqual([]);
+    expect(run.posted.length).toBeGreaterThan(0);
+    // and the run still reached the board with its verdict
+    expect(run.api.setStatus).toHaveBeenCalledWith("p1", "t1", "in_review");
   });
 });
