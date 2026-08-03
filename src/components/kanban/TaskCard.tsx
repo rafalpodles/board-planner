@@ -5,6 +5,7 @@ import { ApiTask, ApiLabel, ApiCustomField, ApiProjectCategory, PRIORITY_LABELS 
 import { Badge } from "@/components/ui/Badge";
 import { categoryColor, categoryTint } from "@/lib/category-colors";
 import { cardBadges } from "@/lib/custom-fields";
+import { legacyRenderingSuppressed } from "@/lib/legacy-fields";
 import { taskPath } from "@/lib/urls";
 
 // A card is a summary; past a few badges it stops being one
@@ -41,6 +42,9 @@ export function TaskCard({
   const taskLabels = projectLabels.filter((l) =>
     (task.labels || []).includes(l._id)
   );
+  // Once a project has the migrated field, its badge is the one that renders
+  const migrated = (key: "component" | "difficulty" | "labels") =>
+    legacyRenderingSuppressed(customFields, key);
   const badges = cardBadges(task.customFieldValues, customFields);
   const shownBadges = badges.slice(0, MAX_CARD_BADGES);
   const hiddenBadges = badges.length - shownBadges.length;
@@ -116,9 +120,11 @@ export function TaskCard({
         <Badge variant="priority" value={task.priority} className={COMPACT_BADGE}>
           {PRIORITY_LABELS[task.priority] ?? task.priority}
         </Badge>
-        <Badge variant="difficulty" value={task.difficulty} className={COMPACT_BADGE}>
-          {task.difficulty}
-        </Badge>
+        {!migrated("difficulty") && (
+          <Badge variant="difficulty" value={task.difficulty} className={COMPACT_BADGE}>
+            {task.difficulty}
+          </Badge>
+        )}
         <Badge
           variant="category"
           value={task.category}
@@ -131,13 +137,13 @@ export function TaskCard({
 
       <h3 className="text-sm font-medium mb-2 line-clamp-2">{task.title}</h3>
 
-      {task.component && (
+      {task.component && !migrated("component") && (
         <div className="mb-2">
           <Badge className="text-[11px]">{task.component}</Badge>
         </div>
       )}
 
-      {taskLabels.length > 0 && (
+      {taskLabels.length > 0 && !migrated("labels") && (
         <div className="flex flex-wrap gap-1 mb-2">
           {taskLabels.map((label) => (
             <span

@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { z } from "zod";
 import { PlannerClient } from "./planner-client";
+import { resolveFieldsByName } from "@/lib/custom-fields";
 
 type ToolExtra = { authInfo?: AuthInfo };
 
@@ -101,8 +102,15 @@ export function registerPlannerTools(server: McpServer): void {
         .string()
         .optional()
         .describe("Acceptance criteria (markdown checklist, converted to structured checklist items)"),
+      fields: z
+        .record(z.any())
+        .optional()
+        .describe(
+          "Project-defined fields keyed by field name, e.g. { \"Owoce\": \"Apples\" }. " +
+            "Since CP-213 difficulty and component are ordinary fields; their named parameters above still work."
+        ),
     },
-    async ({ project, title, description, difficulty, priority, component, category, assignee, status, acceptanceCriteria }, extra) => {
+    async ({ project, title, description, difficulty, priority, component, category, assignee, status, acceptanceCriteria, fields }, extra) => {
       const client = clientFrom(extra);
       const proj = await client.getProjectByKey(project);
       const data: Record<string, unknown> = { title };
@@ -114,6 +122,9 @@ export function registerPlannerTools(server: McpServer): void {
       if (category) data.category = category;
       if (status) data.status = status;
       if (acceptanceCriteria) data.acceptanceCriteria = acceptanceCriteria;
+      if (fields && Object.keys(fields).length) {
+        data.customFieldValues = resolveFieldsByName(fields, proj.customFields || []);
+      }
 
       if (assignee) {
         const users = (await client.listUsers()) as { username: string }[];
@@ -142,8 +153,15 @@ export function registerPlannerTools(server: McpServer): void {
         .string()
         .optional()
         .describe("Acceptance criteria (markdown checklist, converted to structured checklist items)"),
+      fields: z
+        .record(z.any())
+        .optional()
+        .describe(
+          "Project-defined fields keyed by field name. Only the named fields change; " +
+            "the task's other field values are left alone."
+        ),
     },
-    async ({ taskKey, title, description, difficulty, priority, component, category, assignee, acceptanceCriteria }, extra) => {
+    async ({ taskKey, title, description, difficulty, priority, component, category, assignee, acceptanceCriteria, fields }, extra) => {
       const client = clientFrom(extra);
       const { projectId, taskId } = await client.resolveTaskKey(taskKey);
       const data: Record<string, unknown> = {};
@@ -155,6 +173,19 @@ export function registerPlannerTools(server: McpServer): void {
       if (component !== undefined) data.component = component;
       if (category !== undefined) data.category = category;
       if (acceptanceCriteria !== undefined) data.acceptanceCriteria = acceptanceCriteria;
+
+      if (fields && Object.keys(fields).length) {
+        // customFieldValues is replaced wholesale by the API, so naming one field
+        // would otherwise clear every other value on the task
+        const project = await client.getProject(projectId);
+        const task = (await client.getTask(projectId, taskId)) as {
+          customFieldValues?: Record<string, unknown>;
+        };
+        data.customFieldValues = {
+          ...(task.customFieldValues || {}),
+          ...resolveFieldsByName(fields, project.customFields || []),
+        };
+      }
 
       if (assignee !== undefined) {
         if (assignee) {

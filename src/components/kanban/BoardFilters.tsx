@@ -33,6 +33,7 @@ import {
   type FieldFilter,
   type BuiltInFilterKey,
 } from "@/lib/board-filters-state";
+import { legacyRenderingSuppressed } from "@/lib/legacy-fields";
 import {
   activeFields,
   matchesAllFieldFilters,
@@ -258,6 +259,10 @@ export function BoardFilters({
   }
 
   const filterableFields = sortedFields(activeFields(customFields)).filter((f) => f.filterable);
+  // A migrated field brings its own control, so the built-in one would be a
+  // duplicate filtering the same values (CP-213)
+  const migrated = (key: "component" | "difficulty" | "labels") =>
+    legacyRenderingSuppressed(customFields, key);
 
   function fieldFilter(fieldId: string): FieldFilter {
     return filters.fields?.[fieldId] ?? {};
@@ -464,6 +469,7 @@ export function BoardFilters({
                 </select>
               </Field>
 
+              {!migrated("component") && (
               <Field label="Component">
                 <select
                   value={filters.component}
@@ -479,7 +485,9 @@ export function BoardFilters({
                   ))}
                 </select>
               </Field>
+            )}
 
+              {!migrated("difficulty") && (
               <Field label="Difficulty">
                 <select
                   value={filters.difficulty}
@@ -494,6 +502,7 @@ export function BoardFilters({
                   ))}
                 </select>
               </Field>
+            )}
 
               <Field label="Priority">
                 <select
@@ -510,6 +519,7 @@ export function BoardFilters({
                 </select>
               </Field>
 
+              {!migrated("labels") && (
               <Field label="Label">
                 <select
                   value={filters.label}
@@ -525,6 +535,7 @@ export function BoardFilters({
                   ))}
                 </select>
               </Field>
+            )}
 
               <Field label="Updated">
                 <select

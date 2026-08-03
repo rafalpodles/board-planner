@@ -16,6 +16,7 @@ import {
 } from "@/types";
 import { ListColumnId, isColumnVisible, listColumns as projectListColumns } from "@/lib/list-columns";
 import { fieldCellText } from "@/lib/custom-fields";
+import { legacyRenderingSuppressed } from "@/lib/legacy-fields";
 import { effectiveColumns } from "@/lib/columns";
 import { Badge } from "@/components/ui/Badge";
 import { categoryColor, categoryTint } from "@/lib/category-colors";
@@ -76,7 +77,16 @@ export function ListView({
   customFields = [],
 }: ListViewProps) {
   const selectionActive = selectionMode || (selectedTasks?.size ?? 0) > 0;
-  const show = (id: ListColumnId) => isColumnVisible(id, hiddenColumns);
+  // A migrated field renders its own column; the built-in one would repeat it
+  const show = (id: ListColumnId) => {
+    if (
+      (id === "difficulty" && legacyRenderingSuppressed(customFields, "difficulty")) ||
+      (id === "component" && legacyRenderingSuppressed(customFields, "component"))
+    ) {
+      return false;
+    }
+    return isColumnVisible(id, hiddenColumns);
+  };
   const fieldColumns = useMemo(
     () => projectListColumns(customFields).filter((c) => c.field && show(c.id)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
