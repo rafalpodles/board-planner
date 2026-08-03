@@ -16,6 +16,9 @@ function depsWith(
     registerResponse?: Partial<Stored>;
     body?: Record<string, unknown>;
     handlers?: CommandHandlers;
+    enrolmentToken?: string;
+    registerStatus?: number;
+    forgetEnrolmentToken?: () => void;
   } = {}
 ): HeartbeatDeps {
   const initialStored = opts.stored === undefined ? { workerId: "w1", credential: "cpw_existing", heartbeatMs: 60_000 } : opts.stored;
@@ -29,6 +32,9 @@ function depsWith(
   const fetchImpl = vi.fn(async (url: string) => {
     if (opts.throws) throw opts.throws;
     if (String(url).endsWith("/api/workers/register")) {
+      if (opts.registerStatus && opts.registerStatus >= 400) {
+        return { ok: false, status: opts.registerStatus, json: async () => ({}) };
+      }
       return {
         ok: true,
         status: 200,
@@ -41,7 +47,8 @@ function depsWith(
 
   return {
     apiBaseUrl: "https://app.example.com",
-    apiToken: "cp_admin_token",
+    enrolmentToken: opts.enrolmentToken === undefined ? "cpe_one_time" : opts.enrolmentToken,
+    forgetEnrolmentToken: opts.forgetEnrolmentToken,
     registration: { name: "worker-1", host: "host-1", platform: "darwin", version: "1.0.0" },
     store,
     handlers: opts.handlers ?? handlerStub(),
@@ -90,14 +97,71 @@ describe("startHeartbeat", () => {
     expect(deps.store.write).toHaveBeenCalledWith(expect.any(String), { mode: 0o600 });
   });
 
-  it("registers with the api token, since no worker credential exists yet", async () => {
+  // Registration authenticates with a single-use enrolment token, never the operational token. The
+  // agent runs at this uid with Read, so whatever sits on this disk must not be able to lift the
+  // worker's own kill switch — and an unscoped admin token could.
+  it("registers with the enrolment token, not the operational one", async () => {
     const deps = depsWith({ stored: null });
 
     await startHeartbeat(deps).tick();
 
     const [, init] = calls(deps).find(([url]) => String(url).endsWith("/api/workers/register"))!;
-    expect(init.headers.Authorization).toBe("Bearer cp_admin_token");
+    expect(init.headers.Authorization).toBe("Bearer cpe_one_time");
     expect(init.headers["X-CP-Protocol"]).toBe("1");
+  });
+
+  it("removes the spent enrolment token once the credential is safely on disk", async () => {
+    const forget = vi.fn();
+    const deps = depsWith({ stored: null, forgetEnrolmentToken: forget });
+
+    await startHeartbeat(deps).tick();
+
+    expect(deps.store.write).toHaveBeenCalled();
+    expect(forget).toHaveBeenCalledTimes(1);
+  });
+
+  // Order matters: forgetting first would strand the worker with a spent token and no credential
+  it("keeps the token when registration fails", async () => {
+    const forget = vi.fn();
+    const deps = depsWith({ stored: null, registerStatus: 401, forgetEnrolmentToken: forget });
+
+    await startHeartbeat(deps).tick();
+
+    expect(forget).not.toHaveBeenCalled();
+  });
+
+  // The failure the ordering exists for: if the credential cannot be persisted and the token has
+  // already been spent server-side, deleting it too leaves this worker unable to ever register.
+  it("keeps the token when the credential cannot be written to disk", async () => {
+    const forget = vi.fn();
+    const deps = depsWith({ stored: null, forgetEnrolmentToken: forget });
+    (deps.store.write as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      throw new Error("disk full");
+    });
+
+    await startHeartbeat(deps).tick();
+
+    expect(forget).not.toHaveBeenCalled();
+  });
+
+  it("does not attempt to register at all with no enrolment token", async () => {
+    const deps = depsWith({ stored: null, enrolmentToken: "" });
+
+    await startHeartbeat(deps).tick();
+
+    expect(calls(deps).some(([url]) => String(url).endsWith("/api/workers/register"))).toBe(false);
+    expect(deps.log).toHaveBeenCalledWith(expect.stringContaining("CP_ENROLMENT_TOKEN"));
+  });
+
+  // An enrolled worker must keep booting after the operator deletes the token, which is the whole
+  // point of removing it
+  it("still heartbeats on a stored identity with no enrolment token present", async () => {
+    const deps = depsWith({ enrolmentToken: "" });
+
+    await startHeartbeat(deps).tick();
+
+    const [, init] = calls(deps)[0];
+    expect(init.headers.Authorization).toBe("Bearer cpw_existing");
   });
 
   it("sends the worker credential, X-Worker-Id and X-CP-Protocol on the heartbeat", async () => {

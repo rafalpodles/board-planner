@@ -154,3 +154,24 @@ npm test
 
 Every subprocess call — `claude`, `git`, `gh`, `npm` — sits behind the `Runner` interface, so the
 suite runs without spawning a model, touching GitHub or creating a worktree.
+
+## Credentials
+
+Two, and neither of them can lift this worker's kill switch. That is the point: the worker runs the
+coding agent at the same uid with `Read` and `bypassPermissions`, so anything on this disk is
+readable by the agent, and an unscoped instance-admin token there would let it clear
+`lockedByInstance` on itself.
+
+**`CP_ENROLMENT_TOKEN` / `CP_ENROLMENT_TOKEN_FILE`** — single-use, one hour to live. Mint one as an
+instance admin (`POST /api/workers/enrolment`, interactive session only) and put it on the machine.
+The first registration spends it server-side, the worker deletes the file, and it is never needed
+again — a worker with an identity in `worker.json` does not re-register. Optional by design: an
+enrolled worker must keep booting after you remove it.
+
+**`CP_API_TOKEN` / `CP_API_TOKEN_FILE`** — the operational credential for claiming and reporting.
+**Scope it to the projects this worker serves.** A scoped token is downgraded to member level with
+`tokenScoped: true`, and `PATCH /api/workers/:id` refuses those — which is what makes the kill
+switch hold. An unscoped admin token works too and is exactly what must not be used here.
+
+Claiming itself uses neither: `worker.json` holds a `cpw_` credential minted at registration, which
+no route outside the worker API accepts.

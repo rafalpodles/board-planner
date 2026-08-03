@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "fs";
 import { hostname } from "os";
 import { dirname, join } from "path";
 import { ApiClient, createApiClient } from "./api.js";
@@ -316,7 +316,10 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
 
   const heartbeatDeps: HeartbeatDeps = {
     apiBaseUrl: bootstrap.apiBaseUrl,
-    apiToken: bootstrap.apiToken,
+    enrolmentToken: bootstrap.enrolmentToken,
+    forgetEnrolmentToken: bootstrap.enrolmentTokenFile
+      ? () => rmSync(bootstrap.enrolmentTokenFile, { force: true })
+      : undefined,
     registration: {
       name: bootstrap.workerName,
       host: deps.hostname(),
