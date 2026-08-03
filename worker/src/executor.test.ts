@@ -116,6 +116,44 @@ describe("createExecutor", () => {
     expect(args).toContain("--verbose");
   });
 
+  // policy.model / policy.fallbackModel, all the way down to the argv the CLI is actually given
+  it("runs the model the policy names, not a hardcoded one", async () => {
+    const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
+    const policyConfig = { ...config, model: "haiku", fallbackModel: "opus" } as never;
+
+    await createExecutor(policyConfig, runner).execute(task, "/wt");
+
+    const args = run.mock.calls[0][1] as string[];
+    expect(args[args.indexOf("--model") + 1]).toBe("haiku");
+    expect(args[args.indexOf("--fallback-model") + 1]).toBe("opus");
+  });
+
+  // Nothing typechecks a WorkerConfig assembled in a test or by an older worker build, so an unset
+  // field arrives as undefined rather than as an error
+  it("falls back to the models it has always used when the policy names none", async () => {
+    const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
+
+    await createExecutor(config, runner).execute(task, "/wt");
+
+    const args = run.mock.calls[0][1] as string[];
+    expect(args[args.indexOf("--model") + 1]).toBe("opus");
+    expect(args[args.indexOf("--fallback-model") + 1]).toBe("sonnet");
+  });
+
+  // `--model ""` is not "no model": the CLI takes the empty string as the value and refuses the run,
+  // so a blank policy field would fail every task this worker claims
+  it("never hands the CLI an empty model flag", async () => {
+    const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
+    const blank = { ...config, model: "   ", fallbackModel: "" } as never;
+
+    await createExecutor(blank, runner).execute(task, "/wt");
+
+    const args = run.mock.calls[0][1] as string[];
+    expect(args[args.indexOf("--model") + 1]).toBe("opus");
+    expect(args[args.indexOf("--fallback-model") + 1]).toBe("sonnet");
+    expect(args).not.toContain("");
+  });
+
   it("never passes an API key so the subscription is used", async () => {
     vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
     const { runner, run } = runnerReturning({

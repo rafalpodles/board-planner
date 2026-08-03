@@ -148,6 +148,25 @@ describe("reviewGate", () => {
     expect(args[args.indexOf("--model") + 1]).toBe("opus");
   });
 
+  it("reviews with the model policy.reviewModel names", async () => {
+    const { runner, run } = claudeReturning({ approved: true, reason: "" });
+
+    await reviewGate(runner, TIMEOUT_MS, "sonnet").run(context());
+
+    const args = run.mock.calls[0][1];
+    expect(args[args.indexOf("--model") + 1]).toBe("sonnet");
+  });
+
+  it("reviews with opus when reviewModel is blank rather than with no model at all", async () => {
+    const { runner, run } = claudeReturning({ approved: true, reason: "" });
+
+    await reviewGate(runner, TIMEOUT_MS, "  ").run(context());
+
+    const args = run.mock.calls[0][1];
+    expect(args[args.indexOf("--model") + 1]).toBe("opus");
+    expect(args).not.toContain("");
+  });
+
   it("asks for a schema-enforced verdict", async () => {
     const { runner, run } = claudeReturning({ approved: true, reason: "" });
 

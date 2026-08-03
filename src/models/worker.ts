@@ -25,6 +25,8 @@ const workerSchema = new Schema<IWorker>(
       maxDiffLines: { type: Number, default: 400 },
       maxDiffFiles: { type: Number, default: 10 },
       model: { type: String, default: "opus" },
+      fallbackModel: { type: String, default: "sonnet" },
+      reviewModel: { type: String, default: "opus" },
     },
     enabled: { type: Boolean, default: true },
     lockedByInstance: { type: Boolean, default: false },

@@ -17,6 +17,19 @@ export interface WorkerConfig {
   maxDiffLines: number;
   maxDiffFiles: number;
   workerId: string;
+  model?: string;
+  fallbackModel?: string;
+  reviewModel?: string;
+}
+
+export const DEFAULT_MODEL = "opus";
+export const DEFAULT_FALLBACK_MODEL = "sonnet";
+export const DEFAULT_REVIEW_MODEL = "opus";
+
+// Unset or blank means today's model, never `--model ""` — measured: the CLI answers
+// `400 model: String should have at least 1 character`, so a blank setting would fail every run
+export function modelOr(value: string | undefined, fallback: string): string {
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
 }
 
 // What a worker needs before it can even register: where the server is, how to authenticate to it
@@ -38,6 +51,8 @@ export interface EffectiveConfig {
   maxDiffLines: number;
   maxDiffFiles: number;
   model: string;
+  fallbackModel: string;
+  reviewModel: string;
 }
 
 export const DEFAULT_POLICY: EffectiveConfig = {
@@ -46,7 +61,9 @@ export const DEFAULT_POLICY: EffectiveConfig = {
   taskTimeoutMs: 1_800_000,
   maxDiffLines: 400,
   maxDiffFiles: 10,
-  model: "opus",
+  model: DEFAULT_MODEL,
+  fallbackModel: DEFAULT_FALLBACK_MODEL,
+  reviewModel: DEFAULT_REVIEW_MODEL,
 };
 
 export interface Assignment {
@@ -130,6 +147,8 @@ export function applyPolicy(current: EffectiveConfig, patch: unknown): Effective
   if (isPositiveNumber(source.maxDiffLines)) next.maxDiffLines = source.maxDiffLines;
   if (isPositiveNumber(source.maxDiffFiles)) next.maxDiffFiles = source.maxDiffFiles;
   if (isNonEmptyString(source.model)) next.model = source.model.trim();
+  if (isNonEmptyString(source.fallbackModel)) next.fallbackModel = source.fallbackModel.trim();
+  if (isNonEmptyString(source.reviewModel)) next.reviewModel = source.reviewModel.trim();
 
   return next;
 }

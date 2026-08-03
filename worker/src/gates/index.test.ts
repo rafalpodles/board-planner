@@ -85,6 +85,29 @@ describe("buildGates", () => {
     expect(result.reason).toMatch(/limit is 5/);
   });
 
+  // The reviewer is the last thing standing between an unattended agent's diff and main. Turning
+  // the implementer down for cost — the whole point of a configurable model — must not take the
+  // reviewer down with it, silently, through a setting whose name says nothing about review.
+  it("leaves the reviewer on its own model when the implementer's is turned down", async () => {
+    const { runner, run } = spyRunner();
+    const gates = buildGates(config({ model: "haiku" }), runner);
+
+    await gates.find((gate) => gate.name === "review")!.run(context);
+
+    const args = run.mock.calls[0][1];
+    expect(args[args.indexOf("--model") + 1]).toBe("opus");
+    expect(args).not.toContain("haiku");
+  });
+
+  it("carries the configured review model into the reviewer", async () => {
+    const { runner, run } = spyRunner();
+    const gates = buildGates(config({ model: "haiku", reviewModel: "sonnet" }), runner);
+
+    await gates.find((gate) => gate.name === "review")!.run(context);
+
+    expect(run.mock.calls[0][1][run.mock.calls[0][1].indexOf("--model") + 1]).toBe("sonnet");
+  });
+
   it("keeps the whole gate chain inside the task's own time budget", async () => {
     const { runner, run } = spyRunner();
     const gates = buildGates(config({ taskTimeoutMs: 300_000 }), runner);

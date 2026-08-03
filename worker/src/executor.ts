@@ -1,4 +1,4 @@
-import { WorkerConfig } from "./config.js";
+import { DEFAULT_FALLBACK_MODEL, DEFAULT_MODEL, modelOr, WorkerConfig } from "./config.js";
 import { childEnv } from "./env.js";
 import { Runner } from "./exec.js";
 import { isRateLimitEvent, lastResultEvent, parseStream, ResultEvent, StreamEvent } from "./stream.js";
@@ -191,9 +191,9 @@ export function createExecutor(config: WorkerConfig, runner: Runner): Executor {
           "--append-system-prompt",
           SYSTEM_PROMPT,
           "--model",
-          "opus",
+          modelOr(config.model, DEFAULT_MODEL),
           "--fallback-model",
-          "sonnet",
+          modelOr(config.fallbackModel, DEFAULT_FALLBACK_MODEL),
         ],
         {
           cwd: worktreePath,

@@ -25,6 +25,6 @@ export function buildGates(config: WorkerConfig, runner: Runner): Gate[] {
     testPresenceGate(),
     buildGate(runner, gateTimeoutMs),
     testRunGate(runner, gateTimeoutMs),
-    reviewGate(runner, gateTimeoutMs),
+    reviewGate(runner, gateTimeoutMs, config.reviewModel),
   ];
 }

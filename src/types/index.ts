@@ -387,6 +387,8 @@ export interface WorkerPolicy {
   maxDiffLines: number;
   maxDiffFiles: number;
   model: string;
+  fallbackModel: string;
+  reviewModel: string;
 }
 
 export interface IWorker {
