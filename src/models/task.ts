@@ -128,7 +128,9 @@ const taskSchema = new Schema<ITask>(
       required: true,
     },
   },
-  { timestamps: true }
+  // customFieldValues is a Map, and JSON.stringify turns a Map into {} — every
+  // custom field value was silently absent from every API response without this
+  { timestamps: true, toJSON: { flattenMaps: true }, toObject: { flattenMaps: true } }
 );
 
 taskSchema.index({ project: 1, taskNumber: 1 }, { unique: true });

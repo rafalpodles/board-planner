@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, FormEvent, useEffect } from "react";
+import { useState, useCallback, useRef, FormEvent, useEffect, type CSSProperties } from "react";
 import { useApi } from "@/hooks/use-api";
 import { emitBoardRefresh } from "@/lib/board-refresh";
 import { Input } from "@/components/ui/Input";
@@ -29,6 +29,7 @@ import {
 } from "@/types";
 import { effectiveColumns } from "@/lib/columns";
 import { parseChecklistString } from "@/lib/checklist";
+import { activeFields, sortedFields, orderedOptions } from "@/lib/custom-fields";
 import type { GeneratedTask } from "@/lib/ai";
 
 const AUTOSAVE_DEBOUNCE_MS = 700;
@@ -584,10 +585,10 @@ export function TaskForm({
         />
       )}
 
-      {customFields.length > 0 && (
+      {activeFields(customFields).length > 0 && (
         <div className="space-y-3">
           <label className="block text-sm font-medium">Custom Fields</label>
-          {customFields.map((field) => {
+          {sortedFields(activeFields(customFields)).map((field) => {
             const val = customFieldValues[field._id];
             if (field.fieldType === "checkbox") {
               return (
@@ -614,10 +615,47 @@ export function TaskForm({
                   onChange={(e) =>
                     setCustomFieldValues((prev) => ({ ...prev, [field._id]: e.target.value }))
                   }
-                  options={field.options.map((o) => ({ value: o, label: o }))}
+                  options={orderedOptions(field).map((o) => ({ value: o.id, label: o.value }))}
                   placeholder="Select..."
                   required={field.required}
                 />
+              );
+            }
+            if (field.fieldType === "multiselect") {
+              const picked = Array.isArray(val) ? (val as string[]) : [];
+              return (
+                <div key={field._id}>
+                  <label className="block text-sm font-medium mb-1">
+                    {field.name}
+                    {field.required && <span className="text-danger">*</span>}
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    {orderedOptions(field).map((option) => {
+                      const on = picked.includes(option.id);
+                      return (
+                        <button
+                          key={option.id}
+                          type="button"
+                          onClick={() =>
+                            setCustomFieldValues((prev) => ({
+                              ...prev,
+                              [field._id]: on
+                                ? picked.filter((id) => id !== option.id)
+                                : [...picked, option.id],
+                            }))
+                          }
+                          aria-pressed={on}
+                          className={`focus-ring chip chip-custom rounded-full px-2.5 py-1 text-xs transition-opacity ${
+                            on ? "" : "opacity-40"
+                          }`}
+                          style={{ "--chip": option.color } as CSSProperties}
+                        >
+                          {option.value}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               );
             }
             return (
