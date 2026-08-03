@@ -7,15 +7,27 @@ final class AppModel {
     private(set) var state = WorkerState()
     private(set) var config: ConfigResponse?
 
-    private let client: SocketClient
+    private var client: SocketClient
+    private let fixedClient: Bool
     private var pump: Task<Void, Never>?
 
-    init(
-        client: SocketClient = SocketClient(
-            socketPath: SocketClient.defaultSocketPath(),
-            transport: POSIXTransport())
-    ) {
-        self.client = client
+    init(client: SocketClient? = nil) {
+        self.client = client ?? AppModel.liveClient()
+        self.fixedClient = client != nil
+    }
+
+    private static func liveClient() -> SocketClient {
+        SocketClient(socketPath: SocketClient.defaultSocketPath(), transport: POSIXTransport())
+    }
+
+    // Pointing the app at another state directory has to take effect without a relaunch, since the
+    // operator has just been told that is where the socket lives.
+    func reconnect() {
+        guard !fixedClient else { return }
+        client = AppModel.liveClient()
+        state = WorkerState()
+        config = nil
+        start()
     }
 
     func start() {

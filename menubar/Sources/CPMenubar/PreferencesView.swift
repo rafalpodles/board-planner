@@ -126,14 +126,40 @@ private struct PolicyTab: View {
 private struct AdvancedTab: View {
     let model: AppModel
 
+    @State private var stateDirectory = StateDirectory.resolve()
+
     var body: some View {
         Form {
             LabeledContent("Task timeout",
                            value: model.config.map { "\($0.taskTimeoutMs / 1000)s" } ?? "—")
-            LabeledContent("Socket", value: SocketClient.defaultSocketPath())
-            LabeledContent("Allowlist", value: ReposFile.defaultPath())
+
+            LabeledContent("State directory") {
+                HStack {
+                    Text(stateDirectory).lineLimit(1).truncationMode(.head)
+                    Button("Choose…") { choose() }
+                }
+            }
+            LabeledContent("Socket", value: SocketClient.socketPath(in: stateDirectory))
+            LabeledContent("Allowlist", value: ReposFile.path(in: stateDirectory))
+
+            Text("Where the worker keeps its socket. Launched from Finder or a login item this app "
+                 + "inherits no environment, so CP_STATE_DIR is not visible to it — set it here.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
         .formStyle(.grouped)
         .padding()
+    }
+
+    private func choose() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = URL(fileURLWithPath: stateDirectory)
+        guard panel.runModal() == .OK, let path = panel.url?.path else { return }
+        StateDirectory.set(path)
+        stateDirectory = path
+        model.reconnect()
     }
 }

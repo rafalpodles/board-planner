@@ -39,13 +39,12 @@ public struct SocketClient: Sendable {
         self.transport = transport
     }
 
+    public static func socketPath(in stateDirectory: String) -> String {
+        (stateDirectory as NSString).appendingPathComponent("worker.sock")
+    }
+
     public static func defaultSocketPath() -> String {
-        let configured: String? = ProcessInfo.processInfo.environment["CP_STATE_DIR"]?
-            .trimmingCharacters(in: .whitespaces)
-        let fallback = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".claudeplanner").path
-        let stateDir = configured.flatMap { $0.isEmpty ? nil : $0 } ?? fallback
-        return (stateDir as NSString).appendingPathComponent("worker.sock")
+        socketPath(in: StateDirectory.resolve())
     }
 
     private func request(_ method: String, _ path: String) -> String {
