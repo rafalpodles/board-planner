@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const getAuthUser = vi.fn();
 const verifyWorkerCredential = vi.fn();
+const workerFind = vi.fn();
 const workerFindById = vi.fn();
 const workerFindByIdAndUpdate = vi.fn();
 const projectFind = vi.fn();
@@ -15,7 +16,7 @@ vi.mock("@/lib/auth", () => ({
 vi.mock("@/models/task", () => ({ Task: {} }));
 vi.mock("@/models/project", () => ({ Project: { find: projectFind } }));
 vi.mock("@/models/worker", () => ({
-  Worker: { findById: workerFindById, findByIdAndUpdate: workerFindByIdAndUpdate },
+  Worker: { find: workerFind, findById: workerFindById, findByIdAndUpdate: workerFindByIdAndUpdate },
 }));
 vi.mock("@/lib/worker-service", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/worker-service")>();
@@ -96,6 +97,7 @@ function ctx(workerId = WORKER_ID) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  workerFind.mockResolvedValue([]);
   workerFindById.mockResolvedValue(workerDoc());
   workerFindByIdAndUpdate.mockImplementation((_id, { $set }) =>
     Promise.resolve(workerDoc($set as Record<string, unknown>))
@@ -404,5 +406,71 @@ describe("PATCH /api/workers/:workerId — not found and validation", () => {
     const response = await PATCH(patchRequest({ pollIntervalMs: -5 }), ctx());
 
     expect(response.status).toBe(400);
+  });
+});
+
+// Two live workers pointed at one checkout both build worktrees in it and both run git in it.
+describe("PATCH /api/workers/:workerId — one checkout, one worker", () => {
+  const OTHER_ID = "69a52e3b399b27d3cbb2c5b0";
+
+  function otherWorker(overrides: Record<string, unknown> = {}) {
+    return workerDoc({
+      _id: OTHER_ID,
+      name: "other-laptop",
+      assignments: [{ project: PROJECT_A, proposedPath: "/repo" }],
+      ...overrides,
+    });
+  }
+
+  it("refuses an assignment a live worker already holds, and writes nothing", async () => {
+    getAuthUser.mockResolvedValue(INSTANCE_ADMIN);
+    workerFind.mockResolvedValue([otherWorker()]);
+
+    const response = await PATCH(
+      patchRequest({ assignments: [{ project: PROJECT_A, proposedPath: "/repo" }] }),
+      ctx()
+    );
+
+    expect(response.status).toBe(409);
+    expect((await response.json()).error).toMatch(/other-laptop/);
+    expect(workerFindByIdAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("excludes the worker being updated, so re-saving its own assignment is allowed", async () => {
+    getAuthUser.mockResolvedValue(INSTANCE_ADMIN);
+    workerFind.mockResolvedValue([]);
+
+    const response = await PATCH(
+      patchRequest({ assignments: [{ project: PROJECT_A, proposedPath: "/repo" }] }),
+      ctx()
+    );
+
+    expect(response.status).toBe(200);
+    expect(workerFind).toHaveBeenCalledWith({ _id: { $ne: WORKER_ID } });
+  });
+
+  it("allows the same project in a different checkout", async () => {
+    getAuthUser.mockResolvedValue(INSTANCE_ADMIN);
+    workerFind.mockResolvedValue([otherWorker()]);
+
+    const response = await PATCH(
+      patchRequest({ assignments: [{ project: PROJECT_A, proposedPath: "/another-repo" }] }),
+      ctx()
+    );
+
+    expect(response.status).toBe(200);
+  });
+
+  // Refusing on behalf of a machine that is gone would leave no way to move its work elsewhere.
+  it("lets an assignment move off a worker that has stopped reporting", async () => {
+    getAuthUser.mockResolvedValue(INSTANCE_ADMIN);
+    workerFind.mockResolvedValue([otherWorker({ lastSeenAt: new Date("2020-01-01T00:00:00.000Z") })]);
+
+    const response = await PATCH(
+      patchRequest({ assignments: [{ project: PROJECT_A, proposedPath: "/repo" }] }),
+      ctx()
+    );
+
+    expect(response.status).toBe(200);
   });
 });

@@ -4,7 +4,7 @@ import { connectDB } from "@/lib/db";
 import { withAuth, withWorker, canAdminProject } from "@/lib/middleware";
 import { Worker } from "@/models/worker";
 import { Project } from "@/models/project";
-import { toApiWorker } from "@/lib/worker-service";
+import { collidingAssignment, toApiWorker } from "@/lib/worker-service";
 import { logProjectAudit } from "@/lib/projectAudit";
 
 // Instance-admin only: retargeting a worker, renaming it, enabling/disabling or
@@ -93,6 +93,20 @@ export const PATCH = withAuth(async (request, { params, user }) => {
         return NextResponse.json(
           { error: "assignments must be [{ project: <ObjectId>, proposedPath: <non-empty string> }]" },
           { status: 400 }
+        );
+      }
+      // Read every other worker, not just the ones already on these projects: an assignment is a
+      // claim on a checkout, and the checkout is what two live workers cannot share.
+      const others = await Worker.find({ _id: { $ne: workerId } });
+      const collision = collidingAssignment(assignments, others);
+      if (collision) {
+        return NextResponse.json(
+          {
+            error:
+              `${collision.workerName} already runs ${collision.assignment.proposedPath} for this ` +
+              `project; two live workers cannot share a checkout`,
+          },
+          { status: 409 }
         );
       }
       update.assignments = assignments;

@@ -8,8 +8,14 @@ const updateOne = vi.fn();
 vi.mock("./db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/worker", () => ({ Worker: { findById, findOneAndUpdate, updateOne } }));
 
-const { verdictFor, verifyWorkerCredential, PROTOCOL_VERSION, WORKER_STALE_MS, WORKER_HEARTBEAT_MS } =
-  await import("./worker-service");
+const {
+  collidingAssignment,
+  verdictFor,
+  verifyWorkerCredential,
+  PROTOCOL_VERSION,
+  WORKER_STALE_MS,
+  WORKER_HEARTBEAT_MS,
+} = await import("./worker-service");
 
 const now = new Date("2026-08-01T12:00:00.000Z");
 const fresh = new Date(now.getTime() - 1000);
@@ -151,5 +157,89 @@ describe("verifyWorkerCredential", () => {
     findById.mockReturnValue({ select: () => Promise.resolve({ _id: workerId, credentialHash }) });
 
     expect(await verifyWorkerCredential(workerId, "cpw_wrong")).toBeNull();
+  });
+});
+
+// Two live workers pointed at the same checkout both create worktrees in it and both run `git` in
+// it. The claim is atomic so they will not take the same task, but the working tree is not — one
+// run's checkout moves under the other's feet.
+describe("collidingAssignment", () => {
+  const other = "6a705baf749036e9ae754e1c";
+
+  function fleet(overrides: Record<string, unknown> = {}) {
+    return [worker({ _id: "w2", name: "other-laptop", ...overrides })];
+  }
+
+  it("passes when nothing else holds the project and path", () => {
+    expect(collidingAssignment([{ project: other, proposedPath: "/repo" }], fleet(), now)).toBeNull();
+  });
+
+  it("refuses a second live worker on the same project and path", () => {
+    const collision = collidingAssignment([{ project, proposedPath: "/repo" }], fleet(), now);
+
+    expect(collision?.workerName).toBe("other-laptop");
+    expect(collision?.assignment).toEqual({ project, proposedPath: "/repo" });
+  });
+
+  it("allows the same project in a different checkout", () => {
+    expect(collidingAssignment([{ project, proposedPath: "/other-repo" }], fleet(), now)).toBeNull();
+  });
+
+  it("allows the same checkout for a different project", () => {
+    expect(
+      collidingAssignment([{ project: other, proposedPath: "/repo" }], fleet(), now)
+    ).toBeNull();
+  });
+
+  // A worker that cannot claim is not competing for the checkout, and refusing on its account would
+  // strand the operator with no way to move an assignment off a machine that is gone.
+  it("ignores a disabled worker", () => {
+    expect(collidingAssignment([{ project, proposedPath: "/repo" }], fleet({ enabled: false }), now))
+      .toBeNull();
+  });
+
+  it("ignores a locked worker", () => {
+    expect(
+      collidingAssignment([{ project, proposedPath: "/repo" }], fleet({ lockedByInstance: true }), now)
+    ).toBeNull();
+  });
+
+  it("ignores a worker that has not reported in", () => {
+    const stale = new Date(now.getTime() - WORKER_STALE_MS - 1);
+
+    expect(collidingAssignment([{ project, proposedPath: "/repo" }], fleet({ lastSeenAt: stale }), now))
+      .toBeNull();
+  });
+
+  it("treats an unparseable lastSeenAt as stale rather than live", () => {
+    expect(
+      collidingAssignment([{ project, proposedPath: "/repo" }], fleet({ lastSeenAt: "not-a-date" }), now)
+    ).toBeNull();
+  });
+
+  it("refuses a request that collides with itself", () => {
+    const collision = collidingAssignment(
+      [
+        { project, proposedPath: "/repo" },
+        { project, proposedPath: "/repo" },
+      ],
+      [],
+      now
+    );
+
+    expect(collision?.assignment).toEqual({ project, proposedPath: "/repo" });
+  });
+
+  it("names the first collision when several are present", () => {
+    const collision = collidingAssignment(
+      [
+        { project: other, proposedPath: "/free" },
+        { project, proposedPath: "/repo" },
+      ],
+      fleet(),
+      now
+    );
+
+    expect(collision?.assignment.proposedPath).toBe("/repo");
   });
 });
