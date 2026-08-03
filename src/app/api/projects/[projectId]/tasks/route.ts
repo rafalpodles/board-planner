@@ -35,11 +35,6 @@ export const GET = withProjectAccess(async (request, { params }) => {
     filter.assignee = assignee;
   }
 
-  const component = url.searchParams.get("component");
-  if (component) {
-    filter.component = component;
-  }
-
   const category = url.searchParams.get("category");
   if (category) {
     filter.category = category;
@@ -50,11 +45,6 @@ export const GET = withProjectAccess(async (request, { params }) => {
     // $in with null also matches tasks predating the priority field, which default to medium
     filter.priority =
       priority === DEFAULT_PRIORITY ? { $in: [DEFAULT_PRIORITY, null] } : priority;
-  }
-
-  const label = url.searchParams.get("label");
-  if (label) {
-    filter.labels = label;
   }
 
   const sprint = url.searchParams.get("sprint");

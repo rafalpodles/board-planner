@@ -1,7 +1,9 @@
 import { Types } from "mongoose";
 import { Task } from "@/models/task";
+import { Project } from "@/models/project";
 import { Comment } from "@/models/comment";
 import { PRIORITIES } from "@/types";
+import { resolveFieldsByName } from "@/lib/custom-fields";
 import {
   createTask,
   updateTask,
@@ -47,6 +49,26 @@ async function resolveTask(ctx: PmToolContext, taskKey: unknown): Promise<{ task
   return { task };
 }
 
+/**
+ * Project fields arrive from the model keyed by name; the API only stores ids.
+ * Difficulty and Component are ordinary fields since CP-213, so this is the only
+ * way the PM can set them.
+ */
+async function fieldValuesFor(
+  projectId: string,
+  fields: unknown
+): Promise<Record<string, unknown> | { error: string }> {
+  if (!fields || typeof fields !== "object" || Array.isArray(fields)) return {};
+  const entries = fields as Record<string, unknown>;
+  if (!Object.keys(entries).length) return {};
+  const project = await Project.findById(projectId, "customFields").lean();
+  try {
+    return resolveFieldsByName(entries, (project?.customFields || []) as never);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Unknown field" };
+  }
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function compactTask(ctx: PmToolContext, t: any) {
   return {
@@ -54,7 +76,6 @@ function compactTask(ctx: PmToolContext, t: any) {
     title: t.title,
     status: t.status,
     assignee: t.assignee && typeof t.assignee === "object" ? t.assignee.username : null,
-    difficulty: t.difficulty,
     priority: t.priority,
   };
 }
@@ -69,7 +90,7 @@ export const PM_TOOLS: Record<string, PmTool> = {
     definition: {
       name: "list_tasks",
       description:
-        "List tasks in the project (compact: key, title, status, assignee, difficulty, priority). Use get_task for full details.",
+        "List tasks in the project (compact: key, title, status, assignee, priority). Use get_task for full details.",
       parameters: {
         type: "object",
         properties: {
@@ -212,10 +233,9 @@ export const PM_TOOLS: Record<string, PmTool> = {
         properties: {
           title: { type: "string" },
           description: { type: "string" },
-          difficulty: { type: "string", enum: ["S", "M", "L", "XL"] },
           priority: { type: "string", enum: [...PRIORITIES], description: "Default: medium" },
           category: { type: "string", description: "One of the project's configured categories (see the project context; defaults: bug, doc, user-story, idea)" },
-          component: { type: "string" },
+          fields: { type: "object", description: "Project fields keyed by name, e.g. { \"Difficulty\": \"M\", \"Component\": \"ui\" } — see the project context for the field list" },
           acceptanceCriteria: { type: "string", description: "Markdown checklist, e.g. '- [ ] item'" },
           assignee: { type: "string", description: "Username, optional" },
         },
@@ -225,14 +245,18 @@ export const PM_TOOLS: Record<string, PmTool> = {
     async execute(args, ctx) {
       const title = str(args.title).trim();
       if (!title) return { result: { error: "title is required" } };
+      const resolvedFields = await fieldValuesFor(ctx.projectId, args.fields);
+      if ("error" in resolvedFields) return { result: { error: resolvedFields.error as string } };
+      const createFields = Object.keys(resolvedFields).length
+        ? { customFieldValues: resolvedFields }
+        : {};
       const result = await createTask(ctx.projectId, ctx.pmUserId, {
         title,
         description: str(args.description),
-        difficulty: args.difficulty,
         priority: args.priority,
         category: args.category,
-        component: str(args.component),
         acceptanceCriteria: str(args.acceptanceCriteria),
+        ...(createFields as Record<string, unknown>),
         assignee: args.assignee,
         // status omitted on purpose: task-service defaults to the backlog-role
         // column, and the PM must never create outside the backlog
@@ -251,17 +275,16 @@ export const PM_TOOLS: Record<string, PmTool> = {
     definition: {
       name: "update_task",
       description:
-        "Update a task's content fields (title, description, difficulty, priority, category, component, acceptanceCriteria, dueDate). Use change_status / assign_task for status and assignee.",
+        "Update a task's content fields (title, description, priority, category, acceptanceCriteria, dueDate) and its project fields via `fields`. Use change_status / assign_task for status and assignee.",
       parameters: {
         type: "object",
         properties: {
           taskKey: { type: "string" },
           title: { type: "string" },
           description: { type: "string" },
-          difficulty: { type: "string", enum: ["S", "M", "L", "XL"] },
           priority: { type: "string", enum: [...PRIORITIES] },
           category: { type: "string", description: "One of the project's configured categories (see the project context; defaults: bug, doc, user-story, idea)" },
-          component: { type: "string" },
+          fields: { type: "object", description: "Project fields keyed by name, e.g. { \"Difficulty\": \"L\" }. Only the named fields change." },
           acceptanceCriteria: { type: "string" },
           dueDate: { type: "string", description: "YYYY-MM-DD or empty to clear" },
         },
@@ -271,10 +294,19 @@ export const PM_TOOLS: Record<string, PmTool> = {
     async execute(args, ctx) {
       const resolved = await resolveTask(ctx, args.taskKey);
       if ("error" in resolved) return { result: { error: resolved.error } };
-      const allowed = ["title", "description", "difficulty", "priority", "category", "component", "acceptanceCriteria", "dueDate"];
+      const allowed = ["title", "description", "priority", "category", "acceptanceCriteria", "dueDate"];
       const body: Record<string, unknown> = {};
       for (const field of allowed) {
         if (args[field] !== undefined) body[field] = args[field];
+      }
+      const updates = await fieldValuesFor(ctx.projectId, args.fields);
+      if ("error" in updates) return { result: { error: updates.error as string } };
+      if (Object.keys(updates).length) {
+        // customFieldValues is replaced wholesale, so the task's other values are
+        // merged back in rather than cleared by naming a single field
+        const current = (resolved.task.customFieldValues || {}) as Record<string, unknown>;
+        const merged = current instanceof Map ? Object.fromEntries(current) : { ...current };
+        body.customFieldValues = { ...merged, ...updates };
       }
       if (Object.keys(body).length === 0) {
         return { result: { error: "Provide at least one field to update" } };
