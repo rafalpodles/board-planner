@@ -466,10 +466,13 @@ interface CustomFieldRowProps {
 
 function CustomFieldRow({ field, value, onChange, touch }: CustomFieldRowProps) {
   const options = orderedOptions(field);
+  // The form marked required fields; losing the marker with the form would make a
+  // required field indistinguishable from an optional one
+  const label = field.required ? `${field.name} *` : field.name;
 
   if (field.fieldType === "checkbox") {
     return (
-      <FieldRow label={field.name} touch={touch}>
+      <FieldRow label={label} touch={touch}>
         <label className="flex cursor-pointer items-center gap-2">
           <input
             type="checkbox"
@@ -487,7 +490,7 @@ function CustomFieldRow({ field, value, onChange, touch }: CustomFieldRowProps) 
     const selected = options.find((o) => o.id === value);
     return (
       <PickerRow
-        label={field.name}
+        label={label}
         touch={touch}
         value={
           selected ? (
@@ -502,7 +505,7 @@ function CustomFieldRow({ field, value, onChange, touch }: CustomFieldRowProps) 
           )
         }
         panel={(close) => (
-          <OptionList label={field.name}>
+          <OptionList label={label}>
             <OptionItem
               selected={!selected}
               onClick={() => {
@@ -539,7 +542,7 @@ function CustomFieldRow({ field, value, onChange, touch }: CustomFieldRowProps) 
     const picked = Array.isArray(value) ? (value as string[]) : [];
     return (
       <PickerRow
-        label={field.name}
+        label={label}
         touch={touch}
         align="start"
         value={
@@ -595,7 +598,7 @@ function CustomFieldRow({ field, value, onChange, touch }: CustomFieldRowProps) 
 
   return (
     <PickerRow
-      label={field.name}
+      label={label}
       touch={touch}
       value={
         value === undefined || value === "" ? (

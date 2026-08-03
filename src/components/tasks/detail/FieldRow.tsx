@@ -10,6 +10,8 @@ interface FieldRowProps {
   /** Sheet sizing: a 46px row is the smallest comfortable tap target here */
   touch?: boolean;
   align?: "center" | "start";
+  /** Set when the row opens a popup, so the row announces itself as one */
+  expanded?: boolean;
 }
 
 export function FieldRow({
@@ -18,6 +20,7 @@ export function FieldRow({
   onClick,
   touch = false,
   align = "center",
+  expanded,
 }: FieldRowProps) {
   const shared = `flex w-full gap-2.5 rounded-lg px-2.5 text-left ${
     touch ? "min-h-[46px] py-2.5" : "py-1.5"
@@ -42,6 +45,8 @@ export function FieldRow({
     <button
       type="button"
       onClick={onClick}
+      aria-haspopup={expanded === undefined ? undefined : "dialog"}
+      aria-expanded={expanded}
       className={`focus-ring -mx-2.5 cursor-pointer transition-colors hover:bg-bg-hover ${shared}`}
     >
       {body}
@@ -75,8 +80,14 @@ export function PickerRow({
     <Popover
       label={label}
       width={width}
-      trigger={({ toggle }) => (
-        <FieldRow label={label} onClick={toggle} touch={touch} align={align}>
+      trigger={({ toggle, open }) => (
+        <FieldRow
+          label={label}
+          onClick={toggle}
+          touch={touch}
+          align={align}
+          expanded={open}
+        >
           {value}
         </FieldRow>
       )}

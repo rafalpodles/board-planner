@@ -31,6 +31,9 @@ export function Popover({
       if (anchorRef.current?.contains(e.target as Node)) return;
       setOpen(false);
     }
+    // Captured, not bubbled: a modal's Escape handler is a second listener on
+    // document, and stopPropagation between two listeners on the same target does
+    // nothing — one Escape would close the popover and the dialog holding it
     function onKeyDown(e: KeyboardEvent) {
       if (e.key !== "Escape") return;
       e.stopPropagation();
@@ -38,10 +41,10 @@ export function Popover({
       anchorRef.current?.querySelector("button")?.focus();
     }
     document.addEventListener("mousedown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("keydown", onKeyDown, true);
     return () => {
       document.removeEventListener("mousedown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("keydown", onKeyDown, true);
     };
   }, [open]);
 

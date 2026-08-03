@@ -384,3 +384,41 @@ describe("Stacked modals", () => {
     expect(onFirstClose).not.toHaveBeenCalled();
   });
 });
+
+// The task detail draws its own top bar — breadcrumb, status, close — so the
+// modal's header would be a second one sitting above it
+describe("Modal, bare", () => {
+  it("drops its header but stays a labelled dialog", () => {
+    render(
+      <Modal open onClose={() => {}} title="CP-225" size="xl" bare>
+        <div>detail</div>
+      </Modal>
+    );
+
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.getAttribute("aria-label")).toBe("CP-225");
+    expect(dialog.getAttribute("aria-labelledby")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "CP-225" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /close dialog/i })).toBeNull();
+    expect(screen.getByText("detail")).toBeTruthy();
+  });
+
+  it("still labels itself when the title has not arrived yet", () => {
+    render(
+      <Modal open onClose={() => {}} title="" size="xl" bare>
+        <div>detail</div>
+      </Modal>
+    );
+    expect(screen.getByRole("dialog").getAttribute("aria-label")).toBe("Dialog");
+  });
+
+  it("keeps the header for every other caller", () => {
+    render(
+      <Modal open onClose={() => {}} title="New Task">
+        <div>form</div>
+      </Modal>
+    );
+    expect(screen.getByRole("heading", { name: "New Task" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /close dialog/i })).toBeTruthy();
+  });
+});
