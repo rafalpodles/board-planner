@@ -254,3 +254,76 @@ export function cardBadges(
 
   return badges;
 }
+
+/**
+ * Whether a task passes one field's filter. Ranges are inclusive and open-ended:
+ * a `from` with no `to` means "at least this", which is how people read it.
+ */
+export function matchesFieldFilter(
+  value: unknown,
+  filter: { value?: string; from?: string; to?: string },
+  field: { fieldType: ICustomField["fieldType"] }
+): boolean {
+  const { value: wanted, from, to } = filter;
+
+  if (field.fieldType === "number" || field.fieldType === "date") {
+    if (!from && !to) return true;
+    if (value === undefined || value === null || value === "") return false;
+    const at = field.fieldType === "number" ? Number(value) : new Date(String(value)).getTime();
+    if (Number.isNaN(at)) return false;
+    if (from) {
+      const lower = field.fieldType === "number" ? Number(from) : new Date(from).getTime();
+      if (at < lower) return false;
+    }
+    if (to) {
+      const upper = field.fieldType === "number" ? Number(to) : new Date(to).getTime();
+      if (at > upper) return false;
+    }
+    return true;
+  }
+
+  if (!wanted) return true;
+
+  switch (field.fieldType) {
+    case "checkbox":
+      return String(!!value) === wanted;
+    case "multiselect":
+      return Array.isArray(value) && value.includes(wanted);
+    case "dropdown":
+      return value === wanted;
+    default:
+      return String(value ?? "").toLowerCase().includes(wanted.toLowerCase());
+  }
+}
+
+export function matchesAllFieldFilters(
+  values: Record<string, unknown> | undefined,
+  filters: Record<string, { value?: string; from?: string; to?: string }>,
+  definitions: { _id: string; fieldType: ICustomField["fieldType"] }[]
+): boolean {
+  const byId = new Map(definitions.map((f) => [f._id, f]));
+  for (const [fieldId, filter] of Object.entries(filters || {})) {
+    const field = byId.get(fieldId);
+    // A filter whose field vanished is stale, not a reason to hide every task
+    if (!field) continue;
+    if (!matchesFieldFilter(values?.[fieldId], filter, field)) return false;
+  }
+  return true;
+}
+
+/** A field's value as one line of text. No field name — a table header already carries it. */
+export function fieldCellText(
+  values: Record<string, unknown> | undefined,
+  field: { _id: string; fieldType: ICustomField["fieldType"]; options?: LegacyOption[] }
+): string {
+  const value = values?.[field._id];
+  if (value === undefined || value === null || value === "") return "";
+
+  if (field.fieldType === "dropdown" || field.fieldType === "multiselect") {
+    const byId = new Map(normalizeOptions(field.options).map((o) => [o.id, o.value]));
+    const ids = Array.isArray(value) ? (value as string[]) : [String(value)];
+    return ids.map((id) => byId.get(id)).filter(Boolean).join(", ");
+  }
+  if (field.fieldType === "checkbox") return value === true ? "Yes" : "No";
+  return String(value);
+}

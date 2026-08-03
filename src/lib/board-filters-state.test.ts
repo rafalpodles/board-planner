@@ -1,8 +1,10 @@
 import { describe, it, expect } from "vitest";
+import { ApiCustomField } from "@/types";
 import {
   migratePersistedFilters,
   countActiveFilters,
   EMPTY_FILTERS,
+  sanitizeFieldFilters,
 } from "./board-filters-state";
 
 describe("migratePersistedFilters", () => {
@@ -102,8 +104,46 @@ describe("countActiveFilters", () => {
 
   // Search lives in the resting row, not the popover, so it must not inflate the pill
   it("does not count search", () => {
-    const withSearch = { ...EMPTY_FILTERS, assignee: "rpo" } as Record<string, string>;
-    withSearch.search = "CP-128";
+    const withSearch = { ...EMPTY_FILTERS, assignee: "rpo", search: "CP-128" };
     expect(countActiveFilters(withSearch as never)).toBe(1);
+  });
+});
+
+describe("project field filters", () => {
+  const fields = [
+    { _id: "f1", name: "Points", fieldType: "number", filterable: true, archived: false },
+    { _id: "f2", name: "Gone", fieldType: "text", filterable: true, archived: true },
+    { _id: "f3", name: "Hidden", fieldType: "text", filterable: false, archived: false },
+  ] as unknown as ApiCustomField[];
+
+  it("counts a set field filter alongside the built-in ones", () => {
+    const filters = { ...EMPTY_FILTERS, assignee: "rpo", fields: { f1: { from: "3" } } };
+    expect(countActiveFilters(filters)).toBe(2);
+  });
+
+  it("does not count an empty field filter", () => {
+    expect(countActiveFilters({ ...EMPTY_FILTERS, fields: { f1: {} } })).toBe(0);
+  });
+
+  // Otherwise the board keeps filtering on a field the panel no longer shows
+  it("drops filters for archived and non-filterable fields", () => {
+    const kept = sanitizeFieldFilters(
+      { f1: { from: "3" }, f2: { value: "x" }, f3: { value: "y" } },
+      fields
+    );
+    expect(Object.keys(kept)).toEqual(["f1"]);
+  });
+
+  it("drops a filter whose field no longer exists at all", () => {
+    expect(sanitizeFieldFilters({ ghost: { value: "x" } }, fields)).toEqual({});
+  });
+
+  it("survives a reload with a live field filter intact", () => {
+    const state = migratePersistedFilters(
+      { filters: { fields: { f1: { from: "3", to: "8" } } } },
+      undefined,
+      fields
+    );
+    expect(state.filters.fields).toEqual({ f1: { from: "3", to: "8" } });
   });
 });
