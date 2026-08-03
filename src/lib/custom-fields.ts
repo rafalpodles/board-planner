@@ -163,3 +163,49 @@ export function sanitizeCustomFieldValues(
 export function orderedOptions(field: { options?: LegacyOption[] }): ICustomFieldOption[] {
   return normalizeOptions(field.options).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 }
+
+export const MAX_FIELD_NAME_LENGTH = 100;
+export const MAX_OPTIONS = 100;
+
+/**
+ * Turns whatever the editor posted into storable options. Strings are accepted so
+ * the API keeps working for older clients; each one becomes its own id, matching
+ * how pre-CP-211 options migrate.
+ */
+export function parseOptions(
+  input: unknown,
+  existing: ICustomFieldOption[] = []
+): { options?: ICustomFieldOption[]; error?: string } {
+  if (!Array.isArray(input)) return { error: "Options must be a list" };
+
+  const byId = new Map(existing.map((o) => [o.id, o]));
+  const options: ICustomFieldOption[] = [];
+
+  for (const [index, raw] of input.entries()) {
+    const source = typeof raw === "string" ? { value: raw } : (raw as Partial<ICustomFieldOption>);
+    const value = String(source?.value ?? "").trim();
+    if (!value) return { error: "Every option needs a value" };
+    // Keep the id of an option that already exists, or every task loses it on rename
+    const id = source?.id && byId.has(source.id) ? source.id : (source?.id ?? newOptionId(value));
+    options.push({
+      id,
+      value,
+      color: source?.color || byId.get(id)?.color || DEFAULT_OPTION_COLOR,
+      order: index,
+    });
+  }
+
+  if (options.length > MAX_OPTIONS) return { error: `At most ${MAX_OPTIONS} options` };
+  if (new Set(options.map((o) => o.id)).size !== options.length) {
+    return { error: "Options must be unique" };
+  }
+  if (new Set(options.map((o) => o.value.toLowerCase())).size !== options.length) {
+    return { error: "Option names must be unique" };
+  }
+  return { options };
+}
+
+function newOptionId(value: string): string {
+  const slug = value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 24);
+  return `${slug || "opt"}-${Math.random().toString(36).slice(2, 8)}`;
+}
