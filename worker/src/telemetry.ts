@@ -47,6 +47,9 @@ export interface Telemetry {
   emit(update: TelemetryUpdate): void;
   emitEvent(event: StreamEvent): void;
   recent(): Progress[];
+  // The phase of the run in flight, or null when none is. Distinct from recent().at(-1), which is
+  // the last phase ever emitted and so outlives the run it described.
+  current(): Progress | null;
 }
 
 const RECENT_LIMIT = 50;
@@ -165,9 +168,13 @@ export function summarise(event: StreamEvent): TelemetryUpdate | null {
 export function createTelemetry(): Telemetry {
   const listeners = new Set<TelemetryListener>();
   const ring: Progress[] = [];
+  let inFlight: Progress | null = null;
 
   function emit(update: TelemetryUpdate): void {
-    if (!isQuota(update) && !isOutcome(update)) {
+    if (isOutcome(update)) {
+      inFlight = null;
+    } else if (!isQuota(update)) {
+      inFlight = update;
       ring.push(update);
       if (ring.length > RECENT_LIMIT) ring.shift();
     }
@@ -193,6 +200,7 @@ export function createTelemetry(): Telemetry {
       if (update) emit(update);
     },
     recent: () => [...ring],
+    current: () => inFlight,
   };
 }
 

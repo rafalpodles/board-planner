@@ -34,7 +34,7 @@ export interface LocalServerDeps {
   // That guard orders instants from the server's clock; feeding it this laptop's would let one
   // local pause swallow a later board-issued stop.
   handlers: LocalCommands;
-  telemetry: Pick<Telemetry, "subscribe" | "recent">;
+  telemetry: Pick<Telemetry, "subscribe" | "recent" | "current">;
   paused: () => boolean;
   // A function, not a value: policy arrives from the server over SSE and changes under a running
   // worker, so anything captured at startup goes stale the first time an operator edits it.
@@ -101,8 +101,11 @@ export function startLocalServer(deps: LocalServerDeps): LocalServer {
 
   const routes: Record<string, Route> = {
     "GET /status": (_request, response) => {
-      const recent = deps.telemetry.recent();
-      json(response, 200, { paused: deps.paused(), current: recent.at(-1) ?? null, recent });
+      json(response, 200, {
+        paused: deps.paused(),
+        current: deps.telemetry.current(),
+        recent: deps.telemetry.recent(),
+      });
     },
     "GET /config": (_request, response) => json(response, 200, deps.config()),
     "GET /stream": openStream,

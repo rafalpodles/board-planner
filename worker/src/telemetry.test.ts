@@ -378,6 +378,51 @@ describe("outcome updates", () => {
     expect(seen).toEqual([{ outcome: "gateRejected", taskKey: "CP-1", detail: "build" }]);
   });
 
+  // Found against a running worker, not by a test: /status served `recent.at(-1)`, so six hours
+  // after a run finished the socket still reported `current: {phase: "push"}` and a panel reading
+  // it showed "working" forever. A phase outlives the run it described; an outcome ends it.
+  it("has no current phase before anything has run", () => {
+    expect(createTelemetry().current()).toBeNull();
+  });
+
+  it("reports the phase of the run in flight", () => {
+    const telemetry = createTelemetry();
+
+    telemetry.emit({ phase: "worktree" });
+    telemetry.emit({ phase: "push", taskKey: "CP-1" });
+
+    expect(telemetry.current()).toEqual({ phase: "push", taskKey: "CP-1" });
+  });
+
+  it("has no current phase once the run has settled, though the history remains", () => {
+    const telemetry = createTelemetry();
+
+    telemetry.emit({ phase: "push" });
+    telemetry.emit({ outcome: "merged", taskKey: "CP-1" });
+
+    expect(telemetry.current()).toBeNull();
+    expect(telemetry.recent()).toEqual([{ phase: "push" }]);
+  });
+
+  it("picks the phase up again when the next run starts", () => {
+    const telemetry = createTelemetry();
+
+    telemetry.emit({ phase: "push" });
+    telemetry.emit({ outcome: "merged", taskKey: "CP-1" });
+    telemetry.emit({ phase: "claiming", taskKey: "CP-2" });
+
+    expect(telemetry.current()).toEqual({ phase: "claiming", taskKey: "CP-2" });
+  });
+
+  it("is not ended by a quota reading, which says nothing about the run", () => {
+    const telemetry = createTelemetry();
+
+    telemetry.emit({ phase: "agent" });
+    telemetry.emit({ status: "allowed_warning", utilization: 0.9 });
+
+    expect(telemetry.current()).toEqual({ phase: "agent" });
+  });
+
   it("carries the task key on a progress update, so the panel can name what is running", () => {
     const telemetry = createTelemetry();
 
