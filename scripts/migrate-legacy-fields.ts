@@ -6,11 +6,6 @@
  *   MONGODB_URI=... npx tsx scripts/migrate-legacy-fields.ts --dry-run
  *   MONGODB_URI=... npx tsx scripts/migrate-legacy-fields.ts
  *
- * Against Railway, run it on the database service — the app service's URI is on
- * `.railway.internal` and does not resolve from a laptop:
- *   railway run --service MongoDB -- sh -c \
- *     'MONGODB_URI="$MONGO_PUBLIC_URL" MONGODB_DB=<name> npx tsx scripts/migrate-legacy-fields.ts --dry-run'
- *
  * Safe to re-run: a project that already has the three definitions is not seeded
  * again, and a task whose values are already copied is left alone. The old columns
  * are not touched, so a rollback loses nothing.
@@ -22,26 +17,19 @@
 
 import mongoose from "mongoose";
 import { legacyFieldSeeds, findLegacyField, migratedValuesFor, withValuesInUse } from "../src/lib/legacy-fields";
-import { resolveMongoUri, assertDatabaseIsNotEmpty } from "./mongo-uri";
 import type { ApiCustomField } from "../src/types";
 
 const dryRun = process.argv.includes("--dry-run");
 
 async function main() {
-  const { uri, source } = resolveMongoUri("scripts/migrate-legacy-fields.ts --dry-run");
+  const uri = process.env.MONGODB_URI;
+  if (!uri) throw new Error("MONGODB_URI is required");
 
-  await mongoose.connect(uri, { dbName: process.env.MONGODB_DB || undefined });
+  await mongoose.connect(uri);
   const db = mongoose.connection.db;
   if (!db) throw new Error("No database handle");
 
   const projects = await db.collection("projects").find({}).toArray();
-
-  // Printed before the verdict, so "nothing to do" can never be read without
-  // seeing which database produced it
-  console.log(`Database: ${db.databaseName} (from ${source})`);
-  console.log(`Projects: ${projects.length}, tasks: ${await db.collection("tasks").countDocuments()}`);
-  assertDatabaseIsNotEmpty(db.databaseName, projects.length);
-
   let seededProjects = 0;
   let migratedTasks = 0;
 
