@@ -590,6 +590,28 @@ describe("toApiExecution", () => {
     expect(Object.keys(api).sort()).toEqual(["asOf", "phase", "phaseAt", "startedAt", "workerId"]);
   });
 
+  // A raw ObjectId names nothing to the person reading the card; the fleet console has shown the
+  // name all along.
+  it("names the worker when the caller can resolve it", () => {
+    const api = toApiExecution(running, new Map([["w1", "rig-laptop"]]))!;
+
+    expect(api.workerName).toBe("rig-laptop");
+    expect(api.workerId).toBe("w1");
+  });
+
+  it("falls back to the id alone when the name cannot be resolved", () => {
+    const api = toApiExecution(running, new Map())!;
+
+    expect(api.workerName).toBeUndefined();
+    expect(api.workerId).toBe("w1");
+  });
+
+  it("omits the name for a run with no worker recorded", () => {
+    const api = toApiExecution({ ...running, workerId: "" }, new Map([["w1", "rig-laptop"]]))!;
+
+    expect(api).not.toHaveProperty("workerName");
+  });
+
   // runId is the scope recordTaskPhase authorises against; attempts counts attempts spent and
   // lastError is only ever "", so neither can be rendered as if it meant something
   it("keeps the run identity and the misleading counters off the wire", () => {

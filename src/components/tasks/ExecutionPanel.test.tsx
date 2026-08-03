@@ -124,3 +124,19 @@ describe("ExecutionPanel", () => {
     expect(container.innerHTML).toBe("");
   });
 });
+
+describe("naming the machine", () => {
+  it("shows the worker's name when the API resolved one", () => {
+    const { container } = render(<ExecutionPanel execution={payload({ workerName: "rig-laptop" })} />);
+
+    expect(screen.getByText(/rig-laptop/)).toBeTruthy();
+    expect(container.textContent).not.toContain("w-laptop");
+  });
+
+  // Better a raw id than nothing: the operator can still match it against the fleet console.
+  it("falls back to the id when no name came back", () => {
+    render(<ExecutionPanel execution={payload()} />);
+
+    expect(screen.getByText(/w-laptop/)).toBeTruthy();
+  });
+});

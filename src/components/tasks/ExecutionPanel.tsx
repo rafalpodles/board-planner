@@ -32,7 +32,7 @@ export function ageAt(from: string | null | undefined, asOf: string | undefined,
 }
 
 export function ExecutionPanel({ execution }: ExecutionPanelProps) {
-  const { phase, phaseAt, startedAt, asOf, workerId } = execution ?? {};
+  const { phase, phaseAt, startedAt, asOf, workerId, workerName } = execution ?? {};
   const receivedAt = useRef(Date.now());
   const [sinceFetch, setSinceFetch] = useState(0);
 
@@ -79,7 +79,9 @@ export function ExecutionPanel({ execution }: ExecutionPanelProps) {
             · last sign of life {silent} ago
           </span>
         )}
-        {workerId && <span className="text-gray-500 dark:text-gray-400">· {workerId}</span>}
+        {(workerName || workerId) && (
+          <span className="text-gray-500 dark:text-gray-400">· {workerName || workerId}</span>
+        )}
       </div>
     </div>
   );

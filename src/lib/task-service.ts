@@ -719,13 +719,21 @@ export async function recordTaskPhase(event: TaskPhaseUpdate): Promise<boolean> 
 // recordTaskPhase matches on, phaseSeq is an ordering detail, lastError is only ever "" and
 // attempts counts attempts spent rather than an attempt number — and none of it belongs in a
 // browser. Returning the raw document would publish all of it to every project member.
-export function toApiExecution(execution: ITaskExecution | undefined): ApiTaskExecution | undefined {
+export function toApiExecution(
+  execution: ITaskExecution | undefined,
+  workerNames?: ReadonlyMap<string, string>
+): ApiTaskExecution | undefined {
   // runId is what says a run still holds this task: every exit from the active column clears it,
   // while workerId and startedAt are left behind as history. Keying on those instead would leave a
   // finished task claiming to be starting forever, which is what live testing caught.
   if (!execution?.runId) return undefined;
   return {
     ...(execution.workerId ? { workerId: execution.workerId } : {}),
+    // Resolved by the caller, which is the layer that can read the fleet. Absent rather than
+    // guessed when it cannot be: a card showing the wrong machine is worse than one showing an id.
+    ...(execution.workerId && workerNames?.get(execution.workerId)
+      ? { workerName: workerNames.get(execution.workerId)! }
+      : {}),
     ...(execution.phase ? { phase: execution.phase } : {}),
     phaseAt: execution.phaseAt ? new Date(execution.phaseAt).toISOString() : null,
     startedAt: execution.startedAt ? new Date(execution.startedAt).toISOString() : null,

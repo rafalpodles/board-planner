@@ -848,6 +848,7 @@ export interface ApiTask {
 // remaining budget, not the attempt number.
 export interface ApiTaskExecution {
   workerId?: string;
+  workerName?: string;
   phase?: string;
   phaseAt?: string | null;
   startedAt?: string | null;
