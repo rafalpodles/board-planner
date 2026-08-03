@@ -233,10 +233,11 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     return parts;
   }
 
-  function streamingRunner(): Runner {
+  function streamingRunner(claudeCalls: string[][] = []): Runner {
     return {
       async run(command, args, opts) {
         if (command === "claude") {
+          claudeCalls.push(args);
           for (const part of pipeFlushes(AGENT_STREAM)) {
             opts.onStdout?.(part);
             await new Promise((resolve) => setImmediate(resolve));
@@ -259,12 +260,16 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
   // postEvent is deliberately a plain function, never a vi.fn: a spy attaches its own handler to
   // whatever it returns, which quietly settles a rejection the source left unhandled — and that is
   // exactly the failure this suite has to be able to see.
-  async function runOneTask(postEvent: ApiClient["postEvent"] = async () => {}) {
+  async function runOneTask(
+    postEvent: ApiClient["postEvent"] = async () => {},
+    policy?: Record<string, unknown>
+  ) {
     const stateDir = mkdtempSync(join(tmpdir(), "cp-wiring-run-"));
     writeFileSync(join(stateDir, "repos.json"), JSON.stringify({ repos: [REPO] }), { mode: 0o600 });
 
     const telemetry = createTelemetry();
     const posted: PhaseEvent[] = [];
+    const claudeCalls: string[][] = [];
     let claims = 0;
 
     const api = {
@@ -287,7 +292,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     let stop = (): void => {};
     const worker = createWorker({
       env: { ...ENV, CP_STATE_DIR: stateDir },
-      runner: streamingRunner(),
+      runner: streamingRunner(claudeCalls),
       hostname: () => "host-1",
       // the loop only sleeps once it has nothing left to claim, which is one pass after the run
       sleep: async () => stop(),
@@ -299,7 +304,10 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       fetchImpl: vi.fn().mockResolvedValue({
         ok: true,
         status: 200,
-        json: async () => ({ assignments: [{ project: "p1", proposedPath: REPO }] }),
+        json: async () => ({
+          assignments: [{ project: "p1", proposedPath: REPO }],
+          ...(policy ? { policy } : {}),
+        }),
       }) as unknown as typeof fetch,
       createStore: (path) => memoryStore(path.endsWith("worker.json") ? IDENTITY : ""),
       createApi: () => api as unknown as ApiClient,
@@ -316,7 +324,14 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       rmSync(stateDir, { recursive: true, force: true });
     }
 
-    return { api, posted, phases: posted.map((event) => event.phase), telemetry, worker };
+    return {
+      api,
+      posted,
+      phases: posted.map((event) => event.phase),
+      telemetry,
+      worker,
+      claudeArgs: claudeCalls[0] ?? [],
+    };
   }
 
   // The whole run, as the board would see it: the three stage boundaries it got past, the three
@@ -350,6 +365,26 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       phase: "agent",
       tool: { name: "Edit", target: "src/a.ts" },
     });
+  });
+
+  // The whole path in one pass — the server's own policy JSON, through applyPolicy and configFor,
+  // into the argv of the process that does the work. This is the join no unit test can see: config
+  // knows the policy, executor knows the flag, and until now nothing carried one to the other.
+  it("runs the agent on the model the server's policy names", async () => {
+    const { claudeArgs } = await runOneTask(async () => {}, {
+      model: "haiku",
+      fallbackModel: "opus",
+    });
+
+    expect(claudeArgs[claudeArgs.indexOf("--model") + 1]).toBe("haiku");
+    expect(claudeArgs[claudeArgs.indexOf("--fallback-model") + 1]).toBe("opus");
+  });
+
+  it("runs the agent on today's models when the server's policy names none", async () => {
+    const { claudeArgs } = await runOneTask();
+
+    expect(claudeArgs[claudeArgs.indexOf("--model") + 1]).toBe("opus");
+    expect(claudeArgs[claudeArgs.indexOf("--fallback-model") + 1]).toBe("sonnet");
   });
 
   it("addresses every event to the task and the run the server itself minted", async () => {

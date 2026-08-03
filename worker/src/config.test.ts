@@ -114,6 +114,8 @@ describe("applyPolicy", () => {
       maxDiffLines: 100,
       maxDiffFiles: 3,
       model: "sonnet",
+      fallbackModel: "haiku",
+      reviewModel: "opus-4",
     });
 
     expect(next).toEqual({
@@ -123,7 +125,26 @@ describe("applyPolicy", () => {
       maxDiffLines: 100,
       maxDiffFiles: 3,
       model: "sonnet",
+      fallbackModel: "haiku",
+      reviewModel: "opus-4",
     });
+  });
+
+  // The reviewer is the last gate before a merge, so it does not move when the implementer does
+  it("leaves the review model alone when only the implementer's model changes", () => {
+    const next = applyPolicy(DEFAULT_POLICY, { model: "haiku" });
+
+    expect(next.model).toBe("haiku");
+    expect(next.reviewModel).toBe(DEFAULT_POLICY.reviewModel);
+    expect(next.fallbackModel).toBe(DEFAULT_POLICY.fallbackModel);
+  });
+
+  it("ignores a blank model rather than adopting an empty flag value", () => {
+    const next = applyPolicy(DEFAULT_POLICY, { model: "   ", fallbackModel: "", reviewModel: "  " });
+
+    expect(next.model).toBe(DEFAULT_POLICY.model);
+    expect(next.fallbackModel).toBe(DEFAULT_POLICY.fallbackModel);
+    expect(next.reviewModel).toBe(DEFAULT_POLICY.reviewModel);
   });
 
   it("ignores a field the server did not send, keeping the current value", () => {

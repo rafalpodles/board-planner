@@ -18,7 +18,15 @@ const POLICY_FIELDS = [
   "maxDiffLines",
   "maxDiffFiles",
   "model",
+  "fallbackModel",
+  "reviewModel",
 ] as const;
+const STRING_POLICY_FIELDS: ReadonlySet<string> = new Set([
+  "baseBranch",
+  "model",
+  "fallbackModel",
+  "reviewModel",
+]);
 
 export const GET = withWorker(async (_request, { worker }) => {
   return NextResponse.json(toApiWorker(worker));
@@ -131,7 +139,7 @@ export const PATCH = withAuth(async (request, { params, user }) => {
       );
     }
 
-    if (field === "baseBranch" || field === "model") {
+    if (STRING_POLICY_FIELDS.has(field)) {
       if (typeof body[field] !== "string" || !body[field].trim()) {
         return NextResponse.json({ error: `${field} must be a non-empty string` }, { status: 400 });
       }

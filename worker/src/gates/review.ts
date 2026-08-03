@@ -1,3 +1,4 @@
+import { DEFAULT_REVIEW_MODEL, modelOr } from "../config.js";
 import { CommandResult, Runner } from "../exec.js";
 import { Gate, GateContext } from "../types.js";
 
@@ -88,7 +89,10 @@ function buildPrompt(context: GateContext): string {
   ].join("\n");
 }
 
-export function reviewGate(runner: Runner, timeoutMs: number): Gate {
+// reviewModel is its own policy field, never policy.model: turning the implementer down for cost
+// must not quietly hand the last gate before a merge to a weaker reviewer
+export function reviewGate(runner: Runner, timeoutMs: number, reviewModel?: string): Gate {
+  const model = modelOr(reviewModel, DEFAULT_REVIEW_MODEL);
   return {
     name: "review",
     async run(context) {
@@ -134,7 +138,7 @@ export function reviewGate(runner: Runner, timeoutMs: number): Gate {
           "--allowedTools",
           "Read Grep Glob",
           "--model",
-          "opus",
+          model,
         ],
         { cwd: context.worktreePath, timeoutMs, env, signal: context.signal }
       );

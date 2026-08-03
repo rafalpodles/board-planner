@@ -130,6 +130,9 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       taskTimeoutMs: policy.taskTimeoutMs,
       maxDiffLines: policy.maxDiffLines,
       maxDiffFiles: policy.maxDiffFiles,
+      model: policy.model,
+      fallbackModel: policy.fallbackModel,
+      reviewModel: policy.reviewModel,
     };
   }
 

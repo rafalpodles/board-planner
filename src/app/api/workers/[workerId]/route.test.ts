@@ -198,6 +198,41 @@ describe("PATCH /api/workers/:workerId — authorization matrix", () => {
     );
   });
 
+  it("writes each model setting to its own policy field", async () => {
+    getAuthUser.mockResolvedValue(PROJECT_ADMIN);
+
+    const response = await PATCH(
+      patchRequest({ model: "haiku", fallbackModel: "sonnet", reviewModel: "opus" }),
+      ctx()
+    );
+
+    expect(response.status).toBe(200);
+    expect(workerFindByIdAndUpdate).toHaveBeenCalledWith(
+      WORKER_ID,
+      {
+        $set: {
+          "policy.model": "haiku",
+          "policy.fallbackModel": "sonnet",
+          "policy.reviewModel": "opus",
+        },
+      },
+      { new: true }
+    );
+  });
+
+  // A blank model reaches the worker as an empty --model flag, which fails every run it claims
+  it("400s on a blank model setting instead of storing it", async () => {
+    getAuthUser.mockResolvedValue(PROJECT_ADMIN);
+
+    for (const field of ["model", "fallbackModel", "reviewModel"]) {
+      const response = await PATCH(patchRequest({ [field]: "   " }), ctx());
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toMatch(new RegExp(`^${field} must be a non-empty`));
+    }
+    expect(workerFindByIdAndUpdate).not.toHaveBeenCalled();
+  });
+
   // Independent of the authorization gate above: the response must reflect only what
   // was verified, not whatever the write happens to return
   it("does not disclose a project the caller cannot see, even if assignments changed between the read and the write", async () => {
