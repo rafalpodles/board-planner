@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ApiClient, PhaseEvent } from "./api.js";
 import { ControlDeps } from "./control.js";
 import { Runner } from "./exec.js";
-import { LocalServer, LocalServerDeps } from "./local-server.js";
+import { LocalConfigView, LocalServer, LocalServerDeps } from "./local-server.js";
 import { Store } from "./outbox.js";
 import { Heartbeat, HeartbeatDeps } from "./registration.js";
 import { createTelemetry } from "./telemetry.js";
@@ -274,6 +274,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     const posted: PhaseEvent[] = [];
     const claudeCalls: string[][] = [];
     let claims = 0;
+    let localConfig: (() => LocalConfigView) | undefined;
 
     const api = {
       claim: vi.fn<ApiClient["claim"]>(async () => (claims++ === 0 ? CLAIMED : null)),
@@ -317,7 +318,10 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       createTelemetry: () => telemetry,
       startHeartbeat: () => fakeHeartbeat(),
       connectControl: () => ({ close: vi.fn() }),
-      startLocalServer: () => ({ ready: Promise.resolve(), close: vi.fn().mockResolvedValue(undefined) }),
+      startLocalServer: (localDeps) => {
+        localConfig = localDeps.config;
+        return { ready: Promise.resolve(), close: vi.fn().mockResolvedValue(undefined) };
+      },
     });
     stop = () => worker.shutdown();
 
@@ -334,6 +338,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       telemetry,
       worker,
       claudeArgs: claudeCalls[0] ?? [],
+      localConfig,
     };
   }
 
@@ -466,6 +471,32 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
 
     expect(claudeArgs[claudeArgs.indexOf("--model") + 1]).toBe("haiku");
     expect(claudeArgs[claudeArgs.indexOf("--fallback-model") + 1]).toBe("opus");
+  });
+
+  // Same join as the model test below, one surface further on: the server's policy has to reach the
+  // socket the operator's own cockpit reads, or the app shows defaults while the run uses something
+  // else. config knows the policy and local-server serves it; nothing carried one to the other.
+  it("serves the server's own policy on the socket, not the startup defaults", async () => {
+    const { localConfig } = await runOneTask(async () => {}, {
+      model: "haiku",
+      reviewModel: "opus",
+      maxDiffLines: 77,
+    });
+
+    expect(localConfig?.()).toMatchObject({
+      apiUrl: "https://app.example.com",
+      workerName: "worker-1",
+      projectCount: 1,
+      model: "haiku",
+      reviewModel: "opus",
+      maxDiffLines: 77,
+    });
+  });
+
+  it("puts no credential and no repository path on the socket", async () => {
+    const { localConfig } = await runOneTask();
+
+    expect(JSON.stringify(localConfig?.())).not.toMatch(/cp_admin_token|cpw_|\/repos\/demo/);
   });
 
   it("runs the agent on today's models when the server's policy names none", async () => {
