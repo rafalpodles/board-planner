@@ -152,6 +152,9 @@ describe("the worker's lifecycle", () => {
     expect(local.close).toHaveBeenCalledTimes(1);
   });
 
+  // Since children run in their own session, a terminal Ctrl-C reaches only the worker. Without an
+  // abort, shutdown is a flag checked between tasks — so stopping could mean waiting out the whole
+  // task timeout with the agent still working.
   it("keeps claiming when the socket cannot be opened at all", async () => {
     const { worker, logError } = harness({
       startLocalServer: () => ({
@@ -333,6 +336,80 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       claudeArgs: claudeCalls[0] ?? [],
     };
   }
+
+  // Children run in their own session since the process-group change, so a terminal Ctrl-C reaches
+  // only the worker. loop.stop() alone is a flag checked between tasks, which would mean waiting out
+  // a run that can last the full task timeout with the agent still working.
+  it("aborts the run in flight when the worker is asked to shut down", async () => {
+    const stateDir = mkdtempSync(join(tmpdir(), "cp-shutdown-"));
+    writeFileSync(join(stateDir, "repos.json"), JSON.stringify({ repos: [REPO] }), { mode: 0o600 });
+    let sawAbort = false;
+    let claims = 0;
+    let reachedSleep = false;
+    let shutdown = () => {};
+
+    const hangingRunner: Runner = {
+      async run(command, args, opts) {
+        if (command === "claude") {
+          shutdown();
+          // shutdown aborts synchronously, so the signal is already aborted by the time we look —
+          // registering a listener first and only then calling shutdown would wait forever
+          if (!opts.signal?.aborted) {
+            await new Promise<void>((resolve) => opts.signal?.addEventListener("abort", () => resolve()));
+          }
+          sawAbort = opts.signal?.aborted === true;
+          return { code: 143, stdout: "", stderr: "aborted", timedOut: false };
+        }
+        return { code: 0, stdout: args.includes("rev-parse") ? REPO : "", stderr: "", timedOut: false };
+      },
+    };
+
+    const worker = createWorker({
+      env: { ...ENV, CP_STATE_DIR: stateDir },
+      runner: hangingRunner,
+      hostname: () => "host-1",
+      // reaching this at all means the abort did not end the run — without it the loop spins with
+      // nothing to claim and never yields, which starves even the test timeout
+      sleep: async () => {
+        reachedSleep = true;
+        worker.shutdown();
+      },
+      log: vi.fn(),
+      logError: vi.fn(),
+      uid: 501,
+      realpath: (path) => path,
+      stat: () => ({ uid: 501, mode: 0o40700 }),
+      fetchImpl: vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ assignments: [{ project: "p1", proposedPath: REPO }] }),
+      }) as unknown as typeof fetch,
+      createStore: (path) => memoryStore(path.endsWith("worker.json") ? IDENTITY : ""),
+      createApi: () =>
+        ({
+          claim: vi.fn(async () => (claims++ === 0 ? CLAIMED : null)),
+          setStatus: vi.fn().mockResolvedValue(undefined),
+          comment: vi.fn().mockResolvedValue(undefined),
+          release: vi.fn().mockResolvedValue(undefined),
+          statusIds: vi.fn().mockResolvedValue({ approved: "todo", review: "in_review", done: "done" }),
+          columnIds: vi.fn().mockResolvedValue(["todo", "in_progress", "in_review", "done"]),
+          postEvent: async () => {},
+        }) as unknown as ApiClient,
+      startHeartbeat: () => fakeHeartbeat(),
+      connectControl: () => ({ close: vi.fn() }),
+      startLocalServer: () => ({ ready: Promise.resolve(), close: vi.fn().mockResolvedValue(undefined) }),
+    });
+    shutdown = () => worker.shutdown();
+
+    try {
+      await worker.run();
+    } finally {
+      rmSync(stateDir, { recursive: true, force: true });
+    }
+
+    expect(sawAbort).toBe(true);
+    expect(reachedSleep).toBe(false);
+  });
 
   // The whole run, as the board would see it: the three stage boundaries it got past, the three
   // events its own agent produced, and the three gates it reached before the empty diff was
