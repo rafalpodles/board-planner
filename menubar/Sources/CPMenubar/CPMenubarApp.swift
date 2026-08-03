@@ -27,5 +27,7 @@ struct CPMenubarApp: App {
             }
         }
         .menuBarExtraStyle(.window)
+
+        Settings { PreferencesView(model: model) }
     }
 }
