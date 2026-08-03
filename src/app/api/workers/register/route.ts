@@ -1,12 +1,27 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { withAdmin, protocolOf } from "@/lib/middleware";
+import { protocolOf } from "@/lib/middleware";
 import { PROTOCOL_VERSION, WORKER_HEARTBEAT_MS, overriddenPolicy, registerWorker } from "@/lib/worker-service";
+import { attachWorkerToEnrolment, consumeEnrolmentToken } from "@/lib/enrolment";
 
-// Deliberately withAdmin, not withAuth: minting a worker credential is an
-// instance-level act, not something a project-scoped token can do
-export const POST = withAdmin(async (request) => {
+// Authenticated by a single-use enrolment token, NOT by an admin session or an admin API token.
+//
+// The reason is the laptop, not this route. A worker runs the coding agent at the same uid with
+// Read and `bypassPermissions`, so anything on that disk is readable by the agent. While this was
+// withAdmin, the credential the laptop had to hold was an unscoped instance-admin token — enough to
+// PATCH lockedByInstance and lift the worker's own kill switch. An enrolment token is spent by the
+// first registration and is useless afterwards, so reading it off disk buys nothing.
+function bearerOf(request: Request): string {
+  const header = request.headers.get("authorization") ?? "";
+  return header.startsWith("Bearer ") ? header.slice(7).trim() : "";
+}
+
+export async function POST(request: Request) {
   await connectDB();
+
+  // Shape is checked before the token is spent: an operator gets one enrolment token, and burning
+  // it on a missing field would mean minting another. Nothing here discloses anything a caller
+  // without a token could not already read in the error text.
   const body = await request.json().catch(() => ({}));
   const name = typeof body.name === "string" ? body.name.trim() : "";
   const host = typeof body.host === "string" ? body.host.trim() : "";
@@ -20,12 +35,21 @@ export const POST = withAdmin(async (request) => {
     );
   }
 
+  const consumed = await consumeEnrolmentToken(bearerOf(request));
+  if (!consumed.ok) {
+    // One message for every failure: telling a caller whether a token was real but spent, or never
+    // existed, turns this into an oracle for guessing.
+    return NextResponse.json({ error: "Invalid or spent enrolment token" }, { status: 401 });
+  }
+
   const { worker, credential } = await registerWorker({
     name,
     host,
     platform: String(body.platform ?? ""),
     version: String(body.version ?? ""),
   });
+
+  await attachWorkerToEnrolment(consumed.tokenId, String(worker._id));
 
   return NextResponse.json({
     workerId: String(worker._id),
@@ -39,4 +63,4 @@ export const POST = withAdmin(async (request) => {
       proposedPath: a.proposedPath,
     })),
   });
-});
+}

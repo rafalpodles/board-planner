@@ -417,6 +417,21 @@ export interface WorkerPolicy {
   reviewModel: string;
 }
 
+// A single-use, short-lived credential whose only power is to register one worker. Deliberately
+// not an ApiToken: an ApiToken can be used repeatedly and carries its owner's access.
+export interface IEnrolmentToken {
+  _id: Types.ObjectId;
+  prefix: string;
+  tokenHash: string;
+  createdBy: Types.ObjectId | IUser;
+  label: string;
+  expiresAt: Date;
+  usedAt: Date | null;
+  usedByWorker: Types.ObjectId | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export interface IWorker {
   _id: Types.ObjectId;
   name: string;
