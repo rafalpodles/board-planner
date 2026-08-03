@@ -14,6 +14,7 @@
 
 import { MongoClient, type Document } from "mongodb";
 import { EJSON } from "bson";
+import { resolveUri, dbName } from "./mongo-uri";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -114,33 +115,6 @@ async function restore(db: ReturnType<MongoClient["db"]>, target: string) {
   console.log("\nRestored. Restart the app — Mongoose caches compiled models.");
 }
 
-/**
- * Railway names this differently per service: the app gets MONGODB_URI pointing at
- * the private network, the database service gets MONGO_PUBLIC_URL for the outside.
- * Anything on `.railway.internal` only resolves inside Railway, so prefer a public
- * candidate over one we know cannot connect from here.
- */
-const URI_VARS = ["MONGODB_URI", "MONGO_PUBLIC_URL", "MONGO_URL", "DATABASE_URL"];
-
-function resolveUri(): { uri: string; source: string } {
-  const found = URI_VARS.filter((name) => process.env[name]).map((name) => ({
-    source: name,
-    uri: process.env[name] as string,
-  }));
-  if (!found.length) throw new Error(`Set one of: ${URI_VARS.join(", ")}`);
-
-  const reachable = found.filter((c) => !c.uri.includes(".railway.internal"));
-  if (!reachable.length) {
-    throw new Error(
-      `${found.map((c) => c.source).join(", ")} point at Railway's private network ` +
-        `(.railway.internal), which only resolves from inside Railway.\n` +
-        `Run against the database service instead, which exposes a public address:\n` +
-        `  railway run --service MongoDB -- npx tsx scripts/dump-collections.ts ...`
-    );
-  }
-  return reachable[0];
-}
-
 async function main() {
   const [mode, target, collectionArg] = process.argv.slice(2);
   if (!mode || !["dump", "verify", "restore"].includes(mode)) {
@@ -150,10 +124,7 @@ async function main() {
 
   const { uri, source } = resolveUri();
   const client = await MongoClient.connect(uri);
-  // A public database URL often carries no database in its path, and the driver
-  // then quietly hands back `test` — dumping an empty database that is not the one
-  // being migrated. MONGODB_DB forces it.
-  const db = client.db(process.env.MONGODB_DB || undefined);
+  const db = client.db(dbName());
   console.log(`Database: ${db.databaseName} (from ${source})`);
 
   if (mode === "dump") await dump(db, target, (collectionArg || DEFAULT_COLLECTIONS.join(",")).split(","));
