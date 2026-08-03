@@ -7,6 +7,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/components/ui/Toast";
 import { Button } from "@/components/ui/Button";
 import { EnrolWorkerModal } from "@/components/settings/EnrolWorkerModal";
+import { WorkerAssignmentsModal } from "@/components/settings/WorkerAssignmentsModal";
 import { usePollWhileVisible } from "@/hooks/use-poll-while-visible";
 import { timeAgo } from "@/lib/time";
 import { policyRows } from "@/lib/worker-policy-view";
@@ -31,6 +32,7 @@ export default function AdminWorkersPage() {
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [enrolling, setEnrolling] = useState(false);
+  const [assigning, setAssigning] = useState<ApiWorker | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -110,6 +112,11 @@ export default function AdminWorkersPage() {
       </div>
 
       <EnrolWorkerModal open={enrolling} onClose={() => setEnrolling(false)} />
+      <WorkerAssignmentsModal
+        worker={assigning}
+        onClose={() => setAssigning(null)}
+        onSaved={load}
+      />
 
       <div className="border border-border rounded-lg overflow-hidden">
         <div className="overflow-x-auto">
@@ -119,6 +126,7 @@ export default function AdminWorkersPage() {
                 <th className="text-left px-3 py-2 font-medium">Name</th>
                 <th className="text-left px-3 py-2 font-medium">Host</th>
                 <th className="text-left px-3 py-2 font-medium">Version</th>
+                <th className="text-left px-3 py-2 font-medium">Projects</th>
                 <th className="text-left px-3 py-2 font-medium">Running</th>
                 <th className="text-left px-3 py-2 font-medium">Last seen</th>
                 <th className="text-left px-3 py-2 font-medium">Binding error</th>
@@ -130,7 +138,7 @@ export default function AdminWorkersPage() {
             <tbody>
               {workers.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-3 py-6 text-center text-text-muted text-sm">
+                  <td colSpan={10} className="px-3 py-6 text-center text-text-muted text-sm">
                     No workers registered yet.
                   </td>
                 </tr>
@@ -143,6 +151,17 @@ export default function AdminWorkersPage() {
                     <td className="px-3 py-2 text-text-muted whitespace-nowrap">{worker.host || "—"}</td>
                     <td className="px-3 py-2 text-text-muted font-mono text-xs whitespace-nowrap">
                       {worker.version || "—"}
+                    </td>
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      <button
+                        type="button"
+                        onClick={() => setAssigning(worker)}
+                        className="text-primary hover:underline text-sm"
+                      >
+                        {worker.assignments.length === 0
+                          ? "Assign…"
+                          : `${worker.assignments.length} project${worker.assignments.length === 1 ? "" : "s"}`}
+                      </button>
                     </td>
                     <td className="px-3 py-2 whitespace-nowrap">
                       {worker.currentTask ? (
@@ -243,7 +262,7 @@ export default function AdminWorkersPage() {
                     </td>
                   </tr>,
                   <tr key={`${worker._id}-policy`} className="border-b border-border last:border-b-0">
-                    <td colSpan={9} className="px-3 pb-3 pt-0">
+                    <td colSpan={10} className="px-3 pb-3 pt-0">
                       <div className="flex flex-wrap gap-1.5">
                         {policyRows(worker).map((row) => (
                           <span
