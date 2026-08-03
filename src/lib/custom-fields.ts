@@ -209,3 +209,48 @@ function newOptionId(value: string): string {
   const slug = value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 24);
   return `${slug || "opt"}-${Math.random().toString(36).slice(2, 8)}`;
 }
+
+export interface FieldBadge {
+  key: string;
+  label: string;
+  color?: string;
+}
+
+/**
+ * Badges for the fields a project marked `showOnCard`. Option-backed fields carry
+ * their option's colour; the rest read as "Name: value", because a bare value on a
+ * card says nothing about which field it came from.
+ */
+export function cardBadges(
+  values: Record<string, unknown> | undefined,
+  fields: { _id: string; name: string; fieldType: ICustomField["fieldType"];
+            options?: LegacyOption[]; showOnCard?: boolean; archived?: boolean }[]
+): FieldBadge[] {
+  const badges: FieldBadge[] = [];
+
+  for (const field of fields) {
+    if (!field.showOnCard || field.archived) continue;
+    const value = values?.[field._id];
+    if (value === undefined || value === null || value === "") continue;
+
+    if (field.fieldType === "dropdown" || field.fieldType === "multiselect") {
+      const byId = new Map(normalizeOptions(field.options).map((o) => [o.id, o]));
+      const ids = Array.isArray(value) ? (value as string[]) : [String(value)];
+      for (const id of ids) {
+        const option = byId.get(id);
+        // An id with no option left is history, not a badge
+        if (option) badges.push({ key: `${field._id}:${id}`, label: option.value, color: option.color });
+      }
+      continue;
+    }
+
+    if (field.fieldType === "checkbox") {
+      if (value === true) badges.push({ key: field._id, label: field.name });
+      continue;
+    }
+
+    badges.push({ key: field._id, label: `${field.name}: ${String(value)}` });
+  }
+
+  return badges;
+}
