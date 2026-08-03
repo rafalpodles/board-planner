@@ -18,6 +18,50 @@ interface Row {
 
 const rows: Row[] = [
   {
+    // gh auth login stores gho_, delivery.ts forwards GH_TOKEN into gh, and github_pat_ is a
+    // different shape from ghp_ rather than a longer one
+    name: "the GitHub token shapes that are not ghp_",
+    input:
+      "GH_TOKEN=gho_16C7e42F292c6912E7710c838347Ae178B4a rejected; also github_pat_11AABBCCD0aBcDeFgHiJk_LmNoPqRsTuVwXyZ0123456789aBcDeFgHiJkLmNoPqRs",
+    mustNotAppear: ["gho_16C7e42F292c6912E7710c838347Ae178B4a", "github_pat_11AABBCCD0"],
+    mustAppear: ["GH_TOKEN=[redacted]", "rejected"],
+  },
+  {
+    // This system accepts Basic auth as well as Bearer, and base64 hides every other pattern here
+    name: "an Authorization header echoed back by an HTTP error",
+    input: "401 from /api/projects/CP/tasks/claim: Authorization: Basic cnBvOmNwX2ExYjJhMWIyYTFiMmExYjJhMWIyYTFiMmExYjJhMWIyYTFiMmExYjI=",
+    mustNotAppear: ["cnBvOmNwX2Ex"],
+    mustAppear: ["401 from /api/projects/CP/tasks/claim", "[redacted]"],
+  },
+  {
+    name: "a lowercase bearer header, since HTTP is case-insensitive",
+    input: "authorization: bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ3b3JrZXIifQ.7sVn-_1qO0aP",
+    mustNotAppear: ["eyJhbGciOiJIUzI1NiJ9"],
+    mustAppear: ["authorization: [redacted]"],
+  },
+  {
+    // A credential in userinfo is caught by where it sits, not by matching a known token shape
+    name: "a credential in a pull request url's userinfo",
+    input: "Merged https://x-access-token:ghp_0123456789abcdefghijABCDEFGHIJ012345@github.com/rafalpodles/ClaudePlanner/pull/7",
+    mustNotAppear: ["x-access-token", "ghp_0123456789"],
+    mustAppear: ["https://[redacted]@github.com/rafalpodles/ClaudePlanner/pull/7", "Merged"],
+  },
+  {
+    // The counterexample the no-\b decision turns on. Nothing pinned it before, so the tempting
+    // one-character "fix" could be made without any test objecting.
+    name: "kebab-case identifiers that merely look like key prefixes",
+    input: "disk-ant-collector-metrics-service failed after risk-based routing in task-service",
+    mustNotAppear: ["[redacted]"],
+    mustAppear: ["disk-ant-collector-metrics-service", "risk-based", "task-service"],
+  },
+  {
+    // ...and the glued secret the same decision protects, which \b would have missed
+    name: "a credential glued straight to preceding word characters",
+    input: `${"x".repeat(40)}cpw_9f3c9f3c9f3c9f3c9f3c9f3c9f3c9f3c9f3c9f3c9f3c9f3c9f3c9f3c9f3c9f3c`,
+    mustNotAppear: ["cpw_9f3c"],
+    mustAppear: ["[redacted]"],
+  },
+  {
     name: "a GitHub token embedded in a push failure",
     input: `could not push \`cp-161/worker\`: remote: Invalid username or password for https://x-access-token:${GITHUB_PAT}@github.com/rafalpodles/ClaudePlanner.git`,
     mustNotAppear: [GITHUB_PAT, "0123456789abcdefghij"],
