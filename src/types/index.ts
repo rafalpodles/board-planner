@@ -30,7 +30,6 @@ export const TASK_STATUSES: TaskStatus[] = [
   "done",
 ];
 
-export const DIFFICULTIES: Difficulty[] = ["S", "M", "L", "XL"];
 export const CATEGORIES: Category[] = ["bug", "doc", "user-story", "idea"];
 
 export const DEFAULT_PROJECT_CATEGORIES: { name: string; color: string }[] = [
@@ -805,8 +804,7 @@ export type SortField =
   | "title"
   | "status"
   | "assignee"
-  | "sprint"
-  | "component";
+  | "sprint";
 export type SortDir = "asc" | "desc";
 
 /** A sort key is a built-in field or a project field's id (CP-212). The `string & {}`
@@ -820,13 +818,11 @@ export const SORT_OPTIONS: { value: SortField; label: string; defaultDir: SortDi
   { value: "createdAt", label: "Created", defaultDir: "desc" },
   { value: "dueDate", label: "Due date", defaultDir: "asc" },
   { value: "priority", label: "Priority", defaultDir: "asc" },
-  { value: "difficulty", label: "Difficulty", defaultDir: "asc" },
   { value: "category", label: "Category", defaultDir: "asc" },
   { value: "title", label: "Title", defaultDir: "asc" },
   { value: "status", label: "Status", defaultDir: "asc" },
   { value: "assignee", label: "Assignee", defaultDir: "asc" },
   { value: "sprint", label: "Sprint", defaultDir: "asc" },
-  { value: "component", label: "Component", defaultDir: "asc" },
 ];
 
 // The board already groups by status and shows no assignee, sprint or component
@@ -838,7 +834,6 @@ export const BOARD_SORT_FIELDS: SortField[] = [
   "createdAt",
   "dueDate",
   "priority",
-  "difficulty",
   "category",
   "title",
 ];
@@ -948,8 +943,6 @@ export interface ApiNotification {
 export interface ParsedTask {
   title: string;
   category: Category;
-  component?: string;
-  difficulty?: Difficulty;
   priority?: Priority;
   status?: TaskStatus;
   assignee?: string;

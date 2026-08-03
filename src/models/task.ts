@@ -1,5 +1,5 @@
 import mongoose, { Schema, Model } from "mongoose";
-import { ITask, DIFFICULTIES, PRIORITIES, DEFAULT_PRIORITY } from "@/types";
+import { ITask, PRIORITIES, DEFAULT_PRIORITY } from "@/types";
 
 const taskSchema = new Schema<ITask>(
   {

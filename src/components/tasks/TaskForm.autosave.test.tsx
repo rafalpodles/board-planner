@@ -35,7 +35,6 @@ function renderForm() {
     <TaskForm
       projectId="p1"
       task={task}
-      components={[]}
       categories={["idea"]}
       onSaved={() => {}}
       onCancel={() => {}}

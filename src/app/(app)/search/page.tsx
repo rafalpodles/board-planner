@@ -153,9 +153,6 @@ function SearchContent() {
                   <Badge variant="priority" value={task.priority}>
                     {PRIORITY_LABELS[task.priority] ?? task.priority}
                   </Badge>
-                  <Badge variant="difficulty" value={task.difficulty}>
-                    {task.difficulty}
-                  </Badge>
                 </Link>
               ))}
             </div>

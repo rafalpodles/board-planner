@@ -121,9 +121,7 @@ export const PM_TOOLS: Record<string, PmTool> = {
           ...compactTask(ctx, t),
           description: (t.description || "").slice(0, MAX_TEXT_RESULT),
           category: t.category,
-          component: t.component,
           dueDate: t.dueDate,
-          labels: t.labels,
           checklist: (t.checklist || []).map((c) => ({ text: c.text, done: c.done })),
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           blockedBy: (t.blockedBy || []).map((b: any) =>

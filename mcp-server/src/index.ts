@@ -61,16 +61,14 @@ server.tool(
     project: z.string().describe("Project key (e.g. 'CP')"),
     status: z.string().optional().describe("Filter by status (comma-separated): planned, todo, in_progress, in_review, needs_human_review, ready_to_test, done"),
     assignee: z.string().optional().describe("Filter by assignee username"),
-    component: z.string().optional().describe("Filter by component name"),
     category: z.string().optional().describe("Filter by category (project-defined; defaults: bug, doc, user-story, idea)"),
     priority: z.string().optional().describe("Filter by priority: low, medium, high, urgent"),
   },
-  async ({ project, status, assignee, component, category, priority }) => {
+  async ({ project, status, assignee, category, priority }) => {
     const proj = await client.getProjectByKey(project) as { _id: string };
     const filters: Record<string, string> = {};
     if (status) filters.status = status;
     if (assignee) filters.assignee = assignee;
-    if (component) filters.component = component;
     if (category) filters.category = category;
     if (priority) filters.priority = priority;
 
@@ -90,6 +88,57 @@ server.tool(
   }
 );
 
+type FieldDef = {
+  _id: string;
+  name: string;
+  fieldType: string;
+  options?: (string | { id: string; value: string })[];
+  archived?: boolean;
+};
+
+/**
+ * Maps { "Difficulty": "L" } onto { <fieldId>: <optionId> }. Callers name fields and
+ * options the way they read them; the API only ever stores ids.
+ */
+function resolveFieldsByName(
+  input: Record<string, unknown>,
+  definitions: FieldDef[]
+): Record<string, unknown> {
+  const byName = new Map(
+    (definitions || []).filter((f) => !f.archived).map((f) => [f.name.toLowerCase(), f])
+  );
+  const values: Record<string, unknown> = {};
+
+  for (const [name, raw] of Object.entries(input || {})) {
+    const field = byName.get(name.trim().toLowerCase());
+    if (!field) {
+      const known = [...byName.values()].map((f) => f.name).join(", ") || "none";
+      throw new Error(`Unknown field "${name}". Available: ${known}`);
+    }
+
+    if (field.fieldType === "dropdown" || field.fieldType === "multiselect") {
+      const options = (field.options || []).map((o) =>
+        typeof o === "string" ? { id: o, value: o } : o
+      );
+      const resolve = (value: unknown) => {
+        const text = String(value).trim().toLowerCase();
+        const match =
+          options.find((o) => o.id.toLowerCase() === text) ||
+          options.find((o) => o.value.trim().toLowerCase() === text);
+        if (!match) {
+          const known = options.map((o) => o.value).join(", ") || "none";
+          throw new Error(`Unknown option "${value}" for "${field.name}". Available: ${known}`);
+        }
+        return match.id;
+      };
+      values[field._id] = Array.isArray(raw) ? raw.map(resolve) : resolve(raw);
+    } else {
+      values[field._id] = raw;
+    }
+  }
+  return values;
+}
+
 server.tool(
   "create_task",
   "Create a new task in a project",
@@ -97,25 +146,31 @@ server.tool(
     project: z.string().describe("Project key (e.g. 'CP')"),
     title: z.string().describe("Task title"),
     description: z.string().optional().describe("Task description"),
-    difficulty: z.string().optional().describe("Difficulty: S, M, L, or XL"),
     priority: z.string().optional().describe("Priority: low, medium, high, or urgent (default: medium)"),
-    component: z.string().optional().describe("Component name"),
     category: z.string().optional().describe("Category — one of the project's configured categories (defaults: bug, doc, user-story, idea)"),
     assignee: z.string().optional().describe("Assignee username"),
     status: z.string().optional().describe("Initial status (default: planned)"),
     acceptanceCriteria: z.string().optional().describe("Acceptance criteria (markdown checklist, converted to structured checklist items)"),
+    fields: z
+      .record(z.any())
+      .optional()
+      .describe(
+        "Project-defined fields keyed by field name, e.g. { \"Difficulty\": \"L\", \"Component\": \"ui\" }. " +
+          "Since CP-214 this is the only way to set them — see get_project for the field list."
+      ),
   },
-  async ({ project, title, description, difficulty, priority, component, category, assignee, status, acceptanceCriteria }) => {
-    const proj = await client.getProjectByKey(project) as { _id: string };
+  async ({ project, title, description, priority, category, assignee, status, acceptanceCriteria, fields }) => {
+    const proj = await client.getProjectByKey(project) as { _id: string; customFields?: FieldDef[] };
     const data: Record<string, unknown> = { title };
 
     if (description) data.description = description;
-    if (difficulty) data.difficulty = difficulty;
     if (priority) data.priority = priority;
-    if (component) data.component = component;
     if (category) data.category = category;
     if (status) data.status = status;
     if (acceptanceCriteria) data.acceptanceCriteria = acceptanceCriteria;
+    if (fields && Object.keys(fields).length) {
+      data.customFieldValues = resolveFieldsByName(fields, proj.customFields || []);
+    }
 
     if (assignee) {
       const users = await client.listUsers() as { _id: string; username: string }[];
@@ -136,24 +191,34 @@ server.tool(
     taskKey: z.string().describe("Task key (e.g. 'CP-1')"),
     title: z.string().optional(),
     description: z.string().optional(),
-    difficulty: z.string().optional(),
     priority: z.string().optional().describe("Priority: low, medium, high, or urgent"),
-    component: z.string().optional(),
     category: z.string().optional(),
     assignee: z.string().optional().describe("Assignee username. Empty string to unassign."),
     acceptanceCriteria: z.string().optional().describe("Acceptance criteria (markdown checklist, converted to structured checklist items)"),
+    fields: z
+      .record(z.any())
+      .optional()
+      .describe(
+        "Project-defined fields keyed by field name, e.g. { \"Difficulty\": \"L\", \"Component\": \"ui\" }. " +
+          "Since CP-214 this is the only way to set them — see get_project for the field list."
+      ),
   },
-  async ({ taskKey, title, description, difficulty, priority, component, category, assignee, acceptanceCriteria }) => {
+  async ({ taskKey, title, description, priority, category, assignee, acceptanceCriteria, fields }) => {
     const { projectId, task } = await resolveTaskKey(taskKey);
     const data: Record<string, unknown> = {};
 
     if (title !== undefined) data.title = title;
     if (description !== undefined) data.description = description;
-    if (difficulty !== undefined) data.difficulty = difficulty;
     if (priority !== undefined) data.priority = priority;
-    if (component !== undefined) data.component = component;
     if (category !== undefined) data.category = category;
     if (acceptanceCriteria !== undefined) data.acceptanceCriteria = acceptanceCriteria;
+    if (fields && Object.keys(fields).length) {
+      // customFieldValues is replaced wholesale, so the task's other values are
+      // merged back in rather than cleared by naming a single field
+      const project = await client.getProject(projectId) as { customFields?: FieldDef[] };
+      const current = ((task as { customFieldValues?: Record<string, unknown> }).customFieldValues) || {};
+      data.customFieldValues = { ...current, ...resolveFieldsByName(fields, project.customFields || []) };
+    }
 
     if (assignee !== undefined) {
       if (assignee) {

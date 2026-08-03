@@ -11,18 +11,15 @@ import { useToast } from "@/components/ui/Toast";
 import {
   ApiTask,
   ApiUser,
-  ApiLabel,
   ApiTaskTemplate,
   ApiSprint,
   ApiCustomField,
   ApiChecklistItem,
   RecurrenceFrequency,
   TaskStatus,
-  Difficulty,
   Priority,
   Category,
   ApiProjectColumn,
-  DIFFICULTIES,
   PRIORITIES,
   PRIORITY_LABELS,
   CATEGORIES,
@@ -30,7 +27,6 @@ import {
 import { effectiveColumns } from "@/lib/columns";
 import { parseChecklistString } from "@/lib/checklist";
 import { activeFields, sortedFields, orderedOptions } from "@/lib/custom-fields";
-import { legacyRenderingSuppressed } from "@/lib/legacy-fields";
 import type { GeneratedTask } from "@/lib/ai";
 
 const AUTOSAVE_DEBOUNCE_MS = 700;
@@ -42,16 +38,13 @@ function serverSnapshot(task: ApiTask): Record<string, unknown> {
   return {
     title: task.title || "",
     description: task.description || "",
-    difficulty: task.difficulty || "M",
     priority: task.priority || "medium",
-    component: task.component || "",
     category: task.category,
     status: task.status,
     assignee:
       (task.assignee && typeof task.assignee === "object" ? task.assignee.username : "") || null,
     dueDate: (task.dueDate ? task.dueDate.substring(0, 10) : "") || null,
     checklist: task.checklist || [],
-    labels: task.labels || [],
     sprint: task.sprint || null,
     recurrence: task.recurrence
       ? { frequency: task.recurrence.frequency, interval: task.recurrence.interval }
@@ -64,10 +57,8 @@ interface TaskFormProps {
   projectId: string;
   projectKey?: string;
   task?: ApiTask;
-  components: string[];
   categories?: string[];
   columns?: ApiProjectColumn[];
-  projectLabels?: ApiLabel[];
   taskTemplates?: ApiTaskTemplate[];
   sprints?: ApiSprint[];
   /** Pre-selects a sprint when creating; ignored when editing an existing task */
@@ -83,10 +74,8 @@ export function TaskForm({
   projectId,
   projectKey,
   task,
-  components,
   categories = [],
   columns,
-  projectLabels = [],
   taskTemplates = [],
   sprints = [],
   defaultSprint = "",
@@ -97,9 +86,7 @@ export function TaskForm({
 }: TaskFormProps) {
   const [title, setTitle] = useState(task?.title || "");
   const [description, setDescription] = useState(task?.description || "");
-  const [difficulty, setDifficulty] = useState<Difficulty>(task?.difficulty || "M");
   const [priority, setPriority] = useState<Priority>(task?.priority || "medium");
-  const [component, setComponent] = useState(task?.component || "");
   const [category, setCategory] = useState<Category>(
     task?.category || (categories.includes("user-story") ? "user-story" : categories[0] || "user-story")
   );
@@ -119,9 +106,6 @@ export function TaskForm({
     task?.checklist || []
   );
   const [newChecklistItem, setNewChecklistItem] = useState("");
-  const [selectedLabels, setSelectedLabels] = useState<string[]>(
-    task?.labels || []
-  );
   const [sprint, setSprint] = useState(task?.sprint || defaultSprint || "");
   const [customFieldValues, setCustomFieldValues] = useState<Record<string, unknown>>(
     task?.customFieldValues || {}
@@ -142,10 +126,6 @@ export function TaskForm({
   const [autoSaveState, setAutoSaveState] = useState<AutoSaveState>("idle");
   const api = useApi();
   const { toast } = useToast();
-  // The migrated field carries its own control; the hardcoded one would be a
-  // second input for the same value (CP-213)
-  const migrated = (key: "component" | "difficulty" | "labels") =>
-    legacyRenderingSuppressed(customFields, key);
 
   useEffect(() => {
     api.get("/api/users").then(setUsers).catch(() => toast("Failed to load users", "error"));
@@ -178,9 +158,7 @@ export function TaskForm({
       );
       setTitle(result.title || "");
       setDescription(result.description || "");
-      setDifficulty(result.difficulty || "M");
       setCategory(result.category || "user-story");
-      setComponent(result.component || "");
       setChecklist(parseChecklistString(result.acceptanceCriteria || ""));
       setAiInsights(result);
       toast("Fields filled by AI — review and save", "success");
@@ -194,15 +172,12 @@ export function TaskForm({
   const body = {
     title,
     description,
-    difficulty,
     priority,
-    component,
     category,
     status,
     assignee: assignee || null,
     dueDate: dueDate || null,
     checklist,
-    labels: selectedLabels,
     sprint: sprint || null,
     recurrence: recurrenceFreq
       ? { frequency: recurrenceFreq, interval: recurrenceInterval }
@@ -221,15 +196,12 @@ export function TaskForm({
     switch (key) {
       case "title": return setTitle(value as string);
       case "description": return setDescription(value as string);
-      case "difficulty": return setDifficulty(value as Difficulty);
       case "priority": return setPriority(value as Priority);
-      case "component": return setComponent(value as string);
       case "category": return setCategory(value as Category);
       case "status": return setStatus(value as TaskStatus);
       case "assignee": return setAssignee((value as string) ?? "");
       case "dueDate": return setDueDate((value as string) ?? "");
       case "checklist": return setChecklist(value as { text: string; done: boolean }[]);
-      case "labels": return setSelectedLabels(value as string[]);
       case "sprint": return setSprint((value as string) ?? "");
       case "customFieldValues": return setCustomFieldValues(value as Record<string, unknown>);
       case "recurrence": {
@@ -386,9 +358,7 @@ export function TaskForm({
             if (tpl) {
               if (tpl.title) setTitle(tpl.title);
               if (tpl.description) setDescription(tpl.description);
-              setDifficulty(tpl.difficulty);
               setCategory(tpl.category);
-              if (tpl.component) setComponent(tpl.component);
               if (tpl.acceptanceCriteria) setChecklist(parseChecklistString(tpl.acceptanceCriteria));
             }
           }}
@@ -494,14 +464,6 @@ export function TaskForm({
             label: c.label,
           }))}
         />
-        {!migrated("difficulty") && (
-          <Select
-            label="Difficulty"
-            value={difficulty}
-            onChange={(e) => setDifficulty(e.target.value as Difficulty)}
-            options={DIFFICULTIES.map((d) => ({ value: d, label: d }))}
-          />
-        )}
         <Select
           label="Priority"
           value={priority}
@@ -517,15 +479,6 @@ export function TaskForm({
           onChange={(e) => setCategory(e.target.value as Category)}
           options={(categories.length > 0 ? categories : CATEGORIES).map((c) => ({ value: c, label: c }))}
         />
-        {!migrated("component") && (
-          <Select
-            label="Component"
-            value={component}
-            onChange={(e) => setComponent(e.target.value)}
-            options={components.map((c) => ({ value: c, label: c }))}
-            placeholder="None"
-          />
-        )}
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -683,38 +636,6 @@ export function TaskForm({
               />
             );
           })}
-        </div>
-      )}
-
-      {projectLabels.length > 0 && !migrated("labels") && (
-        <div>
-          <label className="block text-sm font-medium mb-1">Labels</label>
-          <div className="flex flex-wrap gap-2">
-            {projectLabels.map((label) => {
-              const isSelected = selectedLabels.includes(label._id);
-              return (
-                <button
-                  key={label._id}
-                  type="button"
-                  onClick={() =>
-                    setSelectedLabels((prev) =>
-                      isSelected
-                        ? prev.filter((id) => id !== label._id)
-                        : [...prev, label._id]
-                    )
-                  }
-                  className={`text-xs px-2.5 py-1 rounded-full border transition-colors font-medium ${
-                    isSelected
-                      ? "text-white border-transparent"
-                      : "border-border text-text-muted hover:border-primary/50"
-                  }`}
-                  style={isSelected ? { backgroundColor: label.color } : undefined}
-                >
-                  {label.name}
-                </button>
-              );
-            })}
-          </div>
         </div>
       )}
 

@@ -2,11 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   legacyFieldSeeds,
   findLegacyField,
-  legacyFieldValue,
   migratedValuesFor,
   withValuesInUse,
-  legacyRenderingSuppressed,
-  dualWriteLegacyColumns,
 } from "./legacy-fields";
 import { ApiCustomField, ApiLabel } from "@/types";
 
@@ -65,37 +62,6 @@ describe("legacyFieldSeeds", () => {
   });
 });
 
-describe("legacyFieldValue", () => {
-  const fields = seededFields();
-
-  // Until the script runs, the value only exists in the old column — reading
-  // through here is what stops an unmigrated database looking empty
-  it("falls back to the legacy column when nothing was migrated", () => {
-    const task = { component: "ui", difficulty: "L", labels: ["lab1"], customFieldValues: {} };
-    expect(legacyFieldValue(task, fields, "component")).toBe("ui");
-    expect(legacyFieldValue(task, fields, "difficulty")).toBe("L");
-    expect(legacyFieldValue(task, fields, "labels")).toEqual(["lab1"]);
-  });
-
-  it("prefers the migrated value once it is there", () => {
-    const task = {
-      component: "ui",
-      difficulty: "L",
-      labels: ["lab1"],
-      customFieldValues: { f0: "backend", f1: "XL", f2: ["lab2"] },
-    };
-    expect(legacyFieldValue(task, fields, "component")).toBe("backend");
-    expect(legacyFieldValue(task, fields, "difficulty")).toBe("XL");
-    expect(legacyFieldValue(task, fields, "labels")).toEqual(["lab2"]);
-  });
-
-  it("still reads the legacy column when the project was never seeded", () => {
-    const task = { component: "ui", difficulty: "M", labels: [] };
-    expect(legacyFieldValue(task, [], "component")).toBe("ui");
-    expect(legacyFieldValue(task, undefined, "difficulty")).toBe("M");
-  });
-});
-
 describe("migratedValuesFor", () => {
   const fields = seededFields();
 
@@ -140,59 +106,5 @@ describe("findLegacyField", () => {
 
   it("returns nothing when the project has no such field", () => {
     expect(findLegacyField([], "component")).toBeUndefined();
-  });
-});
-
-describe("legacyRenderingSuppressed", () => {
-  const seeded = legacyFieldSeeds(project).map((f, i) => ({ ...f, _id: `f${i}` })) as ApiCustomField[];
-
-  // Without this every card, row and filter panel showed the same value twice
-  it("stands the hardcoded rendering down once the field is seeded", () => {
-    expect(legacyRenderingSuppressed(seeded, "component")).toBe(true);
-    expect(legacyRenderingSuppressed(seeded, "difficulty")).toBe(true);
-    expect(legacyRenderingSuppressed(seeded, "labels")).toBe(true);
-  });
-
-  it("leaves it alone on a project that was never migrated", () => {
-    expect(legacyRenderingSuppressed([], "component")).toBe(false);
-    expect(legacyRenderingSuppressed(undefined, "difficulty")).toBe(false);
-  });
-
-  // Turning the badge off is a choice; the old rendering must not creep back
-  it("stays suppressed when the field exists but its switches are off", () => {
-    const off = seeded.map((f) => ({ ...f, showOnCard: false, showInList: false }));
-    expect(legacyRenderingSuppressed(off, "difficulty")).toBe(true);
-  });
-});
-
-describe("dualWriteLegacyColumns", () => {
-  const fields = seededFields();
-
-  // CP-214 removes this; until then a rollback has to find the columns current
-  it("mirrors a migrated edit back onto the legacy column", () => {
-    expect(dualWriteLegacyColumns({ f0: "backend", f1: "XL", f2: ["lab1"] }, fields)).toEqual({
-      component: "backend",
-      difficulty: "XL",
-      labels: ["lab1"],
-    });
-  });
-
-  it("touches only the columns whose field was edited", () => {
-    expect(dualWriteLegacyColumns({ f1: "S" }, fields)).toEqual({ difficulty: "S" });
-  });
-
-  it("clears the column when the value was cleared", () => {
-    expect(dualWriteLegacyColumns({ f0: "" }, fields)).toEqual({ component: "" });
-    expect(dualWriteLegacyColumns({ f2: [] }, fields)).toEqual({ labels: [] });
-  });
-
-  // The column is an enum: a renamed difficulty option would not be a valid value,
-  // and writing it would make the document fail validation
-  it("refuses to write a difficulty the enum does not know", () => {
-    expect(dualWriteLegacyColumns({ f1: "Enormous" }, fields)).toEqual({});
-  });
-
-  it("does nothing on a project that was never migrated", () => {
-    expect(dualWriteLegacyColumns({ anything: "x" }, [])).toEqual({});
   });
 });

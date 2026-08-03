@@ -17,7 +17,6 @@ import {
 } from "@/types";
 import { ListColumnId, isColumnVisible, listColumns as projectListColumns } from "@/lib/list-columns";
 import { fieldCellText } from "@/lib/custom-fields";
-import { legacyRenderingSuppressed } from "@/lib/legacy-fields";
 import { effectiveColumns } from "@/lib/columns";
 import { Badge } from "@/components/ui/Badge";
 import { categoryColor, categoryTint } from "@/lib/category-colors";
@@ -58,8 +57,6 @@ function sprintTiming(sprint: ApiSprint): "active" | "past" | "upcoming" {
   return "active";
 }
 
-const DIFFICULTY_ORDER: Record<string, number> = { S: 0, M: 1, L: 2, XL: 3 };
-
 export function ListView({
   tasks,
   projectKey,
@@ -83,16 +80,7 @@ export function ListView({
   customFields = [],
 }: ListViewProps) {
   const selectionActive = selectionMode || (selectedTasks?.size ?? 0) > 0;
-  // A migrated field renders its own column; the built-in one would repeat it
-  const show = (id: ListColumnId) => {
-    if (
-      (id === "difficulty" && legacyRenderingSuppressed(customFields, "difficulty")) ||
-      (id === "component" && legacyRenderingSuppressed(customFields, "component"))
-    ) {
-      return false;
-    }
-    return isColumnVisible(id, hiddenColumns);
-  };
+  const show = (id: ListColumnId) => isColumnVisible(id, hiddenColumns);
   const fieldColumns = useMemo(
     () => projectListColumns(customFields).filter((c) => c.field && show(c.id)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -226,25 +214,11 @@ export function ListView({
                   className="hidden lg:table-cell"
                 />
               )}
-              {show("difficulty") && (
-                <SortHeader
-                  label="Difficulty"
-                  column="difficulty"
-                  className="hidden lg:table-cell"
-                />
-              )}
               {show("category") && (
                 <SortHeader
                   label="Category"
                   column="category"
                   className="hidden lg:table-cell"
-                />
-              )}
-              {show("component") && (
-                <SortHeader
-                  label="Component"
-                  column="component"
-                  className="hidden xl:table-cell"
                 />
               )}
               {show("dueDate") && (
@@ -476,13 +450,6 @@ export function ListView({
                       })()}
                     </td>
                   )}
-                  {show("difficulty") && (
-                    <td className="px-2 py-2 hidden lg:table-cell">
-                      <Badge variant="difficulty" value={task.difficulty}>
-                        {task.difficulty}
-                      </Badge>
-                    </td>
-                  )}
                   {show("category") && (
                     <td className="px-2 py-2 hidden lg:table-cell max-w-32">
                       <Badge
@@ -495,14 +462,6 @@ export function ListView({
                           {task.category}
                         </span>
                       </Badge>
-                    </td>
-                  )}
-                  {show("component") && (
-                    <td
-                      className="px-2 py-2 hidden xl:table-cell text-text-muted max-w-32"
-                      title={task.component || undefined}
-                    >
-                      <div className="truncate">{task.component || "—"}</div>
                     </td>
                   )}
                   {show("dueDate") && (

@@ -12,11 +12,8 @@ export interface BoardFilterValues {
   /** Keyed by field id, so the built-in keys stay a closed set */
   fields: Record<string, FieldFilter>;
   assignee: string;
-  component: string;
   category: string;
-  difficulty: string;
   priority: string;
-  label: string;
   dateRange: string;
 }
 
@@ -31,11 +28,8 @@ export interface PersistedBoardFilters {
 export const EMPTY_FILTERS: BoardFilterValues = {
   fields: {},
   assignee: "",
-  component: "",
   category: "",
-  difficulty: "",
   priority: "",
-  label: "",
   dateRange: "",
 };
 
