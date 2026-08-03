@@ -10,7 +10,7 @@ import {
 } from "./custom-fields";
 import { DEFAULT_OPTION_COLOR, ICustomField } from "@/types";
 
-function field(over: Partial<ICustomField> & { _id: string }): ICustomField {
+function field(over: Partial<Omit<ICustomField, "_id">> & { _id: string }): ICustomField {
   return {
     name: "Owoce",
     fieldType: "dropdown",
