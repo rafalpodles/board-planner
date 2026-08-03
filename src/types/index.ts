@@ -429,6 +429,17 @@ export interface ApiWorker {
   createdAt: string;
   updatedAt: string;
   stale: boolean;
+  // The task this worker holds right now, if any. Phase lives on the task, not the worker, so the
+  // route has to join — a worker document alone cannot answer "what is it doing".
+  currentTask?: ApiWorkerTask;
+}
+
+export interface ApiWorkerTask {
+  taskId: string;
+  taskKey: string;
+  title: string;
+  phase?: string;
+  phaseAt?: string | null;
 }
 
 export interface ITaskExecution {

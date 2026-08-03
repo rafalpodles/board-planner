@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import { isValidObjectId } from "mongoose";
 import { connectDB } from "./db";
 import { Worker } from "@/models/worker";
-import { ApiWorker, IWorker } from "@/types";
+import { ApiWorker, ApiWorkerTask, IWorker } from "@/types";
 
 export const PROTOCOL_VERSION = 1;
 export const WORKER_STALE_MS = 5 * 60 * 1000;
@@ -89,7 +89,11 @@ export async function touchWorker(
 
 // Built field-by-field so credentialHash can never leak through, even if a caller
 // passes in a document that was queried with it selected
-export function toApiWorker(worker: IWorker, now = new Date()): ApiWorker {
+export function toApiWorker(
+  worker: IWorker,
+  now = new Date(),
+  currentTask?: ApiWorkerTask
+): ApiWorker {
   const seenAt = worker.lastSeenAt ? new Date(worker.lastSeenAt).getTime() : NaN;
   const stale = !Number.isFinite(seenAt) || now.getTime() - seenAt > WORKER_STALE_MS;
 
@@ -115,5 +119,6 @@ export function toApiWorker(worker: IWorker, now = new Date()): ApiWorker {
     createdAt: new Date(worker.createdAt).toISOString(),
     updatedAt: new Date(worker.updatedAt).toISOString(),
     stale,
+    ...(currentTask ? { currentTask } : {}),
   };
 }
