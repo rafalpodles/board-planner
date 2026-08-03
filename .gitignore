@@ -32,3 +32,6 @@ next-env.d.ts
 
 # mcp-server build
 /mcp-server/dist/
+
+# Database snapshots taken before migrations — never commit, they hold every task
+backups/
