@@ -138,14 +138,14 @@ describe("Sidebar", () => {
     expect(screen.getByText("My Tasks")).toBeTruthy();
   });
 
-  it("keeps the parent nav item active on a nested route", async () => {
-    nav.pathname = "/settings/users";
+  // The Settings row this used to assert on left with the Instance group (CP-216);
+  // the rule itself is covered by nav-active.test.ts and the collapsed-rail case
+  it("marks only the nav item the route belongs to", async () => {
+    nav.pathname = "/my-tasks";
     renderSidebar();
-    const settings = await screen.findByText("Settings");
-    expect(settings.closest("a")?.getAttribute("aria-current")).toBe("page");
-
-    const myTasks = screen.getByText("My Tasks");
-    expect(myTasks.closest("a")?.getAttribute("aria-current")).toBeNull();
+    const myTasks = await screen.findByText("My Tasks");
+    expect(myTasks.closest("a")?.getAttribute("aria-current")).toBe("page");
+    expect(screen.getByText("Notifications").closest("a")?.getAttribute("aria-current")).toBeNull();
   });
 
   // The expanded sidebar hands the Projects group to ProjectTree; only the
@@ -320,5 +320,25 @@ describe("Sidebar search row", () => {
 
     await act(async () => screen.getByRole("button", { name: "Search" }).click());
     expect(onOpenSearch).toHaveBeenCalled();
+  });
+});
+
+// CP-216: the same page hangs off the user menu, so the Instance group was
+// one entry pretending to be a section
+describe("Sidebar instance settings", () => {
+  it("offers no Instance group in the nav", async () => {
+    renderSidebar();
+    await waitFor(() => expect(screen.getByText("My Tasks")).toBeTruthy());
+    expect(screen.queryByText("Instance")).toBeNull();
+    expect(screen.queryByRole("link", { name: "Settings" })).toBeNull();
+  });
+
+  it("still reaches settings from the user menu", async () => {
+    renderSidebar();
+    await waitFor(() => expect(screen.getByText("Admin User")).toBeTruthy());
+
+    await act(async () => screen.getByText("Admin User").closest("button")!.click());
+    const link = screen.getByRole("link", { name: "Settings" });
+    expect(link.getAttribute("href")).toBe("/settings");
   });
 });
