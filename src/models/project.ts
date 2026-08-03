@@ -1,5 +1,5 @@
 import mongoose, { Schema, Model } from "mongoose";
-import { IProject, DIFFICULTIES, DEFAULT_PROJECT_CATEGORIES, DEFAULT_PROJECT_COLUMNS, COLUMN_ROLES, WEBHOOK_EVENTS, NOTIFICATION_CHANNEL_TYPES, CUSTOM_FIELD_TYPES, DEFAULT_OPTION_COLOR } from "@/types";
+import { IProject, DIFFICULTIES, DEFAULT_PROJECT_CATEGORIES, DEFAULT_PROJECT_COLUMNS, COLUMN_ROLES, WEBHOOK_EVENTS, NOTIFICATION_CHANNEL_TYPES, CUSTOM_FIELD_TYPES } from "@/types";
 
 const labelSchema = new Schema(
   {
@@ -38,21 +38,14 @@ const taskTemplateSchema = new Schema(
   }
 );
 
-const customFieldOptionSchema = new Schema(
-  {
-    id: { type: String, required: true },
-    value: { type: String, required: true, trim: true },
-    color: { type: String, default: DEFAULT_OPTION_COLOR },
-    order: { type: Number, default: 0 },
-  },
-  { _id: false }
-);
-
 const customFieldSchema = new Schema(
   {
     name: { type: String, required: true, trim: true },
     fieldType: { type: String, enum: CUSTOM_FIELD_TYPES, required: true },
-    options: { type: [customFieldOptionSchema], default: [] },
+    // Mixed, not a subdocument schema: options stored before CP-211 are plain
+    // strings, and casting them to the new shape silently discards them. Shape is
+    // enforced in lib/custom-fields.ts, which also converts the legacy form.
+    options: { type: [Schema.Types.Mixed], default: [] },
     required: { type: Boolean, default: false },
     order: { type: Number, default: 0 },
     showOnCard: { type: Boolean, default: false },
