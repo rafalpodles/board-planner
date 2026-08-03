@@ -26,6 +26,7 @@ export interface CodaTaskRow {
   status: string;
   assignee: string;
   priority: string;
+  difficulty: string;
   category: string;
   due: string;
   link: string;
@@ -89,6 +90,7 @@ function toCells(row: CodaTaskRow) {
     { column: "Status", value: row.status },
     { column: "Assignee", value: row.assignee },
     { column: "Priority", value: row.priority },
+    { column: "Difficulty", value: row.difficulty },
     { column: "Category", value: row.category },
     { column: "Due", value: row.due },
     { column: "Link", value: row.link },
