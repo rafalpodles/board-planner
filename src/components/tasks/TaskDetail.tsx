@@ -13,6 +13,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Modal } from "@/components/ui/Modal";
 import { TaskForm } from "@/components/tasks/TaskForm";
 import { TaskActivityPanel } from "@/components/tasks/TaskActivityPanel";
+import { ExecutionPanel } from "@/components/tasks/ExecutionPanel";
 import { TaskLinks } from "@/components/tasks/TaskLinks";
 import { useToast } from "@/components/ui/Toast";
 import { GitlabActivity } from "@/components/tasks/GitlabActivity";
@@ -212,6 +213,8 @@ export function TaskDetail({
           onSaved={loadData}
           onCancel={onClose}
         />
+
+        <ExecutionPanel execution={task.execution} />
 
         {/* Linked PRs */}
         {task.linkedPRs && task.linkedPRs.length > 0 && (
