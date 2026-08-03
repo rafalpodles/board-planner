@@ -4,6 +4,8 @@ import { withProjectAccess } from "@/lib/middleware";
 import { Task } from "@/models/task";
 import { DEFAULT_PRIORITY } from "@/types";
 import { createTask, toApiExecution } from "@/lib/task-service";
+import { Worker } from "@/models/worker";
+import { ITaskExecution } from "@/types";
 
 const populateFields = [
   { path: "assignee", select: "username fullName" },
@@ -79,10 +81,24 @@ export const GET = withProjectAccess(async (request, { params }) => {
 
   // The board loads every task, so a raw document here would publish each one's whole execution
   // subdocument — run identity included — to every project member on every page load
+  const workerNames = await workerNamesFor(tasks.map((task) => task.execution));
   return NextResponse.json(
-    tasks.map((task) => ({ ...task.toObject(), execution: toApiExecution(task.execution) }))
+    tasks.map((task) => ({
+      ...task.toObject(),
+      execution: toApiExecution(task.execution, workerNames),
+    }))
   );
 });
+
+
+// Only runs still holding a task carry a workerId, so this reads a handful of documents at most —
+// and skips the query entirely when nothing is running.
+async function workerNamesFor(executions: (ITaskExecution | undefined)[]): Promise<Map<string, string>> {
+  const ids = [...new Set(executions.filter((e) => e?.runId && e.workerId).map((e) => e!.workerId))];
+  if (ids.length === 0) return new Map();
+  const workers = await Worker.find({ _id: { $in: ids } }).select("name").lean();
+  return new Map(workers.map((w) => [String(w._id), w.name as string]));
+}
 
 export const POST = withProjectAccess(async (request, { params, user }) => {
   const { projectId } = await params;
