@@ -73,6 +73,10 @@ struct PanelView: View {
                 .disabled(model.state.currentPhase == nil)
 
             Spacer()
+
+            // In an LSUIElement app there is no menu bar, so a Settings scene is unreachable
+            // without this.
+            SettingsLink { Text("Preferences…") }
         }
     }
 
