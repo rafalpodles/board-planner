@@ -160,6 +160,25 @@ export function sanitizeCustomFieldValues(
 }
 
 /** Options in their configured order; dropdown and multiselect both render from this */
+/**
+ * The option id for a value written the way a human or a model would write it, or
+ * undefined when the field does not offer it. Unlike resolveFieldsByName this never
+ * throws: a model's guess at an option is a suggestion, not a command.
+ */
+export function matchOptionValue(
+  field: { options?: LegacyOption[] } | undefined,
+  value: unknown
+): string | undefined {
+  if (!field || value === null || value === undefined || value === "") return undefined;
+  const text = String(value).trim().toLowerCase();
+  if (!text) return undefined;
+  const options = normalizeOptions(field.options);
+  const match =
+    options.find((o) => o.id.toLowerCase() === text) ||
+    options.find((o) => o.value.trim().toLowerCase() === text);
+  return match?.id;
+}
+
 export function orderedOptions(field: { options?: LegacyOption[] }): ICustomFieldOption[] {
   return normalizeOptions(field.options).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 }

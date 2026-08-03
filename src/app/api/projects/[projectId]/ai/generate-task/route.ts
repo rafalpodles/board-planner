@@ -5,7 +5,7 @@ import { Project } from "@/models/project";
 import { Task } from "@/models/task";
 import { isAIEnabled, generateTask, ExistingTaskSummary } from "@/lib/ai";
 import { findLegacyField } from "@/lib/legacy-fields";
-import { orderedOptions } from "@/lib/custom-fields";
+import { orderedOptions, matchOptionValue } from "@/lib/custom-fields";
 import { getSettings } from "@/models/settings";
 
 async function fetchReadme(githubRepo: string): Promise<string | undefined> {
@@ -105,7 +105,19 @@ export const POST = withProjectAccess(async (request, { params }) => {
       settings.aiModel
     );
 
-    return NextResponse.json(task);
+    // The model answers with option text; the client should never have to work out
+    // which field that belongs to, so it is resolved here where the definitions are
+    const customFieldValues: Record<string, unknown> = {};
+    const difficultyOption = matchOptionValue(difficultyField, task.difficulty);
+    if (difficultyField && difficultyOption) {
+      customFieldValues[String(difficultyField._id)] = difficultyOption;
+    }
+    const componentOption = matchOptionValue(componentField, task.component);
+    if (componentField && componentOption) {
+      customFieldValues[String(componentField._id)] = componentOption;
+    }
+
+    return NextResponse.json({ ...task, customFieldValues });
   } catch (err) {
     console.error("AI generation failed:", err);
     return NextResponse.json(
