@@ -1,7 +1,47 @@
 "use client";
 
-import type { CSSProperties, ReactNode } from "react";
+import { useEffect, useRef, type CSSProperties, type ReactNode } from "react";
 import { PRIORITIES, Priority } from "@/types";
+
+/** A one-line-looking field that wraps instead of scrolling its text out of sight */
+export function GrowingTextarea({
+  value,
+  onChange,
+  onKeyDown,
+  onBlur,
+  className = "",
+  ...rest
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  onKeyDown?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
+  onBlur?: () => void;
+  className?: string;
+  placeholder?: string;
+  "aria-label"?: string;
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [value]);
+
+  return (
+    <textarea
+      ref={ref}
+      rows={1}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      onKeyDown={onKeyDown}
+      onBlur={onBlur}
+      className={`resize-none overflow-hidden ${className}`}
+      {...rest}
+    />
+  );
+}
 
 export function SectionLabel({ children }: { children: ReactNode }) {
   return (

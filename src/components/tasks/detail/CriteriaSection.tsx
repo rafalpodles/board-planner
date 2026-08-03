@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ProgressBar, SectionLabel } from "./atoms";
+import { GrowingTextarea, ProgressBar, SectionLabel } from "./atoms";
 import type { ChecklistDraftItem } from "./useTaskEditor";
 
 interface CriteriaSectionProps {
@@ -56,15 +56,15 @@ export function CriteriaSection({ items, onChange }: CriteriaSectionProps) {
             >
               {item.done ? "✓" : ""}
             </button>
-            <input
-              type="text"
+            <GrowingTextarea
               value={item.text}
               aria-label={`Criterion ${i + 1}`}
-              onChange={(e) =>
-                onChange(
-                  items.map((it, idx) => (idx === i ? { ...it, text: e.target.value } : it))
-                )
+              onChange={(text) =>
+                onChange(items.map((it, idx) => (idx === i ? { ...it, text } : it)))
               }
+              onKeyDown={(e) => {
+                if (e.key === "Enter") e.preventDefault();
+              }}
               className={`focus-ring min-w-0 flex-1 rounded bg-transparent text-sm leading-snug ${
                 item.done ? "text-text-muted line-through" : "text-text"
               }`}
@@ -84,18 +84,18 @@ export function CriteriaSection({ items, onChange }: CriteriaSectionProps) {
           <span aria-hidden className="w-4 text-center text-text-muted">
             +
           </span>
-          <input
-            type="text"
+          <GrowingTextarea
             value={draft}
-            onChange={(e) => setDraft(e.target.value)}
+            onChange={setDraft}
             onBlur={add}
             onKeyDown={(e) => {
               if (e.key !== "Enter") return;
               e.preventDefault();
               add();
             }}
+            aria-label="Add criterion"
             placeholder="Add criterion"
-            className="focus-ring min-w-0 flex-1 rounded bg-transparent text-sm text-text placeholder:text-text-muted"
+            className="focus-ring min-w-0 flex-1 rounded bg-transparent text-sm leading-snug text-text placeholder:text-text-muted"
           />
         </div>
       </div>
