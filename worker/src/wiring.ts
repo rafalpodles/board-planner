@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileS
 import { hostname } from "os";
 import { dirname, join } from "path";
 import { ApiClient, createApiClient } from "./api.js";
-import { createCommandHandlers, createRunGuard } from "./commands.js";
+import { createCommandHandlers, createRunGuard, SHUTDOWN_SIGNAL } from "./commands.js";
 import {
   applyPolicy,
   Assignment,
@@ -366,7 +366,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     // stopping the worker is not the task failing.
     shutdown() {
       loop.stop();
-      runs.abort();
+      runs.abort(SHUTDOWN_SIGNAL);
     },
   };
 }

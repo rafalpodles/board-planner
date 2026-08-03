@@ -5,6 +5,7 @@ import { childEnv } from "./env.js";
 import { Runner } from "./exec.js";
 import { Executor } from "./executor.js";
 import { Reporter } from "./reporter.js";
+import { SHUTDOWN_SIGNAL } from "./commands.js";
 import { scrub } from "./scrub.js";
 import { Phase, Telemetry } from "./telemetry.js";
 import { Workspace } from "./workspace.js";
@@ -97,7 +98,11 @@ async function releaseIfAborted(
   detail = ""
 ): Promise<boolean> {
   if (!deps.signal?.aborted) return false;
-  await reporter.released(task, `the run was stopped${detail}`);
+  // A signal-driven shutdown charges the attempt; an operator's explicit stop does not. See
+  // SHUTDOWN_SIGNAL for why the distinction matters.
+  const stoppedByProcessSignal = deps.signal.reason === SHUTDOWN_SIGNAL;
+  const report = stoppedByProcessSignal ? reporter.requeued : reporter.released;
+  await report(task, `the run was stopped${detail}`);
   return true;
 }
 

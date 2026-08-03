@@ -15,9 +15,15 @@ export function isWorkerCommand(value: unknown): value is WorkerCommand {
   return typeof value === "string" && COMMANDS.has(value);
 }
 
+// An operator asking the worker to stop is a deliberate act and must not cost the task an attempt.
+// A process signal can come from a supervisor restarting in a loop, and a task released with its
+// attempt refunded every cycle never accrues one — so it never runs out of retries and never
+// reaches a human, which is the whole point of counting them.
+export const SHUTDOWN_SIGNAL = Symbol("shutdown");
+
 export interface RunGuard {
   under<T>(work: (signal: AbortSignal) => Promise<T>): Promise<T>;
-  abort(): void;
+  abort(reason?: unknown): void;
 }
 
 export function createRunGuard(): RunGuard {
@@ -34,8 +40,8 @@ export function createRunGuard(): RunGuard {
       }
     },
 
-    abort() {
-      current?.abort();
+    abort(reason) {
+      current?.abort(reason);
     },
   };
 }

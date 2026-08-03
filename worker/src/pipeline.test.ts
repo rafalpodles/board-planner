@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { ApiClient, StatusIds } from "./api.js";
+import { SHUTDOWN_SIGNAL } from "./commands.js";
 import { WorkerConfig } from "./config.js";
 import { Delivery } from "./delivery.js";
 import { CommandResult, Runner } from "./exec.js";
@@ -374,6 +375,25 @@ describe("runTask", () => {
 
     expect(h.reporter.released).toHaveBeenCalled();
     expect(h.reporter.requeued).not.toHaveBeenCalled();
+    expect(h.delivery.push).not.toHaveBeenCalled();
+  });
+
+  // A supervisor restarting the worker on a failing health check signals it every cycle. Refunding
+  // there means claim(+1), abort, refund(-1), restart, re-claim the same task — attempts never
+  // grow, so the task never runs out of retries and never reaches a human, which is the entire
+  // point of counting them.
+  it("charges the attempt when a process signal stopped the run, not an operator", async () => {
+    const controller = new AbortController();
+    const execute = vi.fn<Executor["execute"]>(async () => {
+      controller.abort(SHUTDOWN_SIGNAL);
+      return { kind: "error", message: "AbortError: The operation was aborted" };
+    });
+    const h = harness({ executor: { execute }, signal: controller.signal });
+
+    await runTask(h.deps, task);
+
+    expect(h.reporter.requeued).toHaveBeenCalled();
+    expect(h.reporter.released).not.toHaveBeenCalled();
     expect(h.delivery.push).not.toHaveBeenCalled();
   });
 
