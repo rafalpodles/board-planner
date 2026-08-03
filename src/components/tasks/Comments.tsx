@@ -408,10 +408,11 @@ export function Comments({
         )}
       </div>
 
-      {/* Sticky so the most common action on a phone does not need a scroll to the end */}
+      {/* Sticky on a phone, where the most common action should not need a scroll to
+          the end; inline on a wide screen, where it would cover the last comment */}
       <form
         onSubmit={handleSubmit}
-        className="sticky bottom-0 -mx-1 flex items-start gap-3 bg-bg-card px-1 pb-1 pt-3"
+        className="sticky bottom-0 -mx-1 flex items-start gap-3 bg-bg-card px-1 pb-1 pt-3 lg:static"
       >
         <Avatar name={user?.fullName} size={28} className="mt-1 hidden sm:inline-flex" />
         <div className="flex min-w-0 flex-1 flex-col gap-2.5">

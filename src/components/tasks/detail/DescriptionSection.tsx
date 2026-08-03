@@ -22,7 +22,8 @@ export function DescriptionSection({
   const [editing, setEditing] = useState(false);
   const [expanded, setExpanded] = useState(false);
 
-  const clamped = collapsible && !expanded;
+  // Clamped on narrow screens only — the rail layout has room for the whole thing
+  const clamped = collapsible && !expanded ? "line-clamp-3 lg:line-clamp-none" : "";
 
   return (
     <section className="flex flex-col gap-2.5">
@@ -47,18 +48,14 @@ export function DescriptionSection({
         />
       ) : value.trim() ? (
         <>
-          <div
-            className={`prose prose-sm max-w-none text-sm leading-relaxed ${
-              clamped ? "line-clamp-3" : ""
-            }`}
-          >
+          <div className={`prose prose-sm max-w-none text-sm leading-relaxed ${clamped}`}>
             <MarkdownContent>{value}</MarkdownContent>
           </div>
           {collapsible && (
             <button
               type="button"
               onClick={() => setExpanded((v) => !v)}
-              className="focus-ring self-start rounded-md text-sm font-medium text-primary"
+              className="focus-ring self-start rounded-md text-sm font-medium text-primary lg:hidden"
             >
               {expanded ? "Show less" : "Show more"}
             </button>
