@@ -13,6 +13,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Modal } from "@/components/ui/Modal";
 import { TaskForm } from "@/components/tasks/TaskForm";
 import { TaskActivityPanel } from "@/components/tasks/TaskActivityPanel";
+import { ExecutionPanel } from "@/components/tasks/ExecutionPanel";
 import { ResizableSplit } from "@/components/tasks/ResizableSplit";
 import { TaskLinks } from "@/components/tasks/TaskLinks";
 import { useToast } from "@/components/ui/Toast";
@@ -82,9 +83,10 @@ export function TaskDetail({
         `/api/projects/${projectId}/tasks/${taskId}/status`,
         { status: newStatus }
       );
-      setTask((prev) =>
-        prev ? { ...prev, status: newStatus as ApiTask["status"] } : prev
-      );
+      // A status change ends any run the task was under, and the server clears the execution phase
+      // in the same write — so patching status alone would leave the panel asserting a live run the
+      // user just stopped, counting up from a snapshot that is no longer true
+      await loadData();
     } catch {
       toast("Failed to update status", "error");
     }
@@ -212,6 +214,8 @@ export function TaskDetail({
           onSaved={loadData}
           onCancel={onClose}
         />
+
+        <ExecutionPanel execution={task.execution} />
 
         {/* Linked PRs */}
         {task.linkedPRs && task.linkedPRs.length > 0 && (

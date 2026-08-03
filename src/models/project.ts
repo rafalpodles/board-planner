@@ -204,6 +204,10 @@ const projectSchema = new Schema<IProject>(
       type: Number,
       default: 0,
     },
+    repository: {
+      url: { type: String, default: "" },
+      defaultBranch: { type: String, default: "main" },
+    },
     // Sparse ordering: reordering rewrites only the projects that moved
     sortOrder: {
       type: Number,

@@ -16,6 +16,7 @@ const ACTIONS = [
   "task_deleted",
   "bulk_delete",
   "bulk_move",
+  "worker_updated",
 ];
 
 const projectAuditLogSchema = new Schema<IProjectAuditLog>(

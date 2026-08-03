@@ -8,6 +8,7 @@ const nextConfig: NextConfig = {
       { source: "/tokens", destination: "/settings/tokens", permanent: false },
       { source: "/users", destination: "/settings/users", permanent: false },
       { source: "/admin/agents", destination: "/settings/agents", permanent: false },
+      { source: "/admin/workers", destination: "/settings/workers", permanent: false },
     ];
   },
 

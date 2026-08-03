@@ -28,6 +28,7 @@ const GROUPS: SettingsGroup[] = [
     sections: [
       { id: "users", label: "Users" },
       { id: "agents", label: "PM Agents" },
+      { id: "workers", label: "Workers" },
     ],
   },
 ];

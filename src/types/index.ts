@@ -396,6 +396,96 @@ export const PROJECT_ICONS: string[] = [
   "🏥", "🎬", "🎵", "✈️", "🏠", "🌱", "⏰", "🏆",
 ];
 
+export interface IProjectRepository {
+  url: string;
+  defaultBranch: string;
+}
+
+export interface WorkerAssignment {
+  project: Types.ObjectId;
+  proposedPath: string;
+}
+
+export interface WorkerPolicy {
+  baseBranch: string;
+  pollIntervalMs: number;
+  taskTimeoutMs: number;
+  maxDiffLines: number;
+  maxDiffFiles: number;
+  model: string;
+  fallbackModel: string;
+  reviewModel: string;
+}
+
+export interface IWorker {
+  _id: Types.ObjectId;
+  name: string;
+  host: string;
+  platform: string;
+  version: string;
+  protocolVersion: number;
+  credentialHash: string;
+  assignments: WorkerAssignment[];
+  policy: WorkerPolicy;
+  // Which policy fields an operator actually set; everything else follows the default
+  policyOverrides: string[];
+  enabled: boolean;
+  lockedByInstance: boolean;
+  lastSeenAt: Date | null;
+  bindingError: string;
+  command: "" | "pause" | "resume" | "stop";
+  commandIssuedAt: Date | null;
+  commandAckedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface ApiWorker {
+  _id: string;
+  name: string;
+  host: string;
+  platform: string;
+  version: string;
+  protocolVersion: number;
+  assignments: Array<{ project: string; proposedPath: string }>;
+  policy: WorkerPolicy;
+  policyOverrides: string[];
+  enabled: boolean;
+  lockedByInstance: boolean;
+  lastSeenAt: string | null;
+  bindingError: string;
+  command: "" | "pause" | "resume" | "stop";
+  commandIssuedAt: string | null;
+  commandAckedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  stale: boolean;
+  // The task this worker holds right now, if any. Phase lives on the task, not the worker, so the
+  // route has to join — a worker document alone cannot answer "what is it doing".
+  currentTask?: ApiWorkerTask;
+}
+
+export interface ApiWorkerTask {
+  taskId: string;
+  taskKey: string;
+  title: string;
+  phase?: string;
+  phaseAt?: string | null;
+}
+
+export interface ITaskExecution {
+  runId: string;
+  workerId: string;
+  attempts: number;
+  startedAt: Date | null;
+  lastError: string;
+  // Absent until the run that holds the task reports one, and unset again the moment it leaves
+  // the active column — so "no phase" is a missing field, never a stale one
+  phase?: string;
+  phaseAt?: Date | null;
+  phaseSeq?: number;
+}
+
 export interface IProject {
   _id: Types.ObjectId;
   name: string;
@@ -418,6 +508,7 @@ export interface IProject {
   codaTableId: string;
   codaToken: string;
   taskCounter: number;
+  repository: IProjectRepository;
   sortOrder: number;
   pm?: IPmConfig;
   owner: Types.ObjectId | IUser;
@@ -570,6 +661,7 @@ export interface ITask {
   recurrence: IRecurrence | null;
   recurringParentId: Types.ObjectId | null;
   order: number;
+  execution: ITaskExecution;
   createdBy: Types.ObjectId | IUser;
   createdAt: Date;
   updatedAt: Date;
@@ -774,6 +866,21 @@ export interface ApiTask {
   createdBy: ApiUser | string;
   createdAt: string;
   updatedAt: string;
+  execution?: ApiTaskExecution;
+}
+
+// Only what a reader needs. lastError is deliberately absent — task-service writes it as "" and
+// never anything else — and so is attempts, which is decremented on refund and therefore counts
+// remaining budget, not the attempt number.
+export interface ApiTaskExecution {
+  workerId?: string;
+  workerName?: string;
+  phase?: string;
+  phaseAt?: string | null;
+  startedAt?: string | null;
+  // the server's clock when this was serialised, so ages can be measured against it rather than
+  // against the reader's, which may be minutes off in either direction
+  asOf?: string;
 }
 
 export interface ApiReaction {
@@ -889,7 +996,8 @@ export type ProjectAuditAction =
   | "task_created"
   | "task_deleted"
   | "bulk_delete"
-  | "bulk_move";
+  | "bulk_move"
+  | "worker_updated";
 
 export interface IProjectAuditLog {
   _id: Types.ObjectId;
