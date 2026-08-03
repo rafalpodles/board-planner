@@ -46,7 +46,8 @@ export function TaskTopBar({
         type="button"
         onClick={onClose}
         aria-label="Back"
-        className="focus-ring -ml-1 rounded-lg px-1.5 py-1 text-text-muted hover:text-text sm:hidden"
+        className="focus-ring -ml-2 flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg
+          text-text-muted hover:text-text sm:hidden"
       >
         ‹
       </button>
@@ -81,7 +82,7 @@ export function TaskTopBar({
             aria-haspopup="menu"
             aria-expanded={open}
             aria-label="More actions"
-            className={ghost}
+            className={`${ghost} min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0`}
           >
             ···
           </button>
