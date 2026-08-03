@@ -411,6 +411,7 @@ export interface WorkerAssignment {
 }
 
 export interface WorkerPolicy {
+  autoMerge: boolean;
   baseBranch: string;
   pollIntervalMs: number;
   taskTimeoutMs: number;

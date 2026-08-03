@@ -5,6 +5,9 @@
 // overrides resolves against this on the worker, which is what lets a changed default reach every
 // machine that never pinned it.
 export const POLICY_DEFAULTS = {
+  // Off by default: merging to a base branch is a thing an operator turns on, not a thing a
+  // freshly registered worker starts doing
+  autoMerge: false,
   baseBranch: "main",
   pollIntervalMs: 30_000,
   taskTimeoutMs: 1_800_000,
