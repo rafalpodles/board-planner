@@ -1,6 +1,7 @@
 import { readFileSync } from "fs";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { createExecutor } from "./executor.js";
+import { parseStream, StreamEvent } from "./stream.js";
 
 const config = { taskTimeoutMs: 1000, apiBaseUrl: "https://app.example.com", apiToken: "cp_t" } as never;
 
@@ -386,6 +387,96 @@ describe("createExecutor", () => {
     const flagIndex = args.indexOf("--append-system-prompt");
     expect(flagIndex).toBeGreaterThanOrEqual(0);
     expect(args[flagIndex + 1]).toMatch(/untrusted/i);
+  });
+});
+
+describe("reporting the stream as it arrives", () => {
+  type Opts = { onStdout?: (chunk: string) => void };
+
+  function fixedChunks(text: string, size: number): string[] {
+    const parts: string[] = [];
+    for (let index = 0; index < text.length; index += size) parts.push(text.slice(index, index + size));
+    return parts;
+  }
+
+  function chunkedRunner(stdout: string, parts: string[]) {
+    const run = vi.fn(async (_command: string, _args: string[], opts: Opts) => {
+      for (const part of parts) opts.onStdout?.(part);
+      return { code: 0, stdout, stderr: "", timedOut: false };
+    });
+    return { runner: { run } as never, run };
+  }
+
+  // The strongest statement available: whatever the pipe does to the line boundaries, the run
+  // reports exactly the events a parse of the finished output would have found — no duplicate from
+  // a re-parsed prefix, no line lost to the split that cut it in half.
+  it.each([1, 3, 17, 512, 1_000_000])(
+    "reports the same events as a whole-output parse when the pipe flushes every %i bytes",
+    async (size) => {
+      const seen: StreamEvent[] = [];
+      const { runner } = chunkedRunner(FIXTURE, fixedChunks(FIXTURE, size));
+
+      await createExecutor(config, runner).execute(task, "/wt", undefined, (event) => seen.push(event));
+
+      expect(seen).toEqual(parseStream(FIXTURE));
+    }
+  );
+
+  it("holds a line back until the chunk carrying the rest of it arrives", async () => {
+    const stream = `${JSON.stringify({ type: "system", subtype: "init" })}\n`;
+    const cut = Math.floor(stream.length / 2);
+    const seen: StreamEvent[] = [];
+    let reportedAfterTheFirstHalf = -1;
+
+    const run = vi.fn(async (_command: string, _args: string[], opts: Opts) => {
+      opts.onStdout?.(stream.slice(0, cut));
+      reportedAfterTheFirstHalf = seen.length;
+      opts.onStdout?.(stream.slice(cut));
+      return { code: 0, stdout: stream, stderr: "", timedOut: false };
+    });
+
+    await createExecutor(config, { run } as never).execute(task, "/wt", undefined, (event) =>
+      seen.push(event)
+    );
+
+    expect(reportedAfterTheFirstHalf).toBe(0);
+    expect(seen).toEqual([{ type: "system", subtype: "init" }]);
+  });
+
+  it("reports a final line that never got its newline", async () => {
+    const stream = JSON.stringify({ type: "system", subtype: "init" });
+    const seen: StreamEvent[] = [];
+    const { runner } = chunkedRunner(stream, [stream]);
+
+    await createExecutor(config, runner).execute(task, "/wt", undefined, (event) => seen.push(event));
+
+    expect(seen).toEqual([{ type: "system", subtype: "init" }]);
+  });
+
+  it("stops reporting once the run has settled, so a late chunk cannot describe a finished task", async () => {
+    const seen: StreamEvent[] = [];
+    let late: ((chunk: string) => void) | undefined;
+    const run = vi.fn(async (_command: string, _args: string[], opts: Opts) => {
+      late = opts.onStdout;
+      return { code: 0, stdout: completed(FIXTURE_RESULT), stderr: "", timedOut: false };
+    });
+
+    await createExecutor(config, { run } as never).execute(task, "/wt", undefined, (event) =>
+      seen.push(event)
+    );
+
+    expect(late).toBeDefined();
+    late?.(`${JSON.stringify({ type: "system", subtype: "late" })}\n`);
+
+    expect(seen).toEqual([]);
+  });
+
+  it("asks for no incremental stdout at all when nobody is listening", async () => {
+    const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
+
+    await createExecutor(config, runner).execute(task, "/wt");
+
+    expect(run.mock.calls[0][2].onStdout).toBeUndefined();
   });
 });
 
