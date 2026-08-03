@@ -611,6 +611,13 @@ export interface ApiUser {
   createdAt: string;
 }
 
+/** What GET /api/users/list returns: enough to name someone and assign them */
+export interface ApiUserSummary {
+  _id: string;
+  username: string;
+  fullName: string;
+}
+
 export interface ApiLabel {
   _id: string;
   name: string;
