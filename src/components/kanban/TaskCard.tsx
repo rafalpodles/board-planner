@@ -1,10 +1,14 @@
 "use client";
 
 import { useRef, type CSSProperties } from "react";
-import { ApiTask, ApiLabel, ApiProjectCategory, PRIORITY_LABELS } from "@/types";
+import { ApiTask, ApiCustomField, ApiProjectCategory, PRIORITY_LABELS } from "@/types";
 import { Badge } from "@/components/ui/Badge";
 import { categoryColor, categoryTint } from "@/lib/category-colors";
+import { cardBadges } from "@/lib/custom-fields";
 import { taskPath } from "@/lib/urls";
+
+// A card is a summary; past a few badges it stops being one
+const MAX_CARD_BADGES = 3;
 
 // Cards are narrow; the default badge padding makes three of them wrap raggedly
 const COMPACT_BADGE = "text-[11px] px-1.5 whitespace-nowrap";
@@ -12,7 +16,7 @@ const COMPACT_BADGE = "text-[11px] px-1.5 whitespace-nowrap";
 interface TaskCardProps {
   task: ApiTask;
   projectKey: string;
-  projectLabels?: ApiLabel[];
+  customFields?: ApiCustomField[];
   projectCategories?: ApiProjectCategory[];
   selected?: boolean;
   selectionActive?: boolean;
@@ -24,7 +28,7 @@ interface TaskCardProps {
 export function TaskCard({
   task,
   projectKey,
-  projectLabels = [],
+  customFields = [],
   projectCategories = [],
   selected = false,
   selectionActive = false,
@@ -32,9 +36,9 @@ export function TaskCard({
   onClick,
   onContextMenu,
 }: TaskCardProps) {
-  const taskLabels = projectLabels.filter((l) =>
-    (task.labels || []).includes(l._id)
-  );
+  const badges = cardBadges(task.customFieldValues, customFields);
+  const shownBadges = badges.slice(0, MAX_CARD_BADGES);
+  const hiddenBadges = badges.length - shownBadges.length;
   const catColor = categoryColor(projectCategories, task.category);
   const tinted = !selected && !!catColor;
   const dragged = useRef(false);
@@ -107,9 +111,6 @@ export function TaskCard({
         <Badge variant="priority" value={task.priority} className={COMPACT_BADGE}>
           {PRIORITY_LABELS[task.priority] ?? task.priority}
         </Badge>
-        <Badge variant="difficulty" value={task.difficulty} className={COMPACT_BADGE}>
-          {task.difficulty}
-        </Badge>
         <Badge
           variant="category"
           value={task.category}
@@ -122,23 +123,25 @@ export function TaskCard({
 
       <h3 className="text-sm font-medium mb-2 line-clamp-2">{task.title}</h3>
 
-      {task.component && (
-        <div className="mb-2">
-          <Badge className="text-[11px]">{task.component}</Badge>
-        </div>
-      )}
-
-      {taskLabels.length > 0 && (
+      {shownBadges.length > 0 && (
         <div className="flex flex-wrap gap-1 mb-2">
-          {taskLabels.map((label) => (
+          {shownBadges.map((badge) => (
             <span
-              key={label._id}
+              key={badge.key}
               className="chip chip-custom text-[11px] px-1.5 py-0.5 rounded-full font-medium"
-              style={{ "--chip": label.color } as CSSProperties}
+              style={{ "--chip": badge.color || "var(--color-text-muted)" } as CSSProperties}
             >
-              {label.name}
+              {badge.label}
             </span>
           ))}
+          {hiddenBadges > 0 && (
+            <span
+              title={badges.slice(MAX_CARD_BADGES).map((b) => b.label).join(", ")}
+              className="text-[11px] px-1.5 py-0.5 text-text-muted"
+            >
+              +{hiddenBadges}
+            </span>
+          )}
         </div>
       )}
 

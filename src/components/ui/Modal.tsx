@@ -1,6 +1,10 @@
 "use client";
 
-import { useEffect, useId, useRef } from "react";
+import { useId, useRef } from "react";
+import { useFocusTrap } from "@/hooks/use-focus-trap";
+import { topmostLayer } from "@/lib/focus-trap";
+
+const UNNAMED_DIALOG_LABEL = "Dialog";
 
 const SIZE_CLASSES = {
   sm: "sm:max-w-md",
@@ -9,57 +13,6 @@ const SIZE_CLASSES = {
   // Wide enough for the two-column task detail; lg would clip it to one column
   xl: "sm:max-w-6xl",
 } as const;
-
-const FOCUSABLE_SELECTOR = [
-  "a[href]",
-  "button:not([disabled])",
-  'input:not([disabled]):not([type="hidden"])',
-  "select:not([disabled])",
-  "textarea:not([disabled])",
-  "details > summary:first-of-type",
-  '[contenteditable]:not([contenteditable="false"])',
-  '[tabindex]:not([tabindex="-1"])',
-].join(", ");
-
-const UNNAMED_DIALOG_LABEL = "Dialog";
-
-const openDialogs: HTMLElement[] = [];
-
-// All overlays share z-50, so the dialog last in the DOM is the one painted in front
-function topmostDialog() {
-  return openDialogs.reduce<HTMLElement | undefined>(
-    (top, dialog) =>
-      top && !(top.compareDocumentPosition(dialog) & Node.DOCUMENT_POSITION_FOLLOWING)
-        ? top
-        : dialog,
-    undefined
-  );
-}
-
-// The selector matches markup; only these checks tell us what a keyboard user can actually reach
-function tabbablesWithin(dialog: HTMLElement) {
-  const rendered = new Map<Element, boolean>();
-
-  function isRendered(el: HTMLElement): boolean {
-    const cached = rendered.get(el);
-    if (cached !== undefined) return cached;
-    const style = getComputedStyle(el);
-    const parent = el.parentElement;
-    const ok =
-      !el.hidden &&
-      style.display !== "none" &&
-      style.visibility !== "hidden" &&
-      (el === dialog || parent === null || isRendered(parent));
-    rendered.set(el, ok);
-    return ok;
-  }
-
-  return Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
-    (el) =>
-      isRendered(el) &&
-      (el.tagName === "SUMMARY" || !el.closest("details:not([open])"))
-  );
-}
 
 interface ModalProps {
   open: boolean;
@@ -84,62 +37,12 @@ export function Modal({
   const titleId = useId();
   const named = title.trim().length > 0;
 
-  useEffect(() => {
-    if (!open) return;
-    const dialog = dialogRef.current!;
-    openDialogs.push(dialog);
-    document.body.style.overflow = "hidden";
-    return () => {
-      const at = openDialogs.indexOf(dialog);
-      if (at >= 0) openDialogs.splice(at, 1);
-      if (openDialogs.length === 0) document.body.style.overflow = "";
-    };
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const focused = document.activeElement as HTMLElement | null;
-    const trigger =
-      focused && focused !== document.body && focused !== document.documentElement
-        ? focused
-        : null;
-    dialogRef.current!.focus();
-    return () => {
-      const target = trigger ?? returnFocusTo?.current ?? null;
-      if (target?.isConnected) target.focus();
-    };
-  }, [open, returnFocusTo]);
-
-  useEffect(() => {
-    if (!open) return;
-    function handleKey(e: KeyboardEvent) {
-      const dialog = dialogRef.current;
-      if (!dialog || topmostDialog() !== dialog) return;
-      if (e.key === "Escape") {
-        onClose();
-        return;
-      }
-      if (e.key !== "Tab") return;
-
-      const focusable = tabbablesWithin(dialog);
-      const active = document.activeElement;
-      const first = focusable[0] ?? dialog;
-      const last = focusable[focusable.length - 1] ?? dialog;
-      const leavingForwards = !e.shiftKey && (active === last || !dialog.contains(active));
-      const leavingBackwards =
-        e.shiftKey && (active === first || active === dialog || !dialog.contains(active));
-
-      if (leavingForwards) {
-        e.preventDefault();
-        first.focus();
-      } else if (leavingBackwards) {
-        e.preventDefault();
-        last.focus();
-      }
-    }
-    document.addEventListener("keydown", handleKey);
-    return () => document.removeEventListener("keydown", handleKey);
-  }, [open, onClose]);
+  useFocusTrap({
+    active: open,
+    containerRef: dialogRef,
+    onEscape: onClose,
+    returnFocusTo,
+  });
 
   if (!open) return null;
 
@@ -149,7 +52,7 @@ export function Modal({
       className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60"
       onClick={(e) => {
         if (e.target !== overlayRef.current) return;
-        if (topmostDialog() !== dialogRef.current) return;
+        if (topmostLayer() !== dialogRef.current) return;
         onClose();
       }}
     >

@@ -1,7 +1,7 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import { TaskStatus, Difficulty, Category, Priority } from "@/types";
+import { TaskStatus, Category, Priority } from "@/types";
 
 const statusAccents: Record<TaskStatus, string> = {
   planned: "var(--color-status-planned)",
@@ -11,13 +11,6 @@ const statusAccents: Record<TaskStatus, string> = {
   needs_human_review: "var(--color-status-needs-human-review)",
   ready_to_test: "var(--color-status-ready-to-test)",
   done: "var(--color-status-done)",
-};
-
-const difficultyAccents: Record<Difficulty, string> = {
-  S: "var(--color-difficulty-s)",
-  M: "var(--color-difficulty-m)",
-  L: "var(--color-difficulty-l)",
-  XL: "var(--color-difficulty-xl)",
 };
 
 const priorityAccents: Record<Priority, string> = {
@@ -36,7 +29,7 @@ const categoryAccents: Record<Category, string> = {
 
 interface BadgeProps {
   children: React.ReactNode;
-  variant?: "status" | "difficulty" | "priority" | "category" | "default";
+  variant?: "status" | "priority" | "category" | "default";
   value?: string;
   // Explicit colour (hex) for project-defined categories; overrides the built-in maps
   color?: string;
@@ -55,8 +48,6 @@ export function Badge({
   if (!accent) {
     if (variant === "status" && value && value in statusAccents) {
       accent = statusAccents[value as TaskStatus];
-    } else if (variant === "difficulty" && value && value in difficultyAccents) {
-      accent = difficultyAccents[value as Difficulty];
     } else if (variant === "priority" && value && value in priorityAccents) {
       accent = priorityAccents[value as Priority];
     } else if (variant === "category" && value && value in categoryAccents) {

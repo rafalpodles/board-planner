@@ -30,7 +30,6 @@ export const TASK_STATUSES: TaskStatus[] = [
   "done",
 ];
 
-export const DIFFICULTIES: Difficulty[] = ["S", "M", "L", "XL"];
 export const CATEGORIES: Category[] = ["bug", "doc", "user-story", "idea"];
 
 export const DEFAULT_PROJECT_CATEGORIES: { name: string; color: string }[] = [
@@ -213,9 +212,7 @@ export interface ITaskTemplate {
   name: string;
   title: string;
   description: string;
-  difficulty: Difficulty;
   category: Category;
-  component: string;
   acceptanceCriteria: string;
 }
 
@@ -264,24 +261,53 @@ export interface ApiNotificationChannel {
 }
 
 // Custom field types
-export type CustomFieldType = "text" | "number" | "date" | "dropdown" | "checkbox";
+export type CustomFieldType =
+  | "text"
+  | "number"
+  | "date"
+  | "dropdown"
+  | "multiselect"
+  | "checkbox";
 
-export const CUSTOM_FIELD_TYPES: CustomFieldType[] = ["text", "number", "date", "dropdown", "checkbox"];
+export const CUSTOM_FIELD_TYPES: CustomFieldType[] = [
+  "text",
+  "number",
+  "date",
+  "dropdown",
+  "multiselect",
+  "checkbox",
+];
+
+/** The types whose values are option ids rather than a literal */
+export const OPTION_FIELD_TYPES: CustomFieldType[] = ["dropdown", "multiselect"];
+
+export const DEFAULT_OPTION_COLOR = "#64748b";
+
+// Values store `id`, never `value`, so renaming an option keeps it attached to
+// every task that had it
+export interface ICustomFieldOption {
+  id: string;
+  value: string;
+  color: string;
+  order: number;
+}
 
 export interface ICustomField {
   _id: Types.ObjectId;
   name: string;
   fieldType: CustomFieldType;
-  options: string[];
+  options: ICustomFieldOption[];
   required: boolean;
+  order: number;
+  showOnCard: boolean;
+  showInList: boolean;
+  filterable: boolean;
+  /** Replaces deletion for a field that is already in use: pickers drop it, values survive */
+  archived: boolean;
 }
 
-export interface ApiCustomField {
+export interface ApiCustomField extends Omit<ICustomField, "_id"> {
   _id: string;
-  name: string;
-  fieldType: CustomFieldType;
-  options: string[];
-  required: boolean;
 }
 
 export interface IPmLink {
@@ -466,8 +492,6 @@ export interface IProject {
   key: string;
   description: string;
   icon: string;
-  components: string[];
-  labels: ILabel[];
   categories: IProjectCategory[];
   columns: IProjectColumn[];
   taskTemplates: ITaskTemplate[];
@@ -485,6 +509,7 @@ export interface IProject {
   codaToken: string;
   taskCounter: number;
   repository: IProjectRepository;
+  sortOrder: number;
   pm?: IPmConfig;
   owner: Types.ObjectId | IUser;
   admins: (Types.ObjectId | IUser)[];
@@ -620,16 +645,13 @@ export interface ITask {
   taskNumber: number;
   title: string;
   description: string;
-  difficulty: Difficulty;
   priority: Priority;
-  component: string;
   category: Category;
   status: TaskStatus;
   assignee: Types.ObjectId | IUser | null;
   dueDate: Date | null;
   checklist: IChecklistItem[];
   linkedPRs: ILinkedPR[];
-  labels: Types.ObjectId[];
   pinned: boolean;
   blockedBy: (Types.ObjectId | ITask)[];
   relations: ITaskRelation[];
@@ -673,6 +695,13 @@ export interface ApiUser {
   createdAt: string;
 }
 
+/** What GET /api/users/list returns: enough to name someone and assign them */
+export interface ApiUserSummary {
+  _id: string;
+  username: string;
+  fullName: string;
+}
+
 export interface ApiLabel {
   _id: string;
   name: string;
@@ -684,9 +713,7 @@ export interface ApiTaskTemplate {
   name: string;
   title: string;
   description: string;
-  difficulty: Difficulty;
   category: Category;
-  component: string;
   acceptanceCriteria: string;
 }
 
@@ -696,8 +723,6 @@ export interface ApiProject {
   key: string;
   description: string;
   icon: string;
-  components: string[];
-  labels: ApiLabel[];
   categories?: ApiProjectCategory[];
   columns?: ApiProjectColumn[];
   taskTemplates: ApiTaskTemplate[];
@@ -714,6 +739,7 @@ export interface ApiProject {
   codaTableId?: string;
   codaTokenSet?: boolean;
   taskCounter: number;
+  sortOrder?: number;
   // Sidebar badges, computed by the list endpoint only
   taskCount?: number;
   hasActiveSprint?: boolean;
@@ -819,16 +845,13 @@ export interface ApiTask {
   taskNumber: number;
   title: string;
   description: string;
-  difficulty: Difficulty;
   priority: Priority;
-  component: string;
   category: Category;
   status: TaskStatus;
   assignee: ApiUser | null;
   dueDate: string | null;
   checklist: ApiChecklistItem[];
   linkedPRs: ApiLinkedPR[];
-  labels: string[];
   pinned: boolean;
   blockedBy: ApiTaskLink[];
   blocking: ApiTaskLink[];
@@ -876,19 +899,56 @@ export interface ApiComment {
 }
 
 // Sort options for board columns
-export type SortField = "manual" | "updatedAt" | "createdAt" | "dueDate" | "priority" | "difficulty" | "category" | "title";
+export type SortField =
+  | "manual"
+  | "key"
+  | "updatedAt"
+  | "createdAt"
+  | "dueDate"
+  | "priority"
+  | "category"
+  | "title"
+  | "status"
+  | "assignee"
+  | "sprint";
 export type SortDir = "asc" | "desc";
+
+/** A sort key is a built-in field or a project field's id (CP-212). The `string & {}`
+ * keeps editor completion for the built-ins instead of collapsing to plain string. */
+export type SortKey = SortField | (string & {});
 
 export const SORT_OPTIONS: { value: SortField; label: string; defaultDir: SortDir }[] = [
   { value: "manual", label: "Manual order", defaultDir: "asc" },
+  { value: "key", label: "Key", defaultDir: "asc" },
   { value: "updatedAt", label: "Last updated", defaultDir: "desc" },
   { value: "createdAt", label: "Created", defaultDir: "desc" },
   { value: "dueDate", label: "Due date", defaultDir: "asc" },
   { value: "priority", label: "Priority", defaultDir: "asc" },
-  { value: "difficulty", label: "Difficulty", defaultDir: "asc" },
   { value: "category", label: "Category", defaultDir: "asc" },
   { value: "title", label: "Title", defaultDir: "asc" },
+  { value: "status", label: "Status", defaultDir: "asc" },
+  { value: "assignee", label: "Assignee", defaultDir: "asc" },
+  { value: "sprint", label: "Sprint", defaultDir: "asc" },
 ];
+
+// The board already groups by status and shows no assignee, sprint or component
+// column, so those four read as nonsense in its dropdown. The list offers all.
+export const BOARD_SORT_FIELDS: SortField[] = [
+  "manual",
+  "key",
+  "updatedAt",
+  "createdAt",
+  "dueDate",
+  "priority",
+  "category",
+  "title",
+];
+
+export const LIST_SORT_FIELDS: SortField[] = SORT_OPTIONS.map((o) => o.value);
+
+export function defaultSortDir(field: SortKey): SortDir {
+  return SORT_OPTIONS.find((o) => o.value === field)?.defaultDir ?? "asc";
+}
 
 // Activity log
 export type ActivityAction =
@@ -990,8 +1050,6 @@ export interface ApiNotification {
 export interface ParsedTask {
   title: string;
   category: Category;
-  component?: string;
-  difficulty?: Difficulty;
   priority?: Priority;
   status?: TaskStatus;
   assignee?: string;

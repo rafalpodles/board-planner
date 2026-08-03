@@ -8,7 +8,10 @@ import { useToast } from "@/components/ui/Toast";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { ApiProject } from "@/types";
 import { effectiveColumns } from "@/lib/columns";
-import { SettingsProvider, useDirtyRegistry } from "@/components/settings/settings-context";
+import {
+  SettingsProvider,
+  useDirtyRegistry,
+} from "@/components/settings/settings-context";
 import { SaveBar } from "@/components/settings/SaveBar";
 import { GeneralSection } from "./sections/GeneralSection";
 import { BoardSection } from "./sections/BoardSection";
@@ -17,6 +20,7 @@ import { IntegrationsSection } from "./sections/IntegrationsSection";
 import { PmAgentSection } from "./sections/PmAgentSection";
 import { AuditSection } from "./sections/AuditSection";
 import { InstanceSection } from "./sections/InstanceSection";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 type Access = "member" | "projectAdmin" | "instanceAdmin";
 
@@ -53,7 +57,8 @@ const SECTIONS: SectionMeta[] = [
     id: "general",
     label: "General",
     title: "General",
-    blurb: "What this project is called, who can change its settings, and how to remove it.",
+    blurb:
+      "What this project is called, who can change its settings, and how to remove it.",
     keywords: "name key icon description owner admins access delete rename",
     access: "projectAdmin",
     icon: <Icon d="M4 6h16M4 12h16M4 18h10" />,
@@ -64,7 +69,8 @@ const SECTIONS: SectionMeta[] = [
     title: "Board",
     blurb:
       "Columns on the Kanban board. Automation — Claude Code, the PM agent, webhooks — follows the role you map a column to, not its name.",
-    keywords: "columns status role backlog approved active review blocked done order",
+    keywords:
+      "columns status role backlog approved active review blocked done order",
     access: "projectAdmin",
     icon: <Icon d="M5 4v16M12 4v11M19 4v7" />,
   },
@@ -74,27 +80,38 @@ const SECTIONS: SectionMeta[] = [
     title: "Task fields",
     blurb:
       "The vocabulary tasks are described with: what they are, what part of the product they touch, and any extra fields you need.",
-    keywords: "categories components labels custom fields templates tags dropdown required",
+    keywords:
+      "categories custom fields templates tags dropdown required",
     access: "member",
-    icon: <Icon d="M20.6 13.4L12 22l-9-9V3h10l7.6 7.6a2 2 0 010 2.8zM7.5 7.5h.01" />,
+    icon: (
+      <Icon d="M20.6 13.4L12 22l-9-9V3h10l7.6 7.6a2 2 0 010 2.8zM7.5 7.5h.01" />
+    ),
   },
   {
     id: "integrations",
     label: "Integrations",
     title: "Integrations",
-    blurb: "Connect the board to the places work actually happens — code hosting and team chat.",
-    keywords: "github gitlab token webhook slack discord notifications pull request merge sync repo",
+    blurb:
+      "Connect the board to the places work actually happens — code hosting and team chat.",
+    keywords:
+      "github gitlab token webhook slack discord notifications pull request merge sync repo",
     access: "projectAdmin",
-    icon: <Icon d="M10 13a5 5 0 007.5.5l3-3a5 5 0 00-7-7l-1.7 1.7M14 11a5 5 0 00-7.5-.5l-3 3a5 5 0 007 7l1.7-1.7" />,
+    icon: (
+      <Icon d="M10 13a5 5 0 007.5.5l3-3a5 5 0 00-7-7l-1.7 1.7M14 11a5 5 0 00-7.5-.5l-3 3a5 5 0 007 7l1.7-1.7" />
+    ),
   },
   {
     id: "pm",
     label: "PM agent",
     title: "PM agent",
-    blurb: "A chat-driven project manager that can review the board on its own and act on tasks.",
-    keywords: "pm agent autonomy board review frequency interval schedule model context notes mcp openrouter turn cap timezone links",
+    blurb:
+      "A chat-driven project manager that can review the board on its own and act on tasks.",
+    keywords:
+      "pm agent autonomy board review frequency interval schedule model context notes mcp openrouter turn cap timezone links",
     access: "projectAdmin",
-    icon: <Icon d="M12 7V4M6 7h12a2 2 0 012 2v8a2 2 0 01-2 2H6a2 2 0 01-2-2V9a2 2 0 012-2zM9 13h.01M15 13h.01" />,
+    icon: (
+      <Icon d="M12 7V4M6 7h12a2 2 0 012 2v8a2 2 0 01-2 2H6a2 2 0 01-2-2V9a2 2 0 012-2zM9 13h.01M15 13h.01" />
+    ),
   },
   {
     id: "audit",
@@ -113,7 +130,9 @@ const SECTIONS: SectionMeta[] = [
     keywords: "ai model openai gpt task generation instance global",
     access: "instanceAdmin",
     instanceGroup: true,
-    icon: <Icon d="M12 3l2.1 4.7 5.1.6-3.8 3.5 1 5.1L12 14.5 7.6 16.9l1-5.1L4.8 8.3l5.1-.6z" />,
+    icon: (
+      <Icon d="M12 3l2.1 4.7 5.1.6-3.8 3.5 1 5.1L12 14.5 7.6 16.9l1-5.1L4.8 8.3l5.1-.6z" />
+    ),
   },
 ];
 
@@ -136,10 +155,19 @@ export default function ProjectSettingsPage() {
     const params = new URLSearchParams(window.location.search);
     const oauthResult = params.get("mcp_oauth");
     if (oauthResult) {
-      if (oauthResult === "ok") toast("MCP OAuth connection established", "success");
-      else toast(`MCP OAuth failed: ${oauthResult.replace(/^error:/, "")}`, "error");
+      if (oauthResult === "ok")
+        toast("MCP OAuth connection established", "success");
+      else
+        toast(
+          `MCP OAuth failed: ${oauthResult.replace(/^error:/, "")}`,
+          "error",
+        );
       setSection("pm");
-      window.history.replaceState(null, "", `${window.location.pathname}?section=pm`);
+      window.history.replaceState(
+        null,
+        "",
+        `${window.location.pathname}?section=pm`,
+      );
     } else {
       const requested = params.get("section");
       if (requested) setSection(requested);
@@ -154,13 +182,20 @@ export default function ProjectSettingsPage() {
   }, [projectId]);
 
   const patchProject = useCallback(
-    (patch: Partial<ApiProject> | ((prev: ApiProject) => Partial<ApiProject>)) => {
-      setProject((p) => (p ? { ...p, ...(typeof patch === "function" ? patch(p) : patch) } : p));
+    (
+      patch: Partial<ApiProject> | ((prev: ApiProject) => Partial<ApiProject>),
+    ) => {
+      setProject((p) =>
+        p ? { ...p, ...(typeof patch === "function" ? patch(p) : patch) } : p,
+      );
     },
-    []
+    [],
   );
 
-  const replaceProject = useCallback((next: ApiProject) => setProject(next), []);
+  const replaceProject = useCallback(
+    (next: ApiProject) => setProject(next),
+    [],
+  );
 
   const visible = useMemo(() => {
     if (!project) return [];
@@ -174,7 +209,9 @@ export default function ProjectSettingsPage() {
   const matches = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return visible;
-    return visible.filter((s) => `${s.label} ${s.keywords}`.toLowerCase().includes(q));
+    return visible.filter((s) =>
+      `${s.label} ${s.keywords}`.toLowerCase().includes(q),
+    );
   }, [visible, query]);
 
   const active = useMemo(() => {
@@ -184,7 +221,11 @@ export default function ProjectSettingsPage() {
 
   const goToSection = useCallback((id: string, scroll = true) => {
     setSection(id);
-    window.history.replaceState(null, "", `${window.location.pathname}?section=${id}`);
+    window.history.replaceState(
+      null,
+      "",
+      `${window.location.pathname}?section=${id}`,
+    );
     if (scroll) window.scrollTo({ top: 0, behavior: "smooth" });
   }, []);
 
@@ -195,8 +236,6 @@ export default function ProjectSettingsPage() {
       fields: {
         count:
           (project.categories?.length || 0) +
-          project.components.length +
-          (project.labels?.length || 0) +
           (project.customFields?.length || 0) +
           (project.taskTemplates?.length || 0),
       },
@@ -220,7 +259,13 @@ export default function ProjectSettingsPage() {
   }
 
   const activeMeta = visible.find((s) => s.id === active);
-  const sectionProps = { projectId, project, patchProject, replaceProject, isAdmin };
+  const sectionProps = {
+    projectId,
+    project,
+    patchProject,
+    replaceProject,
+    isAdmin,
+  };
 
   function navButton(s: SectionMeta, mobile: boolean) {
     const badge = badges[s.id];
@@ -274,23 +319,31 @@ export default function ProjectSettingsPage() {
   return (
     <>
       <div className="pb-32">
-        <button
-          onClick={() => (total > 0 ? setConfirmLeave(true) : router.push(`/projects/${projectId}`))}
-          className="mb-2 flex min-h-[44px] items-center text-sm text-text-muted hover:text-text"
-        >
-          &larr; Back to board
-        </button>
-
-        <div className="mb-6 flex flex-wrap items-center gap-3">
-          <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
-          <span className="inline-flex items-center gap-2 rounded-full border border-border bg-bg-card px-3 py-1 text-sm">
-            {project.icon || "📋"} {project.name}
-            <span className="text-xs text-text-muted">{project.key}</span>
-          </span>
-        </div>
+        <PageHeader
+          title="Settings"
+          icon={project.icon || "📋"}
+          subtitle={`${project.name} · ${project.key}`}
+          actions={
+            // Kept, unlike the other pages' back arrows: this one is the only
+            // trigger for the unsaved-changes guard
+            <button
+              onClick={() =>
+                total > 0
+                  ? setConfirmLeave(true)
+                  : router.push(`/projects/${projectId}`)
+              }
+              className="focus-ring rounded px-2 py-1 text-sm text-text-muted hover:text-text"
+            >
+              Back to board
+            </button>
+          }
+        />
 
         <div className="md:grid md:grid-cols-[236px_minmax(0,1fr)] md:gap-7">
-          <nav className="hidden md:block md:sticky md:top-4 md:self-start" aria-label="Settings sections">
+          <nav
+            className="hidden md:block md:sticky md:top-4 md:self-start"
+            aria-label="Settings sections"
+          >
             <div className="relative mb-3">
               <input
                 type="search"
@@ -299,7 +352,9 @@ export default function ProjectSettingsPage() {
                   setQuery(e.target.value);
                   const q = e.target.value.trim().toLowerCase();
                   if (!q) return;
-                  const first = visible.find((s) => `${s.label} ${s.keywords}`.toLowerCase().includes(q));
+                  const first = visible.find((s) =>
+                    `${s.label} ${s.keywords}`.toLowerCase().includes(q),
+                  );
                   if (first) goToSection(first.id, false);
                 }}
                 placeholder="Search settings..."
@@ -330,7 +385,9 @@ export default function ProjectSettingsPage() {
             )}
 
             {matches.length === 0 && (
-              <p className="px-2.5 text-sm text-text-muted">Nothing matches &ldquo;{query}&rdquo;.</p>
+              <p className="px-2.5 text-sm text-text-muted">
+                Nothing matches &ldquo;{query}&rdquo;.
+              </p>
             )}
 
             {!project.canAdmin && (
@@ -350,8 +407,12 @@ export default function ProjectSettingsPage() {
           <main>
             {activeMeta && (
               <header className="mb-4">
-                <h2 className="text-xl font-bold tracking-tight">{activeMeta.title}</h2>
-                <p className="max-w-[62ch] text-sm text-text-muted">{activeMeta.blurb}</p>
+                <h2 className="text-xl font-bold tracking-tight">
+                  {activeMeta.title}
+                </h2>
+                <p className="max-w-[62ch] text-sm text-text-muted">
+                  {activeMeta.blurb}
+                </p>
               </header>
             )}
 
@@ -359,11 +420,23 @@ export default function ProjectSettingsPage() {
               {visible.map((s) => (
                 <div key={s.id} className={s.id === active ? "" : "hidden"}>
                   {s.id === "general" && <GeneralSection {...sectionProps} />}
-                  {s.id === "board" && <BoardSection {...sectionProps} active={active === "board"} />}
+                  {s.id === "board" && (
+                    <BoardSection
+                      {...sectionProps}
+                      active={active === "board"}
+                    />
+                  )}
                   {s.id === "fields" && <TaskFieldsSection {...sectionProps} />}
-                  {s.id === "integrations" && <IntegrationsSection {...sectionProps} />}
+                  {s.id === "integrations" && (
+                    <IntegrationsSection {...sectionProps} />
+                  )}
                   {s.id === "pm" && <PmAgentSection {...sectionProps} />}
-                  {s.id === "audit" && <AuditSection projectId={projectId} active={active === "audit"} />}
+                  {s.id === "audit" && (
+                    <AuditSection
+                      projectId={projectId}
+                      active={active === "audit"}
+                    />
+                  )}
                   {s.id === "instance" && <InstanceSection />}
                 </div>
               ))}

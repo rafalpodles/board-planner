@@ -7,6 +7,7 @@ import { ApiNotification } from "@/types";
 import { Button } from "@/components/ui/Button";
 import { timeAgo } from "@/lib/time";
 import { taskPath } from "@/lib/urls";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 const TYPE_LABELS: Record<string, string> = {
   task_assigned: "Assigned",
@@ -83,15 +84,22 @@ export default function NotificationsPage() {
   }
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold">Notifications</h1>
-        {notifications.some((n) => !n.read) && (
-          <Button size="sm" variant="secondary" onClick={markAllRead}>
-            Mark all as read
-          </Button>
-        )}
-      </div>
+    <div className="max-w-4xl mx-auto w-full">
+      <PageHeader
+        title="Notifications"
+        subtitle={
+          notifications.filter((n) => !n.read).length > 0
+            ? `${notifications.filter((n) => !n.read).length} unread`
+            : "All caught up"
+        }
+        actions={
+          notifications.some((n) => !n.read) ? (
+            <Button size="sm" variant="secondary" onClick={markAllRead}>
+              Mark all as read
+            </Button>
+          ) : undefined
+        }
+      />
 
       {notifications.length === 0 ? (
         <p className="text-text-muted text-center py-12">No notifications yet.</p>

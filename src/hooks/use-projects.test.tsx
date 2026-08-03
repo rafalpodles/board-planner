@@ -5,7 +5,7 @@ import { ProjectsProvider } from "@/components/shell/ProjectsProvider";
 import { useProjects } from "@/hooks/use-projects";
 
 const { api, auth } = vi.hoisted(() => ({
-  api: { get: vi.fn() },
+  api: { get: vi.fn(), put: vi.fn() },
   auth: { user: null as { username: string } | null },
 }));
 
@@ -14,27 +14,31 @@ const { api, auth } = vi.hoisted(() => ({
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
 vi.mock("@/hooks/use-auth", () => ({ useAuth: () => auth }));
 
-function Probe() {
-  const { projects, isLoading, reload } = useProjects();
+function Probe({ newOrder }: { newOrder?: string[] } = {}) {
+  const { projects, isLoading, reload, reorder } = useProjects();
   return (
     <div>
       <span data-testid="loading">{String(isLoading)}</span>
       <span data-testid="count">{projects.length}</span>
+      <span data-testid="order">{projects.map((p) => p._id).join(",")}</span>
       <button onClick={() => reload()}>reload</button>
+      <button onClick={() => reorder(newOrder ?? [])}>reorder</button>
     </div>
   );
 }
 
-function renderProvider() {
+function renderProvider(newOrder?: string[]) {
   return render(
     <ProjectsProvider>
-      <Probe />
+      <Probe newOrder={newOrder} />
     </ProjectsProvider>
   );
 }
 
 beforeEach(() => {
   api.get.mockReset();
+  api.put.mockReset();
+  api.put.mockResolvedValue({ updated: 0 });
   auth.user = { username: "admin" };
 });
 
@@ -92,5 +96,59 @@ describe("useProjects", () => {
     const silence = vi.spyOn(console, "error").mockImplementation(() => {});
     expect(() => render(<Probe />)).toThrow(/must be used within ProjectsProvider/);
     silence.mockRestore();
+  });
+});
+
+// The sidebar must show the row where it was dropped, not where it was a
+// round-trip ago — and must not keep a position the server refused
+describe("useProjects reorder", () => {
+  const three = [{ _id: "a" }, { _id: "b" }, { _id: "c" }];
+
+  it("applies the new order before the request resolves", async () => {
+    api.get.mockResolvedValue(three);
+    let resolvePut: () => void = () => {};
+    api.put.mockReturnValue(new Promise<void>((r) => (resolvePut = r)));
+
+    renderProvider(["c", "a", "b"]);
+    await waitFor(() => expect(screen.getByTestId("order").textContent).toBe("a,b,c"));
+
+    await act(async () => screen.getByText("reorder").click());
+    expect(screen.getByTestId("order").textContent).toBe("c,a,b");
+
+    await act(async () => resolvePut());
+    expect(screen.getByTestId("order").textContent).toBe("c,a,b");
+  });
+
+  it("sends the ids in the new order", async () => {
+    api.get.mockResolvedValue(three);
+    renderProvider(["c", "a", "b"]);
+    await waitFor(() => expect(screen.getByTestId("count").textContent).toBe("3"));
+
+    await act(async () => screen.getByText("reorder").click());
+    expect(api.put).toHaveBeenCalledWith("/api/projects/reorder", {
+      order: ["c", "a", "b"],
+    });
+  });
+
+  it("snaps back when the write fails", async () => {
+    api.get.mockResolvedValue(three);
+    api.put.mockRejectedValue(new Error("boom"));
+
+    renderProvider(["c", "a", "b"]);
+    await waitFor(() => expect(screen.getByTestId("order").textContent).toBe("a,b,c"));
+
+    await act(async () => screen.getByText("reorder").click());
+    await waitFor(() => expect(screen.getByTestId("order").textContent).toBe("a,b,c"));
+  });
+
+  // A truncated or padded list would drop or duplicate a project on screen
+  it("refuses an order that is not a permutation of what it holds", async () => {
+    api.get.mockResolvedValue(three);
+    renderProvider(["a", "b"]);
+    await waitFor(() => expect(screen.getByTestId("order").textContent).toBe("a,b,c"));
+
+    await act(async () => screen.getByText("reorder").click());
+    expect(screen.getByTestId("order").textContent).toBe("a,b,c");
+    expect(api.put).not.toHaveBeenCalled();
   });
 });

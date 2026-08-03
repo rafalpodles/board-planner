@@ -11,7 +11,7 @@ const { api, auth, nav, theme, projectsState } = vi.hoisted(() => ({
     logout: vi.fn(),
   },
   nav: { pathname: "/projects" },
-  theme: { theme: "dark", toggle: vi.fn() },
+  theme: { theme: "dark", preference: "system", setPreference: vi.fn() },
   projectsState: { projects: [] as unknown[], isLoading: false, reload: vi.fn() },
 }));
 
@@ -27,20 +27,41 @@ vi.mock("next/image", () => ({
   default: (props: { alt?: string }) => <span data-testid="logo" aria-label={props.alt} />,
 }));
 
-function renderSidebar(props: { mobileOpen?: boolean } = {}) {
+function renderSidebar(
+  props: {
+    mobileOpen?: boolean;
+    onCloseMobile?: () => void;
+    menuButtonRef?: React.RefObject<HTMLElement | null>;
+    onOpenSearch?: () => void;
+  } = {}
+) {
   return render(
     <Sidebar
       mobileOpen={props.mobileOpen ?? false}
       onNavigate={() => {}}
-      onOpenImport={() => {}}
-      onOpenExport={() => {}}
+      onCloseMobile={props.onCloseMobile ?? (() => {})}
+      menuButtonRef={props.menuButtonRef}
+      onOpenSearch={props.onOpenSearch ?? (() => {})}
     />
   );
 }
 
+// jsdom/happy-dom answer every media query with false, so the drawer branch only
+// runs when matchMedia is told the viewport is narrow
+function setViewport(mobile: boolean) {
+  window.matchMedia = ((query: string) => ({
+    matches: mobile && query.includes("max-width"),
+    media: query,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  })) as unknown as typeof window.matchMedia;
+}
+
 beforeEach(() => {
   api.get.mockReset();
-  api.get.mockResolvedValue({ count: 0 });
+  api.get.mockImplementation((url: string) =>
+    Promise.resolve(url.startsWith("/api/search") ? [] : { count: 0 })
+  );
   auth.user = { fullName: "Admin User", role: "admin" };
   auth.isAdmin = true;
   nav.pathname = "/projects";
@@ -117,14 +138,14 @@ describe("Sidebar", () => {
     expect(screen.getByText("My Tasks")).toBeTruthy();
   });
 
-  it("keeps the parent nav item active on a nested route", async () => {
-    nav.pathname = "/settings/users";
+  // The Settings row this used to assert on left with the Instance group (CP-216);
+  // the rule itself is covered by nav-active.test.ts and the collapsed-rail case
+  it("marks only the nav item the route belongs to", async () => {
+    nav.pathname = "/my-tasks";
     renderSidebar();
-    const settings = await screen.findByText("Settings");
-    expect(settings.closest("a")?.getAttribute("aria-current")).toBe("page");
-
-    const myTasks = screen.getByText("My Tasks");
-    expect(myTasks.closest("a")?.getAttribute("aria-current")).toBeNull();
+    const myTasks = await screen.findByText("My Tasks");
+    expect(myTasks.closest("a")?.getAttribute("aria-current")).toBe("page");
+    expect(screen.getByText("Notifications").closest("a")?.getAttribute("aria-current")).toBeNull();
   });
 
   // The expanded sidebar hands the Projects group to ProjectTree; only the
@@ -135,5 +156,189 @@ describe("Sidebar", () => {
     renderSidebar({ mobileOpen: false });
     const entry = await screen.findByTitle("All projects");
     expect(entry.getAttribute("aria-current")).toBe("page");
+  });
+});
+
+// The drawer painted a scrim and blocked the page visually, but owed it none of
+// a modal's actual contract: Escape did nothing and Tab walked straight past it
+describe("Sidebar as a mobile drawer", () => {
+  afterEach(() => setViewport(false));
+
+  it("presents itself as a dialog only while it is a drawer", async () => {
+    setViewport(true);
+    const { container } = renderSidebar({ mobileOpen: true });
+    await waitFor(() => {
+      const aside = container.querySelector("aside")!;
+      expect(aside.getAttribute("role")).toBe("dialog");
+      expect(aside.getAttribute("aria-modal")).toBe("true");
+      expect(aside.getAttribute("aria-label")).toBe("Navigation");
+    });
+  });
+
+  it("is plain layout above the breakpoint, even when mobileOpen is set", async () => {
+    setViewport(false);
+    const { container } = renderSidebar({ mobileOpen: true });
+    await waitFor(() => expect(screen.getByText("My Tasks")).toBeTruthy());
+    const aside = container.querySelector("aside")!;
+    expect(aside.getAttribute("role")).toBeNull();
+    expect(aside.getAttribute("aria-modal")).toBeNull();
+  });
+
+  it("closes on Escape", async () => {
+    setViewport(true);
+    const onCloseMobile = vi.fn();
+    renderSidebar({ mobileOpen: true, onCloseMobile });
+    await waitFor(() => expect(screen.getByLabelText("Close navigation")).toBeTruthy());
+
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    expect(onCloseMobile).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not answer Escape when it is not a drawer", async () => {
+    setViewport(false);
+    const onCloseMobile = vi.fn();
+    renderSidebar({ mobileOpen: false, onCloseMobile });
+    await waitFor(() => expect(screen.getByText("My Tasks")).toBeTruthy());
+
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    expect(onCloseMobile).not.toHaveBeenCalled();
+  });
+
+  it("keeps Tab inside itself", async () => {
+    setViewport(true);
+    const { container } = renderSidebar({ mobileOpen: true });
+    const aside = await waitFor(() => container.querySelector("aside")!);
+    const stops = [...aside.querySelectorAll<HTMLElement>("a[href], button")];
+    const last = stops[stops.length - 1];
+
+    last.focus();
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
+    });
+    expect(aside.contains(document.activeElement)).toBe(true);
+    expect(document.activeElement).toBe(stops[0]);
+  });
+
+  it("labels its close control for the drawer, not the desktop rail", async () => {
+    setViewport(true);
+    renderSidebar({ mobileOpen: true });
+    await waitFor(() => expect(screen.getByLabelText("Close navigation")).toBeTruthy());
+    expect(screen.queryByLabelText("Collapse sidebar")).toBeNull();
+  });
+
+  it("closes when that control is used", async () => {
+    setViewport(true);
+    const onCloseMobile = vi.fn();
+    renderSidebar({ mobileOpen: true, onCloseMobile });
+    const close = await screen.findByLabelText("Close navigation");
+    await act(async () => close.click());
+    expect(onCloseMobile).toHaveBeenCalledTimes(1);
+  });
+
+  it("still says Collapse sidebar on the desktop layout", async () => {
+    setViewport(false);
+    renderSidebar({ mobileOpen: false });
+    await waitFor(() => expect(screen.getByLabelText("Collapse sidebar")).toBeTruthy());
+  });
+
+  it("returns focus to whatever opened it", async () => {
+    setViewport(true);
+    const trigger = document.createElement("button");
+    document.body.appendChild(trigger);
+    const menuButtonRef = { current: trigger };
+
+    const { unmount } = renderSidebar({ mobileOpen: true, menuButtonRef });
+    await waitFor(() => expect(screen.getByLabelText("Close navigation")).toBeTruthy());
+    await act(async () => unmount());
+
+    expect(document.activeElement).toBe(trigger);
+    trigger.remove();
+  });
+});
+
+// CP-197 moved search out of the sidebar into a single centered layer; what is
+// left here is a trigger, and the nav must never be replaced by results again
+describe("Sidebar search row", () => {
+  it("opens the search layer instead of searching in place", async () => {
+    const onOpenSearch = vi.fn();
+    renderSidebar({ onOpenSearch });
+    const row = await screen.findByRole("button", { name: "Search" });
+
+    await act(async () => row.click());
+    expect(onOpenSearch).toHaveBeenCalled();
+  });
+
+  // It stopped being a field when it stopped searching; looking like one was the lie
+  it("looks like the other nav rows, not like an input", async () => {
+    renderSidebar();
+    const row = await screen.findByRole("button", { name: "Search" });
+    const myTasks = screen.getByText("My Tasks").closest("a")!;
+
+    expect(row.className).toBe(myTasks.className);
+    expect(row.querySelector("kbd")).toBeNull();
+  });
+
+  it("still announces the shortcut that reaches it", async () => {
+    renderSidebar();
+    const row = await screen.findByRole("button", { name: "Search" });
+    expect(row.getAttribute("aria-keyshortcuts")).toBe("Meta+K Control+K");
+  });
+
+  it("sits in the same list position whether the rail is open or collapsed", async () => {
+    const namesInOrder = () =>
+      [...document.querySelectorAll("nav a, nav button")]
+        .map((el) => el.textContent?.trim() || el.getAttribute("aria-label"))
+        .slice(0, 3);
+
+    renderSidebar();
+    await waitFor(() => expect(screen.getByText("My Tasks")).toBeTruthy());
+    expect(namesInOrder()[0]).toBe("Search");
+
+    cleanup();
+    localStorage.setItem("sidebar-collapsed", "1");
+    renderSidebar();
+    await waitFor(() => expect(screen.queryByText("My Tasks")).toBeNull());
+    expect(namesInOrder()[0]).toBe("Search");
+  });
+
+  it("never puts a search field or results in the nav", async () => {
+    renderSidebar();
+    await waitFor(() => expect(screen.getByText("My Tasks")).toBeTruthy());
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.queryByRole("listbox")).toBeNull();
+  });
+
+  it("keeps a way into search from the collapsed rail", async () => {
+    const onOpenSearch = vi.fn();
+    localStorage.setItem("sidebar-collapsed", "1");
+    renderSidebar({ onOpenSearch });
+    await waitFor(() => expect(screen.queryByText("My Tasks")).toBeNull());
+
+    await act(async () => screen.getByRole("button", { name: "Search" }).click());
+    expect(onOpenSearch).toHaveBeenCalled();
+  });
+});
+
+// CP-216: the same page hangs off the user menu, so the Instance group was
+// one entry pretending to be a section
+describe("Sidebar instance settings", () => {
+  it("offers no Instance group in the nav", async () => {
+    renderSidebar();
+    await waitFor(() => expect(screen.getByText("My Tasks")).toBeTruthy());
+    expect(screen.queryByText("Instance")).toBeNull();
+    expect(screen.queryByRole("link", { name: "Settings" })).toBeNull();
+  });
+
+  it("still reaches settings from the user menu", async () => {
+    renderSidebar();
+    await waitFor(() => expect(screen.getByText("Admin User")).toBeTruthy());
+
+    await act(async () => screen.getByText("Admin User").closest("button")!.click());
+    const link = screen.getByRole("link", { name: "Settings" });
+    expect(link.getAttribute("href")).toBe("/settings");
   });
 });

@@ -23,8 +23,6 @@ function renderTree(over: Partial<React.ComponentProps<typeof ProjectTree>> = {}
       projects={[TP, MOB]}
       pathname="/projects/TP"
       isAdmin
-      onOpenImport={() => {}}
-      onOpenExport={() => {}}
       {...over}
     />
   );
@@ -142,30 +140,20 @@ describe("ProjectTree", () => {
     expect(screen.queryByLabelText("New project")).toBeNull();
   });
 
-  it("triggers the import and export dialogs for the current project", async () => {
-    const onOpenImport = vi.fn();
-    const onOpenExport = vi.fn();
-    renderTree({ onOpenImport, onOpenExport });
-
-    await act(async () => {
-      screen.getByText("Import").click();
-    });
-    await act(async () => {
-      screen.getByText("Export").click();
-    });
-
-    expect(onOpenImport).toHaveBeenCalledTimes(1);
-    expect(onOpenExport).toHaveBeenCalledTimes(1);
+  // Import/export was deleted in CP-205; the sub-nav is links only now
+  it("offers no import or export entry", async () => {
+    renderTree();
+    expect(screen.queryByText("Import")).toBeNull();
+    expect(screen.queryByText("Export")).toBeNull();
   });
 
-  // Import/export act on whatever project the board is showing, so they make no
-  // sense under a project you have merely expanded to peek at
-  it("does not offer import or export under a non-route project", async () => {
-    renderTree();
-    await act(async () => {
-      screen.getByLabelText("Expand Mobile App").click();
-    });
-    expect(screen.queryByText("Import")).toBeNull();
+  it("renders every sub-nav entry as a link, never a button", async () => {
+    const { container } = renderTree();
+    const subNav = [...container.querySelectorAll("a, button")].filter((el) =>
+      ["Board", "Sprints", "Dashboard", "PM agent", "Settings"].includes(el.textContent?.trim() || "")
+    );
+    expect(subNav.length).toBeGreaterThan(0);
+    expect(subNav.every((el) => el.tagName === "A")).toBe(true);
   });
 
   it("links sub-nav entries under the project key", () => {
@@ -176,5 +164,66 @@ describe("ProjectTree", () => {
     expect(screen.getByText("Dashboard").closest("a")?.getAttribute("href")).toBe(
       "/projects/TP/dashboard"
     );
+  });
+});
+
+describe("ProjectTree reordering", () => {
+  function rows(container: HTMLElement) {
+    return [...container.querySelectorAll('[draggable="true"]')] as HTMLElement[];
+  }
+
+  function drag(container: HTMLElement, fromIndex: number, toIndex: number) {
+    const data = new Map<string, string>();
+    const dataTransfer = {
+      effectAllowed: "",
+      dropEffect: "",
+      setData: (k: string, v: string) => void data.set(k, v),
+      getData: (k: string) => data.get(k) ?? "",
+    };
+    const source = rows(container)[fromIndex];
+    const target = rows(container)[toIndex];
+
+    const fire = (el: HTMLElement, type: string) => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperty(event, "dataTransfer", { value: dataTransfer });
+      el.dispatchEvent(event);
+    };
+
+    fire(source, "dragstart");
+    fire(target, "dragover");
+    fire(target, "drop");
+  }
+
+  it("makes rows draggable when reordering is allowed", () => {
+    const { container } = renderTree({ onReorder: () => {} });
+    expect(rows(container)).toHaveLength(2);
+  });
+
+  it("makes nothing draggable without a reorder handler", () => {
+    const { container } = renderTree();
+    expect(rows(container)).toHaveLength(0);
+  });
+
+  // One project cannot be reordered against anything
+  it("makes nothing draggable with a single project", () => {
+    const { container } = renderTree({
+      projects: [project({ _id: "1", key: "TP" })],
+      onReorder: () => {},
+    });
+    expect(rows(container)).toHaveLength(0);
+  });
+
+  it("reports the reordered ids on drop", async () => {
+    const onReorder = vi.fn();
+    const { container } = renderTree({ onReorder });
+    await act(async () => drag(container, 0, 1));
+    expect(onReorder).toHaveBeenCalledWith(["2", "1"]);
+  });
+
+  it("reports nothing when a row is dropped on itself", async () => {
+    const onReorder = vi.fn();
+    const { container } = renderTree({ onReorder });
+    await act(async () => drag(container, 1, 1));
+    expect(onReorder).not.toHaveBeenCalled();
   });
 });

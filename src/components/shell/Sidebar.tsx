@@ -8,6 +8,8 @@ import { useAuth } from "@/hooks/use-auth";
 import { useApi } from "@/hooks/use-api";
 import { useTheme } from "@/components/ThemeProvider";
 import { usePollWhileVisible } from "@/hooks/use-poll-while-visible";
+import { useFocusTrap } from "@/hooks/use-focus-trap";
+import { useMediaQuery } from "@/hooks/use-media-query";
 import { isNavItemActive } from "@/lib/nav-active";
 import { useProjects } from "@/hooks/use-projects";
 import { ProjectTree } from "./ProjectTree";
@@ -24,7 +26,19 @@ const ICONS = {
   logout: "M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1",
   collapse: "M9 4v16M4 6a2 2 0 012-2h12a2 2 0 012 2v12a2 2 0 01-2 2H6a2 2 0 01-2-2V6z",
   chevronUp: "M5 15l7-7 7 7",
+  close: "M6 18L18 6M6 6l12 12",
+  sun: "M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z",
+  moon: "M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z",
+  monitor:
+    "M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z",
+  check: "M5 13l4 4L19 7",
 } as const;
+
+const THEME_OPTIONS = [
+  { value: "light", label: "Light", icon: ICONS.sun },
+  { value: "dark", label: "Dark", icon: ICONS.moon },
+  { value: "system", label: "System", icon: ICONS.monitor },
+] as const;
 
 const COLLAPSED_KEY = "sidebar-collapsed";
 
@@ -43,54 +57,87 @@ function Icon({ d, className = "" }: { d: string; className?: string }) {
 }
 
 interface NavItemProps {
-  href: string;
   icon: string;
   label: string;
-  active: boolean;
   collapsed: boolean;
+  active?: boolean;
   badge?: React.ReactNode;
+  /** A row is a link, unless it acts on this page — then it is a button */
+  href?: string;
+  onClick?: () => void;
+  keyshortcuts?: string;
 }
 
-function NavItem({ href, icon, label, active, collapsed, badge }: NavItemProps) {
+function NavItem({
+  href,
+  onClick,
+  icon,
+  label,
+  active = false,
+  collapsed,
+  badge,
+  keyshortcuts,
+}: NavItemProps) {
+  const className = `focus-ring flex min-h-[44px] w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-colors md:min-h-0 ${
+    collapsed ? "justify-center" : ""
+  } ${
+    active ? "bg-primary/15 font-semibold text-text" : "text-text-muted hover:bg-bg-hover hover:text-text"
+  }`;
+
+  const body = (
+    <>
+      <Icon d={icon} className={`h-[17px] w-[17px] ${active ? "text-primary" : ""}`} />
+      {!collapsed && <span className="flex-1 truncate">{label}</span>}
+      {!collapsed && badge}
+    </>
+  );
+
+  if (!href) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        title={collapsed ? label : undefined}
+        aria-label={label}
+        aria-keyshortcuts={keyshortcuts}
+        className={className}
+      >
+        {body}
+      </button>
+    );
+  }
+
   return (
     <Link
       href={href}
       title={collapsed ? label : undefined}
       aria-current={active ? "page" : undefined}
-      className={`focus-ring flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-colors ${
-        collapsed ? "justify-center" : ""
-      } ${
-        active
-          ? "bg-primary/15 font-semibold text-text"
-          : "text-text-muted hover:bg-bg-hover hover:text-text"
-      }`}
+      className={className}
     >
-      <Icon d={icon} className={`h-[17px] w-[17px] ${active ? "text-primary" : ""}`} />
-      {!collapsed && <span className="flex-1 truncate">{label}</span>}
-      {!collapsed && badge}
+      {body}
     </Link>
-  );
-}
-
-function GroupHeading({ children }: { children: React.ReactNode }) {
-  return (
-    <h2 className="mb-1.5 ml-2.5 text-[10.5px] font-bold uppercase tracking-wider text-text-muted">
-      {children}
-    </h2>
   );
 }
 
 interface SidebarProps {
   mobileOpen: boolean;
   onNavigate: () => void;
-  onOpenImport: () => void;
-  onOpenExport: () => void;
+  onCloseMobile: () => void;
+  /** Focus goes back to whatever opened the drawer */
+  menuButtonRef?: React.RefObject<HTMLElement | null>;
+  onOpenSearch: () => void;
 }
 
-export function Sidebar({ mobileOpen, onNavigate, onOpenImport, onOpenExport }: SidebarProps) {
+export function Sidebar({
+  mobileOpen,
+  onNavigate,
+  onCloseMobile,
+  menuButtonRef,
+  onOpenSearch,
+}: SidebarProps) {
   const { user, isAdmin, logout } = useAuth();
-  const { projects } = useProjects();
-  const { theme, toggle: toggleTheme } = useTheme();
+  const { projects, reorder } = useProjects();
+  const { preference, setPreference } = useTheme();
   const pathname = usePathname() ?? "";
   const router = useRouter();
   const api = useApi();
@@ -133,6 +180,19 @@ export function Sidebar({ mobileOpen, onNavigate, onOpenImport, onOpenExport }: 
 
   usePollWhileVisible(fetchUnreadCount, 30_000, !!user);
 
+  // Below md the sidebar is an overlay over the page, so it owes the page a
+  // modal's contract. Above md it is part of the layout and owes it nothing.
+  const asideRef = useRef<HTMLElement>(null);
+  const isMobile = useMediaQuery("(max-width: 767px)");
+  const isDrawer = isMobile && mobileOpen;
+
+  useFocusTrap({
+    active: isDrawer,
+    containerRef: asideRef,
+    onEscape: onCloseMobile,
+    returnFocusTo: menuButtonRef,
+  });
+
   if (!user) return null;
 
   // The drawer is always full width, so the icon-only rail is a desktop-only state
@@ -140,8 +200,19 @@ export function Sidebar({ mobileOpen, onNavigate, onOpenImport, onOpenExport }: 
 
   const isActive = (href: string) => isNavItemActive(pathname, href);
 
+  const drawerAwareCollapseLabel = isDrawer
+    ? "Close navigation"
+    : compact
+      ? "Expand sidebar"
+      : "Collapse sidebar";
+
   return (
     <aside
+      ref={asideRef}
+      tabIndex={isDrawer ? -1 : undefined}
+      role={isDrawer ? "dialog" : undefined}
+      aria-modal={isDrawer ? true : undefined}
+      aria-label={isDrawer ? "Navigation" : undefined}
       onClick={(e) => {
         if ((e.target as HTMLElement).closest("a")) onNavigate();
       }}
@@ -155,39 +226,35 @@ export function Sidebar({ mobileOpen, onNavigate, onOpenImport, onOpenExport }: 
         }`}
       >
         {!compact && (
-          <Link href="/projects" className="focus-ring flex min-w-0 items-center gap-2 rounded">
+          <Link
+            href="/projects"
+            className="focus-ring flex min-h-[44px] min-w-0 items-center gap-2 rounded md:min-h-0"
+          >
             <Image src="/logo.svg" alt="" width={24} height={24} />
             <span className="truncate text-[15px] font-bold">ClaudePlanner</span>
           </Link>
         )}
         <button
-          onClick={toggleCollapsed}
-          title={compact ? "Expand sidebar" : "Collapse sidebar"}
-          aria-label={compact ? "Expand sidebar" : "Collapse sidebar"}
-          className={`focus-ring rounded-md p-1 text-text-muted transition-colors hover:bg-bg-hover hover:text-text ${
+          onClick={isDrawer ? onCloseMobile : toggleCollapsed}
+          title={drawerAwareCollapseLabel}
+          aria-label={drawerAwareCollapseLabel}
+          className={`focus-ring flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md text-text-muted transition-colors hover:bg-bg-hover hover:text-text md:min-h-0 md:min-w-0 md:p-1 ${
             compact ? "" : "ml-auto"
           }`}
         >
-          <Icon d={ICONS.collapse} className="h-4 w-4" />
+          <Icon d={isDrawer ? ICONS.close : ICONS.collapse} className="h-4 w-4" />
         </button>
       </div>
 
-      {!compact && (
-        <div className="relative px-2.5 pb-2.5">
-          <Link
-            href="/search"
-            className="focus-ring block rounded-lg border border-border bg-bg-input py-2 pl-3 pr-[34px] text-[13px] text-text-muted transition-colors hover:text-text"
-          >
-            Search tasks and projects
-          </Link>
-          <kbd className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 rounded border border-border bg-bg-card px-1 py-0.5 font-mono text-[10px] text-text-muted">
-            ⌘K
-          </kbd>
-        </div>
-      )}
-
       <nav className="flex flex-1 flex-col gap-4 overflow-y-auto px-2.5 pb-2.5">
         <div>
+          <NavItem
+            icon={ICONS.search}
+            label="Search"
+            collapsed={compact}
+            onClick={onOpenSearch}
+            keyshortcuts="Meta+K Control+K"
+          />
           <NavItem
             href="/my-tasks"
             icon={ICONS.myTasks}
@@ -209,15 +276,6 @@ export function Sidebar({ mobileOpen, onNavigate, onOpenImport, onOpenExport }: 
               ) : undefined
             }
           />
-          {compact && (
-            <NavItem
-              href="/search"
-              icon={ICONS.search}
-              label="Search"
-              active={isActive("/search")}
-              collapsed
-            />
-          )}
         </div>
 
         {compact ? (
@@ -233,28 +291,16 @@ export function Sidebar({ mobileOpen, onNavigate, onOpenImport, onOpenExport }: 
             projects={projects}
             pathname={pathname}
             isAdmin={isAdmin}
-            onOpenImport={onOpenImport}
-            onOpenExport={onOpenExport}
+            onReorder={isAdmin ? reorder : undefined}
           />
         )}
-
-        <div>
-          {!compact && <GroupHeading>Instance</GroupHeading>}
-          <NavItem
-            href="/settings"
-            icon={ICONS.settings}
-            label="Settings"
-            active={isActive("/settings")}
-            collapsed={compact}
-          />
-        </div>
       </nav>
 
       <div className="border-t border-border p-2.5" ref={menuRef}>
         <div className="relative">
           <button
             onClick={() => setMenuOpen((v) => !v)}
-            className={`focus-ring flex w-full items-center gap-2 rounded-lg p-1 text-left transition-colors hover:bg-bg-hover ${
+            className={`focus-ring flex min-h-[44px] w-full items-center gap-2 rounded-lg p-1 text-left transition-colors hover:bg-bg-hover md:min-h-0 ${
               compact ? "justify-center" : ""
             }`}
           >
@@ -282,27 +328,32 @@ export function Sidebar({ mobileOpen, onNavigate, onOpenImport, onOpenExport }: 
               <Link
                 href="/settings"
                 onClick={() => setMenuOpen(false)}
-                className="focus-ring-inset flex items-center gap-2 px-3 py-2 text-sm text-text-muted hover:bg-bg-hover hover:text-text"
+                className="focus-ring-inset flex min-h-[44px] items-center gap-2 px-3 py-2 text-sm text-text-muted hover:bg-bg-hover hover:text-text md:min-h-0"
               >
                 <Icon d={ICONS.settings} className="h-4 w-4" />
                 Settings
               </Link>
-              <button
-                onClick={() => {
-                  toggleTheme();
-                  setMenuOpen(false);
-                }}
-                className="focus-ring-inset block w-full cursor-pointer px-3 py-2 text-left text-sm text-text-muted hover:bg-bg-hover hover:text-text"
-              >
-                {theme === "dark" ? "Light mode" : "Dark mode"}
-              </button>
+              <div role="group" aria-label="Theme" className="border-y border-border py-1">
+                {THEME_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    onClick={() => setPreference(option.value)}
+                    aria-pressed={preference === option.value}
+                    className="focus-ring-inset flex min-h-[44px] w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-sm text-text-muted hover:bg-bg-hover hover:text-text md:min-h-0"
+                  >
+                    <Icon d={option.icon} className="h-4 w-4" />
+                    <span className="flex-1">{option.label}</span>
+                    {preference === option.value && <Icon d={ICONS.check} className="h-4 w-4" />}
+                  </button>
+                ))}
+              </div>
               <button
                 onClick={() => {
                   setMenuOpen(false);
                   logout();
                   router.replace("/login");
                 }}
-                className="focus-ring-inset flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-sm text-text-muted hover:bg-bg-hover hover:text-text"
+                className="focus-ring-inset flex min-h-[44px] w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-sm text-text-muted hover:bg-bg-hover hover:text-text md:min-h-0"
               >
                 <Icon d={ICONS.logout} className="h-4 w-4" />
                 Logout

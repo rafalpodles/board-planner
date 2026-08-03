@@ -42,18 +42,46 @@ describe("no control strips its outline without a replacement", () => {
     "outline-primary",
   ];
 
+  // The rule assumes a control whose focus is invisible without an outline. A text
+  // input is the one case where that is false: it is marked by its own caret. Each
+  // exemption is listed here with its reason, so adding one is a reviewable act
+  // rather than a class quietly slipping past the regex.
+  // `placeholder:` pins each exemption to the text field it was granted for, so an
+  // outline stripped from a button in the same file still fails.
+  const CARET_MARKS_FOCUS = [
+    {
+      file: "components/search/SearchLayer.tsx",
+      onlyOn: "placeholder:",
+      // focused from the moment the layer opens; a box around it for the whole
+      // search reads as a validation error rather than as focus
+    },
+  ];
+
+  const exempt = (path: string, line: string) =>
+    CARET_MARKS_FOCUS.some((e) => path.endsWith(e.file) && line.includes(e.onlyOn));
+
   const offenders = files.flatMap((file) =>
     readFileSync(file, "utf8")
       .split("\n")
       .map((line, i) => ({ file, line, number: i + 1 }))
       .filter(({ line }) => /(focus(-visible)?:)?outline-none/.test(line))
       .filter(({ line }) => !REPLACEMENTS.some((token) => line.includes(token)))
+      .filter(({ file: path, line }) => !exempt(path, line))
   );
 
   it("finds none", () => {
     expect(
       offenders.map((o) => `${o.file.replace(`${SRC}/`, "")}:${o.number}`)
     ).toEqual([]);
+  });
+
+  // An exemption that stops matching is an exemption nobody is checking any more
+  it.each(CARET_MARKS_FOCUS)("$file still has the field its exemption was granted for", (e) => {
+    const lines = readFileSync(join(SRC, e.file), "utf8").split("\n");
+    const exempted = lines.filter(
+      (line) => /outline-none/.test(line) && line.includes(e.onlyOn)
+    );
+    expect(exempted).toHaveLength(1);
   });
 });
 

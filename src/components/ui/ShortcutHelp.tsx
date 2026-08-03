@@ -14,8 +14,7 @@ const SHORTCUT_GROUPS = [
     title: "Anywhere",
     shortcuts: [
       { key: "N", description: "Create new task" },
-      { key: "/", description: "Focus search" },
-      { key: "⌘K", description: "Quick search" },
+      { key: "⌘K / /", description: "Search tasks and projects" },
       { key: "V", description: "Toggle view: board ↔ list" },
       { key: "R", description: "Refresh board" },
       { key: "Esc", description: "Close dialogs / clear selection" },

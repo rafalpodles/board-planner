@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
 import { STATUS_LABELS, TaskStatus } from "@/types";
 import { useToast } from "@/components/ui/Toast";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 interface Stats {
   total: number;
@@ -103,6 +104,9 @@ function DonutChart({
   );
 }
 
+const BAR_TRACK_PX = 112;
+const MIN_VISIBLE_BAR_PX = 4;
+
 function BarChart({
   data,
   label,
@@ -115,16 +119,20 @@ function BarChart({
   if (!data.some((d) => d.value > 0)) return <EmptyChart message={emptyMessage} />;
 
   const max = Math.max(...data.map((d) => d.value), 1);
+  // px, not %: each column sizes to its content, and a percentage height against
+  // an auto-height parent resolves to zero — every bar then collapsed to its minimum
+  const barHeight = (value: number) =>
+    value > 0 ? Math.max(Math.round((value / max) * BAR_TRACK_PX), MIN_VISIBLE_BAR_PX) : 0;
 
   return (
     <div>
-      <div className="flex items-end gap-1 h-32">
+      <div className="flex items-end gap-1">
         {data.map((d, i) => (
           <div key={i} className="flex-1 flex flex-col items-center gap-1">
             <span className="text-[10px] text-text-muted">{d.value || ""}</span>
             <div
               className="w-full bg-primary rounded-t transition-all"
-              style={{ height: `${(d.value / max) * 100}%`, minHeight: d.value > 0 ? 4 : 0 }}
+              style={{ height: barHeight(d.value) }}
             />
           </div>
         ))}
@@ -256,18 +264,7 @@ export default function DashboardPage() {
 
   return (
     <div className="max-w-7xl mx-auto w-full">
-      <div className="flex items-center gap-2 mb-6">
-        <button
-          onClick={() => router.push(`/projects/${projectId}`)}
-          className="text-text-muted hover:text-text transition-colors"
-          title="Back to board"
-        >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-          </svg>
-        </button>
-        <h1 className="text-2xl font-bold">{projectName} — Dashboard</h1>
-      </div>
+      <PageHeader title="Dashboard" subtitle={projectName} />
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
