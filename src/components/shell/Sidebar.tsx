@@ -108,14 +108,6 @@ function NavItem({
   );
 }
 
-function GroupHeading({ children }: { children: React.ReactNode }) {
-  return (
-    <h2 className="mb-1.5 ml-2.5 text-[10.5px] font-bold uppercase tracking-wider text-text-muted">
-      {children}
-    </h2>
-  );
-}
-
 interface SidebarProps {
   mobileOpen: boolean;
   onNavigate: () => void;
@@ -291,17 +283,6 @@ export function Sidebar({
             onReorder={isAdmin ? reorder : undefined}
           />
         )}
-
-        <div>
-          {!compact && <GroupHeading>Instance</GroupHeading>}
-          <NavItem
-            href="/settings"
-            icon={ICONS.settings}
-            label="Settings"
-            active={isActive("/settings")}
-            collapsed={compact}
-          />
-        </div>
       </nav>
 
       <div className="border-t border-border p-2.5" ref={menuRef}>
