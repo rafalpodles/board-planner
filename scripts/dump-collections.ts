@@ -37,15 +37,19 @@ async function dump(db: ReturnType<MongoClient["db"]>, target: string, collectio
   // The timestamp comes from the caller's clock, so two runs a second apart
   // cannot land in the same directory
   const dir = join(target, new Date().toISOString().replace(/[:.]/g, "-"));
-  mkdirSync(dir, { recursive: true });
+
+  // Everything is read and checked before anything is written, so a rejected dump
+  // leaves no half-written directory that could later be mistaken for a backup
+  const encoded = new Map<string, string>();
+  let total = 0;
 
   for (const name of collections) {
     const docs = await db.collection(name).find({}).toArray();
-    const encoded = encode(docs);
+    const json = encode(docs);
 
     // A dump that cannot be read back is worthless, and the failure would only
     // surface during the restore — the one moment there is nothing to fall back on
-    const roundTripped = decode(encoded);
+    const roundTripped = decode(json);
     if (roundTripped.length !== docs.length) throw new Error(`${name}: dump does not read back`);
     for (const [i, doc] of roundTripped.entries()) {
       if (String(doc._id) !== String(docs[i]._id) || doc._id?.constructor !== docs[i]._id?.constructor) {
@@ -53,9 +57,22 @@ async function dump(db: ReturnType<MongoClient["db"]>, target: string, collectio
       }
     }
 
-    writeFileSync(join(dir, `${name}.json`), encoded);
+    encoded.set(name, json);
     console.log(`  ${name}: ${docs.length} documents`);
+    total += docs.length;
   }
+
+  // Connecting to the wrong database succeeds and dumps nothing, which reads as a
+  // clean backup right up until the restore that was supposed to save you
+  if (!total) {
+    throw new Error(
+      `Every collection is empty — this is almost certainly the wrong database. ` +
+        `Set MONGODB_DB to name the right one.`
+    );
+  }
+
+  mkdirSync(dir, { recursive: true });
+  for (const [name, json] of encoded) writeFileSync(join(dir, `${name}.json`), json);
 
   console.log(`\nWritten to ${dir}`);
   console.log(`Verify it:  MONGODB_URI=... npx tsx scripts/dump-collections.ts verify ${dir}`);
@@ -97,18 +114,47 @@ async function restore(db: ReturnType<MongoClient["db"]>, target: string) {
   console.log("\nRestored. Restart the app — Mongoose caches compiled models.");
 }
 
+/**
+ * Railway names this differently per service: the app gets MONGODB_URI pointing at
+ * the private network, the database service gets MONGO_PUBLIC_URL for the outside.
+ * Anything on `.railway.internal` only resolves inside Railway, so prefer a public
+ * candidate over one we know cannot connect from here.
+ */
+const URI_VARS = ["MONGODB_URI", "MONGO_PUBLIC_URL", "MONGO_URL", "DATABASE_URL"];
+
+function resolveUri(): { uri: string; source: string } {
+  const found = URI_VARS.filter((name) => process.env[name]).map((name) => ({
+    source: name,
+    uri: process.env[name] as string,
+  }));
+  if (!found.length) throw new Error(`Set one of: ${URI_VARS.join(", ")}`);
+
+  const reachable = found.filter((c) => !c.uri.includes(".railway.internal"));
+  if (!reachable.length) {
+    throw new Error(
+      `${found.map((c) => c.source).join(", ")} point at Railway's private network ` +
+        `(.railway.internal), which only resolves from inside Railway.\n` +
+        `Run against the database service instead, which exposes a public address:\n` +
+        `  railway run --service MongoDB -- npx tsx scripts/dump-collections.ts ...`
+    );
+  }
+  return reachable[0];
+}
+
 async function main() {
   const [mode, target, collectionArg] = process.argv.slice(2);
-  const uri = process.env.MONGODB_URI;
-  if (!uri) throw new Error("MONGODB_URI is required");
   if (!mode || !["dump", "verify", "restore"].includes(mode)) {
     throw new Error("Usage: dump <dir> | verify <dir> | restore <dir>");
   }
   if (!target) throw new Error("A directory is required");
 
+  const { uri, source } = resolveUri();
   const client = await MongoClient.connect(uri);
-  const db = client.db();
-  console.log(`Database: ${db.databaseName}`);
+  // A public database URL often carries no database in its path, and the driver
+  // then quietly hands back `test` — dumping an empty database that is not the one
+  // being migrated. MONGODB_DB forces it.
+  const db = client.db(process.env.MONGODB_DB || undefined);
+  console.log(`Database: ${db.databaseName} (from ${source})`);
 
   if (mode === "dump") await dump(db, target, (collectionArg || DEFAULT_COLLECTIONS.join(",")).split(","));
   if (mode === "verify") await verify(db, target);
