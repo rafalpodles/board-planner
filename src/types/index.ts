@@ -264,24 +264,53 @@ export interface ApiNotificationChannel {
 }
 
 // Custom field types
-export type CustomFieldType = "text" | "number" | "date" | "dropdown" | "checkbox";
+export type CustomFieldType =
+  | "text"
+  | "number"
+  | "date"
+  | "dropdown"
+  | "multiselect"
+  | "checkbox";
 
-export const CUSTOM_FIELD_TYPES: CustomFieldType[] = ["text", "number", "date", "dropdown", "checkbox"];
+export const CUSTOM_FIELD_TYPES: CustomFieldType[] = [
+  "text",
+  "number",
+  "date",
+  "dropdown",
+  "multiselect",
+  "checkbox",
+];
+
+/** The types whose values are option ids rather than a literal */
+export const OPTION_FIELD_TYPES: CustomFieldType[] = ["dropdown", "multiselect"];
+
+export const DEFAULT_OPTION_COLOR = "#64748b";
+
+// Values store `id`, never `value`, so renaming an option keeps it attached to
+// every task that had it
+export interface ICustomFieldOption {
+  id: string;
+  value: string;
+  color: string;
+  order: number;
+}
 
 export interface ICustomField {
   _id: Types.ObjectId;
   name: string;
   fieldType: CustomFieldType;
-  options: string[];
+  options: ICustomFieldOption[];
   required: boolean;
+  order: number;
+  showOnCard: boolean;
+  showInList: boolean;
+  filterable: boolean;
+  /** Replaces deletion for a field that is already in use: pickers drop it, values survive */
+  archived: boolean;
 }
 
-export interface ApiCustomField {
+export interface ApiCustomField extends Omit<ICustomField, "_id"> {
   _id: string;
-  name: string;
-  fieldType: CustomFieldType;
-  options: string[];
-  required: boolean;
 }
 
 export interface IPmLink {
