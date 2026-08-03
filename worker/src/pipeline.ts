@@ -7,7 +7,7 @@ import { Executor } from "./executor.js";
 import { Reporter } from "./reporter.js";
 import { SHUTDOWN_SIGNAL } from "./commands.js";
 import { scrub } from "./scrub.js";
-import { Phase, Telemetry } from "./telemetry.js";
+import { OutcomeKind, Phase, Telemetry } from "./telemetry.js";
 import { Workspace } from "./workspace.js";
 import { ClaimedTask, DiffStats, Gate, GateContext, GateResult } from "./types.js";
 
@@ -29,6 +29,8 @@ export interface PipelineDeps {
 }
 
 const SLUG = "worker";
+
+const MAX_DETAIL_CHARS = 200;
 const GIT_TIMEOUT_MS = 60_000;
 const ROLES = ["approved", "review", "done"] as const;
 
@@ -102,6 +104,11 @@ async function releaseIfAborted(
   // SHUTDOWN_SIGNAL for why the distinction matters.
   const stoppedByProcessSignal = deps.signal.reason === SHUTDOWN_SIGNAL;
   const report = stoppedByProcessSignal ? reporter.requeued : reporter.released;
+  deps.telemetry?.emit({
+    outcome: stoppedByProcessSignal ? "requeued" : "released",
+    taskKey: task.taskKey,
+    detail: "the run was stopped",
+  });
   await report(task, `the run was stopped${detail}`);
   return true;
 }
@@ -112,7 +119,17 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
 
   // Coarse on purpose: a phase names the stage a run is in, and every stage below either finishes
   // or ends the run, so the last one emitted is always where the run actually is.
-  const enter = (phase: Phase): void => telemetry?.emit({ phase });
+  const enter = (phase: Phase): void => telemetry?.emit({ phase, taskKey: task.taskKey });
+
+  // Emitted before the matching reporter call, so a reporter that throws cannot swallow the
+  // operator's only local sign that the run ended. Detail takes the same redaction as board-bound
+  // text: it reaches a Notification Center database that outlives the run.
+  const settle = (outcome: OutcomeKind, detail?: string): void =>
+    telemetry?.emit(
+      detail === undefined
+        ? { outcome, taskKey: task.taskKey }
+        : { outcome, taskKey: task.taskKey, detail: scrub(detail).slice(0, MAX_DETAIL_CHARS) }
+    );
 
   enter("claiming");
 
@@ -138,6 +155,7 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
     worktreePath = await workspace.create(task.taskKey, SLUG);
   } catch (error) {
     await quietly(() => workspace.destroy(task.taskKey));
+    settle("requeued", "could not create a worktree");
     await reporter.requeued(task, `could not create a worktree: ${String(error)}`);
     return;
   }
@@ -156,18 +174,22 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
     if (await releaseIfAborted(deps, reporter, task)) return;
 
     if (outcome.kind === "usage_limit") {
+      settle("released", "usage limit reached");
       await reporter.released(task, "usage limit reached");
       return;
     }
     if (outcome.kind === "timeout") {
+      settle("requeued", "the run timed out");
       await reporter.requeued(task, `the run timed out after ${config.taskTimeoutMs}ms`);
       return;
     }
     if (outcome.kind === "error") {
+      settle("requeued", outcome.message);
       await reporter.requeued(task, outcome.message);
       return;
     }
     if (outcome.result.status === "blocked") {
+      settle("blocked", outcome.result.blockedReason);
       await reporter.blocked(task, outcome.result.blockedReason);
       return;
     }
@@ -175,6 +197,7 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
     const leftover = await unfinishedWork(runner, worktreePath);
     if (leftover) {
       keepWorktree = true;
+      settle("failed", "the executor left the worktree unclean");
       await reporter.failed(
         task,
         `the executor left the worktree unclean, so the gates would judge a diff that is not what is on disk — and the reviewer would load whatever was never committed:\n\n${leftover}\n\nNothing was pushed; the worktree is kept at \`${worktreePath}\` on the worker host.`
@@ -194,6 +217,7 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
       if (verdict.ok) continue;
 
       if (hitUsageLimit(verdict)) {
+        settle("released", `the ${gate.name} gate could not run`);
         await reporter.released(task, `the ${gate.name} gate could not run: ${verdict.reason}`);
         return;
       }
@@ -201,6 +225,7 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
       // The worktree goes next, so the pushed branch is the only copy a human can reach
       const failure = await pushFailure(delivery, worktreePath, branch);
       if (failure) keepWorktree = true;
+      settle("gateRejected", gate.name);
       await reporter.gateRejected(
         task,
         gate.name,
@@ -248,6 +273,7 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
       await delivery.merge(worktreePath, prUrl);
     } catch (error) {
       keepWorktree = true;
+      settle("failed", "the delivery did not land");
       await reporter.failed(
         task,
         `could not deliver \`${branch}\`${prUrl ? ` (${prUrl})` : ""}: ${String(error)}\n\nThe worktree is kept at \`${worktreePath}\` on the worker host, with the branch checked out.`
@@ -255,8 +281,10 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
       return;
     }
 
+    settle("merged");
     await reporter.merged(task, prUrl, outcome.result.summary);
   } catch (error) {
+    settle("requeued", "the worker hit an unexpected error");
     await reporter.requeued(task, `the worker hit an unexpected error: ${String(error)}`);
   } finally {
     if (!keepWorktree) {

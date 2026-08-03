@@ -4,6 +4,7 @@ import { parseStream, StreamEvent } from "./stream.js";
 import {
   createTelemetry,
   dropWhenBusy,
+  isOutcome,
   isQuota,
   Progress,
   summarise,
@@ -344,6 +345,45 @@ describe("createTelemetry", () => {
 
     expect(() => telemetry.emit(progress("push"))).not.toThrow();
     expect(seen).toEqual([{ phase: "push" }]);
+  });
+});
+
+describe("outcome updates", () => {
+  it("discriminates an outcome from a progress and a quota", () => {
+    expect(isOutcome({ outcome: "merged", taskKey: "CP-1" })).toBe(true);
+    expect(isOutcome({ phase: "agent" })).toBe(false);
+    expect(isOutcome({ status: "allowed" })).toBe(false);
+  });
+
+  it("is not mistaken for a quota, which would silence it on the socket", () => {
+    expect(isQuota({ outcome: "merged", taskKey: "CP-1" })).toBe(false);
+  });
+
+  it("keeps outcomes out of the recent ring, which is progress only", () => {
+    const telemetry = createTelemetry();
+
+    telemetry.emit({ phase: "agent" });
+    telemetry.emit({ outcome: "merged", taskKey: "CP-1" });
+
+    expect(telemetry.recent()).toEqual([{ phase: "agent" }]);
+  });
+
+  it("delivers an outcome to subscribers", () => {
+    const telemetry = createTelemetry();
+    const seen: TelemetryUpdate[] = [];
+    telemetry.subscribe((update) => seen.push(update));
+
+    telemetry.emit({ outcome: "gateRejected", taskKey: "CP-1", detail: "build" });
+
+    expect(seen).toEqual([{ outcome: "gateRejected", taskKey: "CP-1", detail: "build" }]);
+  });
+
+  it("carries the task key on a progress update, so the panel can name what is running", () => {
+    const telemetry = createTelemetry();
+
+    telemetry.emit({ phase: "agent", taskKey: "CP-161" });
+
+    expect(telemetry.recent()).toEqual([{ phase: "agent", taskKey: "CP-161" }]);
   });
 });
 

@@ -431,6 +431,17 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     ]);
   });
 
+  // An outcome is durable and reaches the board through reporter.ts and its outbox. Letting one
+  // onto this feed posts `phase: undefined` against a live run — the shape the phase field is
+  // matched on — and spends the single in-flight slot the next real phase needs.
+  it("keeps outcomes off the server's phase feed, which carries stages only", async () => {
+    const { posted } = await runOneTask();
+
+    expect(posted.length).toBeGreaterThan(0);
+    expect(posted.every((event) => typeof event.phase === "string" && event.phase !== "")).toBe(true);
+    expect(posted.map((event) => event.phase)).not.toContain(undefined);
+  });
+
   // The pipeline names "agent" exactly once, at the stage boundary. Every further one was produced
   // by parsing the agent's stdout mid-run, so more than one is proof the stream reached the server.
   it("carries an event off the agent's own stream to the server", async () => {

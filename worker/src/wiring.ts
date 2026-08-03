@@ -27,7 +27,15 @@ import { PipelineDeps, runTask } from "./pipeline.js";
 import { createReporter } from "./reporter.js";
 import { HeartbeatDeps, loadIdentity, PROTOCOL_VERSION, startHeartbeat } from "./registration.js";
 import { bindRepository, createAllowlistReader } from "./repos.js";
-import { createTelemetry, dropWhenBusy, isQuota, Telemetry } from "./telemetry.js";
+import {
+  createTelemetry,
+  dropWhenBusy,
+  isOutcome,
+  isQuota,
+  Progress,
+  Telemetry,
+  TelemetryUpdate,
+} from "./telemetry.js";
 import { ClaimedTask } from "./types.js";
 import { createWorkspace, reapOrphans } from "./workspace.js";
 
@@ -227,16 +235,21 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   // than relying on the server to notice.
   let currentRun: { taskId: string; runId: string } | null = null;
 
-  const postPhase = dropWhenBusy((update) => {
+  // An outcome is durable and already has a route: reporter.ts writes it to the board through the
+  // outbox, which survives a restart. This feed is the volatile one and carries phases only.
+  const isPhase = (update: TelemetryUpdate): update is Progress =>
+    !isQuota(update) && !isOutcome(update);
+
+  const postPhase = dropWhenBusy((update: TelemetryUpdate) => {
     const run = currentRun;
-    if (!run || isQuota(update)) return Promise.resolve();
+    if (!run || !isPhase(update)) return Promise.resolve();
     return api.postEvent({ taskId: run.taskId, runId: run.runId, phase: update.phase });
   });
 
   telemetry.subscribe((update) => {
     // Filtered before dropWhenBusy, not inside it: an update with nowhere to go must not spend the
     // single in-flight slot that the next real phase needs.
-    if (isQuota(update) || !currentRun) return;
+    if (!isPhase(update) || !currentRun) return;
     postPhase(update);
   });
 
