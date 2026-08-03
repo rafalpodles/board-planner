@@ -95,10 +95,12 @@ export function legacyFieldSeeds(project: SeedInput): Omit<ICustomField, "_id">[
   ] as Omit<ICustomField, "_id">[];
 }
 
-export function findLegacyField(
-  fields: ApiCustomField[] | undefined,
+type FieldLike = { _id: unknown; name: string };
+
+export function findLegacyField<T extends FieldLike>(
+  fields: T[] | undefined,
   key: LegacyFieldKey
-): ApiCustomField | undefined {
+): T | undefined {
   const name = LEGACY_FIELD_NAMES[key].toLowerCase();
   return (fields || []).find((f) => f.name.toLowerCase() === name);
 }
@@ -168,8 +170,42 @@ export function withValuesInUse(
  * user turns the badge off, that is a choice, not a reason to bring the old one back.
  */
 export function legacyRenderingSuppressed(
-  fields: ApiCustomField[] | undefined,
+  fields: FieldLike[] | undefined,
   key: LegacyFieldKey
 ): boolean {
   return !!findLegacyField(fields, key);
+}
+
+/**
+ * Mirrors a migrated field's value back onto its legacy column. CP-213 keeps those
+ * columns written for one release so a rollback loses nothing — without this, every
+ * edit made through the migrated field would leave the old column stale.
+ *
+ * Removed by CP-214 together with the columns themselves.
+ */
+export function dualWriteLegacyColumns(
+  customFieldValues: Record<string, unknown>,
+  fields: FieldLike[] | undefined
+): Partial<{ component: string; difficulty: string; labels: string[] }> {
+  const mirrored: Record<string, unknown> = {};
+
+  const component = findLegacyField(fields, "component");
+  if (component && String(component._id) in customFieldValues) {
+    mirrored.component = String(customFieldValues[String(component._id)] ?? "");
+  }
+  const difficulty = findLegacyField(fields, "difficulty");
+  if (difficulty && String(difficulty._id) in customFieldValues) {
+    const value = customFieldValues[String(difficulty._id)];
+    // The column is an enum; an option the project renamed would not be valid there
+    if (typeof value === "string" && (DIFFICULTIES as string[]).includes(value)) {
+      mirrored.difficulty = value;
+    }
+  }
+  const labels = findLegacyField(fields, "labels");
+  if (labels && String(labels._id) in customFieldValues) {
+    const value = customFieldValues[String(labels._id)];
+    mirrored.labels = Array.isArray(value) ? (value as string[]) : [];
+  }
+
+  return mirrored;
 }

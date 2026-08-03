@@ -11,6 +11,7 @@ import { dispatchNotifications } from "@/lib/notifications";
 import { createNotifications, collectRecipients, resolveMentions } from "@/lib/in-app-notifications";
 import { parseChecklistString } from "@/lib/checklist";
 import { validateCustomFieldValues, sanitizeCustomFieldValues } from "@/lib/custom-fields";
+import { dualWriteLegacyColumns } from "@/lib/legacy-fields";
 import { onTaskStatusChanged } from "@/lib/pm/triggers";
 
 export const taskPopulateFields = [
@@ -275,6 +276,8 @@ export async function updateTask(
         return { ok: false, error: result.error ?? "Invalid custom field values", status: 400 };
       }
       updates.customFieldValues = sanitized;
+      // Keep the legacy columns current so a rollback still has the values
+      Object.assign(updates, dualWriteLegacyColumns(sanitized, defs));
     }
   }
 
