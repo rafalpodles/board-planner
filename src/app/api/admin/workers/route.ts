@@ -2,13 +2,49 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withAdmin } from "@/lib/middleware";
 import { Worker } from "@/models/worker";
+import { Task } from "@/models/task";
 import { toApiWorker } from "@/lib/worker-service";
+import { ApiWorkerTask } from "@/types";
+
+// Phase lives on the task, not the worker, so the fleet view has to join the two. A task is only
+// reported while its run still holds it: every exit from the active column clears the run identity,
+// so a stale workerId cannot resurface here as a task the worker is no longer running.
+async function currentTasks(workerIds: string[]): Promise<Map<string, ApiWorkerTask>> {
+  if (workerIds.length === 0) return new Map();
+
+  const tasks = await Task.find({
+    "execution.workerId": { $in: workerIds },
+    "execution.runId": { $nin: [null, ""] },
+  })
+    .select("_id taskNumber title project execution")
+    .populate("project", "key")
+    .lean();
+
+  const byWorker = new Map<string, ApiWorkerTask>();
+  for (const task of tasks) {
+    const workerId = task.execution?.workerId ?? "";
+    if (!workerId || byWorker.has(workerId)) continue;
+
+    const project = task.project as unknown as { key?: string } | undefined;
+    byWorker.set(workerId, {
+      taskId: String(task._id),
+      taskKey: `${project?.key ?? "?"}-${task.taskNumber}`,
+      title: task.title,
+      ...(task.execution?.phase ? { phase: task.execution.phase } : {}),
+      phaseAt: task.execution?.phaseAt ? new Date(task.execution.phaseAt).toISOString() : null,
+    });
+  }
+  return byWorker;
+}
 
 export const GET = withAdmin(async () => {
   await connectDB();
 
   const workers = await Worker.find().sort({ name: 1, host: 1 });
   const now = new Date();
+  const running = await currentTasks(workers.map((worker) => String(worker._id)));
 
-  return NextResponse.json(workers.map((worker) => toApiWorker(worker, now)));
+  return NextResponse.json(
+    workers.map((worker) => toApiWorker(worker, now, running.get(String(worker._id))))
+  );
 });

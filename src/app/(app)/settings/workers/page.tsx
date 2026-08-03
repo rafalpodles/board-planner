@@ -109,6 +109,7 @@ export default function AdminWorkersPage() {
                 <th className="text-left px-3 py-2 font-medium">Name</th>
                 <th className="text-left px-3 py-2 font-medium">Host</th>
                 <th className="text-left px-3 py-2 font-medium">Version</th>
+                <th className="text-left px-3 py-2 font-medium">Running</th>
                 <th className="text-left px-3 py-2 font-medium">Last seen</th>
                 <th className="text-left px-3 py-2 font-medium">Binding error</th>
                 <th className="text-left px-3 py-2 font-medium">Enabled</th>
@@ -132,6 +133,23 @@ export default function AdminWorkersPage() {
                     <td className="px-3 py-2 text-text-muted whitespace-nowrap">{worker.host || "—"}</td>
                     <td className="px-3 py-2 text-text-muted font-mono text-xs whitespace-nowrap">
                       {worker.version || "—"}
+                    </td>
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      {worker.currentTask ? (
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-xs">{worker.currentTask.taskKey}</span>
+                          <span className="text-text-muted text-xs">
+                            {worker.currentTask.phase ?? "starting"}
+                          </span>
+                          {worker.currentTask.phaseAt && (
+                            <span className="text-text-muted text-xs">
+                              {timeAgo(worker.currentTask.phaseAt)}
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-text-muted">—</span>
+                      )}
                     </td>
                     <td className="px-3 py-2 whitespace-nowrap">
                       <div className="flex items-center gap-2">
