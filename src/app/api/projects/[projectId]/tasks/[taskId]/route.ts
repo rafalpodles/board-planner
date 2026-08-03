@@ -6,7 +6,7 @@ import { Task } from "@/models/task";
 import { Comment } from "@/models/comment";
 import { ActivityLog } from "@/models/activityLog";
 import { Notification } from "@/models/notification";
-import { updateTask } from "@/lib/task-service";
+import { toApiExecution, updateTask } from "@/lib/task-service";
 
 const populateFields = [
   { path: "assignee", select: "username fullName" },
@@ -49,6 +49,8 @@ export const GET = withProjectAccess(async (_request, { params }) => {
         task: { _id: t._id, taskNumber: t.taskNumber, title: t.title, status: t.status },
       }))
   );
+
+  taskObj.execution = toApiExecution(task.execution);
 
   return NextResponse.json(taskObj);
 });

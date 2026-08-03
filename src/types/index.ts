@@ -851,6 +851,9 @@ export interface ApiTaskExecution {
   phase?: string;
   phaseAt?: string | null;
   startedAt?: string | null;
+  // the server's clock when this was serialised, so ages can be measured against it rather than
+  // against the reader's, which may be minutes off in either direction
+  asOf?: string;
 }
 
 export interface ApiReaction {

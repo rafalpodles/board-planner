@@ -82,9 +82,10 @@ export function TaskDetail({
         `/api/projects/${projectId}/tasks/${taskId}/status`,
         { status: newStatus }
       );
-      setTask((prev) =>
-        prev ? { ...prev, status: newStatus as ApiTask["status"] } : prev
-      );
+      // A status change ends any run the task was under, and the server clears the execution phase
+      // in the same write — so patching status alone would leave the panel asserting a live run the
+      // user just stopped, counting up from a snapshot that is no longer true
+      await loadData();
     } catch {
       toast("Failed to update status", "error");
     }
