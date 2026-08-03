@@ -20,6 +20,7 @@ import { CriteriaSection } from "@/components/tasks/detail/CriteriaSection";
 import { DescriptionSection } from "@/components/tasks/detail/DescriptionSection";
 import { InlineTitle } from "@/components/tasks/detail/InlineTitle";
 import { LinkedWork } from "@/components/tasks/detail/LinkedWork";
+import { MobileCommentBar } from "@/components/tasks/detail/MobileCommentBar";
 import { MobileSummary } from "@/components/tasks/detail/MobileSummary";
 import { PropertyRail } from "@/components/tasks/detail/PropertyRail";
 import { TaskTopBar } from "@/components/tasks/detail/TaskTopBar";
@@ -132,6 +133,7 @@ function TaskDetailView({
   const [addingChild, setAddingChild] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [commentRefreshKey, setCommentRefreshKey] = useState(0);
 
   const { draft, set, autoSaveState, retry } = useTaskEditor(projectId, task);
 
@@ -231,7 +233,10 @@ function TaskDetailView({
       />
 
       <div className="grid lg:grid-cols-[minmax(0,1fr)_312px]">
-        <div className="flex min-w-0 flex-col gap-6 px-4 py-6 sm:px-7 lg:border-r lg:border-border">
+        <div
+          className="flex min-w-0 flex-col gap-6 px-4 py-6 pb-28 sm:px-7
+            lg:border-r lg:border-border lg:pb-6"
+        >
           <div className="flex flex-col gap-2">
             <InlineTitle value={draft.title} onChange={(value) => set("title", value)} />
             <div className="flex flex-wrap items-center gap-2 px-1.5 text-xs text-text-muted">
@@ -301,7 +306,11 @@ function TaskDetailView({
           <GitlabActivity projectId={projectId} taskId={task._id} />
 
           <section className="border-t border-border pt-5">
-            <TaskActivityPanel projectId={projectId} taskId={task._id} />
+            <TaskActivityPanel
+              projectId={projectId}
+              taskId={task._id}
+              commentRefreshKey={commentRefreshKey}
+            />
           </section>
         </div>
 
@@ -318,6 +327,12 @@ function TaskDetailView({
           />
         </aside>
       </div>
+
+      <MobileCommentBar
+        projectId={projectId}
+        taskId={task._id}
+        onPosted={() => setCommentRefreshKey((k) => k + 1)}
+      />
 
       <Modal
         open={detailsOpen}

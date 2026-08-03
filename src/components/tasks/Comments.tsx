@@ -22,6 +22,8 @@ interface CommentsProps {
   taskId: string;
   hideHeading?: boolean;
   onCountChange?: (count: number) => void;
+  /** Bumped when a comment is posted from somewhere else, e.g. the phone's bottom bar */
+  refreshKey?: number;
   // Adding, editing and deleting a comment each write an activity entry; reacting does not
   onMutated?: () => void;
 }
@@ -32,6 +34,7 @@ export function Comments({
   hideHeading,
   onCountChange,
   onMutated,
+  refreshKey = 0,
 }: CommentsProps) {
   const [comments, setComments] = useState<ApiComment[]>([]);
   const [body, setBody] = useState("");
@@ -69,6 +72,12 @@ export function Comments({
     api.get("/api/users/list").then(setMentionUsers).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId]);
+
+  useEffect(() => {
+    if (refreshKey === 0) return;
+    loadComments();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey]);
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -408,12 +417,9 @@ export function Comments({
         )}
       </div>
 
-      {/* Sticky on a phone, where the most common action should not need a scroll to
-          the end; inline on a wide screen, where it would cover the last comment */}
-      <form
-        onSubmit={handleSubmit}
-        className="sticky bottom-0 -mx-1 flex items-start gap-3 bg-bg-card px-1 pb-1 pt-3 lg:static"
-      >
+      {/* Wide screens only: a phone comments through the bar pinned to the bottom of
+          the task, so a second composer here would be a decoy */}
+      <form onSubmit={handleSubmit} className="hidden items-start gap-3 pt-3 lg:flex">
         <Avatar name={user?.fullName} size={28} className="mt-1 hidden sm:inline-flex" />
         <div className="flex min-w-0 flex-1 flex-col gap-2.5">
           <div className="relative">
