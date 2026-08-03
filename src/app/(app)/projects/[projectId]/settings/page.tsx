@@ -81,7 +81,7 @@ const SECTIONS: SectionMeta[] = [
     blurb:
       "The vocabulary tasks are described with: what they are, what part of the product they touch, and any extra fields you need.",
     keywords:
-      "categories components labels custom fields templates tags dropdown required",
+      "categories custom fields templates tags dropdown required",
     access: "member",
     icon: (
       <Icon d="M20.6 13.4L12 22l-9-9V3h10l7.6 7.6a2 2 0 010 2.8zM7.5 7.5h.01" />
@@ -236,8 +236,6 @@ export default function ProjectSettingsPage() {
       fields: {
         count:
           (project.categories?.length || 0) +
-          project.components.length +
-          (project.labels?.length || 0) +
           (project.customFields?.length || 0) +
           (project.taskTemplates?.length || 0),
       },

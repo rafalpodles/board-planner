@@ -1,12 +1,5 @@
 import mongoose, { Schema, Model } from "mongoose";
-import { IProject, DIFFICULTIES, DEFAULT_PROJECT_CATEGORIES, DEFAULT_PROJECT_COLUMNS, COLUMN_ROLES, WEBHOOK_EVENTS, NOTIFICATION_CHANNEL_TYPES, CUSTOM_FIELD_TYPES } from "@/types";
-
-const labelSchema = new Schema(
-  {
-    name: { type: String, required: true, trim: true },
-    color: { type: String, required: true, default: "#3b82f6" },
-  }
-);
+import { IProject, DEFAULT_PROJECT_CATEGORIES, DEFAULT_PROJECT_COLUMNS, COLUMN_ROLES, WEBHOOK_EVENTS, NOTIFICATION_CHANNEL_TYPES, CUSTOM_FIELD_TYPES } from "@/types";
 
 const categorySchema = new Schema(
   {
@@ -31,9 +24,7 @@ const taskTemplateSchema = new Schema(
     name: { type: String, required: true, trim: true },
     title: { type: String, default: "" },
     description: { type: String, default: "" },
-    difficulty: { type: String, enum: DIFFICULTIES, default: "M" },
     category: { type: String, default: "user-story" },
-    component: { type: String, default: "" },
     acceptanceCriteria: { type: String, default: "" },
   }
 );
@@ -77,14 +68,6 @@ const projectSchema = new Schema<IProject>(
       type: String,
       default: "",
       trim: true,
-    },
-    components: {
-      type: [String],
-      default: [],
-    },
-    labels: {
-      type: [labelSchema],
-      default: [],
     },
     categories: {
       type: [categorySchema],

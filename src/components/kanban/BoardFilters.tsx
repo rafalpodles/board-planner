@@ -3,9 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   ApiTask, ApiCustomField,
-  ApiLabel,
   ApiProjectCategory,
-  DIFFICULTIES,
   CATEGORIES,
   PRIORITIES,
   PRIORITY_LABELS,
@@ -14,7 +12,6 @@ import {
   BOARD_SORT_FIELDS,
   SortField, SortKey,
   SortDir,
-  Difficulty,
   Category,
   Priority,
   defaultSortDir
@@ -33,7 +30,6 @@ import {
   type FieldFilter,
   type BuiltInFilterKey,
 } from "@/lib/board-filters-state";
-import { legacyRenderingSuppressed } from "@/lib/legacy-fields";
 import {
   activeFields,
   matchesAllFieldFilters,
@@ -67,8 +63,6 @@ function savePersistedState(
 
 interface BoardFiltersProps {
   tasks: ApiTask[];
-  components: string[];
-  labels?: ApiLabel[];
   categories?: string[];
   projectKey?: string;
   projectId: string;
@@ -91,8 +85,6 @@ interface BoardFiltersProps {
 
 export function BoardFilters({
   tasks,
-  components,
-  labels = [],
   categories = [],
   projectKey,
   projectId,
@@ -195,20 +187,11 @@ export function BoardFilters({
           t.assignee.username === filters.assignee
       );
     }
-    if (filters.component) {
-      result = result.filter((t) => t.component === filters.component);
-    }
     if (filters.category) {
       result = result.filter((t) => t.category === filters.category);
     }
-    if (filters.difficulty) {
-      result = result.filter((t) => t.difficulty === filters.difficulty);
-    }
     if (filters.priority) {
       result = result.filter((t) => t.priority === filters.priority);
-    }
-    if (filters.label) {
-      result = result.filter((t) => (t.labels || []).includes(filters.label));
     }
     if (Object.keys(filters.fields || {}).length) {
       result = result.filter((t) =>
@@ -248,7 +231,7 @@ export function BoardFilters({
 
     onFilter(result);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters, tasks, sortField, sortDir, sortContext, currentUsername, labels, projectKey]);
+  }, [filters, tasks, sortField, sortDir, sortContext, currentUsername, projectKey]);
 
   function clearFilters() {
     setFilters((f) => ({ ...EMPTY_FILTERS, search: f.search }));
@@ -259,10 +242,6 @@ export function BoardFilters({
   }
 
   const filterableFields = sortedFields(activeFields(customFields)).filter((f) => f.filterable);
-  // A migrated field brings its own control, so the built-in one would be a
-  // duplicate filtering the same values (CP-213)
-  const migrated = (key: "component" | "difficulty" | "labels") =>
-    legacyRenderingSuppressed(customFields, key);
 
   function fieldFilter(fieldId: string): FieldFilter {
     return filters.fields?.[fieldId] ?? {};
@@ -308,16 +287,8 @@ export function BoardFilters({
       colour: categoryColor(projectCategories, filters.category) || undefined,
     });
   }
-  if (filters.component) chips.push({ key: "component", label: filters.component });
-  if (filters.difficulty) chips.push({ key: "difficulty", label: filters.difficulty });
   if (filters.priority) {
     chips.push({ key: "priority", label: PRIORITY_LABELS[filters.priority as Priority] });
-  }
-  if (filters.label) {
-    chips.push({
-      key: "label",
-      label: labels.find((l) => l._id === filters.label)?.name ?? filters.label,
-    });
   }
   if (filters.dateRange) {
     chips.push({
@@ -469,41 +440,6 @@ export function BoardFilters({
                 </select>
               </Field>
 
-              {!migrated("component") && (
-              <Field label="Component">
-                <select
-                  value={filters.component}
-                  onChange={(e) => setFilters((f) => ({ ...f, component: e.target.value }))}
-                  className={selectClass}
-                  disabled={components.length === 0}
-                >
-                  <option value="">All components</option>
-                  {components.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-            )}
-
-              {!migrated("difficulty") && (
-              <Field label="Difficulty">
-                <select
-                  value={filters.difficulty}
-                  onChange={(e) => setFilters((f) => ({ ...f, difficulty: e.target.value }))}
-                  className={selectClass}
-                >
-                  <option value="">All sizes</option>
-                  {DIFFICULTIES.map((d: Difficulty) => (
-                    <option key={d} value={d}>
-                      {d}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-            )}
-
               <Field label="Priority">
                 <select
                   value={filters.priority}
@@ -519,23 +455,6 @@ export function BoardFilters({
                 </select>
               </Field>
 
-              {!migrated("labels") && (
-              <Field label="Label">
-                <select
-                  value={filters.label}
-                  onChange={(e) => setFilters((f) => ({ ...f, label: e.target.value }))}
-                  className={selectClass}
-                  disabled={labels.length === 0}
-                >
-                  <option value="">All labels</option>
-                  {labels.map((l) => (
-                    <option key={l._id} value={l._id}>
-                      {l.name}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-            )}
 
               <Field label="Updated">
                 <select

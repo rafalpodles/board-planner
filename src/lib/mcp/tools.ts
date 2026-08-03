@@ -57,17 +57,15 @@ export function registerPlannerTools(server: McpServer): void {
           "Filter by status (comma-separated): planned, todo, in_progress, in_review, needs_human_review, ready_to_test, done"
         ),
       assignee: z.string().optional().describe("Filter by assignee username"),
-      component: z.string().optional().describe("Filter by component name"),
       category: z.string().optional().describe("Filter by category: bug, doc, user-story, idea"),
       priority: z.string().optional().describe("Filter by priority: low, medium, high, urgent"),
     },
-    async ({ project, status, assignee, component, category, priority }, extra) => {
+    async ({ project, status, assignee, category, priority }, extra) => {
       const client = clientFrom(extra);
       const proj = await client.getProjectByKey(project);
       const filters: Record<string, string> = {};
       if (status) filters.status = status;
       if (assignee) filters.assignee = assignee;
-      if (component) filters.component = component;
       if (category) filters.category = category;
       if (priority) filters.priority = priority;
       return json(await client.listTasks(proj._id, filters));
@@ -92,9 +90,7 @@ export function registerPlannerTools(server: McpServer): void {
       project: z.string().describe("Project key (e.g. 'CP')"),
       title: z.string().describe("Task title"),
       description: z.string().optional().describe("Task description"),
-      difficulty: z.string().optional().describe("Difficulty: S, M, L, or XL"),
       priority: z.string().optional().describe("Priority: low, medium, high, or urgent (default: medium)"),
-      component: z.string().optional().describe("Component name"),
       category: z.string().optional().describe("Category: bug, doc, user-story, idea"),
       assignee: z.string().optional().describe("Assignee username"),
       status: z.string().optional().describe("Initial status (default: planned)"),
@@ -106,19 +102,16 @@ export function registerPlannerTools(server: McpServer): void {
         .record(z.any())
         .optional()
         .describe(
-          "Project-defined fields keyed by field name, e.g. { \"Owoce\": \"Apples\" }. " +
-            "Since CP-213 difficulty and component are ordinary fields; their named parameters above still work."
+          "Project-defined fields keyed by field name, e.g. { \"Owoce\": \"Apples\" }. "
         ),
     },
-    async ({ project, title, description, difficulty, priority, component, category, assignee, status, acceptanceCriteria, fields }, extra) => {
+    async ({ project, title, description, priority, category, assignee, status, acceptanceCriteria, fields }, extra) => {
       const client = clientFrom(extra);
       const proj = await client.getProjectByKey(project);
       const data: Record<string, unknown> = { title };
 
       if (description) data.description = description;
-      if (difficulty) data.difficulty = difficulty;
       if (priority) data.priority = priority;
-      if (component) data.component = component;
       if (category) data.category = category;
       if (status) data.status = status;
       if (acceptanceCriteria) data.acceptanceCriteria = acceptanceCriteria;
@@ -144,9 +137,7 @@ export function registerPlannerTools(server: McpServer): void {
       taskKey: z.string().describe("Task key (e.g. 'CP-1')"),
       title: z.string().optional(),
       description: z.string().optional(),
-      difficulty: z.string().optional(),
       priority: z.string().optional().describe("Priority: low, medium, high, or urgent"),
-      component: z.string().optional(),
       category: z.string().optional(),
       assignee: z.string().optional().describe("Assignee username. Empty string to unassign."),
       acceptanceCriteria: z
@@ -161,16 +152,14 @@ export function registerPlannerTools(server: McpServer): void {
             "the task's other field values are left alone."
         ),
     },
-    async ({ taskKey, title, description, difficulty, priority, component, category, assignee, acceptanceCriteria, fields }, extra) => {
+    async ({ taskKey, title, description, priority, category, assignee, acceptanceCriteria, fields }, extra) => {
       const client = clientFrom(extra);
       const { projectId, taskId } = await client.resolveTaskKey(taskKey);
       const data: Record<string, unknown> = {};
 
       if (title !== undefined) data.title = title;
       if (description !== undefined) data.description = description;
-      if (difficulty !== undefined) data.difficulty = difficulty;
       if (priority !== undefined) data.priority = priority;
-      if (component !== undefined) data.component = component;
       if (category !== undefined) data.category = category;
       if (acceptanceCriteria !== undefined) data.acceptanceCriteria = acceptanceCriteria;
 

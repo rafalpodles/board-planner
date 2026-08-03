@@ -1,5 +1,5 @@
 import mongoose, { Schema, Model } from "mongoose";
-import { ITask, DIFFICULTIES, PRIORITIES, DEFAULT_PRIORITY } from "@/types";
+import { ITask, PRIORITIES, DEFAULT_PRIORITY } from "@/types";
 
 const taskSchema = new Schema<ITask>(
   {
@@ -21,19 +21,10 @@ const taskSchema = new Schema<ITask>(
       type: String,
       default: "",
     },
-    difficulty: {
-      type: String,
-      enum: DIFFICULTIES,
-      default: "M",
-    },
     priority: {
       type: String,
       enum: PRIORITIES,
       default: DEFAULT_PRIORITY,
-    },
-    component: {
-      type: String,
-      default: "",
     },
     category: {
       type: String,
@@ -69,10 +60,6 @@ const taskSchema = new Schema<ITask>(
         mergedAt: { type: Date, default: null },
         updatedAt: { type: Date, default: Date.now },
       }],
-      default: [],
-    },
-    labels: {
-      type: [{ type: Schema.Types.ObjectId }],
       default: [],
     },
     pinned: {
