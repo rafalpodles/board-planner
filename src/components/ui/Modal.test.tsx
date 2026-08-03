@@ -384,3 +384,85 @@ describe("Stacked modals", () => {
     expect(onFirstClose).not.toHaveBeenCalled();
   });
 });
+
+// The task detail draws its own top bar — breadcrumb, status, close — so the
+// modal's header would be a second one sitting above it
+describe("Modal, bare", () => {
+  it("drops its header but stays a labelled dialog", () => {
+    render(
+      <Modal open onClose={() => {}} title="CP-225" size="xl" bare>
+        <div>detail</div>
+      </Modal>
+    );
+
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.getAttribute("aria-label")).toBe("CP-225");
+    expect(dialog.getAttribute("aria-labelledby")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "CP-225" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /close dialog/i })).toBeNull();
+    expect(screen.getByText("detail")).toBeTruthy();
+  });
+
+  it("still labels itself when the title has not arrived yet", () => {
+    render(
+      <Modal open onClose={() => {}} title="" size="xl" bare>
+        <div>detail</div>
+      </Modal>
+    );
+    expect(screen.getByRole("dialog").getAttribute("aria-label")).toBe("Dialog");
+  });
+
+  it("keeps the header for every other caller", () => {
+    render(
+      <Modal open onClose={() => {}} title="New Task">
+        <div>form</div>
+      </Modal>
+    );
+    expect(screen.getByRole("heading", { name: "New Task" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /close dialog/i })).toBeTruthy();
+  });
+});
+
+// The task detail is a whole page of content; on a phone a backdrop around it
+// costs height for nothing, so a bare dialog takes the screen
+describe("Modal, bare on a narrow screen", () => {
+  function frame() {
+    render(
+      <Modal open onClose={() => {}} title="CP-225" size="xl" bare>
+        <div>detail</div>
+      </Modal>
+    );
+    return screen.getByRole("dialog").className;
+  }
+
+  it("fills the viewport below sm and becomes a card from sm up", () => {
+    const cls = frame();
+    expect(cls).toContain("h-dvh");
+    expect(cls).toContain("rounded-none");
+    expect(cls).toContain("border-0");
+    expect(cls).toContain("sm:h-auto");
+    expect(cls).toContain("sm:max-h-[90vh]");
+    expect(cls).toContain("sm:rounded-2xl");
+  });
+
+  it("lets the scrolling body take the leftover height", () => {
+    render(
+      <Modal open onClose={() => {}} title="CP-225" size="xl" bare>
+        <div>detail</div>
+      </Modal>
+    );
+    expect(screen.getByText("detail").parentElement!.className).toContain("flex-1");
+  });
+
+  it("leaves every other dialog docked at 90% as before", () => {
+    render(
+      <Modal open onClose={() => {}} title="New Task">
+        <div>form</div>
+      </Modal>
+    );
+    const cls = screen.getByRole("dialog").className;
+    expect(cls).toContain("max-h-[90vh]");
+    expect(cls).toContain("rounded-t-2xl");
+    expect(cls).not.toContain("h-dvh");
+  });
+});
