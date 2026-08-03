@@ -5,6 +5,7 @@ import {
   legacyFieldValue,
   migratedValuesFor,
   withValuesInUse,
+  legacyRenderingSuppressed,
 } from "./legacy-fields";
 import { ApiCustomField, ApiLabel } from "@/types";
 
@@ -138,5 +139,27 @@ describe("findLegacyField", () => {
 
   it("returns nothing when the project has no such field", () => {
     expect(findLegacyField([], "component")).toBeUndefined();
+  });
+});
+
+describe("legacyRenderingSuppressed", () => {
+  const seeded = legacyFieldSeeds(project).map((f, i) => ({ ...f, _id: `f${i}` })) as ApiCustomField[];
+
+  // Without this every card, row and filter panel showed the same value twice
+  it("stands the hardcoded rendering down once the field is seeded", () => {
+    expect(legacyRenderingSuppressed(seeded, "component")).toBe(true);
+    expect(legacyRenderingSuppressed(seeded, "difficulty")).toBe(true);
+    expect(legacyRenderingSuppressed(seeded, "labels")).toBe(true);
+  });
+
+  it("leaves it alone on a project that was never migrated", () => {
+    expect(legacyRenderingSuppressed([], "component")).toBe(false);
+    expect(legacyRenderingSuppressed(undefined, "difficulty")).toBe(false);
+  });
+
+  // Turning the badge off is a choice; the old rendering must not creep back
+  it("stays suppressed when the field exists but its switches are off", () => {
+    const off = seeded.map((f) => ({ ...f, showOnCard: false, showInList: false }));
+    expect(legacyRenderingSuppressed(off, "difficulty")).toBe(true);
   });
 });
