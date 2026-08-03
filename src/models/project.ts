@@ -31,9 +31,7 @@ const taskTemplateSchema = new Schema(
     name: { type: String, required: true, trim: true },
     title: { type: String, default: "" },
     description: { type: String, default: "" },
-    difficulty: { type: String, enum: DIFFICULTIES, default: "M" },
     category: { type: String, default: "user-story" },
-    component: { type: String, default: "" },
     acceptanceCriteria: { type: String, default: "" },
   }
 );
@@ -77,14 +75,6 @@ const projectSchema = new Schema<IProject>(
       type: String,
       default: "",
       trim: true,
-    },
-    components: {
-      type: [String],
-      default: [],
-    },
-    labels: {
-      type: [labelSchema],
-      default: [],
     },
     categories: {
       type: [categorySchema],

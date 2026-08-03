@@ -210,7 +210,6 @@ export function TaskDetail({
           components={project.components}
           categories={(project.categories || []).map((c) => c.name)}
           columns={project.columns || []}
-          projectLabels={project.labels || []}
           sprints={sprints}
           customFields={project.customFields || []}
           onSaved={loadData}

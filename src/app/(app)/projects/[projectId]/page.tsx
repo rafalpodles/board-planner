@@ -504,7 +504,6 @@ export default function KanbanPage() {
         <Board
           tasks={filteredTasks}
           projectKey={project.key}
-          projectLabels={project.labels || []}
           customFields={project.customFields || []}
           projectCategories={project.categories || []}
           columns={project.columns || []}
