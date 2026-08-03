@@ -15,7 +15,7 @@ import {
   defaultSortDir,
 } from "@/types";
 import { ListColumnId, isColumnVisible, listColumns as projectListColumns } from "@/lib/list-columns";
-import { cardBadges } from "@/lib/custom-fields";
+import { fieldCellText } from "@/lib/custom-fields";
 import { effectiveColumns } from "@/lib/columns";
 import { Badge } from "@/components/ui/Badge";
 import { categoryColor, categoryTint } from "@/lib/category-colors";
@@ -495,19 +495,14 @@ export function ListView({
                     </td>
                   )}
                   {fieldColumns.map((column) => {
-                    // cardBadges already resolves an option id to its label, and a
-                    // list cell wants the same resolution a card badge does
-                    const cells = cardBadges(task.customFieldValues, [
-                      { ...column.field!, showOnCard: true },
-                    ]);
+                    const text = fieldCellText(task.customFieldValues, column.field!);
                     return (
                       <td
                         key={column.id}
                         className="px-2 py-2 hidden lg:table-cell text-text-muted max-w-32"
+                        title={text || undefined}
                       >
-                        <div className="truncate">
-                          {cells.length ? cells.map((c) => c.label).join(", ") : "—"}
-                        </div>
+                        <div className="truncate">{text || "—"}</div>
                       </td>
                     );
                   })}
