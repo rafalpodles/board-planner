@@ -87,12 +87,26 @@ describe("POST /api/workers/:workerId/heartbeat", () => {
     expect(touchWorker).not.toHaveBeenCalled();
   });
 
-  it("returns the policy and assignments the worker refreshes from", async () => {
+  // Only the fields an operator set. A worker that is handed the whole stored policy pins every
+  // field forever, because the schema materialises a default into each one at creation — so a
+  // later change to a default would never reach it.
+  it("returns only the overridden policy fields, and the assignments", async () => {
     const { req, ctx } = request();
 
     const json = await (await POST(req, ctx)).json();
 
-    expect(json.policy).toEqual({ baseBranch: "main" });
+    expect(json.policy).toEqual({});
     expect(json.assignments).toEqual([{ project: PROJECT_ID, proposedPath: "/repo" }]);
+  });
+
+  it("returns a field the operator pinned, and nothing else", async () => {
+    verifyWorkerCredential.mockResolvedValue(
+      workerDoc({ policy: { baseBranch: "release" }, policyOverrides: ["baseBranch"] })
+    );
+    const { req, ctx } = request();
+
+    const json = await (await POST(req, ctx)).json();
+
+    expect(json.policy).toEqual({ baseBranch: "release" });
   });
 });

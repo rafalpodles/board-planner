@@ -8,6 +8,7 @@ import { useToast } from "@/components/ui/Toast";
 import { Button } from "@/components/ui/Button";
 import { usePollWhileVisible } from "@/hooks/use-poll-while-visible";
 import { timeAgo } from "@/lib/time";
+import { policyRows } from "@/lib/worker-policy-view";
 import { commandStatus, WorkerCommand } from "@/lib/worker-command-status";
 import { ApiWorker } from "@/types";
 
@@ -127,8 +128,8 @@ export default function AdminWorkersPage() {
               )}
               {workers.map((worker) => {
                 const status = commandStatus(worker);
-                return (
-                  <tr key={worker._id} className="border-b border-border last:border-b-0">
+                return [
+                  <tr key={worker._id} className="border-b-0">
                     <td className="px-3 py-2 font-medium whitespace-nowrap">{worker.name}</td>
                     <td className="px-3 py-2 text-text-muted whitespace-nowrap">{worker.host || "—"}</td>
                     <td className="px-3 py-2 text-text-muted font-mono text-xs whitespace-nowrap">
@@ -231,8 +232,35 @@ export default function AdminWorkersPage() {
                         </div>
                       </div>
                     </td>
-                  </tr>
-                );
+                  </tr>,
+                  <tr key={`${worker._id}-policy`} className="border-b border-border last:border-b-0">
+                    <td colSpan={9} className="px-3 pb-3 pt-0">
+                      <div className="flex flex-wrap gap-1.5">
+                        {policyRows(worker).map((row) => (
+                          <span
+                            key={row.field}
+                            title={
+                              row.overridden
+                                ? `Set on this worker. Default is ${row.defaultValue}.`
+                                : `Inherited. Changing the default moves this worker too.`
+                            }
+                            className={
+                              row.overridden
+                                ? "inline-flex items-center gap-1 rounded border border-border bg-bg-input px-1.5 py-0.5 text-xs"
+                                : "inline-flex items-center gap-1 rounded border border-transparent px-1.5 py-0.5 text-xs text-text-muted"
+                            }
+                          >
+                            <span className="font-mono">{row.field}</span>
+                            <span className={row.overridden ? "font-medium" : ""}>{row.value}</span>
+                            <span className="text-text-muted">
+                              {row.overridden ? "set" : "default"}
+                            </span>
+                          </span>
+                        ))}
+                      </div>
+                    </td>
+                  </tr>,
+                ];
               })}
             </tbody>
           </table>

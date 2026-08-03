@@ -28,6 +28,9 @@ const workerSchema = new Schema<IWorker>(
       fallbackModel: { type: String, default: "sonnet" },
       reviewModel: { type: String, default: "opus" },
     },
+    // Which policy fields an operator actually set. The schema materialises a default into every
+    // other field at creation, so this list is the only record of intent.
+    policyOverrides: { type: [String], default: [] },
     enabled: { type: Boolean, default: true },
     lockedByInstance: { type: Boolean, default: false },
     lastSeenAt: { type: Date, default: null },

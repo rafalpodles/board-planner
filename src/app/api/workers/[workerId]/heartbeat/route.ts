@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { withWorker, protocolOf } from "@/lib/middleware";
-import { touchWorker } from "@/lib/worker-service";
+import { overriddenPolicy, touchWorker } from "@/lib/worker-service";
 
 // The only path guaranteed to survive SSE loss, so it carries both the abort
 // verdict and the command acknowledgement
@@ -24,7 +24,9 @@ export const POST = withWorker(async (request, { worker }) => {
   return NextResponse.json({
     command: worker.command,
     commandIssuedAt: worker.commandIssuedAt ? new Date(worker.commandIssuedAt).toISOString() : null,
-    policy: worker.policy,
+    // Only what an operator set: everything else resolves against the worker's own
+    // DEFAULT_POLICY, so raising a default reaches every machine that never pinned it
+    policy: overriddenPolicy(worker),
     assignments: worker.assignments.map((a) => ({
       project: String(a.project),
       proposedPath: a.proposedPath,

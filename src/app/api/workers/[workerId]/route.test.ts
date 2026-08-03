@@ -195,7 +195,7 @@ describe("PATCH /api/workers/:workerId — authorization matrix", () => {
     expect(response.status).toBe(200);
     expect(workerFindByIdAndUpdate).toHaveBeenCalledWith(
       WORKER_ID,
-      { $set: { "policy.baseBranch": "develop" } },
+      { $set: { "policy.baseBranch": "develop", policyOverrides: ["baseBranch"] } },
       { new: true }
     );
   });
@@ -216,6 +216,7 @@ describe("PATCH /api/workers/:workerId — authorization matrix", () => {
           "policy.model": "haiku",
           "policy.fallbackModel": "sonnet",
           "policy.reviewModel": "opus",
+          policyOverrides: ["model", "fallbackModel", "reviewModel"],
         },
       },
       { new: true }
@@ -320,6 +321,7 @@ describe("PATCH /api/workers/:workerId — authorization matrix", () => {
           assignments: [{ project: PROJECT_A, proposedPath: "/repo" }],
           "policy.baseBranch": "develop",
           "policy.pollIntervalMs": 5000,
+          policyOverrides: ["baseBranch", "pollIntervalMs"],
         },
       },
       { new: true }
@@ -472,5 +474,50 @@ describe("PATCH /api/workers/:workerId — one checkout, one worker", () => {
     );
 
     expect(response.status).toBe(200);
+  });
+});
+
+// The list is the only record of intent: the schema materialises a default into every policy field
+// at creation, so the stored value cannot say whether anyone chose it.
+describe("PATCH /api/workers/:workerId — recording what the operator set", () => {
+  it("records a field even when the value equals the default", async () => {
+    getAuthUser.mockResolvedValue(INSTANCE_ADMIN);
+
+    await PATCH(patchRequest({ maxDiffLines: 400 }), ctx());
+
+    expect(workerFindByIdAndUpdate).toHaveBeenCalledWith(
+      WORKER_ID,
+      { $set: { "policy.maxDiffLines": 400, policyOverrides: ["maxDiffLines"] } },
+      { new: true }
+    );
+  });
+
+  it("adds to the existing list rather than replacing it", async () => {
+    getAuthUser.mockResolvedValue(INSTANCE_ADMIN);
+    workerFindById.mockResolvedValue(workerDoc({ policyOverrides: ["model"] }));
+
+    await PATCH(patchRequest({ baseBranch: "develop" }), ctx());
+
+    expect(workerFindByIdAndUpdate.mock.calls[0][1].$set.policyOverrides).toEqual([
+      "model",
+      "baseBranch",
+    ]);
+  });
+
+  it("does not record the same field twice", async () => {
+    getAuthUser.mockResolvedValue(INSTANCE_ADMIN);
+    workerFindById.mockResolvedValue(workerDoc({ policyOverrides: ["baseBranch"] }));
+
+    await PATCH(patchRequest({ baseBranch: "develop" }), ctx());
+
+    expect(workerFindByIdAndUpdate.mock.calls[0][1].$set.policyOverrides).toEqual(["baseBranch"]);
+  });
+
+  it("leaves the list alone when no policy field was touched", async () => {
+    getAuthUser.mockResolvedValue(INSTANCE_ADMIN);
+
+    await PATCH(patchRequest({ enabled: false }), ctx());
+
+    expect(workerFindByIdAndUpdate.mock.calls[0][1].$set).not.toHaveProperty("policyOverrides");
   });
 });
