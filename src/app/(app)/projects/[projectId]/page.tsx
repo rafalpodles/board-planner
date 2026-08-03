@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { usePollWhileVisible } from "@/hooks/use-poll-while-visible";
-import { ApiProject, ApiTask, ApiSprint , BOARD_SORT_FIELDS, LIST_SORT_FIELDS, SortField, SortKey, SortDir } from "@/types";
+import { ApiProject, ApiTask, ApiSprint , ApiUserSummary, BOARD_SORT_FIELDS, LIST_SORT_FIELDS, SortField, SortKey, SortDir } from "@/types";
 import { effectiveColumns } from "@/lib/columns";
 import { ListColumnId } from "@/lib/list-columns";
 import { subscribeBoardRefresh } from "@/lib/board-refresh";
@@ -89,6 +89,7 @@ export default function KanbanPage() {
     return localStorage.getItem(`view-mode:${projectId}`) === "list" ? "list" : "board";
   });
   const [sprints, setSprints] = useState<ApiSprint[]>([]);
+  const [assignableUsers, setAssignableUsers] = useState<ApiUserSummary[]>([]);
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
   const [focusedTaskIndex, setFocusedTaskIndex] = useState(-1);
 
@@ -136,6 +137,12 @@ export default function KanbanPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, selectedSprint]);
+
+  // Once, not on the board poll: the roster does not change while you work
+  useEffect(() => {
+    api.get("/api/users/list").then(setAssignableUsers).catch(() => setAssignableUsers([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useCanonicalUrl(project?.key);
 
@@ -302,6 +309,23 @@ export default function KanbanPage() {
       toast("Failed to delete tasks", "error");
     } finally {
       setBulkDeleting(false);
+    }
+  }
+
+  async function handleAssigneeChange(taskId: string, username: string) {
+    try {
+      // PUT, not PATCH: the task route exposes GET/PUT/DELETE, and updateTask
+      // copies only the fields present in the body, so this stays a partial update.
+      // null, not "": task-service only resolves a non-empty string, so "" would
+      // reach Mongoose as a cast error instead of clearing the field
+      const updated = await api.put(`/api/projects/${projectId}/tasks/${taskId}`, {
+        assignee: username || null,
+      });
+      setTasks((prev) =>
+        prev.map((t) => (t._id === taskId ? { ...t, assignee: updated.assignee } : t))
+      );
+    } catch {
+      toast("Failed to update assignee", "error");
     }
   }
 
@@ -508,8 +532,10 @@ export default function KanbanPage() {
             setSortDir(dir);
           }}
           hiddenColumns={hiddenColumns}
+          assignableUsers={assignableUsers}
           onTaskClick={openTask}
           onStatusChange={handleStatusChange}
+          onAssigneeChange={handleAssigneeChange}
           onTaskSelect={handleTaskSelect}
           onTaskContextMenu={(taskId, x, y) => setContextMenu({ taskId, x, y })}
         />
