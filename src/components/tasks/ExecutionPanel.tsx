@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ApiTaskExecution } from "@/types";
+import { SectionLabel } from "@/components/tasks/detail/atoms";
 
 interface ExecutionPanelProps {
   execution?: ApiTaskExecution;
@@ -59,12 +60,12 @@ export function ExecutionPanel({ execution }: ExecutionPanelProps) {
   const silent = durationLabel(quietFor);
 
   return (
-    <div>
-      <h2 className="font-semibold mb-2">Execution</h2>
-      <div className="flex items-center gap-2 text-sm">
+    <section className="flex flex-col gap-2.5">
+      <SectionLabel>Execution</SectionLabel>
+      <div className="flex flex-wrap items-center gap-2 text-sm">
         <span
           className={`inline-block w-2 h-2 rounded-full ${
-            quiet ? "bg-amber-500" : "bg-emerald-500 animate-pulse"
+            quiet ? "bg-warning" : "bg-success animate-pulse"
           }`}
           data-testid={quiet ? "run-quiet" : "run-live"}
           aria-hidden="true"
@@ -73,16 +74,16 @@ export function ExecutionPanel({ execution }: ExecutionPanelProps) {
         {/* Two clocks that mean different things: during the agent stage every tool call refreshes
             phaseAt, so its age is time since the last sign of life, not time spent. Only startedAt
             answers "how long has this been going". */}
-        {running && <span className="text-gray-500 dark:text-gray-400">· running {running}</span>}
+        {running && <span className="text-text-muted">· running {running}</span>}
         {silent && (
-          <span className={quiet ? "text-amber-600 dark:text-amber-400" : "text-gray-500 dark:text-gray-400"}>
+          <span className={quiet ? "text-warning" : "text-text-muted"}>
             · last sign of life {silent} ago
           </span>
         )}
         {(workerName || workerId) && (
-          <span className="text-gray-500 dark:text-gray-400">· {workerName || workerId}</span>
+          <span className="text-text-muted">· {workerName || workerId}</span>
         )}
       </div>
-    </div>
+    </section>
   );
 }
