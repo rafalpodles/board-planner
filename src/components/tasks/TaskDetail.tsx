@@ -183,13 +183,16 @@ function TaskDetailView({
 
   async function handleDuplicate() {
     try {
+      // No status: columns are per project since CP-128, so a literal "planned" is a 400
+      // in any project that renamed or rebuilt its board. Omitting it lets the server pick
+      // the project's own backlog column.
       const created = await api.post(`/api/projects/${projectId}/tasks`, {
         title: `Copy of ${task.title}`,
         description: task.description,
         category: task.category,
         checklist: task.checklist,
         dueDate: task.dueDate,
-        status: "planned",
+        customFieldValues: task.customFieldValues,
       });
       toast("Task duplicated", "success");
       router.push(taskPath(projectId, created.taskNumber));
