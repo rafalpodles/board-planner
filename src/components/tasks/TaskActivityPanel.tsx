@@ -47,7 +47,7 @@ export function TaskActivityPanel({ projectId, taskId }: TaskActivityPanelProps)
       <div
         role="tablist"
         aria-label="Task discussion and history"
-        className="flex gap-1 border-b border-border mb-4 overflow-x-auto"
+        className="mb-4 flex gap-1 overflow-x-auto"
       >
         {tabs.map((t) => (
           <button
@@ -62,16 +62,14 @@ export function TaskActivityPanel({ projectId, taskId }: TaskActivityPanelProps)
             tabIndex={tab === t.id ? 0 : -1}
             onKeyDown={handleKeyDown}
             onClick={() => setTab(t.id)}
-            className={`shrink-0 -mb-px border-b-2 px-3 py-2 text-sm transition-colors ${
+            className={`shrink-0 rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors ${
               tab === t.id
-                ? "border-primary font-semibold text-text"
-                : "border-transparent text-text-muted hover:text-text"
+                ? "bg-bg-input text-text"
+                : "text-text-muted hover:text-text"
             }`}
           >
             {t.label}
-            {t.count !== null && (
-              <span className="ml-1.5 text-xs text-text-muted">{t.count}</span>
-            )}
+            {t.count !== null && <span className="ml-1.5 opacity-60">{t.count}</span>}
           </button>
         ))}
       </div>

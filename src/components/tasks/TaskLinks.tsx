@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, type CSSProperties, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
 import { ApiTask, ApiTaskLink, DependencyType } from "@/types";
@@ -15,11 +15,21 @@ const DEPENDENCY_LABELS: { value: DependencyType; label: string }[] = [
   { value: "parent_of", label: "Parent of" },
 ];
 
+interface Column {
+  id: string;
+  label: string;
+  color: string;
+}
+
 interface TaskLinksProps {
   projectId: string;
   projectKey: string;
   task: ApiTask;
   onChanged: () => void;
+  /** The project's columns, so a linked task's status reads as its board label */
+  columns?: Column[];
+  /** Rendered beside "Add dependency" */
+  actions?: ReactNode;
 }
 
 export function TaskLinks({
@@ -27,6 +37,8 @@ export function TaskLinks({
   projectKey,
   task,
   onChanged,
+  columns = [],
+  actions,
 }: TaskLinksProps) {
   const api = useApi();
   const router = useRouter();
@@ -125,15 +137,23 @@ export function TaskLinks({
     children.length === 0 &&
     parents.length === 0;
 
+  function statusChip(status: string) {
+    const column = columns.find((c) => c.id === status);
+    return (
+      <span
+        className="chip shrink-0 rounded px-2 py-0.5 text-[11px] font-medium"
+        style={{ "--chip": column?.color || "var(--color-text-muted)" } as CSSProperties}
+      >
+        {column?.label || status}
+      </span>
+    );
+  }
+
   if (isEmpty && !showPicker) {
     return (
-      <div>
-        <button
-          onClick={() => setShowPicker(true)}
-          className="text-xs text-text-muted hover:text-primary transition-colors"
-        >
-          + Add dependency
-        </button>
+      <div className="flex flex-wrap items-center gap-4">
+        <AddDependencyButton onClick={() => setShowPicker(true)} />
+        {actions}
       </div>
     );
   }
@@ -145,27 +165,16 @@ export function TaskLinks({
           <h4 className="text-xs font-medium text-text-muted mb-1">
             Blocked by
           </h4>
-          <div className="space-y-1">
+          <div className="space-y-1.5">
             {blockedBy.map((t) => (
-              <div
+              <LinkRow
                 key={t._id}
-                className="flex items-center gap-2 text-sm group"
-              >
-                <button
-                  onClick={() => navigateToTask(t.taskNumber)}
-                  className="text-primary hover:underline font-mono text-xs"
-                >
-                  {projectKey}-{t.taskNumber}
-                </button>
-                <span className="truncate flex-1">{t.title}</span>
-                <span className="text-xs text-text-muted">{t.status}</span>
-                <button
-                  onClick={() => removeLink(t._id, "blocked_by")}
-                  className="text-text-muted hover:text-danger opacity-0 group-hover:opacity-100 transition-opacity text-xs"
-                >
-                  &times;
-                </button>
-              </div>
+                taskKey={`${projectKey}-${t.taskNumber}`}
+                title={t.title}
+                status={statusChip(t.status)}
+                onOpen={() => navigateToTask(t.taskNumber)}
+                onRemove={() => removeLink(t._id, "blocked_by")}
+              />
             ))}
           </div>
         </div>
@@ -176,18 +185,15 @@ export function TaskLinks({
           <h4 className="text-xs font-medium text-text-muted mb-1">
             Is blocking
           </h4>
-          <div className="space-y-1">
+          <div className="space-y-1.5">
             {blocking.map((t) => (
-              <div key={t._id} className="flex items-center gap-2 text-sm">
-                <button
-                  onClick={() => navigateToTask(t.taskNumber)}
-                  className="text-primary hover:underline font-mono text-xs"
-                >
-                  {projectKey}-{t.taskNumber}
-                </button>
-                <span className="truncate flex-1">{t.title}</span>
-                <span className="text-xs text-text-muted">{t.status}</span>
-              </div>
+              <LinkRow
+                key={t._id}
+                taskKey={`${projectKey}-${t.taskNumber}`}
+                title={t.title}
+                status={statusChip(t.status)}
+                onOpen={() => navigateToTask(t.taskNumber)}
+              />
             ))}
           </div>
         </div>
@@ -203,26 +209,20 @@ export function TaskLinks({
         section.items.length === 0 ? null : (
           <div key={section.heading}>
             <h4 className="text-xs font-medium text-text-muted mb-1">{section.heading}</h4>
-            <div className="space-y-1">
+            <div className="space-y-1.5">
               {section.items.map((r) => (
-                <div key={`${section.heading}-${r.task._id}`} className="flex items-center gap-2 text-sm group">
-                  <button
-                    onClick={() => navigateToTask(r.task.taskNumber)}
-                    className="text-primary hover:underline font-mono text-xs"
-                  >
-                    {projectKey}-{r.task.taskNumber}
-                  </button>
-                  <span className="truncate flex-1">{r.task.title}</span>
-                  <span className="text-xs text-text-muted">{r.task.status}</span>
-                  {section.removable && (
-                    <button
-                      onClick={() => removeLink(r.task._id, section.type)}
-                      className="text-text-muted hover:text-danger opacity-0 group-hover:opacity-100 transition-opacity text-xs"
-                    >
-                      &times;
-                    </button>
-                  )}
-                </div>
+                <LinkRow
+                  key={`${section.heading}-${r.task._id}`}
+                  taskKey={`${projectKey}-${r.task.taskNumber}`}
+                  title={r.task.title}
+                  status={statusChip(r.task.status)}
+                  onOpen={() => navigateToTask(r.task.taskNumber)}
+                  onRemove={
+                    section.removable
+                      ? () => removeLink(r.task._id, section.type)
+                      : undefined
+                  }
+                />
               ))}
             </div>
           </div>
@@ -281,11 +281,55 @@ export function TaskLinks({
           </Button>
         </div>
       ) : (
+        <div className="flex flex-wrap items-center gap-4">
+          <AddDependencyButton onClick={() => setShowPicker(true)} />
+          {actions}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AddDependencyButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="focus-ring rounded text-sm text-text-muted transition-colors hover:text-text"
+    >
+      + Add dependency
+    </button>
+  );
+}
+
+interface LinkRowProps {
+  taskKey: string;
+  title: string;
+  status: ReactNode;
+  onOpen: () => void;
+  onRemove?: () => void;
+}
+
+function LinkRow({ taskKey, title, status, onOpen, onRemove }: LinkRowProps) {
+  return (
+    <div className="group flex items-center gap-3 rounded-lg border border-border bg-bg-input/40 px-3 py-2.5 text-sm">
+      <button
+        type="button"
+        onClick={onOpen}
+        className="focus-ring shrink-0 rounded font-mono text-xs text-primary hover:underline"
+      >
+        {taskKey}
+      </button>
+      <span className="min-w-0 flex-1 truncate">{title}</span>
+      {status}
+      {onRemove && (
         <button
-          onClick={() => setShowPicker(true)}
-          className="text-xs text-text-muted hover:text-primary transition-colors"
+          type="button"
+          onClick={onRemove}
+          aria-label={`Unlink ${taskKey}`}
+          className="focus-ring shrink-0 rounded px-1 text-text-muted opacity-0 transition-opacity hover:text-danger group-hover:opacity-100"
         >
-          + Add dependency
+          &times;
         </button>
       )}
     </div>
