@@ -6,7 +6,7 @@ import { join } from "path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiClient } from "./api.js";
 import { CommandChannels, createCommandHandlers } from "./commands.js";
-import { LocalServer, startLocalServer } from "./local-server.js";
+import { LocalConfigView, LocalServer, startLocalServer } from "./local-server.js";
 import { createLoop, Loop } from "./loop.js";
 import { createTelemetry, Telemetry } from "./telemetry.js";
 
@@ -35,11 +35,22 @@ function idleLoop(): Loop {
   });
 }
 
+const SOME_CONFIG: LocalConfigView = {
+  apiUrl: "http://localhost:3000",
+  workerName: "test-worker",
+  projectCount: 0,
+  model: "opus",
+  reviewModel: "sonnet",
+  maxDiffLines: 400,
+  taskTimeoutMs: 900_000,
+};
+
 async function serve(
   opts: {
     handlers?: CommandChannels;
     telemetry?: Pick<Telemetry, "subscribe" | "recent">;
     socketPath?: string;
+    config?: () => LocalConfigView;
   } = {}
 ) {
   const loop = idleLoop();
@@ -53,6 +64,7 @@ async function serve(
     handlers: channels.local,
     telemetry: opts.telemetry ?? createTelemetry(),
     paused: () => loop.paused(),
+    config: opts.config ?? (() => SOME_CONFIG),
     log: vi.fn(),
   });
   started.push(server);
@@ -130,6 +142,7 @@ describe("the local socket as a transport", () => {
       handlers: { pause: vi.fn(), resume: vi.fn(), stop: vi.fn() },
       telemetry: createTelemetry(),
       paused: () => false,
+      config: () => SOME_CONFIG,
       log: vi.fn(),
     });
     started.push(server);
@@ -273,17 +286,101 @@ describe("the progress stream", () => {
     ).resolves.toBeUndefined();
   });
 
-  it("does not put quota on a stream that carries progress", async () => {
+  // Reversed in part C, deliberately. The stream used to drop quota, which left the operator with
+  // no local source for the one notification that explains why a run stopped. /status still replays
+  // progress only — the ring is what stays progress-shaped, not the stream.
+  it("puts quota on the stream, so a client can say why the run stopped", async () => {
     const telemetry = createTelemetry();
     const { socketPath } = await serve({ telemetry });
     const stream = await openStream(socketPath);
 
+    telemetry.emit({ status: "rejected", utilization: 100 });
+
+    await vi.waitFor(() => expect(stream.frames.join("")).toContain('"status":"rejected"'));
+    stream.close();
+  });
+
+  it("puts an outcome on the stream, which is where a notification comes from", async () => {
+    const telemetry = createTelemetry();
+    const { socketPath } = await serve({ telemetry });
+    const stream = await openStream(socketPath);
+
+    telemetry.emit({ outcome: "merged", taskKey: "CP-1" });
+
+    await vi.waitFor(() =>
+      expect(stream.frames.join("")).toContain('data: {"outcome":"merged","taskKey":"CP-1"}\n\n')
+    );
+    stream.close();
+  });
+
+  it("keeps quota and outcomes out of the /status replay, which is progress only", async () => {
+    const telemetry = createTelemetry();
+    const { socketPath } = await serve({ telemetry });
+
     telemetry.emit({ status: "allowed_warning", utilization: 76 });
+    telemetry.emit({ outcome: "merged", taskKey: "CP-1" });
     telemetry.emit({ phase: "push" });
 
-    await vi.waitFor(() => expect(stream.frames.join("")).toContain('"phase":"push"'));
-    expect(stream.frames.join("")).not.toContain("allowed_warning");
-    stream.close();
+    const body = JSON.parse((await call(socketPath, "GET", "/status")).body);
+    expect(body.recent).toEqual([{ phase: "push" }]);
+  });
+
+  it("serves the effective config the worker is actually running under", async () => {
+    const { socketPath } = await serve({
+      config: () => ({
+        apiUrl: "http://localhost:3991",
+        workerName: "rig-laptop",
+        projectCount: 1,
+        model: "opus",
+        reviewModel: "sonnet",
+        maxDiffLines: 400,
+        taskTimeoutMs: 900_000,
+      }),
+    });
+
+    const response = await call(socketPath, "GET", "/config");
+
+    expect(response.status).toBe(200);
+    expect(JSON.parse(response.body)).toEqual({
+      apiUrl: "http://localhost:3991",
+      workerName: "rig-laptop",
+      projectCount: 1,
+      model: "opus",
+      reviewModel: "sonnet",
+      maxDiffLines: 400,
+      taskTimeoutMs: 900_000,
+    });
+  });
+
+  // No route on this socket may disclose a credential or a repository binding — the agent runs at
+  // this same uid and can reach it. See the header comment on local-server.ts.
+  it("discloses no credential and no repository path", async () => {
+    const { socketPath } = await serve();
+
+    const body = (await call(socketPath, "GET", "/config")).body;
+
+    expect(body).not.toMatch(/cpw_|token|credential|repoPath|worktreeRoot/i);
+  });
+
+  // Policy arrives from the server over SSE and changes under a running worker; a value captured at
+  // startup would go stale the first time an operator edits it in the console.
+  it("reads the config afresh on every request", async () => {
+    let model = "opus";
+    const { socketPath } = await serve({
+      config: () => ({
+        apiUrl: "http://x",
+        workerName: "w",
+        projectCount: 0,
+        model,
+        reviewModel: "sonnet",
+        maxDiffLines: 400,
+        taskTimeoutMs: 1,
+      }),
+    });
+
+    expect(JSON.parse((await call(socketPath, "GET", "/config")).body).model).toBe("opus");
+    model = "haiku";
+    expect(JSON.parse((await call(socketPath, "GET", "/config")).body).model).toBe("haiku");
   });
 
   it("lets go of its subscription when the client disconnects", async () => {

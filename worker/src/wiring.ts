@@ -346,6 +346,15 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     handlers: channels.local,
     telemetry,
     paused: () => loop.paused(),
+    config: () => ({
+      apiUrl: bootstrap.apiBaseUrl,
+      workerName: bootstrap.workerName,
+      projectCount: assignments.length,
+      model: policy.model,
+      reviewModel: policy.reviewModel,
+      maxDiffLines: policy.maxDiffLines,
+      taskTimeoutMs: policy.taskTimeoutMs,
+    }),
     log: deps.logError,
   });
   // A worker that cannot open its socket is a worker without a menubar, not a worker that stops

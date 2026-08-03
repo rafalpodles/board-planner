@@ -2,7 +2,7 @@ import { chmodSync, lstatSync, mkdirSync, unlinkSync } from "fs";
 import { createServer, IncomingMessage, ServerResponse } from "http";
 import { dirname } from "path";
 import { LocalCommands, WorkerCommand } from "./commands.js";
-import { isQuota, Telemetry } from "./telemetry.js";
+import { Telemetry } from "./telemetry.js";
 
 // A unix domain socket, not a TCP port: a port is reachable by every process on the machine and by
 // anything that can make a browser issue a request to localhost. Filesystem permissions are the
@@ -14,6 +14,19 @@ import { isQuota, Telemetry } from "./telemetry.js";
 // No route returns a credential or a repository binding, and no route starts work. Designed on the
 // assumption that the secret is already gone, because it effectively is.
 
+// What the operator's own cockpit may know: the effective policy this worker is running under, and
+// nothing that would let a reader reach the server or the checkout. No credential, no repository
+// path — see the header comment.
+export interface LocalConfigView {
+  apiUrl: string;
+  workerName: string;
+  projectCount: number;
+  model: string;
+  reviewModel: string;
+  maxDiffLines: number;
+  taskTimeoutMs: number;
+}
+
 export interface LocalServerDeps {
   socketPath: string;
   // The same dispatcher the server channels use, so pause/resume/stop get the same effects and the
@@ -23,6 +36,9 @@ export interface LocalServerDeps {
   handlers: LocalCommands;
   telemetry: Pick<Telemetry, "subscribe" | "recent">;
   paused: () => boolean;
+  // A function, not a value: policy arrives from the server over SSE and changes under a running
+  // worker, so anything captured at startup goes stale the first time an operator edits it.
+  config: () => LocalConfigView;
   log?: (message: string) => void;
 }
 
@@ -69,8 +85,9 @@ export function startLocalServer(deps: LocalServerDeps): LocalServer {
     response.flushHeaders();
     streams.add(response);
 
+    // Everything, quota and outcomes included: this is the operator's only local source for why a
+    // run stopped. /status stays progress-only, because the replay ring is what has that shape.
     const unsubscribe = deps.telemetry.subscribe((update) => {
-      if (isQuota(update)) return;
       response.write(`data: ${JSON.stringify(update)}\n\n`);
     });
 
@@ -87,6 +104,7 @@ export function startLocalServer(deps: LocalServerDeps): LocalServer {
       const recent = deps.telemetry.recent();
       json(response, 200, { paused: deps.paused(), current: recent.at(-1) ?? null, recent });
     },
+    "GET /config": (_request, response) => json(response, 200, deps.config()),
     "GET /stream": openStream,
     "POST /pause": (_request, response) => apply(response, "pause"),
     "POST /resume": (_request, response) => apply(response, "resume"),
