@@ -7,11 +7,17 @@ import { ActivityTimeline } from "./ActivityTimeline";
 interface TaskActivityPanelProps {
   projectId: string;
   taskId: string;
+  /** Bumped when a comment is posted from the phone's bottom bar */
+  commentRefreshKey?: number;
 }
 
 type Tab = "comments" | "history";
 
-export function TaskActivityPanel({ projectId, taskId }: TaskActivityPanelProps) {
+export function TaskActivityPanel({
+  projectId,
+  taskId,
+  commentRefreshKey = 0,
+}: TaskActivityPanelProps) {
   const [tab, setTab] = useState<Tab>("comments");
   const [commentCount, setCommentCount] = useState<number | null>(null);
   const [historyCount, setHistoryCount] = useState<number | null>(null);
@@ -85,6 +91,7 @@ export function TaskActivityPanel({ projectId, taskId }: TaskActivityPanelProps)
         <Comments
           projectId={projectId}
           taskId={taskId}
+          refreshKey={commentRefreshKey}
           hideHeading
           onCountChange={setCommentCount}
           onMutated={() => setHistoryRefresh((k) => k + 1)}
