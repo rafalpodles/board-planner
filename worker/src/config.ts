@@ -38,6 +38,10 @@ export function modelOr(value: string | undefined, fallback: string): string {
 export interface Bootstrap {
   apiBaseUrl: string;
   apiToken: string;
+  // Single-use, spent by the first registration. Empty once the operator has removed it, which is
+  // the intended end state — an enrolled worker never needs it again.
+  enrolmentToken: string;
+  enrolmentTokenFile: string;
   workerName: string;
   stateDir: string;
 }
@@ -101,6 +105,21 @@ function requiredSecret(env: Env, key: string, readSecret: SecretReader): string
   throw new Error(`${key} or ${key}_FILE is required`);
 }
 
+// Optional by design: once a worker has an identity it never registers again, so the operator is
+// meant to delete this. Requiring it would stop an enrolled worker from booting.
+function optionalSecret(env: Env, key: string, readSecret: SecretReader): string {
+  const inline = env[key];
+  if (inline?.trim()) return inline.trim();
+
+  const path = env[`${key}_FILE`];
+  if (!path?.trim()) return "";
+  try {
+    return readSecret(path.trim()).trim();
+  } catch {
+    return "";
+  }
+}
+
 function required(env: Env, key: string): string {
   const value = env[key];
   if (!value || !value.trim()) {
@@ -113,6 +132,8 @@ export function loadBootstrap(env: Env, readSecret: SecretReader = readSecretFil
   return {
     apiBaseUrl: required(env, "CP_API_URL").replace(/\/$/, ""),
     apiToken: requiredSecret(env, "CP_API_TOKEN", readSecret),
+    enrolmentToken: optionalSecret(env, "CP_ENROLMENT_TOKEN", readSecret),
+    enrolmentTokenFile: env.CP_ENROLMENT_TOKEN_FILE?.trim() || "",
     workerName: required(env, "CP_WORKER_NAME"),
     stateDir: env.CP_STATE_DIR?.trim() || join(homedir(), ".claudeplanner"),
   };

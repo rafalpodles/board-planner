@@ -118,6 +118,10 @@ export interface IUser {
   allowedProjects: Types.ObjectId[];
   // Runtime-only, set for project-scoped tokens — a scoped token never gets project-admin
   tokenScoped?: boolean;
+  // Runtime-only, set for every API and OAuth token. Distinct from tokenScoped, which answers only
+  // whether project access was narrowed: an unscoped admin token is still a machine credential, and
+  // acts that need a person at a keyboard must key on this instead.
+  viaMachineCredential?: boolean;
   createdAt: Date;
 }
 
@@ -415,6 +419,21 @@ export interface WorkerPolicy {
   model: string;
   fallbackModel: string;
   reviewModel: string;
+}
+
+// A single-use, short-lived credential whose only power is to register one worker. Deliberately
+// not an ApiToken: an ApiToken can be used repeatedly and carries its owner's access.
+export interface IEnrolmentToken {
+  _id: Types.ObjectId;
+  prefix: string;
+  tokenHash: string;
+  createdBy: Types.ObjectId | IUser;
+  label: string;
+  expiresAt: Date;
+  usedAt: Date | null;
+  usedByWorker: Types.ObjectId | null;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface IWorker {

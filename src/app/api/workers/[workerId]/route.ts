@@ -58,9 +58,10 @@ function normalizeAssignments(
 export const PATCH = withAuth(async (request, { params, user }) => {
   await connectDB();
 
-  // A machine credential must not be able to retarget a laptop; that requires an
-  // interactive admin session
-  if (user.tokenScoped) {
+  // A machine credential must not be able to retarget a laptop, or clear lockedByInstance on it;
+  // that requires an interactive admin session. Keyed on viaMachineCredential, not tokenScoped: an
+  // unscoped admin API token leaves tokenScoped false and used to pass straight through here.
+  if (user.viaMachineCredential) {
     return NextResponse.json({ error: "Interactive admin session required" }, { status: 403 });
   }
 
