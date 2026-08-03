@@ -1,21 +1,17 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup, act, waitFor } from "@testing-library/react";
-import { TaskForm } from "./TaskForm";
+import { useTaskEditor } from "./useTaskEditor";
 import { ApiTask } from "@/types";
 
 const { api } = vi.hoisted(() => ({
-  api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), upload: vi.fn() },
+  api: { get: vi.fn(), post: vi.fn(), put: vi.fn() },
 }));
 
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
-vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast: vi.fn() }) }));
 vi.mock("@/lib/board-refresh", () => ({ emitBoardRefresh: vi.fn() }));
-vi.mock("@/components/ui/MarkdownEditor", () => ({
-  MarkdownEditor: ({ value }: { value: string }) => <div data-testid="md">{value}</div>,
-}));
 
-const task = {
+const baseTask = {
   _id: "t1",
   taskNumber: 6,
   title: "Recurring one",
@@ -25,25 +21,33 @@ const task = {
   difficulty: "L",
   category: "idea",
   component: "",
+  assignee: null,
+  dueDate: null,
   labels: [],
   checklist: [],
   customFieldValues: {},
+  recurrence: null,
+  sprint: null,
 } as unknown as ApiTask;
 
-function renderForm() {
-  return render(
-    <TaskForm
-      projectId="p1"
-      task={task}
-      categories={["idea"]}
-      onSaved={() => {}}
-      onCancel={() => {}}
-    />
+function Harness({ task }: { task: ApiTask }) {
+  const { draft, set, autoSaveState, retry } = useTaskEditor("p1", task);
+  return (
+    <div>
+      <input
+        aria-label="title"
+        value={draft.title}
+        onChange={(e) => set("title", e.target.value)}
+      />
+      <span data-testid="state">{autoSaveState}</span>
+      <span data-testid="priority">{draft.priority}</span>
+      <button onClick={retry}>retry</button>
+    </div>
   );
 }
 
 function titleField() {
-  return screen.getByDisplayValue("Recurring one") as HTMLInputElement;
+  return screen.getByLabelText("title") as HTMLInputElement;
 }
 
 function type(field: HTMLInputElement, value: string) {
@@ -57,9 +61,7 @@ function type(field: HTMLInputElement, value: string) {
 
 beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
-  api.get.mockReset();
   api.put.mockReset();
-  api.get.mockResolvedValue([]);
   api.put.mockResolvedValue({});
 });
 
@@ -68,23 +70,9 @@ afterEach(() => {
   cleanup();
 });
 
-describe("TaskForm autosave", () => {
-  it("offers no manual save button for an existing task", async () => {
-    renderForm();
-    await waitFor(() => expect(titleField()).toBeTruthy());
-    expect(screen.queryByRole("button", { name: /Update Task/i })).toBeNull();
-    expect(screen.getByRole("button", { name: "Close" })).toBeTruthy();
-  });
-
-  it("says it saves by itself before anything is edited", async () => {
-    renderForm();
-    await waitFor(() => expect(titleField()).toBeTruthy());
-    expect(screen.getByText("Saves automatically")).toBeTruthy();
-  });
-
-  it("reports saving and then saved as an edit goes out", async () => {
-    renderForm();
-    await waitFor(() => expect(titleField()).toBeTruthy());
+describe("useTaskEditor", () => {
+  it("waits out the debounce, then sends the edited field alone", async () => {
+    render(<Harness task={baseTask} />);
 
     await act(async () => type(titleField(), "Recurring one ZZ"));
     expect(api.put).not.toHaveBeenCalled();
@@ -92,17 +80,17 @@ describe("TaskForm autosave", () => {
     await act(async () => {
       vi.advanceTimersByTime(700);
     });
-    await waitFor(() => expect(screen.getByText("✓ Saved")).toBeTruthy());
+
+    await waitFor(() => expect(screen.getByTestId("state").textContent).toBe("saved"));
     expect(api.put).toHaveBeenCalledWith("/api/projects/p1/tasks/t1", {
       title: "Recurring one ZZ",
     });
   });
 
-  // Without the button there is no second chance, and the debounce cleanup also
-  // runs on unmount — so closing inside the window used to drop the edit silently
-  it("flushes a pending edit when the form goes away inside the debounce window", async () => {
-    const { unmount } = renderForm();
-    await waitFor(() => expect(titleField()).toBeTruthy());
+  // The debounce cleanup also runs on unmount, so closing inside the window used
+  // to drop the edit silently
+  it("flushes a pending edit when the view goes away inside the debounce window", async () => {
+    const { unmount } = render(<Harness task={baseTask} />);
 
     await act(async () => type(titleField(), "Closed too fast"));
     expect(api.put).not.toHaveBeenCalled();
@@ -115,28 +103,42 @@ describe("TaskForm autosave", () => {
   });
 
   it("sends nothing on unmount when nothing was edited", async () => {
-    const { unmount } = renderForm();
-    await waitFor(() => expect(titleField()).toBeTruthy());
-
+    const { unmount } = render(<Harness task={baseTask} />);
     await act(async () => unmount());
     expect(api.put).not.toHaveBeenCalled();
   });
 
   it("offers a retry that goes out immediately when a save fails", async () => {
     api.put.mockRejectedValueOnce(new Error("nope"));
-    renderForm();
-    await waitFor(() => expect(titleField()).toBeTruthy());
+    render(<Harness task={baseTask} />);
 
     await act(async () => type(titleField(), "Recurring one QQ"));
     await act(async () => {
       vi.advanceTimersByTime(700);
     });
+    await waitFor(() => expect(screen.getByTestId("state").textContent).toBe("error"));
 
-    const retry = await screen.findByRole("button", { name: /Save failed/ });
     api.put.mockResolvedValue({});
-    await act(async () => retry.click());
+    await act(async () => screen.getByText("retry").click());
 
-    await waitFor(() => expect(screen.getByText("✓ Saved")).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId("state").textContent).toBe("saved"));
     expect(api.put).toHaveBeenCalledTimes(2);
+  });
+
+  // A PM move or a second tab must not be clobbered, but it must not win over
+  // what the user is in the middle of typing either
+  it("adopts a server change only for fields the user has not edited", async () => {
+    const { rerender } = render(<Harness task={baseTask} />);
+
+    await act(async () => type(titleField(), "Mine, still pending"));
+
+    await act(async () => {
+      rerender(
+        <Harness task={{ ...baseTask, title: "Theirs", priority: "low" } as ApiTask} />
+      );
+    });
+
+    expect(titleField().value).toBe("Mine, still pending");
+    expect(screen.getByTestId("priority").textContent).toBe("low");
   });
 });

@@ -14,13 +14,15 @@ export default function TaskDetailPage() {
 
   useCanonicalUrl(loaded?.project.key, loaded?.task.taskNumber);
 
+  // The same card the intercepting modal draws, so both routes render one view
   return (
-    <TaskDetail
-      projectId={projectId}
-      taskId={taskId}
-      showBackLink
-      onClose={() => router.push(projectPath(projectId))}
-      onLoaded={(task, project) => setLoaded({ task, project })}
-    />
+    <div className="mx-auto w-full max-w-[1240px] overflow-hidden rounded-2xl border border-border bg-bg-card">
+      <TaskDetail
+        projectId={projectId}
+        taskId={taskId}
+        onClose={() => router.push(projectPath(projectId))}
+        onLoaded={(task, project) => setLoaded({ task, project })}
+      />
+    </div>
   );
 }

@@ -10,8 +10,8 @@ const SIZE_CLASSES = {
   sm: "sm:max-w-md",
   md: "sm:max-w-lg",
   lg: "sm:max-w-2xl",
-  // Wide enough for the two-column task detail; lg would clip it to one column
-  xl: "sm:max-w-6xl",
+  // The task detail's own width, so the modal and the standalone page match
+  xl: "sm:max-w-[1240px]",
 } as const;
 
 interface ModalProps {
@@ -22,6 +22,8 @@ interface ModalProps {
   size?: keyof typeof SIZE_CLASSES;
   /** Where focus lands on close when nothing was focused at open time — keyboard shortcuts, Safari clicks */
   returnFocusTo?: React.RefObject<HTMLElement | null>;
+  /** Drops the header and padding for a child that draws its own frame */
+  bare?: boolean;
 }
 
 export function Modal({
@@ -31,6 +33,7 @@ export function Modal({
   children,
   size = "md",
   returnFocusTo,
+  bare = false,
 }: ModalProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -60,22 +63,25 @@ export function Modal({
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-labelledby={named ? titleId : undefined}
-        aria-label={named ? undefined : UNNAMED_DIALOG_LABEL}
+        aria-labelledby={named && !bare ? titleId : undefined}
+        aria-label={named && !bare ? undefined : named ? title : UNNAMED_DIALOG_LABEL}
         tabIndex={-1}
         className={`flex flex-col w-full ${SIZE_CLASSES[size]} max-h-[90vh]
-        bg-bg-card border border-border rounded-t-2xl sm:rounded-2xl p-4 sm:p-6 sm:mx-4
+        bg-bg-card border border-border rounded-t-2xl sm:rounded-2xl sm:mx-4
+        ${bare ? "overflow-hidden" : "p-4 sm:p-6"}
         animate-in slide-in-from-bottom sm:slide-in-from-bottom-0`}>
-        <div className="flex shrink-0 items-center justify-between mb-4">
-          <h2 id={titleId} className="text-lg font-semibold">{title}</h2>
-          <button
-            onClick={onClose}
-            aria-label="Close dialog"
-            className="p-2 rounded-lg hover:bg-bg-hover text-text-muted min-h-[44px] min-w-[44px] flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-          >
-            &#x2715;
-          </button>
-        </div>
+        {!bare && (
+          <div className="flex shrink-0 items-center justify-between mb-4">
+            <h2 id={titleId} className="text-lg font-semibold">{title}</h2>
+            <button
+              onClick={onClose}
+              aria-label="Close dialog"
+              className="p-2 rounded-lg hover:bg-bg-hover text-text-muted min-h-[44px] min-w-[44px] flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            >
+              &#x2715;
+            </button>
+          </div>
+        )}
         <div className="min-h-0 overflow-y-auto">{children}</div>
       </div>
     </div>
