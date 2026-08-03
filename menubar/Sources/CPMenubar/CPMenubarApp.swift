@@ -11,6 +11,7 @@ struct CPMenubarApp: App {
         let model = AppModel()
         _model = State(initialValue: model)
         model.start()
+        Notifier.shared.requestAuthorization()
     }
 
     var body: some Scene {
