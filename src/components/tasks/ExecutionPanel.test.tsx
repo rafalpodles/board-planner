@@ -100,7 +100,7 @@ describe("ExecutionPanel", () => {
 
     expect(container.querySelector('[data-testid="run-quiet"]')).toBeTruthy();
     expect(container.querySelector(".animate-pulse")).toBeNull();
-    expect(container.querySelector(".bg-amber-500")).toBeTruthy();
+    expect(container.querySelector(".bg-warning")).toBeTruthy();
   });
 
   // Claim writes workerId and startedAt; phase arrives only with the first telemetry event. Showing

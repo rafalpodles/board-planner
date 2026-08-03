@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/Textarea";
 import { useToast } from "@/components/ui/Toast";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { MarkdownContent } from "@/components/ui/MarkdownContent";
+import { Avatar } from "@/components/tasks/detail/atoms";
 
 interface MentionUser {
   _id: string;
@@ -21,6 +22,8 @@ interface CommentsProps {
   taskId: string;
   hideHeading?: boolean;
   onCountChange?: (count: number) => void;
+  /** Bumped when a comment is posted from somewhere else, e.g. the phone's bottom bar */
+  refreshKey?: number;
   // Adding, editing and deleting a comment each write an activity entry; reacting does not
   onMutated?: () => void;
 }
@@ -31,6 +34,7 @@ export function Comments({
   hideHeading,
   onCountChange,
   onMutated,
+  refreshKey = 0,
 }: CommentsProps) {
   const [comments, setComments] = useState<ApiComment[]>([]);
   const [body, setBody] = useState("");
@@ -69,8 +73,18 @@ export function Comments({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId]);
 
-  async function handleSubmit(e: FormEvent) {
+  useEffect(() => {
+    if (refreshKey === 0) return;
+    loadComments();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey]);
+
+  function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    postComment();
+  }
+
+  async function postComment() {
     if (!body.trim()) return;
     setLoading(true);
 
@@ -403,26 +417,41 @@ export function Comments({
         )}
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-2">
-        <div className="relative">
-          <MentionDropdown />
-          <textarea
-            ref={textareaRef}
-            value={body}
-            onChange={(e) => {
-              setBody(e.target.value);
-              detectMention(e.target.value, e.target.selectionStart, "new");
-            }}
-            onKeyDown={handleMentionKeyDown}
-            onBlur={() => setTimeout(() => setMentionQuery(null), 150)}
-            placeholder="Add a comment... (use @ to mention)"
-            rows={3}
-            className="w-full rounded-lg border border-border bg-bg-input px-3 py-2 text-text min-h-[88px] placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent resize-y"
-          />
+      {/* Wide screens only: a phone comments through the bar pinned to the bottom of
+          the task, so a second composer here would be a decoy */}
+      <form onSubmit={handleSubmit} className="hidden items-start gap-3 pt-3 lg:flex">
+        <Avatar name={user?.fullName} size={28} className="mt-1 hidden sm:inline-flex" />
+        <div className="flex min-w-0 flex-1 flex-col gap-2.5">
+          <div className="relative">
+            <MentionDropdown />
+            <textarea
+              ref={textareaRef}
+              value={body}
+              onChange={(e) => {
+                setBody(e.target.value);
+                detectMention(e.target.value, e.target.selectionStart, "new");
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                  e.preventDefault();
+                  postComment();
+                  return;
+                }
+                handleMentionKeyDown(e);
+              }}
+              onBlur={() => setTimeout(() => setMentionQuery(null), 150)}
+              placeholder="Write a comment, @mention someone…"
+              rows={2}
+              className="min-h-[44px] w-full resize-y rounded-xl border border-border bg-bg-input px-3 py-2.5 text-text placeholder:text-text-muted focus:border-transparent focus:outline-none focus:ring-2 focus:ring-primary"
+            />
+          </div>
+          <div className="flex items-center gap-3">
+            <Button type="submit" size="sm" disabled={loading || !body.trim()}>
+              {loading ? "Posting..." : "Comment"}
+            </Button>
+            <span className="text-xs text-text-muted">⌘↵ to send</span>
+          </div>
         </div>
-        <Button type="submit" size="sm" disabled={loading || !body.trim()}>
-          {loading ? "Posting..." : "Add Comment"}
-        </Button>
       </form>
 
       <ConfirmDialog
