@@ -11,13 +11,12 @@ public struct ReposFile: Sendable {
         self.path = path
     }
 
+    public static func path(in stateDirectory: String) -> String {
+        (stateDirectory as NSString).appendingPathComponent("repos.json")
+    }
+
     public static func defaultPath() -> String {
-        let configured: String? = ProcessInfo.processInfo.environment["CP_STATE_DIR"]?
-            .trimmingCharacters(in: .whitespaces)
-        let fallback = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".claudeplanner").path
-        let stateDir = configured.flatMap { $0.isEmpty ? nil : $0 } ?? fallback
-        return (stateDir as NSString).appendingPathComponent("repos.json")
+        path(in: StateDirectory.resolve())
     }
 
     private struct Document: Codable {
