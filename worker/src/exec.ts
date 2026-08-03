@@ -89,6 +89,12 @@ export function createRunner(): Runner {
           child.stdin.on("error", () => {});
           child.stdin.end(opts.stdin);
 
+          // Without this a multibyte character split across a 64KB pipe boundary decodes to two
+          // replacement characters — in the accumulated stdout the run is classified from, not just
+          // in what an observer sees
+          child.stdout.setEncoding("utf8");
+          child.stderr.setEncoding("utf8");
+
           child.stdout.on("data", (chunk: Buffer | string) => {
             const text = chunk.toString();
             stdout += text;

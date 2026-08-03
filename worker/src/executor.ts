@@ -90,23 +90,55 @@ function parseExecutionResult(final: ResultEvent | undefined): RunOutcome {
   }
 }
 
+const MAX_BUFFERED_LINE = 1_000_000;
+
 export type StreamListener = (event: StreamEvent) => void;
 
 // The CLI writes one JSON object per line, but a chunk boundary falls wherever the pipe flushes —
 // mid-object as readily as after a newline. Only whole lines are handed on; a half line waits for
 // the rest of itself instead of being parsed as garbage or thrown away.
+// One JSON object per line, but a chunk boundary falls wherever the pipe flushes — mid-object as
+// readily as after a newline. Only whole lines are handed on; a half line waits for the rest of
+// itself instead of being parsed as garbage or thrown away.
 function incrementalParser(onEvent: StreamListener) {
   let buffer = "";
   let live = true;
+  let resyncing = false;
 
   return {
     push(chunk: string): void {
       if (!live) return;
-      buffer += chunk;
-      const lastNewline = buffer.lastIndexOf("\n");
-      if (lastNewline === -1) return;
-      const whole = buffer.slice(0, lastNewline);
-      buffer = buffer.slice(lastNewline + 1);
+      let rest = chunk;
+
+      if (resyncing) {
+        // Everything up to the next newline is the tail of the line we gave up on. What follows it
+        // is whole lines again, so only that tail is lost.
+        const endOfAbandoned = rest.indexOf("\n");
+        if (endOfAbandoned === -1) return;
+        resyncing = false;
+        rest = rest.slice(endOfAbandoned + 1);
+      }
+
+      // Scan only what just arrived. After every push the buffer holds no newline by construction,
+      // so a chunk without one cannot have completed a line — and rescanning the whole buffer is
+      // quadratic. Measured: 64MB of one unbroken line blocked the event loop for 18 seconds, long
+      // enough to miss the heartbeat that carries the kill switch.
+      const newline = rest.lastIndexOf("\n");
+
+      if (newline === -1) {
+        // A single line larger than this is not telemetry worth keeping the process busy for. The
+        // run is still classified from result.stdout, which is accumulated separately and whole.
+        if (buffer.length + rest.length > MAX_BUFFERED_LINE) {
+          buffer = "";
+          resyncing = true;
+        } else {
+          buffer += rest;
+        }
+        return;
+      }
+
+      const whole = buffer + rest.slice(0, newline);
+      buffer = rest.slice(newline + 1);
       for (const event of parseStream(whole)) onEvent(event);
     },
 
@@ -116,7 +148,7 @@ function incrementalParser(onEvent: StreamListener) {
     close(): void {
       if (!live) return;
       live = false;
-      const rest = buffer;
+      const rest = resyncing ? "" : buffer;
       buffer = "";
       for (const event of parseStream(rest)) onEvent(event);
     },

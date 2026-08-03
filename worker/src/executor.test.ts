@@ -443,6 +443,29 @@ describe("reporting the stream as it arrives", () => {
     expect(seen).toEqual([{ type: "system", subtype: "init" }]);
   });
 
+  // An unbounded buffer is the hazard: one line is one event, and a tool_result for a large Read
+  // can be tens of megabytes. Blocking the event loop on it means the missed heartbeat is the one
+  // carrying the kill switch. The line here is VALID json, so it would be forwarded if it were
+  // kept — an invalid one is skipped either way and proves nothing.
+  it("gives up on a single line too large to be telemetry, then resynchronises", async () => {
+    const enormous = `${JSON.stringify({ type: "system", subtype: "init", pad: "x".repeat(1_200_000) })}\n`;
+    const good = `${JSON.stringify({ type: "system", subtype: "compact_boundary" })}\n`;
+    const seen: StreamEvent[] = [];
+
+    const run = vi.fn(async (_c: string, _a: string[], opts: Opts) => {
+      for (const piece of fixedChunks(enormous, 256 * 1024)) opts.onStdout?.(piece);
+      opts.onStdout?.(good);
+      return { code: 0, stdout: "", stderr: "", timedOut: false };
+    });
+
+    await createExecutor(config, { run } as never).execute(task, "/wt", undefined, (event) =>
+      seen.push(event)
+    );
+
+    // the oversized event never arrives, and the next whole line still does
+    expect(seen).toEqual([{ type: "system", subtype: "compact_boundary" }]);
+  });
+
   it("reports a final line that never got its newline", async () => {
     const stream = JSON.stringify({ type: "system", subtype: "init" });
     const seen: StreamEvent[] = [];
