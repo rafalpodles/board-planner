@@ -50,7 +50,7 @@ export const POST = withProjectAdmin(async (_request, { params }) => {
 
   const tasks = await Task.find(
     { project: projectId },
-    "taskNumber title status assignee priority difficulty category dueDate"
+    "taskNumber title status assignee priority category dueDate"
   )
     .sort({ taskNumber: 1 })
     .populate<{ assignee: { fullName?: string; username: string } | null }>(
@@ -68,7 +68,6 @@ export const POST = withProjectAdmin(async (_request, { params }) => {
     status: columnLabels.get(task.status) || task.status,
     assignee: task.assignee ? task.assignee.fullName || task.assignee.username : "",
     priority: task.priority || "",
-    difficulty: task.difficulty || "",
     category: task.category || "",
     due: task.dueDate ? new Date(task.dueDate).toISOString().slice(0, 10) : "",
     link: appUrl ? `${appUrl}/projects/${project.key}/tasks/${task.taskNumber}` : "",

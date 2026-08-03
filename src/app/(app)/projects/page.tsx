@@ -72,18 +72,6 @@ export default function ProjectsPage() {
                   {project.description}
                 </p>
               )}
-              {project.components.length > 0 && (
-                <div className="mt-3 flex flex-wrap gap-1">
-                  {project.components.map((c) => (
-                    <span
-                      key={c}
-                      className="text-xs bg-bg-input px-2 py-0.5 rounded"
-                    >
-                      {c}
-                    </span>
-                  ))}
-                </div>
-              )}
             </Link>
           ))}
         </div>

@@ -1,12 +1,5 @@
 import mongoose, { Schema, Model } from "mongoose";
-import { IProject, DIFFICULTIES, DEFAULT_PROJECT_CATEGORIES, DEFAULT_PROJECT_COLUMNS, COLUMN_ROLES, WEBHOOK_EVENTS, NOTIFICATION_CHANNEL_TYPES, CUSTOM_FIELD_TYPES } from "@/types";
-
-const labelSchema = new Schema(
-  {
-    name: { type: String, required: true, trim: true },
-    color: { type: String, required: true, default: "#3b82f6" },
-  }
-);
+import { IProject, DEFAULT_PROJECT_CATEGORIES, DEFAULT_PROJECT_COLUMNS, COLUMN_ROLES, WEBHOOK_EVENTS, NOTIFICATION_CHANNEL_TYPES, CUSTOM_FIELD_TYPES } from "@/types";
 
 const categorySchema = new Schema(
   {

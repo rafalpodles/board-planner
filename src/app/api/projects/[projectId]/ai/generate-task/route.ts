@@ -80,13 +80,11 @@ export const POST = withProjectAccess(async (request, { params }) => {
     description: t.description || "",
   }));
 
-  // Prefer the project's own field options; fall back to the legacy columns for a
-  // project the CP-213 migration has not reached (CP-213)
   const componentField = findLegacyField(project.customFields || [], "component");
   const difficultyField = findLegacyField(project.customFields || [], "difficulty");
   const componentOptions = componentField
     ? orderedOptions(componentField).map((o) => o.value)
-    : project.components || [];
+    : [];
   const difficultyOptions = difficultyField
     ? orderedOptions(difficultyField).map((o) => o.value)
     : undefined;

@@ -95,9 +95,7 @@ export function TaskDetail({
       const created = await api.post(`/api/projects/${projectId}/tasks`, {
         title: `Copy of ${task!.title}`,
         description: task!.description,
-        difficulty: task!.difficulty,
         category: task!.category,
-        component: task!.component,
         checklist: task!.checklist,
         dueDate: task!.dueDate,
         status: "planned",
@@ -207,7 +205,6 @@ export function TaskDetail({
           projectId={projectId}
           projectKey={project.key}
           task={task}
-          components={project.components}
           categories={(project.categories || []).map((c) => c.name)}
           columns={project.columns || []}
           sprints={sprints}
@@ -315,10 +312,8 @@ export function TaskDetail({
           projectId={projectId}
           projectKey={project.key}
           parentTaskId={task._id}
-          components={project.components}
           categories={(project.categories || []).map((c) => c.name)}
           columns={project.columns || []}
-          projectLabels={project.labels || []}
           sprints={sprints}
           customFields={project.customFields || []}
           onSaved={() => {

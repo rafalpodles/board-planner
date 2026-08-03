@@ -20,7 +20,7 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
   const { projectId } = await params;
   await connectDB();
 
-  const { name, title, description, difficulty, category, component, acceptanceCriteria } =
+  const { name, title, description, category, acceptanceCriteria } =
     await request.json();
 
   if (!name || typeof name !== "string" || !name.trim()) {
@@ -41,9 +41,7 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
     name: name.trim(),
     title: title || "",
     description: description || "",
-    difficulty: difficulty || "M",
     category: category || "user-story",
-    component: component || "",
     acceptanceCriteria: acceptanceCriteria || "",
   } as typeof templates[number]);
   project.taskTemplates = templates;
@@ -75,7 +73,7 @@ export const PUT = withProjectAccess(async (request, { params, user }) => {
     return NextResponse.json({ error: "Template not found" }, { status: 404 });
   }
 
-  const allowed = ["name", "title", "description", "difficulty", "category", "component", "acceptanceCriteria"];
+  const allowed = ["name", "title", "description", "category", "acceptanceCriteria"];
   for (const field of allowed) {
     if (updates[field] !== undefined) {
       (template as unknown as Record<string, unknown>)[field] = updates[field];

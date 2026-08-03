@@ -1,5 +1,8 @@
 import OpenAI from "openai";
-import { DIFFICULTIES } from "@/types";
+
+/** The sizes a project gets seeded with; only used to decide whether the prompt
+ * can explain what each one means */
+const DEFAULT_SIZES = ["S", "M", "L", "XL"];
 
 const apiKey = process.env.OPENAI_API_KEY || process.env.OPENAPI_KEY;
 
@@ -65,10 +68,10 @@ export async function generateTask(
 
   // Driven by the project's own field, so a project that renamed or reordered its
   // sizes still gets a value it can store (CP-213)
-  const difficultyList = context.difficulties?.length ? context.difficulties : DIFFICULTIES;
+  const difficultyList = context.difficulties?.length ? context.difficulties : DEFAULT_SIZES;
   const usingDefaultSizes =
-    difficultyList.length === DIFFICULTIES.length &&
-    difficultyList.every((d, i) => d === DIFFICULTIES[i]);
+    difficultyList.length === DEFAULT_SIZES.length &&
+    difficultyList.every((d: string, i: number) => d === DEFAULT_SIZES[i]);
   const difficultyGuide = usingDefaultSizes
     ? `
   - S = trivial, few lines of code or config change
@@ -100,7 +103,7 @@ ${componentList}${readmeSection}${existingTasksSection}
 You must respond with a JSON object with these exact fields:
 - title: concise imperative task title (max 80 chars)
 - description: detailed description explaining what needs to be done, context, and implementation hints. Use markdown formatting.
-- difficulty: one of ${difficultyList.map((d) => `"${d}"`).join(", ")} based on estimated complexity${difficultyGuide}
+- difficulty: one of ${difficultyList.map((d: string) => `"${d}"`).join(", ")} based on estimated complexity${difficultyGuide}
 - category: one of ${categoryList.map((c) => `"${c}"`).join(", ")}
 - acceptanceCriteria: markdown checklist of acceptance criteria (use "- [ ]" format)
 - component: best matching component from the available list, or empty string if none match
