@@ -1,19 +1,5 @@
 "use client";
 
-export type SaveContract = "live" | "draft" | "readonly";
-
-const CONTRACT_LABEL: Record<SaveContract, string> = {
-  live: "Saves instantly",
-  draft: "Save to apply",
-  readonly: "Read only",
-};
-
-const CONTRACT_CLASS: Record<SaveContract, string> = {
-  live: "text-success border-success/45 bg-success/10",
-  draft: "text-warning border-warning/45 bg-warning/10",
-  readonly: "text-text-muted border-border bg-bg-input",
-};
-
 export function Chip({
   children,
   className = "",
@@ -41,7 +27,6 @@ export function StatusPill({ label, on }: { label: string; on: boolean }) {
 interface SettingsCardProps {
   title: string;
   description?: string;
-  contract?: SaveContract;
   instanceScoped?: boolean;
   status?: { label: string; on: boolean };
   danger?: boolean;
@@ -51,7 +36,6 @@ interface SettingsCardProps {
 export function SettingsCard({
   title,
   description,
-  contract,
   instanceScoped,
   status,
   danger,
@@ -59,7 +43,7 @@ export function SettingsCard({
 }: SettingsCardProps) {
   return (
     <section
-      className={`mb-4 overflow-hidden rounded-xl border bg-bg-card ${
+      className={`mb-4 rounded-xl border bg-bg-card ${
         danger ? "border-danger/45" : "border-border"
       }`}
     >
@@ -74,7 +58,6 @@ export function SettingsCard({
         )}
         {status && <StatusPill label={status.label} on={status.on} />}
         <span className="flex-1" />
-        {contract && <Chip className={CONTRACT_CLASS[contract]}>{CONTRACT_LABEL[contract]}</Chip>}
       </header>
       <div className="space-y-4 p-4">
         {description && <p className="max-w-[66ch] text-sm text-text-muted">{description}</p>}

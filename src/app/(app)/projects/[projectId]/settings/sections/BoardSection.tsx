@@ -104,7 +104,6 @@ export function BoardSection({
   return (
     <SettingsCard
       title="Columns"
-      contract="draft"
       description="Drag to reorder. A column that still holds tasks can't be removed."
     >
       <div className="space-y-2">

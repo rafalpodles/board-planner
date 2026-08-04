@@ -23,7 +23,7 @@ export function AuditSection({ projectId, active }: { projectId: string; active:
   }, [active, loaded, projectId]);
 
   return (
-    <SettingsCard title="Recent changes" contract="readonly">
+    <SettingsCard title="Recent changes">
       {logs.length === 0 ? (
         <EmptyState>No settings changes recorded yet.</EmptyState>
       ) : (

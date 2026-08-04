@@ -131,7 +131,6 @@ export function TaskFieldsSection({ projectId, project, patchProject }: SectionP
     <>
       <SettingsCard
         title="Categories"
-        contract="live"
         description="The kind of work a task is. A category in use by tasks can't be removed."
       >
         <div className="flex flex-wrap gap-2">
@@ -183,7 +182,6 @@ export function TaskFieldsSection({ projectId, project, patchProject }: SectionP
 
       <SettingsCard
         title="Custom fields"
-        contract="live"
         description="Extra fields carried by every task in this project. Archived fields keep the values already on tasks and stop appearing in pickers."
       >
         <div className="space-y-2">
@@ -221,7 +219,6 @@ export function TaskFieldsSection({ projectId, project, patchProject }: SectionP
 
       <SettingsCard
         title="Task templates"
-        contract="live"
         description="Pre-filled starting points for tasks people create often."
       >
         <div className="space-y-2">
