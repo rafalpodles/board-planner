@@ -1,3 +1,4 @@
+import { RepoInventory } from "./config.js";
 import { CommandHandlers, isWorkerCommand } from "./commands.js";
 
 export const PROTOCOL_VERSION = 1;
@@ -22,6 +23,7 @@ export interface RegistrationInfo {
 export interface HeartbeatDeps {
   apiBaseUrl: string;
   enrolmentToken: string;
+  repos?: () => RepoInventory[];
   // Removed after a successful registration: the token is already spent server-side, and leaving a
   // dead secret on a disk the agent can read is pointless risk.
   forgetEnrolmentToken?: () => void;
@@ -186,6 +188,9 @@ export function startHeartbeat(deps: HeartbeatDeps): Heartbeat {
         body: JSON.stringify({
           version: deps.registration.version,
           bindingError,
+          // What this machine has on disk. The server matches projects against these remotes and
+          // answers with assignments; it never sends a path back.
+          repos: deps.repos?.() ?? [],
           ...(acked !== undefined ? { acked } : {}),
         }),
       });

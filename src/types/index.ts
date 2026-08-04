@@ -410,16 +410,32 @@ export interface WorkerAssignment {
   proposedPath: string;
 }
 
+// Facts about a machine. Everything describing a repository or the work lives on the project.
 export interface WorkerPolicy {
+  pollIntervalMs: number;
+}
+
+export interface ProjectWorkerPolicy {
   autoMerge: boolean;
   baseBranch: string;
-  pollIntervalMs: number;
   taskTimeoutMs: number;
   maxDiffLines: number;
   maxDiffFiles: number;
   model: string;
   fallbackModel: string;
   reviewModel: string;
+}
+
+export interface ProjectWorkerConfig {
+  enabled: boolean;
+  policy: ProjectWorkerPolicy;
+  policyOverrides: string[];
+}
+
+// What a worker says it has on disk. Reported upward only — the server never sends a path back.
+export interface WorkerRepo {
+  remote: string;
+  path: string;
 }
 
 // A single-use, short-lived credential whose only power is to register one worker. Deliberately
@@ -445,7 +461,7 @@ export interface IWorker {
   version: string;
   protocolVersion: number;
   credentialHash: string;
-  assignments: WorkerAssignment[];
+  repos: WorkerRepo[];
   policy: WorkerPolicy;
   // Which policy fields an operator actually set; everything else follows the default
   policyOverrides: string[];
@@ -467,7 +483,7 @@ export interface ApiWorker {
   platform: string;
   version: string;
   protocolVersion: number;
-  assignments: Array<{ project: string; proposedPath: string }>;
+  repos: WorkerRepo[];
   policy: WorkerPolicy;
   policyOverrides: string[];
   enabled: boolean;
@@ -518,6 +534,7 @@ export interface IProject {
   customFields: ICustomField[];
   webhooks: IWebhook[];
   notificationChannels: INotificationChannel[];
+  worker: ProjectWorkerConfig;
   githubRepo: string;
   githubToken: string;
   gitlabRepo: string;
@@ -738,6 +755,7 @@ export interface ApiTaskTemplate {
 }
 
 export interface ApiProject {
+  worker: ProjectWorkerConfig;
   _id: string;
   name: string;
   key: string;

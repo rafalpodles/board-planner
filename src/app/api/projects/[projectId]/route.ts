@@ -3,6 +3,7 @@ import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { withProjectAccess, withProjectAdmin, withAdmin, canAdminProject } from "@/lib/middleware";
 import { Project } from "@/models/project";
+import { parseProjectWorkerConfig } from "@/lib/project-worker-config";
 import { User } from "@/models/user";
 import { Task } from "@/models/task";
 import { Comment } from "@/models/comment";
@@ -101,6 +102,26 @@ export const PUT = withProjectAdmin(async (request, { params, user }) => {
       );
     }
     updates.admins = ids;
+  }
+
+  if (body.worker !== undefined) {
+    // Instance-admin only: enabling a project for workers commits somebody's machine to running
+    // agent-written code, which is not a project admin's call to make.
+    if (user.role !== "admin") {
+      return NextResponse.json(
+        { error: "Only an instance admin can change worker settings" },
+        { status: 403 }
+      );
+    }
+    const existing = await Project.findById(projectId).select("worker");
+    if (!existing) {
+      return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    }
+    const parsed = parseProjectWorkerConfig(body.worker, existing.worker?.policyOverrides ?? []);
+    if (!parsed.ok) {
+      return NextResponse.json({ error: parsed.error }, { status: 400 });
+    }
+    Object.assign(updates, parsed.update);
   }
 
   if (body.pm !== undefined) {

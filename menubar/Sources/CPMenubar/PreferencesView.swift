@@ -111,10 +111,20 @@ private struct PolicyTab: View {
 
     var body: some View {
         Form {
-            LabeledContent("Model", value: model.config?.model ?? "—")
-            LabeledContent("Review model", value: model.config?.reviewModel ?? "—")
-            LabeledContent("Max diff lines", value: model.config.map { "\($0.maxDiffLines)" } ?? "—")
-            Text("Policy comes from the server. Change it in Settings → Workers in the web console.")
+            // One row per bound project: these settings describe a repository, so a machine serving
+            // two projects genuinely has two answers.
+            ForEach(model.config?.projects ?? [], id: \.project) { project in
+                Section(project.baseBranch) {
+                    LabeledContent("Model", value: project.model)
+                    LabeledContent("Review model", value: project.reviewModel)
+                    LabeledContent("Max diff lines", value: "\(project.maxDiffLines)")
+                    LabeledContent("Merges automatically", value: project.autoMerge ? "yes" : "no")
+                }
+            }
+            if model.config?.projects.isEmpty ?? true {
+                Text("No project bound yet.").foregroundStyle(.secondary)
+            }
+            Text("These come from each project's own settings — Settings → Workers on that project.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -131,7 +141,7 @@ private struct AdvancedTab: View {
     var body: some View {
         Form {
             LabeledContent("Task timeout",
-                           value: model.config.map { "\($0.taskTimeoutMs / 1000)s" } ?? "—")
+                           value: model.config?.projects.first.map { "\($0.taskTimeoutMs / 1000)s" } ?? "—")
 
             LabeledContent("State directory") {
                 HStack {

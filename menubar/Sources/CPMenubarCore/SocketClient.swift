@@ -1,13 +1,23 @@
 import Foundation
 
-public struct ConfigResponse: Decodable, Sendable {
-    public let apiUrl: String
-    public let workerName: String
-    public let projectCount: Int
+// Work settings describe a project, not this machine, so there is no single model or diff limit to
+// show. Reporting one would put a number on screen that no run is using.
+public struct ProjectConfig: Decodable, Sendable {
+    public let project: String
+    public let autoMerge: Bool
+    public let baseBranch: String
     public let model: String
     public let reviewModel: String
     public let maxDiffLines: Int
     public let taskTimeoutMs: Int
+}
+
+public struct ConfigResponse: Decodable, Sendable {
+    public let apiUrl: String
+    public let workerName: String
+    public let projectCount: Int
+    public let pollIntervalMs: Int
+    public let projects: [ProjectConfig]
 }
 
 public enum SocketError: Error, Equatable {

@@ -9,25 +9,17 @@ const workerSchema = new Schema<IWorker>(
     version: { type: String, default: "" },
     protocolVersion: { type: Number, required: true },
     credentialHash: { type: String, required: true, select: false },
-    assignments: {
-      type: [
-        {
-          project: { type: Schema.Types.ObjectId, ref: "Project", required: true },
-          proposedPath: { type: String, default: "" },
-        },
-      ],
+    // Reported by the worker, never set from the server: this is what that machine says it has
+    // on disk. The path is here only so an operator can see which checkout was used.
+    repos: {
+      type: [{
+        remote: { type: String, required: true, trim: true },
+        path: { type: String, required: true, trim: true },
+      }],
       default: [],
     },
     policy: {
-      autoMerge: { type: Boolean, default: false },
-      baseBranch: { type: String, default: "main" },
       pollIntervalMs: { type: Number, default: 30_000 },
-      taskTimeoutMs: { type: Number, default: 1_800_000 },
-      maxDiffLines: { type: Number, default: 400 },
-      maxDiffFiles: { type: Number, default: 10 },
-      model: { type: String, default: "opus" },
-      fallbackModel: { type: String, default: "sonnet" },
-      reviewModel: { type: String, default: "opus" },
     },
     // Which policy fields an operator actually set. The schema materialises a default into every
     // other field at creation, so this list is the only record of intent.
