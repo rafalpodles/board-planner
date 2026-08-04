@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { protocolOf, resolveProjectId, withWorker } from "@/lib/middleware";
 import { claimNextTask, releaseExpiredTasks } from "@/lib/task-service";
+import { Project } from "@/models/project";
 import { verdictFor } from "@/lib/worker-service";
 
 export const POST = withWorker(async (request, { params, worker }) => {
@@ -15,7 +16,8 @@ export const POST = withWorker(async (request, { params, worker }) => {
   // queue from healing tasks its previous run abandoned
   await releaseExpiredTasks(projectId).catch(() => 0);
 
-  const verdict = verdictFor(worker, projectId, protocolOf(request));
+  const project = await Project.findById(projectId).select("_id githubRepo gitlabRepo worker").lean();
+  const verdict = verdictFor(worker, project as never, protocolOf(request));
   if (!verdict.ok) return NextResponse.json({ error: verdict.reason }, { status: 403 });
 
   const { runId } = (await request.json().catch(() => ({}))) ?? {};

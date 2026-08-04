@@ -158,6 +158,23 @@ const projectSchema = new Schema<IProject>(
         default: [],
       },
     },
+    // Whether workers may run this project, and how. The repository path is deliberately absent:
+    // a worker reports the checkouts it has and matches this project by its remote, so the server
+    // never names a directory on someone else's machine.
+    worker: {
+      enabled: { type: Boolean, default: false },
+      policy: {
+        autoMerge: { type: Boolean, default: false },
+        baseBranch: { type: String, default: "main" },
+        taskTimeoutMs: { type: Number, default: 1_800_000 },
+        maxDiffLines: { type: Number, default: 400 },
+        maxDiffFiles: { type: Number, default: 10 },
+        model: { type: String, default: "opus" },
+        fallbackModel: { type: String, default: "sonnet" },
+        reviewModel: { type: String, default: "opus" },
+      },
+      policyOverrides: { type: [String], default: [] },
+    },
     githubRepo: {
       type: String,
       default: "",

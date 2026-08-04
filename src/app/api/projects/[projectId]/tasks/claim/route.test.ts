@@ -6,7 +6,12 @@ const claimNextTask = vi.fn();
 const releaseExpiredTasks = vi.fn();
 const resolveProjectId = vi.fn();
 
+const projectFindById = vi.fn();
+
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
+vi.mock("@/models/project", () => ({
+  Project: { findById: () => ({ select: () => ({ lean: projectFindById }) }) },
+}));
 vi.mock("@/lib/worker-service", () => ({
   verifyWorkerCredential,
   verdictFor,
@@ -50,6 +55,7 @@ const authed = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  projectFindById.mockResolvedValue({ _id: "p1", githubRepo: "owner/repo", worker: { enabled: true } });
   resolveProjectId.mockResolvedValue(OID);
   verifyWorkerCredential.mockResolvedValue({ _id: OID, assignments: [] });
   verdictFor.mockReturnValue({ ok: true });
@@ -87,7 +93,9 @@ describe("POST /tasks/claim", () => {
     await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
     expect(resolveProjectId).toHaveBeenCalledWith("CP");
-    expect(verdictFor.mock.calls[0][1]).toBe(OID);
+    // The verdict now decides against the project itself, since assignment is the project being
+    // enabled and this machine reporting a checkout of its repository
+    expect(verdictFor.mock.calls[0][1]).toMatchObject({ worker: { enabled: true } });
   });
 
   // Otherwise locking the only worker of a project also stops the queue healing itself

@@ -1,19 +1,20 @@
-import { ApiWorker } from "@/types";
-import { POLICY_DEFAULTS, PolicyField } from "@/lib/worker-policy";
+import { PROJECT_POLICY_DEFAULTS, WORKER_POLICY_DEFAULTS } from "@/lib/worker-policy";
 
 export interface PolicyRow {
-  field: PolicyField;
+  field: string;
   value: string;
   defaultValue: string;
   overridden: boolean;
 }
 
-const MILLISECOND_FIELDS: ReadonlySet<string> = new Set([
-  "pollIntervalMs",
-  "taskTimeoutMs",
-]);
+export interface PolicyHolder {
+  policy?: Record<string, unknown> | null;
+  policyOverrides?: string[] | null;
+}
 
-function format(field: PolicyField, value: unknown): string {
+const MILLISECOND_FIELDS: ReadonlySet<string> = new Set(["pollIntervalMs", "taskTimeoutMs"]);
+
+function format(field: string, value: unknown): string {
   if (typeof value === "boolean") return value ? "on" : "off";
   if (value === undefined || value === null || value === "") return "—";
   if (MILLISECOND_FIELDS.has(field)) return `${Math.round(Number(value) / 1000)}s`;
@@ -24,13 +25,16 @@ function format(field: PolicyField, value: unknown): string {
 // schema writes a default into every field at creation, so a stored 400 and a chosen 400 are the
 // same bytes. `policyOverrides` is the only record of intent, which is why it is read here rather
 // than comparing values.
-export function policyRows(worker: Pick<ApiWorker, "policy" | "policyOverrides">): PolicyRow[] {
-  const overrides = new Set(worker.policyOverrides ?? []);
-  const stored = (worker.policy ?? {}) as unknown as Record<string, unknown>;
+export function policyRows(
+  holder: PolicyHolder,
+  defaults: Record<string, unknown>
+): PolicyRow[] {
+  const overrides = new Set(holder.policyOverrides ?? []);
+  const stored = (holder.policy ?? {}) as Record<string, unknown>;
 
-  return (Object.keys(POLICY_DEFAULTS) as PolicyField[]).map((field) => {
+  return Object.keys(defaults).map((field) => {
     const overridden = overrides.has(field);
-    const fallback = POLICY_DEFAULTS[field];
+    const fallback = defaults[field];
     return {
       field,
       // An inherited field shows the default, not the stored copy of it — they can differ once a
@@ -41,3 +45,9 @@ export function policyRows(worker: Pick<ApiWorker, "policy" | "policyOverrides">
     };
   });
 }
+
+export const workerPolicyRows = (holder: PolicyHolder): PolicyRow[] =>
+  policyRows(holder, WORKER_POLICY_DEFAULTS);
+
+export const projectPolicyRows = (holder: PolicyHolder): PolicyRow[] =>
+  policyRows(holder, PROJECT_POLICY_DEFAULTS);
