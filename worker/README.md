@@ -197,6 +197,21 @@ configuration changes that.
 An entry that has gone missing, or has no `origin`, is skipped rather than failing the whole list —
 one stale line must not cost this machine every other checkout it could serve.
 
+## What a worker's credential grants
+
+Instance-wide, not per project. A worker that reports a checkout matching a project's repository is
+offered that project, for **every** project with workers enabled — there is no per-worker list of
+which projects a machine may serve.
+
+That is deliberate. A worker credential comes from a single-use enrolment token that only an
+instance admin can mint from an interactive session, so the set of workers is already the set an
+admin chose to admit, and admitting a machine admits it to the instance. Reporting a remote it does
+not really have gains a worker nothing it could run: it resolves the checkout from this file, so a
+false remote earns an assignment it then fails to bind.
+
+Revisit this if workers are ever enrolled by someone other than an instance admin, or if two
+projects on one instance must not share a machine.
+
 ## Where settings live
 
 **On the project** (Settings → Workers, instance admin): whether workers may run it at all, and how
