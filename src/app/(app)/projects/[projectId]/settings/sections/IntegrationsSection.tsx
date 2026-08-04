@@ -16,6 +16,11 @@ import {
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { SettingsCard, EmptyState } from "@/components/settings/SettingsCard";
+import {
+  INTEGRATIONS,
+  IntegrationCatalogue,
+  type IntegrationId,
+} from "@/components/settings/IntegrationCatalogue";
 import { useDirtyGroup } from "@/components/settings/settings-context";
 import { SectionProps } from "./types";
 
@@ -200,8 +205,20 @@ export function IntegrationsSection({ projectId, project, patchProject, replaceP
     return current.includes(event) ? current.filter((e) => e !== event) : [...current, event];
   }
 
+  // A vendor's form appears once it is configured, or once it is picked from the
+  // catalogue — not merely because the vendor exists
+  const [opened, setOpened] = useState<IntegrationId[]>([]);
+  const show = (id: IntegrationId) =>
+    opened.includes(id) || !!INTEGRATIONS.find((i) => i.id === id)?.isConfigured(project);
+
   return (
     <>
+      <IntegrationCatalogue
+        project={project}
+        opened={opened}
+        onOpen={(id) => setOpened((o) => (o.includes(id) ? o : [...o, id]))}
+      />
+      {show("github") && (
       <SettingsCard
         title="GitHub"
         contract="draft"
@@ -260,7 +277,8 @@ export function IntegrationsSection({ projectId, project, patchProject, replaceP
           </div>
         )}
       </SettingsCard>
-
+      )}
+      {show("gitlab") && (
       <SettingsCard
         title="GitLab"
         contract="draft"
@@ -344,7 +362,8 @@ export function IntegrationsSection({ projectId, project, patchProject, replaceP
           )}
         </div>
       </SettingsCard>
-
+      )}
+      {show("coda") && (
       <SettingsCard
         title="Coda"
         contract="draft"
@@ -438,7 +457,8 @@ export function IntegrationsSection({ projectId, project, patchProject, replaceP
           )}
         </div>
       </SettingsCard>
-
+      )}
+      {show("channels") && (
       <SettingsCard
         title="Slack & Discord"
         contract="live"
@@ -542,7 +562,8 @@ export function IntegrationsSection({ projectId, project, patchProject, replaceP
           </div>
         </div>
       </SettingsCard>
-
+      )}
+      {show("webhooks") && (
       <SettingsCard
         title="Webhooks"
         contract="live"
@@ -610,6 +631,7 @@ export function IntegrationsSection({ projectId, project, patchProject, replaceP
           </Button>
         </div>
       </SettingsCard>
+      )}
     </>
   );
 }
