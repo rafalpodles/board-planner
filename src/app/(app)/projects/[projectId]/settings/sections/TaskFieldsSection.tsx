@@ -18,14 +18,27 @@ import { CustomFieldEditor } from "./CustomFieldEditor";
 import { CustomFieldForm, FieldDraft } from "@/components/settings/CustomFieldForm";
 import { sortedFields } from "@/lib/custom-fields";
 import { SettingsCard, EmptyState, ListRow } from "@/components/settings/SettingsCard";
+import { ListEditor } from "@/components/settings/ListEditor";
+import { useDirtyGroup } from "@/components/settings/settings-context";
+import { useDraft } from "@/hooks/use-draft";
+import { Popover } from "@/components/ui/Popover";
+import { SwatchPicker } from "@/components/ui/SwatchPicker";
+import { categoryDiff, CategoryDraft } from "@/lib/category-diff";
+import { nextColour } from "@/lib/palette";
 import { SectionProps } from "./types";
 
 export function TaskFieldsSection({ projectId, project, patchProject }: SectionProps) {
   const api = useApi();
   const { toast } = useToast();
 
-  const [newCategoryName, setNewCategoryName] = useState("");
-  const [newCategoryColor, setNewCategoryColor] = useState("#3b82f6");
+  // Explicit, because a row added here has no _id until it is saved
+  const categories = useDraft<{ categories: CategoryDraft[] }>({
+    categories: (project.categories || []).map((c) => ({
+      _id: c._id,
+      name: c.name,
+      color: c.color,
+    })),
+  });
   // "new" opens the create form; a field id opens the same form over that field
   const [fieldForm, setFieldForm] = useState<"new" | string | null>(null);
   const [newTemplateName, setNewTemplateName] = useState("");
@@ -35,28 +48,41 @@ export function TaskFieldsSection({ projectId, project, patchProject }: SectionP
     toast(err instanceof Error ? err.message : fallback, "error");
   }
 
-  async function addCategory() {
-    if (!newCategoryName.trim()) return;
-    try {
-      const categories = await api.post(`/api/projects/${projectId}/categories`, {
-        name: newCategoryName.trim(),
-        color: newCategoryColor,
-      });
-      patchProject({ categories });
-      setNewCategoryName("");
-      setNewCategoryColor("#3b82f6");
-    } catch (err) {
-      fail(err, "Failed to add category");
+  useDirtyGroup(
+    {
+      id: "fields-categories",
+      section: "fields",
+      label: "Task fields · Categories",
+      count: categories.count,
+    },
+    {
+      save: async () => {
+        const diff = categoryDiff(project.categories || [], categories.value.categories);
+        try {
+          let saved = project.categories || [];
+          // Renames first: a name freed by a rename may be the one an added row wants,
+          // and a removal checks the tasks still holding the old name
+          for (const change of diff.changed) {
+            saved = await api.patch(`/api/projects/${projectId}/categories`, change);
+          }
+          for (const added of diff.added) {
+            saved = await api.post(`/api/projects/${projectId}/categories`, added);
+          }
+          for (const name of diff.removed) {
+            saved = await api.del(`/api/projects/${projectId}/categories`, { name });
+          }
+          patchProject({ categories: saved });
+          categories.commit({
+            categories: saved.map((c) => ({ _id: c._id, name: c.name, color: c.color })),
+          });
+          toast("Categories saved", "success");
+        } catch (err) {
+          fail(err, "Failed to save categories");
+        }
+      },
+      discard: categories.discard,
     }
-  }
-
-  async function removeCategory(name: string) {
-    try {
-      patchProject({ categories: await api.del(`/api/projects/${projectId}/categories`, { name }) });
-    } catch (err) {
-      fail(err, "Failed to remove category");
-    }
-  }
+  );
 
   // Throws rather than toasting: the form stays open on failure and shows the reason
   // beside the field, instead of closing and dropping what was typed
@@ -133,50 +159,77 @@ export function TaskFieldsSection({ projectId, project, patchProject }: SectionP
         title="Categories"
         description="The kind of work a task is. A category in use by tasks can't be removed."
       >
-        <div className="flex flex-wrap gap-2">
-          {(project.categories || []).map((cat) => (
-            <span
-              key={cat._id}
-              className="inline-flex items-center gap-1 rounded-full px-3 py-1 text-sm"
-              style={{ backgroundColor: `${cat.color}33`, color: cat.color }}
-            >
-              {cat.name}
-              <button
-                onClick={() => removeCategory(cat.name)}
-                aria-label={`Remove ${cat.name}`}
-                className="ml-1 flex min-h-[24px] min-w-[24px] items-center justify-center hover:opacity-70"
+        <ListEditor
+          items={categories.value.categories}
+          onChange={(next) => categories.set("categories", next)}
+          keyOf={(c, i) => c._id ?? `new-${i}`}
+          nameOf={(c) => c.name || "this category"}
+          reorderable={false}
+          addLabel="Add category"
+          canRemove={() => categories.value.categories.length > 1}
+          onAdd={() =>
+            categories.set("categories", [
+              ...categories.value.categories,
+              {
+                name: "",
+                color: nextColour(categories.value.categories.map((c) => c.color)),
+              },
+            ])
+          }
+          empty={
+            <EmptyState>
+              No categories yet. Add one to describe what kind of work a task is.
+            </EmptyState>
+          }
+          renderRow={(cat, i) => (
+            <>
+              <Input
+                value={cat.name}
+                aria-label="Category name"
+                placeholder="Category name..."
+                className="min-h-[38px] max-w-[240px] py-1.5"
+                onChange={(e) =>
+                  categories.set(
+                    "categories",
+                    categories.value.categories.map((c, idx) =>
+                      idx === i ? { ...c, name: e.target.value } : c
+                    )
+                  )
+                }
+              />
+              <Popover
+                width="w-auto"
+                trigger={({ toggle }) => (
+                  <button
+                    type="button"
+                    onClick={toggle}
+                    aria-label={`Colour for ${cat.name || "this category"}`}
+                    className="focus-ring h-9 w-9 shrink-0 rounded-lg border border-border"
+                    style={{ backgroundColor: cat.color }}
+                  />
+                )}
               >
-                &times;
-              </button>
-            </span>
-          ))}
-          {(project.categories || []).length === 0 && (
-            <EmptyState>No categories yet. Add one to describe what kind of work a task is.</EmptyState>
+                {({ close }) => (
+                  <div className="p-2">
+                    <SwatchPicker
+                      value={cat.color}
+                      label={`Colour for ${cat.name || "this category"}`}
+                      onChange={(hex) => {
+                        categories.set(
+                          "categories",
+                          categories.value.categories.map((c, idx) =>
+                            idx === i ? { ...c, color: hex } : c
+                          )
+                        );
+                        close();
+                      }}
+                    />
+                  </div>
+                )}
+              </Popover>
+            </>
           )}
-        </div>
-        <div className="flex items-center gap-2">
-          <Input
-            value={newCategoryName}
-            onChange={(e) => setNewCategoryName(e.target.value)}
-            placeholder="Category name..."
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                addCategory();
-              }
-            }}
-          />
-          <input
-            type="color"
-            value={newCategoryColor}
-            onChange={(e) => setNewCategoryColor(e.target.value)}
-            aria-label="Category colour"
-            className="h-10 w-10 cursor-pointer rounded-lg border border-border bg-transparent"
-          />
-          <Button variant="secondary" onClick={addCategory}>
-            Add
-          </Button>
-        </div>
+        />
       </SettingsCard>
 
 
