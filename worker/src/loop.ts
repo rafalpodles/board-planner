@@ -9,7 +9,9 @@ export interface LoopDeps {
   assignments: () => string[];
   api: ApiClient;
   execute: (task: ClaimedTask) => Promise<void>;
-  sleep: (ms: number) => Promise<void>;
+  // The signal is aborted by stop(); a sleep that ignores it delays every shutdown by up to a full
+  // poll interval, which at the default 30 s outlasts launchd's 20 s exit timeout
+  sleep: (ms: number, signal?: AbortSignal) => Promise<void>;
   // Undelivered reports go out before new work is claimed: a stranded task from the last cycle
   // matters more than starting another one
   drain?: () => Promise<void>;
@@ -26,6 +28,7 @@ export interface Loop {
 
 export function createLoop(deps: LoopDeps): Loop {
   const log = deps.log ?? ((message: string) => console.error(message));
+  const stopping = new AbortController();
   let running = true;
   let pausedState = false;
 
@@ -64,12 +67,13 @@ export function createLoop(deps: LoopDeps): Loop {
 
         if (!running) return;
         if (claimedAny) continue;
-        await deps.sleep(deps.pollIntervalMs());
+        await deps.sleep(deps.pollIntervalMs(), stopping.signal);
       }
     },
 
     stop() {
       running = false;
+      stopping.abort();
     },
 
     pause() {
