@@ -400,16 +400,6 @@ export const PROJECT_ICONS: string[] = [
   "🏥", "🎬", "🎵", "✈️", "🏠", "🌱", "⏰", "🏆",
 ];
 
-export interface IProjectRepository {
-  url: string;
-  defaultBranch: string;
-}
-
-export interface WorkerAssignment {
-  project: Types.ObjectId;
-  proposedPath: string;
-}
-
 // Facts about a machine. Everything describing a repository or the work lives on the project.
 export interface WorkerPolicy {
   pollIntervalMs: number;
@@ -545,7 +535,6 @@ export interface IProject {
   codaTableId: string;
   codaToken: string;
   taskCounter: number;
-  repository: IProjectRepository;
   sortOrder: number;
   pm?: IPmConfig;
   owner: Types.ObjectId | IUser;

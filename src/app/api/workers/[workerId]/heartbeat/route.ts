@@ -4,7 +4,7 @@ import { withWorker, protocolOf } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { Worker } from "@/models/worker";
 import { RepoReport } from "@/lib/repo-match";
-import { assignmentsFor, overriddenWorkerPolicy, touchWorker } from "@/lib/worker-service";
+import { assignmentsFor, overriddenWorkerPolicy, sharedCheckout, touchWorker } from "@/lib/worker-service";
 
 // A worker reports its own checkouts; anything else is discarded rather than trusted, since this
 // list decides which projects it is offered.
@@ -44,13 +44,21 @@ export const POST = withWorker(async (request, { worker }) => {
 
   // An absent list is a worker that has not been taught to report yet, not a worker that suddenly
   // has nothing — overwriting the stored inventory with [] would silently unassign it.
+  await connectDB();
   if (repos) {
-    await connectDB();
     await Worker.updateOne({ _id: worker._id }, { $set: { repos } });
   }
 
-  const inventory = repos ?? worker.repos ?? [];
-  await connectDB();
+  // Two worker processes sharing one working tree both run git in it. Different machines cannot,
+  // so only a same-host pair is a real collision — and the machine that got there first keeps it.
+  const others = await Worker.find({ _id: { $ne: worker._id } });
+  const claimed = new Set<string>();
+  for (const repo of repos ?? worker.repos ?? []) {
+    const collision = sharedCheckout({ host: worker.host, repos: [repo] }, others);
+    if (collision) claimed.add(repo.path);
+  }
+  const inventory = (repos ?? worker.repos ?? []).filter((r) => !claimed.has(r.path));
+
   const projects = await Project.find({ "worker.enabled": true })
     .select("_id githubRepo gitlabRepo worker")
     .lean();

@@ -46,7 +46,7 @@ export function WorkersSection({ projectId, project, patchProject, isAdmin }: Se
   async function save(patch: Record<string, unknown>) {
     setSaving(true);
     try {
-      const updated = await api.patch(`/api/projects/${projectId}`, { worker: patch });
+      const updated = await api.put(`/api/projects/${projectId}`, { worker: patch });
       patchProject({ worker: updated.worker });
     } catch (err) {
       toast(err instanceof Error ? err.message : "Could not save", "error");
