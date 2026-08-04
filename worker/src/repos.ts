@@ -2,6 +2,7 @@ import { readFileSync, statSync } from "fs";
 import { homedir } from "os";
 import { dirname, isAbsolute, join, sep } from "path";
 import { childEnv } from "./env.js";
+import { RepoInventory } from "./config.js";
 import { Runner } from "./exec.js";
 
 // A repository path is a capability grant, not configuration: a .git/config the operator didn't
@@ -210,4 +211,41 @@ export function createAllowlistReader(stateDir: string): () => string {
     }
     return readFileSync(path, "utf8");
   };
+}
+
+// What this machine offers, read from repos.json and resolved to each checkout's origin. Reported
+// upward so the server can match a project by remote; the path travels only for display, and never
+// comes back down.
+//
+// Returns a reason rather than an empty list when the file cannot be read. The two are not the
+// same: an operator who emptied repos.json meant it, whereas a mode-644 file or a missing state
+// directory is a fault — and reporting [] for a fault made the server wipe its stored inventory,
+// leaving a worker that looked live, enabled and error-free while claiming nothing.
+export type InventoryResult =
+  | { ok: true; repos: RepoInventory[] }
+  | { ok: false; reason: string };
+
+export async function repoInventory(
+  deps: Pick<RepoDeps, "runner" | "readAllowlist">
+): Promise<InventoryResult> {
+  let allowlist: unknown;
+  try {
+    allowlist = JSON.parse(deps.readAllowlist()).repos ?? [];
+  } catch (error) {
+    return { ok: false, reason: `could not read repos.json: ${(error as Error).message}` };
+  }
+  if (!Array.isArray(allowlist)) {
+    return { ok: false, reason: "repos.json: `repos` must be an array of absolute paths" };
+  }
+
+  const repos: RepoInventory[] = [];
+  for (const path of allowlist) {
+    if (typeof path !== "string" || !isAbsolute(path)) continue;
+    // A directory that has gone away, or has no origin, is simply not offered — one bad entry must
+    // not cost this machine every other checkout it could serve.
+    const result = await git(deps.runner, path, ["remote", "get-url", "origin"]).catch(() => null);
+    const remote = result && result.code === 0 ? result.stdout.trim() : "";
+    if (remote) repos.push({ remote, path });
+  }
+  return { ok: true, repos };
 }

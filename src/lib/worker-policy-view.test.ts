@@ -1,24 +1,24 @@
 import { describe, it, expect } from "vitest";
-import { policyRows } from "./worker-policy-view";
-import { POLICY_DEFAULTS } from "./worker-policy";
+import { workerPolicyRows, projectPolicyRows } from "./worker-policy-view";
+import { PROJECT_POLICY_DEFAULTS, WORKER_POLICY_DEFAULTS } from "./worker-policy";
 
 function view(overrides: {
   policy?: Record<string, unknown>;
   policyOverrides?: string[];
 }) {
-  return policyRows({
-    policy: { ...POLICY_DEFAULTS, ...(overrides.policy ?? {}) },
+  return projectPolicyRows({
+    policy: { ...PROJECT_POLICY_DEFAULTS, ...(overrides.policy ?? {}) },
     policyOverrides: overrides.policyOverrides ?? [],
   } as never);
 }
 
-function row(rows: ReturnType<typeof policyRows>, field: string) {
+function row(rows: ReturnType<typeof projectPolicyRows>, field: string) {
   return rows.find((r) => r.field === field)!;
 }
 
 describe("policyRows", () => {
   it("covers every policy field, in a stable order", () => {
-    expect(view({}).map((r) => r.field)).toEqual(Object.keys(POLICY_DEFAULTS));
+    expect(view({}).map((r) => r.field)).toEqual(Object.keys(PROJECT_POLICY_DEFAULTS));
   });
 
   it("marks a field nobody set as inherited", () => {
@@ -54,12 +54,26 @@ describe("policyRows", () => {
 
   it("renders millisecond fields as seconds, which is how an operator reads them", () => {
     expect(row(view({}), "taskTimeoutMs").value).toBe("1800s");
-    expect(row(view({}), "pollIntervalMs").value).toBe("30s");
+  });
+
+  // The split itself: how long a task may take describes the work, how often a machine asks
+  // describes the machine. Neither list should be able to show the other's field.
+  it("keeps machine settings out of the project's rows, and work settings out of the machine's", () => {
+    const projectFields = view({}).map((r) => r.field);
+    const workerFields = workerPolicyRows({ policy: {}, policyOverrides: [] }).map((r) => r.field);
+
+    expect(projectFields).toContain("taskTimeoutMs");
+    expect(projectFields).not.toContain("pollIntervalMs");
+    expect(workerFields).toEqual(["pollIntervalMs"]);
+  });
+
+  it("renders the machine's own interval as seconds too", () => {
+    expect(workerPolicyRows({ policy: {}, policyOverrides: [] })[0].value).toBe("30s");
   });
 
   it("survives a worker with no override list recorded at all", () => {
-    expect(policyRows({ policy: POLICY_DEFAULTS, policyOverrides: undefined } as never)).toHaveLength(
-      Object.keys(POLICY_DEFAULTS).length
+    expect(projectPolicyRows({ policy: PROJECT_POLICY_DEFAULTS, policyOverrides: undefined } as never)).toHaveLength(
+      Object.keys(PROJECT_POLICY_DEFAULTS).length
     );
   });
 

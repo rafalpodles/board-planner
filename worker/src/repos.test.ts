@@ -2,7 +2,7 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { describe, it, expect, vi, afterAll } from "vitest";
-import { bindRepository, createAllowlistReader, RepoDeps } from "./repos.js";
+import { bindRepository, createAllowlistReader, RepoDeps, repoInventory } from "./repos.js";
 
 function depsWith(over: Partial<{
   allowlist: string[];
@@ -201,5 +201,75 @@ describe("createAllowlistReader", () => {
     chmodSync(path, 0o644);
 
     expect(() => createAllowlistReader(dir)()).toThrow(/readable by group or others/);
+  });
+});
+
+// Reporting [] for a fault made the server wipe its stored inventory, leaving a worker that looked
+// live, enabled and error-free while claiming nothing — and, for a mode-644 repos.json, never
+// self-healing. The reason has to survive as a reason.
+describe("repoInventory", () => {
+  const runner = (remote: string) => ({
+    run: async () => ({ code: 0, stdout: remote, stderr: "", timedOut: false }),
+  });
+
+  it("reports each allowed checkout with the origin it resolves to", async () => {
+    const result = await repoInventory({
+      runner: runner("git@github.com:owner/repo.git") as never,
+      readAllowlist: () => JSON.stringify({ repos: ["/a"] }),
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      repos: [{ remote: "git@github.com:owner/repo.git", path: "/a" }],
+    });
+  });
+
+  it("distinguishes a file it could not read from a machine with nothing listed", async () => {
+    const unreadable = await repoInventory({
+      runner: runner("x") as never,
+      readAllowlist: () => {
+        throw new Error("is readable by group or others (mode 644); run chmod 600 on it");
+      },
+    });
+    const empty = await repoInventory({
+      runner: runner("x") as never,
+      readAllowlist: () => JSON.stringify({ repos: [] }),
+    });
+
+    expect(unreadable.ok).toBe(false);
+    expect((unreadable as { reason: string }).reason).toMatch(/mode 644/);
+    expect(empty).toEqual({ ok: true, repos: [] });
+  });
+
+  // The `for…of` used to sit outside the try, so this threw and took out the whole refresh
+  it("refuses a repos.json whose repos is not an array, instead of throwing", async () => {
+    const result = await repoInventory({
+      runner: runner("x") as never,
+      readAllowlist: () => JSON.stringify({ repos: { a: 1 } }),
+    });
+
+    expect(result).toMatchObject({ ok: false });
+  });
+
+  it("skips a checkout with no origin without losing the rest", async () => {
+    let call = 0;
+    const mixed = {
+      run: async () => {
+        call += 1;
+        return call === 1
+          ? { code: 128, stdout: "", stderr: "no origin", timedOut: false }
+          : { code: 0, stdout: "git@github.com:owner/second.git", stderr: "", timedOut: false };
+      },
+    };
+
+    const result = await repoInventory({
+      runner: mixed as never,
+      readAllowlist: () => JSON.stringify({ repos: ["/first", "/second"] }),
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      repos: [{ remote: "git@github.com:owner/second.git", path: "/second" }],
+    });
   });
 });
