@@ -384,6 +384,23 @@ export default function KanbanPage() {
     }
   }
 
+  // The list hands back only the rows it shows, so a filtered list reindexes just
+  // those; tasks hidden by a filter keep the order they already had
+  async function handleReorder(orderedIds: string[]) {
+    const previous = tasks;
+    const rank = new Map(orderedIds.map((id, index) => [id, index]));
+    setTasks((prev) =>
+      prev.map((t) => (rank.has(t._id) ? { ...t, order: rank.get(t._id)! } : t))
+    );
+
+    try {
+      await api.put(`/api/projects/${projectId}/tasks/reorder`, { order: orderedIds });
+    } catch {
+      toast("Failed to reorder tasks", "error");
+      setTasks(previous);
+    }
+  }
+
   async function handleContextDuplicate(taskId: string) {
     const task = tasks.find((t) => t._id === taskId);
     if (!task) return;
@@ -539,6 +556,7 @@ export default function KanbanPage() {
           onAssigneeChange={handleAssigneeChange}
           onTaskSelect={handleTaskSelect}
           onTaskContextMenu={(taskId, x, y) => setContextMenu({ taskId, x, y })}
+          onReorder={handleReorder}
         />
       )}
       </div>

@@ -18,6 +18,7 @@ import {
 import { ListColumnId, isColumnVisible, listColumns as projectListColumns } from "@/lib/list-columns";
 import { fieldCellText } from "@/lib/custom-fields";
 import { effectiveColumns } from "@/lib/columns";
+import { moveItem } from "@/lib/reorder";
 import { Badge } from "@/components/ui/Badge";
 import { categoryColor, categoryTint } from "@/lib/category-colors";
 import { timeAgo } from "@/lib/time";
@@ -45,6 +46,8 @@ interface ListViewProps {
   onAssigneeChange?: (taskId: string, username: string) => void | Promise<void>;
   onTaskSelect?: (taskId: string) => void;
   onTaskContextMenu?: (taskId: string, x: number, y: number) => void;
+  /** Receives every visible row's id in its new order; only reachable under manual sort */
+  onReorder?: (orderedIds: string[]) => void;
 }
 
 function sprintTiming(sprint: ApiSprint): "active" | "past" | "upcoming" {
@@ -77,6 +80,7 @@ export function ListView({
   onAssigneeChange,
   onTaskSelect,
   onTaskContextMenu,
+  onReorder,
   customFields = [],
 }: ListViewProps) {
   const selectionActive = selectionMode || (selectedTasks?.size ?? 0) > 0;
@@ -87,6 +91,8 @@ export function ListView({
     [customFields, hiddenColumns]
   );
   const rowRefs = useRef<(HTMLTableRowElement | null)[]>([]);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const sprintById = useMemo(
     () => new Map(sprints.map((s) => [s._id, s])),
     [sprints],
@@ -117,6 +123,22 @@ export function ListView({
 
   // No local sort: the rows arrive in the order the board page decided
   const sorted = tasks;
+
+  // Any other sort would recompute the order on the next render and throw the drop
+  // away, so the handle only appears once the list is showing manual order
+  const canReorder = !!onReorder && sortField === "manual" && sorted.length > 1;
+
+  // The dragged id comes off the dataTransfer rather than component state: the
+  // browser owns the drag session, and state may not have flushed by drop time
+  function handleRowDrop(e: React.DragEvent, targetId: string) {
+    const sourceId = e.dataTransfer.getData("text/plain") || draggingId;
+    const from = sorted.findIndex((t) => t._id === sourceId);
+    const to = sorted.findIndex((t) => t._id === targetId);
+    setDraggingId(null);
+    setDropTargetId(null);
+    if (from < 0 || to < 0 || from === to) return;
+    onReorder?.(moveItem(sorted, from, to).map((t) => t._id));
+  }
 
   function SortHeader({
     label,
@@ -183,6 +205,7 @@ export function ListView({
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-bg-input text-text-muted text-xs border-b border-border">
+              {canReorder && <th className="w-6 px-1 py-2" />}
               {selectionActive && <th className="w-8 px-2 py-2" />}
               <SortHeader label="Key" column="key" />
               <SortHeader label="Title" column="title" />
@@ -302,14 +325,67 @@ export function ListView({
                     e.preventDefault();
                     onTaskContextMenu(task._id, e.clientX, e.clientY);
                   }}
-                  className={`border-b border-border last:border-b-0 cursor-pointer transition-colors ${
+                  onDragOver={(e) => {
+                    if (!canReorder || draggingId === task._id) return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "move";
+                    setDropTargetId(task._id);
+                  }}
+                  onDragLeave={(e) => {
+                    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                      setDropTargetId((current) =>
+                        current === task._id ? null : current,
+                      );
+                    }
+                  }}
+                  onDrop={(e) => {
+                    if (!canReorder) return;
+                    e.preventDefault();
+                    handleRowDrop(e, task._id);
+                  }}
+                  className={`group/row border-b border-border last:border-b-0 cursor-pointer transition-colors ${
                     tinted ? "cat-row" : "hover:bg-bg-input/50"
                   } ${selected ? "bg-primary/10" : ""} ${
                     index === focusedIndex
                       ? "ring-2 ring-primary ring-inset bg-primary/5"
                       : ""
+                  } ${draggingId === task._id ? "opacity-40" : ""} ${
+                    dropTargetId === task._id
+                      ? "outline outline-2 outline-primary -outline-offset-2"
+                      : ""
                   }`}
                 >
+                  {canReorder && (
+                    <td className="px-1 py-2 align-middle">
+                      {/* The handle is the drag source, not the row: the row opens the
+                          task on click and carries inline selects that a draggable
+                          ancestor would make awkward to operate */}
+                      <span
+                        draggable
+                        role="button"
+                        tabIndex={-1}
+                        aria-label={`Reorder ${taskKey}`}
+                        title="Drag to reorder"
+                        onClick={(e) => e.stopPropagation()}
+                        onDragStart={(e) => {
+                          setDraggingId(task._id);
+                          e.dataTransfer.effectAllowed = "move";
+                          e.dataTransfer.setData("text/plain", task._id);
+                          const row = rowRefs.current[index];
+                          if (row) e.dataTransfer.setDragImage(row, 0, 0);
+                        }}
+                        onDragEnd={() => {
+                          setDraggingId(null);
+                          setDropTargetId(null);
+                        }}
+                        className="flex w-4 cursor-grab select-none justify-center text-text-muted opacity-0 transition-opacity hover:text-text focus-visible:opacity-100 group-hover/row:opacity-100 active:cursor-grabbing"
+                      >
+                        <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M9 5h2v2H9zm0 6h2v2H9zm0 6h2v2H9zm4-12h2v2h-2zm0 6h2v2h-2zm0 6h2v2h-2z" />
+                        </svg>
+                      </span>
+                    </td>
+                  )}
                   {selectionActive && (
                     <td className="px-2 py-2">
                       <button
