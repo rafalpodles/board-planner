@@ -32,7 +32,12 @@ export const POST = withWorker(async (request, { params, worker }) => {
     return NextResponse.json({ error: "runId is required" }, { status: 400 });
   }
 
-  const task = await claimNextTask(projectId, String(worker._id), runId);
+  const task = await claimNextTask(
+    projectId,
+    String(worker._id),
+    runId,
+    worker.identity ? String(worker.identity) : null
+  );
   if (!task) return new NextResponse(null, { status: 204 });
 
   return NextResponse.json(task);

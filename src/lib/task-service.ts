@@ -27,6 +27,18 @@ const RUN_FIELDS = [...PHASE_FIELDS, "execution.runId"];
 const UNSET_PHASE = Object.fromEntries(PHASE_FIELDS.map((field) => [field, ""]));
 const UNSET_RUN = Object.fromEntries(RUN_FIELDS.map((field) => [field, ""]));
 
+// A worker claims by assigning the task to itself, so the assignment has to die with the run —
+// every way back to the board, or the task is left assigned to a machine that is not running it
+// and no worker will ever claim it again.
+//
+// Conditional, not unconditional: these same updates are what a person dragging a card goes
+// through, and clearing their assignment would be a bug of its own. The claim filter refuses any
+// task that already has an assignee, so execution.workerId being set means the assignee is the
+// worker.
+const CLEAR_WORKER_ASSIGNEE = {
+  assignee: { $cond: [{ $ifNull: ["$execution.workerId", false] }, null, "$assignee"] },
+};
+
 // Four times the worker's default task timeout. A worker killed mid-run leaves its task in the
 // active column, where claimNextTask can never see it again — nothing else reclaims it.
 export const EXECUTION_LEASE_MS = 2 * 60 * 60 * 1000;
@@ -168,8 +180,8 @@ export async function changeStatus(
 
   const task = await Task.findOneAndUpdate(
     { _id: taskId, project: projectId },
-    { $set: { status }, $unset: UNSET_RUN },
-    { returnDocument: "after" }
+    [{ $set: { status, ...CLEAR_WORKER_ASSIGNEE } }, { $unset: RUN_FIELDS }],
+    { returnDocument: "after", updatePipeline: true }
   ).populate([
     { path: "assignee", select: "username fullName" },
     { path: "createdBy", select: "username fullName" },
@@ -320,9 +332,15 @@ export async function updateTask(
   // already refuses to tell.
   const onlyOrder = updates.order !== undefined && Object.keys(updates).length === 1;
 
+  // Same rule as changeStatus, decided in JS rather than with a pipeline because this update needs
+  // runValidators, which a pipeline update does not run. An explicit assignee in the edit still
+  // wins — it is spread last.
+  const releasesWorker = leavesColumn && !!oldTask.execution?.workerId;
+  const setFields = releasesWorker ? { assignee: null, ...updates } : updates;
+
   const task = await Task.findOneAndUpdate(
     { _id: taskId, project: projectId },
-    leavesColumn ? { $set: updates, $unset: UNSET_RUN } : { $set: updates },
+    leavesColumn ? { $set: setFields, $unset: UNSET_RUN } : { $set: updates },
     { returnDocument: "after", runValidators: true, timestamps: !onlyOrder }
   ).populate(taskPopulateFields);
 
@@ -569,11 +587,13 @@ export async function releaseExpiredTasks(projectId: string, now = new Date()): 
   const [spent, retryable] = await Promise.all([
     Task.updateMany(
       { ...expired, "execution.attempts": { $gte: MAX_EXECUTION_ATTEMPTS } },
-      { $set: { status: exhausted }, $unset: UNSET_RUN }
+      [{ $set: { status: exhausted, ...CLEAR_WORKER_ASSIGNEE } }, { $unset: RUN_FIELDS }],
+      { updatePipeline: true }
     ),
     Task.updateMany(
       { ...expired, "execution.attempts": { $lt: MAX_EXECUTION_ATTEMPTS } },
-      { $set: { status: approved }, $unset: UNSET_RUN }
+      [{ $set: { status: approved, ...CLEAR_WORKER_ASSIGNEE } }, { $unset: RUN_FIELDS }],
+      { updatePipeline: true }
     ),
   ]);
 
@@ -583,7 +603,10 @@ export async function releaseExpiredTasks(projectId: string, now = new Date()): 
 export async function claimNextTask(
   projectId: string,
   workerId: string,
-  runId: string
+  runId: string,
+  // The worker's own identity user. A claim is an assignment, which is what stops two machines
+  // converging on one task and what makes a task parked for a colleague untouchable.
+  identity?: string | null
 ): Promise<ITask | null> {
   await connectDB();
 
@@ -597,6 +620,9 @@ export async function claimNextTask(
     {
       project: projectId,
       status: { $in: approved },
+      // An assigned task belongs to whoever it is assigned to — another machine that got there
+      // first, or a person it was parked for. Either way this worker leaves it alone.
+      assignee: null,
       // Mongoose applies defaults at hydration, so tasks created before the
       // execution subdocument existed have no such field — and $lt never
       // matches a missing one
@@ -608,6 +634,7 @@ export async function claimNextTask(
     {
       $set: {
         status: activeStatus,
+        ...(identity ? { assignee: identity } : {}),
         "execution.workerId": workerId,
         "execution.runId": runId,
         "execution.startedAt": new Date(),
@@ -651,6 +678,7 @@ export async function releaseTask(
                 approved,
               ],
             },
+            ...CLEAR_WORKER_ASSIGNEE,
           },
         },
         { $unset: RUN_FIELDS },
@@ -666,8 +694,17 @@ export async function releaseTask(
       status: { $in: active },
       "execution.attempts": { $gt: 0 },
     },
-    { $set: { status: approved }, $inc: { "execution.attempts": -1 }, $unset: UNSET_RUN },
-    { returnDocument: "after" }
+    [
+      {
+        $set: {
+          status: approved,
+          "execution.attempts": { $add: ["$execution.attempts", -1] },
+          ...CLEAR_WORKER_ASSIGNEE,
+        },
+      },
+      { $unset: RUN_FIELDS },
+    ],
+    { returnDocument: "after", updatePipeline: true }
   );
 }
 
