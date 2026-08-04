@@ -1,5 +1,6 @@
 import { RepoInventory } from "./config.js";
 import { CommandHandlers, isWorkerCommand } from "./commands.js";
+import { PreflightCheck } from "./preflight.js";
 
 export const PROTOCOL_VERSION = 1;
 
@@ -11,6 +12,12 @@ export interface Identity {
 export interface Store {
   read(): string;
   write(text: string, opts?: { mode?: number }): void;
+}
+
+export interface ReportedPreflight {
+  ok: boolean;
+  account: string;
+  checks: PreflightCheck[];
 }
 
 export interface RegistrationInfo {
@@ -25,6 +32,10 @@ export interface HeartbeatDeps {
   enrolmentToken: string;
   // Undefined means "could not tell", which is not the same as an empty list
   repos?: () => RepoInventory[] | undefined;
+  // Whether this machine can actually do the work. Undefined until it has been established, and
+  // omitted from the body then, so a worker that has not run it yet does not report itself broken.
+  // Resolved binary paths stay local: the server has no use for a path on someone's laptop.
+  preflight?: () => ReportedPreflight | undefined;
   // Removed after a successful registration: the token is already spent server-side, and leaving a
   // dead secret on a disk the agent can read is pointless risk.
   forgetEnrolmentToken?: () => void;
@@ -178,6 +189,7 @@ export function startHeartbeat(deps: HeartbeatDeps): Heartbeat {
     }
 
     const reported = deps.repos?.();
+    const preflight = deps.preflight?.();
 
     try {
       const response = await fetchImpl(`${deps.apiBaseUrl}/api/workers/${identity.workerId}/heartbeat`, {
@@ -196,6 +208,7 @@ export function startHeartbeat(deps: HeartbeatDeps): Heartbeat {
           // inventory could not be read, so the server keeps what it already knows rather than
           // being told this machine suddenly has nothing.
           ...(reported === undefined ? {} : { repos: reported }),
+          ...(preflight === undefined ? {} : { preflight }),
           ...(acked !== undefined ? { acked } : {}),
         }),
       });
