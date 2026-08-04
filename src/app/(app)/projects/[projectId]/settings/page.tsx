@@ -20,7 +20,7 @@ import { IntegrationsSection } from "./sections/IntegrationsSection";
 import { PmAgentSection } from "./sections/PmAgentSection";
 import { WorkersSection } from "./sections/WorkersSection";
 import { AuditSection } from "./sections/AuditSection";
-import { InstanceSection } from "./sections/InstanceSection";
+import Link from "next/link";
 import { PageHeader } from "@/components/shell/PageHeader";
 
 type Access = "member" | "projectAdmin" | "instanceAdmin";
@@ -32,7 +32,6 @@ interface SectionMeta {
   blurb: string;
   keywords: string;
   access: Access;
-  instanceGroup?: boolean;
   icon: React.ReactNode;
 }
 
@@ -132,18 +131,6 @@ const SECTIONS: SectionMeta[] = [
     keywords: "audit log history changes who when activity",
     access: "projectAdmin",
     icon: <Icon d="M12 21a9 9 0 100-18 9 9 0 000 18zM12 7v5l3 2" />,
-  },
-  {
-    id: "instance",
-    label: "AI model",
-    title: "AI model",
-    blurb: "Used when generating tasks with AI.",
-    keywords: "ai model openai gpt task generation instance global",
-    access: "instanceAdmin",
-    instanceGroup: true,
-    icon: (
-      <Icon d="M12 3l2.1 4.7 5.1.6-3.8 3.5 1 5.1L12 14.5 7.6 16.9l1-5.1L4.8 8.3l5.1-.6z" />
-    ),
   },
 ];
 
@@ -324,8 +311,7 @@ export default function ProjectSettingsPage() {
     );
   }
 
-  const projectSections = matches.filter((s) => !s.instanceGroup);
-  const instanceSections = matches.filter((s) => s.instanceGroup);
+  const projectSections = matches;
 
   return (
     <>
@@ -383,14 +369,22 @@ export default function ProjectSettingsPage() {
               </div>
             )}
 
-            {instanceSections.length > 0 && (
-              <div>
+            {isAdmin && (
+              <div className="mt-4">
                 <h2 className="mb-1.5 ml-2.5 text-[10.5px] font-bold uppercase tracking-wider text-text-muted">
                   All projects
                 </h2>
-                {instanceSections.map((s) => navButton(s, false))}
-                <p className="mt-2 px-2.5 text-[11.5px] leading-snug text-text-muted">
-                  Changing these affects every project on this instance.
+                {/* Nothing instance-wide is edited here any more — the link is the
+                    whole point, so a setting that affects every project cannot be
+                    mistaken for one of this project's */}
+                <Link
+                  href="/settings/agents"
+                  className="focus-ring flex min-h-[40px] w-full items-center gap-2 rounded-lg px-2.5 text-left text-[13.5px] text-text-muted transition-colors hover:bg-bg-hover hover:text-text"
+                >
+                  AI &amp; agents ↗
+                </Link>
+                <p className="mt-1 px-2.5 text-[11.5px] leading-snug text-text-muted">
+                  Instance settings live outside this project.
                 </p>
               </div>
             )}
@@ -449,7 +443,6 @@ export default function ProjectSettingsPage() {
                       active={active === "audit"}
                     />
                   )}
-                  {s.id === "instance" && <InstanceSection />}
                 </div>
               ))}
             </SettingsProvider>
