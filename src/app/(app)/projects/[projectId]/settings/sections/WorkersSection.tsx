@@ -135,7 +135,7 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
         contract={contract}
         instanceScoped
       >
-        {!project.githubRepo && !project.gitlabRepo ? (
+        {!project.repositoryUrl ? (
           <p className="text-sm text-danger">
             This project names no repository, so no machine can be matched to it. Set the GitHub or
             GitLab repository under Integrations first.
@@ -159,7 +159,7 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
               ) : offering.length === 0 ? (
                 <p className="text-sm text-text-muted">
                   None yet. A machine appears here once its worker reports a checkout of{" "}
-                  <code className="text-text">{project.githubRepo || project.gitlabRepo}</code> —
+                  <code className="text-text">{project.repositoryUrl}</code> —
                   granted locally in <code className="text-text">repos.json</code> on that machine,
                   never set from here.
                 </p>
