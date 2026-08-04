@@ -401,6 +401,38 @@ export default function KanbanPage() {
     }
   }
 
+  // One writer for every inline enum cell: they differ only in which field they set
+  async function patchTask(taskId: string, patch: Record<string, unknown>, label: string) {
+    const previous = tasks;
+    setTasks((prev) => prev.map((t) => (t._id === taskId ? { ...t, ...patch } : t)));
+    try {
+      await api.put(`/api/projects/${projectId}/tasks/${taskId}`, patch);
+    } catch {
+      toast(`Failed to update ${label}`, "error");
+      setTasks(previous);
+    }
+  }
+
+  async function handleFieldValueChange(taskId: string, fieldId: string, value: string) {
+    const task = tasks.find((t) => t._id === taskId);
+    if (!task) return;
+    const values = { ...(task.customFieldValues || {}), [fieldId]: value };
+    await patchTask(taskId, { customFieldValues: values }, "field");
+  }
+
+  async function handleRowSprintChange(taskId: string, sprintId: string | null) {
+    const previous = tasks;
+    // Not patchTask: a task leaving the sprint the board is filtered by has to drop
+    // out of the list, which applySprintChange already knows how to do
+    applySprintChange([taskId], sprintId);
+    try {
+      await api.put(`/api/projects/${projectId}/tasks/${taskId}`, { sprint: sprintId });
+    } catch {
+      toast("Failed to update sprint", "error");
+      setTasks(previous);
+    }
+  }
+
   async function handleContextDuplicate(taskId: string) {
     const task = tasks.find((t) => t._id === taskId);
     if (!task) return;
@@ -557,6 +589,14 @@ export default function KanbanPage() {
           onTaskSelect={handleTaskSelect}
           onTaskContextMenu={(taskId, x, y) => setContextMenu({ taskId, x, y })}
           onReorder={handleReorder}
+          onPriorityChange={(taskId, priority) =>
+            patchTask(taskId, { priority }, "priority")
+          }
+          onCategoryChange={(taskId, category) =>
+            patchTask(taskId, { category }, "category")
+          }
+          onSprintChange={handleRowSprintChange}
+          onFieldChange={handleFieldValueChange}
         />
       )}
       </div>
@@ -572,7 +612,6 @@ export default function KanbanPage() {
             x={contextMenu.x}
             y={contextMenu.y}
             currentStatus={task.status}
-            isPinned={task.pinned}
             sprints={sprints.filter((s) => s.status !== "completed")}
             columns={project.columns || []}
             currentSprint={task.sprint}
@@ -595,16 +634,6 @@ export default function KanbanPage() {
                 toast(`Moved to ${target}`, "success");
               } catch {
                 toast("Failed to move task to sprint", "error");
-                loadData();
-              }
-            }}
-            onPin={async () => {
-              const newPinned = !task.pinned;
-              setTasks((prev) => prev.map((t) => t._id === contextMenu.taskId ? { ...t, pinned: newPinned } : t));
-              try {
-                await api.put(`/api/projects/${projectId}/tasks/${contextMenu.taskId}`, { pinned: newPinned });
-              } catch {
-                toast("Failed to toggle pin", "error");
                 loadData();
               }
             }}

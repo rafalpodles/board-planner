@@ -55,6 +55,12 @@ describe("no control strips its outline without a replacement", () => {
       // focused from the moment the layer opens; a box around it for the whole
       // search reads as a validation error rather than as focus
     },
+    {
+      file: "components/ui/Combobox.tsx",
+      onlyOn: "placeholder:",
+      // same as above: the panel focuses it on open, so the ring would be on for the
+      // whole life of the dropdown, framing a field nobody has typed in yet
+    },
   ];
 
   const exempt = (path: string, line: string) =>

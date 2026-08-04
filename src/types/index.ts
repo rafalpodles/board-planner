@@ -672,7 +672,6 @@ export interface ITask {
   dueDate: Date | null;
   checklist: IChecklistItem[];
   linkedPRs: ILinkedPR[];
-  pinned: boolean;
   blockedBy: (Types.ObjectId | ITask)[];
   relations: ITaskRelation[];
   watchers: Types.ObjectId[];
@@ -872,7 +871,6 @@ export interface ApiTask {
   dueDate: string | null;
   checklist: ApiChecklistItem[];
   linkedPRs: ApiLinkedPR[];
-  pinned: boolean;
   blockedBy: ApiTaskLink[];
   blocking: ApiTaskLink[];
   relations: ApiTaskRelation[];

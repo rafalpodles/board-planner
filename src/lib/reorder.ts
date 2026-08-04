@@ -25,3 +25,15 @@ export function moveItem<T>(items: T[], from: number, to: number): T[] {
   next.splice(to, 0, moved);
   return next;
 }
+
+/**
+ * The id order after dragging one item onto another, or null when the drop changes
+ * nothing. Kept out of the component because the drag itself belongs to dnd-kit,
+ * but which order it produces is ours to get right.
+ */
+export function reorderedIds(ids: string[], activeId: string, overId: string): string[] | null {
+  const from = ids.indexOf(activeId);
+  const to = ids.indexOf(overId);
+  if (from < 0 || to < 0 || from === to) return null;
+  return moveItem(ids, from, to);
+}
