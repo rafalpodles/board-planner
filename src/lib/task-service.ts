@@ -35,8 +35,15 @@ const UNSET_RUN = Object.fromEntries(RUN_FIELDS.map((field) => [field, ""]));
 // through, and clearing their assignment would be a bug of its own. The claim filter refuses any
 // task that already has an assignee, so execution.workerId being set means the assignee is the
 // worker.
+//
+// `$ifNull` alone was wrong and shipped once: `execution.workerId` defaults to the empty string,
+// and an empty string is TRUTHY in MongoDB's `$cond` — unlike in JavaScript. So every ordinary
+// status change cleared the assignee of every task that had ever been near the execution
+// subdocument. Compare against "" explicitly; do not lean on truthiness across that boundary.
 const CLEAR_WORKER_ASSIGNEE = {
-  assignee: { $cond: [{ $ifNull: ["$execution.workerId", false] }, null, "$assignee"] },
+  assignee: {
+    $cond: [{ $ne: [{ $ifNull: ["$execution.workerId", ""] }, ""] }, null, "$assignee"],
+  },
 };
 
 // Four times the worker's default task timeout. A worker killed mid-run leaves its task in the
