@@ -145,6 +145,10 @@ export function WorkersSection({ projectId, project, patchProject, isAdmin }: Se
                   />
                 ) : (
                   <Input
+                    // Uncontrolled, so React will not refresh it on its own — remounting on the
+                    // resolved value is what stops a reset leaving the old number under a
+                    // "default" label. Editing still works, because the key only changes on save.
+                    key={String(value)}
                     className="flex-1"
                     defaultValue={String(value)}
                     disabled={!isAdmin || saving}
@@ -157,9 +161,19 @@ export function WorkersSection({ projectId, project, patchProject, isAdmin }: Se
                     }}
                   />
                 )}
-                <span className="text-xs text-text-muted w-16">
-                  {inherited ? "default" : "set"}
-                </span>
+                {inherited ? (
+                  <span className="text-xs text-text-muted w-24">default</span>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={!isAdmin || saving}
+                    onClick={() => save({ reset: [field] })}
+                    className="text-xs text-primary hover:underline w-24 text-left disabled:text-text-muted disabled:no-underline"
+                    title="Follow the default again"
+                  >
+                    set · reset
+                  </button>
+                )}
               </div>
             );
           })}
