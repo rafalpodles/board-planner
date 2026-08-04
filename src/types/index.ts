@@ -267,9 +267,10 @@ export interface IWebhook {
   enabled: boolean;
 }
 
+// The URL never reaches a client: it is a credential, so the API returns only a mask
 export interface ApiWebhook {
   _id: string;
-  url: string;
+  urlMasked: string;
   events: WebhookEvent[];
   enabled: boolean;
 }
@@ -291,7 +292,7 @@ export interface ApiNotificationChannel {
   _id: string;
   type: NotificationChannelType;
   name: string;
-  webhookUrl: string;
+  webhookUrlMasked: string;
   events: WebhookEvent[];
   enabled: boolean;
 }

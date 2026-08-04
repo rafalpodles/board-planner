@@ -6,6 +6,7 @@ import { legacyFieldSeeds } from "@/lib/legacy-fields";
 import { Task } from "@/models/task";
 import { Sprint } from "@/models/sprint";
 import { sanitizeMcpServers } from "@/lib/pm/config";
+import { sanitizeProjectSecrets } from "@/lib/project-secrets";
 
 export const GET = withAuth(async (_request, { user }) => {
   await connectDB();
@@ -43,9 +44,7 @@ export const GET = withAuth(async (_request, { user }) => {
 
   const sanitized = projects.map((p) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const obj: any = p.toObject();
-    obj.githubTokenSet = !!obj.githubToken;
-    delete obj.githubToken;
+    const obj: any = sanitizeProjectSecrets(p.toObject());
     if (obj.pm) obj.pm.mcpServers = sanitizeMcpServers(obj.pm.mcpServers);
 
     const stats = statsByProject.get(String(p._id));

@@ -4,6 +4,12 @@ import { withProjectAdmin } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { logProjectAudit } from "@/lib/projectAudit";
 import { NOTIFICATION_CHANNEL_TYPES, WEBHOOK_EVENTS, NotificationChannelType } from "@/types";
+import { sanitizeProjectSecrets } from "@/lib/project-secrets";
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function masked(project: any) {
+  return sanitizeProjectSecrets(project.toObject()).notificationChannels || [];
+}
 
 export const GET = withProjectAdmin(async (_request, { params }) => {
   const { projectId } = await params;
@@ -14,7 +20,7 @@ export const GET = withProjectAdmin(async (_request, { params }) => {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
-  return NextResponse.json(project.notificationChannels || []);
+  return NextResponse.json(masked(project));
 });
 
 export const POST = withProjectAdmin(async (request, { params, user }) => {
@@ -62,7 +68,7 @@ export const POST = withProjectAdmin(async (request, { params, user }) => {
 
   logProjectAudit(projectId, user._id, "settings_updated", `Notification channel added: ${name.trim()} (${type})`);
 
-  return NextResponse.json(project.notificationChannels, { status: 201 });
+  return NextResponse.json(masked(project), { status: 201 });
 });
 
 export const PUT = withProjectAdmin(async (request, { params }) => {
@@ -92,7 +98,7 @@ export const PUT = withProjectAdmin(async (request, { params }) => {
   if (updates.enabled !== undefined) channel.enabled = updates.enabled;
 
   await project.save();
-  return NextResponse.json(project.notificationChannels);
+  return NextResponse.json(masked(project));
 });
 
 export const DELETE = withProjectAdmin(async (request, { params, user }) => {
@@ -119,5 +125,5 @@ export const DELETE = withProjectAdmin(async (request, { params, user }) => {
     logProjectAudit(projectId, user._id, "settings_updated", `Notification channel removed: ${removed.name}`);
   }
 
-  return NextResponse.json(project.notificationChannels);
+  return NextResponse.json(masked(project));
 });
