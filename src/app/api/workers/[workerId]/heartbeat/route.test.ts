@@ -5,12 +5,13 @@ const touchWorker = vi.fn();
 
 const projectFind = vi.fn();
 const workerUpdateOne = vi.fn();
+const workerFind = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/project", () => ({
   Project: { find: () => ({ select: () => ({ lean: projectFind }) }) },
 }));
-vi.mock("@/models/worker", () => ({ Worker: { updateOne: workerUpdateOne } }));
+vi.mock("@/models/worker", () => ({ Worker: { updateOne: workerUpdateOne, find: workerFind } }));
 vi.mock("@/lib/worker-service", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/worker-service")>();
   return { ...actual, verifyWorkerCredential, touchWorker };
@@ -36,6 +37,7 @@ function workerDoc(overrides: Record<string, unknown> = {}) {
     enabled: true,
     lockedByInstance: false,
     version: "1.0.0",
+    host: "mac.home",
     policy: { pollIntervalMs: 5000 },
     policyOverrides: ["pollIntervalMs"],
     repos: [{ remote: REMOTE, path: "/repo" }],
@@ -65,6 +67,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   projectFind.mockResolvedValue([enabledProject()]);
   workerUpdateOne.mockResolvedValue({});
+  workerFind.mockResolvedValue([]);
   verifyWorkerCredential.mockResolvedValue(workerDoc());
   touchWorker.mockResolvedValue(undefined);
 });
@@ -165,5 +168,60 @@ describe("POST /api/workers/:workerId/heartbeat", () => {
 
     expect(workerUpdateOne).not.toHaveBeenCalled();
     expect(json.assignments).toHaveLength(1);
+  });
+});
+
+// Two worker processes sharing one working tree both run git in it. Different machines cannot, so
+// only a same-host pair collides — and the one that got there first keeps it.
+describe("one working tree, one worker", () => {
+  const otherOnSameHost = {
+    _id: "w2",
+    name: "second-process",
+    host: "mac.home",
+    enabled: true,
+    lockedByInstance: false,
+    lastSeenAt: new Date(),
+    repos: [{ remote: REMOTE, path: "/repo" }],
+  };
+
+  it("offers nothing for a checkout another live process on this host already has", async () => {
+    workerFind.mockResolvedValue([otherOnSameHost]);
+    const { req, ctx } = request({ repos: [{ remote: REMOTE, path: "/repo" }] });
+
+    expect((await (await POST(req, ctx)).json()).assignments).toEqual([]);
+  });
+
+  it("still offers it when the other worker is on a different machine", async () => {
+    workerFind.mockResolvedValue([{ ...otherOnSameHost, host: "other-laptop" }]);
+    const { req, ctx } = request({ repos: [{ remote: REMOTE, path: "/repo" }] });
+
+    expect((await (await POST(req, ctx)).json()).assignments).toHaveLength(1);
+  });
+
+  it("takes the checkout over once the other process has gone stale", async () => {
+    const stale = { ...otherOnSameHost, lastSeenAt: new Date(Date.now() - 60 * 60 * 1000) };
+    workerFind.mockResolvedValue([stale]);
+    const { req, ctx } = request({ repos: [{ remote: REMOTE, path: "/repo" }] });
+
+    expect((await (await POST(req, ctx)).json()).assignments).toHaveLength(1);
+  });
+
+  // Only the contested checkout drops out; a second, uncontested one must still be offered
+  it("drops only the contested checkout, not the whole inventory", async () => {
+    workerFind.mockResolvedValue([otherOnSameHost]);
+    projectFind.mockResolvedValue([
+      enabledProject(),
+      { _id: "p2", githubRepo: "owner/other", worker: { enabled: true, policy: {}, policyOverrides: [] } },
+    ]);
+    const { req, ctx } = request({
+      repos: [
+        { remote: REMOTE, path: "/repo" },
+        { remote: "git@github.com:owner/other.git", path: "/other" },
+      ],
+    });
+
+    const assignments = (await (await POST(req, ctx)).json()).assignments;
+
+    expect(assignments.map((a: { project: string }) => a.project)).toEqual(["p2"]);
   });
 });
