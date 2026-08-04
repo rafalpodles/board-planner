@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { moveItem } from "./reorder";
+import { destinationIndex, dropEdge, moveItem } from "./reorder";
 
 const list = ["a", "b", "c", "d"];
 
@@ -39,5 +39,38 @@ describe("moveItem", () => {
         expect([...moveItem(list, from, to)].sort()).toEqual([...list].sort());
       }
     }
+  });
+});
+
+describe("dropEdge", () => {
+  const rect = { top: 100, height: 40 };
+
+  it("reads the top half as before and the bottom half as after", () => {
+    expect(dropEdge(105, rect)).toBe("before");
+    expect(dropEdge(135, rect)).toBe("after");
+  });
+
+  it("puts the midpoint in the bottom half", () => {
+    expect(dropEdge(120, rect)).toBe("after");
+  });
+});
+
+describe("destinationIndex", () => {
+  // Dragging forwards removes the item first, so the gap shifts back by one
+  it("lands the item on the chosen side when dragging forwards", () => {
+    const items = ["a", "b", "c", "d"];
+    expect(moveItem(items, 0, destinationIndex(0, 2, "before"))).toEqual(["b", "a", "c", "d"]);
+    expect(moveItem(items, 0, destinationIndex(0, 2, "after"))).toEqual(["b", "c", "a", "d"]);
+  });
+
+  it("lands the item on the chosen side when dragging backwards", () => {
+    const items = ["a", "b", "c", "d"];
+    expect(moveItem(items, 3, destinationIndex(3, 1, "before"))).toEqual(["a", "d", "b", "c"]);
+    expect(moveItem(items, 3, destinationIndex(3, 1, "after"))).toEqual(["a", "b", "d", "c"]);
+  });
+
+  it("is a no-op on either side of the dragged item itself", () => {
+    expect(destinationIndex(1, 1, "before")).toBe(1);
+    expect(destinationIndex(1, 1, "after")).toBe(1);
   });
 });

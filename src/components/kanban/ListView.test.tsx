@@ -410,3 +410,51 @@ describe("ListView reordering", () => {
     expect(onReorder).not.toHaveBeenCalled();
   });
 });
+
+describe("ListView drop indicator", () => {
+  const many = [
+    { ...tasks[0], _id: "t1", taskNumber: 1, title: "First" },
+    { ...tasks[0], _id: "t2", taskNumber: 2, title: "Second" },
+    { ...tasks[0], _id: "t3", taskNumber: 3, title: "Third" },
+  ] as unknown as ApiTask[];
+
+  // happy-dom reports a zero-sized rect, so the halves have to be staked out by hand
+  function dragOnto(container: HTMLElement, fromIndex: number, toIndex: number, half: "top" | "bottom") {
+    const data = new Map<string, string>();
+    const dataTransfer = {
+      effectAllowed: "", dropEffect: "",
+      setData: (k: string, v: string) => void data.set(k, v),
+      getData: (k: string) => data.get(k) ?? "",
+      setDragImage: () => {},
+    };
+    const rows = [...container.querySelectorAll("tbody tr")] as HTMLElement[];
+    const target = rows[toIndex];
+    target.getBoundingClientRect = () => ({ top: 100, height: 40 }) as DOMRect;
+
+    const fire = (el: HTMLElement, type: string, clientY?: number) => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperty(event, "dataTransfer", { value: dataTransfer });
+      if (clientY !== undefined) Object.defineProperty(event, "clientY", { value: clientY });
+      el.dispatchEvent(event);
+    };
+
+    const y = half === "top" ? 105 : 135;
+    fire((container.querySelectorAll('tbody [draggable="true"]') as NodeListOf<HTMLElement>)[fromIndex], "dragstart");
+    fire(target, "dragover", y);
+    fire(target, "drop", y);
+  }
+
+  it("drops above the row when the pointer is in its top half", async () => {
+    const onReorder = vi.fn();
+    const { container } = renderList({ tasks: many, onReorder });
+    await act(async () => dragOnto(container, 0, 2, "top"));
+    expect(onReorder).toHaveBeenCalledWith(["t2", "t1", "t3"]);
+  });
+
+  it("drops below the row when the pointer is in its bottom half", async () => {
+    const onReorder = vi.fn();
+    const { container } = renderList({ tasks: many, onReorder });
+    await act(async () => dragOnto(container, 0, 2, "bottom"));
+    expect(onReorder).toHaveBeenCalledWith(["t2", "t3", "t1"]);
+  });
+});

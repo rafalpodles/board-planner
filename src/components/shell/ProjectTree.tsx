@@ -5,7 +5,7 @@ import { useState } from "react";
 import { ApiProject, DEFAULT_PROJECT_ICON } from "@/types";
 import { projectPath } from "@/lib/urls";
 import { isNavItemActive } from "@/lib/nav-active";
-import { moveItem } from "@/lib/reorder";
+import { DropEdge, destinationIndex, dropEdge, moveItem } from "@/lib/reorder";
 
 const SUB_ICONS = {
   board: "M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2",
@@ -91,18 +91,24 @@ export function ProjectTree({
   const expandedId = manuallyExpanded ?? routeProject?._id ?? null;
 
   const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ id: string; edge: DropEdge } | null>(
+    null,
+  );
   const canReorder = !!onReorder && projects.length > 1;
 
-  // The dragged id comes off the dataTransfer rather than component state: the
-  // browser owns the drag session, and state may not have flushed by drop time
+  // The dragged id and the edge both come off the event rather than component state:
+  // the browser owns the drag session, and state may not have flushed by drop time.
+  // dropTarget drives the indicator only.
   function handleDrop(e: React.DragEvent, targetId: string) {
     const sourceId = e.dataTransfer.getData("text/plain") || draggingId;
+    const edge = dropEdge(e.clientY, e.currentTarget.getBoundingClientRect());
     const from = projects.findIndex((p) => p._id === sourceId);
-    const to = projects.findIndex((p) => p._id === targetId);
+    const target = projects.findIndex((p) => p._id === targetId);
     setDraggingId(null);
-    setDropTargetId(null);
-    if (from < 0 || to < 0 || from === to) return;
+    setDropTarget(null);
+    if (from < 0 || target < 0) return;
+    const to = destinationIndex(from, target, edge);
+    if (from === to) return;
     onReorder?.(moveItem(projects, from, to).map((p) => p._id));
   }
 
@@ -136,7 +142,9 @@ export function ProjectTree({
           <div key={project._id}>
             <div
               data-active-project={isRouteProject || undefined}
-              data-drop-target={dropTargetId === project._id || undefined}
+              data-drop-target={
+                dropTarget?.id === project._id ? dropTarget.edge : undefined
+              }
               // The row is the drag source, not the links inside it: dragging a
               // link would hand the browser a URL drag instead of a reorder
               draggable={canReorder}
@@ -147,27 +155,40 @@ export function ProjectTree({
               }}
               onDragEnd={() => {
                 setDraggingId(null);
-                setDropTargetId(null);
+                setDropTarget(null);
               }}
               onDragOver={(e) => {
                 if (!canReorder || draggingId === project._id) return;
                 e.preventDefault();
                 e.dataTransfer.dropEffect = "move";
-                setDropTargetId(project._id);
+                const edge = dropEdge(e.clientY, e.currentTarget.getBoundingClientRect());
+                setDropTarget((current) =>
+                  current?.id === project._id && current.edge === edge
+                    ? current
+                    : { id: project._id, edge }
+                );
               }}
               onDragLeave={(e) => {
                 if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-                  setDropTargetId((current) => (current === project._id ? null : current));
+                  setDropTarget((current) =>
+                    current?.id === project._id ? null : current
+                  );
                 }
               }}
               onDrop={(e) => {
                 e.preventDefault();
                 handleDrop(e, project._id);
               }}
-              className={`flex w-full items-center gap-1.5 rounded-lg pr-2.5 transition-colors hover:bg-bg-hover ${
+              // The marker is a pseudo-element, not a shadow: the active project
+              // already owns this element's box-shadow for its left bar
+              className={`relative flex w-full items-center gap-1.5 rounded-lg pr-2.5 transition-colors hover:bg-bg-hover ${
                 isRouteProject ? "shadow-[inset_3px_0_0_var(--color-primary)]" : ""
               } ${draggingId === project._id ? "opacity-40" : ""} ${
-                dropTargetId === project._id ? "outline outline-2 outline-primary" : ""
+                dropTarget?.id === project._id
+                  ? `before:absolute before:inset-x-0 before:h-0.5 before:rounded-full before:bg-[var(--color-primary)] before:content-[''] ${
+                      dropTarget.edge === "before" ? "before:top-0" : "before:bottom-0"
+                    }`
+                  : ""
               }`}
             >
               <button

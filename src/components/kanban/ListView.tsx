@@ -18,7 +18,7 @@ import {
 import { ListColumnId, isColumnVisible, listColumns as projectListColumns } from "@/lib/list-columns";
 import { fieldCellText } from "@/lib/custom-fields";
 import { effectiveColumns } from "@/lib/columns";
-import { moveItem } from "@/lib/reorder";
+import { DropEdge, destinationIndex, dropEdge, moveItem } from "@/lib/reorder";
 import { Badge } from "@/components/ui/Badge";
 import { categoryColor, categoryTint } from "@/lib/category-colors";
 import { timeAgo } from "@/lib/time";
@@ -92,7 +92,9 @@ export function ListView({
   );
   const rowRefs = useRef<(HTMLTableRowElement | null)[]>([]);
   const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ id: string; edge: DropEdge } | null>(
+    null,
+  );
   const sprintById = useMemo(
     () => new Map(sprints.map((s) => [s._id, s])),
     [sprints],
@@ -125,18 +127,26 @@ export function ListView({
   const sorted = tasks;
 
   // Any other sort would recompute the order on the next render and throw the drop
-  // away, so the handle only appears once the list is showing manual order
-  const canReorder = !!onReorder && sortField === "manual" && sorted.length > 1;
+  // away, so the handle only appears once the list is showing manual order. The
+  // direction matters too: descending manual reverses the rows, which would make a
+  // drop reindex them backwards — reachable only from a sort saved before the
+  // direction toggle was disabled for manual.
+  const canReorder =
+    !!onReorder && sortField === "manual" && sortDir === "asc" && sorted.length > 1;
 
-  // The dragged id comes off the dataTransfer rather than component state: the
-  // browser owns the drag session, and state may not have flushed by drop time
+  // The dragged id and the edge both come off the event rather than component state:
+  // the browser owns the drag session, and state may not have flushed by drop time.
+  // dropTarget drives the indicator only.
   function handleRowDrop(e: React.DragEvent, targetId: string) {
     const sourceId = e.dataTransfer.getData("text/plain") || draggingId;
+    const edge = dropEdge(e.clientY, e.currentTarget.getBoundingClientRect());
     const from = sorted.findIndex((t) => t._id === sourceId);
-    const to = sorted.findIndex((t) => t._id === targetId);
+    const target = sorted.findIndex((t) => t._id === targetId);
     setDraggingId(null);
-    setDropTargetId(null);
-    if (from < 0 || to < 0 || from === to) return;
+    setDropTarget(null);
+    if (from < 0 || target < 0) return;
+    const to = destinationIndex(from, target, edge);
+    if (from === to) return;
     onReorder?.(moveItem(sorted, from, to).map((t) => t._id));
   }
 
@@ -200,7 +210,7 @@ export function ListView({
   }
 
   return (
-    <div className="border border-border rounded-lg overflow-hidden">
+    <div className="my-4 border border-border rounded-lg overflow-hidden">
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
@@ -329,12 +339,20 @@ export function ListView({
                     if (!canReorder || draggingId === task._id) return;
                     e.preventDefault();
                     e.dataTransfer.dropEffect = "move";
-                    setDropTargetId(task._id);
+                    const edge = dropEdge(
+                      e.clientY,
+                      e.currentTarget.getBoundingClientRect(),
+                    );
+                    setDropTarget((current) =>
+                      current?.id === task._id && current.edge === edge
+                        ? current
+                        : { id: task._id, edge },
+                    );
                   }}
                   onDragLeave={(e) => {
                     if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-                      setDropTargetId((current) =>
-                        current === task._id ? null : current,
+                      setDropTarget((current) =>
+                        current?.id === task._id ? null : current,
                       );
                     }
                   }}
@@ -350,8 +368,12 @@ export function ListView({
                       ? "ring-2 ring-primary ring-inset bg-primary/5"
                       : ""
                   } ${draggingId === task._id ? "opacity-40" : ""} ${
-                    dropTargetId === task._id
-                      ? "outline outline-2 outline-primary -outline-offset-2"
+                    // An inset shadow on the cells, not a border: it marks the gap the
+                    // row will land in without a 2px reflow of the whole table
+                    dropTarget?.id === task._id
+                      ? dropTarget.edge === "before"
+                        ? "[&>td]:shadow-[inset_0_2px_0_0_var(--color-primary)]"
+                        : "[&>td]:shadow-[inset_0_-2px_0_0_var(--color-primary)]"
                       : ""
                   }`}
                 >
