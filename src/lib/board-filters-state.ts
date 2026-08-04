@@ -83,7 +83,10 @@ export function migratePersistedFilters(
   currentUsername?: string,
   // Passed so a hidden project-field column survives a reload, and an archived
   // field's entry is dropped instead of lingering where nobody can clear it
-  customFields: ApiCustomField[] = []
+  customFields: ApiCustomField[] = [],
+  // Undefined means "not known yet" and leaves the filter alone; a list means a name
+  // outside it was renamed away and the filter has to go with it
+  categories?: string[]
 ): PersistedBoardFilters {
   if (!raw || typeof raw !== "object") {
     return { ...DEFAULTS, hiddenColumns: defaultHidden(customFields) };
@@ -93,6 +96,10 @@ export function migratePersistedFilters(
 
   const filters = { ...EMPTY_FILTERS };
   for (const key of FILTER_KEYS) filters[key] = str(stored[key]);
+
+  if (categories && filters.category && !categories.includes(filters.category)) {
+    filters.category = "";
+  }
 
   // An explicit assignee is a later, more specific choice than the legacy toggle
   if (blob.myTasks === true && !filters.assignee && currentUsername) {

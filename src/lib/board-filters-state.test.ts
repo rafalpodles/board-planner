@@ -7,6 +7,28 @@ import {
   sanitizeFieldFilters,
 } from "./board-filters-state";
 
+describe("migratePersistedFilters — category renames", () => {
+  const stored = { filters: { ...EMPTY_FILTERS, category: "bug" } };
+
+  // Categories are stored on a task by name, so renaming one leaves this filter pointing
+  // at a name the picker no longer offers: an empty board and no way to clear it
+  it("drops a category filter the project no longer has", () => {
+    const state = migratePersistedFilters(stored, "rpo", [], ["defect", "doc"]);
+    expect(state.filters.category).toBe("");
+  });
+
+  it("keeps a category the project still has", () => {
+    const state = migratePersistedFilters(stored, "rpo", [], ["bug", "doc"]);
+    expect(state.filters.category).toBe("bug");
+  });
+
+  // Callers that do not know the categories yet must not have their filter wiped
+  it("leaves the filter alone when the category list is not supplied", () => {
+    const state = migratePersistedFilters(stored, "rpo", []);
+    expect(state.filters.category).toBe("bug");
+  });
+});
+
 describe("migratePersistedFilters", () => {
   it("falls back to defaults for missing or malformed storage", () => {
     for (const raw of [null, undefined, "nonsense", 42, []]) {
