@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  DEFAULT_HIDDEN,
+  defaultHidden,
   hideableColumns,
   listColumns,
   ListColumnId,
@@ -18,9 +18,21 @@ describe("column definitions", () => {
     expect(hideableColumns().map((c) => c.id)).not.toContain("title");
   });
 
-  it("shows everything by default, which is what the list did before", () => {
-    expect(DEFAULT_HIDDEN).toEqual([]);
-    expect(visibleCount(DEFAULT_HIDDEN)).toBe(listColumns().length);
+  // Twelve columns at once squeezed the title out; these are the ones that earn
+  // their width least
+  it("starts with the noisiest columns off", () => {
+    expect(defaultHidden()).toEqual(["category", "dueDate", "updatedAt"]);
+    expect(visibleCount(defaultHidden())).toBe(listColumns().length - 3);
+  });
+
+  it("starts every project field off too", () => {
+    const fields = [
+      { _id: "f1", name: "Component", showInList: true, order: 1 },
+      { _id: "f2", name: "Difficulty", showInList: true, order: 2 },
+    ] as unknown as Parameters<typeof defaultHidden>[0];
+    expect(defaultHidden(fields)).toContain("f1");
+    expect(defaultHidden(fields)).toContain("f2");
+    expect(visibleCount(defaultHidden(fields), fields)).toBe(listColumns().length - 3);
   });
 
   // Column ids double as sort fields, so a typo would silently break sorting
@@ -75,8 +87,8 @@ describe("sanitizeHidden", () => {
   });
 
   it("falls back to the default for anything that is not an array", () => {
-    expect(sanitizeHidden(null)).toEqual(DEFAULT_HIDDEN);
-    expect(sanitizeHidden("status")).toEqual(DEFAULT_HIDDEN);
-    expect(sanitizeHidden(undefined)).toEqual(DEFAULT_HIDDEN);
+    expect(sanitizeHidden(null)).toEqual(defaultHidden());
+    expect(sanitizeHidden("status")).toEqual(defaultHidden());
+    expect(sanitizeHidden(undefined)).toEqual(defaultHidden());
   });
 });
