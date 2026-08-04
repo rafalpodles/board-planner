@@ -42,7 +42,9 @@ export function ColumnPicker({ hidden, onChange, customFields = [] }: ColumnPick
   const builtIn = columns.filter((c) => !c.field);
   const fromProject = columns.filter((c) => c.field);
   const fallback = defaultHidden(customFields);
-  const isDefault = hidden.length === fallback.length;
+  // Compared as sets: lengths alone called any three hidden columns "default"
+  const isDefault =
+    hidden.length === fallback.length && fallback.every((id) => hidden.includes(id));
 
   return (
     <div className="relative shrink-0" ref={ref}>

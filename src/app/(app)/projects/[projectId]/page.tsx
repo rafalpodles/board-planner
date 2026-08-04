@@ -374,9 +374,13 @@ export default function KanbanPage() {
     );
 
     try {
+      // Status only when it actually changes: a drop inside the same column is a
+      // reorder, and sending the status it already has would stamp updatedAt and
+      // release the task from any run a worker is holding it for
+      const moved = tasks.find((t) => t._id === taskId);
       await api.put(`/api/projects/${projectId}/tasks/${taskId}`, {
-        status,
         order: newOrder,
+        ...(moved?.status === status ? {} : { status }),
       });
     } catch {
       toast("Failed to move task", "error");
@@ -387,7 +391,6 @@ export default function KanbanPage() {
   // The list hands back only the rows it shows, so a filtered list reindexes just
   // those; tasks hidden by a filter keep the order they already had
   async function handleReorder(orderedIds: string[]) {
-    const previous = tasks;
     const rank = new Map(orderedIds.map((id, index) => [id, index]));
     setTasks((prev) =>
       prev.map((t) => (rank.has(t._id) ? { ...t, order: rank.get(t._id)! } : t))
@@ -397,19 +400,27 @@ export default function KanbanPage() {
       await api.put(`/api/projects/${projectId}/tasks/reorder`, { order: orderedIds });
     } catch {
       toast("Failed to reorder tasks", "error");
-      setTasks(previous);
+      // The server renumbers across the whole project, so only it knows the result
+      loadData();
     }
   }
 
   // One writer for every inline enum cell: they differ only in which field they set
+  // Reverts the fields it touched on the one task, rather than restoring a whole
+  // snapshot: the 10s poll and any concurrent edit land in between, and putting the
+  // old array back would throw their results away too
   async function patchTask(taskId: string, patch: Record<string, unknown>, label: string) {
-    const previous = tasks;
+    const before = tasks.find((t) => t._id === taskId);
     setTasks((prev) => prev.map((t) => (t._id === taskId ? { ...t, ...patch } : t)));
     try {
       await api.put(`/api/projects/${projectId}/tasks/${taskId}`, patch);
     } catch {
       toast(`Failed to update ${label}`, "error");
-      setTasks(previous);
+      if (!before) return;
+      const revert = Object.fromEntries(
+        Object.keys(patch).map((key) => [key, before[key as keyof ApiTask]])
+      );
+      setTasks((prev) => prev.map((t) => (t._id === taskId ? { ...t, ...revert } : t)));
     }
   }
 
@@ -421,7 +432,6 @@ export default function KanbanPage() {
   }
 
   async function handleRowSprintChange(taskId: string, sprintId: string | null) {
-    const previous = tasks;
     // Not patchTask: a task leaving the sprint the board is filtered by has to drop
     // out of the list, which applySprintChange already knows how to do
     applySprintChange([taskId], sprintId);
@@ -429,7 +439,9 @@ export default function KanbanPage() {
       await api.put(`/api/projects/${projectId}/tasks/${taskId}`, { sprint: sprintId });
     } catch {
       toast("Failed to update sprint", "error");
-      setTasks(previous);
+      // A removed row cannot be put back by patching it, and the server is the only
+      // thing that still knows what the scope should contain
+      loadData();
     }
   }
 
@@ -510,7 +522,8 @@ export default function KanbanPage() {
         sortFields={viewMode === "list" ? LIST_SORT_FIELDS : BOARD_SORT_FIELDS}
         sortContext={sortContext}
         hiddenColumns={hiddenColumns}
-        {...(viewMode === "list" ? { onHiddenColumnsChange: setHiddenColumns } : {})}
+        onHiddenColumnsChange={setHiddenColumns}
+        showColumnPicker={viewMode === "list"}
         extraControls={
           <button
             onClick={() => {

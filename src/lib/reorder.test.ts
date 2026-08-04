@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { destinationIndex, dropEdge, moveItem, reorderedIds } from "./reorder";
+import { manualOrder, moveItem, placeInto, reorderedIds } from "./reorder";
 
 const list = ["a", "b", "c", "d"];
 
@@ -42,39 +42,6 @@ describe("moveItem", () => {
   });
 });
 
-describe("dropEdge", () => {
-  const rect = { top: 100, height: 40 };
-
-  it("reads the top half as before and the bottom half as after", () => {
-    expect(dropEdge(105, rect)).toBe("before");
-    expect(dropEdge(135, rect)).toBe("after");
-  });
-
-  it("puts the midpoint in the bottom half", () => {
-    expect(dropEdge(120, rect)).toBe("after");
-  });
-});
-
-describe("destinationIndex", () => {
-  // Dragging forwards removes the item first, so the gap shifts back by one
-  it("lands the item on the chosen side when dragging forwards", () => {
-    const items = ["a", "b", "c", "d"];
-    expect(moveItem(items, 0, destinationIndex(0, 2, "before"))).toEqual(["b", "a", "c", "d"]);
-    expect(moveItem(items, 0, destinationIndex(0, 2, "after"))).toEqual(["b", "c", "a", "d"]);
-  });
-
-  it("lands the item on the chosen side when dragging backwards", () => {
-    const items = ["a", "b", "c", "d"];
-    expect(moveItem(items, 3, destinationIndex(3, 1, "before"))).toEqual(["a", "d", "b", "c"]);
-    expect(moveItem(items, 3, destinationIndex(3, 1, "after"))).toEqual(["a", "b", "d", "c"]);
-  });
-
-  it("is a no-op on either side of the dragged item itself", () => {
-    expect(destinationIndex(1, 1, "before")).toBe(1);
-    expect(destinationIndex(1, 1, "after")).toBe(1);
-  });
-});
-
 describe("reorderedIds", () => {
   const ids = ["a", "b", "c", "d"];
 
@@ -90,5 +57,33 @@ describe("reorderedIds", () => {
   it("reports nothing for an id that is not in the list", () => {
     expect(reorderedIds(ids, "a", "zz")).toBeNull();
     expect(reorderedIds(ids, "zz", "a")).toBeNull();
+  });
+});
+
+describe("manualOrder", () => {
+  const row = (id: string, order: number, createdAt = 0, taskNumber = 1) =>
+    ({ id, order, createdAt, taskNumber });
+
+  it("sorts by order, then newest first, then task number", () => {
+    expect(manualOrder([row("a", 2), row("b", 1)])).toEqual(["b", "a"]);
+    expect(manualOrder([row("a", 0, 100), row("b", 0, 200)])).toEqual(["b", "a"]);
+    expect(manualOrder([row("a", 0, 0, 2), row("b", 0, 0, 1)])).toEqual(["b", "a"]);
+  });
+});
+
+describe("placeInto", () => {
+  const all = ["a", "b", "c", "d", "e"];
+
+  // The client can only order the rows it can see; the rest must not move
+  it("permutes the moved ids within the slots they already held", () => {
+    expect(placeInto(all, ["e", "c", "a"])).toEqual(["e", "b", "c", "d", "a"]);
+  });
+
+  it("leaves a full list exactly as given", () => {
+    expect(placeInto(all, ["e", "d", "c", "b", "a"])).toEqual(["e", "d", "c", "b", "a"]);
+  });
+
+  it("refuses a set that is not a subset of the whole", () => {
+    expect(placeInto(all, ["a", "zz"])).toEqual(all);
   });
 });

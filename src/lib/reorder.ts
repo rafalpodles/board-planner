@@ -1,19 +1,3 @@
-export type DropEdge = "before" | "after";
-
-/** Which half of the hovered row the pointer sits in, so the drop lands between rows. */
-export function dropEdge(clientY: number, rect: { top: number; height: number }): DropEdge {
-  return clientY < rect.top + rect.height / 2 ? "before" : "after";
-}
-
-/**
- * Index `from` must move to so it ends up on `edge` of `target`. Shifts down by one
- * when the item is dragged forwards, since removing it first pulls the gap back.
- */
-export function destinationIndex(from: number, target: number, edge: DropEdge): number {
-  const to = edge === "before" ? target : target + 1;
-  return from < to ? to - 1 : to;
-}
-
 /** Moves one item, leaving every other item's relative order alone. */
 export function moveItem<T>(items: T[], from: number, to: number): T[] {
   if (from === to) return items;
@@ -36,4 +20,41 @@ export function reorderedIds(ids: string[], activeId: string, overId: string): s
   const to = ids.indexOf(overId);
   if (from < 0 || to < 0 || from === to) return null;
   return moveItem(ids, from, to);
+}
+
+export interface ManualRow {
+  id: string;
+  order: number;
+  createdAt: number;
+  taskNumber: number;
+}
+
+/** The order the list view shows under manual sort — must match sortTasks' "manual" case. */
+export function manualOrder(rows: ManualRow[]): string[] {
+  return [...rows]
+    .sort(
+      (a, b) =>
+        a.order - b.order || b.createdAt - a.createdAt || a.taskNumber - b.taskNumber
+    )
+    .map((r) => r.id);
+}
+
+/**
+ * Drops `moved` into the slots it already occupied within `all`, keeping every other
+ * id where it was. The client can only order the rows it can see, so a filtered list
+ * must not be able to shuffle the ones it cannot.
+ */
+export function placeInto(all: string[], moved: string[]): string[] {
+  const moving = new Set(moved);
+  const slots: number[] = [];
+  all.forEach((id, index) => {
+    if (moving.has(id)) slots.push(index);
+  });
+  if (slots.length !== moved.length) return all;
+
+  const next = [...all];
+  moved.forEach((id, i) => {
+    next[slots[i]] = id;
+  });
+  return next;
 }
