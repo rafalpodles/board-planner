@@ -1,6 +1,7 @@
 # Worker onboarding — from seven steps to one screen
 
-**Status:** proposed, revised after review
+**Status:** proposed, revised after review, then redirected — the repository now belongs to the
+project and the machine clones it, rather than the machine's checkout defining the project
 **Raised by:** rpo, after walking the current setup as if new
 **Related:** CP-158, CP-161, CP-232 (shipped), CP-229 (reopened by this), CP-230
 
@@ -114,23 +115,33 @@ fleet console, claims a task, and fails it. **Preflight is not polish; without i
 and that `gh` is authenticated. Each failure gets a plain sentence and a way to fix it. Nothing
 proceeds until they pass, because everything after this would be a worker that cannot work.
 
-**3. Choose the checkout.** A native directory picker. The app resolves that directory's `origin`
-and writes `repos.json` at mode `0600`.
+Once a project is chosen, preflight **proves it can fetch the repository by fetching it**. This is
+the single biggest reason to prefer this direction: an authentication failure that would otherwise
+appear after the first task, as an unreadable gate error, appears here instead, where it can be
+named and fixed.
 
-The human still chooses, on their own machine — the property CP-232 established is preserved, not
-weakened. Clicking replaces typing; it does not move the decision to the server.
+**3. Choose where work happens.** A native directory picker, but for a **parent folder** — "where
+should workers keep their checkouts?" — not for an existing clone. Easier to answer, and it does not
+assume the person has already cloned anything.
+
+Anyone who *has* already cloned it gets a second path: **use an existing checkout**, verified the
+same way, for the monorepo nobody wants a second copy of.
+
+The human still chooses the location, on their own machine, so the property CP-232 established holds
+— the app is acting for the person at that keyboard, not for the server.
 
 **4. Connect to Board Planner.** The app asks the server to begin an enrolment, receives a short
 code and a URL, and opens the browser.
 
 ### In the browser
 
-**5. Approve.** The page shows what is being connected: the machine's name, and — because the app
-sent the remote it found — **the project that repository already belongs to**.
+**5. Approve.** The page shows the machine, and asks which project it should serve — a list of the
+projects this operator can administer.
 
-This is a deliberate improvement on picking from a list. The server knows which project has that
-repository; asking the user to choose blind invites choosing wrong. The page states the match and
-asks for confirmation, offering a list only when nothing matches.
+An earlier draft had the app send the remote it found and the page confirm the matching project.
+That inverts ownership: the project's identity would come from whatever a laptop happened to have
+checked out. It survives one user and breaks on the second, who cloned over https, or works on a
+fork, or has a mirror. **The project owns its repository; the machine is told which one to fetch.**
 
 **6. Choose the flow.** Three presets, worded as autonomy rather than as gates:
 
@@ -147,10 +158,58 @@ the onboarding question is *how much do you trust it*, not *which of six gates d
 
 ### Back in the app
 
-**8.** The app has been polling; it receives the worker credential, stores it, starts the worker and
-registers it as a login item. The panel shows a registered, idle worker.
+**8.** The app has been polling; it receives **the worker credential** — issued as the last step of
+the approval, not copied from a settings page — stores it, clones the repository into the chosen
+folder, writes `repos.json`, starts the worker and registers it as a login item. The panel shows a
+registered, idle worker.
+
+`repos.json` remains where the configuration lives, but it stops being something a human authors. A
+fresh install starts empty and the app fills it in.
 
 ---
+
+## Two things the redirection settles
+
+### The repository belongs to the project, as one field
+
+`githubRepo` cannot simply be deleted: it has a second job, driving `github/sync` and `gitlab/sync`
+for pull-request linking. The worker was only borrowing it.
+
+What is actually wrong with it is that it is **provider-specific, and there are two of them**.
+Replace `githubRepo` and `gitlabRepo` with a single repository URL. GitHub stops being privileged in
+the settings screen, Bitbucket stops being a special case, and the worker gets one thing to fetch.
+
+### Private repositories are already solved for GitHub, and provable elsewhere
+
+The worry that killed this direction in the first draft turns out to be small. **The worker already
+requires an authenticated `gh`** — it cannot push a branch or open a pull request without one — so a
+private GitHub repository is covered by a dependency that has to be there anyway.
+
+GitLab and Bitbucket go through the operator's own git credentials: an SSH agent, or a credential
+helper. The worker runs as that person, so if they can clone by hand, it can clone. And preflight
+does not have to assume — it clones, and reports what happened.
+
+### A worker needs its own identity
+
+`Comment.author` is a required reference to a user, so **today a worker comments in the voice of
+whoever owns its API token**. Its notes on a task look as though a person wrote them. That is a
+falsified audit trail, not a cosmetic problem, and it gets worse the moment a second person connects
+a machine.
+
+Give each registered worker a non-loginable user record, displayed as its owner's worker. Mentions,
+filters, avatars and history keep working with no change to any consumer.
+
+This does not foreclose SPIFFE or anything like it later: that would be the *authenticating*
+identity, a layer underneath the *displayed* one. Choosing this now costs nothing there.
+
+### The approval page stays an approval
+
+It is tempting to put every setting on it, since the user is right there. Resist it. A page that
+configures ten things is a settings screen wearing an approval's clothes, and people click through
+those without reading — which is the exact opposite of what an authorisation screen is for.
+
+Three decisions: **who is connecting, which project, how much autonomy.** Everything else lives in
+project settings, one click away, afterwards.
 
 ## Design decisions
 
