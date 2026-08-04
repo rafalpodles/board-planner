@@ -11,6 +11,10 @@ A single worker process can serve more than one project: it registers once, an i
 assigns it whichever projects it should work, and the poll loop claims from each assignment in
 turn.
 
+User-facing documentation lives on the docs site, under **AI and automation → Execution
+workers**: what the gates do, how to enable a project, which tasks get picked up, and how to stop a
+machine. This file is the operator's view — what has to be true on the box itself.
+
 ## How one task runs
 
 ```
