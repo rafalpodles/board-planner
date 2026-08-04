@@ -28,6 +28,32 @@ const workerSchema = new Schema<IWorker>(
     lockedByInstance: { type: Boolean, default: false },
     lastSeenAt: { type: Date, default: null },
     bindingError: { type: String, default: "" },
+    // Null, not an empty pass: a worker too old to report this has not told us it is fine, and a
+    // console that showed it green would be the exact "healthy, fails every task" this closes.
+    preflight: {
+      type: new Schema(
+        {
+          ok: { type: Boolean, required: true },
+          account: { type: String, default: "" },
+          checks: {
+            type: [
+              new Schema(
+                {
+                  name: { type: String, required: true, trim: true },
+                  ok: { type: Boolean, required: true },
+                  detail: { type: String, default: "", trim: true },
+                },
+                { _id: false }
+              ),
+            ],
+            default: [],
+          },
+          reportedAt: { type: Date, required: true },
+        },
+        { _id: false }
+      ),
+      default: null,
+    },
     command: { type: String, enum: ["", "pause", "resume", "stop"], default: "" },
     commandIssuedAt: { type: Date, default: null },
     commandAckedAt: { type: Date, default: null },

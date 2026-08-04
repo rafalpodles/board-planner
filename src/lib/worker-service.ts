@@ -224,7 +224,9 @@ export async function verifyWorkerCredential(
 
 export async function touchWorker(
   workerId: string,
-  patch: Partial<Pick<IWorker, "protocolVersion" | "version" | "commandAckedAt" | "bindingError">> = {}
+  patch: Partial<
+    Pick<IWorker, "protocolVersion" | "version" | "commandAckedAt" | "bindingError" | "preflight">
+  > = {}
 ): Promise<void> {
   await connectDB();
   await Worker.updateOne({ _id: workerId }, { $set: { lastSeenAt: new Date(), ...patch } });
@@ -254,6 +256,18 @@ export function toApiWorker(
     lockedByInstance: worker.lockedByInstance,
     lastSeenAt: worker.lastSeenAt ? new Date(worker.lastSeenAt).toISOString() : null,
     bindingError: worker.bindingError,
+    preflight: worker.preflight
+      ? {
+          ok: worker.preflight.ok,
+          account: worker.preflight.account,
+          checks: (worker.preflight.checks ?? []).map((c) => ({
+            name: c.name,
+            ok: c.ok,
+            detail: c.detail,
+          })),
+          reportedAt: new Date(worker.preflight.reportedAt).toISOString(),
+        }
+      : null,
     command: worker.command,
     commandIssuedAt: worker.commandIssuedAt ? new Date(worker.commandIssuedAt).toISOString() : null,
     commandAckedAt: worker.commandAckedAt ? new Date(worker.commandAckedAt).toISOString() : null,

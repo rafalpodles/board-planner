@@ -11,7 +11,7 @@ import { usePollWhileVisible } from "@/hooks/use-poll-while-visible";
 import { timeAgo } from "@/lib/time";
 import { workerPolicyRows } from "@/lib/worker-policy-view";
 import { commandStatus, WorkerCommand } from "@/lib/worker-command-status";
-import { ApiWorker } from "@/types";
+import { ApiWorker, ApiWorkerPreflight } from "@/types";
 
 const POLL_MS = 5_000;
 
@@ -20,6 +20,29 @@ const TONE_CLASSES = {
   applied: "text-text-muted",
   warning: "text-danger",
 };
+
+// A worker that has never reported this is not a worker that passed — showing it green would be the
+// "healthy in the console, fails every task" this column exists to end.
+function PreflightCell({ preflight }: { preflight: ApiWorkerPreflight | null }) {
+  if (!preflight) return <span className="text-text-muted">not reported</span>;
+
+  const failed = preflight.checks.filter((c) => !c.ok);
+  const detail = preflight.checks.map((c) => `${c.ok ? "ok" : "FAILED"}  ${c.name} — ${c.detail}`).join("\n");
+
+  if (failed.length === 0) {
+    return (
+      <span className="text-xs text-text-muted block truncate" title={detail}>
+        ready{preflight.account ? ` · ${preflight.account}` : ""}
+      </span>
+    );
+  }
+
+  return (
+    <span className="text-xs text-danger block truncate" title={detail}>
+      {failed.map((c) => c.name).join(", ")} — {failed[0].detail}
+    </span>
+  );
+}
 
 export default function AdminWorkersPage() {
   const api = useApi();
@@ -122,6 +145,7 @@ export default function AdminWorkersPage() {
                 <th className="text-left px-3 py-2 font-medium">Checkouts</th>
                 <th className="text-left px-3 py-2 font-medium">Running</th>
                 <th className="text-left px-3 py-2 font-medium">Last seen</th>
+                <th className="text-left px-3 py-2 font-medium">Preflight</th>
                 <th className="text-left px-3 py-2 font-medium">Binding error</th>
                 <th className="text-left px-3 py-2 font-medium">Enabled</th>
                 <th className="text-left px-3 py-2 font-medium">Lock</th>
@@ -131,7 +155,7 @@ export default function AdminWorkersPage() {
             <tbody>
               {workers.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="px-3 py-6 text-center text-text-muted text-sm">
+                  <td colSpan={11} className="px-3 py-6 text-center text-text-muted text-sm">
                     No workers registered yet.
                   </td>
                 </tr>
@@ -183,6 +207,9 @@ export default function AdminWorkersPage() {
                           </span>
                         )}
                       </div>
+                    </td>
+                    <td className="px-3 py-2 max-w-[14rem]">
+                      <PreflightCell preflight={worker.preflight} />
                     </td>
                     <td className="px-3 py-2 max-w-[16rem]">
                       {worker.bindingError && (
