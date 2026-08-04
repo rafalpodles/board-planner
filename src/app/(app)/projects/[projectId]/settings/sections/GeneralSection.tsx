@@ -5,11 +5,11 @@ import { useRouter } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
 import { useDraft } from "@/hooks/use-draft";
 import { useToast } from "@/components/ui/Toast";
-import { ApiProjectMember, PROJECT_ICONS, DEFAULT_PROJECT_ICON } from "@/types";
+import { ApiProjectMember } from "@/types";
 import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
 import { Button } from "@/components/ui/Button";
-import { EmojiPicker } from "@/components/ui/EmojiPicker";
+import { IconPicker } from "@/components/ui/IconPicker";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { SettingsCard, ListRow } from "@/components/settings/SettingsCard";
 import { useDirtyGroup } from "@/components/settings/settings-context";
@@ -104,13 +104,15 @@ export function GeneralSection({ projectId, project, replaceProject, isAdmin }: 
             <p className="mt-1 text-xs text-text-muted">Task keys use it. Can&apos;t change.</p>
           </div>
         </div>
-        <EmojiPicker
-          label="Icon"
-          value={identity.value.icon}
-          options={PROJECT_ICONS}
-          fallback={DEFAULT_PROJECT_ICON}
-          onChange={(v) => identity.set("icon", v)}
-        />
+        <div>
+          <label className="mb-1 block text-sm font-medium text-text-muted">Icon</label>
+          <IconPicker
+            label="Project icon"
+            value={identity.value.icon}
+            dirty={identity.isDirty("icon")}
+            onChange={(v) => identity.set("icon", v)}
+          />
+        </div>
         <Textarea
           label="Description"
           value={identity.value.description}
