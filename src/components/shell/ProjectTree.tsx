@@ -6,6 +6,7 @@ import { ApiProject, DEFAULT_PROJECT_ICON } from "@/types";
 import { projectPath } from "@/lib/urls";
 import { isNavItemActive } from "@/lib/nav-active";
 import { DropEdge, destinationIndex, dropEdge, moveItem } from "@/lib/reorder";
+import { useFlipRows } from "@/hooks/use-flip-rows";
 
 const SUB_ICONS = {
   board: "M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2",
@@ -95,6 +96,7 @@ export function ProjectTree({
     null,
   );
   const canReorder = !!onReorder && projects.length > 1;
+  const registerRow = useFlipRows(projects.map((p) => p._id).join(","));
 
   // The dragged id and the edge both come off the event rather than component state:
   // the browser owns the drag session, and state may not have flushed by drop time.
@@ -139,7 +141,7 @@ export function ProjectTree({
         const base = projectPath(project.key);
 
         return (
-          <div key={project._id}>
+          <div key={project._id} ref={registerRow(project._id)}>
             <div
               data-active-project={isRouteProject || undefined}
               data-drop-target={

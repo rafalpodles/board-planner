@@ -18,7 +18,8 @@ import {
 import { ListColumnId, isColumnVisible, listColumns as projectListColumns } from "@/lib/list-columns";
 import { fieldCellText } from "@/lib/custom-fields";
 import { effectiveColumns } from "@/lib/columns";
-import { DropEdge, destinationIndex, dropEdge, moveItem } from "@/lib/reorder";
+import { destinationIndex, dropEdge, moveItem } from "@/lib/reorder";
+import { useFlipRows } from "@/hooks/use-flip-rows";
 import { Badge } from "@/components/ui/Badge";
 import { categoryColor, categoryTint } from "@/lib/category-colors";
 import { timeAgo } from "@/lib/time";
@@ -92,9 +93,8 @@ export function ListView({
   );
   const rowRefs = useRef<(HTMLTableRowElement | null)[]>([]);
   const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [dropTarget, setDropTarget] = useState<{ id: string; edge: DropEdge } | null>(
-    null,
-  );
+  const [preview, setPreview] = useState<string[] | null>(null);
+  const committed = useRef(false);
   const sprintById = useMemo(
     () => new Map(sprints.map((s) => [s._id, s])),
     [sprints],
@@ -134,20 +134,58 @@ export function ListView({
   const canReorder =
     !!onReorder && sortField === "manual" && sortDir === "asc" && sorted.length > 1;
 
+  // Rows are shown in the dragged-to order before the drop lands, so the gap opens
+  // under the cursor and the drop itself moves nothing
+  const displayed = useMemo(() => {
+    if (!preview) return sorted;
+    const byId = new Map(sorted.map((t) => [t._id, t]));
+    const next = preview.map((id) => byId.get(id)).filter((t): t is ApiTask => !!t);
+    return next.length === sorted.length ? next : sorted;
+  }, [preview, sorted]);
+
+  const registerRow = useFlipRows(displayed.map((t) => t._id).join(","));
+
   // The dragged id and the edge both come off the event rather than component state:
-  // the browser owns the drag session, and state may not have flushed by drop time.
-  // dropTarget drives the indicator only.
-  function handleRowDrop(e: React.DragEvent, targetId: string) {
+  // the browser owns the drag session, and state may not have flushed by drop time
+  function previewDropAt(e: React.DragEvent, targetId: string) {
     const sourceId = e.dataTransfer.getData("text/plain") || draggingId;
-    const edge = dropEdge(e.clientY, e.currentTarget.getBoundingClientRect());
-    const from = sorted.findIndex((t) => t._id === sourceId);
-    const target = sorted.findIndex((t) => t._id === targetId);
-    setDraggingId(null);
-    setDropTarget(null);
+    const from = displayed.findIndex((t) => t._id === sourceId);
+    const target = displayed.findIndex((t) => t._id === targetId);
     if (from < 0 || target < 0) return;
-    const to = destinationIndex(from, target, edge);
+    const to = destinationIndex(
+      from,
+      target,
+      dropEdge(e.clientY, e.currentTarget.getBoundingClientRect()),
+    );
     if (from === to) return;
-    onReorder?.(moveItem(sorted, from, to).map((t) => t._id));
+    setPreview(moveItem(displayed, from, to).map((t) => t._id));
+  }
+
+  // Recomputed from the event rather than trusting the previewed order to have
+  // committed: dragover and drop can land in the same React batch
+  function commitDrop(e: React.DragEvent, targetId: string) {
+    const sourceId = e.dataTransfer.getData("text/plain") || draggingId;
+    const from = displayed.findIndex((t) => t._id === sourceId);
+    const target = displayed.findIndex((t) => t._id === targetId);
+    setDraggingId(null);
+    if (from < 0 || target < 0) return setPreview(null);
+
+    const to = destinationIndex(
+      from,
+      target,
+      dropEdge(e.clientY, e.currentTarget.getBoundingClientRect()),
+    );
+    const ids = moveItem(displayed, from, to).map((t) => t._id);
+    if (ids.join() === sorted.map((t) => t._id).join()) return setPreview(null);
+
+    setPreview(ids);
+    committed.current = true;
+    // Held until the write settles: clearing now would snap the rows back to the
+    // parent's pre-drop order for a frame, and on failure it shows the rollback
+    Promise.resolve(onReorder?.(ids)).finally(() => {
+      committed.current = false;
+      setPreview(null);
+    });
   }
 
   function SortHeader({
@@ -279,7 +317,7 @@ export function ListView({
             </tr>
           </thead>
           <tbody>
-            {sorted.map((task, index) => {
+            {displayed.map((task, index) => {
               const dueDateInfo = task.dueDate
                 ? (() => {
                     const due = new Date(task.dueDate);
@@ -321,6 +359,7 @@ export function ListView({
                   style={tinted ? categoryTint(catColor) : undefined}
                   ref={(el) => {
                     rowRefs.current[index] = el;
+                    registerRow(task._id)(el);
                   }}
                   onClick={(e) => {
                     if (selectionActive || e.ctrlKey || e.metaKey) {
@@ -339,27 +378,12 @@ export function ListView({
                     if (!canReorder || draggingId === task._id) return;
                     e.preventDefault();
                     e.dataTransfer.dropEffect = "move";
-                    const edge = dropEdge(
-                      e.clientY,
-                      e.currentTarget.getBoundingClientRect(),
-                    );
-                    setDropTarget((current) =>
-                      current?.id === task._id && current.edge === edge
-                        ? current
-                        : { id: task._id, edge },
-                    );
-                  }}
-                  onDragLeave={(e) => {
-                    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-                      setDropTarget((current) =>
-                        current?.id === task._id ? null : current,
-                      );
-                    }
+                    previewDropAt(e, task._id);
                   }}
                   onDrop={(e) => {
                     if (!canReorder) return;
                     e.preventDefault();
-                    handleRowDrop(e, task._id);
+                    commitDrop(e, task._id);
                   }}
                   className={`group/row border-b border-border last:border-b-0 cursor-pointer transition-colors ${
                     tinted ? "cat-row" : "hover:bg-bg-input/50"
@@ -367,13 +391,11 @@ export function ListView({
                     index === focusedIndex
                       ? "ring-2 ring-primary ring-inset bg-primary/5"
                       : ""
-                  } ${draggingId === task._id ? "opacity-40" : ""} ${
-                    // An inset shadow on the cells, not a border: it marks the gap the
-                    // row will land in without a 2px reflow of the whole table
-                    dropTarget?.id === task._id
-                      ? dropTarget.edge === "before"
-                        ? "[&>td]:shadow-[inset_0_2px_0_0_var(--color-primary)]"
-                        : "[&>td]:shadow-[inset_0_-2px_0_0_var(--color-primary)]"
+                  } ${
+                    // The dragged row keeps its place in the list and the others flow
+                    // around it, so the gap under the cursor is the drop preview
+                    draggingId === task._id
+                      ? "relative z-10 opacity-60 [&>td]:shadow-[inset_0_2px_0_0_var(--color-primary),inset_0_-2px_0_0_var(--color-primary)]"
                       : ""
                   }`}
                 >
@@ -398,7 +420,9 @@ export function ListView({
                         }}
                         onDragEnd={() => {
                           setDraggingId(null);
-                          setDropTargetId(null);
+                          // A drop already owns the preview; this only covers a drag
+                          // abandoned outside the table, which animates back
+                          if (!committed.current) setPreview(null);
                         }}
                         className="flex w-4 cursor-grab select-none justify-center text-text-muted opacity-0 transition-opacity hover:text-text focus-visible:opacity-100 group-hover/row:opacity-100 active:cursor-grabbing"
                       >
