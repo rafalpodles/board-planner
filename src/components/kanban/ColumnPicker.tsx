@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ApiCustomField } from "@/types";
 import {
-  DEFAULT_HIDDEN,
+  defaultHidden,
   hideableColumns,
   listColumns,
   ListColumnId,
@@ -41,7 +41,8 @@ export function ColumnPicker({ hidden, onChange, customFields = [] }: ColumnPick
   const columns = hideableColumns(customFields);
   const builtIn = columns.filter((c) => !c.field);
   const fromProject = columns.filter((c) => c.field);
-  const isDefault = hidden.length === DEFAULT_HIDDEN.length;
+  const fallback = defaultHidden(customFields);
+  const isDefault = hidden.length === fallback.length;
 
   return (
     <div className="relative shrink-0" ref={ref}>
@@ -111,7 +112,7 @@ export function ColumnPicker({ hidden, onChange, customFields = [] }: ColumnPick
           <div className="mt-1 border-t border-border pt-1">
             <button
               type="button"
-              onClick={() => onChange(DEFAULT_HIDDEN)}
+              onClick={() => onChange(fallback)}
               disabled={isDefault}
               className="focus-ring w-full rounded-md px-2 py-1.5 text-left text-[12px] text-text-muted hover:bg-bg-hover hover:text-text disabled:opacity-40 disabled:hover:bg-transparent"
             >

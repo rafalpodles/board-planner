@@ -1,5 +1,5 @@
 import { ApiCustomField, SortDir, SortField, SortKey } from "@/types";
-import { ListColumnId, DEFAULT_HIDDEN, sanitizeHidden } from "./list-columns";
+import { ListColumnId, defaultHidden, sanitizeHidden } from "./list-columns";
 
 /** Range for number and date fields; `value` carries every other type */
 export interface FieldFilter {
@@ -63,7 +63,7 @@ const DEFAULTS: PersistedBoardFilters = {
   sortField: "manual",
   sortDir: "asc",
   showFilters: false,
-  hiddenColumns: DEFAULT_HIDDEN,
+  hiddenColumns: [],
 };
 
 function str(value: unknown): string {
@@ -79,7 +79,9 @@ export function migratePersistedFilters(
   // field's entry is dropped instead of lingering where nobody can clear it
   customFields: ApiCustomField[] = []
 ): PersistedBoardFilters {
-  if (!raw || typeof raw !== "object") return DEFAULTS;
+  if (!raw || typeof raw !== "object") {
+    return { ...DEFAULTS, hiddenColumns: defaultHidden(customFields) };
+  }
   const blob = raw as Record<string, unknown>;
   const stored = (blob.filters ?? {}) as Record<string, unknown>;
 

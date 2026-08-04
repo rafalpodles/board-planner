@@ -51,6 +51,17 @@ interface ListViewProps {
   onReorder?: (orderedIds: string[]) => void;
 }
 
+let pixel: HTMLImageElement | null = null;
+
+function transparentPixel(): HTMLImageElement {
+  if (!pixel) {
+    pixel = new Image();
+    pixel.src =
+      "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+  }
+  return pixel;
+}
+
 function sprintTiming(sprint: ApiSprint): "active" | "past" | "upcoming" {
   const now = Date.now();
   const start = new Date(sprint.startDate).getTime();
@@ -391,12 +402,6 @@ export function ListView({
                     index === focusedIndex
                       ? "ring-2 ring-primary ring-inset bg-primary/5"
                       : ""
-                  } ${
-                    // The dragged row keeps its place in the list and the others flow
-                    // around it, so the gap under the cursor is the drop preview
-                    draggingId === task._id
-                      ? "relative z-10 opacity-60 [&>td]:shadow-[inset_0_2px_0_0_var(--color-primary),inset_0_-2px_0_0_var(--color-primary)]"
-                      : ""
                   }`}
                 >
                   {canReorder && (
@@ -415,8 +420,9 @@ export function ListView({
                           setDraggingId(task._id);
                           e.dataTransfer.effectAllowed = "move";
                           e.dataTransfer.setData("text/plain", task._id);
-                          const row = rowRefs.current[index];
-                          if (row) e.dataTransfer.setDragImage(row, 0, 0);
+                          // The row itself moves to the drop position as you drag, so
+                          // the browser's floating copy would be a second, laggier one
+                          e.dataTransfer.setDragImage(transparentPixel(), 0, 0);
                         }}
                         onDragEnd={() => {
                           setDraggingId(null);
@@ -468,12 +474,15 @@ export function ListView({
                     </span>
                   </td>
                   <td
-                    className="px-2 py-2 font-medium w-full max-w-0"
+                    // overflow-hidden on the cell too: the column can be squeezed
+                    // narrower than the title's min width, and the div alone would
+                    // then paint its overflow across the next cell
+                    className="px-2 py-2 font-medium w-full max-w-0 overflow-hidden"
                     title={task.title}
                   >
-                    <div className="truncate min-w-36 sm:min-w-48 lg:min-w-56 2xl:min-w-80">
-                      {task.title}
-                    </div>
+                    {/* No min-width: it would be a floor the table cannot go under,
+                        which is what forced the whole list to scroll sideways */}
+                    <div className="truncate w-full">{task.title}</div>
                   </td>
                   {show("status") && (
                     <td className="px-2 py-2 hidden sm:table-cell">
@@ -487,7 +496,7 @@ export function ListView({
                             onStatusChange(task._id, e.target.value);
                           }}
                           onClick={(e) => e.stopPropagation()}
-                          className="focus-ring text-xs bg-bg-input border border-border rounded px-1.5 py-1 max-w-28 text-text cursor-pointer"
+                          className="focus-ring text-xs bg-bg-input border border-border rounded px-1.5 py-1 w-full min-w-24 max-w-28 text-text cursor-pointer"
                         >
                           {listColumns.map((c) => (
                             <option key={c.id} value={c.id}>
@@ -659,7 +668,7 @@ function AssigneeCell({
           setSaving(false);
         }
       }}
-      className={`focus-ring text-xs bg-bg-input border border-border rounded px-1.5 py-1 max-w-28 text-text cursor-pointer ${
+      className={`focus-ring text-xs bg-bg-input border border-border rounded px-1.5 py-1 w-full min-w-24 max-w-28 text-text cursor-pointer ${
         saving ? "opacity-50" : ""
       }`}
     >
