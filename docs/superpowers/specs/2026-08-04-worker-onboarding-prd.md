@@ -211,6 +211,50 @@ those without reading — which is the exact opposite of what an authorisation s
 Three decisions: **who is connecting, which project, how much autonomy.** Everything else lives in
 project settings, one click away, afterwards.
 
+## Settled by interview
+
+Seven decisions, taken deliberately rather than left to whoever implements first.
+
+**A worker must be able to push, and preflight proves it.** The worker pushes to `origin` with
+`--force-with-lease` and has no concept of a fork. So read-only access is a hard failure — and today
+it fails *late*, after the agent has done the work and passed six gates. Preflight verifies write
+access and refuses to connect without it. Forks stay unsupported; adding them means a second URL and
+a rewrite of delivery, for a case nobody has yet.
+
+**The worker gets its own clone.** Not the operator's checkout. Today the worker registers worktrees
+inside the working copy a human is also using and reaps directories beside it — a hazard that has
+already bitten once in this repository. A dedicated clone in the chosen folder removes it, along
+with the questions it dragged in: no picking a package inside a monorepo, no interference from
+uncommitted work or a switched branch. "Use an existing checkout" is dropped, not deferred.
+
+**A changed repository URL is followed, not fatal.** The server sends the URL with the assignment;
+a worker whose `origin` differs re-points it, fetches, and re-verifies push. Success means it keeps
+working with nobody involved; failure is reported as a binding error and it stops claiming. Renames
+redirect anyway, so this covers the common case silently and the uncommon one loudly.
+
+**One identity per machine, named for its owner.** `Comment.author` is a required user reference, so
+today a worker comments *in the voice of whoever owns its API token* — a falsified audit trail, not
+a cosmetic issue. Each registered worker gets a non-loginable user record, "Rafał · MacBook". Two
+machines are two identities, because when something goes wrong the question is which machine. The
+PM agent's `pm` user is the precedent. SPIFFE later would sit underneath this as the *authenticating*
+identity; this is the *displayed* one, and choosing it now costs nothing there.
+
+**A worker claims a task by assigning it to itself, and never touches an assigned one.** This is the
+concurrency answer and it solves a second problem for free: a task parked for a colleague is
+assigned, therefore untouchable. It needs two changes — the claim must set `assignee`, and the claim
+filter must exclude tasks that have one. It also makes true what `CLAUDE.md` has always claimed and
+the code never did.
+
+**Every path back to the board clears that assignment.** Usage limit, crash, timeout, expired lease,
+operator stop. Without this the rule above kills tasks silently: a task left assigned to a machine
+that is no longer running it is a task **no worker will ever pick up again**.
+
+**Registration is incomplete until the repository works.** Cloning and the push check can only
+happen once a project is known, which is after approval — so the credential exists before the
+repository is proven. The worker therefore registers in a *configuring* state, shown as such and
+claiming nothing, and either completes or fails with a reason. There is never a worker that looks
+ready and is not.
+
 ## Design decisions
 
 **Device flow, not a pasted token.** The app initiates and the browser approves, which is RFC 8628's
