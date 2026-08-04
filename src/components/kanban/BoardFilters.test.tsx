@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup, act, waitFor } from "@testing-library/react";
 import { BoardFilters } from "./BoardFilters";
-import { ApiTask } from "@/types";
+import { ApiCustomField, ApiTask } from "@/types";
 
 function task(over: Partial<ApiTask> & { _id: string }): ApiTask {
   return {
@@ -228,5 +228,71 @@ describe("BoardFilters", () => {
     const stored = JSON.parse(localStorage.getItem("board-filters:TP")!);
     expect("myTasks" in stored).toBe(false);
     expect("search" in stored.filters).toBe(false);
+  });
+});
+
+describe("BoardFilters field filters", () => {
+  const field = (over: Record<string, unknown>) =>
+    ({
+      _id: "f1",
+      name: "Component",
+      fieldType: "dropdown",
+      options: [],
+      required: false,
+      order: 1,
+      showOnCard: false,
+      showInList: true,
+      filterable: true,
+      archived: false,
+      ...over,
+    }) as unknown as ApiCustomField;
+
+  function openFilters(fields: ApiCustomField[]) {
+    renderFilters({ customFields: fields });
+    act(() => {
+      (screen.getByRole("button", { name: "Filters" }) as HTMLButtonElement).click();
+    });
+  }
+
+  // The picker's only entry would be "All", so it could never narrow anything
+  it("hides an option field that has no options", () => {
+    openFilters([field({ options: [] })]);
+    expect(screen.queryByLabelText("Component")).toBeNull();
+  });
+
+  it("shows an option field once it has options", () => {
+    openFilters([
+      field({ options: [{ id: "o1", value: "ui", color: "#fff", order: 1 }] }),
+    ]);
+    expect(screen.getByLabelText("Component")).toBeTruthy();
+  });
+
+  // These carry their own values rather than a list, so emptiness means nothing
+  it("keeps a text field with no options", () => {
+    openFilters([field({ fieldType: "text", name: "Notes" })]);
+    expect(screen.getByLabelText("Notes")).toBeTruthy();
+  });
+});
+
+describe("BoardFilters unassigned", () => {
+  // "" already means "any assignee", so the empty case needs a value of its own
+  it("keeps only tasks with nobody assigned", async () => {
+    const { onFilter } = renderFilters();
+    act(() => {
+      (screen.getByRole("button", { name: "Filters" }) as HTMLButtonElement).click();
+    });
+    const select = screen.getByLabelText("Assignee") as HTMLSelectElement;
+    expect([...select.options].map((o) => o.textContent)).toContain("Unassigned");
+
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(
+        select,
+        "@none"
+      );
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    const last = onFilter.mock.calls.at(-1)?.[0] as ApiTask[];
+    expect(last.map((t) => t._id).sort()).toEqual(["1", "3"]);
   });
 });

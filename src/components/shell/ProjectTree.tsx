@@ -5,8 +5,24 @@ import { useState } from "react";
 import { ApiProject, DEFAULT_PROJECT_ICON } from "@/types";
 import { projectPath } from "@/lib/urls";
 import { isNavItemActive } from "@/lib/nav-active";
-import { DropEdge, destinationIndex, dropEdge, moveItem } from "@/lib/reorder";
-import { useFlipRows } from "@/hooks/use-flip-rows";
+import { reorderedIds } from "@/lib/reorder";
+import {
+  DndContext,
+  DragEndEvent,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import { restrictToParentElement, restrictToVerticalAxis } from "@dnd-kit/modifiers";
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
 const SUB_ICONS = {
   board: "M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2",
@@ -71,6 +87,40 @@ function SubItem({ href, icon, label, active, dot, pill }: SubItemProps) {
   );
 }
 
+/**
+ * Carries useSortable for one project. The whole row is the handle here, so the
+ * listeners go on the row while the sortable element is the wrapper that also holds
+ * the expanded sub-items — otherwise the sub-items would not travel with it.
+ */
+function SortableProject({
+  id,
+  disabled,
+  children,
+}: {
+  id: string;
+  disabled: boolean;
+  children: (state: {
+    setNodeRef: (el: HTMLElement | null) => void;
+    handleProps: Record<string, unknown>;
+    style: React.CSSProperties;
+    isDragging: boolean;
+  }) => React.ReactNode;
+}) {
+  const { setNodeRef, attributes, listeners, transform, transition, isDragging } =
+    useSortable({ id, disabled });
+
+  return children({
+    setNodeRef,
+    handleProps: { ...attributes, ...listeners },
+    style: {
+      transform: CSS.Transform.toString(transform),
+      transition,
+      ...(isDragging ? { position: "relative", zIndex: 20 } : {}),
+    },
+    isDragging,
+  });
+}
+
 interface ProjectTreeProps {
   projects: ApiProject[];
   pathname: string;
@@ -91,27 +141,38 @@ export function ProjectTree({
   const [manuallyExpanded, setManuallyExpanded] = useState<string | null>(null);
   const expandedId = manuallyExpanded ?? routeProject?._id ?? null;
 
-  const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [dropTarget, setDropTarget] = useState<{ id: string; edge: DropEdge } | null>(
-    null,
-  );
   const canReorder = !!onReorder && projects.length > 1;
-  const registerRow = useFlipRows(projects.map((p) => p._id).join(","));
+  const sensors = useSensors(
+    // The whole row is the handle and it is full of links, so a drag only begins
+    // once the pointer has actually travelled — a plain click still navigates
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
 
-  // The dragged id and the edge both come off the event rather than component state:
-  // the browser owns the drag session, and state may not have flushed by drop time.
-  // dropTarget drives the indicator only.
-  function handleDrop(e: React.DragEvent, targetId: string) {
-    const sourceId = e.dataTransfer.getData("text/plain") || draggingId;
-    const edge = dropEdge(e.clientY, e.currentTarget.getBoundingClientRect());
-    const from = projects.findIndex((p) => p._id === sourceId);
-    const target = projects.findIndex((p) => p._id === targetId);
-    setDraggingId(null);
-    setDropTarget(null);
-    if (from < 0 || target < 0) return;
-    const to = destinationIndex(from, target, edge);
-    if (from === to) return;
-    onReorder?.(moveItem(projects, from, to).map((p) => p._id));
+  // An expanded project is several times taller than a collapsed one, and dnd-kit
+  // shifts the others by the dragged element's height — so the tree lurches. Everything
+  // is collapsed for the duration and put back afterwards.
+  const [expandedBeforeDrag, setExpandedBeforeDrag] = useState<string | null>(null);
+
+  function handleDragStart() {
+    setExpandedBeforeDrag(expandedId);
+    setManuallyExpanded("");
+  }
+
+  function restoreExpanded() {
+    setManuallyExpanded(expandedBeforeDrag);
+    setExpandedBeforeDrag(null);
+  }
+
+  function handleDragEnd({ active, over }: DragEndEvent) {
+    restoreExpanded();
+    if (!over) return;
+    const next = reorderedIds(
+      projects.map((p) => p._id),
+      String(active.id),
+      String(over.id),
+    );
+    if (next) onReorder?.(next);
   }
 
   return (
@@ -135,62 +196,34 @@ export function ProjectTree({
         )}
       </div>
 
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        modifiers={[restrictToVerticalAxis, restrictToParentElement]}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+        onDragCancel={restoreExpanded}
+      >
+      <SortableContext
+        items={projects.map((p) => p._id)}
+        strategy={verticalListSortingStrategy}
+      >
       {projects.map((project) => {
         const expanded = expandedId === project._id;
         const isRouteProject = routeProject?._id === project._id;
         const base = projectPath(project.key);
 
         return (
-          <div key={project._id} ref={registerRow(project._id)}>
+          <SortableProject key={project._id} id={project._id} disabled={!canReorder}>
+            {({ setNodeRef, handleProps, style, isDragging }) => (
+          <div ref={setNodeRef} style={style}>
             <div
               data-active-project={isRouteProject || undefined}
-              data-drop-target={
-                dropTarget?.id === project._id ? dropTarget.edge : undefined
-              }
-              // The row is the drag source, not the links inside it: dragging a
-              // link would hand the browser a URL drag instead of a reorder
-              draggable={canReorder}
-              onDragStart={(e) => {
-                setDraggingId(project._id);
-                e.dataTransfer.effectAllowed = "move";
-                e.dataTransfer.setData("text/plain", project._id);
-              }}
-              onDragEnd={() => {
-                setDraggingId(null);
-                setDropTarget(null);
-              }}
-              onDragOver={(e) => {
-                if (!canReorder || draggingId === project._id) return;
-                e.preventDefault();
-                e.dataTransfer.dropEffect = "move";
-                const edge = dropEdge(e.clientY, e.currentTarget.getBoundingClientRect());
-                setDropTarget((current) =>
-                  current?.id === project._id && current.edge === edge
-                    ? current
-                    : { id: project._id, edge }
-                );
-              }}
-              onDragLeave={(e) => {
-                if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-                  setDropTarget((current) =>
-                    current?.id === project._id ? null : current
-                  );
-                }
-              }}
-              onDrop={(e) => {
-                e.preventDefault();
-                handleDrop(e, project._id);
-              }}
-              // The marker is a pseudo-element, not a shadow: the active project
-              // already owns this element's box-shadow for its left bar
+              {...(canReorder ? handleProps : {})}
               className={`relative flex w-full items-center gap-1.5 rounded-lg pr-2.5 transition-colors hover:bg-bg-hover ${
                 isRouteProject ? "shadow-[inset_3px_0_0_var(--color-primary)]" : ""
-              } ${draggingId === project._id ? "opacity-40" : ""} ${
-                dropTarget?.id === project._id
-                  ? `before:absolute before:inset-x-0 before:h-0.5 before:rounded-full before:bg-[var(--color-primary)] before:content-[''] ${
-                      dropTarget.edge === "before" ? "before:top-0" : "before:bottom-0"
-                    }`
-                  : ""
+              } ${canReorder ? "cursor-grab touch-none active:cursor-grabbing" : ""} ${
+                isDragging ? "bg-bg-card shadow-lg ring-1 ring-border" : ""
               }`}
             >
               <button
@@ -266,8 +299,12 @@ export function ProjectTree({
               </div>
             )}
           </div>
+            )}
+          </SortableProject>
         );
       })}
+      </SortableContext>
+      </DndContext>
     </div>
   );
 }

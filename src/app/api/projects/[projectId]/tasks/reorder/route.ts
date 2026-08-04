@@ -35,10 +35,13 @@ export const PUT = withProjectAccess(async (request, { params }) => {
     );
   }
 
+  // timestamps off: a reorder touches every visible task, and letting the schema
+  // stamp updatedAt would reset the whole list to "just now" on each drag
   await Task.bulkWrite(
     (ids as string[]).map((id, index) => ({
       updateOne: { filter: { _id: id }, update: { $set: { order: index } } },
-    }))
+    })),
+    { timestamps: false }
   );
 
   return NextResponse.json({ updated: ids.length });

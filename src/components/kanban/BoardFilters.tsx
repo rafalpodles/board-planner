@@ -27,11 +27,13 @@ import {
   countActiveFilters,
   migratePersistedFilters,
   isFieldFilterSet,
+  UNASSIGNED,
   type FieldFilter,
   type BuiltInFilterKey,
 } from "@/lib/board-filters-state";
 import {
   activeFields,
+  isOptionField,
   matchesAllFieldFilters,
   orderedOptions,
   sortedFields,
@@ -179,7 +181,9 @@ export function BoardFilters({
         return key.includes(q) || String(t.taskNumber).startsWith(q);
       });
     }
-    if (filters.assignee) {
+    if (filters.assignee === UNASSIGNED) {
+      result = result.filter((t) => !t.assignee);
+    } else if (filters.assignee) {
       result = result.filter(
         (t) =>
           t.assignee &&
@@ -241,7 +245,12 @@ export function BoardFilters({
     setFilters((f) => ({ ...f, [key]: "" }));
   }
 
-  const filterableFields = sortedFields(activeFields(customFields)).filter((f) => f.filterable);
+  // An option field with no options renders a picker whose only entry is "All", so it
+  // filters nothing. Every other type carries its own values — a checkbox is yes/no,
+  // and text, number and date are typed in.
+  const filterableFields = sortedFields(activeFields(customFields)).filter(
+    (f) => f.filterable && (!isOptionField(f) || orderedOptions(f).length > 0)
+  );
 
   function fieldFilter(fieldId: string): FieldFilter {
     return filters.fields?.[fieldId] ?? {};
@@ -276,8 +285,9 @@ export function BoardFilters({
   if (filters.assignee) {
     chips.push({
       key: "assignee",
-      label: filters.assignee,
-      initial: filters.assignee.charAt(0).toUpperCase(),
+      label: filters.assignee === UNASSIGNED ? "Unassigned" : filters.assignee,
+      initial:
+        filters.assignee === UNASSIGNED ? "–" : filters.assignee.charAt(0).toUpperCase(),
     });
   }
   if (filters.category) {
@@ -417,6 +427,7 @@ export function BoardFilters({
                   className={selectClass}
                 >
                   <option value="">All assignees</option>
+                  <option value={UNASSIGNED}>Unassigned</option>
                   {assignees.map((a) => (
                     <option key={a.username} value={a.username}>
                       {a.username}

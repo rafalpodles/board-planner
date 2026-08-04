@@ -25,6 +25,12 @@ export interface PersistedBoardFilters {
   hiddenColumns: ListColumnId[];
 }
 
+/**
+ * Sentinel for "has no assignee" in the assignee filter. Not "" — that already means
+ * "any assignee" — and the "@" keeps it out of reach of a real username.
+ */
+export const UNASSIGNED = "@none";
+
 export const EMPTY_FILTERS: BoardFilterValues = {
   fields: {},
   assignee: "",

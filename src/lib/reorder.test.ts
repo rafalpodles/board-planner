@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { destinationIndex, dropEdge, moveItem } from "./reorder";
+import { destinationIndex, dropEdge, moveItem, reorderedIds } from "./reorder";
 
 const list = ["a", "b", "c", "d"];
 
@@ -72,5 +72,23 @@ describe("destinationIndex", () => {
   it("is a no-op on either side of the dragged item itself", () => {
     expect(destinationIndex(1, 1, "before")).toBe(1);
     expect(destinationIndex(1, 1, "after")).toBe(1);
+  });
+});
+
+describe("reorderedIds", () => {
+  const ids = ["a", "b", "c", "d"];
+
+  it("moves the dragged id onto the target's position", () => {
+    expect(reorderedIds(ids, "a", "c")).toEqual(["b", "c", "a", "d"]);
+    expect(reorderedIds(ids, "d", "b")).toEqual(["a", "d", "b", "c"]);
+  });
+
+  it("reports nothing when the drop changes no order", () => {
+    expect(reorderedIds(ids, "b", "b")).toBeNull();
+  });
+
+  it("reports nothing for an id that is not in the list", () => {
+    expect(reorderedIds(ids, "a", "zz")).toBeNull();
+    expect(reorderedIds(ids, "zz", "a")).toBeNull();
   });
 });

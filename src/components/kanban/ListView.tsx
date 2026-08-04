@@ -18,9 +18,26 @@ import {
 import { ListColumnId, isColumnVisible, listColumns as projectListColumns } from "@/lib/list-columns";
 import { fieldCellText } from "@/lib/custom-fields";
 import { effectiveColumns } from "@/lib/columns";
-import { destinationIndex, dropEdge, moveItem } from "@/lib/reorder";
-import { useFlipRows } from "@/hooks/use-flip-rows";
+import {
+  DndContext,
+  DragEndEvent,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import { restrictToParentElement, restrictToVerticalAxis } from "@dnd-kit/modifiers";
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { reorderedIds } from "@/lib/reorder";
 import { Badge } from "@/components/ui/Badge";
+import { Combobox, ComboboxOption } from "@/components/ui/Combobox";
 import { categoryColor, categoryTint } from "@/lib/category-colors";
 import { timeAgo } from "@/lib/time";
 
@@ -49,17 +66,107 @@ interface ListViewProps {
   onTaskContextMenu?: (taskId: string, x: number, y: number) => void;
   /** Receives every visible row's id in its new order; only reachable under manual sort */
   onReorder?: (orderedIds: string[]) => void;
+  /** Each turns its column into a picker; omit one and that cell stays read-only */
+  onPriorityChange?: (taskId: string, priority: string) => void;
+  onCategoryChange?: (taskId: string, category: string) => void;
+  onSprintChange?: (taskId: string, sprintId: string | null) => void;
+  onFieldChange?: (taskId: string, fieldId: string, value: string) => void;
 }
 
-let pixel: HTMLImageElement | null = null;
+function initials(fullName: string): string {
+  const parts = fullName.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "";
+  return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase();
+}
 
-function transparentPixel(): HTMLImageElement {
-  if (!pixel) {
-    pixel = new Image();
-    pixel.src =
-      "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
-  }
-  return pixel;
+function AssigneeAvatar({ fullName }: { fullName: string }) {
+  const label = initials(fullName);
+  return (
+    <span
+      aria-hidden
+      className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold ${
+        label
+          ? "bg-primary/30 text-text"
+          : "border border-dashed border-border text-text-muted"
+      }`}
+    >
+      {label || "–"}
+    </span>
+  );
+}
+
+interface SortableRowState {
+  setNodeRef: (el: HTMLElement | null) => void;
+  setHandleRef: (el: HTMLElement | null) => void;
+  handleProps: Record<string, unknown>;
+  style: React.CSSProperties;
+  isDragging: boolean;
+}
+
+/**
+ * Carries useSortable for one row. A render prop rather than a component per row:
+ * the row body needs a dozen values from the list, and threading them through props
+ * would be a bigger change than the drag itself.
+ */
+function SortableRow({
+  id,
+  disabled,
+  children,
+}: {
+  id: string;
+  disabled: boolean;
+  children: (state: SortableRowState) => React.ReactNode;
+}) {
+  const { setNodeRef, setActivatorNodeRef, attributes, listeners, transform, transition, isDragging } =
+    useSortable({ id, disabled });
+
+  return children({
+    setNodeRef,
+    setHandleRef: setActivatorNodeRef,
+    handleProps: { ...attributes, ...listeners },
+    style: {
+      transform: CSS.Transform.toString(transform),
+      transition,
+      ...(isDragging ? { position: "relative", zIndex: 1, opacity: 0.85 } : {}),
+    },
+    isDragging,
+  });
+}
+
+const PRIORITY_OPTIONS: ComboboxOption[] = Object.entries(PRIORITY_LABELS).map(
+  ([value, label]) => ({ value, label })
+);
+
+/**
+ * A cell whose value comes from a fixed set. Without a handler it renders exactly
+ * what it did before, so a column the caller cannot write stays read-only rather
+ * than offering a picker that would fail.
+ */
+function EnumCell({
+  value,
+  options,
+  label,
+  onChange,
+  children,
+}: {
+  value: string;
+  options: ComboboxOption[];
+  label: string;
+  onChange?: (next: string) => void;
+  children: React.ReactNode;
+}) {
+  if (!onChange || options.length === 0) return <>{children}</>;
+  return (
+    <Combobox
+      value={value}
+      options={options}
+      onChange={onChange}
+      label={label}
+      triggerClassName="w-full rounded"
+    >
+      {() => children}
+    </Combobox>
+  );
 }
 
 function sprintTiming(sprint: ApiSprint): "active" | "past" | "upcoming" {
@@ -93,6 +200,10 @@ export function ListView({
   onTaskSelect,
   onTaskContextMenu,
   onReorder,
+  onPriorityChange,
+  onCategoryChange,
+  onSprintChange,
+  onFieldChange,
   customFields = [],
 }: ListViewProps) {
   const selectionActive = selectionMode || (selectedTasks?.size ?? 0) > 0;
@@ -103,9 +214,6 @@ export function ListView({
     [customFields, hiddenColumns]
   );
   const rowRefs = useRef<(HTMLTableRowElement | null)[]>([]);
-  const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [preview, setPreview] = useState<string[] | null>(null);
-  const committed = useRef(false);
   const sprintById = useMemo(
     () => new Map(sprints.map((s) => [s._id, s])),
     [sprints],
@@ -145,58 +253,20 @@ export function ListView({
   const canReorder =
     !!onReorder && sortField === "manual" && sortDir === "asc" && sorted.length > 1;
 
-  // Rows are shown in the dragged-to order before the drop lands, so the gap opens
-  // under the cursor and the drop itself moves nothing
-  const displayed = useMemo(() => {
-    if (!preview) return sorted;
-    const byId = new Map(sorted.map((t) => [t._id, t]));
-    const next = preview.map((id) => byId.get(id)).filter((t): t is ApiTask => !!t);
-    return next.length === sorted.length ? next : sorted;
-  }, [preview, sorted]);
+  const sensors = useSensors(
+    // A few pixels of travel before a drag starts, so clicking the grip stays a click
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
 
-  const registerRow = useFlipRows(displayed.map((t) => t._id).join(","));
-
-  // The dragged id and the edge both come off the event rather than component state:
-  // the browser owns the drag session, and state may not have flushed by drop time
-  function previewDropAt(e: React.DragEvent, targetId: string) {
-    const sourceId = e.dataTransfer.getData("text/plain") || draggingId;
-    const from = displayed.findIndex((t) => t._id === sourceId);
-    const target = displayed.findIndex((t) => t._id === targetId);
-    if (from < 0 || target < 0) return;
-    const to = destinationIndex(
-      from,
-      target,
-      dropEdge(e.clientY, e.currentTarget.getBoundingClientRect()),
+  function handleDragEnd({ active, over }: DragEndEvent) {
+    if (!over) return;
+    const next = reorderedIds(
+      sorted.map((t) => t._id),
+      String(active.id),
+      String(over.id),
     );
-    if (from === to) return;
-    setPreview(moveItem(displayed, from, to).map((t) => t._id));
-  }
-
-  // Recomputed from the event rather than trusting the previewed order to have
-  // committed: dragover and drop can land in the same React batch
-  function commitDrop(e: React.DragEvent, targetId: string) {
-    const sourceId = e.dataTransfer.getData("text/plain") || draggingId;
-    const from = displayed.findIndex((t) => t._id === sourceId);
-    const target = displayed.findIndex((t) => t._id === targetId);
-    setDraggingId(null);
-    if (from < 0 || target < 0) return setPreview(null);
-
-    const to = destinationIndex(
-      from,
-      target,
-      dropEdge(e.clientY, e.currentTarget.getBoundingClientRect()),
-    );
-    const ids = moveItem(displayed, from, to).map((t) => t._id);
-    if (ids.join() === sorted.map((t) => t._id).join()) return setPreview(null);
-
-    setPreview(ids);
-    committed.current = true;
-    // Held until the write settles: clearing now would snap the rows back to the
-    // parent's pre-drop order for a frame, and on failure it shows the rollback
-    Promise.resolve(onReorder?.(ids)).finally(() => {
-      committed.current = false;
-      setPreview(null);
-    });
+    if (next) onReorder?.(next);
   }
 
   function SortHeader({
@@ -259,6 +329,17 @@ export function ListView({
   }
 
   return (
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCenter}
+      // The rows only ever move up and down, and never out of the table
+      modifiers={[restrictToVerticalAxis, restrictToParentElement]}
+      onDragEnd={handleDragEnd}
+    >
+    <SortableContext
+      items={sorted.map((t) => t._id)}
+      strategy={verticalListSortingStrategy}
+    >
     <div className="my-4 border border-border rounded-lg overflow-hidden">
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
@@ -272,7 +353,7 @@ export function ListView({
                 <SortHeader
                   label="Status"
                   column="status"
-                  className="hidden sm:table-cell"
+                  className="hidden sm:table-cell min-w-28"
                 />
               )}
               {show("assignee") && (
@@ -328,7 +409,7 @@ export function ListView({
             </tr>
           </thead>
           <tbody>
-            {displayed.map((task, index) => {
+            {sorted.map((task, index) => {
               const dueDateInfo = task.dueDate
                 ? (() => {
                     const due = new Date(task.dueDate);
@@ -365,12 +446,13 @@ export function ListView({
                   : "—";
 
               return (
+                <SortableRow key={task._id} id={task._id} disabled={!canReorder}>
+                  {({ setNodeRef, setHandleRef, handleProps, style }) => (
                 <tr
-                  key={task._id}
-                  style={tinted ? categoryTint(catColor) : undefined}
+                  style={{ ...(tinted ? categoryTint(catColor) : {}), ...style }}
                   ref={(el) => {
                     rowRefs.current[index] = el;
-                    registerRow(task._id)(el);
+                    setNodeRef(el);
                   }}
                   onClick={(e) => {
                     if (selectionActive || e.ctrlKey || e.metaKey) {
@@ -385,18 +467,7 @@ export function ListView({
                     e.preventDefault();
                     onTaskContextMenu(task._id, e.clientX, e.clientY);
                   }}
-                  onDragOver={(e) => {
-                    if (!canReorder || draggingId === task._id) return;
-                    e.preventDefault();
-                    e.dataTransfer.dropEffect = "move";
-                    previewDropAt(e, task._id);
-                  }}
-                  onDrop={(e) => {
-                    if (!canReorder) return;
-                    e.preventDefault();
-                    commitDrop(e, task._id);
-                  }}
-                  className={`group/row border-b border-border last:border-b-0 cursor-pointer transition-colors ${
+                  className={`group/row border-b border-border last:border-b-0 transition-colors ${
                     tinted ? "cat-row" : "hover:bg-bg-input/50"
                   } ${selected ? "bg-primary/10" : ""} ${
                     index === focusedIndex
@@ -409,33 +480,19 @@ export function ListView({
                       {/* The handle is the drag source, not the row: the row opens the
                           task on click and carries inline selects that a draggable
                           ancestor would make awkward to operate */}
-                      <span
-                        draggable
-                        role="button"
-                        tabIndex={-1}
+                      <button
+                        type="button"
+                        ref={setHandleRef}
                         aria-label={`Reorder ${taskKey}`}
                         title="Drag to reorder"
                         onClick={(e) => e.stopPropagation()}
-                        onDragStart={(e) => {
-                          setDraggingId(task._id);
-                          e.dataTransfer.effectAllowed = "move";
-                          e.dataTransfer.setData("text/plain", task._id);
-                          // The row itself moves to the drop position as you drag, so
-                          // the browser's floating copy would be a second, laggier one
-                          e.dataTransfer.setDragImage(transparentPixel(), 0, 0);
-                        }}
-                        onDragEnd={() => {
-                          setDraggingId(null);
-                          // A drop already owns the preview; this only covers a drag
-                          // abandoned outside the table, which animates back
-                          if (!committed.current) setPreview(null);
-                        }}
-                        className="flex w-4 cursor-grab select-none justify-center text-text-muted opacity-0 transition-opacity hover:text-text focus-visible:opacity-100 group-hover/row:opacity-100 active:cursor-grabbing"
+                        {...handleProps}
+                        className="focus-ring flex w-4 cursor-grab touch-none select-none justify-center text-text-muted opacity-0 transition-opacity hover:text-text focus-visible:opacity-100 group-hover/row:opacity-100 active:cursor-grabbing"
                       >
                         <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
                           <path d="M9 5h2v2H9zm0 6h2v2H9zm0 6h2v2H9zm4-12h2v2h-2zm0 6h2v2h-2zm0 6h2v2h-2z" />
                         </svg>
-                      </span>
+                      </button>
                     </td>
                   )}
                   {selectionActive && (
@@ -460,24 +517,15 @@ export function ListView({
                     className="px-2 py-2 font-mono text-xs text-text-muted max-w-24"
                     title={taskKey}
                   >
-                    <span className="flex items-center gap-1">
-                      {task.pinned && (
-                        <svg
-                          className="w-3 h-3 shrink-0 text-primary"
-                          fill="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2z" />
-                        </svg>
-                      )}
-                      <span className="truncate">{taskKey}</span>
-                    </span>
+                    <span className="truncate">{taskKey}</span>
                   </td>
                   <td
                     // overflow-hidden on the cell too: the column can be squeezed
                     // narrower than the title's min width, and the div alone would
                     // then paint its overflow across the next cell
-                    className="px-2 py-2 font-medium w-full max-w-0 overflow-hidden"
+                    // The pointer lives on the title alone: the row opens the task,
+                    // but a hand over the selects and the drag grip reads as wrong
+                    className="px-2 py-2 font-medium w-full max-w-0 overflow-hidden cursor-pointer"
                     title={task.title}
                   >
                     {/* No min-width: it would be a floor the table cannot go under,
@@ -487,29 +535,36 @@ export function ListView({
                   {show("status") && (
                     <td className="px-2 py-2 hidden sm:table-cell">
                       {onStatusChange ? (
-                        <select
+                        <Combobox
                           value={task.status}
-                          title={statusLabel}
-                          aria-label={`Status for ${taskKey}: ${task.title}`}
-                          onChange={(e) => {
-                            e.stopPropagation();
-                            onStatusChange(task._id, e.target.value);
-                          }}
-                          onClick={(e) => e.stopPropagation()}
-                          className="focus-ring text-xs bg-bg-input border border-border rounded px-1.5 py-1 w-full min-w-24 max-w-28 text-text cursor-pointer"
+                          options={listColumns.map((c) => ({
+                            value: c.id,
+                            label: c.label,
+                            color: c.color,
+                          }))}
+                          onChange={(next) => onStatusChange(task._id, next)}
+                          label={`Status for ${taskKey}: ${task.title}`}
+                          triggerClassName="w-full rounded"
                         >
-                          {listColumns.map((c) => (
-                            <option key={c.id} value={c.id}>
-                              {c.label}
-                            </option>
-                          ))}
-                        </select>
+                          {(selected) => (
+                            <Badge
+                              variant="status"
+                              value={task.status}
+                              color={columnById.get(task.status)?.color}
+                              className="w-full"
+                            >
+                              <span className="truncate" title={statusLabel}>
+                                {selected?.label ?? statusLabel}
+                              </span>
+                            </Badge>
+                          )}
+                        </Combobox>
                       ) : (
                         <Badge
                           variant="status"
                           value={task.status}
                           color={columnById.get(task.status)?.color}
-                          className="max-w-28"
+                          className="w-full"
                         >
                           <span className="truncate" title={statusLabel}>
                             {statusLabel}
@@ -520,7 +575,7 @@ export function ListView({
                   )}
                   {show("assignee") && (
                     <td
-                      className="px-2 py-2 hidden md:table-cell text-text-muted max-w-32"
+                      className="px-2 py-2 hidden md:table-cell text-text-muted"
                       title={assigneeName}
                     >
                       {onAssigneeChange && assignableUsers.length > 0 ? (
@@ -531,19 +586,44 @@ export function ListView({
                           onChange={onAssigneeChange}
                         />
                       ) : (
-                        <div className="truncate">{assigneeName}</div>
+                        <AssigneeAvatar
+                          fullName={assigneeName === "—" ? "" : assigneeName}
+                        />
                       )}
                     </td>
                   )}
                   {show("priority") && (
                     <td className="px-2 py-2 hidden md:table-cell">
-                      <Badge variant="priority" value={task.priority}>
-                        {PRIORITY_LABELS[task.priority] ?? task.priority}
-                      </Badge>
+                      <EnumCell
+                        value={task.priority}
+                        options={PRIORITY_OPTIONS}
+                        label={`Priority for ${taskKey}: ${task.title}`}
+                        onChange={
+                          onPriorityChange && ((next) => onPriorityChange(task._id, next))
+                        }
+                      >
+                        <Badge variant="priority" value={task.priority} className="w-full">
+                          <span className="truncate">
+                            {PRIORITY_LABELS[task.priority] ?? task.priority}
+                          </span>
+                        </Badge>
+                      </EnumCell>
                     </td>
                   )}
                   {show("sprint") && (
                     <td className="px-2 py-2 hidden lg:table-cell text-xs max-w-32">
+                      <EnumCell
+                        value={task.sprint ?? ""}
+                        options={[
+                          { value: "", label: "No sprint" },
+                          ...sprints.map((s) => ({ value: s._id, label: s.name })),
+                        ]}
+                        label={`Sprint for ${taskKey}: ${task.title}`}
+                        onChange={
+                          onSprintChange &&
+                          ((next) => onSprintChange(task._id, next || null))
+                        }
+                      >
                       {(() => {
                         const sprint = task.sprint
                           ? sprintById.get(task.sprint)
@@ -567,6 +647,9 @@ export function ListView({
                             </span>
                           </span>
                         );
+                        // The picker replaces the link to the sprints page: one cell
+                        // cannot be both, and changing the sprint is the commoner act
+                        if (onSprintChange) return inner;
                         return projectId ? (
                           <Link
                             href={`/projects/${projectId}/sprints`}
@@ -579,20 +662,34 @@ export function ListView({
                           inner
                         );
                       })()}
+                      </EnumCell>
                     </td>
                   )}
                   {show("category") && (
                     <td className="px-2 py-2 hidden lg:table-cell max-w-32">
-                      <Badge
-                        variant="category"
+                      <EnumCell
                         value={task.category}
-                        color={catColor}
-                        className="max-w-28"
+                        options={categories.map((c) => ({
+                          value: c.name,
+                          label: c.name,
+                          color: c.color,
+                        }))}
+                        label={`Category for ${taskKey}: ${task.title}`}
+                        onChange={
+                          onCategoryChange && ((next) => onCategoryChange(task._id, next))
+                        }
                       >
-                        <span className="truncate" title={task.category}>
-                          {task.category}
-                        </span>
-                      </Badge>
+                        <Badge
+                          variant="category"
+                          value={task.category}
+                          color={catColor}
+                          className="w-full"
+                        >
+                          <span className="truncate" title={task.category}>
+                            {task.category}
+                          </span>
+                        </Badge>
+                      </EnumCell>
                     </td>
                   )}
                   {show("dueDate") && (
@@ -610,24 +707,52 @@ export function ListView({
                     </td>
                   )}
                   {fieldColumns.map((column) => {
-                    const text = fieldCellText(task.customFieldValues, column.field!);
+                    const field = column.field!;
+                    const text = fieldCellText(task.customFieldValues, field);
+                    // Only single-choice fields: a multiselect needs a control that
+                    // can hold several values, which this picker cannot
+                    const choices =
+                      field.fieldType === "dropdown"
+                        ? [
+                            { value: "", label: "—" },
+                            ...field.options.map((o) => ({
+                              value: o.value,
+                              label: o.value,
+                              color: o.color,
+                            })),
+                          ]
+                        : [];
                     return (
                       <td
                         key={column.id}
                         className="px-2 py-2 hidden lg:table-cell text-text-muted max-w-32"
                         title={text || undefined}
                       >
-                        <div className="truncate">{text || "—"}</div>
+                        <EnumCell
+                          value={text}
+                          options={choices}
+                          label={`${field.name} for ${taskKey}: ${task.title}`}
+                          onChange={
+                            onFieldChange &&
+                            ((next) => onFieldChange(task._id, field._id, next))
+                          }
+                        >
+                          <div className="truncate">{text || "—"}</div>
+                        </EnumCell>
                       </td>
                     );
                   })}
                 </tr>
+                  )}
+                </SortableRow>
               );
             })}
           </tbody>
         </table>
       </div>
     </div>
+    </SortableContext>
+    </DndContext>
   );
 }
 
@@ -653,31 +778,33 @@ function AssigneeCell({
       ? users
       : [...users, { _id: current, username: current, fullName: current }];
 
+  const fullName =
+    task.assignee && typeof task.assignee === "object" ? task.assignee.fullName : "";
+
   return (
-    <select
+    <Combobox
       value={current}
-      disabled={saving}
-      aria-label={`Assignee for ${taskKey}: ${task.title}`}
-      onClick={(e) => e.stopPropagation()}
-      onChange={async (e) => {
-        e.stopPropagation();
+      options={[
+        { value: "", label: "Unassigned" },
+        ...options.map((u) => ({ value: u.username, label: u.fullName })),
+      ]}
+      onChange={async (next) => {
         setSaving(true);
         try {
-          await onChange(task._id, e.target.value);
+          await onChange(task._id, next);
         } finally {
           setSaving(false);
         }
       }}
-      className={`focus-ring text-xs bg-bg-input border border-border rounded px-1.5 py-1 w-full min-w-24 max-w-28 text-text cursor-pointer ${
+      label={`Assignee for ${taskKey}: ${task.title}`}
+      disabled={saving}
+      // The avatar is small and otherwise reads as a static badge; the ring is what
+      // says it opens something
+      triggerClassName={`rounded-full transition hover:ring-2 hover:ring-primary/40 ${
         saving ? "opacity-50" : ""
       }`}
     >
-      <option value="">Unassigned</option>
-      {options.map((u) => (
-        <option key={u._id} value={u.username}>
-          {u.fullName}
-        </option>
-      ))}
-    </select>
+      {() => <AssigneeAvatar fullName={fullName} />}
+    </Combobox>
   );
 }

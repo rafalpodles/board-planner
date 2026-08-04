@@ -236,7 +236,7 @@ export async function updateTask(
   // Whitelist allowed fields to prevent overwriting protected fields
   const allowed = [
     "title", "description", "priority", "category",
-    "status", "assignee", "dueDate", "checklist", "order", "pinned", "sprint", "customFieldValues", "recurrence",
+    "status", "assignee", "dueDate", "checklist", "order", "sprint", "customFieldValues", "recurrence",
   ];
   const updates: Record<string, unknown> = {};
   for (const field of allowed) {
