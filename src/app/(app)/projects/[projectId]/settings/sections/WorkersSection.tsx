@@ -2,12 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { useApi } from "@/hooks/use-api";
+import { useDraft } from "@/hooks/use-draft";
 import { useToast } from "@/components/ui/Toast";
 import { Input } from "@/components/ui/Input";
 import { SettingsCard } from "@/components/settings/SettingsCard";
+import { useDirtyGroup } from "@/components/settings/settings-context";
 import { PROJECT_POLICY_DEFAULTS } from "@/lib/worker-policy";
 import { projectRemotes, sameRepo } from "@/lib/repo-match";
-import { ApiWorker } from "@/types";
+import { ApiProject, ApiWorker } from "@/types";
 import { SectionProps } from "./types";
 
 const NUMBER_FIELDS = new Set(["taskTimeoutMs", "maxDiffLines", "maxDiffFiles"]);
@@ -23,17 +25,32 @@ const LABELS: Record<string, string> = {
 };
 
 type PolicyValue = string | number | boolean;
+type Draft = Record<string, PolicyValue>;
 
-export function WorkersSection({ projectId, project, patchProject, isAdmin }: SectionProps) {
+const FIELDS = Object.keys(PROJECT_POLICY_DEFAULTS);
+const DEFAULTS = PROJECT_POLICY_DEFAULTS as unknown as Record<string, PolicyValue>;
+
+// An inherited field shows the default rather than the stored copy of it: the two diverge once a
+// default changes, and the default is what a worker will actually run under.
+function draftFrom(project: ApiProject): Draft {
+  const stored = (project.worker?.policy ?? {}) as unknown as Record<string, PolicyValue>;
+  const pinned = new Set(project.worker?.policyOverrides ?? []);
+  const draft: Draft = { enabled: !!project.worker?.enabled };
+  for (const field of FIELDS) draft[field] = pinned.has(field) ? stored[field] : DEFAULTS[field];
+  return draft;
+}
+
+export function WorkersSection({ projectId, project, replaceProject, isAdmin }: SectionProps) {
   const api = useApi();
   const { toast } = useToast();
 
   const [workers, setWorkers] = useState<ApiWorker[] | null>(null);
-  const [saving, setSaving] = useState(false);
+  const draft = useDraft<Draft>(draftFrom(project));
+  // Un-pinning is intent, not a value, so it cannot live in the draft's diff: a field reset to the
+  // default is byte-identical to one that was already inheriting it.
+  const [unpinned, setUnpinned] = useState<Set<string>>(new Set());
+  const pinned = new Set(project.worker?.policyOverrides ?? []);
 
-  const config = project.worker;
-  // Both integrations, matching what the server does — considering one would show "None yet"
-  // for a machine holding the other checkout while the server assigned it anyway.
   const wanted = projectRemotes(project);
 
   useEffect(() => {
@@ -45,27 +62,62 @@ export function WorkersSection({ projectId, project, patchProject, isAdmin }: Se
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdmin]);
 
-  async function save(patch: Record<string, unknown>) {
-    setSaving(true);
+  async function save(): Promise<void> {
+    const policy: Record<string, PolicyValue> = {};
+    for (const field of draft.dirtyKeys) {
+      const name = String(field);
+      if (name === "enabled" || unpinned.has(name)) continue;
+      policy[name] = draft.value[name];
+    }
+
+    const patch: Record<string, unknown> = {};
+    if (draft.isDirty("enabled")) patch.enabled = draft.value.enabled;
+    if (Object.keys(policy).length > 0) patch.policy = policy;
+    if (unpinned.size > 0) patch.reset = [...unpinned];
+    if (Object.keys(patch).length === 0) return;
+
     try {
-      const updated = await api.put(`/api/projects/${projectId}`, { worker: patch });
-      patchProject({ worker: updated.worker });
+      const updated: ApiProject = await api.put(`/api/projects/${projectId}`, { worker: patch });
+      replaceProject(updated);
+      draft.commit(draftFrom(updated));
+      setUnpinned(new Set());
     } catch (err) {
-      toast(err instanceof Error ? err.message : "Could not save", "error");
-    } finally {
-      setSaving(false);
+      toast(err instanceof Error ? err.message : "Could not save worker settings", "error");
     }
   }
 
-  const overrides = new Set(config?.policyOverrides ?? []);
-  const valueOf = (field: string): PolicyValue => {
-    const stored = (config?.policy ?? {}) as unknown as Record<string, PolicyValue>;
-    // An inherited field shows the default rather than the stored copy of it: they diverge once a
-    // default changes, and the default is what a worker will actually run under.
-    return overrides.has(field)
-      ? stored[field]
-      : (PROJECT_POLICY_DEFAULTS as Record<string, PolicyValue>)[field];
-  };
+  useDirtyGroup(
+    {
+      id: "workers",
+      section: "workers",
+      label: "Workers",
+      count:
+        draft.count + [...unpinned].filter((f) => !draft.dirtyKeys.includes(f)).length,
+    },
+    {
+      save,
+      discard: () => {
+        draft.discard();
+        setUnpinned(new Set());
+      },
+    }
+  );
+
+  function resetField(field: string): void {
+    draft.set(field, DEFAULTS[field]);
+    setUnpinned((prev) => new Set(prev).add(field));
+  }
+
+  // Editing pins the field again, so a reset followed by a change does not send both
+  function editField(field: string, value: PolicyValue): void {
+    draft.set(field, value);
+    setUnpinned((prev) => {
+      if (!prev.has(field)) return prev;
+      const next = new Set(prev);
+      next.delete(field);
+      return next;
+    });
+  }
 
   // Which machines could serve this project. A worker offers a checkout; the operator granted it
   // locally in repos.json, and no path is ever set from here.
@@ -73,11 +125,15 @@ export function WorkersSection({ projectId, project, patchProject, isAdmin }: Se
     (w.repos ?? []).some((r) => wanted.some((candidate) => sameRepo(candidate, r.remote)))
   );
 
+  const contract = isAdmin ? "draft" : "readonly";
+
   return (
     <div className="space-y-6">
       <SettingsCard
         title="Autonomous workers"
         description="A worker claims approved tasks, runs the coding agent in its own checkout, and opens a pull request. Nothing runs until you enable it here."
+        contract={contract}
+        instanceScoped
       >
         {!project.githubRepo && !project.gitlabRepo ? (
           <p className="text-sm text-danger">
@@ -89,9 +145,9 @@ export function WorkersSection({ projectId, project, patchProject, isAdmin }: Se
             <label className="flex items-center gap-3 text-sm">
               <input
                 type="checkbox"
-                checked={!!config?.enabled}
-                disabled={!isAdmin || saving}
-                onChange={(e) => save({ enabled: e.target.checked })}
+                checked={!!draft.value.enabled}
+                disabled={!isAdmin}
+                onChange={(e) => draft.set("enabled", e.target.checked)}
               />
               <span>Let workers run tasks for this project</span>
             </label>
@@ -128,11 +184,14 @@ export function WorkersSection({ projectId, project, patchProject, isAdmin }: Se
       <SettingsCard
         title="How work is done here"
         description="These describe this repository, so every machine serving it runs under the same values. A field you have not set follows the default."
+        contract={contract}
+        instanceScoped
       >
         <div className="space-y-3">
-          {Object.keys(PROJECT_POLICY_DEFAULTS).map((field) => {
-            const value = valueOf(field);
-            const inherited = !overrides.has(field);
+          {FIELDS.map((field) => {
+            const value = draft.value[field];
+            // What the row will mean once saved, not what is stored right now
+            const inherits = unpinned.has(field) || (!pinned.has(field) && !draft.isDirty(field));
             return (
               <div key={field} className="flex items-center gap-3">
                 <span className="w-52 text-sm">{LABELS[field] ?? field}</span>
@@ -140,34 +199,31 @@ export function WorkersSection({ projectId, project, patchProject, isAdmin }: Se
                   <input
                     type="checkbox"
                     checked={value}
-                    disabled={!isAdmin || saving}
-                    onChange={(e) => save({ policy: { [field]: e.target.checked } })}
+                    disabled={!isAdmin}
+                    onChange={(e) => editField(field, e.target.checked)}
                   />
                 ) : (
                   <Input
-                    // Uncontrolled, so React will not refresh it on its own — remounting on the
-                    // resolved value is what stops a reset leaving the old number under a
-                    // "default" label. Editing still works, because the key only changes on save.
-                    key={String(value)}
+                    // Controlled: an uncontrolled input keeps showing the old number after a reset
+                    // or a discard, under a label that has already changed
+                    value={String(value)}
                     className="flex-1"
-                    defaultValue={String(value)}
-                    disabled={!isAdmin || saving}
-                    onBlur={(e) => {
-                      const raw = e.target.value.trim();
-                      if (!raw || raw === String(value)) return;
-                      save({
-                        policy: { [field]: NUMBER_FIELDS.has(field) ? Number(raw) : raw },
-                      });
-                    }}
+                    disabled={!isAdmin}
+                    onChange={(e) =>
+                      editField(
+                        field,
+                        NUMBER_FIELDS.has(field) ? Number(e.target.value) : e.target.value
+                      )
+                    }
                   />
                 )}
-                {inherited ? (
+                {inherits ? (
                   <span className="text-xs text-text-muted w-24">default</span>
                 ) : (
                   <button
                     type="button"
-                    disabled={!isAdmin || saving}
-                    onClick={() => save({ reset: [field] })}
+                    disabled={!isAdmin}
+                    onClick={() => resetField(field)}
                     className="text-xs text-primary hover:underline w-24 text-left disabled:text-text-muted disabled:no-underline"
                     title="Follow the default again"
                   >
@@ -178,12 +234,6 @@ export function WorkersSection({ projectId, project, patchProject, isAdmin }: Se
             );
           })}
         </div>
-        {!isAdmin && (
-          <p className="text-xs text-text-muted mt-3">
-            Only an instance admin can change these — enabling a project commits somebody&apos;s
-            machine to running agent-written code.
-          </p>
-        )}
       </SettingsCard>
     </div>
   );
