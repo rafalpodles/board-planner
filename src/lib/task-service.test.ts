@@ -3,6 +3,35 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // by a hand-rolled reading of them
 import sift from "sift";
 
+// MongoDB's $cond treats only false, null, 0 and missing as false. An **empty string is true** —
+// the opposite of JavaScript. `execution.workerId` defaults to "", so an expression that leaned on
+// truthiness cleared the assignee of every task that had ever carried an execution subdocument,
+// on every ordinary status change. It shipped, because asserting the *shape* of an expression
+// cannot notice what the shape means. This runs it instead.
+function mongoTruthy(value: unknown): boolean {
+  return !(value === false || value === null || value === undefined || value === 0);
+}
+
+function evaluateExpr(expr: unknown, doc: Record<string, unknown>): unknown {
+  if (typeof expr === "string" && expr.startsWith("$")) {
+    return expr
+      .slice(1)
+      .split(".")
+      .reduce<unknown>((at, key) => (at as Record<string, unknown>)?.[key], doc);
+  }
+  if (!expr || typeof expr !== "object" || Array.isArray(expr)) return expr;
+
+  const [op, args] = Object.entries(expr as Record<string, unknown>)[0];
+  const list = (Array.isArray(args) ? args : [args]).map((a) => evaluateExpr(a, doc));
+
+  if (op === "$cond") return mongoTruthy(list[0]) ? list[1] : list[2];
+  if (op === "$ifNull") return list[0] === undefined || list[0] === null ? list[1] : list[0];
+  if (op === "$ne") return list[0] !== list[1];
+  if (op === "$eq") return list[0] === list[1];
+  throw new Error(`the evaluator does not know ${op}`);
+}
+
+
 // Every path that hands a task back to the board became a pipeline update when the assignment
 // started travelling with the run, so the shape these read is [{ $set }, { $unset }] rather than
 // { $set, $unset }. Both are accepted so the tests say what they mean rather than what Mongo wants.
@@ -701,7 +730,9 @@ describe("every way back to the board clears the assignment", () => {
 
   // Cleared only for a task a worker was running: these same updates are what a person dragging a
   // card goes through, and clearing their assignment would be a bug of its own
-  const CLEARED = { $cond: [{ $ifNull: ["$execution.workerId", false] }, null, "$assignee"] };
+  const CLEARED = {
+    $cond: [{ $ne: [{ $ifNull: ["$execution.workerId", ""] }, ""] }, null, "$assignee"],
+  };
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -803,5 +834,35 @@ describe("every way back to the board clears the assignment", () => {
     await updateTask("p1", "t1", { status: "checking" }, "actor");
 
     expect(findOneAndUpdate.mock.calls[0][1].$set.assignee).toBeNull();
+  });
+});
+
+describe("what the clearing expression actually evaluates to", () => {
+  const CLEARING = {
+    $cond: [{ $ne: [{ $ifNull: ["$execution.workerId", ""] }, ""] }, null, "$assignee"],
+  };
+
+  it("keeps a person's assignment on a task no worker has ever run", () => {
+    const doc = { assignee: "USER-A", execution: { workerId: "" } };
+
+    expect(evaluateExpr(CLEARING, doc)).toBe("USER-A");
+  });
+
+  it("keeps it on a task with no execution subdocument at all", () => {
+    expect(evaluateExpr(CLEARING, { assignee: "USER-A" })).toBe("USER-A");
+  });
+
+  it("clears it on a task a worker is running", () => {
+    const doc = { assignee: "u-worker", execution: { workerId: "w1" } };
+
+    expect(evaluateExpr(CLEARING, doc)).toBeNull();
+  });
+
+  // The shipped-and-reverted version, kept as the thing this must never become again
+  it("would have cleared every assignment had it leaned on truthiness", () => {
+    const naive = { $cond: [{ $ifNull: ["$execution.workerId", false] }, null, "$assignee"] };
+    const doc = { assignee: "USER-A", execution: { workerId: "" } };
+
+    expect(evaluateExpr(naive, doc)).toBeNull();
   });
 });
