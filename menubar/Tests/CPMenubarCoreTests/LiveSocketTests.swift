@@ -30,7 +30,7 @@ func readsConfigFromARunningWorker() async throws {
 
     #expect(!config.workerName.isEmpty)
     #expect(!config.apiUrl.isEmpty)
-    #expect(config.maxDiffLines > 0)
+    #expect(config.pollIntervalMs > 0)
 }
 
 @Test(.enabled(if: liveSocket != nil))

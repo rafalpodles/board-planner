@@ -181,17 +181,26 @@ describe("applyPolicy", () => {
 });
 
 describe("parseAssignments", () => {
+  // An assignment names a remote, never a path: the worker resolves its own checkout from it, so
+  // the server has no way to point this machine at a directory.
   it("keeps a well-formed assignment", () => {
-    const assignments = parseAssignments([{ project: "p1", proposedPath: "/repo" }]);
-    expect(assignments).toEqual([{ project: "p1", proposedPath: "/repo" }]);
+    const assignments = parseAssignments([{ project: "p1", remote: "git@github.com:o/r.git" }]);
+    expect(assignments).toEqual([{ project: "p1", remote: "git@github.com:o/r.git" }]);
   });
 
-  it("drops an entry missing proposedPath, keeping the rest", () => {
+  it("carries the project's own policy alongside it", () => {
+    const assignments = parseAssignments([
+      { project: "p1", remote: "git@github.com:o/r.git", policy: { autoMerge: true } },
+    ]);
+    expect(assignments[0].policy).toEqual({ autoMerge: true });
+  });
+
+  it("drops an entry missing a remote, keeping the rest", () => {
     const assignments = parseAssignments([
       { project: "p1" },
-      { project: "p2", proposedPath: "/repo2" },
+      { project: "p2", remote: "git@github.com:o/r2.git" },
     ]);
-    expect(assignments).toEqual([{ project: "p2", proposedPath: "/repo2" }]);
+    expect(assignments).toEqual([{ project: "p2", remote: "git@github.com:o/r2.git" }]);
   });
 
   it("returns an empty list for anything that is not an array", () => {

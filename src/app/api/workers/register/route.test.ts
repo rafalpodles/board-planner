@@ -20,9 +20,9 @@ const { POST } = await import("./route");
 
 const WORKER = {
   _id: "w1",
-  policy: { model: "haiku" },
-  policyOverrides: ["model"],
-  assignments: [{ project: "p1", proposedPath: "/repo" }],
+  policy: { pollIntervalMs: 5000 },
+  policyOverrides: ["pollIntervalMs"],
+  repos: [],
 };
 
 function request(body: unknown, token?: string) {
@@ -118,9 +118,17 @@ describe("POST /api/workers/register", () => {
     expect(consumeEnrolmentToken).not.toHaveBeenCalled();
   });
 
-  it("sends only the overridden policy, as the heartbeat does", async () => {
+  it("sends only the overridden machine policy, as the heartbeat does", async () => {
     const json = await (await POST(request(VALID, "cpe_good"))).json();
 
-    expect(json.policy).toEqual({ model: "haiku" });
+    expect(json.policy).toEqual({ pollIntervalMs: 5000 });
+  });
+
+  // A worker that has just registered has reported no checkouts, so nothing can be matched yet.
+  // Its first heartbeat carries the inventory and gets the projects back.
+  it("assigns nothing at registration, before the worker has reported what it has", async () => {
+    const json = await (await POST(request(VALID, "cpe_good"))).json();
+
+    expect(json.assignments).toEqual([]);
   });
 });

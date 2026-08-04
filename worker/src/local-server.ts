@@ -17,14 +17,25 @@ import { Telemetry } from "./telemetry.js";
 // What the operator's own cockpit may know: the effective policy this worker is running under, and
 // nothing that would let a reader reach the server or the checkout. No credential, no repository
 // path — see the header comment.
-export interface LocalConfigView {
-  apiUrl: string;
-  workerName: string;
-  projectCount: number;
+// Work settings are per project now, so there is no single answer for "the model" — reporting one
+// would show an operator a value no run is using. The machine's own settings stay at the top; each
+// bound project reports what it actually resolved to.
+export interface LocalProjectView {
+  project: string;
+  autoMerge: boolean;
+  baseBranch: string;
   model: string;
   reviewModel: string;
   maxDiffLines: number;
   taskTimeoutMs: number;
+}
+
+export interface LocalConfigView {
+  apiUrl: string;
+  workerName: string;
+  projectCount: number;
+  pollIntervalMs: number;
+  projects: LocalProjectView[];
 }
 
 export interface LocalServerDeps {
