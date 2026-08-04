@@ -6,6 +6,7 @@ import { useDraft } from "@/hooks/use-draft";
 import { useToast } from "@/components/ui/Toast";
 import { COLUMN_ROLES, ColumnRole, ROLE_LABELS } from "@/types";
 import { effectiveColumns } from "@/lib/columns";
+import { escalationColumnId, flaggedColumnIds, withEscalationColumn } from "@/lib/escalation";
 import { Input } from "@/components/ui/Input";
 import { Popover } from "@/components/ui/Popover";
 import { SwatchPicker } from "@/components/ui/SwatchPicker";
@@ -63,7 +64,13 @@ export function BoardSection({
   function update(index: number, patch: Partial<ColumnDraft>) {
     draft.set(
       "columns",
-      columns.map((c, i) => (i === index ? { ...c, ...patch } : c))
+      columns.map((c, i) => {
+        if (i !== index) return c;
+        const next = { ...c, ...patch };
+        // Moving the escalation column out of review would otherwise relocate the hand-off
+        // to whichever review column happens to sort first, silently
+        return next.role === "review" ? next : { ...next, triggersPmReview: false };
+      })
     );
   }
 
@@ -101,7 +108,17 @@ export function BoardSection({
     }
   );
 
+  const reviewColumns = columns.filter((c) => c.role === "review");
+  const escalation = escalationColumnId(columns);
+  const explicit = columns.some((c) => c.triggersPmReview);
+  // The flag used to be a per-column checkbox, so a project could carry several. Only one
+  // survives the next save of this section, and it is not obvious which
+  const strandedFlags = flaggedColumnIds(effectiveColumns(project.columns)).filter(
+    (id) => id !== escalation
+  );
+
   return (
+    <>
     <SettingsCard
       title="Columns"
       description="Drag to reorder. A column that still holds tasks can't be removed."
@@ -234,5 +251,65 @@ export function BoardSection({
         </Button>
       </div>
     </SettingsCard>
+
+    <SettingsCard
+      title="Hand-off to the PM agent"
+      description="The one column that means a human or the PM agent needs to look at this."
+    >
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-6">
+        <div className="pt-0.5 sm:w-[40%] sm:shrink-0">
+          <strong className="block text-[13.5px] font-semibold">Escalation column</strong>
+          <span className="mt-0.5 block text-xs text-text-muted">Two things land here</span>
+        </div>
+        <div className="min-w-0 flex-1">
+          <select
+            value={explicit ? escalation : ""}
+            aria-label="Escalation column"
+            onChange={(e) =>
+              draft.set("columns", withEscalationColumn(columns, e.target.value || null))
+            }
+            className="focus-ring w-full rounded-lg border border-border bg-bg-input px-3 py-2 text-sm"
+          >
+            <option value="">— none —</option>
+            {reviewColumns.map((c) => (
+              <option key={c.id ?? c.label} value={c.id}>
+                {c.label}
+              </option>
+            ))}
+          </select>
+          <p className="mt-1.5 text-xs text-text-muted">
+            A task whose worker run fails or times out is moved here, and — if PM autonomy is
+            on — arriving here queues a PM turn against the daily cap.
+          </p>
+          {reviewColumns.length === 0 && (
+            <p className="mt-1.5 text-xs text-text-muted">
+              Only a column set to <strong>{ROLE_LABELS.review.label}</strong> can take the
+              hand-off, and this board has none.
+            </p>
+          )}
+          {!explicit && escalation && (
+            <p className="mt-1.5 text-xs text-text-muted">
+              Nothing is chosen, so automation falls back to the first review column —{" "}
+              <strong>{columns.find((c) => c.id === escalation)?.label}</strong>.
+            </p>
+          )}
+        </div>
+      </div>
+
+      {strandedFlags.length > 0 && (
+        <div className="flex gap-2 rounded-lg border-l-2 border-warning bg-warning/10 px-3 py-2 text-sm">
+          <span aria-hidden>⚠</span>
+          <p className="m-0">
+            This board hands off from more than one column, which nothing supports. Saving keeps{" "}
+            <strong>{columns.find((c) => c.id === escalation)?.label ?? "none"}</strong> and stops{" "}
+            {strandedFlags
+              .map((id) => effectiveColumns(project.columns).find((c) => c.id === id)?.label ?? id)
+              .join(", ")}{" "}
+            from queueing PM turns.
+          </p>
+        </div>
+      )}
+    </SettingsCard>
+    </>
   );
 }

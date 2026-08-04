@@ -5,6 +5,7 @@ import { User } from "@/models/user";
 import { Comment } from "@/models/comment";
 import { ApiTaskExecution, ITask, ITaskExecution, DEFAULT_PRIORITY } from "@/types";
 import { getColumnIds, defaultStatusFor, roleOf, getProjectColumns } from "@/lib/columns";
+import { escalationColumnId } from "@/lib/escalation";
 import { logActivity } from "@/lib/activity";
 import { dispatchWebhooks } from "@/lib/webhooks";
 import { dispatchNotifications } from "@/lib/notifications";
@@ -556,8 +557,7 @@ export async function releaseExpiredTasks(projectId: string, now = new Date()): 
   const active = columns.filter((c) => c.role === "active").map((c) => c.id);
   if (!approved || active.length === 0) return 0;
 
-  const review = columns.filter((c) => c.role === "review");
-  const exhausted = (review.find((c) => c.triggersPmReview) ?? review[0])?.id ?? approved;
+  const exhausted = escalationColumnId(columns) ?? approved;
   const expired = {
     project: projectId,
     status: { $in: active },
@@ -636,8 +636,7 @@ export async function releaseTask(
   if (!approved || active.length === 0) return null;
 
   if (options.refund === false) {
-    const review = columns.filter((c) => c.role === "review");
-    const exhausted = (review.find((c) => c.triggersPmReview) ?? review[0])?.id ?? approved;
+    const exhausted = escalationColumnId(columns) ?? approved;
 
     return Task.findOneAndUpdate(
       { _id: taskId, project: projectId, status: { $in: active } },
