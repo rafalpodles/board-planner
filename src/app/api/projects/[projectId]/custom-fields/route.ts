@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { withProjectAccess } from "@/lib/middleware";
+import { withProjectAccess, withProjectAdmin } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { CUSTOM_FIELD_TYPES, CustomFieldType } from "@/types";
 import { isOptionField, parseOptions, MAX_FIELD_NAME_LENGTH } from "@/lib/custom-fields";
@@ -19,7 +19,7 @@ export const GET = withProjectAccess(async (_request, { params }) => {
   return NextResponse.json(project.customFields || []);
 });
 
-export const POST = withProjectAccess(async (request, { params }) => {
+export const POST = withProjectAdmin(async (request, { params }) => {
   const { projectId } = await params;
   await connectDB();
 

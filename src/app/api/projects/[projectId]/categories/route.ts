@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { withProjectAccess } from "@/lib/middleware";
+import { withProjectAccess, withProjectAdmin } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { Task } from "@/models/task";
 import { logProjectAudit } from "@/lib/projectAudit";
@@ -17,7 +17,7 @@ export const GET = withProjectAccess(async (_request, { params }) => {
   return NextResponse.json(project.categories || []);
 });
 
-export const POST = withProjectAccess(async (request, { params, user }) => {
+export const POST = withProjectAdmin(async (request, { params, user }) => {
   const { projectId } = await params;
   await connectDB();
 
@@ -48,7 +48,7 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
   return NextResponse.json(project.categories, { status: 201 });
 });
 
-export const DELETE = withProjectAccess(async (request, { params, user }) => {
+export const DELETE = withProjectAdmin(async (request, { params, user }) => {
   const { projectId } = await params;
   await connectDB();
 
