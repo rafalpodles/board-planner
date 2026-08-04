@@ -4,9 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { useDraft } from "@/hooks/use-draft";
 import { useToast } from "@/components/ui/Toast";
-import { COLUMN_ROLES, ColumnRole } from "@/types";
+import { COLUMN_ROLES, ColumnRole, ROLE_LABELS } from "@/types";
 import { effectiveColumns } from "@/lib/columns";
 import { Input } from "@/components/ui/Input";
+import { Popover } from "@/components/ui/Popover";
+import { SwatchPicker } from "@/components/ui/SwatchPicker";
 import { Button } from "@/components/ui/Button";
 import { SettingsCard } from "@/components/settings/SettingsCard";
 import { useDirtyGroup } from "@/components/settings/settings-context";
@@ -77,7 +79,7 @@ export function BoardSection({
     if (!newLabel.trim()) return;
     draft.set("columns", [
       ...columns,
-      { label: newLabel.trim(), color: "#6b7280", role: "active", triggersPmReview: false },
+      { label: newLabel.trim(), color: "#6b7280", role: "backlog", triggersPmReview: false },
     ]);
     setNewLabel("");
   }
@@ -131,35 +133,46 @@ export function BoardSection({
                 className="min-h-[38px] py-1.5"
               />
             </div>
-            <input
-              type="color"
-              value={col.color}
-              onChange={(e) => update(i, { color: e.target.value })}
-              aria-label={`Colour for ${col.label}`}
-              className="h-9 w-9 cursor-pointer rounded-lg border border-border bg-transparent"
-            />
-            <select
-              value={col.role}
-              onChange={(e) => update(i, { role: e.target.value as ColumnRole })}
-              className="rounded-lg border border-border bg-bg-input px-2 py-1.5 text-sm"
+            <Popover
+              width="w-auto"
+              trigger={({ toggle }) => (
+                <button
+                  type="button"
+                  onClick={toggle}
+                  aria-label={`Colour for ${col.label}`}
+                  className="focus-ring h-9 w-9 shrink-0 rounded-lg border border-border"
+                  style={{ backgroundColor: col.color }}
+                />
+              )}
             >
-              {COLUMN_ROLES.map((r) => (
-                <option key={r} value={r}>
-                  {r}
-                </option>
-              ))}
-            </select>
-            <label
-              className="flex cursor-pointer items-center gap-1.5 text-xs text-text-muted"
-              title="Entering this column queues a PM agent review (when PM autonomy is enabled)"
-            >
-              <input
-                type="checkbox"
-                checked={col.triggersPmReview}
-                onChange={(e) => update(i, { triggersPmReview: e.target.checked })}
-              />
-              PM review
-            </label>
+              {({ close }) => (
+                <div className="p-2">
+                  <SwatchPicker
+                    value={col.color}
+                    label={`Colour for ${col.label}`}
+                    onChange={(hex) => {
+                      update(i, { color: hex });
+                      close();
+                    }}
+                  />
+                </div>
+              )}
+            </Popover>
+            <div className="min-w-[190px]">
+              <select
+                value={col.role}
+                aria-label={`What ${col.label || "this column"} means to automation`}
+                onChange={(e) => update(i, { role: e.target.value as ColumnRole })}
+                className="focus-ring w-full rounded-lg border border-border bg-bg-input px-2 py-1.5 text-sm"
+              >
+                {COLUMN_ROLES.map((r) => (
+                  <option key={r} value={r}>
+                    {ROLE_LABELS[r].label}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-text-muted">{ROLE_LABELS[col.role].hint}</p>
+            </div>
             <span className="flex-1" />
             {col.id && taskCounts[col.id] !== undefined && (
               <span className="text-xs text-text-muted">
@@ -196,6 +209,15 @@ export function BoardSection({
         ))}
       </div>
 
+      {!draft.value.columns.some((c) => c.role === "approved") && (
+        <div className="mb-3 flex gap-2 rounded-lg border-l-2 border-warning bg-warning/10 px-3 py-2 text-sm">
+          <span aria-hidden>⚠</span>
+          <p className="m-0">
+            No column means <strong>{ROLE_LABELS.approved.label}</strong>. Workers and Claude Code
+            have nowhere to take work from, and will stop without reporting anything.
+          </p>
+        </div>
+      )}
       <div className="flex gap-2">
         <Input
           value={newLabel}

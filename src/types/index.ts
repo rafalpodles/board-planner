@@ -60,6 +60,38 @@ export const PRIORITY_ORDER: Record<string, number> = {
 export const COLUMN_ROLES = ["backlog", "approved", "active", "review", "blocked", "done"] as const;
 export type ColumnRole = (typeof COLUMN_ROLES)[number];
 
+/**
+ * What each role means, in the words of someone arranging a board rather than reading
+ * the enum. Every automation keys on the role and never on the column's name, so this
+ * is the only place the two vocabularies are reconciled for a human.
+ */
+export const ROLE_LABELS: Record<ColumnRole, { label: string; hint: string }> = {
+  backlog: {
+    label: "Ideas & backlog",
+    hint: "Not approved for work. Nothing picks these up on its own.",
+  },
+  approved: {
+    label: "Ready to pick up",
+    hint: "Workers and Claude Code take their next task from here.",
+  },
+  active: {
+    label: "In progress",
+    hint: "Where a task is moved once something starts working on it.",
+  },
+  review: {
+    label: "Awaiting review",
+    hint: "Finished work waiting on a check.",
+  },
+  blocked: {
+    label: "Blocked",
+    hint: "Parked. Left alone by automation.",
+  },
+  done: {
+    label: "Done",
+    hint: "Completes the task, and creates the next one if it repeats.",
+  },
+};
+
 export interface IProjectColumn {
   _id: Types.ObjectId;
   id: string;
