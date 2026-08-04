@@ -23,7 +23,8 @@ export interface RegistrationInfo {
 export interface HeartbeatDeps {
   apiBaseUrl: string;
   enrolmentToken: string;
-  repos?: () => RepoInventory[];
+  // Undefined means "could not tell", which is not the same as an empty list
+  repos?: () => RepoInventory[] | undefined;
   // Removed after a successful registration: the token is already spent server-side, and leaving a
   // dead secret on a disk the agent can read is pointless risk.
   forgetEnrolmentToken?: () => void;
@@ -176,6 +177,8 @@ export function startHeartbeat(deps: HeartbeatDeps): Heartbeat {
       return;
     }
 
+    const reported = deps.repos?.();
+
     try {
       const response = await fetchImpl(`${deps.apiBaseUrl}/api/workers/${identity.workerId}/heartbeat`, {
         method: "POST",
@@ -189,8 +192,10 @@ export function startHeartbeat(deps: HeartbeatDeps): Heartbeat {
           version: deps.registration.version,
           bindingError,
           // What this machine has on disk. The server matches projects against these remotes and
-          // answers with assignments; it never sends a path back.
-          repos: deps.repos?.() ?? [],
+          // answers with assignments; it never sends a path back. Omitted entirely when the
+          // inventory could not be read, so the server keeps what it already knows rather than
+          // being told this machine suddenly has nothing.
+          ...(reported === undefined ? {} : { repos: reported }),
           ...(acked !== undefined ? { acked } : {}),
         }),
       });

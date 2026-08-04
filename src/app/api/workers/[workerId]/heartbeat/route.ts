@@ -4,7 +4,7 @@ import { withWorker, protocolOf } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { Worker } from "@/models/worker";
 import { RepoReport } from "@/lib/repo-match";
-import { assignmentsFor, overriddenWorkerPolicy, sharedCheckout, touchWorker } from "@/lib/worker-service";
+import { assignmentsFor, overriddenWorkerPolicy, touchWorker, usableRepos } from "@/lib/worker-service";
 
 // A worker reports its own checkouts; anything else is discarded rather than trusted, since this
 // list decides which projects it is offered.
@@ -49,15 +49,24 @@ export const POST = withWorker(async (request, { worker }) => {
     await Worker.updateOne({ _id: worker._id }, { $set: { repos } });
   }
 
-  // Two worker processes sharing one working tree both run git in it. Different machines cannot,
-  // so only a same-host pair is a real collision — and the machine that got there first keeps it.
-  const others = await Worker.find({ _id: { $ne: worker._id } });
-  const claimed = new Set<string>();
-  for (const repo of repos ?? worker.repos ?? []) {
-    const collision = sharedCheckout({ host: worker.host, repos: [repo] }, others);
-    if (collision) claimed.add(repo.path);
-  }
-  const inventory = (repos ?? worker.repos ?? []).filter((r) => !claimed.has(r.path));
+  // Two worker processes on one machine must not share a working tree, and the same decision has to
+  // hold at claim time — so it is made in worker-service and used by both this route and verdictFor.
+  const others = await Worker.find({ _id: { $ne: worker._id } }).select(
+    "_id name host repos enabled lockedByInstance lastSeenAt createdAt"
+  );
+  const inventory = usableRepos(
+    {
+      _id: worker._id,
+      name: worker.name,
+      host: worker.host,
+      enabled: worker.enabled,
+      lockedByInstance: worker.lockedByInstance,
+      lastSeenAt: worker.lastSeenAt,
+      createdAt: worker.createdAt,
+      repos: repos ?? worker.repos ?? [],
+    },
+    others as never
+  );
 
   const projects = await Project.find({ "worker.enabled": true })
     .select("_id githubRepo gitlabRepo worker")

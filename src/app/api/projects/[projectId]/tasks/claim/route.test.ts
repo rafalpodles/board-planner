@@ -7,10 +7,14 @@ const releaseExpiredTasks = vi.fn();
 const resolveProjectId = vi.fn();
 
 const projectFindById = vi.fn();
+const workerFindOthers = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/project", () => ({
   Project: { findById: () => ({ select: () => ({ lean: projectFindById }) }) },
+}));
+vi.mock("@/models/worker", () => ({
+  Worker: { find: () => ({ select: workerFindOthers }) },
 }));
 vi.mock("@/lib/worker-service", () => ({
   verifyWorkerCredential,
@@ -56,6 +60,7 @@ const authed = {
 beforeEach(() => {
   vi.clearAllMocks();
   projectFindById.mockResolvedValue({ _id: "p1", githubRepo: "owner/repo", worker: { enabled: true } });
+  workerFindOthers.mockResolvedValue([]);
   resolveProjectId.mockResolvedValue(OID);
   verifyWorkerCredential.mockResolvedValue({ _id: OID, assignments: [] });
   verdictFor.mockReturnValue({ ok: true });

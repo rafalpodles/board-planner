@@ -4,7 +4,7 @@ import { connectDB } from "@/lib/db";
 import { withAuth, withWorker } from "@/lib/middleware";
 import { Worker } from "@/models/worker";
 import { Project } from "@/models/project";
-import { assignmentsFor, overriddenWorkerPolicy, toApiWorker } from "@/lib/worker-service";
+import { assignmentsFor, overriddenWorkerPolicy, toApiWorker, usableRepos } from "@/lib/worker-service";
 
 // Everything a worker document still carries is fleet management: what this machine is called,
 // whether it may run, and how often it asks. What the work looks like moved to the project, so
@@ -17,14 +17,19 @@ const POLICY_FIELDS = ["pollIntervalMs"] as const;
 // would never learn which projects they match.
 export const GET = withWorker(async (_request, { worker }) => {
   await connectDB();
-  const projects = await Project.find({ "worker.enabled": true })
-    .select("_id githubRepo gitlabRepo worker")
-    .lean();
+  const [projects, others] = await Promise.all([
+    Project.find({ "worker.enabled": true }).select("_id githubRepo gitlabRepo worker").lean(),
+    Worker.find({ _id: { $ne: worker._id } }).select(
+      "_id name host repos enabled lockedByInstance lastSeenAt createdAt"
+    ),
+  ]);
 
   return NextResponse.json({
     ...toApiWorker(worker),
     policy: overriddenWorkerPolicy(worker),
-    assignments: assignmentsFor(worker.repos ?? [], projects as never),
+    // This is the field the worker actually reads, so the contested-checkout decision has to be
+    // applied here and not only on the heartbeat, whose assignments nothing consumes.
+    assignments: assignmentsFor(usableRepos(worker as never, others as never), projects as never),
   });
 });
 

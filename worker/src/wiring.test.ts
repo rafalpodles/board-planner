@@ -33,13 +33,15 @@ function memoryStore(contents: string): Store {
   };
 }
 
-function fakeHeartbeat(): Heartbeat {
+function fakeHeartbeat(bindingErrors: string[] = []): Heartbeat {
   return {
     tick: vi.fn().mockResolvedValue(undefined),
     stop: vi.fn(),
     onAbort: vi.fn(),
     ack: vi.fn(),
-    reportBindingError: vi.fn(),
+    reportBindingError: vi.fn((message: string) => {
+      bindingErrors.push(message);
+    }),
   };
 }
 
@@ -266,7 +268,8 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
   // exactly the failure this suite has to be able to see.
   async function runOneTask(
     postEvent: ApiClient["postEvent"] = async () => {},
-    policy?: Record<string, unknown>
+    policy?: Record<string, unknown>,
+    opts: { assignmentRemote?: string; extraAssignmentFields?: Record<string, unknown> } = {}
   ) {
     const stateDir = mkdtempSync(join(tmpdir(), "cp-wiring-run-"));
     writeFileSync(join(stateDir, "repos.json"), JSON.stringify({ repos: [REPO] }), { mode: 0o600 });
@@ -274,6 +277,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     const telemetry = createTelemetry();
     const posted: PhaseEvent[] = [];
     const claudeCalls: string[][] = [];
+    const bindingErrors: string[] = [];
     let claims = 0;
     let localConfig: (() => LocalConfigView) | undefined;
 
@@ -312,13 +316,20 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         json: async () => ({
           // Work policy travels with the assignment now: it describes the project, so two projects
           // on one machine can resolve differently.
-          assignments: [{ project: "p1", remote: REMOTE, ...(policy ? { policy } : {}) }],
+          assignments: [
+            {
+              project: "p1",
+              remote: opts.assignmentRemote ?? REMOTE,
+              ...(opts.extraAssignmentFields ?? {}),
+              ...(policy ? { policy } : {}),
+            },
+          ],
         }),
       }) as unknown as typeof fetch,
       createStore: (path) => memoryStore(path.endsWith("worker.json") ? IDENTITY : ""),
       createApi: () => api as unknown as ApiClient,
       createTelemetry: () => telemetry,
-      startHeartbeat: () => fakeHeartbeat(),
+      startHeartbeat: () => fakeHeartbeat(bindingErrors),
       connectControl: () => ({ close: vi.fn() }),
       startLocalServer: (localDeps) => {
         localConfig = localDeps.config;
@@ -336,6 +347,9 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     return {
       api,
       posted,
+      bindingErrors,
+      claimed: claudeCalls.length > 0,
+      workspacePaths: claudeCalls.flat(),
       phases: posted.map((event) => event.phase),
       telemetry,
       worker,
@@ -578,5 +592,27 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     expect(run.posted.length).toBeGreaterThan(0);
     // and the run still reached the board with its verdict
     expect(run.api.setStatus).toHaveBeenCalledWith("p1", "t1", "in_review");
+  });
+
+  // The invariant the whole change exists to protect, and the one that had no test: an assignment
+  // naming a remote this machine does not have must bind nothing and say why.
+  describe("the server can never name a directory here", () => {
+    it("binds nothing and reports the reason when the remote is not on this machine", async () => {
+      const run = await runOneTask(async () => {}, undefined, {
+        assignmentRemote: "git@github.com:someone/else.git",
+      });
+
+      expect(run.claimed).toBe(false);
+      expect(run.bindingErrors.join(" ")).toMatch(/no checkout of git@github\.com:someone\/else\.git/);
+    });
+
+    // A server that sends a path alongside the remote must not get one used
+    it("ignores a path the server sends alongside the remote", async () => {
+      const run = await runOneTask(async () => {}, undefined, {
+        extraAssignmentFields: { proposedPath: "/etc", path: "/etc" },
+      });
+
+      expect(run.workspacePaths.some((arg) => arg.startsWith("/etc"))).toBe(false);
+    });
   });
 });

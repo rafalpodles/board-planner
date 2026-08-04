@@ -6,7 +6,7 @@ import { useToast } from "@/components/ui/Toast";
 import { Input } from "@/components/ui/Input";
 import { SettingsCard } from "@/components/settings/SettingsCard";
 import { PROJECT_POLICY_DEFAULTS } from "@/lib/worker-policy";
-import { normaliseRemote } from "@/lib/repo-match";
+import { projectRemotes, sameRepo } from "@/lib/repo-match";
 import { ApiWorker } from "@/types";
 import { SectionProps } from "./types";
 
@@ -32,7 +32,9 @@ export function WorkersSection({ projectId, project, patchProject, isAdmin }: Se
   const [saving, setSaving] = useState(false);
 
   const config = project.worker;
-  const wanted = normaliseRemote(project.githubRepo || project.gitlabRepo);
+  // Both integrations, matching what the server does — considering one would show "None yet"
+  // for a machine holding the other checkout while the server assigned it anyway.
+  const wanted = projectRemotes(project);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -68,7 +70,7 @@ export function WorkersSection({ projectId, project, patchProject, isAdmin }: Se
   // Which machines could serve this project. A worker offers a checkout; the operator granted it
   // locally in repos.json, and no path is ever set from here.
   const offering = (workers ?? []).filter((w) =>
-    wanted ? (w.repos ?? []).some((r) => normaliseRemote(r.remote) === wanted) : false
+    (w.repos ?? []).some((r) => wanted.some((candidate) => sameRepo(candidate, r.remote)))
   );
 
   return (

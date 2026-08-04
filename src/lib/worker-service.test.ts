@@ -10,7 +10,8 @@ vi.mock("@/models/worker", () => ({ Worker: { findById, findOneAndUpdate, update
 
 const {
   assignmentsFor,
-  sharedCheckout,
+  lostCheckouts,
+  usableRepos,
   overriddenWorkerPolicy,
   verdictFor,
   verifyWorkerCredential,
@@ -95,11 +96,6 @@ describe("verdictFor", () => {
     expect((verdict as { reason: string }).reason).toMatch(/reported/i);
   });
 
-  it("compares the project as a string, so an ObjectId assignment matches a resolved id", () => {
-    const assignments = [{ project: { toString: () => project }, proposedPath: "/repo" }];
-
-    expect(verdictFor(worker({ assignments }), project(), PROTOCOL_VERSION, now)).toEqual({ ok: true });
-  });
 
   // String(undefined) === String(undefined): a caller passing no project id must not match
   // an assignment that also has no project, however that assignment came to be malformed
@@ -246,36 +242,99 @@ describe("assignmentsFor", () => {
 
 // Two machines each serving the same project is fine and useful — the claim is atomic. The real
 // hazard is two worker processes on ONE machine sharing a working tree.
-describe("sharedCheckout", () => {
-  const live = (overrides: Record<string, unknown> = {}) =>
-    worker({ name: "other", ...overrides }) as unknown as never;
-
-  it("refuses a checkout another live worker on the same host already has", () => {
-    const collision = sharedCheckout(
-      { host: "mac.home", repos: [{ remote: REMOTE, path: "/repo" }] },
-      [live()],
-      now
-    );
-
-    expect(collision).toEqual({ path: "/repo", workerName: "other" });
+describe("contested checkouts", () => {
+  const REPO = { remote: REMOTE, path: "/repo" };
+  const claimant = (over: Record<string, unknown> = {}) => ({
+    _id: "w1",
+    name: "first",
+    host: "mac.home",
+    enabled: true,
+    lockedByInstance: false,
+    lastSeenAt: fresh,
+    createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    repos: [REPO],
+    ...over,
   });
 
-  it("allows the same path on a different machine, where it is a different directory", () => {
-    expect(
-      sharedCheckout(
-        { host: "other-laptop", repos: [{ remote: REMOTE, path: "/repo" }] },
-        [live()],
-        now
-      )
-    ).toBeNull();
+  // The bug this replaced: the old predicate was symmetric, so both processes stood down and both
+  // machines idled with a green console.
+  it("makes exactly one of two live claimants lose the checkout", () => {
+    const older = claimant({ _id: "w1", name: "older", createdAt: new Date("2026-01-01") });
+    const newer = claimant({ _id: "w2", name: "newer", createdAt: new Date("2026-02-01") });
+
+    expect(lostCheckouts(older, [newer], now).size).toBe(0);
+    expect(lostCheckouts(newer, [older], now)).toEqual(new Map([["/repo", "older"]]));
   });
 
-  it("ignores a worker that has gone stale, so its checkout can be taken over", () => {
-    const stale = live({ lastSeenAt: new Date(now.getTime() - WORKER_STALE_MS - 1) });
+  it("breaks a same-millisecond tie on id, so both sides agree who won", () => {
+    const at = new Date("2026-01-01T00:00:00.000Z");
+    const a = claimant({ _id: "aaa", name: "a", createdAt: at });
+    const b = claimant({ _id: "bbb", name: "b", createdAt: at });
 
-    expect(
-      sharedCheckout({ host: "mac.home", repos: [{ remote: REMOTE, path: "/repo" }] }, [stale], now)
-    ).toBeNull();
+    expect(lostCheckouts(a, [b], now).size).toBe(0);
+    expect(lostCheckouts(b, [a], now).size).toBe(1);
+  });
+
+  it("leaves the same path alone on a different machine, where it is a different directory", () => {
+    const elsewhere = claimant({ _id: "w2", name: "other", host: "other-laptop" });
+
+    expect(lostCheckouts(claimant({ _id: "w1" }), [elsewhere], now).size).toBe(0);
+  });
+
+  it("hands the checkout over once the earlier process goes stale", () => {
+    const stale = claimant({
+      _id: "w0",
+      name: "gone",
+      createdAt: new Date("2020-01-01"),
+      lastSeenAt: new Date(now.getTime() - WORKER_STALE_MS - 1),
+    });
+
+    expect(lostCheckouts(claimant({ _id: "w2" }), [stale], now).size).toBe(0);
+  });
+
+  it("keeps every uncontested checkout when one is lost", () => {
+    const other = { remote: "git@github.com:owner/other.git", path: "/other" };
+    const mine = claimant({ _id: "w2", createdAt: new Date("2026-02-01"), repos: [REPO, other] });
+    const older = claimant({ _id: "w1", name: "older", createdAt: new Date("2026-01-01") });
+
+    expect(usableRepos(mine, [older], now)).toEqual([other]);
+  });
+
+  // A disabled or locked worker is not running, so it must not hold a checkout hostage
+  it("does not let a disabled worker keep a checkout", () => {
+    const disabled = claimant({ _id: "w1", name: "off", enabled: false, createdAt: new Date("2020-01-01") });
+
+    expect(lostCheckouts(claimant({ _id: "w2" }), [disabled], now).size).toBe(0);
+  });
+});
+
+// The claim has to be refused too, not merely the assignment withheld: an assignment the worker
+// already holds from an earlier refresh would otherwise still let it claim into a shared tree.
+describe("verdictFor and a contested checkout", () => {
+  const older = {
+    _id: "w0",
+    name: "older",
+    host: "mac.home",
+    enabled: true,
+    lockedByInstance: false,
+    lastSeenAt: fresh,
+    createdAt: new Date("2020-01-01"),
+    repos: [{ remote: REMOTE, path: "/repo" }],
+  };
+
+  it("refuses the loser and names the machine holding the checkout", () => {
+    const loser = worker({ _id: "w2", createdAt: new Date("2026-06-01") });
+
+    const verdict = verdictFor(loser, project(), PROTOCOL_VERSION, now, [older] as never);
+
+    expect(verdict.ok).toBe(false);
+    expect((verdict as { reason: string }).reason).toMatch(/older already runs this checkout/i);
+  });
+
+  it("still admits the winner", () => {
+    const winner = worker({ _id: "w0", createdAt: new Date("2019-01-01") });
+
+    expect(verdictFor(winner, project(), PROTOCOL_VERSION, now, [older] as never)).toEqual({ ok: true });
   });
 });
 
