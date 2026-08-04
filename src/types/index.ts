@@ -115,6 +115,10 @@ export interface IUser {
   emailNotifications: boolean;
   collapseEmptyColumns: boolean;
   role: UserRole;
+  // A worker's identity is a user record so authorship, mentions, avatars and history keep
+  // working unchanged — but it is not a person, so it stays out of the lists where people are
+  // invited, permissioned or picked as an assignee.
+  kind: "human" | "machine";
   allowedProjects: Types.ObjectId[];
   // Runtime-only, set for project-scoped tokens — a scoped token never gets project-admin
   tokenScoped?: boolean;
@@ -479,6 +483,8 @@ export interface IWorker {
   enabled: boolean;
   lockedByInstance: boolean;
   lastSeenAt: Date | null;
+  // The user this machine acts as — see src/lib/worker-user.ts
+  identity: Types.ObjectId | null;
   bindingError: string;
   preflight: WorkerPreflight | null;
   command: "" | "pause" | "resume" | "stop";

@@ -91,7 +91,7 @@ describe("POST /tasks/claim", () => {
       params: Promise.resolve({ projectId: "CP" }),
     });
 
-    expect(claimNextTask).toHaveBeenCalledWith(OID, OID, "run-1");
+    expect(claimNextTask).toHaveBeenCalledWith(OID, OID, "run-1", null);
   });
 
   it("resolves a project key before asking the verdict or the claim", async () => {
@@ -167,5 +167,18 @@ describe("POST /tasks/claim", () => {
 
     expect(response.status).toBe(400);
     expect(claimNextTask).not.toHaveBeenCalled();
+  });
+});
+
+// The claim is an assignment now, so the worker's identity has to reach task-service — without it
+// a task is claimed and left unassigned, and the "never touch an assigned task" rule buys nothing.
+describe("the worker's identity travels with the claim", () => {
+  it("passes the identity the worker registered with", async () => {
+    verifyWorkerCredential.mockResolvedValue({ _id: OID, assignments: [], identity: "u-worker" });
+    claimNextTask.mockResolvedValue({ _id: "t1" });
+
+    await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
+
+    expect(claimNextTask).toHaveBeenCalledWith(OID, OID, "run-1", "u-worker");
   });
 });
