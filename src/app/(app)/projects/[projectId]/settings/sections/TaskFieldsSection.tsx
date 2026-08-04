@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
 import { Button } from "@/components/ui/Button";
 import { CustomFieldEditor } from "./CustomFieldEditor";
+import { CustomFieldForm, FieldDraft } from "@/components/settings/CustomFieldForm";
 import { sortedFields } from "@/lib/custom-fields";
 import { SettingsCard, EmptyState, ListRow } from "@/components/settings/SettingsCard";
 import { SectionProps } from "./types";
@@ -25,10 +26,8 @@ export function TaskFieldsSection({ projectId, project, patchProject }: SectionP
 
   const [newCategoryName, setNewCategoryName] = useState("");
   const [newCategoryColor, setNewCategoryColor] = useState("#3b82f6");
-  const [newFieldName, setNewFieldName] = useState("");
-  const [newFieldType, setNewFieldType] = useState<CustomFieldType>("text");
-  const [newFieldOptions, setNewFieldOptions] = useState("");
-  const [newFieldRequired, setNewFieldRequired] = useState(false);
+  // "new" opens the create form; a field id opens the same form over that field
+  const [fieldForm, setFieldForm] = useState<"new" | string | null>(null);
   const [newTemplateName, setNewTemplateName] = useState("");
   const [editingTemplate, setEditingTemplate] = useState<ApiTaskTemplate | null>(null);
 
@@ -59,41 +58,25 @@ export function TaskFieldsSection({ projectId, project, patchProject }: SectionP
     }
   }
 
-  async function addCustomField() {
-    if (!newFieldName.trim()) return;
-    try {
-      const customFields: ApiCustomField[] = await api.post(
-        `/api/projects/${projectId}/custom-fields`,
-        {
-          name: newFieldName.trim(),
-          fieldType: newFieldType,
-          options:
-            newFieldType === "dropdown"
-              ? newFieldOptions.split(",").map((o) => o.trim()).filter(Boolean)
-              : [],
-          required: newFieldRequired,
-        }
-      );
-      patchProject({ customFields });
-      setNewFieldName("");
-      setNewFieldOptions("");
-      setNewFieldRequired(false);
-    } catch (err) {
-      fail(err, "Failed to add custom field");
-    }
+  // Throws rather than toasting: the form stays open on failure and shows the reason
+  // beside the field, instead of closing and dropping what was typed
+  async function addCustomField(draft: FieldDraft) {
+    const customFields: ApiCustomField[] = await api.post(
+      `/api/projects/${projectId}/custom-fields`,
+      draft
+    );
+    patchProject({ customFields });
+    setFieldForm(null);
   }
 
-  async function saveCustomField(fieldId: string, patch: Record<string, unknown>) {
-    try {
-      patchProject({
-        customFields: await api.patch(
-          `/api/projects/${projectId}/custom-fields/${fieldId}`,
-          patch
-        ),
-      });
-    } catch (err) {
-      fail(err, "Failed to save custom field");
-    }
+  async function saveCustomField(fieldId: string, patch: FieldDraft | Record<string, unknown>) {
+    patchProject({
+      customFields: await api.patch(
+        `/api/projects/${projectId}/custom-fields/${fieldId}`,
+        patch
+      ),
+    });
+    setFieldForm(null);
   }
 
   async function removeCustomField(fieldId: string) {
@@ -201,62 +184,39 @@ export function TaskFieldsSection({ projectId, project, patchProject }: SectionP
       <SettingsCard
         title="Custom fields"
         contract="live"
-        description="Extra fields shown on every task in this project."
+        description="Extra fields carried by every task in this project. Archived fields keep the values already on tasks and stop appearing in pickers."
       >
         <div className="space-y-2">
-          {sortedFields(project.customFields || []).map((field) => (
-            <CustomFieldEditor
-              key={field._id}
-              field={field}
-              onSave={(patch) => saveCustomField(field._id, patch)}
-              onDelete={() => removeCustomField(field._id)}
-            />
-          ))}
-          {(project.customFields || []).length === 0 && (
+          {sortedFields(project.customFields || []).map((field) =>
+            fieldForm === field._id ? (
+              <CustomFieldForm
+                key={field._id}
+                field={field}
+                onSubmit={(draft) => saveCustomField(field._id, draft)}
+                onCancel={() => setFieldForm(null)}
+              />
+            ) : (
+              <CustomFieldEditor
+                key={field._id}
+                field={field}
+                onEdit={() => setFieldForm(field._id)}
+                onSave={(patch) => saveCustomField(field._id, patch)}
+                onDelete={() => removeCustomField(field._id)}
+              />
+            )
+          )}
+          {(project.customFields || []).length === 0 && fieldForm !== "new" && (
             <EmptyState>No custom fields yet. Add one to capture something the built-in fields don&apos;t.</EmptyState>
           )}
         </div>
-        <div className="space-y-2">
-          <div className="flex gap-2">
-            <Input
-              value={newFieldName}
-              onChange={(e) => setNewFieldName(e.target.value)}
-              placeholder="Field name..."
-            />
-            <select
-              value={newFieldType}
-              onChange={(e) => setNewFieldType(e.target.value as CustomFieldType)}
-              className="rounded-lg border border-border bg-bg-input px-3 py-2 text-sm"
-            >
-              {CUSTOM_FIELD_TYPES.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
-          </div>
-          {newFieldType === "dropdown" && (
-            <Input
-              value={newFieldOptions}
-              onChange={(e) => setNewFieldOptions(e.target.value)}
-              placeholder="Options (comma-separated)..."
-            />
-          )}
-          <div className="flex items-center gap-4">
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={newFieldRequired}
-                onChange={(e) => setNewFieldRequired(e.target.checked)}
-                className="rounded border-border"
-              />
-              Required
-            </label>
-            <Button variant="secondary" size="sm" onClick={addCustomField}>
-              Add field
-            </Button>
-          </div>
-        </div>
+
+        {fieldForm === "new" ? (
+          <CustomFieldForm onSubmit={addCustomField} onCancel={() => setFieldForm(null)} />
+        ) : (
+          <Button variant="secondary" size="sm" onClick={() => setFieldForm("new")}>
+            + Add field
+          </Button>
+        )}
       </SettingsCard>
 
       <SettingsCard

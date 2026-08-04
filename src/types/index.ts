@@ -317,6 +317,16 @@ export const CUSTOM_FIELD_TYPES: CustomFieldType[] = [
 /** The types whose values are option ids rather than a literal */
 export const OPTION_FIELD_TYPES: CustomFieldType[] = ["dropdown", "multiselect"];
 
+/** The type picker used to print the union members; these are what a human calls them. */
+export const FIELD_TYPE_LABELS: Record<CustomFieldType, { label: string; hint: string }> = {
+  dropdown: { label: "Choice", hint: "Pick one from a list you define" },
+  multiselect: { label: "Multi-choice", hint: "Pick any number from a list you define" },
+  text: { label: "Text", hint: "Free text" },
+  number: { label: "Number", hint: "A numeric value" },
+  date: { label: "Date", hint: "A single date" },
+  checkbox: { label: "Yes / no", hint: "A tick box" },
+};
+
 export const DEFAULT_OPTION_COLOR = "#64748b";
 
 // Values store `id`, never `value`, so renaming an option keeps it attached to
