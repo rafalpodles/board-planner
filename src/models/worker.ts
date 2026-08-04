@@ -27,6 +27,9 @@ const workerSchema = new Schema<IWorker>(
     enabled: { type: Boolean, default: true },
     lockedByInstance: { type: Boolean, default: false },
     lastSeenAt: { type: Date, default: null },
+    // The user record this machine acts as: comment author, assignee, and the name in history.
+    // Null only for a worker registered before CP-241 and not seen since.
+    identity: { type: Schema.Types.ObjectId, ref: "User", default: null },
     bindingError: { type: String, default: "" },
     // Null, not an empty pass: a worker too old to report this has not told us it is fine, and a
     // console that showed it green would be the exact "healthy, fails every task" this closes.
