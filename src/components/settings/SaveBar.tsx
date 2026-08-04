@@ -2,6 +2,8 @@
 
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/Button";
+import { useToast } from "@/components/ui/Toast";
+import { saveAllGroups } from "@/lib/save-groups";
 import { DirtyGroup } from "./settings-context";
 
 interface SaveBarProps {
@@ -12,6 +14,7 @@ interface SaveBarProps {
 
 export function SaveBar({ pending, total, onGoToSection }: SaveBarProps) {
   const [saving, setSaving] = useState(false);
+  const { toast } = useToast();
   const open = total > 0;
   const first = pending[0];
 
@@ -30,8 +33,9 @@ export function SaveBar({ pending, total, onGoToSection }: SaveBarProps) {
   async function saveAll() {
     setSaving(true);
     try {
-      for (const group of pending) {
-        await group.save();
+      const failed = await saveAllGroups(pending);
+      if (failed.length > 0) {
+        toast(`Could not save ${failed.join(", ")}`, "error");
       }
     } finally {
       setSaving(false);
