@@ -206,7 +206,7 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
 
   if (!project.pmAvailable) {
     return (
-      <SettingsCard title="PM agent" contract="readonly">
+      <SettingsCard title="PM agent">
         <p className="text-sm text-text-muted">
           Set the <code>OPENROUTER_API_KEY</code> environment variable on the server to enable the PM
           agent (optionally <code>PM_MODEL</code> for the default model).
@@ -229,7 +229,7 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
         </div>
       )}
       {isAdmin ? (
-        <SettingsCard title="Availability & cost" contract="draft" instanceScoped>
+        <SettingsCard title="Availability & cost" instanceScoped>
           <label className="flex cursor-pointer items-start gap-3">
             <input
               type="checkbox"
@@ -272,7 +272,7 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
         </div>
       )}
 
-      <SettingsCard title="What the agent knows" contract="draft">
+      <SettingsCard title="What the agent knows">
         <div>
           <Textarea
             label="Project context"
@@ -347,7 +347,6 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
 
       <SettingsCard
         title="When it acts on its own"
-        contract="draft"
         description="Autonomous turns count against the daily turn cap and post into the PM chat thread."
       >
         <label className="flex cursor-pointer items-start gap-3">
@@ -420,7 +419,6 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
       {isAdmin && (
         <SettingsCard
           title="MCP connections"
-          contract="draft"
           instanceScoped
           description="External MCP servers the agent may read at the start of a turn. Writing is off unless you allow it per server."
         >

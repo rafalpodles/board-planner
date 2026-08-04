@@ -221,7 +221,6 @@ export function IntegrationsSection({ projectId, project, patchProject, replaceP
       {show("github") && (
       <SettingsCard
         title="GitHub"
-        contract="draft"
         status={{ label: project.githubTokenSet ? "Connected" : "Not connected", on: !!project.githubTokenSet }}
         description="Links pull requests to tasks by task key in the branch name or PR title."
       >
@@ -281,7 +280,6 @@ export function IntegrationsSection({ projectId, project, patchProject, replaceP
       {show("gitlab") && (
       <SettingsCard
         title="GitLab"
-        contract="draft"
         status={{ label: project.gitlabTokenSet ? "Connected" : "Not connected", on: !!project.gitlabTokenSet }}
         description="Same matching as GitHub, for merge requests."
       >
@@ -366,7 +364,6 @@ export function IntegrationsSection({ projectId, project, patchProject, replaceP
       {show("coda") && (
       <SettingsCard
         title="Coda"
-        contract="draft"
         status={{ label: project.codaTokenSet ? "Connected" : "Not connected", on: !!project.codaTokenSet }}
         description="Mirrors this board into a Coda table. One-way: Coda never writes back."
       >
@@ -461,7 +458,6 @@ export function IntegrationsSection({ projectId, project, patchProject, replaceP
       {show("channels") && (
       <SettingsCard
         title="Slack & Discord"
-        contract="live"
         description="Posts a formatted message to a channel when something happens on the board."
       >
         <div className="space-y-3">
@@ -566,7 +562,6 @@ export function IntegrationsSection({ projectId, project, patchProject, replaceP
       {show("webhooks") && (
       <SettingsCard
         title="Webhooks"
-        contract="live"
         description="Raw HTTP POST to your own endpoint when an event fires."
       >
         <div className="space-y-3">

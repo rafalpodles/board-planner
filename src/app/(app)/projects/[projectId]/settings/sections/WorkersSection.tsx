@@ -132,7 +132,6 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
       <SettingsCard
         title="Autonomous workers"
         description="A worker claims approved tasks, runs the coding agent in its own checkout, and opens a pull request. Nothing runs until you enable it here."
-        contract={contract}
         instanceScoped
       >
         {!project.githubRepo && !project.gitlabRepo ? (
@@ -184,7 +183,6 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
       <SettingsCard
         title="How work is done here"
         description="These describe this repository, so every machine serving it runs under the same values. A field you have not set follows the default."
-        contract={contract}
         instanceScoped
       >
         <div className="space-y-3">

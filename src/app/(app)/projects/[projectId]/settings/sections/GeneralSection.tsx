@@ -90,7 +90,7 @@ export function GeneralSection({ projectId, project, replaceProject, isAdmin }: 
 
   return (
     <>
-      <SettingsCard title="Identity" contract="draft">
+      <SettingsCard title="Identity">
         <div className="grid gap-4 sm:grid-cols-[1fr_140px]">
           <Input
             label="Name"
@@ -123,7 +123,6 @@ export function GeneralSection({ projectId, project, replaceProject, isAdmin }: 
 
       <SettingsCard
         title="Who can change settings"
-        contract="live"
         description="Project admins can edit everything on this page except the instance settings. The owner is always an admin."
       >
         <div className="space-y-2">
