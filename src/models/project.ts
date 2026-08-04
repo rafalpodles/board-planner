@@ -175,6 +175,15 @@ const projectSchema = new Schema<IProject>(
       },
       policyOverrides: { type: [String], default: [] },
     },
+    // The one place a project names its repository, whoever hosts it. The provider is derived from
+    // the host — see src/lib/repository.ts.
+    repositoryUrl: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    // Superseded by repositoryUrl and no longer read or written by the app; kept so the migration
+    // is reversible until scripts/migrate-repository-url.ts has run everywhere.
     githubRepo: {
       type: String,
       default: "",

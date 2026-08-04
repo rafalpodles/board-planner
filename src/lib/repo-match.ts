@@ -1,3 +1,5 @@
+import { repositoryCandidates, RepositoryFields } from "./repository";
+
 // One repository is reachable by many strings — ssh, https, with or without .git, and through a
 // per-account ssh host alias like `git@github-rafalpodles:owner/repo.git`. Matching a worker's
 // checkout to a project has to see through all of them, so both sides reduce to `owner/repo`.
@@ -52,18 +54,14 @@ export interface RepoReport {
   path: string;
 }
 
-export interface MatchableProject {
+export interface MatchableProject extends RepositoryFields {
   _id: unknown;
-  githubRepo?: string;
-  gitlabRepo?: string;
 }
 
-// A project can name its repository through either integration; a worker only knows the remote its
-// checkout points at, so both are candidates for the same match.
+// One candidate once a project has been migrated to repositoryUrl; until then, both legacy fields
+// exactly as they were stored — see repositoryCandidates for why they are not normalised first.
 export function projectRemotes(project: MatchableProject): string[] {
-  return [project.githubRepo, project.gitlabRepo].filter(
-    (value): value is string => typeof value === "string" && normaliseRemote(value).length > 0
-  );
+  return repositoryCandidates(project).filter((value) => normaliseRemote(value).length > 0);
 }
 
 // Returns the exact string the worker reported, never a path and never a normalised form: the

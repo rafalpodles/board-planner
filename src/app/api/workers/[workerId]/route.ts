@@ -18,7 +18,7 @@ const POLICY_FIELDS = ["pollIntervalMs"] as const;
 export const GET = withWorker(async (_request, { worker }) => {
   await connectDB();
   const [projects, others] = await Promise.all([
-    Project.find({ "worker.enabled": true }).select("_id githubRepo gitlabRepo worker").lean(),
+    Project.find({ "worker.enabled": true }).select("_id repositoryUrl githubRepo gitlabRepo gitlabHost worker").lean(),
     Worker.find({ _id: { $ne: worker._id } }).select(
       "_id name host repos enabled lockedByInstance lastSeenAt createdAt"
     ),

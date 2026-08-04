@@ -7,6 +7,7 @@ import { isAIEnabled, generateTask, ExistingTaskSummary } from "@/lib/ai";
 import { findLegacyField } from "@/lib/legacy-fields";
 import { orderedOptions } from "@/lib/custom-fields";
 import { getSettings } from "@/models/settings";
+import { projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
 
 async function fetchReadme(githubRepo: string): Promise<string | undefined> {
   if (!githubRepo) return undefined;
@@ -63,7 +64,9 @@ export const POST = withProjectAccess(async (request, { params }) => {
   }
 
   const [readme, tasks] = await Promise.all([
-    fetchReadme(project.githubRepo || ""),
+    // raw.githubusercontent.com only serves GitHub, so a project hosted anywhere else gets no
+    // README rather than a request that cannot work
+    fetchReadme(repositoryProvider(project) === "github" ? projectRepositoryUrl(project) : ""),
     Task.find(
       { project: projectId, status: { $ne: "done" } },
       "taskNumber title status description"
