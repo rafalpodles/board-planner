@@ -231,3 +231,81 @@ describe("one working tree, one worker", () => {
     expect(assignments.map((a: { project: string }) => a.project)).toEqual(["p2"]);
   });
 });
+
+// Preflight arrives from the worker, so it is rebuilt field by field like the checkout list rather
+// than trusted. A machine that cannot run the work has to show that in the console instead of
+// looking live, enabled and error-free.
+describe("the preflight report a worker sends", () => {
+  function preflightPatch() {
+    return touchWorker.mock.calls[0]?.[1]?.preflight;
+  }
+
+  it("stores the verdict, the account and every check", async () => {
+    const { req, ctx } = request({
+      preflight: {
+        ok: false,
+        account: "someone@example.com",
+        checks: [
+          { name: "git", ok: true, detail: "/opt/homebrew/bin/git" },
+          { name: "gh", ok: false, detail: "not authenticated" },
+        ],
+      },
+    });
+
+    await POST(req, ctx);
+
+    expect(preflightPatch()).toMatchObject({
+      ok: false,
+      account: "someone@example.com",
+      checks: [
+        { name: "git", ok: true, detail: "/opt/homebrew/bin/git" },
+        { name: "gh", ok: false, detail: "not authenticated" },
+      ],
+    });
+    expect(preflightPatch()?.reportedAt).toBeInstanceOf(Date);
+  });
+
+  it("leaves the stored report alone when a worker sends none", async () => {
+    const { req, ctx } = request({ version: "1.0.0" });
+
+    await POST(req, ctx);
+
+    expect(touchWorker.mock.calls[0]?.[1]).not.toHaveProperty("preflight");
+  });
+
+  it("drops a report whose verdict is not a boolean rather than storing half of one", async () => {
+    const { req, ctx } = request({ preflight: { ok: "yes", checks: [] } });
+
+    await POST(req, ctx);
+
+    expect(touchWorker.mock.calls[0]?.[1]).not.toHaveProperty("preflight");
+  });
+
+  it("drops malformed checks but keeps the rest of the report", async () => {
+    const { req, ctx } = request({
+      preflight: {
+        ok: true,
+        checks: [{ name: "git", ok: true, detail: "fine" }, "nonsense", { ok: true }, { name: "npm", ok: "no" }],
+      },
+    });
+
+    await POST(req, ctx);
+
+    expect(preflightPatch()?.checks).toEqual([{ name: "git", ok: true, detail: "fine" }]);
+  });
+
+  it("caps what a worker can write into the console", async () => {
+    const { req, ctx } = request({
+      preflight: {
+        ok: true,
+        account: "a".repeat(500),
+        checks: [{ name: "git", ok: true, detail: "b".repeat(2000) }],
+      },
+    });
+
+    await POST(req, ctx);
+
+    expect(preflightPatch()?.account).toHaveLength(200);
+    expect(preflightPatch()?.checks[0].detail).toHaveLength(500);
+  });
+});
