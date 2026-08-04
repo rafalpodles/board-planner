@@ -183,20 +183,24 @@ export function TaskFieldsSection({ projectId, project, patchProject }: SectionP
           }
           renderRow={(cat, i) => (
             <>
-              <Input
-                value={cat.name}
-                aria-label="Category name"
-                placeholder="Category name..."
-                className="min-h-[38px] max-w-[240px] py-1.5"
-                onChange={(e) =>
-                  categories.set(
-                    "categories",
-                    categories.value.categories.map((c, idx) =>
-                      idx === i ? { ...c, name: e.target.value } : c
+              {/* Input renders a w-full wrapper, so it needs a sized box or it pushes
+                  everything after it onto the next line */}
+              <div className="w-[240px] shrink-0">
+                <Input
+                  value={cat.name}
+                  aria-label="Category name"
+                  placeholder="Category name..."
+                  className="min-h-[38px] py-1.5"
+                  onChange={(e) =>
+                    categories.set(
+                      "categories",
+                      categories.value.categories.map((c, idx) =>
+                        idx === i ? { ...c, name: e.target.value } : c
+                      )
                     )
-                  )
-                }
-              />
+                  }
+                />
+              </div>
               <Popover
                 width="w-auto"
                 trigger={({ toggle }) => (
