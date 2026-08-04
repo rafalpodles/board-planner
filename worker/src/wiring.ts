@@ -26,6 +26,7 @@ import { createLoop } from "./loop.js";
 import { createOutbox, Store } from "./outbox.js";
 import { PipelineDeps, runTask } from "./pipeline.js";
 import { createReporter } from "./reporter.js";
+import { abortableSleep } from "./sleep.js";
 import { HeartbeatDeps, loadIdentity, PROTOCOL_VERSION, startHeartbeat } from "./registration.js";
 import { bindRepository, createAllowlistReader, repoInventory } from "./repos.js";
 import {
@@ -51,7 +52,7 @@ export interface WorkerDeps {
   env: Record<string, string | undefined>;
   runner: Runner;
   hostname: () => string;
-  sleep: (ms: number) => Promise<void>;
+  sleep: (ms: number, signal?: AbortSignal) => Promise<void>;
   log: (message: string) => void;
   logError: (message: string) => void;
   uid: number;
@@ -86,7 +87,7 @@ export function defaultWorkerDeps(): WorkerDeps {
     env: process.env,
     runner: createRunner(),
     hostname,
-    sleep: (ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
+    sleep: abortableSleep,
     log: (message) => console.log(message),
     logError: (message) => console.error(message),
     uid: process.getuid ? process.getuid() : 0,
