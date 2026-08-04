@@ -566,10 +566,19 @@ export function BoardFilters({
         </select>
         <div className="h-full w-px bg-border" />
         <button
+          // Manual order is the order people dragged the rows into; reversing it
+          // would also invert what a drag means, since the list reindexes on drop
+          disabled={sortField === "manual"}
           onClick={() => onSortChange(sortField, sortDir === "asc" ? "desc" : "asc")}
-          title={sortDir === "asc" ? "Ascending" : "Descending"}
+          title={
+            sortField === "manual"
+              ? "Manual order has no direction"
+              : sortDir === "asc"
+                ? "Ascending"
+                : "Descending"
+          }
           aria-label={sortDir === "asc" ? "Sort ascending" : "Sort descending"}
-          className="focus-ring-inset h-full w-[30px] rounded-r-lg text-[13px] text-text-muted transition-colors hover:text-text"
+          className="focus-ring-inset h-full w-[30px] rounded-r-lg text-[13px] text-text-muted transition-colors hover:text-text disabled:pointer-events-none disabled:opacity-40"
         >
           {sortDir === "asc" ? "↑" : "↓"}
         </button>
