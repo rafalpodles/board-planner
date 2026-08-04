@@ -16,7 +16,7 @@ import {
   defaultSortDir,
 } from "@/types";
 import { ListColumnId, isColumnVisible, listColumns as projectListColumns } from "@/lib/list-columns";
-import { fieldCellText } from "@/lib/custom-fields";
+import { fieldCellText, orderedOptions } from "@/lib/custom-fields";
 import { effectiveColumns } from "@/lib/columns";
 import {
   DndContext,
@@ -709,19 +709,33 @@ export function ListView({
                   {fieldColumns.map((column) => {
                     const field = column.field!;
                     const text = fieldCellText(task.customFieldValues, field);
+                    // orderedOptions, not field.options: it sorts them and gives the
+                    // legacy string form the same {id, value, color} shape
+                    const options = orderedOptions(field);
+                    const raw = task.customFieldValues?.[field._id];
+                    // The stored value is the option's id, never its label — the label
+                    // is what validateCustomFieldValues rejects
+                    const chosen = Array.isArray(raw)
+                      ? raw.map(String)
+                      : raw === undefined || raw === null || raw === ""
+                        ? []
+                        : [String(raw)];
                     // Only single-choice fields: a multiselect needs a control that
                     // can hold several values, which this picker cannot
                     const choices =
                       field.fieldType === "dropdown"
                         ? [
                             { value: "", label: "—" },
-                            ...field.options.map((o) => ({
-                              value: o.value,
+                            ...options.map((o) => ({
+                              value: o.id,
                               label: o.value,
                               color: o.color,
                             })),
                           ]
                         : [];
+                    const picked = chosen
+                      .map((id) => options.find((o) => o.id === id))
+                      .filter((o): o is (typeof options)[number] => !!o);
                     return (
                       <td
                         key={column.id}
@@ -729,7 +743,7 @@ export function ListView({
                         title={text || undefined}
                       >
                         <EnumCell
-                          value={text}
+                          value={chosen[0] ?? ""}
                           options={choices}
                           label={`${field.name} for ${taskKey}: ${task.title}`}
                           onChange={
@@ -737,7 +751,21 @@ export function ListView({
                             ((next) => onFieldChange(task._id, field._id, next))
                           }
                         >
-                          <div className="truncate">{text || "—"}</div>
+                          {picked.length > 0 ? (
+                            <span className="flex flex-wrap items-center gap-1">
+                              {picked.map((option) => (
+                                <Badge
+                                  key={option.id}
+                                  color={option.color}
+                                  className="max-w-full"
+                                >
+                                  <span className="truncate">{option.value}</span>
+                                </Badge>
+                              ))}
+                            </span>
+                          ) : (
+                            <div className="truncate">{text || "—"}</div>
+                          )}
                         </EnumCell>
                       </td>
                     );

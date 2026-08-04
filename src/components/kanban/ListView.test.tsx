@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup, act } from "@testing-library/react";
 import { ListView } from "./ListView";
-import { ApiSprint, ApiTask } from "@/types";
+import { ApiCustomField, ApiSprint, ApiTask } from "@/types";
 
 const sprints = [
   { _id: "s1", name: "Sprint 2026-Q3 hardening and cleanup", startDate: "2026-07-01", endDate: "2026-07-14", status: "completed" },
@@ -105,10 +105,14 @@ describe("ListView truncated cells", () => {
     expect(screen.getByTitle("To Do").textContent).toBe("To Do");
   });
 
-  // The trigger truncates, so the full label has to stay on a title
+  // Was an assertion on tagName === "SELECT"; the control is a combobox now, and the
+  // full label still has to survive on a title because the trigger truncates
   it("keeps the whole status label reachable as a picker", () => {
     renderList({ onStatusChange: () => {} });
     expect(screen.getByTitle("To Do").textContent).toBe("To Do");
+    expect(
+      screen.getByRole("combobox", { name: /^Status for CP-191/ })
+    ).toBeTruthy();
   });
 });
 
@@ -394,5 +398,51 @@ describe("ListView reordering", () => {
   it("offers no handle with a single row", () => {
     renderList({ tasks: [many[0]], onReorder: () => {} });
     expect(handles()).toHaveLength(0);
+  });
+});
+
+// The stored value is the option's id, and since CP-211 that id is a generated
+// "<slug>-<random>" — nothing like the label. Sending the label is a 400 from
+// validateCustomFieldValues, and legacy string options hide it because id === value.
+describe("ListView custom field picker", () => {
+  const field = {
+    _id: "f1",
+    name: "Component",
+    fieldType: "dropdown",
+    options: [
+      { id: "ui-a1b2c3", value: "ui", color: "#ff0000", order: 1 },
+      { id: "backend-d4e5", value: "backend", color: "#00ff00", order: 2 },
+    ],
+    required: false,
+    order: 1,
+    showOnCard: false,
+    showInList: true,
+    filterable: true,
+    archived: false,
+  } as unknown as ApiCustomField;
+
+  const withValue = [
+    { ...tasks[0], _id: "t1", customFieldValues: { f1: "ui-a1b2c3" } },
+  ] as unknown as ApiTask[];
+
+  it("sends the option id, not its label", async () => {
+    const onFieldChange = vi.fn();
+    renderList({ tasks: withValue, customFields: [field], onFieldChange });
+
+    act(() => {
+      screen.getByRole("combobox", { name: /^Component for/ }).click();
+    });
+    const option = screen
+      .getAllByRole("option")
+      .find((o) => o.textContent?.replace("✓", "").trim() === "backend");
+    await act(async () => option?.click());
+
+    expect(onFieldChange).toHaveBeenCalledWith("t1", "f1", "backend-d4e5");
+  });
+
+  it("paints the chosen option in its own colour", () => {
+    renderList({ tasks: withValue, customFields: [field], onFieldChange: vi.fn() });
+    const badge = screen.getByText("ui").closest("span[style]");
+    expect(badge?.getAttribute("style")).toContain("#ff0000");
   });
 });

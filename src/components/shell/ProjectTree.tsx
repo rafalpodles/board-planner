@@ -155,7 +155,10 @@ export function ProjectTree({
   const [expandedBeforeDrag, setExpandedBeforeDrag] = useState<string | null>(null);
 
   function handleDragStart() {
-    setExpandedBeforeDrag(expandedId);
+    // manuallyExpanded, not expandedId: the latter falls back to the route's project,
+    // so storing it would pin an expansion the user never chose and kill
+    // expand-on-navigate for the rest of the session
+    setExpandedBeforeDrag(manuallyExpanded);
     setManuallyExpanded("");
   }
 
@@ -222,7 +225,7 @@ export function ProjectTree({
               {...(canReorder ? handleProps : {})}
               className={`relative flex w-full items-center gap-1.5 rounded-lg pr-2.5 transition-colors hover:bg-bg-hover ${
                 isRouteProject ? "shadow-[inset_3px_0_0_var(--color-primary)]" : ""
-              } ${canReorder ? "cursor-grab touch-none active:cursor-grabbing" : ""} ${
+              } ${canReorder ? "cursor-grab touch-pan-y active:cursor-grabbing" : ""} ${
                 isDragging ? "bg-bg-card shadow-lg ring-1 ring-border" : ""
               }`}
             >

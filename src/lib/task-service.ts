@@ -308,12 +308,22 @@ export async function updateTask(
     updates.assignee = assigneeUser ? assigneeUser._id : null;
   }
 
-  // The edit form PUTs the whole task, status included, so this is as much an exit from the
-  // active column as changeStatus is — but only when the status is actually part of the edit
+  // The edit form PUTs the whole task, status included, so leaving the active column is
+  // as much a release as changeStatus is. Keyed on the value actually changing, not on
+  // the field being present: dragging a card within its own column resends the status it
+  // already had, and unsetting the run there would detach a worker mid-execution.
+  const leavesColumn =
+    updates.status !== undefined && String(updates.status) !== String(oldTask.status);
+
+  // A pure reorder is not an edit. Without this every card dragged inside a column
+  // reads as "updated just now", which is the same lie the list's reorder endpoint
+  // already refuses to tell.
+  const onlyOrder = updates.order !== undefined && Object.keys(updates).length === 1;
+
   const task = await Task.findOneAndUpdate(
     { _id: taskId, project: projectId },
-    updates.status === undefined ? { $set: updates } : { $set: updates, $unset: UNSET_RUN },
-    { returnDocument: "after", runValidators: true }
+    leavesColumn ? { $set: updates, $unset: UNSET_RUN } : { $set: updates },
+    { returnDocument: "after", runValidators: true, timestamps: !onlyOrder }
   ).populate(taskPopulateFields);
 
   if (!task) {

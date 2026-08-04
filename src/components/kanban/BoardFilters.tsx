@@ -82,6 +82,9 @@ interface BoardFiltersProps {
   hiddenColumns?: ListColumnId[];
   customFields?: ApiCustomField[];
   onHiddenColumnsChange?: (hidden: ListColumnId[]) => void;
+  /** Separate from the handler above: the board has no columns to pick, but it still
+      has to hydrate the stored set, or the next load writes an empty one back */
+  showColumnPicker?: boolean;
   onFilter: (filtered: ApiTask[]) => void;
 }
 
@@ -100,6 +103,7 @@ export function BoardFilters({
   sortContext,
   hiddenColumns,
   onHiddenColumnsChange,
+  showColumnPicker,
   onFilter,
   customFields = [],
 }: BoardFiltersProps) {
@@ -595,7 +599,7 @@ export function BoardFilters({
         </button>
       </div>
 
-      {onHiddenColumnsChange && (
+      {showColumnPicker && onHiddenColumnsChange && (
         <ColumnPicker
           hidden={hiddenColumns ?? []}
           onChange={onHiddenColumnsChange}
