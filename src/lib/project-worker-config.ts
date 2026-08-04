@@ -1,4 +1,4 @@
-import { isProjectPolicyField } from "@/lib/worker-policy";
+import { PROJECT_POLICY_DEFAULTS, isProjectPolicyField } from "@/lib/worker-policy";
 
 const BOOLEAN_FIELDS: ReadonlySet<string> = new Set(["autoMerge"]);
 const STRING_FIELDS: ReadonlySet<string> = new Set([
@@ -36,6 +36,23 @@ export function parseProjectWorkerConfig(
     update["worker.enabled"] = body.enabled;
   }
 
+  // Un-pinning, the other half of policyOverrides. Without it a field touched once could never
+  // follow the default again, and the UI would show "set" with no route back.
+  const reset = body.reset;
+  const cleared = new Set<string>();
+  if (reset !== undefined) {
+    if (!Array.isArray(reset)) return { ok: false, error: "worker.reset must be an array" };
+    for (const field of reset) {
+      if (typeof field !== "string" || !isProjectPolicyField(field)) {
+        return { ok: false, error: `${String(field)} is not a worker policy field` };
+      }
+      // The stored copy goes back to the default too, so the document never holds a value that
+      // nothing resolves against — a later reader would have no way to tell it was stale.
+      update[`worker.policy.${field}`] = PROJECT_POLICY_DEFAULTS[field];
+      cleared.add(field);
+    }
+  }
+
   const policy = body.policy;
   if (policy !== undefined) {
     if (typeof policy !== "object" || policy === null || Array.isArray(policy)) {
@@ -56,6 +73,9 @@ export function parseProjectWorkerConfig(
       } else if (!isPositiveInt(value)) {
         return { ok: false, error: `${field} must be a positive integer` };
       }
+      if (cleared.has(field)) {
+        return { ok: false, error: `${field} cannot be set and reset in the same request` };
+      }
       update[`worker.policy.${field}`] =
         typeof value === "string" ? value.trim() : value;
       touched.add(field);
@@ -64,8 +84,10 @@ export function parseProjectWorkerConfig(
 
   // Recorded even when the value equals the default: pinning a field so a later change to the
   // default does not move it is exactly what an operator may be doing.
-  if (touched.size > 0) {
-    update["worker.policyOverrides"] = [...new Set([...existingOverrides, ...touched])];
+  if (touched.size > 0 || cleared.size > 0) {
+    const next = new Set([...existingOverrides, ...touched]);
+    for (const field of cleared) next.delete(field);
+    update["worker.policyOverrides"] = [...next];
   }
 
   if (Object.keys(update).length === 0) {

@@ -98,3 +98,66 @@ describe("parseProjectWorkerConfig", () => {
     });
   });
 });
+
+// Without this a field touched once could never follow the default again: policyOverrides only
+// ever grew, and the UI showed "set" with no route back.
+describe("resetting a field to the default", () => {
+  it("removes the field from the override list", () => {
+    const result = parseProjectWorkerConfig({ reset: ["autoMerge"] }, ["autoMerge", "model"]);
+
+    expect((result as { update: Record<string, unknown> }).update["worker.policyOverrides"]).toEqual([
+      "model",
+    ]);
+  });
+
+  // The stored copy goes back too, so the document never holds a value nothing resolves against
+  it("puts the stored value back to the default", () => {
+    const result = parseProjectWorkerConfig({ reset: ["maxDiffLines"] }, ["maxDiffLines"]);
+
+    expect((result as { update: Record<string, unknown> }).update["worker.policy.maxDiffLines"]).toBe(
+      400
+    );
+  });
+
+  it("resets several fields at once", () => {
+    const result = parseProjectWorkerConfig({ reset: ["autoMerge", "model"] }, [
+      "autoMerge",
+      "model",
+      "baseBranch",
+    ]);
+
+    expect((result as { update: Record<string, unknown> }).update["worker.policyOverrides"]).toEqual([
+      "baseBranch",
+    ]);
+  });
+
+  it("is harmless on a field nobody had pinned", () => {
+    const result = parseProjectWorkerConfig({ reset: ["model"] }, []);
+
+    expect((result as { update: Record<string, unknown> }).update["worker.policyOverrides"]).toEqual([]);
+  });
+
+  it("can reset one field while setting another", () => {
+    const result = parseProjectWorkerConfig(
+      { reset: ["model"], policy: { autoMerge: true } },
+      ["model"]
+    );
+    const update = (result as { update: Record<string, unknown> }).update;
+
+    expect(update["worker.policyOverrides"]).toEqual(["autoMerge"]);
+    expect(update["worker.policy.autoMerge"]).toBe(true);
+  });
+
+  // Otherwise the outcome would depend on which branch ran last
+  it("refuses to set and reset the same field in one request", () => {
+    expect(
+      parseProjectWorkerConfig({ reset: ["autoMerge"], policy: { autoMerge: true } })
+    ).toMatchObject({ ok: false });
+  });
+
+  it("refuses a field that is not a policy field, or a reset that is not an array", () => {
+    expect(parseProjectWorkerConfig({ reset: ["pollIntervalMs"] })).toMatchObject({ ok: false });
+    expect(parseProjectWorkerConfig({ reset: "model" })).toMatchObject({ ok: false });
+    expect(parseProjectWorkerConfig({ reset: [7] })).toMatchObject({ ok: false });
+  });
+});
