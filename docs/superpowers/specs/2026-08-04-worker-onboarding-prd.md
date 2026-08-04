@@ -176,8 +176,10 @@ fresh install starts empty and the app fills it in.
 for pull-request linking. The worker was only borrowing it.
 
 What is actually wrong with it is that it is **provider-specific, and there are two of them**.
-Replace `githubRepo` and `gitlabRepo` with a single repository URL. GitHub stops being privileged in
-the settings screen, Bitbucket stops being a special case, and the worker gets one thing to fetch.
+`githubRepo` and `gitlabRepo` are **decided: they merge into a single repository URL.** GitHub stops
+being privileged in the settings screen, Bitbucket stops being a special case, and the worker gets
+one thing to fetch. It carries a data migration and touches `github/sync` and `gitlab/sync`, so it
+lands before the enrolment work rather than during it.
 
 ### Private repositories are already solved for GitHub, and provable elsewhere
 
@@ -208,8 +210,8 @@ It is tempting to put every setting on it, since the user is right there. Resist
 configures ten things is a settings screen wearing an approval's clothes, and people click through
 those without reading — which is the exact opposite of what an authorisation screen is for.
 
-Three decisions: **who is connecting, which project, how much autonomy.** Everything else lives in
-project settings, one click away, afterwards.
+**Decided: three decisions on that page** — who is connecting, which project, how much autonomy.
+Everything else lives in project settings, one click away, afterwards.
 
 ## Settled by interview
 
