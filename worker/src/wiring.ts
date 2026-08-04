@@ -1,4 +1,14 @@
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "fs";
+import {
+  accessSync,
+  constants,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "fs";
 import { hostname } from "os";
 import { dirname, join } from "path";
 import { ApiClient, createApiClient } from "./api.js";
@@ -25,6 +35,14 @@ import { LocalServer, LocalServerDeps, startLocalServer } from "./local-server.j
 import { createLoop } from "./loop.js";
 import { createOutbox, Store } from "./outbox.js";
 import { PipelineDeps, runTask } from "./pipeline.js";
+import {
+  checkRepo,
+  pathWithTools,
+  PreflightCheck,
+  PreflightDeps,
+  PreflightReport,
+  runPreflight,
+} from "./preflight.js";
 import { createReporter } from "./reporter.js";
 import { abortableSleep } from "./sleep.js";
 import { HeartbeatDeps, loadIdentity, PROTOCOL_VERSION, startHeartbeat } from "./registration.js";
@@ -60,6 +78,15 @@ export interface WorkerDeps {
   stat: (path: string) => { uid: number; mode: number };
   fetchImpl: typeof fetch;
   createStore: (path: string) => Store;
+  // null for "not there", so a missing manifest is not confused with an unreadable one
+  readFile: (path: string) => string | null;
+  execPath: string;
+  isExecutable: (path: string) => boolean;
+  runPreflight: (deps: PreflightDeps) => Promise<PreflightReport>;
+  // childEnv() copies PATH from this process, so repairing the worker's own is what reaches every
+  // child — and, through `claude -p`, every grandchild. Named as a dependency rather than done by
+  // assignment because that coupling is the whole point of the check.
+  setPath: (value: string) => void;
   createApi: (bootstrap: Bootstrap) => ApiClient;
   createTelemetry: () => Telemetry;
   startHeartbeat: typeof startHeartbeat;
@@ -98,6 +125,20 @@ export function defaultWorkerDeps(): WorkerDeps {
     },
     fetchImpl: (...args) => fetch(...args),
     createStore: fileStore,
+    readFile: (path) => (existsSync(path) ? readFileSync(path, "utf8") : null),
+    execPath: process.execPath,
+    isExecutable: (path) => {
+      try {
+        accessSync(path, constants.X_OK);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    runPreflight,
+    setPath: (value) => {
+      process.env.PATH = value;
+    },
     createApi: (bootstrap) => createApiClient(bootstrap),
     createTelemetry,
     startHeartbeat,
@@ -128,6 +169,13 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   let bound = new Map<string, { path: string; worktreeRoot: string; config: EffectiveConfig }>();
   const reapedProjects = new Set<string>();
 
+  // What this machine can actually do, established once at startup. Null until then, and reported
+  // as undefined while it is, so a worker mid-startup never claims to be broken.
+  let preflight: PreflightReport | null = null;
+  // The gates' own requirements, which only exist relative to a bound repository, so they are
+  // recomputed on every rebind rather than once at startup
+  let repoChecks: PreflightCheck[] = [];
+
   function configFor(projectId: string): WorkerConfig | null {
     const identity = loadIdentity(identityStore);
     const repo = bound.get(projectId);
@@ -149,6 +197,35 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       fallbackModel: repo.config.fallbackModel,
       reviewModel: repo.config.reviewModel,
     };
+  }
+
+  // Resolving the binaries is only half of it. childEnv() copies PATH from this process, and a
+  // worker started by launchd — or by an app launched from Finder — has one with no Homebrew and no
+  // nvm on it. So the resolved directories go onto the worker's own PATH, which is what every child
+  // and, through `claude -p`, every grandchild then inherits. Without this the check passes and
+  // every task still fails.
+  async function establishPreflight(): Promise<void> {
+    try {
+      preflight = await deps.runPreflight({
+        runner: deps.runner,
+        env: deps.env,
+        execPath: deps.execPath,
+        isExecutable: deps.isExecutable,
+      });
+    } catch (error) {
+      deps.logError(`preflight could not run: ${String(error)}`);
+      return;
+    }
+
+    const repaired = pathWithTools(preflight.paths, deps.env.PATH ?? "");
+    if (repaired !== deps.env.PATH) {
+      deps.setPath(repaired);
+      deps.log("PATH extended with the directories the required tools were found in");
+    }
+
+    for (const check of preflight.checks) {
+      if (!check.ok) deps.logError(`preflight: ${check.name} — ${check.detail}`);
+    }
   }
 
   // A failure keeps the previous inventory rather than reporting an empty one: the server would
@@ -212,6 +289,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     }
 
     bound = nextBound;
+    repoChecks = [...bound.values()].flatMap((repo) => checkRepo(deps.readFile, repo.path));
     heartbeat.reportBindingError([inventoryError, ...errors].filter(Boolean).join("; "));
 
     for (const projectId of bound.keys()) {
@@ -357,6 +435,11 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     apiBaseUrl: bootstrap.apiBaseUrl,
     enrolmentToken: bootstrap.enrolmentToken,
     repos: () => (inventoryError ? undefined : inventory),
+    preflight: () => {
+      if (!preflight) return undefined;
+      const checks = [...preflight.checks, ...repoChecks];
+      return { ok: checks.every((c) => c.ok), account: preflight.account, checks };
+    },
     forgetEnrolmentToken: bootstrap.enrolmentTokenFile
       ? () => rmSync(bootstrap.enrolmentTokenFile, { force: true })
       : undefined,
@@ -412,6 +495,10 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
 
   return {
     async run() {
+      // First of all, because it repairs the PATH every later child is spawned with — including
+      // the git this run's own inventory scan shells out to.
+      await establishPreflight();
+
       // Before the first heartbeat, which is what carries it: the server matches projects against
       // these remotes, so reporting an empty inventory would leave this machine unassigned until
       // the next heartbeat and the next refresh had both come round.

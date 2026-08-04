@@ -428,6 +428,27 @@ export interface WorkerRepo {
   path: string;
 }
 
+export interface WorkerPreflightCheck {
+  name: string;
+  ok: boolean;
+  detail: string;
+}
+
+// Whether the machine can actually do the work: the four binaries the worker shells out to, the
+// session `claude` and `gh` need, and what the gates require of the bound repository. Reported by
+// the worker, never set here — null until a worker old enough to compute it has checked in.
+export interface WorkerPreflight {
+  ok: boolean;
+  // Which account `claude` is signed into. Empty when the CLI is too old to answer.
+  account: string;
+  checks: WorkerPreflightCheck[];
+  reportedAt: Date;
+}
+
+export interface ApiWorkerPreflight extends Omit<WorkerPreflight, "reportedAt"> {
+  reportedAt: string;
+}
+
 // A single-use, short-lived credential whose only power is to register one worker. Deliberately
 // not an ApiToken: an ApiToken can be used repeatedly and carries its owner's access.
 export interface IEnrolmentToken {
@@ -459,6 +480,7 @@ export interface IWorker {
   lockedByInstance: boolean;
   lastSeenAt: Date | null;
   bindingError: string;
+  preflight: WorkerPreflight | null;
   command: "" | "pause" | "resume" | "stop";
   commandIssuedAt: Date | null;
   commandAckedAt: Date | null;
@@ -480,6 +502,7 @@ export interface ApiWorker {
   lockedByInstance: boolean;
   lastSeenAt: string | null;
   bindingError: string;
+  preflight: ApiWorkerPreflight | null;
   command: "" | "pause" | "resume" | "stop";
   commandIssuedAt: string | null;
   commandAckedAt: string | null;
