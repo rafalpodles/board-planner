@@ -80,7 +80,7 @@ describe("createLoop", () => {
 
     await loop.start();
 
-    expect(sleep).toHaveBeenCalledWith(30_000);
+    expect(sleep).toHaveBeenCalledWith(30_000, expect.any(AbortSignal));
   });
 
   it("keeps polling after a claim throws", async () => {
@@ -136,6 +136,29 @@ describe("createLoop", () => {
     await loop.start();
 
     expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("ends the poll wait the moment it is asked to stop, instead of waiting the interval out", async () => {
+    const api = apiStub(queue());
+    let waitSignal: AbortSignal | undefined;
+    const loop = createLoop({
+      pollIntervalMs: () => 30_000,
+      assignments: () => ["P1"],
+      api,
+      execute: vi.fn(),
+      // Settles only on the abort, so a loop that does not abort its own wait never returns here
+      sleep: (_ms, signal) =>
+        new Promise<void>((resolve) => {
+          waitSignal = signal;
+          signal?.addEventListener("abort", () => resolve(), { once: true });
+          loop.stop();
+        }),
+      log: vi.fn(),
+    });
+
+    await loop.start();
+
+    expect(waitSignal?.aborted).toBe(true);
   });
 
   it("claims nothing more once paused mid-task", async () => {
