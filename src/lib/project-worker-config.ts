@@ -1,4 +1,4 @@
-import { PROJECT_POLICY_DEFAULTS, isProjectPolicyField } from "@/lib/worker-policy";
+import { isProjectPolicyField } from "@/lib/worker-policy";
 
 const BOOLEAN_FIELDS: ReadonlySet<string> = new Set(["autoMerge"]);
 const STRING_FIELDS: ReadonlySet<string> = new Set([
@@ -73,5 +73,3 @@ export function parseProjectWorkerConfig(
   }
   return { ok: true, update };
 }
-
-export const PROJECT_POLICY_FIELDS = Object.keys(PROJECT_POLICY_DEFAULTS);

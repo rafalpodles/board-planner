@@ -17,7 +17,11 @@ export function verdictFor(
   worker: IWorker,
   project: AssignableProject | null,
   requestProtocol: number,
-  now = new Date()
+  now = new Date(),
+  // Every live worker on this instance. Without them a worker that lost a contested checkout would
+  // still be allowed to claim for it — the assignment would be withheld while the claim went
+  // through, which is the same working tree shared by two processes.
+  others: CheckoutClaimant[] = []
 ): Verdict {
   if (requestProtocol !== PROTOCOL_VERSION) {
     return {
@@ -39,8 +43,16 @@ export function verdictFor(
   if (!project?.worker?.enabled) {
     return { ok: false, reason: "this project is not enabled for workers" };
   }
-  if (!matchRepo(project, worker.repos ?? [])) {
-    return { ok: false, reason: "this worker reports no checkout of this project's repository" };
+  const usable = usableRepos(worker as unknown as CheckoutClaimant, others, now);
+  if (!matchRepo(project, usable)) {
+    const lost = lostCheckouts(worker as unknown as CheckoutClaimant, others, now);
+    const holder = matchRepo(project, worker.repos ?? []) ? [...lost.values()][0] : null;
+    return {
+      ok: false,
+      reason: holder
+        ? `${holder} already runs this checkout on the same machine`
+        : "this worker reports no checkout of this project's repository",
+    };
   }
 
   return { ok: true };
@@ -109,21 +121,66 @@ export function assignmentsFor(
   return out;
 }
 
-// Two worker processes sharing one checkout both build worktrees in it and both run git in it. On
-// different machines that cannot happen, so only a same-host, same-path pair is a real collision.
-export function sharedCheckout(
-  worker: { host: string; repos?: RepoReport[] },
-  others: IWorker[],
+export interface CheckoutClaimant {
+  _id: unknown;
+  name: string;
+  host: string;
+  repos?: RepoReport[];
+  enabled?: boolean;
+  lockedByInstance?: boolean;
+  lastSeenAt?: Date | string | null;
+  createdAt?: Date | string;
+}
+
+function registeredAt(worker: CheckoutClaimant): number {
+  const at = worker.createdAt ? new Date(worker.createdAt).getTime() : NaN;
+  // A worker with no usable createdAt must never win by accident, so it sorts last
+  return Number.isFinite(at) ? at : Number.MAX_SAFE_INTEGER;
+}
+
+// Two worker processes sharing one working tree both build worktrees in it and both run git in it.
+// On different machines that cannot happen, so only a same-host, same-path pair collides.
+//
+// The winner is decided, not merely detected: the earliest-registered live claimant keeps the
+// checkout. An earlier version answered symmetrically — both processes saw a collision and both
+// stood down, leaving two idle workers and a green console.
+export function lostCheckouts(
+  worker: CheckoutClaimant,
+  others: CheckoutClaimant[],
   now = new Date()
-): { path: string; workerName: string } | null {
-  const mine = new Set((worker.repos ?? []).map((r) => r.path));
+): Map<string, string> {
+  const lost = new Map<string, string>();
+  if (!isLive(worker as IWorker, now)) return lost;
+
+  const mine = registeredAt(worker);
+  const myId = String(worker._id);
+
   for (const other of others) {
-    if (!isLive(other, now) || other.host !== worker.host) continue;
-    for (const repo of (other as unknown as { repos?: RepoReport[] }).repos ?? []) {
-      if (mine.has(repo.path)) return { path: repo.path, workerName: other.name };
+    if (String(other._id) === myId) continue;
+    if (!isLive(other as IWorker, now) || other.host !== worker.host) continue;
+
+    const theirs = registeredAt(other);
+    // Ties break on id so two workers created in the same millisecond still agree who wins
+    const otherWins = theirs < mine || (theirs === mine && String(other._id) < myId);
+    if (!otherWins) continue;
+
+    const taken = new Set((other.repos ?? []).map((r) => r.path));
+    for (const repo of worker.repos ?? []) {
+      if (taken.has(repo.path)) lost.set(repo.path, other.name);
     }
   }
-  return null;
+  return lost;
+}
+
+// The checkouts this worker may actually use: everything it reported, minus what an
+// earlier-registered live process on the same machine already holds.
+export function usableRepos(
+  worker: CheckoutClaimant,
+  others: CheckoutClaimant[],
+  now = new Date()
+): RepoReport[] {
+  const lost = lostCheckouts(worker, others, now);
+  return (worker.repos ?? []).filter((r) => !lost.has(r.path));
 }
 
 export async function registerWorker(input: {

@@ -11,7 +11,9 @@ vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/project", () => ({
   Project: { find: () => ({ select: () => ({ lean: projectFind }) }) },
 }));
-vi.mock("@/models/worker", () => ({ Worker: { updateOne: workerUpdateOne, find: workerFind } }));
+vi.mock("@/models/worker", () => ({
+  Worker: { updateOne: workerUpdateOne, find: () => ({ select: workerFind }) },
+}));
 vi.mock("@/lib/worker-service", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/worker-service")>();
   return { ...actual, verifyWorkerCredential, touchWorker };
@@ -38,6 +40,8 @@ function workerDoc(overrides: Record<string, unknown> = {}) {
     lockedByInstance: false,
     version: "1.0.0",
     host: "mac.home",
+    lastSeenAt: new Date(),
+    createdAt: new Date("2026-06-01"),
     policy: { pollIntervalMs: 5000 },
     policyOverrides: ["pollIntervalMs"],
     repos: [{ remote: REMOTE, path: "/repo" }],
@@ -174,6 +178,7 @@ describe("POST /api/workers/:workerId/heartbeat", () => {
 // Two worker processes sharing one working tree both run git in it. Different machines cannot, so
 // only a same-host pair collides — and the one that got there first keeps it.
 describe("one working tree, one worker", () => {
+  // Registered earlier than the worker under test, so it is the one that keeps the checkout
   const otherOnSameHost = {
     _id: "w2",
     name: "second-process",
@@ -181,6 +186,7 @@ describe("one working tree, one worker", () => {
     enabled: true,
     lockedByInstance: false,
     lastSeenAt: new Date(),
+    createdAt: new Date("2020-01-01"),
     repos: [{ remote: REMOTE, path: "/repo" }],
   };
 

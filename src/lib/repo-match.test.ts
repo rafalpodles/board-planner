@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { matchRepo, normaliseRemote, projectRemotes } from "./repo-match";
+import { matchRepo, normaliseRemote, projectRemotes, sameRepo } from "./repo-match";
 
 describe("normaliseRemote", () => {
   it("reduces every spelling of the same repository to one form", () => {
@@ -124,5 +124,39 @@ describe("matchRepo", () => {
     const reported = [{ remote: "git@gitlab.com:group/subgroup/repo.git", path: "/a" }];
 
     expect(matchRepo(gitlab, reported)).toBe("git@gitlab.com:group/subgroup/repo.git");
+  });
+});
+
+// Dropping the host entirely made a self-hosted mirror, or a second account, match a project it has
+// nothing to do with — and the agent would then run and push in the wrong checkout.
+describe("hosts", () => {
+  it("refuses two different real hosts holding the same owner/repo", () => {
+    const project = { _id: "p1", githubRepo: "https://github.com/owner/repo" };
+    const elsewhere = [{ remote: "git@git.internal.example.com:owner/repo.git", path: "/a" }];
+
+    expect(matchRepo(project, elsewhere)).toBeNull();
+  });
+
+  it("still matches a bare owner/repo, which is what githubRepo actually holds", () => {
+    const project = { _id: "p1", githubRepo: "owner/repo" };
+
+    expect(matchRepo(project, [{ remote: "git@git.internal.example.com:owner/repo.git", path: "/a" }]))
+      .toBe("git@git.internal.example.com:owner/repo.git");
+  });
+
+  // An ssh alias resolves through this machine's ssh config, so it is not a hostname to compare
+  it("does not treat a per-account ssh alias as a host", () => {
+    const project = { _id: "p1", githubRepo: "https://github.com/rafalpodles/claude-planner" };
+    const aliased = [{ remote: "git@github-rafalpodles:rafalpodles/claude-planner.git", path: "/a" }];
+
+    expect(matchRepo(project, aliased)).toBe(aliased[0].remote);
+  });
+
+  it("ignores a port when comparing hosts", () => {
+    expect(sameRepo("ssh://git@gitlab.example.com:2222/owner/repo.git", "https://gitlab.example.com/owner/repo")).toBe(true);
+  });
+
+  it("matches the same real host spelled two ways", () => {
+    expect(sameRepo("git@github.com:owner/repo.git", "https://github.com/owner/repo")).toBe(true);
   });
 });

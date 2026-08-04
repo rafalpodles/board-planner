@@ -121,6 +121,9 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   let policy: EffectiveConfig = DEFAULT_POLICY;
   let assignments: Assignment[] = [];
   let inventory: RepoInventory[] = [];
+  // Why the inventory could not be read, surfaced on the heartbeat so a broken repos.json shows up
+  // in the console instead of looking like a machine that simply has nothing.
+  let inventoryError = "";
   let bound = new Map<string, { path: string; worktreeRoot: string; config: EffectiveConfig }>();
   const reapedProjects = new Set<string>();
 
@@ -145,6 +148,24 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       fallbackModel: repo.config.fallbackModel,
       reviewModel: repo.config.reviewModel,
     };
+  }
+
+  // A failure keeps the previous inventory rather than reporting an empty one: the server would
+  // otherwise overwrite what it knows, and this machine would silently stop being offered anything.
+  async function refreshInventory(): Promise<void> {
+    let result;
+    try {
+      result = await repoInventory({ runner: deps.runner, readAllowlist });
+    } catch (error) {
+      result = { ok: false as const, reason: `could not read repos.json: ${String(error)}` };
+    }
+    if (result.ok) {
+      inventory = result.repos;
+      inventoryError = "";
+      return;
+    }
+    inventoryError = result.reason;
+    deps.logError(result.reason);
   }
 
   // A refusal here must not crash the worker or touch any other assignment: it is recorded and
@@ -190,7 +211,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     }
 
     bound = nextBound;
-    heartbeat.reportBindingError(errors.join("; "));
+    heartbeat.reportBindingError([inventoryError, ...errors].filter(Boolean).join("; "));
 
     for (const projectId of bound.keys()) {
       if (reapedProjects.has(projectId)) continue;
@@ -235,7 +256,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       return;
     }
 
-    inventory = await repoInventory({ runner: deps.runner, readAllowlist });
+    await refreshInventory();
     await rebind();
   }
 
@@ -334,7 +355,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   const heartbeatDeps: HeartbeatDeps = {
     apiBaseUrl: bootstrap.apiBaseUrl,
     enrolmentToken: bootstrap.enrolmentToken,
-    repos: () => inventory,
+    repos: () => (inventoryError ? undefined : inventory),
     forgetEnrolmentToken: bootstrap.enrolmentTokenFile
       ? () => rmSync(bootstrap.enrolmentTokenFile, { force: true })
       : undefined,
@@ -393,7 +414,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       // Before the first heartbeat, which is what carries it: the server matches projects against
       // these remotes, so reporting an empty inventory would leave this machine unassigned until
       // the next heartbeat and the next refresh had both come round.
-      inventory = await repoInventory({ runner: deps.runner, readAllowlist }).catch(() => []);
+      await refreshInventory();
 
       await heartbeat.tick();
       // A failure here must not keep the worker from starting its loop — drain() retries this on

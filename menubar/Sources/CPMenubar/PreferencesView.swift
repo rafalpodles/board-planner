@@ -114,7 +114,8 @@ private struct PolicyTab: View {
             // One row per bound project: these settings describe a repository, so a machine serving
             // two projects genuinely has two answers.
             ForEach(model.config?.projects ?? [], id: \.project) { project in
-                Section(project.baseBranch) {
+                Section("Project \(project.project)") {
+                    LabeledContent("Base branch", value: project.baseBranch)
                     LabeledContent("Model", value: project.model)
                     LabeledContent("Review model", value: project.reviewModel)
                     LabeledContent("Max diff lines", value: "\(project.maxDiffLines)")

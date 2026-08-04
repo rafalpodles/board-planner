@@ -4,6 +4,7 @@ const getAuthUser = vi.fn();
 const verifyWorkerCredential = vi.fn();
 const workerFindById = vi.fn();
 const projectFind = vi.fn();
+const workerFindOthers = vi.fn();
 const workerFindByIdAndUpdate = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
@@ -16,7 +17,11 @@ vi.mock("@/models/project", () => ({
   Project: { find: () => ({ select: () => ({ lean: projectFind }) }) },
 }));
 vi.mock("@/models/worker", () => ({
-  Worker: { findById: workerFindById, findByIdAndUpdate: workerFindByIdAndUpdate },
+  Worker: {
+    findById: workerFindById,
+    findByIdAndUpdate: workerFindByIdAndUpdate,
+    find: () => ({ select: workerFindOthers }),
+  },
 }));
 vi.mock("@/lib/worker-service", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/worker-service")>();
@@ -45,12 +50,13 @@ const WORKER = {
   _id: WORKER_ID,
   name: "rig-laptop",
   host: "mac.home",
+  lastSeenAt: new Date(),
   policy: { pollIntervalMs: 30_000 },
   policyOverrides: [],
   repos: [{ remote: "git@github.com:owner/repo.git", path: "/repo" }],
   enabled: true,
   lockedByInstance: false,
-  createdAt: new Date(),
+  createdAt: new Date("2026-06-01"),
   updatedAt: new Date(),
 };
 
@@ -69,6 +75,7 @@ beforeEach(() => {
   workerFindById.mockResolvedValue(WORKER);
   workerFindByIdAndUpdate.mockResolvedValue({ ...WORKER, name: "renamed" });
   verifyWorkerCredential.mockResolvedValue(WORKER);
+  workerFindOthers.mockResolvedValue([]);
   projectFind.mockResolvedValue([
     {
       _id: "p1",
@@ -196,5 +203,42 @@ describe("GET /api/workers/:workerId", () => {
     projectFind.mockResolvedValue([]);
 
     expect((await (await GET(getRequest(), ctx())).json()).assignments).toEqual([]);
+  });
+});
+
+// The heartbeat also computes assignments, but nothing reads that field — the worker only ever uses
+// this route. So the contested-checkout decision has to be applied here or it is not applied at all.
+describe("GET and a contested checkout", () => {
+  function getRequest() {
+    return new Request(`http://localhost/api/workers/${WORKER_ID}`, {
+      headers: {
+        authorization: "Bearer cpw_secret",
+        "x-worker-id": WORKER_ID,
+        "x-cp-protocol": "1",
+      },
+    });
+  }
+
+  it("withholds a project whose checkout an earlier live process on this host holds", async () => {
+    workerFindOthers.mockResolvedValue([
+      {
+        _id: "w0",
+        name: "older",
+        host: "mac.home",
+        enabled: true,
+        lockedByInstance: false,
+        lastSeenAt: new Date(),
+        createdAt: new Date("2020-01-01"),
+        repos: [{ remote: "git@github.com:owner/repo.git", path: "/repo" }],
+      },
+    ]);
+
+    expect((await (await GET(getRequest(), ctx())).json()).assignments).toEqual([]);
+  });
+
+  it("consults the other workers at all", async () => {
+    await GET(getRequest(), ctx());
+
+    expect(workerFindOthers).toHaveBeenCalled();
   });
 });
