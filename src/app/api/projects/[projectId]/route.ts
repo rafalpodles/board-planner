@@ -17,6 +17,7 @@ import { encryptSecret } from "@/lib/encryption";
 import { isAllowedMcpServerUrl } from "@/lib/url-validation";
 import { validatePmConfig, isPmAvailable, mergeMcpServerTokens, sanitizeMcpServers } from "@/lib/pm/config";
 import { PROJECT_ICONS } from "@/types";
+import { projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
 
 export const GET = withProjectAccess(async (_request, { params, user }) => {
   await connectDB();
@@ -39,6 +40,11 @@ export const GET = withProjectAccess(async (_request, { params, user }) => {
   delete obj.gitlabToken;
   obj.codaTokenSet = !!obj.codaToken;
   delete obj.codaToken;
+  // One repository field, resolved here so no consumer has to know the legacy pair still exists
+  obj.repositoryUrl = projectRepositoryUrl(obj);
+  obj.repositoryProvider = repositoryProvider(obj);
+  delete obj.githubRepo;
+  delete obj.gitlabRepo;
   if (obj.pm) obj.pm.mcpServers = sanitizeMcpServers(obj.pm.mcpServers);
   obj.pmAvailable = isPmAvailable();
   obj.canAdmin = canAdminProject(user, project);
@@ -50,7 +56,7 @@ export const PUT = withProjectAdmin(async (request, { params, user }) => {
   const { projectId } = await params;
   const body = await request.json();
 
-  const allowed = ["name", "description", "key", "icon", "githubRepo", "githubToken", "gitlabRepo", "gitlabHost", "gitlabToken", "codaHost", "codaDocId", "codaTableId", "codaToken"];
+  const allowed = ["name", "description", "key", "icon", "repositoryUrl", "githubToken", "gitlabHost", "gitlabToken", "codaHost", "codaDocId", "codaTableId", "codaToken"];
   const updates: Record<string, unknown> = {};
   for (const field of allowed) {
     if (body[field] !== undefined) {
@@ -232,6 +238,11 @@ export const PUT = withProjectAdmin(async (request, { params, user }) => {
   delete obj.gitlabToken;
   obj.codaTokenSet = !!obj.codaToken;
   delete obj.codaToken;
+  // One repository field, resolved here so no consumer has to know the legacy pair still exists
+  obj.repositoryUrl = projectRepositoryUrl(obj);
+  obj.repositoryProvider = repositoryProvider(obj);
+  delete obj.githubRepo;
+  delete obj.gitlabRepo;
   if (obj.pm) obj.pm.mcpServers = sanitizeMcpServers(obj.pm.mcpServers);
   obj.pmAvailable = isPmAvailable();
   obj.canAdmin = canAdminProject(user, project);

@@ -548,8 +548,11 @@ export interface IProject {
   webhooks: IWebhook[];
   notificationChannels: INotificationChannel[];
   worker: ProjectWorkerConfig;
+  repositoryUrl: string;
+  /** @deprecated superseded by repositoryUrl; read only as a migration fallback */
   githubRepo: string;
   githubToken: string;
+  /** @deprecated superseded by repositoryUrl; read only as a migration fallback */
   gitlabRepo: string;
   gitlabHost: string;
   gitlabToken: string;
@@ -778,9 +781,10 @@ export interface ApiProject {
   customFields: ApiCustomField[];
   webhooks: ApiWebhook[];
   notificationChannels: ApiNotificationChannel[];
-  githubRepo: string;
+  repositoryUrl: string;
+  // Which of the two integrations that URL's host resolves to, "" when neither
+  repositoryProvider: "github" | "gitlab" | "";
   githubTokenSet: boolean;
-  gitlabRepo?: string;
   gitlabHost?: string;
   gitlabTokenSet?: boolean;
   codaHost?: string;

@@ -100,7 +100,7 @@ export const POST = withWorker(async (request, { worker }) => {
   );
 
   const projects = await Project.find({ "worker.enabled": true })
-    .select("_id githubRepo gitlabRepo worker")
+    .select("_id repositoryUrl githubRepo gitlabRepo gitlabHost worker")
     .lean();
 
   return NextResponse.json({
