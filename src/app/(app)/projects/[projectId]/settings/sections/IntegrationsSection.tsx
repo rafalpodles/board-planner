@@ -15,6 +15,7 @@ import {
 } from "@/types";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
+import { SecretField } from "@/components/ui/SecretField";
 import { SettingsCard, EmptyState } from "@/components/settings/SettingsCard";
 import {
   INTEGRATIONS,
@@ -493,9 +494,18 @@ export function IntegrationsSection({ projectId, project, patchProject, replaceP
                   </button>
                 </div>
               </div>
-              <code className="mb-2 block truncate rounded bg-bg-input px-2 py-0.5 text-xs text-text-muted">
-                {ch.webhookUrl}
-              </code>
+              <div className="mb-2">
+                <SecretField
+                  label={`Webhook URL for ${ch.name}`}
+                  masked={ch.webhookUrlMasked}
+                  placeholder={
+                    ch.type === "slack"
+                      ? "https://hooks.slack.com/services/..."
+                      : "https://discord.com/api/webhooks/..."
+                  }
+                  onReplace={(webhookUrl) => updateChannel(ch._id, { webhookUrl })}
+                />
+              </div>
               <div className="flex flex-wrap gap-1">
                 {WEBHOOK_EVENTS.map((evt) => (
                   <button
@@ -568,9 +578,14 @@ export function IntegrationsSection({ projectId, project, patchProject, replaceP
           {(project.webhooks || []).map((wh) => (
             <div key={wh._id} className="rounded-lg border border-border p-3">
               <div className="mb-2 flex items-center justify-between gap-2">
-                <code className="max-w-[300px] truncate rounded bg-bg-input px-2 py-0.5 text-xs">
-                  {wh.url}
-                </code>
+                <div className="min-w-0 max-w-[380px] flex-1">
+                  <SecretField
+                    label="Webhook URL"
+                    masked={wh.urlMasked}
+                    placeholder="https://example.com/hooks/board"
+                    onReplace={(url) => updateWebhook(wh._id, { url })}
+                  />
+                </div>
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => updateWebhook(wh._id, { enabled: !wh.enabled })}

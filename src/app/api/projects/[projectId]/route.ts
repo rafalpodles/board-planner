@@ -16,6 +16,7 @@ import { logProjectAudit } from "@/lib/projectAudit";
 import { encryptSecret } from "@/lib/encryption";
 import { isAllowedMcpServerUrl } from "@/lib/url-validation";
 import { validatePmConfig, isPmAvailable, mergeMcpServerTokens, sanitizeMcpServers } from "@/lib/pm/config";
+import { sanitizeProjectSecrets } from "@/lib/project-secrets";
 import { PROJECT_ICONS } from "@/types";
 
 export const GET = withProjectAccess(async (_request, { params, user }) => {
@@ -30,15 +31,8 @@ export const GET = withProjectAccess(async (_request, { params, user }) => {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
-  // Strip token, expose only boolean flag
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const obj: any = project.toObject();
-  obj.githubTokenSet = !!obj.githubToken;
-  delete obj.githubToken;
-  obj.gitlabTokenSet = !!obj.gitlabToken;
-  delete obj.gitlabToken;
-  obj.codaTokenSet = !!obj.codaToken;
-  delete obj.codaToken;
+  const obj: any = sanitizeProjectSecrets(project.toObject());
   if (obj.pm) obj.pm.mcpServers = sanitizeMcpServers(obj.pm.mcpServers);
   obj.pmAvailable = isPmAvailable();
   obj.canAdmin = canAdminProject(user, project);
