@@ -138,6 +138,13 @@ mcp-server/           # Standalone MCP server (stdio transport)
 - **Notifications**: In-app + optional Slack/Discord webhooks + optional email
 - **Recurrence**: When task → done with recurrence config, auto-creates next task
 - **GitHub PR linking**: Matches PRs by branch/title pattern `CP-5` (case-insensitive)
+- **Autonomous workers**: Opt-in per project (Settings → Workers, instance admin). A worker reports
+  the checkouts it has — resolved from `repos.json` on its own machine — and the server matches
+  those remotes against the project's `githubRepo`/`gitlabRepo`. **The server never sends a path**:
+  an assignment names a remote and the worker resolves its own checkout, so where anything runs
+  stays a local decision. Work policy (`autoMerge`, `baseBranch`, diff limits, models) lives on the
+  project; only `pollIntervalMs` and the kill switch live on the worker. `autoMerge` defaults off,
+  so an unconfigured project gets a pull request and nothing merged. See `worker/README.md`.
 - **PM autonomy**: Opt-in per project (Settings → PM Agent → Autonomy). Board reviews run from `pm.autonomy.reviewHour` every `pm.autonomy.reviewIntervalHours` in the project's own timezone; each slot is claimed atomically via `pm.autonomy.lastReviewSlot` (`YYYY-MM-DDTHH`) so it runs at most once. A review gets a server-computed digest (missing acceptance criteria, tasks stuck in a column, duplicate titles — `src/lib/pm/board-review.ts`) and runs with `change_status`/`create_task` withheld. Tasks entering `needs_human_review` are queued in `pmtriggers` and reviewed automatically. Autonomous turns count against `pm.dailyTurnCap` and are attributed to the `pm` user. See `docs/superpowers/specs/2026-07-28-pm-phase2-autonomous-triggers.md`.
 
 ## Environment variables

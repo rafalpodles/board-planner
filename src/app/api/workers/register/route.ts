@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { protocolOf } from "@/lib/middleware";
-import { PROTOCOL_VERSION, WORKER_HEARTBEAT_MS, overriddenPolicy, registerWorker } from "@/lib/worker-service";
+import { PROTOCOL_VERSION, WORKER_HEARTBEAT_MS, overriddenWorkerPolicy, registerWorker } from "@/lib/worker-service";
 import { attachWorkerToEnrolment, consumeEnrolmentToken } from "@/lib/enrolment";
 
 // Authenticated by a single-use enrolment token, NOT by an admin session or an admin API token.
@@ -57,10 +57,9 @@ export async function POST(request: Request) {
     heartbeatMs: WORKER_HEARTBEAT_MS,
     // Only what an operator set: everything else resolves against the worker's own
     // DEFAULT_POLICY, so raising a default reaches every machine that never pinned it
-    policy: overriddenPolicy(worker),
-    assignments: worker.assignments.map((a) => ({
-      project: String(a.project),
-      proposedPath: a.proposedPath,
-    })),
+    policy: overriddenWorkerPolicy(worker),
+    // Empty by design: a freshly registered worker has reported no checkouts yet, so there is
+    // nothing to match a project against. The first heartbeat carries its inventory and gets them.
+    assignments: [],
   });
 }

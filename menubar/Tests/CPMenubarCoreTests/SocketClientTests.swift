@@ -63,8 +63,9 @@ private struct RecordingTransport: Transport {
 
 @Test func parsesTheConfigResponse() async throws {
     let body = #"""
-    {"apiUrl":"http://localhost:3991","workerName":"rig","projectCount":2,"model":"opus",
-     "reviewModel":"sonnet","maxDiffLines":400,"taskTimeoutMs":900000}
+    {"apiUrl":"http://localhost:3991","workerName":"rig","projectCount":2,"pollIntervalMs":30000,
+     "projects":[{"project":"p1","autoMerge":false,"baseBranch":"main","model":"opus",
+     "reviewModel":"sonnet","maxDiffLines":400,"taskTimeoutMs":900000}]}
     """#
     let client = SocketClient(socketPath: "/x",
                               transport: FakeTransport(chunks: ["HTTP/1.1 200 OK\r\n\r\n", body]))
@@ -72,7 +73,10 @@ private struct RecordingTransport: Transport {
     let config = try await client.config()
 
     #expect(config.workerName == "rig")
-    #expect(config.maxDiffLines == 400)
+    #expect(config.pollIntervalMs == 30000)
+    // Work settings are per project, so they are read from there and not from the top level
+    #expect(config.projects.first?.maxDiffLines == 400)
+    #expect(config.projects.first?.autoMerge == false)
 }
 
 @Test func surfacesEventsFromASplitStream() async throws {
