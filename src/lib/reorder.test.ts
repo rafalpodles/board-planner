@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { moveItem } from "./reorder";
+import { manualOrder, moveItem, placeInto, reorderedIds } from "./reorder";
 
 const list = ["a", "b", "c", "d"];
 
@@ -39,5 +39,51 @@ describe("moveItem", () => {
         expect([...moveItem(list, from, to)].sort()).toEqual([...list].sort());
       }
     }
+  });
+});
+
+describe("reorderedIds", () => {
+  const ids = ["a", "b", "c", "d"];
+
+  it("moves the dragged id onto the target's position", () => {
+    expect(reorderedIds(ids, "a", "c")).toEqual(["b", "c", "a", "d"]);
+    expect(reorderedIds(ids, "d", "b")).toEqual(["a", "d", "b", "c"]);
+  });
+
+  it("reports nothing when the drop changes no order", () => {
+    expect(reorderedIds(ids, "b", "b")).toBeNull();
+  });
+
+  it("reports nothing for an id that is not in the list", () => {
+    expect(reorderedIds(ids, "a", "zz")).toBeNull();
+    expect(reorderedIds(ids, "zz", "a")).toBeNull();
+  });
+});
+
+describe("manualOrder", () => {
+  const row = (id: string, order: number, createdAt = 0, taskNumber = 1) =>
+    ({ id, order, createdAt, taskNumber });
+
+  it("sorts by order, then newest first, then task number", () => {
+    expect(manualOrder([row("a", 2), row("b", 1)])).toEqual(["b", "a"]);
+    expect(manualOrder([row("a", 0, 100), row("b", 0, 200)])).toEqual(["b", "a"]);
+    expect(manualOrder([row("a", 0, 0, 2), row("b", 0, 0, 1)])).toEqual(["b", "a"]);
+  });
+});
+
+describe("placeInto", () => {
+  const all = ["a", "b", "c", "d", "e"];
+
+  // The client can only order the rows it can see; the rest must not move
+  it("permutes the moved ids within the slots they already held", () => {
+    expect(placeInto(all, ["e", "c", "a"])).toEqual(["e", "b", "c", "d", "a"]);
+  });
+
+  it("leaves a full list exactly as given", () => {
+    expect(placeInto(all, ["e", "d", "c", "b", "a"])).toEqual(["e", "d", "c", "b", "a"]);
+  });
+
+  it("refuses a set that is not a subset of the whole", () => {
+    expect(placeInto(all, ["a", "zz"])).toEqual(all);
   });
 });

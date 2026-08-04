@@ -8,14 +8,12 @@ interface TaskContextMenuProps {
   x: number;
   y: number;
   currentStatus: string;
-  isPinned?: boolean;
   sprints?: ApiSprint[];
   columns?: ApiProjectColumn[];
   currentSprint?: string | null;
   selectedCount?: number;
   onStatusChange: (status: string) => void;
   onSprintChange?: (sprintId: string | null) => void;
-  onPin?: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
   onClose: () => void;
@@ -25,14 +23,12 @@ export function TaskContextMenu({
   x,
   y,
   currentStatus,
-  isPinned,
   sprints = [],
   columns,
   currentSprint,
   selectedCount = 1,
   onStatusChange,
   onSprintChange,
-  onPin,
   onDuplicate,
   onDelete,
   onClose,
@@ -133,14 +129,6 @@ export function TaskContextMenu({
         </>
       )}
       <div className="border-t border-border my-1" />
-      {onPin && selectedCount === 1 && (
-        <button
-          onClick={() => { onPin(); onClose(); }}
-          className="w-full text-left px-3 py-1.5 hover:bg-bg-input transition-colors"
-        >
-          {isPinned ? "Unpin" : "Pin to top"}
-        </button>
-      )}
       {selectedCount === 1 && (
         <button
           onClick={() => { onDuplicate(); onClose(); }}

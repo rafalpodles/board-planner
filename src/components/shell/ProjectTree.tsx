@@ -5,7 +5,24 @@ import { useState } from "react";
 import { ApiProject, DEFAULT_PROJECT_ICON } from "@/types";
 import { projectPath } from "@/lib/urls";
 import { isNavItemActive } from "@/lib/nav-active";
-import { moveItem } from "@/lib/reorder";
+import { reorderedIds } from "@/lib/reorder";
+import {
+  DndContext,
+  DragEndEvent,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import { restrictToParentElement, restrictToVerticalAxis } from "@dnd-kit/modifiers";
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
 const SUB_ICONS = {
   board: "M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2",
@@ -70,6 +87,40 @@ function SubItem({ href, icon, label, active, dot, pill }: SubItemProps) {
   );
 }
 
+/**
+ * Carries useSortable for one project. The whole row is the handle here, so the
+ * listeners go on the row while the sortable element is the wrapper that also holds
+ * the expanded sub-items — otherwise the sub-items would not travel with it.
+ */
+function SortableProject({
+  id,
+  disabled,
+  children,
+}: {
+  id: string;
+  disabled: boolean;
+  children: (state: {
+    setNodeRef: (el: HTMLElement | null) => void;
+    handleProps: Record<string, unknown>;
+    style: React.CSSProperties;
+    isDragging: boolean;
+  }) => React.ReactNode;
+}) {
+  const { setNodeRef, attributes, listeners, transform, transition, isDragging } =
+    useSortable({ id, disabled });
+
+  return children({
+    setNodeRef,
+    handleProps: { ...attributes, ...listeners },
+    style: {
+      transform: CSS.Transform.toString(transform),
+      transition,
+      ...(isDragging ? { position: "relative", zIndex: 20 } : {}),
+    },
+    isDragging,
+  });
+}
+
 interface ProjectTreeProps {
   projects: ApiProject[];
   pathname: string;
@@ -90,20 +141,41 @@ export function ProjectTree({
   const [manuallyExpanded, setManuallyExpanded] = useState<string | null>(null);
   const expandedId = manuallyExpanded ?? routeProject?._id ?? null;
 
-  const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const canReorder = !!onReorder && projects.length > 1;
+  const sensors = useSensors(
+    // The whole row is the handle and it is full of links, so a drag only begins
+    // once the pointer has actually travelled — a plain click still navigates
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
 
-  // The dragged id comes off the dataTransfer rather than component state: the
-  // browser owns the drag session, and state may not have flushed by drop time
-  function handleDrop(e: React.DragEvent, targetId: string) {
-    const sourceId = e.dataTransfer.getData("text/plain") || draggingId;
-    const from = projects.findIndex((p) => p._id === sourceId);
-    const to = projects.findIndex((p) => p._id === targetId);
-    setDraggingId(null);
-    setDropTargetId(null);
-    if (from < 0 || to < 0 || from === to) return;
-    onReorder?.(moveItem(projects, from, to).map((p) => p._id));
+  // An expanded project is several times taller than a collapsed one, and dnd-kit
+  // shifts the others by the dragged element's height — so the tree lurches. Everything
+  // is collapsed for the duration and put back afterwards.
+  const [expandedBeforeDrag, setExpandedBeforeDrag] = useState<string | null>(null);
+
+  function handleDragStart() {
+    // manuallyExpanded, not expandedId: the latter falls back to the route's project,
+    // so storing it would pin an expansion the user never chose and kill
+    // expand-on-navigate for the rest of the session
+    setExpandedBeforeDrag(manuallyExpanded);
+    setManuallyExpanded("");
+  }
+
+  function restoreExpanded() {
+    setManuallyExpanded(expandedBeforeDrag);
+    setExpandedBeforeDrag(null);
+  }
+
+  function handleDragEnd({ active, over }: DragEndEvent) {
+    restoreExpanded();
+    if (!over) return;
+    const next = reorderedIds(
+      projects.map((p) => p._id),
+      String(active.id),
+      String(over.id),
+    );
+    if (next) onReorder?.(next);
   }
 
   return (
@@ -127,47 +199,34 @@ export function ProjectTree({
         )}
       </div>
 
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        modifiers={[restrictToVerticalAxis, restrictToParentElement]}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+        onDragCancel={restoreExpanded}
+      >
+      <SortableContext
+        items={projects.map((p) => p._id)}
+        strategy={verticalListSortingStrategy}
+      >
       {projects.map((project) => {
         const expanded = expandedId === project._id;
         const isRouteProject = routeProject?._id === project._id;
         const base = projectPath(project.key);
 
         return (
-          <div key={project._id}>
+          <SortableProject key={project._id} id={project._id} disabled={!canReorder}>
+            {({ setNodeRef, handleProps, style, isDragging }) => (
+          <div ref={setNodeRef} style={style}>
             <div
               data-active-project={isRouteProject || undefined}
-              data-drop-target={dropTargetId === project._id || undefined}
-              // The row is the drag source, not the links inside it: dragging a
-              // link would hand the browser a URL drag instead of a reorder
-              draggable={canReorder}
-              onDragStart={(e) => {
-                setDraggingId(project._id);
-                e.dataTransfer.effectAllowed = "move";
-                e.dataTransfer.setData("text/plain", project._id);
-              }}
-              onDragEnd={() => {
-                setDraggingId(null);
-                setDropTargetId(null);
-              }}
-              onDragOver={(e) => {
-                if (!canReorder || draggingId === project._id) return;
-                e.preventDefault();
-                e.dataTransfer.dropEffect = "move";
-                setDropTargetId(project._id);
-              }}
-              onDragLeave={(e) => {
-                if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-                  setDropTargetId((current) => (current === project._id ? null : current));
-                }
-              }}
-              onDrop={(e) => {
-                e.preventDefault();
-                handleDrop(e, project._id);
-              }}
-              className={`flex w-full items-center gap-1.5 rounded-lg pr-2.5 transition-colors hover:bg-bg-hover ${
+              {...(canReorder ? handleProps : {})}
+              className={`relative flex w-full items-center gap-1.5 rounded-lg pr-2.5 transition-colors hover:bg-bg-hover ${
                 isRouteProject ? "shadow-[inset_3px_0_0_var(--color-primary)]" : ""
-              } ${draggingId === project._id ? "opacity-40" : ""} ${
-                dropTargetId === project._id ? "outline outline-2 outline-primary" : ""
+              } ${canReorder ? "cursor-grab touch-pan-y active:cursor-grabbing" : ""} ${
+                isDragging ? "bg-bg-card shadow-lg ring-1 ring-border" : ""
               }`}
             >
               <button
@@ -243,8 +302,12 @@ export function ProjectTree({
               </div>
             )}
           </div>
+            )}
+          </SortableProject>
         );
       })}
+      </SortableContext>
+      </DndContext>
     </div>
   );
 }

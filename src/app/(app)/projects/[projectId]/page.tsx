@@ -374,12 +374,73 @@ export default function KanbanPage() {
     );
 
     try {
+      // Status only when it actually changes: a drop inside the same column is a
+      // reorder, and sending the status it already has would stamp updatedAt and
+      // release the task from any run a worker is holding it for
+      const moved = tasks.find((t) => t._id === taskId);
       await api.put(`/api/projects/${projectId}/tasks/${taskId}`, {
-        status,
         order: newOrder,
+        ...(moved?.status === status ? {} : { status }),
       });
     } catch {
       toast("Failed to move task", "error");
+      loadData();
+    }
+  }
+
+  // The list hands back only the rows it shows, so a filtered list reindexes just
+  // those; tasks hidden by a filter keep the order they already had
+  async function handleReorder(orderedIds: string[]) {
+    const rank = new Map(orderedIds.map((id, index) => [id, index]));
+    setTasks((prev) =>
+      prev.map((t) => (rank.has(t._id) ? { ...t, order: rank.get(t._id)! } : t))
+    );
+
+    try {
+      await api.put(`/api/projects/${projectId}/tasks/reorder`, { order: orderedIds });
+    } catch {
+      toast("Failed to reorder tasks", "error");
+      // The server renumbers across the whole project, so only it knows the result
+      loadData();
+    }
+  }
+
+  // One writer for every inline enum cell: they differ only in which field they set
+  // Reverts the fields it touched on the one task, rather than restoring a whole
+  // snapshot: the 10s poll and any concurrent edit land in between, and putting the
+  // old array back would throw their results away too
+  async function patchTask(taskId: string, patch: Record<string, unknown>, label: string) {
+    const before = tasks.find((t) => t._id === taskId);
+    setTasks((prev) => prev.map((t) => (t._id === taskId ? { ...t, ...patch } : t)));
+    try {
+      await api.put(`/api/projects/${projectId}/tasks/${taskId}`, patch);
+    } catch {
+      toast(`Failed to update ${label}`, "error");
+      if (!before) return;
+      const revert = Object.fromEntries(
+        Object.keys(patch).map((key) => [key, before[key as keyof ApiTask]])
+      );
+      setTasks((prev) => prev.map((t) => (t._id === taskId ? { ...t, ...revert } : t)));
+    }
+  }
+
+  async function handleFieldValueChange(taskId: string, fieldId: string, value: string) {
+    const task = tasks.find((t) => t._id === taskId);
+    if (!task) return;
+    const values = { ...(task.customFieldValues || {}), [fieldId]: value };
+    await patchTask(taskId, { customFieldValues: values }, "field");
+  }
+
+  async function handleRowSprintChange(taskId: string, sprintId: string | null) {
+    // Not patchTask: a task leaving the sprint the board is filtered by has to drop
+    // out of the list, which applySprintChange already knows how to do
+    applySprintChange([taskId], sprintId);
+    try {
+      await api.put(`/api/projects/${projectId}/tasks/${taskId}`, { sprint: sprintId });
+    } catch {
+      toast("Failed to update sprint", "error");
+      // A removed row cannot be put back by patching it, and the server is the only
+      // thing that still knows what the scope should contain
       loadData();
     }
   }
@@ -461,7 +522,8 @@ export default function KanbanPage() {
         sortFields={viewMode === "list" ? LIST_SORT_FIELDS : BOARD_SORT_FIELDS}
         sortContext={sortContext}
         hiddenColumns={hiddenColumns}
-        {...(viewMode === "list" ? { onHiddenColumnsChange: setHiddenColumns } : {})}
+        onHiddenColumnsChange={setHiddenColumns}
+        showColumnPicker={viewMode === "list"}
         extraControls={
           <button
             onClick={() => {
@@ -539,6 +601,15 @@ export default function KanbanPage() {
           onAssigneeChange={handleAssigneeChange}
           onTaskSelect={handleTaskSelect}
           onTaskContextMenu={(taskId, x, y) => setContextMenu({ taskId, x, y })}
+          onReorder={handleReorder}
+          onPriorityChange={(taskId, priority) =>
+            patchTask(taskId, { priority }, "priority")
+          }
+          onCategoryChange={(taskId, category) =>
+            patchTask(taskId, { category }, "category")
+          }
+          onSprintChange={handleRowSprintChange}
+          onFieldChange={handleFieldValueChange}
         />
       )}
       </div>
@@ -554,7 +625,6 @@ export default function KanbanPage() {
             x={contextMenu.x}
             y={contextMenu.y}
             currentStatus={task.status}
-            isPinned={task.pinned}
             sprints={sprints.filter((s) => s.status !== "completed")}
             columns={project.columns || []}
             currentSprint={task.sprint}
@@ -577,16 +647,6 @@ export default function KanbanPage() {
                 toast(`Moved to ${target}`, "success");
               } catch {
                 toast("Failed to move task to sprint", "error");
-                loadData();
-              }
-            }}
-            onPin={async () => {
-              const newPinned = !task.pinned;
-              setTasks((prev) => prev.map((t) => t._id === contextMenu.taskId ? { ...t, pinned: newPinned } : t));
-              try {
-                await api.put(`/api/projects/${projectId}/tasks/${contextMenu.taskId}`, { pinned: newPinned });
-              } catch {
-                toast("Failed to toggle pin", "error");
                 loadData();
               }
             }}
