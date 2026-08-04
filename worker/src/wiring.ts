@@ -6,6 +6,7 @@ import { createCommandHandlers, createRunGuard, SHUTDOWN_SIGNAL } from "./comman
 import {
   applyPolicy,
   Assignment,
+  RepoInventory,
   Bootstrap,
   DEFAULT_POLICY,
   EffectiveConfig,
@@ -26,7 +27,7 @@ import { createOutbox, Store } from "./outbox.js";
 import { PipelineDeps, runTask } from "./pipeline.js";
 import { createReporter } from "./reporter.js";
 import { HeartbeatDeps, loadIdentity, PROTOCOL_VERSION, startHeartbeat } from "./registration.js";
-import { bindRepository, createAllowlistReader } from "./repos.js";
+import { bindRepository, createAllowlistReader, repoInventory } from "./repos.js";
 import {
   createTelemetry,
   dropWhenBusy,
@@ -119,7 +120,11 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   // removed at most once per project, the first time this process starts working with it.
   let policy: EffectiveConfig = DEFAULT_POLICY;
   let assignments: Assignment[] = [];
-  let bound = new Map<string, { path: string; worktreeRoot: string }>();
+  let inventory: RepoInventory[] = [];
+  // Why the inventory could not be read, surfaced on the heartbeat so a broken repos.json shows up
+  // in the console instead of looking like a machine that simply has nothing.
+  let inventoryError = "";
+  let bound = new Map<string, { path: string; worktreeRoot: string; config: EffectiveConfig }>();
   const reapedProjects = new Set<string>();
 
   function configFor(projectId: string): WorkerConfig | null {
@@ -133,16 +138,34 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       repoPath: repo.path,
       worktreeRoot: repo.worktreeRoot,
       workerId: identity.workerId,
-      autoMerge: policy.autoMerge,
-      baseBranch: policy.baseBranch,
-      pollIntervalMs: policy.pollIntervalMs,
-      taskTimeoutMs: policy.taskTimeoutMs,
-      maxDiffLines: policy.maxDiffLines,
-      maxDiffFiles: policy.maxDiffFiles,
-      model: policy.model,
-      fallbackModel: policy.fallbackModel,
-      reviewModel: policy.reviewModel,
+      autoMerge: repo.config.autoMerge,
+      baseBranch: repo.config.baseBranch,
+      pollIntervalMs: repo.config.pollIntervalMs,
+      taskTimeoutMs: repo.config.taskTimeoutMs,
+      maxDiffLines: repo.config.maxDiffLines,
+      maxDiffFiles: repo.config.maxDiffFiles,
+      model: repo.config.model,
+      fallbackModel: repo.config.fallbackModel,
+      reviewModel: repo.config.reviewModel,
     };
+  }
+
+  // A failure keeps the previous inventory rather than reporting an empty one: the server would
+  // otherwise overwrite what it knows, and this machine would silently stop being offered anything.
+  async function refreshInventory(): Promise<void> {
+    let result;
+    try {
+      result = await repoInventory({ runner: deps.runner, readAllowlist });
+    } catch (error) {
+      result = { ok: false as const, reason: `could not read repos.json: ${String(error)}` };
+    }
+    if (result.ok) {
+      inventory = result.repos;
+      inventoryError = "";
+      return;
+    }
+    inventoryError = result.reason;
+    deps.logError(result.reason);
   }
 
   // A refusal here must not crash the worker or touch any other assignment: it is recorded and
@@ -150,11 +173,18 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   // absent from bound, so the loop never attempts to claim from it.
   async function rebind(): Promise<void> {
     const identity = loadIdentity(identityStore);
-    const nextBound = new Map<string, { path: string; worktreeRoot: string }>();
+    const nextBound = new Map<string, { path: string; worktreeRoot: string; config: EffectiveConfig }>();
     const errors: string[] = [];
 
     if (identity) {
       for (const assignment of assignments) {
+        // The server sends a remote, never a path. Resolving it here, against this machine's own
+        // inventory, is what keeps "where anything runs" a local decision.
+        const local = inventory.find((r) => r.remote === assignment.remote);
+        if (!local) {
+          errors.push(`${assignment.project}: no checkout of ${assignment.remote} on this machine`);
+          continue;
+        }
         const result = await bindRepository(
           {
             runner: deps.runner,
@@ -164,10 +194,16 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
             uid: deps.uid,
             workerId: identity.workerId,
           },
-          assignment.proposedPath
+          local.path
         );
         if (result.ok) {
-          nextBound.set(assignment.project, { path: result.path, worktreeRoot: result.worktreeRoot });
+          // Each project resolves its own policy against this worker's defaults, so two projects on
+          // one machine can want different models, limits and merge behaviour.
+          nextBound.set(assignment.project, {
+            path: result.path,
+            worktreeRoot: result.worktreeRoot,
+            config: applyPolicy(policy, assignment.policy),
+          });
         } else {
           errors.push(`${assignment.project}: ${result.reason}`);
         }
@@ -175,7 +211,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     }
 
     bound = nextBound;
-    heartbeat.reportBindingError(errors.join("; "));
+    heartbeat.reportBindingError([inventoryError, ...errors].filter(Boolean).join("; "));
 
     for (const projectId of bound.keys()) {
       if (reapedProjects.has(projectId)) continue;
@@ -220,6 +256,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       return;
     }
 
+    await refreshInventory();
     await rebind();
   }
 
@@ -318,6 +355,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   const heartbeatDeps: HeartbeatDeps = {
     apiBaseUrl: bootstrap.apiBaseUrl,
     enrolmentToken: bootstrap.enrolmentToken,
+    repos: () => (inventoryError ? undefined : inventory),
     forgetEnrolmentToken: bootstrap.enrolmentTokenFile
       ? () => rmSync(bootstrap.enrolmentTokenFile, { force: true })
       : undefined,
@@ -353,11 +391,17 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     config: () => ({
       apiUrl: bootstrap.apiBaseUrl,
       workerName: bootstrap.workerName,
-      projectCount: assignments.length,
-      model: policy.model,
-      reviewModel: policy.reviewModel,
-      maxDiffLines: policy.maxDiffLines,
-      taskTimeoutMs: policy.taskTimeoutMs,
+      projectCount: bound.size,
+      pollIntervalMs: policy.pollIntervalMs,
+      projects: [...bound.entries()].map(([project, repo]) => ({
+        project,
+        autoMerge: repo.config.autoMerge,
+        baseBranch: repo.config.baseBranch,
+        model: repo.config.model,
+        reviewModel: repo.config.reviewModel,
+        maxDiffLines: repo.config.maxDiffLines,
+        taskTimeoutMs: repo.config.taskTimeoutMs,
+      })),
     }),
     log: deps.logError,
   });
@@ -367,6 +411,11 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
 
   return {
     async run() {
+      // Before the first heartbeat, which is what carries it: the server matches projects against
+      // these remotes, so reporting an empty inventory would leave this machine unassigned until
+      // the next heartbeat and the next refresh had both come round.
+      await refreshInventory();
+
       await heartbeat.tick();
       // A failure here must not keep the worker from starting its loop — drain() retries this on
       // the worker's normal cadence once running, the same as any later refresh failure.

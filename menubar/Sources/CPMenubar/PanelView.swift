@@ -5,6 +5,7 @@ import CPMenubarCore
 struct PanelView: View {
     let model: AppModel
 
+    @Environment(\.openSettings) private var openSettings
     @State private var now = Date()
     private let tick = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
@@ -74,9 +75,14 @@ struct PanelView: View {
 
             Spacer()
 
-            // In an LSUIElement app there is no menu bar, so a Settings scene is unreachable
-            // without this.
-            SettingsLink { Text("Preferences…") }
+            // Two things are needed, not one. An LSUIElement app has no menu bar, so the Settings
+            // scene is otherwise unreachable — and it runs as an accessory, so nothing activates it:
+            // SettingsLink alone opens the window behind every other app, which reads as a dead
+            // button. Activating first is what puts it in front.
+            Button("Preferences…") {
+                NSApp.activate(ignoringOtherApps: true)
+                openSettings()
+            }
         }
     }
 

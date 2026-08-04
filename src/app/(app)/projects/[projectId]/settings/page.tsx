@@ -18,6 +18,7 @@ import { BoardSection } from "./sections/BoardSection";
 import { TaskFieldsSection } from "./sections/TaskFieldsSection";
 import { IntegrationsSection } from "./sections/IntegrationsSection";
 import { PmAgentSection } from "./sections/PmAgentSection";
+import { WorkersSection } from "./sections/WorkersSection";
 import { AuditSection } from "./sections/AuditSection";
 import { InstanceSection } from "./sections/InstanceSection";
 import { PageHeader } from "@/components/shell/PageHeader";
@@ -99,6 +100,16 @@ const SECTIONS: SectionMeta[] = [
     icon: (
       <Icon d="M10 13a5 5 0 007.5.5l3-3a5 5 0 00-7-7l-1.7 1.7M14 11a5 5 0 00-7.5-.5l-3 3a5 5 0 007 7l1.7-1.7" />
     ),
+  },
+  {
+    id: "workers",
+    label: "Workers",
+    title: "Workers",
+    blurb:
+      "Whether autonomous workers may run this project's approved tasks, and how they should behave.",
+    keywords: "worker agent autonomous merge branch diff model gates checkout repository",
+    access: "instanceAdmin",
+    icon: <Icon d="M4 7h16M4 12h16M4 17h7" />,
   },
   {
     id: "pm",
@@ -430,6 +441,7 @@ export default function ProjectSettingsPage() {
                   {s.id === "integrations" && (
                     <IntegrationsSection {...sectionProps} />
                   )}
+                  {s.id === "workers" && <WorkersSection {...sectionProps} />}
                   {s.id === "pm" && <PmAgentSection {...sectionProps} />}
                   {s.id === "audit" && (
                     <AuditSection

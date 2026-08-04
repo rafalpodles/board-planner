@@ -77,7 +77,17 @@ export const DEFAULT_POLICY: EffectiveConfig = {
 
 export interface Assignment {
   project: string;
-  proposedPath: string;
+  // The remote this worker itself reported. It resolves back to a local checkout through the
+  // worker's own inventory, so the server never names a directory on this machine.
+  remote: string;
+  policy?: Record<string, unknown>;
+}
+
+// What this machine tells the server it has. Built from repos.json, which stays the only thing that
+// decides where anything may run.
+export interface RepoInventory {
+  remote: string;
+  path: string;
 }
 
 type Env = Record<string, string | undefined>;
@@ -182,8 +192,8 @@ export function applyPolicy(current: EffectiveConfig, patch: unknown): Effective
 
 function isAssignment(value: unknown): value is Assignment {
   if (typeof value !== "object" || value === null) return false;
-  const { project, proposedPath } = value as Record<string, unknown>;
-  return isNonEmptyString(project) && isNonEmptyString(proposedPath);
+  const { project, remote } = value as Record<string, unknown>;
+  return isNonEmptyString(project) && isNonEmptyString(remote);
 }
 
 // Drops malformed entries rather than refusing the whole list — one bad assignment must not take

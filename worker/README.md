@@ -11,6 +11,10 @@ A single worker process can serve more than one project: it registers once, an i
 assigns it whichever projects it should work, and the poll loop claims from each assignment in
 turn.
 
+User-facing documentation lives on the docs site, under **AI and automation → Execution
+workers**: what the gates do, how to enable a project, which tasks get picked up, and how to stop a
+machine. This file is the operator's view — what has to be true on the box itself.
+
 ## How one task runs
 
 ```
@@ -162,16 +166,68 @@ coding agent at the same uid with `Read` and `bypassPermissions`, so anything on
 readable by the agent, and an unscoped instance-admin token there would let it clear
 `lockedByInstance` on itself.
 
-**`CP_ENROLMENT_TOKEN` / `CP_ENROLMENT_TOKEN_FILE`** — single-use, one hour to live. Mint one as an
-instance admin (`POST /api/workers/enrolment`, interactive session only) and put it on the machine.
-The first registration spends it server-side, the worker deletes the file, and it is never needed
-again — a worker with an identity in `worker.json` does not re-register. Optional by design: an
-enrolled worker must keep booting after you remove it.
+**`CP_ENROLMENT_TOKEN` / `CP_ENROLMENT_TOKEN_FILE`** — single-use, one hour to live. Mint one from
+Settings → Workers → "Enrol a worker" and put it on the machine. The first registration spends it
+server-side, the worker deletes the file, and it is never needed again — a worker with an identity
+in `worker.json` does not re-register. Optional by design: an enrolled worker must keep booting
+after you remove it.
 
 **`CP_API_TOKEN` / `CP_API_TOKEN_FILE`** — the operational credential for claiming and reporting.
 **Scope it to the projects this worker serves.** A scoped token is downgraded to member level with
-`tokenScoped: true`, and `PATCH /api/workers/:id` refuses those — which is what makes the kill
-switch hold. An unscoped admin token works too and is exactly what must not be used here.
+`tokenScoped: true`, and `PATCH /api/workers/:id` refuses every machine credential — which is what
+makes the kill switch hold. An unscoped admin token works operationally and is exactly what must
+not be used here.
 
 Claiming itself uses neither: `worker.json` holds a `cpw_` credential minted at registration, which
 no route outside the worker API accepts.
+
+## Which repositories this machine will run
+
+`repos.json` in `CP_STATE_DIR` is the only thing that decides where anything runs:
+
+```json
+{ "repos": ["/Users/you/code/the-repo"] }
+```
+
+Mode 0600, absolute paths only. On every refresh the worker resolves each entry's `origin` and
+reports `{remote, path}` upward. The server matches those remotes against each project's configured
+repository and answers with the projects this machine may serve — **as remotes, never as paths.**
+
+That direction matters. The server cannot name a directory on this machine: it says "this project is
+enabled and its repository is X", and the worker looks X up in its own inventory. A project whose
+repository is not in `repos.json` here is simply reported unbound, and no amount of server-side
+configuration changes that.
+
+An entry that has gone missing, or has no `origin`, is skipped rather than failing the whole list —
+one stale line must not cost this machine every other checkout it could serve.
+
+## What a worker's credential grants
+
+Instance-wide, not per project. A worker that reports a checkout matching a project's repository is
+offered that project, for **every** project with workers enabled — there is no per-worker list of
+which projects a machine may serve.
+
+That is deliberate. A worker credential comes from a single-use enrolment token that only an
+instance admin can mint from an interactive session, so the set of workers is already the set an
+admin chose to admit, and admitting a machine admits it to the instance. Reporting a remote it does
+not really have gains a worker nothing it could run: it resolves the checkout from this file, so a
+false remote earns an assignment it then fails to bind.
+
+Revisit this if workers are ever enrolled by someone other than an instance admin, or if two
+projects on one instance must not share a machine.
+
+## Where settings live
+
+**On the project** (Settings → Workers, instance admin): whether workers may run it at all, and how
+— `autoMerge`, `baseBranch`, `taskTimeoutMs`, `maxDiffLines`, `maxDiffFiles`, `model`,
+`fallbackModel`, `reviewModel`. These describe the repository and the work, so every machine serving
+that project runs under the same values.
+
+**On the worker** (Settings → Workers, the fleet console): what this machine is called, whether it
+may run, the instance kill switch, and `pollIntervalMs`. These describe the laptop.
+
+Only fields an operator actually set travel to the worker; everything else resolves against the
+defaults compiled into it, so raising a default reaches every machine that never pinned it.
+
+**`autoMerge` is off unless you turn it on.** A project nobody has configured gets a branch pushed
+and a pull request opened, and the task moves to review — nothing lands on the base branch.
