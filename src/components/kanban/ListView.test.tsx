@@ -335,3 +335,78 @@ describe("ListView inline assignee", () => {
     expect(assigneeSelect().disabled).toBe(false);
   });
 });
+
+describe("ListView reordering", () => {
+  const many = [
+    { ...tasks[0], _id: "t1", taskNumber: 1, title: "First" },
+    { ...tasks[0], _id: "t2", taskNumber: 2, title: "Second" },
+    { ...tasks[0], _id: "t3", taskNumber: 3, title: "Third" },
+  ] as unknown as ApiTask[];
+
+  function handles(container: HTMLElement) {
+    return [...container.querySelectorAll('[draggable="true"]')] as HTMLElement[];
+  }
+
+  function rows(container: HTMLElement) {
+    return [...container.querySelectorAll("tbody tr")] as HTMLElement[];
+  }
+
+  function drag(container: HTMLElement, fromIndex: number, toIndex: number) {
+    const data = new Map<string, string>();
+    const dataTransfer = {
+      effectAllowed: "",
+      dropEffect: "",
+      setData: (k: string, v: string) => void data.set(k, v),
+      getData: (k: string) => data.get(k) ?? "",
+      setDragImage: () => {},
+    };
+    const fire = (el: HTMLElement, type: string) => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperty(event, "dataTransfer", { value: dataTransfer });
+      el.dispatchEvent(event);
+    };
+
+    fire(handles(container)[fromIndex], "dragstart");
+    fire(rows(container)[toIndex], "dragover");
+    fire(rows(container)[toIndex], "drop");
+  }
+
+  it("offers a handle per row under manual sort", () => {
+    const { container } = renderList({ tasks: many, onReorder: () => {} });
+    expect(handles(container)).toHaveLength(3);
+  });
+
+  it("offers no handle without a reorder handler", () => {
+    const { container } = renderList({ tasks: many });
+    expect(handles(container)).toHaveLength(0);
+  });
+
+  // Any other sort recomputes the order on the next render, throwing the drop away
+  it("offers no handle under any other sort", () => {
+    const { container } = renderList({
+      tasks: many,
+      sortField: "priority",
+      onReorder: () => {},
+    });
+    expect(handles(container)).toHaveLength(0);
+  });
+
+  it("offers no handle with a single row", () => {
+    const { container } = renderList({ tasks: [many[0]], onReorder: () => {} });
+    expect(handles(container)).toHaveLength(0);
+  });
+
+  it("reports every visible id in its new order on drop", async () => {
+    const onReorder = vi.fn();
+    const { container } = renderList({ tasks: many, onReorder });
+    await act(async () => drag(container, 0, 2));
+    expect(onReorder).toHaveBeenCalledWith(["t2", "t3", "t1"]);
+  });
+
+  it("reports nothing when a row is dropped on itself", async () => {
+    const onReorder = vi.fn();
+    const { container } = renderList({ tasks: many, onReorder });
+    await act(async () => drag(container, 1, 1));
+    expect(onReorder).not.toHaveBeenCalled();
+  });
+});
