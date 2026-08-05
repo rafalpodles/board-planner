@@ -2,6 +2,7 @@
 
 import { useState, FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import { safeNextPath } from "@/lib/next-path";
 import Image from "next/image";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -38,7 +39,7 @@ export default function LoginPage() {
 
       const success = await login(username, password);
       if (success) {
-        router.replace("/projects");
+        router.replace(safeNextPath(new URLSearchParams(window.location.search).get("next")));
       } else {
         setError("Invalid credentials");
       }
