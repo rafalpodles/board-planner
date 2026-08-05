@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { withAuth, withAdmin } from "@/lib/middleware";
+import { withAuth, withAdmin, canAdminProject } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { legacyFieldSeeds } from "@/lib/legacy-fields";
 import { Task } from "@/models/task";
@@ -50,6 +50,7 @@ export const GET = withAuth(async (_request, { user }) => {
     const stats = statsByProject.get(String(p._id));
     obj.taskCount = stats?.taskCount ?? 0;
     obj.hasActiveSprint = withActiveSprint.has(String(p._id));
+    obj.canAdmin = canAdminProject(user, p);
     return obj;
   });
   return NextResponse.json(sanitized);
