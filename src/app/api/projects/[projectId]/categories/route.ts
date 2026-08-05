@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { withProjectAccess } from "@/lib/middleware";
+import { withProjectAccess, withProjectAdmin } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { Task } from "@/models/task";
 import { logProjectAudit } from "@/lib/projectAudit";
@@ -48,7 +48,74 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
   return NextResponse.json(project.categories, { status: 201 });
 });
 
-export const DELETE = withProjectAccess(async (request, { params, user }) => {
+export const PATCH = withProjectAccess(async (request, { params, user }) => {
+  const { projectId } = await params;
+  await connectDB();
+
+  const { name, newName, color } = await request.json();
+  if (!name || typeof name !== "string") {
+    return NextResponse.json({ error: "name is required" }, { status: 400 });
+  }
+
+  const renaming = typeof newName === "string" && newName.trim() && newName.trim() !== name;
+  const target = renaming ? newName.trim() : name;
+  if (renaming && target.length > 50) {
+    return NextResponse.json({ error: "Category name is too long (max 50 chars)" }, { status: 400 });
+  }
+
+  const project = await Project.findById(projectId);
+  if (!project) {
+    return NextResponse.json({ error: "Project not found" }, { status: 404 });
+  }
+
+  const categories = project.categories || [];
+  const current = categories.find((c) => c.name === name);
+  if (!current) {
+    return NextResponse.json({ error: "Category not found" }, { status: 404 });
+  }
+  // Nothing here can tell this request's own half-finished rename from somebody else's
+  // category, and guessing wrong merges two categories and destroys one. Refuse. A
+  // failure part-way leaves a spare category to delete by hand, which is recoverable.
+  if (
+    renaming &&
+    categories.some((c) => c.name !== name && c.name.toLowerCase() === target.toLowerCase())
+  ) {
+    return NextResponse.json({ error: "Category already exists" }, { status: 409 });
+  }
+
+  if (!renaming) {
+    if (color) current.color = color;
+    await project.save();
+    logProjectAudit(projectId, user._id, "settings_updated", `Category recoloured: ${name}`);
+    return NextResponse.json(project.categories);
+  }
+
+  // Tasks store the category by name and are validated against this list, so a rename
+  // that is not carried across them does not orphan those tasks quietly — it makes them
+  // fail to save. There are no transactions here, so the rename runs through a state
+  // where BOTH names are valid: whichever write fails, every task still holds a name the
+  // project offers, and re-running the request finishes the job.
+  categories.push({
+    name: target,
+    color: color || current.color,
+  } as typeof categories[number]);
+  project.categories = categories;
+  await project.save();
+
+  await Task.updateMany({ project: projectId, category: name }, { $set: { category: target } });
+
+  project.categories = (project.categories || []).filter((c) => c.name !== name);
+  for (const template of project.taskTemplates || []) {
+    if (template.category === name) template.category = target;
+  }
+  await project.save();
+
+  logProjectAudit(projectId, user._id, "settings_updated", `Category renamed: ${name} → ${target}`);
+
+  return NextResponse.json(project.categories);
+});
+
+export const DELETE = withProjectAdmin(async (request, { params, user }) => {
   const { projectId } = await params;
   await connectDB();
 

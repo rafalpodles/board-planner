@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { withProjectAccess } from "@/lib/middleware";
+import { withProjectAccess, withProjectAdmin } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { logProjectAudit } from "@/lib/projectAudit";
 
@@ -87,7 +87,7 @@ export const PUT = withProjectAccess(async (request, { params, user }) => {
   return NextResponse.json(project.taskTemplates);
 });
 
-export const DELETE = withProjectAccess(async (request, { params, user }) => {
+export const DELETE = withProjectAdmin(async (request, { params, user }) => {
   const { projectId } = await params;
   await connectDB();
 

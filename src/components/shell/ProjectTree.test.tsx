@@ -168,62 +168,28 @@ describe("ProjectTree", () => {
 });
 
 describe("ProjectTree reordering", () => {
-  function rows(container: HTMLElement) {
-    return [...container.querySelectorAll('[draggable="true"]')] as HTMLElement[];
+  // The drag itself belongs to dnd-kit and needs real pointer geometry, which this
+  // environment cannot provide; the order a drop produces is covered in reorder.test
+  function sortableRows(container: HTMLElement) {
+    return [...container.querySelectorAll('[aria-roledescription="sortable"]')];
   }
 
-  function drag(container: HTMLElement, fromIndex: number, toIndex: number) {
-    const data = new Map<string, string>();
-    const dataTransfer = {
-      effectAllowed: "",
-      dropEffect: "",
-      setData: (k: string, v: string) => void data.set(k, v),
-      getData: (k: string) => data.get(k) ?? "",
-    };
-    const source = rows(container)[fromIndex];
-    const target = rows(container)[toIndex];
-
-    const fire = (el: HTMLElement, type: string) => {
-      const event = new Event(type, { bubbles: true, cancelable: true });
-      Object.defineProperty(event, "dataTransfer", { value: dataTransfer });
-      el.dispatchEvent(event);
-    };
-
-    fire(source, "dragstart");
-    fire(target, "dragover");
-    fire(target, "drop");
-  }
-
-  it("makes rows draggable when reordering is allowed", () => {
+  it("makes rows sortable when reordering is allowed", () => {
     const { container } = renderTree({ onReorder: () => {} });
-    expect(rows(container)).toHaveLength(2);
+    expect(sortableRows(container)).toHaveLength(2);
   });
 
-  it("makes nothing draggable without a reorder handler", () => {
+  it("makes nothing sortable without a reorder handler", () => {
     const { container } = renderTree();
-    expect(rows(container)).toHaveLength(0);
+    expect(sortableRows(container)).toHaveLength(0);
   });
 
   // One project cannot be reordered against anything
-  it("makes nothing draggable with a single project", () => {
+  it("makes nothing sortable with a single project", () => {
     const { container } = renderTree({
       projects: [project({ _id: "1", key: "TP" })],
       onReorder: () => {},
     });
-    expect(rows(container)).toHaveLength(0);
-  });
-
-  it("reports the reordered ids on drop", async () => {
-    const onReorder = vi.fn();
-    const { container } = renderTree({ onReorder });
-    await act(async () => drag(container, 0, 1));
-    expect(onReorder).toHaveBeenCalledWith(["2", "1"]);
-  });
-
-  it("reports nothing when a row is dropped on itself", async () => {
-    const onReorder = vi.fn();
-    const { container } = renderTree({ onReorder });
-    await act(async () => drag(container, 1, 1));
-    expect(onReorder).not.toHaveBeenCalled();
+    expect(sortableRows(container)).toHaveLength(0);
   });
 });

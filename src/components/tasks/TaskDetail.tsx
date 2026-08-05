@@ -1,51 +1,47 @@
 "use client";
 
-import { useCallback, useEffect, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
 import { subscribeBoardRefresh } from "@/lib/board-refresh";
 import { taskPath } from "@/lib/urls";
+import { timeAgo } from "@/lib/time";
 import { useAuth } from "@/hooks/use-auth";
-import { ApiTask, ApiProject, ApiSprint } from "@/types";
+import { ApiProject, ApiSprint, ApiTask, ApiUser } from "@/types";
 import { effectiveColumns } from "@/lib/columns";
-import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Modal } from "@/components/ui/Modal";
 import { TaskForm } from "@/components/tasks/TaskForm";
 import { TaskActivityPanel } from "@/components/tasks/TaskActivityPanel";
-import { ResizableSplit } from "@/components/tasks/ResizableSplit";
-import { TaskLinks } from "@/components/tasks/TaskLinks";
+import { ExecutionPanel } from "@/components/tasks/ExecutionPanel";
 import { useToast } from "@/components/ui/Toast";
 import { GitlabActivity } from "@/components/tasks/GitlabActivity";
+import { CriteriaSection } from "@/components/tasks/detail/CriteriaSection";
+import { DescriptionSection } from "@/components/tasks/detail/DescriptionSection";
+import { InlineTitle } from "@/components/tasks/detail/InlineTitle";
+import { LinkedWork } from "@/components/tasks/detail/LinkedWork";
+import { MobileCommentBar } from "@/components/tasks/detail/MobileCommentBar";
+import { MobileSummary } from "@/components/tasks/detail/MobileSummary";
+import { PropertyRail } from "@/components/tasks/detail/PropertyRail";
+import { TaskTopBar } from "@/components/tasks/detail/TaskTopBar";
+import { useTaskEditor } from "@/components/tasks/detail/useTaskEditor";
 
 interface TaskDetailProps {
   projectId: string;
   taskId: string;
   /** Back to the board: the page navigates, the modal just closes */
   onClose: () => void;
-  /** Only the page needs it; the modal has its own dismiss */
-  showBackLink?: boolean;
   onLoaded?: (task: ApiTask, project: ApiProject) => void;
 }
 
-export function TaskDetail({
-  projectId,
-  taskId,
-  onClose,
-  showBackLink = false,
-  onLoaded,
-}: TaskDetailProps) {
-  const router = useRouter();
+export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailProps) {
   const api = useApi();
-  const { user: currentUser } = useAuth();
   const { toast } = useToast();
 
   const [task, setTask] = useState<ApiTask | null>(null);
   const [project, setProject] = useState<ApiProject | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [addingChild, setAddingChild] = useState(false);
-  const [deleting, setDeleting] = useState(false);
   const [sprints, setSprints] = useState<ApiSprint[]>([]);
+  const [users, setUsers] = useState<ApiUser[]>([]);
   const [loading, setLoading] = useState(true);
 
   const loadData = useCallback(async () => {
@@ -72,33 +68,131 @@ export function TaskDetail({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId]);
 
-  // The board was not the only view going stale on a PM write — this page never reloaded
-  // at all, so the form kept editing a task that had moved underneath it
+  useEffect(() => {
+    api
+      .get("/api/users")
+      .then(setUsers)
+      .catch(() => setUsers([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // The board was not the only view going stale on a PM write — this view never reloaded
+  // at all, so it kept editing a task that had moved underneath it
   useEffect(() => subscribeBoardRefresh(projectId, loadData), [projectId, loadData]);
 
-  async function handleStatusChange(newStatus: string) {
+  if (loading || !task || !project) {
+    return (
+      <div className="flex justify-center py-12">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+      </div>
+    );
+  }
+
+  return (
+    <TaskDetailView
+      key={task._id}
+      projectId={projectId}
+      task={task}
+      project={project}
+      sprints={sprints}
+      users={users}
+      onClose={onClose}
+      onReload={loadData}
+      onTaskChange={setTask}
+    />
+  );
+}
+
+interface TaskDetailViewProps {
+  projectId: string;
+  task: ApiTask;
+  project: ApiProject;
+  sprints: ApiSprint[];
+  users: ApiUser[];
+  onClose: () => void;
+  onReload: () => void;
+  onTaskChange: (updater: (prev: ApiTask | null) => ApiTask | null) => void;
+}
+
+function TaskDetailView({
+  projectId,
+  task,
+  project,
+  sprints,
+  users,
+  onClose,
+  onReload,
+  onTaskChange,
+}: TaskDetailViewProps) {
+  const api = useApi();
+  const router = useRouter();
+  const { user: currentUser } = useAuth();
+  const { toast } = useToast();
+
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [addingChild, setAddingChild] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [commentRefreshKey, setCommentRefreshKey] = useState(0);
+
+  const { draft, set, autoSaveState, retry } = useTaskEditor(projectId, task);
+
+  const columns = effectiveColumns(project.columns);
+  const taskKey = `${project.key}-${task.taskNumber}`;
+  const assignee = users.find((u) => u.username === draft.assignee);
+  const reporter = typeof task.createdBy === "object" ? task.createdBy.fullName : null;
+  const watching = !!currentUser && (task.watchers || []).includes(currentUser._id);
+
+  const handleFileUpload = useCallback(
+    async (file: File): Promise<string> => {
+      const formData = new FormData();
+      formData.append("file", file);
+      const result = await api.upload("/api/uploads", formData);
+      return result.markdown;
+    },
+    [api]
+  );
+
+  async function handleStatusChange(status: string) {
     try {
-      await api.patch(
-        `/api/projects/${projectId}/tasks/${taskId}/status`,
-        { status: newStatus }
-      );
-      setTask((prev) =>
-        prev ? { ...prev, status: newStatus as ApiTask["status"] } : prev
-      );
+      await api.patch(`/api/projects/${projectId}/tasks/${task._id}/status`, { status });
+      // A status change ends any run the task was under, and the server clears the execution phase
+      // in the same write — so patching status alone would leave the panel asserting a live run the
+      // user just stopped, counting up from a snapshot that is no longer true
+      onReload();
     } catch {
       toast("Failed to update status", "error");
     }
   }
 
+  async function handleToggleWatch() {
+    try {
+      const res = await api.post(`/api/projects/${projectId}/tasks/${task._id}/watch`, {});
+      onTaskChange((prev) => {
+        if (!prev || !currentUser) return prev;
+        const watchers = res.watching
+          ? [...(prev.watchers || []), currentUser._id]
+          : (prev.watchers || []).filter((w: string) => w !== currentUser._id);
+        return { ...prev, watchers };
+      });
+      toast(res.watching ? "Watching task" : "Unwatched task", "success");
+    } catch {
+      toast("Failed to toggle watch", "error");
+    }
+  }
+
   async function handleDuplicate() {
     try {
+      // No status: columns are per project since CP-128, so a literal "planned" is a 400
+      // in any project that renamed or rebuilt its board. Omitting it lets the server pick
+      // the project's own backlog column.
       const created = await api.post(`/api/projects/${projectId}/tasks`, {
-        title: `Copy of ${task!.title}`,
-        description: task!.description,
-        category: task!.category,
-        checklist: task!.checklist,
-        dueDate: task!.dueDate,
-        status: "planned",
+        title: `Copy of ${task.title}`,
+        description: task.description,
+        category: task.category,
+        checklist: task.checklist,
+        dueDate: task.dueDate,
+        customFieldValues: task.customFieldValues,
       });
       toast("Task duplicated", "success");
       router.push(taskPath(projectId, created.taskNumber));
@@ -110,7 +204,7 @@ export function TaskDetail({
   async function handleDelete() {
     setDeleting(true);
     try {
-      await api.del(`/api/projects/${projectId}/tasks/${taskId}`);
+      await api.del(`/api/projects/${projectId}/tasks/${task._id}`);
       toast("Task deleted", "success");
       onClose();
     } catch {
@@ -120,192 +214,152 @@ export function TaskDetail({
     }
   }
 
-  if (loading || !task || !project) {
-    return (
-      <div className="flex justify-center py-12">
-        <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary border-t-transparent" />
-      </div>
-    );
+  function requestDelete() {
+    setDetailsOpen(false);
+    setConfirmDelete(true);
   }
 
   return (
-    <div>
-      {showBackLink && (
-        <button
-          onClick={onClose}
-          className="mb-4 flex min-h-[44px] items-center text-sm text-text-muted transition-colors hover:text-text"
+    <div className="flex min-h-0 flex-col">
+      <TaskTopBar
+        projectName={project.name}
+        taskKey={taskKey}
+        columns={columns}
+        status={task.status}
+        onStatusChange={handleStatusChange}
+        watching={watching}
+        watcherCount={(task.watchers || []).length}
+        onToggleWatch={handleToggleWatch}
+        onDuplicate={handleDuplicate}
+        onAddChild={() => setAddingChild(true)}
+        onClose={onClose}
+      />
+
+      <div className="grid lg:grid-cols-[minmax(0,1fr)_312px]">
+        <div
+          className="flex min-w-0 flex-col gap-6 px-4 py-6 pb-28 sm:px-7
+            lg:border-r lg:border-border lg:pb-6"
         >
-          &larr; Back to board
-        </button>
-      )}
-
-      <ResizableSplit
-        asideLabel="activity"
-        aside={<TaskActivityPanel projectId={projectId} taskId={taskId} />}
-      >
-      <>
-        {/* Header */}
-        <div>
-          <div className="flex flex-wrap items-center gap-2 mb-2">
-            <span className="font-mono text-text-muted">
-              {project.key}-{task.taskNumber}
-            </span>
-            <select
-              value={task.status}
-              onChange={(e) => handleStatusChange(e.target.value)}
-              className="text-xs font-medium bg-bg-input border border-border rounded px-2 py-1 text-text focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
-            >
-              {effectiveColumns(project.columns).map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.label}
-                </option>
-              ))}
-            </select>
-            <button
-              onClick={async () => {
-                try {
-                  const res = await api.post(
-                    `/api/projects/${projectId}/tasks/${taskId}/watch`,
-                    {}
-                  );
-                  setTask((prev) => {
-                    if (!prev || !currentUser) return prev;
-                    const watchers = res.watching
-                      ? [...(prev.watchers || []), currentUser._id]
-                      : (prev.watchers || []).filter((w: string) => w !== currentUser._id);
-                    return { ...prev, watchers };
-                  });
-                  toast(res.watching ? "Watching task" : "Unwatched task", "success");
-                } catch {
-                  toast("Failed to toggle watch", "error");
-                }
-              }}
-              className={`text-xs px-2.5 py-1 rounded border transition-colors ${
-                currentUser && (task.watchers || []).includes(currentUser._id)
-                  ? "border-primary bg-primary/10 text-primary"
-                  : "border-border text-text-muted hover:text-text hover:border-border"
-              }`}
-              title={
-                currentUser && (task.watchers || []).includes(currentUser._id)
-                  ? "Stop watching"
-                  : "Watch for changes"
-              }
-            >
-              {currentUser && (task.watchers || []).includes(currentUser._id)
-                ? "Watching"
-                : "Watch"}
-              {(task.watchers || []).length > 0 && (
-                <span className="ml-1 opacity-60">({(task.watchers || []).length})</span>
-              )}
-            </button>
-          </div>
-        </div>
-
-        <TaskForm
-          projectId={projectId}
-          projectKey={project.key}
-          task={task}
-          categories={(project.categories || []).map((c) => c.name)}
-          columns={project.columns || []}
-          sprints={sprints}
-          customFields={project.customFields || []}
-          onSaved={loadData}
-          onCancel={onClose}
-        />
-
-        {/* Linked PRs */}
-        {task.linkedPRs && task.linkedPRs.length > 0 && (
-          <div>
-            <h2 className="font-semibold mb-2">Pull / Merge Requests</h2>
-            <div className="space-y-1.5">
-              {task.linkedPRs.map((pr) => (
-                <a
-                  key={`${pr.provider ?? "github"}-${pr.number}`}
-                  href={pr.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-2 text-sm hover:bg-bg-hover px-2 py-1.5 rounded transition-colors"
+          <div className="flex flex-col gap-2">
+            <InlineTitle value={draft.title} onChange={(value) => set("title", value)} />
+            <div className="flex flex-wrap items-center gap-2 px-1.5 text-xs text-text-muted">
+              <span>
+                Created{" "}
+                {new Date(task.createdAt).toLocaleDateString(undefined, {
+                  day: "numeric",
+                  month: "short",
+                })}
+                {reporter ? ` by ${reporter}` : ""}
+              </span>
+              <span aria-hidden className="opacity-40">
+                •
+              </span>
+              <span>Edited {timeAgo(task.updatedAt)}</span>
+              <span aria-hidden className="opacity-40">
+                •
+              </span>
+              {autoSaveState === "error" ? (
+                <button
+                  type="button"
+                  onClick={retry}
+                  className="focus-ring rounded text-danger hover:underline"
                 >
-                  <svg
-                    className={`w-4 h-4 shrink-0 ${
-                      pr.state === "merged"
-                        ? "text-[#8b5cf6]"
-                        : pr.state === "open"
-                          ? "text-[#22c55e]"
-                          : "text-danger"
-                    }`}
-                    fill="currentColor"
-                    viewBox="0 0 16 16"
-                  >
-                    <path d="M7.177 3.073L9.573.677A.25.25 0 0110 .854v4.792a.25.25 0 01-.427.177L7.177 3.427a.25.25 0 010-.354zM3.75 2.5a.75.75 0 100 1.5.75.75 0 000-1.5zm-2.25.75a2.25 2.25 0 113 2.122v5.256a2.251 2.251 0 11-1.5 0V5.372A2.25 2.25 0 011.5 3.25zM11 2.5h-1V4h1a1 1 0 011 1v5.628a2.251 2.251 0 101.5 0V5A2.5 2.5 0 0011 2.5zm1 10.25a.75.75 0 111.5 0 .75.75 0 01-1.5 0zM3.75 12a.75.75 0 100 1.5.75.75 0 000-1.5z" />
-                  </svg>
-                  <span className="flex-1 truncate">
-                    #{pr.number} {pr.title}
-                  </span>
-                  {pr.provider === "gitlab" && (
-                    <span
-                      className="chip chip-custom text-[11px] px-1.5 py-0.5 rounded font-medium"
-                      style={{ "--chip": "#fc6d26" } as CSSProperties}
-                    >
-                      GitLab
-                    </span>
-                  )}
-                  <span
-                    className="chip chip-custom text-[11px] px-1.5 py-0.5 rounded font-medium"
-                    style={
-                      {
-                        "--chip":
-                          pr.state === "merged"
-                            ? "#8b5cf6"
-                            : pr.state === "open"
-                              ? "var(--color-success)"
-                              : "var(--color-danger)",
-                      } as CSSProperties
-                    }
-                  >
-                    {pr.state}
-                  </span>
-                </a>
-              ))}
+                  ⚠ Save failed — retry
+                </button>
+              ) : (
+                <span
+                  aria-live="polite"
+                  className={autoSaveState === "saved" ? "text-success" : ""}
+                >
+                  {autoSaveState === "saving" ? "Saving…" : "All changes saved"}
+                </span>
+              )}
             </div>
           </div>
-        )}
 
-        <GitlabActivity projectId={projectId} taskId={taskId} />
+          <MobileSummary
+            draft={draft}
+            assignee={assignee}
+            onOpenDetails={() => setDetailsOpen(true)}
+          />
 
-        {/* Dependencies */}
-        <div>
-          <div className="flex items-center justify-between mb-2">
-            <h2 className="font-semibold">Dependencies</h2>
-            <Button size="sm" variant="secondary" onClick={() => setAddingChild(true)}>
-              Add child
-            </Button>
-          </div>
-          <TaskLinks
+          <DescriptionSection
+            value={draft.description}
+            onChange={(value) => set("description", value)}
+            onFileUpload={handleFileUpload}
+            collapsible
+          />
+
+          <CriteriaSection
+            items={draft.checklist}
+            onChange={(items) => set("checklist", items)}
+          />
+
+          <ExecutionPanel execution={task.execution} />
+
+          <LinkedWork
             projectId={projectId}
             projectKey={project.key}
             task={task}
-            onChanged={loadData}
+            columns={columns}
+            onChanged={onReload}
+            onAddChild={() => setAddingChild(true)}
           />
+
+          <GitlabActivity projectId={projectId} taskId={task._id} />
+
+          <section className="border-t border-border pt-5">
+            <TaskActivityPanel
+              projectId={projectId}
+              taskId={task._id}
+              commentRefreshKey={commentRefreshKey}
+            />
+          </section>
         </div>
 
-        {/* Actions */}
-        <div className="flex gap-3">
-          <Button size="sm" variant="secondary" onClick={handleDuplicate}>
-            Duplicate
-          </Button>
-          <Button size="sm" variant="danger" onClick={() => setConfirmDelete(true)}>
-            Delete
-          </Button>
-        </div>
+        <aside className="hidden bg-bg px-5 py-6 lg:block">
+          <PropertyRail
+            draft={draft}
+            set={set}
+            users={users}
+            sprints={sprints}
+            categories={(project.categories || []).map((c) => c.name)}
+            customFields={project.customFields || []}
+            reporter={reporter}
+            onDelete={requestDelete}
+          />
+        </aside>
+      </div>
 
-      </>
-      </ResizableSplit>
+      <MobileCommentBar
+        projectId={projectId}
+        taskId={task._id}
+        onPosted={() => setCommentRefreshKey((k) => k + 1)}
+      />
+
+      <Modal
+        open={detailsOpen}
+        onClose={() => setDetailsOpen(false)}
+        title="All details"
+        size="md"
+      >
+        <PropertyRail
+          draft={draft}
+          set={set}
+          users={users}
+          sprints={sprints}
+          categories={(project.categories || []).map((c) => c.name)}
+          customFields={project.customFields || []}
+          reporter={reporter}
+          onDelete={requestDelete}
+          touch
+        />
+      </Modal>
 
       <Modal
         open={addingChild}
         onClose={() => setAddingChild(false)}
-        title={`New child of ${project.key}-${task.taskNumber}`}
+        title={`New child of ${taskKey}`}
         size="lg"
       >
         <TaskForm
@@ -318,7 +372,7 @@ export function TaskDetail({
           customFields={project.customFields || []}
           onSaved={() => {
             setAddingChild(false);
-            loadData();
+            onReload();
           }}
           onCancel={() => setAddingChild(false)}
         />
@@ -329,7 +383,7 @@ export function TaskDetail({
         onClose={() => setConfirmDelete(false)}
         onConfirm={handleDelete}
         title="Delete Task"
-        message={`Are you sure you want to delete ${project.key}-${task.taskNumber} "${task.title}"? This action cannot be undone.`}
+        message={`Are you sure you want to delete ${taskKey} "${task.title}"? This action cannot be undone.`}
         loading={deleting}
       />
     </div>

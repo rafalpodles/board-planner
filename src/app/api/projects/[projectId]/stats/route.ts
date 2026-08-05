@@ -29,7 +29,7 @@ export const GET = withProjectAccess(async (_request, { params }) => {
   );
   const difficultyPath = difficultyField ? `$customFieldValues.${difficultyField._id}` : null;
 
-  const [breakdowns, recentTasks] = await Promise.all([
+  const [breakdowns, recentTasks, fieldUsage] = await Promise.all([
     Task.aggregate([
       { $match: { project: projectOid } },
       {
@@ -54,7 +54,21 @@ export const GET = withProjectAccess(async (_request, { params }) => {
       },
       "createdAt updatedAt status"
     ).lean(),
+    // What "used by N tasks" costs before a field is deleted. $objectToArray keeps this
+    // to operators MongoDB 4.4 has.
+    Task.aggregate([
+      { $match: { project: projectOid } },
+      { $project: { pairs: { $objectToArray: { $ifNull: ["$customFieldValues", {}] } } } },
+      { $unwind: "$pairs" },
+      { $match: { "pairs.v": { $nin: [null, "", []] } } },
+      { $group: { _id: "$pairs.k", count: { $sum: 1 } } },
+    ]),
   ]);
+
+  const customFieldUsage: Record<string, number> = {};
+  for (const row of fieldUsage as { _id: string; count: number }[]) {
+    customFieldUsage[row._id] = row.count;
+  }
 
   const data = breakdowns[0] || { total: 0, done: 0, statusPairs: [], categoryPairs: [], difficultyPairs: [], assigneePairs: [] };
 
@@ -136,5 +150,6 @@ export const GET = withProjectAccess(async (_request, { params }) => {
     difficultyBreakdown,
     velocity,
     createdOverTime,
+    customFieldUsage,
   });
 });

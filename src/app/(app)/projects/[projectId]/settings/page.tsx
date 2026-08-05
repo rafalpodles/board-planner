@@ -1,13 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/components/ui/Toast";
-import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { ApiProject } from "@/types";
-import { effectiveColumns } from "@/lib/columns";
 import {
   SettingsProvider,
   useDirtyRegistry,
@@ -18,9 +16,10 @@ import { BoardSection } from "./sections/BoardSection";
 import { TaskFieldsSection } from "./sections/TaskFieldsSection";
 import { IntegrationsSection } from "./sections/IntegrationsSection";
 import { PmAgentSection } from "./sections/PmAgentSection";
+import { WorkersSection } from "./sections/WorkersSection";
 import { AuditSection } from "./sections/AuditSection";
-import { InstanceSection } from "./sections/InstanceSection";
 import { PageHeader } from "@/components/shell/PageHeader";
+import { SettingsStats } from "./sections/types";
 
 type Access = "member" | "projectAdmin" | "instanceAdmin";
 
@@ -31,7 +30,6 @@ interface SectionMeta {
   blurb: string;
   keywords: string;
   access: Access;
-  instanceGroup?: boolean;
   icon: React.ReactNode;
 }
 
@@ -51,6 +49,9 @@ function Icon({ d }: { d: string }) {
     </svg>
   );
 }
+
+// The sections that print a task or usage count
+const COUNTS_NEEDED = new Set(["general", "board", "fields"]);
 
 const SECTIONS: SectionMeta[] = [
   {
@@ -101,6 +102,16 @@ const SECTIONS: SectionMeta[] = [
     ),
   },
   {
+    id: "workers",
+    label: "Workers",
+    title: "Workers",
+    blurb:
+      "Whether autonomous workers may run this project's approved tasks, and how they should behave.",
+    keywords: "worker agent autonomous merge branch diff model gates checkout repository",
+    access: "instanceAdmin",
+    icon: <Icon d="M4 7h16M4 12h16M4 17h7" />,
+  },
+  {
     id: "pm",
     label: "PM agent",
     title: "PM agent",
@@ -122,23 +133,10 @@ const SECTIONS: SectionMeta[] = [
     access: "projectAdmin",
     icon: <Icon d="M12 21a9 9 0 100-18 9 9 0 000 18zM12 7v5l3 2" />,
   },
-  {
-    id: "instance",
-    label: "AI model",
-    title: "AI model",
-    blurb: "Used when generating tasks with AI.",
-    keywords: "ai model openai gpt task generation instance global",
-    access: "instanceAdmin",
-    instanceGroup: true,
-    icon: (
-      <Icon d="M12 3l2.1 4.7 5.1.6-3.8 3.5 1 5.1L12 14.5 7.6 16.9l1-5.1L4.8 8.3l5.1-.6z" />
-    ),
-  },
 ];
 
 export default function ProjectSettingsPage() {
   const { projectId } = useParams<{ projectId: string }>();
-  const router = useRouter();
   const api = useApi();
   const { isAdmin } = useAuth();
   const { toast } = useToast();
@@ -147,7 +145,7 @@ export default function ProjectSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [section, setSection] = useState("");
   const [query, setQuery] = useState("");
-  const [confirmLeave, setConfirmLeave] = useState(false);
+  const [stats, setStats] = useState<SettingsStats | null>(null);
 
   const { register, unregister, pending, total } = useDirtyRegistry();
 
@@ -229,26 +227,31 @@ export default function ProjectSettingsPage() {
     if (scroll) window.scrollTo({ top: 0, behavior: "smooth" });
   }, []);
 
-  const badges = useMemo(() => {
-    if (!project) return {} as Record<string, { count?: number; on?: boolean }>;
-    return {
-      board: { count: effectiveColumns(project.columns).length },
-      fields: {
-        count:
-          (project.categories?.length || 0) +
-          (project.customFields?.length || 0) +
-          (project.taskTemplates?.length || 0),
-      },
-      integrations: {
-        on:
-          !!project.githubTokenSet ||
-          !!project.gitlabTokenSet ||
-          (project.notificationChannels?.length || 0) > 0 ||
-          (project.webhooks?.length || 0) > 0,
-      },
-      pm: { on: !!project.pm?.enabled && !project.pm?.lockedByInstance },
-    } as Record<string, { count?: number; on?: boolean }>;
-  }, [project]);
+  // /stats runs several aggregations, so it is only paid for once a section that
+  // prints a count is opened — and then shared, rather than fetched three times
+  useEffect(() => {
+    if (stats || !COUNTS_NEEDED.has(active)) return;
+    api
+      .get(`/api/projects/${projectId}/stats`)
+      .then(setStats)
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, stats, projectId]);
+
+  // The redesign moved channels, webhooks, categories and templates out of instant-save,
+  // so an accidental reload now costs real work. main guarded one button; this guards the
+  // exits a browser actually offers.
+  useEffect(() => {
+    if (total === 0) return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [total]);
+
+  const dirtySections = useMemo(
+    () => new Set(pending.map((g) => g.section)),
+    [pending]
+  );
 
   if (loading || !project) {
     return (
@@ -265,10 +268,10 @@ export default function ProjectSettingsPage() {
     patchProject,
     replaceProject,
     isAdmin,
+    stats,
   };
 
   function navButton(s: SectionMeta, mobile: boolean) {
-    const badge = badges[s.id];
     if (mobile) {
       return (
         <button
@@ -282,6 +285,12 @@ export default function ProjectSettingsPage() {
           }`}
         >
           {s.label}
+          {dirtySections.has(s.id) && (
+            <span
+              className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-warning align-middle"
+              title="Unsaved changes"
+            />
+          )}
         </button>
       );
     }
@@ -298,46 +307,22 @@ export default function ProjectSettingsPage() {
       >
         <span className={s.id === active ? "text-primary" : ""}>{s.icon}</span>
         <span className="flex-1 truncate">{s.label}</span>
-        {badge?.count !== undefined && (
-          <span className="rounded-full bg-bg-input px-1.5 text-[11px] text-text-muted">
-            {badge.count}
-          </span>
-        )}
-        {badge?.on !== undefined && (
+        {dirtySections.has(s.id) && (
           <span
-            className={`h-1.5 w-1.5 rounded-full ${badge.on ? "bg-success" : "bg-text-muted/50"}`}
-            title={badge.on ? "Configured" : "Not configured"}
+            className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning"
+            title="Unsaved changes"
           />
         )}
       </button>
     );
   }
 
-  const projectSections = matches.filter((s) => !s.instanceGroup);
-  const instanceSections = matches.filter((s) => s.instanceGroup);
+  const projectSections = matches;
 
   return (
     <>
-      <div className="pb-32">
-        <PageHeader
-          title="Settings"
-          icon={project.icon || "📋"}
-          subtitle={`${project.name} · ${project.key}`}
-          actions={
-            // Kept, unlike the other pages' back arrows: this one is the only
-            // trigger for the unsaved-changes guard
-            <button
-              onClick={() =>
-                total > 0
-                  ? setConfirmLeave(true)
-                  : router.push(`/projects/${projectId}`)
-              }
-              className="focus-ring rounded px-2 py-1 text-sm text-text-muted hover:text-text"
-            >
-              Back to board
-            </button>
-          }
-        />
+      <div className="pb-8">
+        <PageHeader title="Settings" />
 
         <div className="md:grid md:grid-cols-[236px_minmax(0,1fr)] md:gap-7">
           <nav
@@ -372,17 +357,6 @@ export default function ProjectSettingsPage() {
               </div>
             )}
 
-            {instanceSections.length > 0 && (
-              <div>
-                <h2 className="mb-1.5 ml-2.5 text-[10.5px] font-bold uppercase tracking-wider text-text-muted">
-                  All projects
-                </h2>
-                {instanceSections.map((s) => navButton(s, false))}
-                <p className="mt-2 px-2.5 text-[11.5px] leading-snug text-text-muted">
-                  Changing these affects every project on this instance.
-                </p>
-              </div>
-            )}
 
             {matches.length === 0 && (
               <p className="px-2.5 text-sm text-text-muted">
@@ -420,16 +394,12 @@ export default function ProjectSettingsPage() {
               {visible.map((s) => (
                 <div key={s.id} className={s.id === active ? "" : "hidden"}>
                   {s.id === "general" && <GeneralSection {...sectionProps} />}
-                  {s.id === "board" && (
-                    <BoardSection
-                      {...sectionProps}
-                      active={active === "board"}
-                    />
-                  )}
+                  {s.id === "board" && <BoardSection {...sectionProps} />}
                   {s.id === "fields" && <TaskFieldsSection {...sectionProps} />}
                   {s.id === "integrations" && (
                     <IntegrationsSection {...sectionProps} />
                   )}
+                  {s.id === "workers" && <WorkersSection {...sectionProps} />}
                   {s.id === "pm" && <PmAgentSection {...sectionProps} />}
                   {s.id === "audit" && (
                     <AuditSection
@@ -437,24 +407,13 @@ export default function ProjectSettingsPage() {
                       active={active === "audit"}
                     />
                   )}
-                  {s.id === "instance" && <InstanceSection />}
                 </div>
               ))}
             </SettingsProvider>
+            <SaveBar pending={pending} total={total} onGoToSection={goToSection} />
           </main>
         </div>
       </div>
-
-      <SaveBar pending={pending} total={total} onGoToSection={goToSection} />
-
-      <ConfirmDialog
-        open={confirmLeave}
-        onClose={() => setConfirmLeave(false)}
-        onConfirm={() => router.push(`/projects/${projectId}`)}
-        title="Leave without saving?"
-        message={`You have ${total === 1 ? "1 unsaved change" : `${total} unsaved changes`}. Leaving now discards them.`}
-        confirmLabel="Discard and leave"
-      />
     </>
   );
 }

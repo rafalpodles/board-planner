@@ -3,8 +3,9 @@ import { Task } from "@/models/task";
 import { Project } from "@/models/project";
 import { User } from "@/models/user";
 import { Comment } from "@/models/comment";
-import { ITask, DEFAULT_PRIORITY } from "@/types";
-import { getColumnIds, defaultStatusFor, roleOf } from "@/lib/columns";
+import { ApiTaskExecution, ITask, ITaskExecution, DEFAULT_PRIORITY } from "@/types";
+import { getColumnIds, defaultStatusFor, roleOf, getProjectColumns } from "@/lib/columns";
+import { escalationColumnId } from "@/lib/escalation";
 import { logActivity } from "@/lib/activity";
 import { dispatchWebhooks } from "@/lib/webhooks";
 import { dispatchNotifications } from "@/lib/notifications";
@@ -12,6 +13,43 @@ import { createNotifications, collectRecipients, resolveMentions } from "@/lib/i
 import { parseChecklistString } from "@/lib/checklist";
 import { validateCustomFieldValues, sanitizeCustomFieldValues } from "@/lib/custom-fields";
 import { onTaskStatusChanged } from "@/lib/pm/triggers";
+
+export const MAX_EXECUTION_ATTEMPTS = 3;
+
+// Long enough for "gates:build" or "Edit src/lib/task-service.ts", short enough that a badge
+// cannot become a payload
+export const MAX_PHASE_LENGTH = 120;
+
+const PHASE_FIELDS = ["execution.phase", "execution.phaseAt", "execution.phaseSeq"];
+// A run's identity has to die with the run. recordTaskPhase matches on runId, so a runId left
+// behind on a released task lets that worker replay its own old run onto a task it no longer holds
+// — and the release unsets phaseSeq, so the $exists branch would accept any seq, stale ones too.
+const RUN_FIELDS = [...PHASE_FIELDS, "execution.runId"];
+const UNSET_PHASE = Object.fromEntries(PHASE_FIELDS.map((field) => [field, ""]));
+const UNSET_RUN = Object.fromEntries(RUN_FIELDS.map((field) => [field, ""]));
+
+// A worker claims by assigning the task to itself, so the assignment has to die with the run —
+// every way back to the board, or the task is left assigned to a machine that is not running it
+// and no worker will ever claim it again.
+//
+// Conditional, not unconditional: these same updates are what a person dragging a card goes
+// through, and clearing their assignment would be a bug of its own. The claim filter refuses any
+// task that already has an assignee, so execution.workerId being set means the assignee is the
+// worker.
+//
+// `$ifNull` alone was wrong and shipped once: `execution.workerId` defaults to the empty string,
+// and an empty string is TRUTHY in MongoDB's `$cond` — unlike in JavaScript. So every ordinary
+// status change cleared the assignee of every task that had ever been near the execution
+// subdocument. Compare against "" explicitly; do not lean on truthiness across that boundary.
+const CLEAR_WORKER_ASSIGNEE = {
+  assignee: {
+    $cond: [{ $ne: [{ $ifNull: ["$execution.workerId", ""] }, ""] }, null, "$assignee"],
+  },
+};
+
+// Four times the worker's default task timeout. A worker killed mid-run leaves its task in the
+// active column, where claimNextTask can never see it again — nothing else reclaims it.
+export const EXECUTION_LEASE_MS = 2 * 60 * 60 * 1000;
 
 export const taskPopulateFields = [
   { path: "assignee", select: "username fullName" },
@@ -150,8 +188,8 @@ export async function changeStatus(
 
   const task = await Task.findOneAndUpdate(
     { _id: taskId, project: projectId },
-    { $set: { status } },
-    { returnDocument: "after" }
+    [{ $set: { status, ...CLEAR_WORKER_ASSIGNEE } }, { $unset: RUN_FIELDS }],
+    { returnDocument: "after", updatePipeline: true }
   ).populate([
     { path: "assignee", select: "username fullName" },
     { path: "createdBy", select: "username fullName" },
@@ -218,7 +256,7 @@ export async function updateTask(
   // Whitelist allowed fields to prevent overwriting protected fields
   const allowed = [
     "title", "description", "priority", "category",
-    "status", "assignee", "dueDate", "checklist", "order", "pinned", "sprint", "customFieldValues", "recurrence",
+    "status", "assignee", "dueDate", "checklist", "order", "sprint", "customFieldValues", "recurrence",
   ];
   const updates: Record<string, unknown> = {};
   for (const field of allowed) {
@@ -290,10 +328,28 @@ export async function updateTask(
     updates.assignee = assigneeUser ? assigneeUser._id : null;
   }
 
+  // The edit form PUTs the whole task, status included, so leaving the active column is
+  // as much a release as changeStatus is. Keyed on the value actually changing, not on
+  // the field being present: dragging a card within its own column resends the status it
+  // already had, and unsetting the run there would detach a worker mid-execution.
+  const leavesColumn =
+    updates.status !== undefined && String(updates.status) !== String(oldTask.status);
+
+  // A pure reorder is not an edit. Without this every card dragged inside a column
+  // reads as "updated just now", which is the same lie the list's reorder endpoint
+  // already refuses to tell.
+  const onlyOrder = updates.order !== undefined && Object.keys(updates).length === 1;
+
+  // Same rule as changeStatus, decided in JS rather than with a pipeline because this update needs
+  // runValidators, which a pipeline update does not run. An explicit assignee in the edit still
+  // wins — it is spread last.
+  const releasesWorker = leavesColumn && !!oldTask.execution?.workerId;
+  const setFields = releasesWorker ? { assignee: null, ...updates } : updates;
+
   const task = await Task.findOneAndUpdate(
     { _id: taskId, project: projectId },
-    { $set: updates },
-    { returnDocument: "after", runValidators: true }
+    leavesColumn ? { $set: setFields, $unset: UNSET_RUN } : { $set: updates },
+    { returnDocument: "after", runValidators: true, timestamps: !onlyOrder }
   ).populate(taskPopulateFields);
 
   if (!task) {
@@ -515,4 +571,222 @@ async function createNextRecurrence(
     "",
     `Next occurrence created: ${project.key}-${project.taskCounter}`
   );
+}
+
+export async function releaseExpiredTasks(projectId: string, now = new Date()): Promise<number> {
+  await connectDB();
+
+  const project = await Project.findById(projectId, "columns").lean();
+  const columns = getProjectColumns(project);
+  const approved = columns.find((c) => c.role === "approved")?.id;
+  const active = columns.filter((c) => c.role === "active").map((c) => c.id);
+  if (!approved || active.length === 0) return 0;
+
+  const exhausted = escalationColumnId(columns) ?? approved;
+  const expired = {
+    project: projectId,
+    status: { $in: active },
+    "execution.startedAt": { $lt: new Date(now.getTime() - EXECUTION_LEASE_MS) },
+  };
+
+  // The attempt is not refunded: a task that repeatedly outlives its worker has to run out of
+  // attempts and reach a human, rather than cycling through the queue forever
+  const [spent, retryable] = await Promise.all([
+    Task.updateMany(
+      { ...expired, "execution.attempts": { $gte: MAX_EXECUTION_ATTEMPTS } },
+      [{ $set: { status: exhausted, ...CLEAR_WORKER_ASSIGNEE } }, { $unset: RUN_FIELDS }],
+      { updatePipeline: true }
+    ),
+    Task.updateMany(
+      { ...expired, "execution.attempts": { $lt: MAX_EXECUTION_ATTEMPTS } },
+      [{ $set: { status: approved, ...CLEAR_WORKER_ASSIGNEE } }, { $unset: RUN_FIELDS }],
+      { updatePipeline: true }
+    ),
+  ]);
+
+  return spent.modifiedCount + retryable.modifiedCount;
+}
+
+export async function claimNextTask(
+  projectId: string,
+  workerId: string,
+  runId: string,
+  // The worker's own identity user. A claim is an assignment, which is what stops two machines
+  // converging on one task and what makes a task parked for a colleague untouchable.
+  identity?: string | null
+): Promise<ITask | null> {
+  await connectDB();
+
+  const project = await Project.findById(projectId, "columns").lean();
+  const columns = getProjectColumns(project);
+  const approved = columns.filter((c) => c.role === "approved").map((c) => c.id);
+  const activeStatus = columns.find((c) => c.role === "active")?.id;
+  if (approved.length === 0 || !activeStatus) return null;
+
+  return Task.findOneAndUpdate(
+    {
+      project: projectId,
+      status: { $in: approved },
+      // An assigned task belongs to whoever it is assigned to — another machine that got there
+      // first, or a person it was parked for. Either way this worker leaves it alone.
+      assignee: null,
+      // Mongoose applies defaults at hydration, so tasks created before the
+      // execution subdocument existed have no such field — and $lt never
+      // matches a missing one
+      $or: [
+        { "execution.attempts": { $exists: false } },
+        { "execution.attempts": { $lt: MAX_EXECUTION_ATTEMPTS } },
+      ],
+    },
+    {
+      $set: {
+        status: activeStatus,
+        ...(identity ? { assignee: identity } : {}),
+        "execution.workerId": workerId,
+        "execution.runId": runId,
+        "execution.startedAt": new Date(),
+        "execution.lastError": "",
+      },
+      // A run counts its own phases from one, so a phaseSeq left by an earlier run would swallow
+      // the first events of this one
+      $unset: UNSET_PHASE,
+      $inc: { "execution.attempts": 1 },
+    },
+    { returnDocument: "after", sort: { order: 1, createdAt: 1 } }
+  );
+}
+
+export async function releaseTask(
+  projectId: string,
+  taskId: string,
+  options: { refund?: boolean } = {}
+): Promise<ITask | null> {
+  await connectDB();
+
+  const project = await Project.findById(projectId, "columns").lean();
+  const columns = getProjectColumns(project);
+  const approved = columns.find((c) => c.role === "approved")?.id;
+  const active = columns.filter((c) => c.role === "active").map((c) => c.id);
+  if (!approved || active.length === 0) return null;
+
+  if (options.refund === false) {
+    const exhausted = escalationColumnId(columns) ?? approved;
+
+    return Task.findOneAndUpdate(
+      { _id: taskId, project: projectId, status: { $in: active } },
+      [
+        {
+          $set: {
+            status: {
+              $cond: [
+                { $gte: ["$execution.attempts", MAX_EXECUTION_ATTEMPTS] },
+                exhausted,
+                approved,
+              ],
+            },
+            ...CLEAR_WORKER_ASSIGNEE,
+          },
+        },
+        { $unset: RUN_FIELDS },
+      ],
+      { returnDocument: "after", updatePipeline: true }
+    );
+  }
+
+  return Task.findOneAndUpdate(
+    {
+      _id: taskId,
+      project: projectId,
+      status: { $in: active },
+      "execution.attempts": { $gt: 0 },
+    },
+    [
+      {
+        $set: {
+          status: approved,
+          "execution.attempts": { $add: ["$execution.attempts", -1] },
+          ...CLEAR_WORKER_ASSIGNEE,
+        },
+      },
+      { $unset: RUN_FIELDS },
+    ],
+    { returnDocument: "after", updatePipeline: true }
+  );
+}
+
+export interface TaskPhaseUpdate {
+  taskId: string;
+  workerId: string;
+  runId: string;
+  seq: number;
+  phase: string;
+}
+
+// A phase is a short label for a board badge, and the only free text a worker can write onto a
+// task without going through a comment. Anything longer, empty, or carrying control characters is
+// not a label.
+export function phaseFrom(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const phase = value.trim();
+  if (!phase || phase.length > MAX_PHASE_LENGTH) return null;
+  if (/[\u0000-\u001f\u007f]/.test(phase)) return null;
+  return phase;
+}
+
+// The run is the authorization: a worker that has been released from this task, or whose run was
+// superseded by a newer claim, matches nothing however valid its credential is.
+export async function recordTaskPhase(event: TaskPhaseUpdate): Promise<boolean> {
+  await connectDB();
+
+  const result = await Task.updateOne(
+    {
+      _id: event.taskId,
+      "execution.workerId": event.workerId,
+      "execution.runId": event.runId,
+      // Same trap as claimNextTask's attempts guard: a task that has never carried a phase has no
+      // phaseSeq at all, and $lt never matches a missing field
+      $or: [
+        { "execution.phaseSeq": { $exists: false } },
+        { "execution.phaseSeq": { $lt: event.seq } },
+      ],
+    },
+    {
+      $set: {
+        "execution.phase": event.phase,
+        "execution.phaseAt": new Date(),
+        "execution.phaseSeq": event.seq,
+      },
+    }
+  );
+
+  return result.matchedCount > 0;
+}
+
+// What a reader may see of a run. The subdocument carries more — runId is the authorization scope
+// recordTaskPhase matches on, phaseSeq is an ordering detail, lastError is only ever "" and
+// attempts counts attempts spent rather than an attempt number — and none of it belongs in a
+// browser. Returning the raw document would publish all of it to every project member.
+export function toApiExecution(
+  execution: ITaskExecution | undefined,
+  workerNames?: ReadonlyMap<string, string>
+): ApiTaskExecution | undefined {
+  // runId is what says a run still holds this task: every exit from the active column clears it,
+  // while workerId and startedAt are left behind as history. Keying on those instead would leave a
+  // finished task claiming to be starting forever, which is what live testing caught.
+  if (!execution?.runId) return undefined;
+  return {
+    ...(execution.workerId ? { workerId: execution.workerId } : {}),
+    // Resolved by the caller, which is the layer that can read the fleet. Absent rather than
+    // guessed when it cannot be: a card showing the wrong machine is worse than one showing an id.
+    ...(execution.workerId && workerNames?.get(execution.workerId)
+      ? { workerName: workerNames.get(execution.workerId)! }
+      : {}),
+    ...(execution.phase ? { phase: execution.phase } : {}),
+    phaseAt: execution.phaseAt ? new Date(execution.phaseAt).toISOString() : null,
+    startedAt: execution.startedAt ? new Date(execution.startedAt).toISOString() : null,
+    // Both timestamps come from this clock, so a reader's clock must never be compared against
+    // them: a browser five minutes fast would call a healthy run silent, and one running behind
+    // would show a run dead for hours as alive. Ages are measured here and only advanced there.
+    asOf: new Date().toISOString(),
+  };
 }

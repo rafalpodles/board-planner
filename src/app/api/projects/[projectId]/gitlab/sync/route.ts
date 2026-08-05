@@ -7,6 +7,7 @@ import { fetchMergeRequests, matchMRsToTasks, parseGitlabRepo } from "@/lib/gitl
 import { logActivity } from "@/lib/activity";
 import { decryptSecret } from "@/lib/encryption";
 import { getProjectColumns } from "@/lib/columns";
+import { projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
 
 export const POST = withProjectAccess(async (_request, { params, user }) => {
   const { projectId } = await params;
@@ -17,17 +18,27 @@ export const POST = withProjectAccess(async (_request, { params, user }) => {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
-  if (!project.gitlabRepo || !project.gitlabToken) {
+  const repositoryUrl = projectRepositoryUrl(project);
+  if (!repositoryUrl || !project.gitlabToken) {
     return NextResponse.json(
-      { error: "GitLab repo and token must be configured in project settings" },
+      { error: "A repository URL and a GitLab token must be configured in project settings" },
       { status: 400 }
     );
   }
 
-  const projectPath = parseGitlabRepo(project.gitlabRepo);
+  // A self-hosted GitLab has no telling hostname, so this is where the project's own gitlabHost
+  // does the classifying — see src/lib/repository.ts
+  if (repositoryProvider(project) !== "gitlab") {
+    return NextResponse.json(
+      { error: `${repositoryUrl} is not a GitLab repository. A self-hosted one also needs its GitLab host set.` },
+      { status: 400 }
+    );
+  }
+
+  const projectPath = parseGitlabRepo(repositoryUrl);
   if (!projectPath) {
     return NextResponse.json(
-      { error: "Invalid GitLab repo format. Use 'group/project'." },
+      { error: `Could not read a group and project out of ${repositoryUrl}` },
       { status: 400 }
     );
   }

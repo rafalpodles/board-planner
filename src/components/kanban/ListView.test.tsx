@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup, act } from "@testing-library/react";
 import { ListView } from "./ListView";
-import { ApiSprint, ApiTask } from "@/types";
+import { ApiCustomField, ApiSprint, ApiTask } from "@/types";
 
 const sprints = [
   { _id: "s1", name: "Sprint 2026-Q3 hardening and cleanup", startDate: "2026-07-01", endDate: "2026-07-14", status: "completed" },
@@ -83,11 +83,11 @@ describe("ListView truncated cells", () => {
     expect(screen.getByTitle("CP-191").textContent).toBe("CP-191");
   });
 
+  // The cell shows initials to save width, so the name has to survive on the title
   it("keeps the whole assignee name reachable", () => {
     renderList();
-    expect(screen.getByTitle("Rafał Podleś-Wojciechowski").textContent).toBe(
-      "Rafał Podleś-Wojciechowski"
-    );
+    expect(screen.getByTitle("Rafał Podleś-Wojciechowski")).toBeTruthy();
+    expect(screen.getByText("RP")).toBeTruthy();
   });
 
   it("keeps the whole sprint name reachable", () => {
@@ -105,9 +105,14 @@ describe("ListView truncated cells", () => {
     expect(screen.getByTitle("To Do").textContent).toBe("To Do");
   });
 
+  // Was an assertion on tagName === "SELECT"; the control is a combobox now, and the
+  // full label still has to survive on a title because the trigger truncates
   it("keeps the whole status label reachable as a picker", () => {
     renderList({ onStatusChange: () => {} });
-    expect(screen.getByTitle("To Do").tagName).toBe("SELECT");
+    expect(screen.getByTitle("To Do").textContent).toBe("To Do");
+    expect(
+      screen.getByRole("combobox", { name: /^Status for CP-191/ })
+    ).toBeTruthy();
   });
 });
 
@@ -116,10 +121,10 @@ describe("ListView truncated cells", () => {
 describe("ListView accessible names", () => {
   it("names the status picker by task and field", () => {
     renderList({ onStatusChange: () => {} });
-    const select = screen.getByLabelText(
+    const trigger = screen.getByLabelText(
       "Status for CP-191: Pages do not use the width the sidebar redesign freed up, and the list view scrolls sideways"
     );
-    expect(select.tagName).toBe("SELECT");
+    expect(trigger.getAttribute("role")).toBe("combobox");
   });
 
   it("leaves no control in a row without an accessible name", () => {
@@ -240,57 +245,68 @@ const roster = [
   { _id: "u2", username: "claude", fullName: "Claude Code" },
 ];
 
-function assigneeSelect() {
-  return screen.getByLabelText(/^Assignee for CP-191/) as HTMLSelectElement;
+function assigneeTrigger() {
+  return screen.getByRole("combobox", { name: /^Assignee for CP-191/ }) as HTMLButtonElement;
 }
 
-// The save settles in a microtask after the change event, so the act block has to
-// be async or React reports the disabled-state update as unwrapped
-async function pick(value: string) {
-  const select = assigneeSelect();
+function openAssignee() {
+  act(() => assigneeTrigger().click());
+  return [...screen.getAllByRole("option")] as HTMLButtonElement[];
+}
+
+function optionLabels() {
+  return openAssignee().map((o) => o.textContent?.replace("✓", "").trim());
+}
+
+// The save settles in a microtask after the click, so the act block has to be async
+// or React reports the disabled-state update as unwrapped
+async function pick(label: string) {
+  const option = openAssignee().find((o) => o.textContent?.replace("✓", "").trim() === label);
+  if (!option) throw new Error(`no option ${label}`);
   await act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(select, value);
-    select.dispatchEvent(new Event("change", { bubbles: true }));
+    option.click();
   });
 }
 
 describe("ListView inline assignee", () => {
-  it("stays read-only text without a handler", () => {
+  it("stays a read-only avatar without a handler", () => {
     renderList({ assignableUsers: roster });
-    expect(screen.queryByLabelText(/^Assignee for/)).toBeNull();
-    expect(screen.getByText("Rafał Podleś-Wojciechowski")).toBeTruthy();
+    expect(screen.queryByRole("combobox", { name: /^Assignee for/ })).toBeNull();
+    expect(screen.getByText("RP")).toBeTruthy();
   });
 
   // A member's user-list fetch 403s today, and an empty dropdown that silently
   // unassigns people is worse than the read-only cell they have now
-  it("stays read-only text when the roster failed to load", () => {
+  it("stays a read-only avatar when the roster failed to load", () => {
     renderList({ assignableUsers: [], onAssigneeChange: vi.fn() });
-    expect(screen.queryByLabelText(/^Assignee for/)).toBeNull();
-    expect(screen.getByText("Rafał Podleś-Wojciechowski")).toBeTruthy();
+    expect(screen.queryByRole("combobox", { name: /^Assignee for/ })).toBeNull();
+    expect(screen.getByText("RP")).toBeTruthy();
   });
 
   it("offers every user plus Unassigned, with the current one selected", () => {
     renderList({ assignableUsers: roster, onAssigneeChange: vi.fn() });
-    const select = assigneeSelect();
-    expect([...select.options].map((o) => o.textContent)).toEqual([
+    expect(optionLabels()).toEqual([
       "Unassigned",
       "Rafał Podleś-Wojciechowski",
       "Claude Code",
     ]);
-    expect(select.value).toBe("rpo");
+    const selected = screen.getAllByRole("option").filter((o) => o.getAttribute("aria-selected") === "true");
+    expect(selected.map((o) => o.textContent?.replace("✓", "").trim())).toEqual([
+      "Rafał Podleś-Wojciechowski",
+    ]);
   });
 
   it("reports the chosen username", async () => {
     const onAssigneeChange = vi.fn();
     renderList({ assignableUsers: roster, onAssigneeChange });
-    await pick("claude");
+    await pick("Claude Code");
     expect(onAssigneeChange).toHaveBeenCalledWith("t1", "claude");
   });
 
   it("reports an empty username when unassigned", async () => {
     const onAssigneeChange = vi.fn();
     renderList({ assignableUsers: roster, onAssigneeChange });
-    await pick("");
+    await pick("Unassigned");
     expect(onAssigneeChange).toHaveBeenCalledWith("t1", "");
   });
 
@@ -298,9 +314,9 @@ describe("ListView inline assignee", () => {
   // among its options renders as the first one — quietly showing the wrong person
   it("keeps an assignee who is no longer in the roster", () => {
     renderList({ assignableUsers: [roster[1]], onAssigneeChange: vi.fn() });
-    const select = assigneeSelect();
-    expect(select.value).toBe("rpo");
-    expect([...select.options].map((o) => o.value)).toContain("rpo");
+    expect(optionLabels()).toContain("rpo");
+    const selected = screen.getAllByRole("option").filter((o) => o.getAttribute("aria-selected") === "true");
+    expect(selected).toHaveLength(1);
   });
 
   // The roster fallback keyed off "not in the list", which an unassigned task also
@@ -316,10 +332,9 @@ describe("ListView inline assignee", () => {
         onAssigneeChange={vi.fn()}
       />
     );
-    const select = assigneeSelect();
-    expect([...select.options].filter((o) => o.value === "")).toHaveLength(1);
-    expect(select.value).toBe("");
-    expect([...select.options].every((o) => o.textContent?.trim())).toBe(true);
+    const labels = optionLabels();
+    expect(labels.filter((l) => l === "Unassigned")).toHaveLength(1);
+    expect(labels.every((l) => l)).toBe(true);
   });
 
   it("disables the cell while the save is in flight", async () => {
@@ -327,11 +342,107 @@ describe("ListView inline assignee", () => {
     const onAssigneeChange = vi.fn(() => new Promise<void>((r) => (release = r)));
     renderList({ assignableUsers: roster, onAssigneeChange });
 
-    const inFlight = pick("claude");
-    expect(assigneeSelect().disabled).toBe(true);
+    const option = openAssignee().find((o) => o.textContent?.includes("Claude Code"));
+    await act(async () => option?.click());
+    expect(assigneeTrigger().disabled).toBe(true);
 
-    release();
-    await inFlight;
-    expect(assigneeSelect().disabled).toBe(false);
+    await act(async () => release());
+    expect(assigneeTrigger().disabled).toBe(false);
+  });
+});
+
+describe("ListView reordering", () => {
+  const many = [
+    { ...tasks[0], _id: "t1", taskNumber: 1, title: "First" },
+    { ...tasks[0], _id: "t2", taskNumber: 2, title: "Second" },
+    { ...tasks[0], _id: "t3", taskNumber: 3, title: "Third" },
+  ] as unknown as ApiTask[];
+
+  // The drag itself belongs to dnd-kit and needs real pointer geometry, which this
+  // environment cannot provide; the order a drop produces is covered in reorder.test
+  function handles() {
+    return screen.queryAllByLabelText(/^Reorder /);
+  }
+
+  it("offers a handle per row under manual sort", () => {
+    renderList({ tasks: many, onReorder: () => {} });
+    expect(handles()).toHaveLength(3);
+  });
+
+  it("names each handle after its own row", () => {
+    renderList({ tasks: many, onReorder: () => {} });
+    expect(handles().map((h) => h.getAttribute("aria-label"))).toEqual([
+      "Reorder CP-1",
+      "Reorder CP-2",
+      "Reorder CP-3",
+    ]);
+  });
+
+  it("offers no handle without a reorder handler", () => {
+    renderList({ tasks: many });
+    expect(handles()).toHaveLength(0);
+  });
+
+  // Any other sort recomputes the order on the next render, throwing the drop away
+  it("offers no handle under any other sort", () => {
+    renderList({ tasks: many, sortField: "priority", onReorder: () => {} });
+    expect(handles()).toHaveLength(0);
+  });
+
+  // Descending manual reverses the rows, so a drop would reindex them backwards
+  it("offers no handle under descending manual order", () => {
+    renderList({ tasks: many, sortDir: "desc", onReorder: () => {} });
+    expect(handles()).toHaveLength(0);
+  });
+
+  it("offers no handle with a single row", () => {
+    renderList({ tasks: [many[0]], onReorder: () => {} });
+    expect(handles()).toHaveLength(0);
+  });
+});
+
+// The stored value is the option's id, and since CP-211 that id is a generated
+// "<slug>-<random>" — nothing like the label. Sending the label is a 400 from
+// validateCustomFieldValues, and legacy string options hide it because id === value.
+describe("ListView custom field picker", () => {
+  const field = {
+    _id: "f1",
+    name: "Component",
+    fieldType: "dropdown",
+    options: [
+      { id: "ui-a1b2c3", value: "ui", color: "#ff0000", order: 1 },
+      { id: "backend-d4e5", value: "backend", color: "#00ff00", order: 2 },
+    ],
+    required: false,
+    order: 1,
+    showOnCard: false,
+    showInList: true,
+    filterable: true,
+    archived: false,
+  } as unknown as ApiCustomField;
+
+  const withValue = [
+    { ...tasks[0], _id: "t1", customFieldValues: { f1: "ui-a1b2c3" } },
+  ] as unknown as ApiTask[];
+
+  it("sends the option id, not its label", async () => {
+    const onFieldChange = vi.fn();
+    renderList({ tasks: withValue, customFields: [field], onFieldChange });
+
+    act(() => {
+      screen.getByRole("combobox", { name: /^Component for/ }).click();
+    });
+    const option = screen
+      .getAllByRole("option")
+      .find((o) => o.textContent?.replace("✓", "").trim() === "backend");
+    await act(async () => option?.click());
+
+    expect(onFieldChange).toHaveBeenCalledWith("t1", "f1", "backend-d4e5");
+  });
+
+  it("paints the chosen option in its own colour", () => {
+    renderList({ tasks: withValue, customFields: [field], onFieldChange: vi.fn() });
+    const badge = screen.getByText("ui").closest("span[style]");
+    expect(badge?.getAttribute("style")).toContain("#ff0000");
   });
 });

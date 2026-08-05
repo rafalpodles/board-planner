@@ -60,6 +60,38 @@ export const PRIORITY_ORDER: Record<string, number> = {
 export const COLUMN_ROLES = ["backlog", "approved", "active", "review", "blocked", "done"] as const;
 export type ColumnRole = (typeof COLUMN_ROLES)[number];
 
+/**
+ * What each role means, in the words of someone arranging a board rather than reading
+ * the enum. Every automation keys on the role and never on the column's name, so this
+ * is the only place the two vocabularies are reconciled for a human.
+ */
+export const ROLE_LABELS: Record<ColumnRole, { label: string; hint: string }> = {
+  backlog: {
+    label: "Ideas & backlog",
+    hint: "Not approved for work. Nothing picks these up on its own.",
+  },
+  approved: {
+    label: "Ready to pick up",
+    hint: "Workers and Claude Code take their next task from here.",
+  },
+  active: {
+    label: "In progress",
+    hint: "Where a task is moved once something starts working on it.",
+  },
+  review: {
+    label: "Awaiting review",
+    hint: "Finished work waiting on a check.",
+  },
+  blocked: {
+    label: "Blocked",
+    hint: "Parked. Left alone by automation.",
+  },
+  done: {
+    label: "Done",
+    hint: "Completes the task, and creates the next one if it repeats.",
+  },
+};
+
 export interface IProjectColumn {
   _id: Types.ObjectId;
   id: string;
@@ -115,9 +147,17 @@ export interface IUser {
   emailNotifications: boolean;
   collapseEmptyColumns: boolean;
   role: UserRole;
+  // A worker's identity is a user record so authorship, mentions, avatars and history keep
+  // working unchanged — but it is not a person, so it stays out of the lists where people are
+  // invited, permissioned or picked as an assignee.
+  kind: "human" | "machine";
   allowedProjects: Types.ObjectId[];
   // Runtime-only, set for project-scoped tokens — a scoped token never gets project-admin
   tokenScoped?: boolean;
+  // Runtime-only, set for every API and OAuth token. Distinct from tokenScoped, which answers only
+  // whether project access was narrowed: an unscoped admin token is still a machine credential, and
+  // acts that need a person at a keyboard must key on this instead.
+  viaMachineCredential?: boolean;
   createdAt: Date;
 }
 
@@ -231,9 +271,10 @@ export interface IWebhook {
   enabled: boolean;
 }
 
+// The URL never reaches a client: it is a credential, so the API returns only a mask
 export interface ApiWebhook {
   _id: string;
-  url: string;
+  urlMasked: string;
   events: WebhookEvent[];
   enabled: boolean;
 }
@@ -255,7 +296,7 @@ export interface ApiNotificationChannel {
   _id: string;
   type: NotificationChannelType;
   name: string;
-  webhookUrl: string;
+  webhookUrlMasked: string;
   events: WebhookEvent[];
   enabled: boolean;
 }
@@ -280,6 +321,16 @@ export const CUSTOM_FIELD_TYPES: CustomFieldType[] = [
 
 /** The types whose values are option ids rather than a literal */
 export const OPTION_FIELD_TYPES: CustomFieldType[] = ["dropdown", "multiselect"];
+
+/** The type picker used to print the union members; these are what a human calls them. */
+export const FIELD_TYPE_LABELS: Record<CustomFieldType, { label: string; hint: string }> = {
+  dropdown: { label: "Choice", hint: "Pick one from a list you define" },
+  multiselect: { label: "Multi-choice", hint: "Pick any number from a list you define" },
+  text: { label: "Text", hint: "Free text" },
+  number: { label: "Number", hint: "A numeric value" },
+  date: { label: "Date", hint: "A single date" },
+  checkbox: { label: "Yes / no", hint: "A tick box" },
+};
 
 export const DEFAULT_OPTION_COLOR = "#64748b";
 
@@ -396,6 +447,169 @@ export const PROJECT_ICONS: string[] = [
   "🏥", "🎬", "🎵", "✈️", "🏠", "🌱", "⏰", "🏆",
 ];
 
+// Facts about a machine. Everything describing a repository or the work lives on the project.
+export interface WorkerPolicy {
+  pollIntervalMs: number;
+}
+
+export interface ProjectWorkerPolicy {
+  autoMerge: boolean;
+  // The second model that reads the diff with no memory of writing it. Turning it off is what
+  // separates "write code" from "write and review"; autoMerge may not outlive it.
+  reviewGate: boolean;
+  baseBranch: string;
+  taskTimeoutMs: number;
+  maxDiffLines: number;
+  maxDiffFiles: number;
+  model: string;
+  fallbackModel: string;
+  reviewModel: string;
+}
+
+export interface ProjectWorkerConfig {
+  enabled: boolean;
+  policy: ProjectWorkerPolicy;
+  policyOverrides: string[];
+}
+
+// What a worker says it has on disk. Reported upward only — the server never sends a path back.
+export interface WorkerRepo {
+  remote: string;
+  path: string;
+}
+
+export interface WorkerPreflightCheck {
+  name: string;
+  ok: boolean;
+  detail: string;
+}
+
+// Whether the machine can actually do the work: the four binaries the worker shells out to, the
+// session `claude` and `gh` need, and what the gates require of the bound repository. Reported by
+// the worker, never set here — null until a worker old enough to compute it has checked in.
+export interface WorkerPreflight {
+  ok: boolean;
+  // Which account `claude` is signed into. Empty when the CLI is too old to answer.
+  account: string;
+  checks: WorkerPreflightCheck[];
+  reportedAt: Date;
+}
+
+export interface ApiWorkerPreflight extends Omit<WorkerPreflight, "reportedAt"> {
+  reportedAt: string;
+}
+
+// How much autonomy a worker is given, worded as a choice rather than a gate checklist. The pair
+// the validator refuses — merging without review — is unreachable from these by construction.
+export type WorkerPreset = "write" | "review" | "merge";
+
+// An enrolment in progress: the app holds the device code, the operator approves the user code in
+// a browser, and the credential is handed back exactly once.
+export interface IDeviceEnrolment {
+  _id: Types.ObjectId;
+  deviceCodeHash: string;
+  userCode: string;
+  machineName: string;
+  machineHost: string;
+  status: "pending" | "approved" | "denied";
+  approvedBy: Types.ObjectId | null;
+  project: Types.ObjectId | null;
+  preset: WorkerPreset;
+  worker: Types.ObjectId | null;
+  credential: string;
+  deliveredAt: Date | null;
+  expiresAt: Date;
+  createdAt: Date;
+}
+
+// A single-use, short-lived credential whose only power is to register one worker. Deliberately
+// not an ApiToken: an ApiToken can be used repeatedly and carries its owner's access.
+export interface IEnrolmentToken {
+  _id: Types.ObjectId;
+  prefix: string;
+  tokenHash: string;
+  createdBy: Types.ObjectId | IUser;
+  label: string;
+  expiresAt: Date;
+  usedAt: Date | null;
+  usedByWorker: Types.ObjectId | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface IWorker {
+  _id: Types.ObjectId;
+  name: string;
+  host: string;
+  platform: string;
+  version: string;
+  protocolVersion: number;
+  credentialHash: string;
+  repos: WorkerRepo[];
+  policy: WorkerPolicy;
+  // Which policy fields an operator actually set; everything else follows the default
+  policyOverrides: string[];
+  enabled: boolean;
+  lockedByInstance: boolean;
+  lastSeenAt: Date | null;
+  // The user this machine acts as — see src/lib/worker-user.ts
+  identity: Types.ObjectId | null;
+  bindingError: string;
+  preflight: WorkerPreflight | null;
+  command: "" | "pause" | "resume" | "stop";
+  commandIssuedAt: Date | null;
+  commandAckedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface ApiWorker {
+  _id: string;
+  name: string;
+  host: string;
+  platform: string;
+  version: string;
+  protocolVersion: number;
+  repos: WorkerRepo[];
+  policy: WorkerPolicy;
+  policyOverrides: string[];
+  enabled: boolean;
+  lockedByInstance: boolean;
+  lastSeenAt: string | null;
+  bindingError: string;
+  preflight: ApiWorkerPreflight | null;
+  command: "" | "pause" | "resume" | "stop";
+  commandIssuedAt: string | null;
+  commandAckedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  stale: boolean;
+  // The task this worker holds right now, if any. Phase lives on the task, not the worker, so the
+  // route has to join — a worker document alone cannot answer "what is it doing".
+  currentTask?: ApiWorkerTask;
+}
+
+export interface ApiWorkerTask {
+  taskId: string;
+  taskKey: string;
+  title: string;
+  phase?: string;
+  phaseAt?: string | null;
+}
+
+export interface ITaskExecution {
+  runId: string;
+  workerId: string;
+  attempts: number;
+  startedAt: Date | null;
+  lastError: string;
+  // Absent until the run that holds the task reports one, and unset again the moment it leaves
+  // the active column — so "no phase" is a missing field, never a stale one
+  phase?: string;
+  phaseAt?: Date | null;
+  phaseSeq?: number;
+}
+
 export interface IProject {
   _id: Types.ObjectId;
   name: string;
@@ -408,8 +622,12 @@ export interface IProject {
   customFields: ICustomField[];
   webhooks: IWebhook[];
   notificationChannels: INotificationChannel[];
+  worker: ProjectWorkerConfig;
+  repositoryUrl: string;
+  /** @deprecated superseded by repositoryUrl; read only as a migration fallback */
   githubRepo: string;
   githubToken: string;
+  /** @deprecated superseded by repositoryUrl; read only as a migration fallback */
   gitlabRepo: string;
   gitlabHost: string;
   gitlabToken: string;
@@ -561,7 +779,6 @@ export interface ITask {
   dueDate: Date | null;
   checklist: IChecklistItem[];
   linkedPRs: ILinkedPR[];
-  pinned: boolean;
   blockedBy: (Types.ObjectId | ITask)[];
   relations: ITaskRelation[];
   watchers: Types.ObjectId[];
@@ -570,6 +787,7 @@ export interface ITask {
   recurrence: IRecurrence | null;
   recurringParentId: Types.ObjectId | null;
   order: number;
+  execution: ITaskExecution;
   createdBy: Types.ObjectId | IUser;
   createdAt: Date;
   updatedAt: Date;
@@ -626,6 +844,7 @@ export interface ApiTaskTemplate {
 }
 
 export interface ApiProject {
+  worker: ProjectWorkerConfig;
   _id: string;
   name: string;
   key: string;
@@ -637,9 +856,10 @@ export interface ApiProject {
   customFields: ApiCustomField[];
   webhooks: ApiWebhook[];
   notificationChannels: ApiNotificationChannel[];
-  githubRepo: string;
+  repositoryUrl: string;
+  // Which of the two integrations that URL's host resolves to, "" when neither
+  repositoryProvider: "github" | "gitlab" | "";
   githubTokenSet: boolean;
-  gitlabRepo?: string;
   gitlabHost?: string;
   gitlabTokenSet?: boolean;
   codaHost?: string;
@@ -760,7 +980,6 @@ export interface ApiTask {
   dueDate: string | null;
   checklist: ApiChecklistItem[];
   linkedPRs: ApiLinkedPR[];
-  pinned: boolean;
   blockedBy: ApiTaskLink[];
   blocking: ApiTaskLink[];
   relations: ApiTaskRelation[];
@@ -774,6 +993,21 @@ export interface ApiTask {
   createdBy: ApiUser | string;
   createdAt: string;
   updatedAt: string;
+  execution?: ApiTaskExecution;
+}
+
+// Only what a reader needs. lastError is deliberately absent — task-service writes it as "" and
+// never anything else — and so is attempts, which is decremented on refund and therefore counts
+// remaining budget, not the attempt number.
+export interface ApiTaskExecution {
+  workerId?: string;
+  workerName?: string;
+  phase?: string;
+  phaseAt?: string | null;
+  startedAt?: string | null;
+  // the server's clock when this was serialised, so ages can be measured against it rather than
+  // against the reader's, which may be minutes off in either direction
+  asOf?: string;
 }
 
 export interface ApiReaction {
@@ -889,7 +1123,8 @@ export type ProjectAuditAction =
   | "task_created"
   | "task_deleted"
   | "bulk_delete"
-  | "bulk_move";
+  | "bulk_move"
+  | "worker_updated";
 
 export interface IProjectAuditLog {
   _id: Types.ObjectId;

@@ -1,14 +1,18 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { useDraft } from "@/hooks/use-draft";
 import { useToast } from "@/components/ui/Toast";
-import { COLUMN_ROLES, ColumnRole } from "@/types";
+import { COLUMN_ROLES, ColumnRole, ROLE_LABELS } from "@/types";
 import { effectiveColumns } from "@/lib/columns";
+import { escalationColumnId, flaggedColumnIds, withEscalationColumn } from "@/lib/escalation";
 import { Input } from "@/components/ui/Input";
+import { Popover } from "@/components/ui/Popover";
+import { SwatchPicker } from "@/components/ui/SwatchPicker";
 import { Button } from "@/components/ui/Button";
 import { SettingsCard } from "@/components/settings/SettingsCard";
+import { SettingRow } from "@/components/settings/SettingRow";
 import { useDirtyGroup } from "@/components/settings/settings-context";
 import { SectionProps } from "./types";
 
@@ -30,38 +34,27 @@ function toDrafts(columns: Parameters<typeof effectiveColumns>[0]): ColumnDraft[
   }));
 }
 
-export function BoardSection({
-  projectId,
-  project,
-  patchProject,
-  active,
-}: SectionProps & { active: boolean }) {
+export function BoardSection({ projectId, project, patchProject, stats }: SectionProps) {
   const api = useApi();
   const { toast } = useToast();
 
   const draft = useDraft({ columns: toDrafts(project.columns) });
   const [newLabel, setNewLabel] = useState("");
-  const [taskCounts, setTaskCounts] = useState<Record<string, number>>({});
-  const [countsRequested, setCountsRequested] = useState(false);
+  const taskCounts = stats?.statusBreakdown ?? {};
   const dragIndex = useRef<number | null>(null);
-
-  // /stats runs several aggregations — only pay for it once the section is opened
-  useEffect(() => {
-    if (!active || countsRequested) return;
-    setCountsRequested(true);
-    api
-      .get(`/api/projects/${projectId}/stats`)
-      .then((s: { statusBreakdown: Record<string, number> }) => setTaskCounts(s.statusBreakdown || {}))
-      .catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, countsRequested, projectId]);
 
   const columns = draft.value.columns;
 
   function update(index: number, patch: Partial<ColumnDraft>) {
     draft.set(
       "columns",
-      columns.map((c, i) => (i === index ? { ...c, ...patch } : c))
+      columns.map((c, i) => {
+        if (i !== index) return c;
+        const next = { ...c, ...patch };
+        // Moving the escalation column out of review would otherwise relocate the hand-off
+        // to whichever review column happens to sort first, silently
+        return next.role === "review" ? next : { ...next, triggersPmReview: false };
+      })
     );
   }
 
@@ -77,7 +70,7 @@ export function BoardSection({
     if (!newLabel.trim()) return;
     draft.set("columns", [
       ...columns,
-      { label: newLabel.trim(), color: "#6b7280", role: "active", triggersPmReview: false },
+      { label: newLabel.trim(), color: "#6b7280", role: "backlog", triggersPmReview: false },
     ]);
     setNewLabel("");
   }
@@ -99,10 +92,21 @@ export function BoardSection({
     }
   );
 
+  // An unsaved column has no id, and an <option> without a value falls back to its
+  // label — picking it matched nothing and silently cleared the hand-off
+  const reviewColumns = columns.filter((c) => c.role === "review" && c.id);
+  const escalation = escalationColumnId(columns);
+  const explicit = columns.some((c) => c.triggersPmReview);
+  // The flag used to be a per-column checkbox, so a project could carry several. Only one
+  // survives the next save of this section, and it is not obvious which
+  const strandedFlags = flaggedColumnIds(effectiveColumns(project.columns)).filter(
+    (id) => id !== escalation
+  );
+
   return (
+    <>
     <SettingsCard
       title="Columns"
-      contract="draft"
       description="Drag to reorder. A column that still holds tasks can't be removed."
     >
       <div className="space-y-2">
@@ -131,35 +135,46 @@ export function BoardSection({
                 className="min-h-[38px] py-1.5"
               />
             </div>
-            <input
-              type="color"
-              value={col.color}
-              onChange={(e) => update(i, { color: e.target.value })}
-              aria-label={`Colour for ${col.label}`}
-              className="h-9 w-9 cursor-pointer rounded-lg border border-border bg-transparent"
-            />
-            <select
-              value={col.role}
-              onChange={(e) => update(i, { role: e.target.value as ColumnRole })}
-              className="rounded-lg border border-border bg-bg-input px-2 py-1.5 text-sm"
+            <Popover
+              width="w-auto"
+              trigger={({ toggle }) => (
+                <button
+                  type="button"
+                  onClick={toggle}
+                  aria-label={`Colour for ${col.label}`}
+                  className="focus-ring h-9 w-9 shrink-0 rounded-lg border border-border"
+                  style={{ backgroundColor: col.color }}
+                />
+              )}
             >
-              {COLUMN_ROLES.map((r) => (
-                <option key={r} value={r}>
-                  {r}
-                </option>
-              ))}
-            </select>
-            <label
-              className="flex cursor-pointer items-center gap-1.5 text-xs text-text-muted"
-              title="Entering this column queues a PM agent review (when PM autonomy is enabled)"
-            >
-              <input
-                type="checkbox"
-                checked={col.triggersPmReview}
-                onChange={(e) => update(i, { triggersPmReview: e.target.checked })}
-              />
-              PM review
-            </label>
+              {({ close }) => (
+                <div className="p-2">
+                  <SwatchPicker
+                    value={col.color}
+                    label={`Colour for ${col.label}`}
+                    onChange={(hex) => {
+                      update(i, { color: hex });
+                      close();
+                    }}
+                  />
+                </div>
+              )}
+            </Popover>
+            <div className="min-w-[190px]">
+              <select
+                value={col.role}
+                aria-label={`What ${col.label || "this column"} means to automation`}
+                onChange={(e) => update(i, { role: e.target.value as ColumnRole })}
+                className="focus-ring w-full rounded-lg border border-border bg-bg-input px-2 py-1.5 text-sm"
+              >
+                {COLUMN_ROLES.map((r) => (
+                  <option key={r} value={r}>
+                    {ROLE_LABELS[r].label}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-text-muted">{ROLE_LABELS[col.role].hint}</p>
+            </div>
             <span className="flex-1" />
             {col.id && taskCounts[col.id] !== undefined && (
               <span className="text-xs text-text-muted">
@@ -196,6 +211,15 @@ export function BoardSection({
         ))}
       </div>
 
+      {!draft.value.columns.some((c) => c.role === "approved") && (
+        <div className="mb-3 flex gap-2 rounded-lg border-l-2 border-warning bg-warning/10 px-3 py-2 text-sm">
+          <span aria-hidden>⚠</span>
+          <p className="m-0">
+            No column means <strong>{ROLE_LABELS.approved.label}</strong>. Workers and Claude Code
+            have nowhere to take work from, and will stop without reporting anything.
+          </p>
+        </div>
+      )}
       <div className="flex gap-2">
         <Input
           value={newLabel}
@@ -213,5 +237,61 @@ export function BoardSection({
         </Button>
       </div>
     </SettingsCard>
+
+    <SettingsCard
+      title="Hand-off to the PM agent"
+      description="The one column that means a human or the PM agent needs to look at this."
+    >
+      <SettingRow label="Escalation column" hint="Two things land here">
+        <div>
+          <select
+            value={explicit ? escalation : ""}
+            aria-label="Escalation column"
+            onChange={(e) =>
+              draft.set("columns", withEscalationColumn(columns, e.target.value || null))
+            }
+            className="focus-ring w-full rounded-lg border border-border bg-bg-input px-3 py-2 text-sm"
+          >
+            <option value="">— none —</option>
+            {reviewColumns.map((c) => (
+              <option key={c.id ?? c.label} value={c.id}>
+                {c.label}
+              </option>
+            ))}
+          </select>
+          <p className="mt-1.5 text-xs text-text-muted">
+            A task whose worker run fails or times out is moved here, and — if PM autonomy is
+            on — arriving here queues a PM turn against the daily cap.
+          </p>
+          {reviewColumns.length === 0 && (
+            <p className="mt-1.5 text-xs text-text-muted">
+              Only a column set to <strong>{ROLE_LABELS.review.label}</strong> can take the
+              hand-off, and this board has none.
+            </p>
+          )}
+          {!explicit && escalation && (
+            <p className="mt-1.5 text-xs text-text-muted">
+              Nothing is chosen, so automation falls back to the first review column —{" "}
+              <strong>{columns.find((c) => c.id === escalation)?.label}</strong>.
+            </p>
+          )}
+        </div>
+      </SettingRow>
+
+      {strandedFlags.length > 0 && (
+        <div className="flex gap-2 rounded-lg border-l-2 border-warning bg-warning/10 px-3 py-2 text-sm">
+          <span aria-hidden>⚠</span>
+          <p className="m-0">
+            This board hands off from more than one column, which nothing supports. Saving keeps{" "}
+            <strong>{columns.find((c) => c.id === escalation)?.label ?? "none"}</strong> and stops{" "}
+            {strandedFlags
+              .map((id) => effectiveColumns(project.columns).find((c) => c.id === id)?.label ?? id)
+              .join(", ")}{" "}
+            from queueing PM turns.
+          </p>
+        </div>
+      )}
+    </SettingsCard>
+    </>
   );
 }
