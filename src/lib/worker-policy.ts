@@ -16,6 +16,10 @@ export const PROJECT_POLICY_DEFAULTS = {
   // Off by default: merging to a base branch is a thing an operator turns on, not a thing a
   // freshly enabled project starts doing
   autoMerge: false,
+  // The second model that reads the diff with no memory of writing it. On by default because
+  // "nothing merges unreviewed" is the safety property the worker asserts outright, and turning
+  // this off is the one thing that could quietly undo it.
+  reviewGate: true,
   baseBranch: "main",
   taskTimeoutMs: 1_800_000,
   maxDiffLines: 400,
