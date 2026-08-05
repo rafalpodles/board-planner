@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
-import { withProjectAccess, withProjectAdmin, withAdmin, canAdminProject } from "@/lib/middleware";
+import { withProjectAccess, withProjectAdmin, withAdmin, canAdminProject, withProjectAccessOrWorker } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { parseProjectWorkerConfig } from "@/lib/project-worker-config";
 import { User } from "@/models/user";
@@ -19,7 +19,7 @@ import { validatePmConfig, isPmAvailable, mergeMcpServerTokens, sanitizeMcpServe
 import { PROJECT_ICONS } from "@/types";
 import { projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
 
-export const GET = withProjectAccess(async (_request, { params, user }) => {
+export const GET = withProjectAccessOrWorker(async (_request, { params, user }) => {
   await connectDB();
   const { projectId } = await params;
 
