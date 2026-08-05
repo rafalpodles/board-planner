@@ -9,7 +9,8 @@ interface SecretFieldProps {
   masked: string;
   label: string;
   placeholder?: string;
-  onReplace: (value: string) => void | Promise<void>;
+  /** Return false to refuse: the field keeps what was typed */
+  onReplace: (value: string) => boolean | void | Promise<boolean | void>;
   disabled?: boolean;
 }
 
@@ -28,9 +29,11 @@ export function SecretField({
     if (!value.trim()) return;
     setBusy(true);
     try {
-      await onReplace(value.trim());
-      setValue("");
-      setReplacing(false);
+      // Clearing regardless threw away the URL whenever the caller refused
+      if ((await onReplace(value.trim())) !== false) {
+        setValue("");
+        setReplacing(false);
+      }
     } finally {
       setBusy(false);
     }

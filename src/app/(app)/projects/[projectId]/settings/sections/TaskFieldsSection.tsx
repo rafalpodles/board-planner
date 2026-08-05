@@ -79,8 +79,8 @@ export function TaskFieldsSection({
           categories.baseline.categories,
           categories.value.categories,
         );
+        let saved = project.categories || [];
         try {
-          let saved = project.categories || [];
           // Renames first: a name freed by a rename may be the one an added row wants,
           // and a removal checks the tasks still holding the old name
           for (const change of diff.changed) {
@@ -100,6 +100,12 @@ export function TaskFieldsSection({
               name,
             });
           }
+          toast("Categories saved", "success");
+        } catch (err) {
+          fail(err, "Failed to save categories");
+        } finally {
+          // Whatever landed before the failure is real. Adopting it stops the retry
+          // re-creating rows that already exist.
           patchProject({ categories: saved });
           categories.commit({
             categories: saved.map((c) => ({
@@ -108,9 +114,6 @@ export function TaskFieldsSection({
               color: c.color,
             })),
           });
-          toast("Categories saved", "success");
-        } catch (err) {
-          fail(err, "Failed to save categories");
         }
       },
       discard: categories.discard,
@@ -130,8 +133,8 @@ export function TaskFieldsSection({
           templates.baseline.templates,
           templates.value.templates,
         );
+        let saved = project.taskTemplates || [];
         try {
-          let saved = project.taskTemplates || [];
           for (const row of diff.added) {
             saved = await api.post(`/api/projects/${projectId}/templates`, row);
           }
@@ -155,11 +158,12 @@ export function TaskFieldsSection({
               templateId,
             });
           }
-          patchProject({ taskTemplates: saved });
-          templates.commit({ templates: saved });
           toast("Templates saved", "success");
         } catch (err) {
           fail(err, "Failed to save templates");
+        } finally {
+          patchProject({ taskTemplates: saved });
+          templates.commit({ templates: saved });
         }
       },
       discard: templates.discard,
