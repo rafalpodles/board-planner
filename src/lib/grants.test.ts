@@ -144,7 +144,7 @@ describe("check", () => {
     expect(findOne).toHaveBeenCalledWith({ subject: "u1", objectType: "project", object: P });
   });
 
-  it("denies cleanly when the collection is empty", async () => {
+  it("denies when the user has no grant on this project", async () => {
     findOne.mockReturnValue(lean(null));
     const user = { _id: "u1", role: "member" } as never;
     expect(await check(user, P, "access")).toBe(false);
@@ -189,6 +189,7 @@ describe("accessibleProjectIds", () => {
     find.mockReturnValue(lean([{ object: P }, { object: OTHER }]));
     const user = { _id: "u1", role: "member" } as never;
     expect(await accessibleProjectIds(user)).toEqual([P, OTHER]);
+    expect(find).toHaveBeenCalledWith({ subject: "u1", objectType: "project" });
   });
 
   it("intersects grants with a token scope", async () => {
