@@ -24,6 +24,7 @@ import { useDraft } from "@/hooks/use-draft";
 import { Popover } from "@/components/ui/Popover";
 import { SwatchPicker } from "@/components/ui/SwatchPicker";
 import { categoryDiff, CategoryDraft } from "@/lib/category-diff";
+import { diffById } from "@/lib/row-diff";
 import { nextColour } from "@/lib/palette";
 import { SectionProps } from "./types";
 
@@ -41,8 +42,10 @@ export function TaskFieldsSection({ projectId, project, patchProject, stats }: S
   });
   // "new" opens the create form; a field id opens the same form over that field
   const [fieldForm, setFieldForm] = useState<"new" | string | null>(null);
-  const [newTemplateName, setNewTemplateName] = useState("");
-  const [editingTemplate, setEditingTemplate] = useState<ApiTaskTemplate | null>(null);
+  const templates = useDraft<{ templates: ApiTaskTemplate[] }>({
+    templates: project.taskTemplates || [],
+  });
+  const [expandedTemplate, setExpandedTemplate] = useState<string | null>(null);
 
   function fail(err: unknown, fallback: string) {
     toast(err instanceof Error ? err.message : fallback, "error");
@@ -84,6 +87,41 @@ export function TaskFieldsSection({ projectId, project, patchProject, stats }: S
     }
   );
 
+  useDirtyGroup(
+    {
+      id: "fields-templates",
+      section: "fields",
+      label: "Task fields · Templates",
+      count: templates.count,
+    },
+    {
+      save: async () => {
+        const diff = diffById(project.taskTemplates || [], templates.value.templates);
+        try {
+          let saved = project.taskTemplates || [];
+          for (const row of diff.added) {
+            saved = await api.post(`/api/projects/${projectId}/templates`, row);
+          }
+          for (const row of diff.changed) {
+            saved = await api.put(`/api/projects/${projectId}/templates`, {
+              templateId: row._id,
+              ...row,
+            });
+          }
+          for (const templateId of diff.removed) {
+            saved = await api.del(`/api/projects/${projectId}/templates`, { templateId });
+          }
+          patchProject({ taskTemplates: saved });
+          templates.commit({ templates: saved });
+          toast("Templates saved", "success");
+        } catch (err) {
+          fail(err, "Failed to save templates");
+        }
+      },
+      discard: templates.discard,
+    }
+  );
+
   // Throws rather than toasting: the form stays open on failure and shows the reason
   // beside the field, instead of closing and dropping what was typed
   async function addCustomField(draft: FieldDraft) {
@@ -115,42 +153,11 @@ export function TaskFieldsSection({ projectId, project, patchProject, stats }: S
     }
   }
 
-  async function addTemplate() {
-    if (!newTemplateName.trim()) return;
-    try {
-      const taskTemplates: ApiTaskTemplate[] = await api.post(
-        `/api/projects/${projectId}/templates`,
-        { name: newTemplateName.trim() }
-      );
-      patchProject({ taskTemplates });
-      setNewTemplateName("");
-    } catch (err) {
-      fail(err, "Failed to add template");
-    }
-  }
-
-  async function removeTemplate(templateId: string) {
-    try {
-      patchProject({
-        taskTemplates: await api.del(`/api/projects/${projectId}/templates`, { templateId }),
-      });
-    } catch (err) {
-      fail(err, "Failed to remove template");
-    }
-  }
-
-  async function saveTemplate(template: ApiTaskTemplate) {
-    try {
-      const taskTemplates: ApiTaskTemplate[] = await api.put(
-        `/api/projects/${projectId}/templates`,
-        { templateId: template._id, ...template }
-      );
-      patchProject({ taskTemplates });
-      setEditingTemplate(null);
-      toast("Template saved", "success");
-    } catch (err) {
-      fail(err, "Failed to save template");
-    }
+  function editTemplate(index: number, patch: Partial<ApiTaskTemplate>) {
+    templates.set(
+      "templates",
+      templates.value.templates.map((t, i) => (i === index ? { ...t, ...patch } : t))
+    );
   }
 
   return (
@@ -279,34 +286,70 @@ export function TaskFieldsSection({ projectId, project, patchProject, stats }: S
         title="Task templates"
         description="Pre-filled starting points for tasks people create often."
       >
-        <div className="space-y-2">
-          {(project.taskTemplates || []).map((tpl) => (
-            <div key={tpl._id} className="rounded-lg border border-border p-3">
-              {editingTemplate?._id === tpl._id ? (
-                <div className="space-y-3">
+        <ListEditor
+          items={templates.value.templates}
+          onChange={(next) => templates.set("templates", next)}
+          keyOf={(t, i) => t._id || `new-${i}`}
+          nameOf={(t) => t.name || "this template"}
+          reorderable={false}
+          addLabel="Add template"
+          onAdd={() =>
+            templates.set("templates", [
+              ...templates.value.templates,
+              {
+                _id: "",
+                name: "",
+                title: "",
+                description: "",
+                category: project.categories?.[0]?.name ?? CATEGORIES[0],
+                acceptanceCriteria: "",
+              } as ApiTaskTemplate,
+            ])
+          }
+          empty={
+            <EmptyState>Add a template to skip filling in the same fields every time.</EmptyState>
+          }
+          renderRow={(tpl, i) => {
+            const key = tpl._id || `new-${i}`;
+            const open = expandedTemplate === key;
+            return (
+              <>
+                <div className="w-[220px] shrink-0">
                   <Input
-                    label="Name"
-                    value={editingTemplate.name}
-                    onChange={(e) => setEditingTemplate({ ...editingTemplate, name: e.target.value })}
+                    value={tpl.name}
+                    aria-label="Template name"
+                    placeholder="Template name..."
+                    className="min-h-[38px] py-1.5"
+                    onChange={(e) => editTemplate(i, { name: e.target.value })}
                   />
-                  <Input
-                    label="Title template"
-                    value={editingTemplate.title}
-                    onChange={(e) => setEditingTemplate({ ...editingTemplate, title: e.target.value })}
-                    placeholder="Pre-filled title"
-                  />
-                  <div className="grid gap-2 sm:grid-cols-2">
+                </div>
+                <span className="text-xs text-text-muted">{tpl.category}</span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setExpandedTemplate(open ? null : key)}
+                >
+                  {open ? "Done" : "Edit"}
+                </Button>
+                {open && (
+                  <div className="w-full space-y-3 pt-2">
+                    <Input
+                      label="Title template"
+                      value={tpl.title}
+                      placeholder="Pre-filled title"
+                      onChange={(e) => editTemplate(i, { title: e.target.value })}
+                    />
                     <div>
-                      <label className="mb-1 block text-sm font-medium text-text-muted">Category</label>
+                      <label className="mb-1 block text-sm font-medium text-text-muted">
+                        Category
+                      </label>
                       <select
-                        value={editingTemplate.category}
+                        value={tpl.category}
+                        aria-label="Template category"
                         onChange={(e) =>
-                          setEditingTemplate({
-                            ...editingTemplate,
-                            category: e.target.value as Category,
-                          })
+                          editTemplate(i, { category: e.target.value as Category })
                         }
-                        className="w-full rounded-lg border border-border bg-bg-input px-3 py-2 text-sm"
+                        className="focus-ring w-full rounded-lg border border-border bg-bg-input px-3 py-2 text-sm"
                       >
                         {(project.categories?.map((x) => x.name) || CATEGORIES).map((c) => (
                           <option key={c} value={c}>
@@ -315,78 +358,24 @@ export function TaskFieldsSection({ projectId, project, patchProject, stats }: S
                         ))}
                       </select>
                     </div>
+                    <Textarea
+                      label="Description"
+                      value={tpl.description}
+                      rows={3}
+                      onChange={(e) => editTemplate(i, { description: e.target.value })}
+                    />
+                    <Textarea
+                      label="Acceptance Criteria"
+                      value={tpl.acceptanceCriteria}
+                      rows={3}
+                      onChange={(e) => editTemplate(i, { acceptanceCriteria: e.target.value })}
+                    />
                   </div>
-                  <Textarea
-                    label="Description"
-                    value={editingTemplate.description}
-                    onChange={(e) =>
-                      setEditingTemplate({ ...editingTemplate, description: e.target.value })
-                    }
-                    rows={3}
-                  />
-                  <Textarea
-                    label="Acceptance Criteria"
-                    value={editingTemplate.acceptanceCriteria}
-                    onChange={(e) =>
-                      setEditingTemplate({ ...editingTemplate, acceptanceCriteria: e.target.value })
-                    }
-                    rows={3}
-                  />
-                  <div className="flex gap-2">
-                    <Button size="sm" onClick={() => saveTemplate(editingTemplate)}>
-                      Save
-                    </Button>
-                    <Button size="sm" variant="secondary" onClick={() => setEditingTemplate(null)}>
-                      Cancel
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex items-center justify-between">
-                  <div>
-                    <span className="text-sm font-medium">{tpl.name}</span>
-                    <span className="ml-2 text-xs text-text-muted">
-                      {tpl.category}
-                    </span>
-                  </div>
-                  <div className="flex gap-1">
-                    <button
-                      onClick={() => setEditingTemplate({ ...tpl })}
-                      className="px-2 py-1 text-xs text-text-muted hover:text-text"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      onClick={() => removeTemplate(tpl._id)}
-                      className="px-2 py-1 text-xs text-text-muted hover:text-danger"
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          ))}
-          {(project.taskTemplates || []).length === 0 && (
-            <EmptyState>Add a template to skip filling in the same fields every time.</EmptyState>
-          )}
-        </div>
-        <div className="flex gap-2">
-          <Input
-            value={newTemplateName}
-            onChange={(e) => setNewTemplateName(e.target.value)}
-            placeholder="Template name..."
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                addTemplate();
-              }
-            }}
-          />
-          <Button variant="secondary" onClick={addTemplate}>
-            Add
-          </Button>
-        </div>
+                )}
+              </>
+            );
+          }}
+        />
       </SettingsCard>
     </>
   );
