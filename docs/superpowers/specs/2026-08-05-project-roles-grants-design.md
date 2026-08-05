@@ -110,19 +110,19 @@ Moving scopes into `grants` would conflate the two and let a token outlive its o
 | `user.allowedProjects` | gone → `member` grants |
 | token `allowedProjects` | unchanged |
 
-## Backfill
+## No migration
 
-One idempotent migration, in the same PR. The invariant: **nobody gains or loses a right at
-migration time.**
+**There is no backfill script.** Production has five users; rpo assigns the grants by hand after
+deploy (his call, 2026-08-05). Writing and testing an idempotent migration would cost more than the
+migration performs.
 
-- `project.owner` → `owner` grant, unconditionally. Today the owner branch precedes the
-  `allowedProjects` check, so an owner has rights without being a member.
-- Each entry in `project.admins[]` → `owner` grant **only if** that project is in their
-  `allowedProjects`. This mirrors `middleware.ts:63` exactly. Admins failing that test get
-  nothing, because today they have nothing.
-- Every other user with the project in `allowedProjects` → `member` grant.
-- Instance admins → **no grants**. Their access comes from the role, and writing rows for them
-  would make demotion silently incomplete.
+What makes that safe rather than reckless: **instance admins hold no grants by design**, so their
+access survives an empty `grants` collection. rpo is an instance admin, is therefore never locked
+out, and can hand out roles through the member-management UI on each board — no Mongo shell needed.
+
+The consequence to accept: between deploy and those clicks, every non-admin sees no projects at
+all. That is `check()` failing closed, which is the right default, and at five users the window is
+minutes. An empty collection means the app is waiting for grants, not broken.
 
 ## API and UI changes
 
@@ -143,7 +143,9 @@ The permission matrix is the gate:
   against both `canAccessProject` and `canAdminProject`
 - the rule-3 regression: an instance admin's scoped token keeps access within scope
 - `tokenScoped` never satisfies `canAdminProject`
-- backfill is idempotent, and an admin missing from `allowedProjects` receives no owner grant
+- an empty `grants` collection leaves an instance admin with full access and everyone else with
+  none — the post-deploy state, which must be a clean deny rather than a crash
+- granting and revoking through the member UI takes effect without a re-login
 - login and API/OAuth token minting verified live in the browser — this is the surface where a
   mistake locks everyone out, and a green curl would not prove the UI path works
 
@@ -152,3 +154,6 @@ The permission matrix is the gate:
 One PR, by explicit decision, with the risk understood: `allowedProjects` has 61 references
 across 22 files, including token minting. CP-245 ships separately and first, because a real user
 is blocked today and the sidebar fix neither depends on nor conflicts with this work.
+
+Deploy order: merge, let Railway deploy, then rpo grants the roles through the UI. Nobody but the
+instance admins can work in between, which at five users is a short and acceptable gap.
