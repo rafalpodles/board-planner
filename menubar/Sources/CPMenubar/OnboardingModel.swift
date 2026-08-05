@@ -141,7 +141,7 @@ final class OnboardingModel {
 
     func startWorker() {
         do {
-            try WorkerProcess.spawn(state: state, stateDirectory: stateDirectory)
+            RunningWorker.shared.adopt(try WorkerProcess.spawn(state: state, stateDirectory: stateDirectory))
             state = Onboarding.started(state)
             persist()
             message = ""
