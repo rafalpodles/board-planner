@@ -202,8 +202,8 @@ export function IntegrationsSection({
           channels.baseline.channels,
           channels.value.channels,
         );
+        let saved = project.notificationChannels || [];
         try {
-          let saved = project.notificationChannels || [];
           for (const row of diff.added) {
             saved = await api.post(`/api/projects/${projectId}/notifications`, {
               type: row.type,
@@ -225,11 +225,12 @@ export function IntegrationsSection({
               channelId,
             });
           }
-          patchProject({ notificationChannels: saved });
-          channels.commit({ channels: saved });
           toast("Channels saved", "success");
         } catch (err) {
           fail(err, "Failed to save channels");
+        } finally {
+          patchProject({ notificationChannels: saved });
+          channels.commit({ channels: saved });
         }
       },
       discard: channels.discard,
@@ -249,8 +250,8 @@ export function IntegrationsSection({
           webhooks.baseline.webhooks,
           webhooks.value.webhooks,
         );
+        let saved = project.webhooks || [];
         try {
-          let saved = project.webhooks || [];
           for (const row of diff.added) {
             saved = await api.post(`/api/projects/${projectId}/webhooks`, {
               url: row.url,
@@ -269,11 +270,12 @@ export function IntegrationsSection({
               webhookId,
             });
           }
-          patchProject({ webhooks: saved });
-          webhooks.commit({ webhooks: saved });
           toast("Webhooks saved", "success");
         } catch (err) {
           fail(err, "Failed to save webhooks");
+        } finally {
+          patchProject({ webhooks: saved });
+          webhooks.commit({ webhooks: saved });
         }
       },
       discard: webhooks.discard,
@@ -321,7 +323,7 @@ export function IntegrationsSection({
   async function replaceWebhookUrl(webhookId: string, url: string) {
     if (webhooks.count > 0) {
       toast("Save or discard your webhook changes before replacing a URL", "error");
-      return;
+      return false;
     }
     try {
       const saved: ApiWebhook[] = await api.put(
@@ -378,7 +380,7 @@ export function IntegrationsSection({
     // row staged but not saved. Ask for that to be settled rather than losing it silently.
     if (channels.count > 0) {
       toast("Save or discard your channel changes before replacing a URL", "error");
-      return;
+      return false;
     }
     try {
       const saved: ApiNotificationChannel[] = await api.put(
