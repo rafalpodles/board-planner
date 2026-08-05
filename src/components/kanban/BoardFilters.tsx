@@ -121,7 +121,14 @@ export function BoardFilters({
     } catch {
       raw = null;
     }
-    const state = migratePersistedFilters(raw, currentUsername, customFields);
+    // Empty means the project's categories have not loaded, not that it has none —
+    // passing [] here would clear everyone's category filter on every first render
+    const state = migratePersistedFilters(
+      raw,
+      currentUsername,
+      customFields,
+      categories.length > 0 ? categories : undefined
+    );
     setFilters((f) => ({ ...f, ...state.filters }));
     onSortChange(state.sortField, state.sortDir);
     onHiddenColumnsChange?.(state.hiddenColumns);
