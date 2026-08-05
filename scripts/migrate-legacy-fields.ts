@@ -17,19 +17,24 @@
 
 import mongoose from "mongoose";
 import { legacyFieldSeeds, findLegacyField, migratedValuesFor, withValuesInUse } from "../src/lib/legacy-fields";
+import { resolveUri, dbName } from "./mongo-uri";
 import type { ApiCustomField } from "../src/types";
 
 const dryRun = process.argv.includes("--dry-run");
 
 async function main() {
-  const uri = process.env.MONGODB_URI;
-  if (!uri) throw new Error("MONGODB_URI is required");
-
-  await mongoose.connect(uri);
+  const { uri, source } = resolveUri();
+  await mongoose.connect(uri, { dbName: dbName() });
   const db = mongoose.connection.db;
   if (!db) throw new Error("No database handle");
+  console.log(`Database: ${db.databaseName} (from ${source})`);
 
   const projects = await db.collection("projects").find({}).toArray();
+  // Pointing at the wrong database does no damage here, but it would report a
+  // clean run and leave the real one unmigrated
+  if (!projects.length) {
+    throw new Error(`No projects in "${db.databaseName}" — wrong database? Set MONGODB_DB.`);
+  }
   let seededProjects = 0;
   let migratedTasks = 0;
 
