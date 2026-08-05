@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/Button";
 import { IconPicker } from "@/components/ui/IconPicker";
 import { SettingsCard, ListRow } from "@/components/settings/SettingsCard";
 import { DangerAction } from "@/components/settings/DangerAction";
+import { SettingRow } from "@/components/settings/SettingRow";
 import { useDirtyGroup } from "@/components/settings/settings-context";
 import { SectionProps } from "./types";
 
@@ -85,35 +86,40 @@ export function GeneralSection({ projectId, project, replaceProject, isAdmin, st
 
   return (
     <>
-      <SettingsCard title="Identity">
-        <div className="grid gap-4 sm:grid-cols-[1fr_140px]">
-          <Input
-            label="Name"
-            value={identity.value.name}
-            dirty={identity.isDirty("name")}
-            onChange={(e) => identity.set("name", e.target.value)}
-            required
-          />
-          <div>
-            <Input label="Key" value={project.key} disabled />
-            <p className="mt-1 text-xs text-text-muted">Task keys use it. Can&apos;t change.</p>
-          </div>
-        </div>
+      <SettingsCard
+        title="Identity"
+        description="How this project appears in the sidebar, search and the board header."
+      >
         <div>
-          <label className="mb-1 block text-sm font-medium text-text-muted">Icon</label>
-          <IconPicker
-            label="Project icon"
-            value={identity.value.icon}
-            dirty={identity.isDirty("icon")}
-            onChange={(v) => identity.set("icon", v)}
-          />
+          <SettingRow label="Name" hint="Shown everywhere the project is listed">
+            <Input
+              value={identity.value.name}
+              aria-label="Project name"
+              dirty={identity.isDirty("name")}
+              onChange={(e) => identity.set("name", e.target.value)}
+              required
+            />
+          </SettingRow>
+          <SettingRow label="Icon" hint="Sidebar, project cards, search results">
+            <IconPicker
+              label="Project icon"
+              value={identity.value.icon}
+              dirty={identity.isDirty("icon")}
+              onChange={(v) => identity.set("icon", v)}
+            />
+          </SettingRow>
+          <SettingRow label="Key" hint="Task keys are built from this and cannot change">
+            <Input value={project.key} aria-label="Project key" disabled className="max-w-[160px]" />
+          </SettingRow>
+          <SettingRow label="Description" hint="One line under the board title">
+            <Textarea
+              value={identity.value.description}
+              aria-label="Project description"
+              dirty={identity.isDirty("description")}
+              onChange={(e) => identity.set("description", e.target.value)}
+            />
+          </SettingRow>
         </div>
-        <Textarea
-          label="Description"
-          value={identity.value.description}
-          dirty={identity.isDirty("description")}
-          onChange={(e) => identity.set("description", e.target.value)}
-        />
       </SettingsCard>
 
       <SettingsCard

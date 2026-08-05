@@ -12,6 +12,7 @@ import { Popover } from "@/components/ui/Popover";
 import { SwatchPicker } from "@/components/ui/SwatchPicker";
 import { Button } from "@/components/ui/Button";
 import { SettingsCard } from "@/components/settings/SettingsCard";
+import { SettingRow } from "@/components/settings/SettingRow";
 import { useDirtyGroup } from "@/components/settings/settings-context";
 import { SectionProps } from "./types";
 
@@ -239,12 +240,8 @@ export function BoardSection({ projectId, project, patchProject, stats }: Sectio
       title="Hand-off to the PM agent"
       description="The one column that means a human or the PM agent needs to look at this."
     >
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-6">
-        <div className="pt-0.5 sm:w-[40%] sm:shrink-0">
-          <strong className="block text-[13.5px] font-semibold">Escalation column</strong>
-          <span className="mt-0.5 block text-xs text-text-muted">Two things land here</span>
-        </div>
-        <div className="min-w-0 flex-1">
+      <SettingRow label="Escalation column" hint="Two things land here">
+        <div>
           <select
             value={explicit ? escalation : ""}
             aria-label="Escalation column"
@@ -277,7 +274,7 @@ export function BoardSection({ projectId, project, patchProject, stats }: Sectio
             </p>
           )}
         </div>
-      </div>
+      </SettingRow>
 
       {strandedFlags.length > 0 && (
         <div className="flex gap-2 rounded-lg border-l-2 border-warning bg-warning/10 px-3 py-2 text-sm">
