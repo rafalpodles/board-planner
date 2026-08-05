@@ -110,9 +110,10 @@ export function Connections({
       i.impliedByRepository?.(project) ||
       opened.includes(i.id),
   );
-  // Pasting a repository URL is what adds GitHub or GitLab, so the picker never offers them
+  // A repository URL adds GitHub or GitLab on its own, but they stay in the picker anyway:
+  // dropping them meant someone looking for "GitHub" found nothing and concluded it was gone
   const available = INTEGRATIONS.filter(
-    (i) => !i.impliedByRepository && !visible.some((v) => v.id === i.id),
+    (i) => !visible.some((v) => v.id === i.id),
   );
 
   return (
