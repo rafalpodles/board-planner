@@ -15,6 +15,7 @@ import { SectionProps } from "./types";
 const NUMBER_FIELDS = new Set(["taskTimeoutMs", "maxDiffLines", "maxDiffFiles"]);
 const LABELS: Record<string, string> = {
   autoMerge: "Merge automatically",
+  reviewGate: "Review the diff before delivering",
   baseBranch: "Base branch",
   taskTimeoutMs: "Task timeout (ms)",
   maxDiffLines: "Largest diff (lines)",

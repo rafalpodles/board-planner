@@ -165,6 +165,7 @@ const projectSchema = new Schema<IProject>(
       enabled: { type: Boolean, default: false },
       policy: {
         autoMerge: { type: Boolean, default: false },
+        reviewGate: { type: Boolean, default: true },
         baseBranch: { type: String, default: "main" },
         taskTimeoutMs: { type: Number, default: 1_800_000 },
         maxDiffLines: { type: Number, default: 400 },

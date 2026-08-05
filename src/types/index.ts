@@ -411,6 +411,9 @@ export interface WorkerPolicy {
 
 export interface ProjectWorkerPolicy {
   autoMerge: boolean;
+  // The second model that reads the diff with no memory of writing it. Turning it off is what
+  // separates "write code" from "write and review"; autoMerge may not outlive it.
+  reviewGate: boolean;
   baseBranch: string;
   taskTimeoutMs: number;
   maxDiffLines: number;
