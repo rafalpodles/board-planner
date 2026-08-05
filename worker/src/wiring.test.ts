@@ -7,6 +7,7 @@ import { ControlDeps } from "./control.js";
 import { Runner } from "./exec.js";
 import { LocalConfigView, LocalServer, LocalServerDeps } from "./local-server.js";
 import { Store } from "./outbox.js";
+import { PreflightReport } from "./preflight.js";
 import { Heartbeat, HeartbeatDeps } from "./registration.js";
 import { createTelemetry } from "./telemetry.js";
 import { ClaimedTask } from "./types.js";
@@ -269,8 +270,13 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
   async function runOneTask(
     postEvent: ApiClient["postEvent"] = async () => {},
     policy?: Record<string, unknown>,
-    opts: { assignmentRemote?: string; extraAssignmentFields?: Record<string, unknown> } = {}
+    opts: {
+      assignmentRemote?: string;
+      extraAssignmentFields?: Record<string, unknown>;
+      readFile?: (path: string) => string | null;
+    } = {}
   ) {
+    let seenHeartbeat: HeartbeatDeps | undefined;
     const stateDir = mkdtempSync(join(tmpdir(), "cp-wiring-run-"));
     writeFileSync(join(stateDir, "repos.json"), JSON.stringify({ repos: [REPO] }), { mode: 0o600 });
 
@@ -329,7 +335,11 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       createStore: (path) => memoryStore(path.endsWith("worker.json") ? IDENTITY : ""),
       createApi: () => api as unknown as ApiClient,
       createTelemetry: () => telemetry,
-      startHeartbeat: () => fakeHeartbeat(bindingErrors),
+      ...(opts.readFile ? { readFile: opts.readFile } : {}),
+      startHeartbeat: (heartbeatDeps) => {
+        seenHeartbeat = heartbeatDeps;
+        return fakeHeartbeat(bindingErrors);
+      },
       connectControl: () => ({ close: vi.fn() }),
       startLocalServer: (localDeps) => {
         localConfig = localDeps.config;
@@ -355,6 +365,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       worker,
       claudeArgs: claudeCalls[0] ?? [],
       localConfig,
+      heartbeatDeps: seenHeartbeat,
     };
   }
 
@@ -606,6 +617,36 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       expect(run.bindingErrors.join(" ")).toMatch(/no checkout of git@github\.com:someone\/else\.git/);
     });
 
+    // The gates run `npm ci` and `npm run build` unconditionally, so a repository without a
+    // lockfile or without those scripts fails every task forever. It can only be checked once a
+    // repository is bound, so the report has to pick it up on rebind rather than at startup.
+    it("adds the bound repository's own shortcomings to the report", async () => {
+      const run = await runOneTask(async () => {}, undefined, {
+        readFile: (path) =>
+          path.endsWith("package.json") ? JSON.stringify({ scripts: { test: "vitest" } }) : null,
+      });
+
+      const report = run.heartbeatDeps?.preflight?.();
+      expect(report?.ok).toBe(false);
+      expect(report?.checks.filter((c) => !c.ok).map((c) => c.name)).toEqual(
+        expect.arrayContaining(["package-lock.json", "build script"])
+      );
+      expect(report?.checks.find((c) => c.name === "package-lock.json")?.detail).toContain(REPO);
+    });
+
+    it("says nothing about a bound repository that has what the gates need", async () => {
+      const run = await runOneTask(async () => {}, undefined, {
+        readFile: (path) =>
+          path.endsWith("package.json")
+            ? JSON.stringify({ scripts: { build: "tsc", test: "vitest" } })
+            : "{}",
+      });
+
+      const report = run.heartbeatDeps?.preflight?.();
+      const repoNames = ["package-lock.json", "build script", "test script"];
+      expect(report?.checks.filter((c) => repoNames.includes(c.name) && !c.ok)).toEqual([]);
+    });
+
     // A server that sends a path alongside the remote must not get one used
     it("ignores a path the server sends alongside the remote", async () => {
       const run = await runOneTask(async () => {}, undefined, {
@@ -614,5 +655,91 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
 
       expect(run.workspacePaths.some((arg) => arg.startsWith("/etc"))).toBe(false);
     });
+  });
+});
+
+// The check is only worth having if what it resolves actually reaches the child. Resolving
+// `claude` through a login shell and then spawning a child whose PATH cannot see it is the exact
+// failure mode this task exists to close: preflight green, every task failing.
+describe("preflight's place in the wiring", () => {
+  const RESOLVED = {
+    git: "/opt/homebrew/bin/git",
+    npm: "/opt/homebrew/bin/npm",
+    claude: "/Users/me/.local/bin/claude",
+    gh: "/opt/homebrew/bin/gh",
+  };
+
+  const PASSING: PreflightReport = {
+    ok: true,
+    account: "someone@example.com",
+    checks: [{ name: "git", ok: true, detail: RESOLVED.git }],
+    paths: RESOLVED,
+  };
+
+  function preflightHarness(overrides: Partial<WorkerDeps> = {}) {
+    const setPath = vi.fn();
+    return {
+      setPath,
+      ...harness({
+        env: { ...ENV, PATH: "/usr/bin:/bin" },
+        runPreflight: vi.fn().mockResolvedValue(PASSING),
+        setPath,
+        ...overrides,
+      }),
+    };
+  }
+
+  it("puts the directories the tools were resolved in onto the PATH every child inherits", async () => {
+    const { worker, setPath } = preflightHarness();
+
+    const running = worker.run();
+    worker.shutdown();
+    await running;
+
+    expect(setPath).toHaveBeenCalledWith("/opt/homebrew/bin:/Users/me/.local/bin:/usr/bin:/bin");
+  });
+
+  it("leaves the PATH alone when every tool is already reachable from it", async () => {
+    const { worker, setPath } = preflightHarness({
+      env: { ...ENV, PATH: "/opt/homebrew/bin:/Users/me/.local/bin" },
+    });
+
+    const running = worker.run();
+    worker.shutdown();
+    await running;
+
+    expect(setPath).not.toHaveBeenCalled();
+  });
+
+  it("reports nothing before preflight has run, rather than reporting a machine as broken", () => {
+    const { seen } = preflightHarness();
+
+    expect(seen.heartbeat?.preflight?.()).toBeUndefined();
+  });
+
+  it("reports the verdict and the claude account on the heartbeat", async () => {
+    const { worker, seen } = preflightHarness();
+
+    const running = worker.run();
+    worker.shutdown();
+    await running;
+
+    expect(seen.heartbeat?.preflight?.()).toMatchObject({
+      ok: true,
+      account: "someone@example.com",
+    });
+  });
+
+  it("keeps the worker running when preflight itself blows up", async () => {
+    const { worker, logError, seen } = preflightHarness({
+      runPreflight: vi.fn().mockRejectedValue(new Error("no shell on this machine")),
+    });
+
+    const running = worker.run();
+    worker.shutdown();
+    await expect(running).resolves.toBeUndefined();
+
+    expect(logError).toHaveBeenCalledWith(expect.stringContaining("preflight could not run"));
+    expect(seen.heartbeat?.preflight?.()).toBeUndefined();
   });
 });

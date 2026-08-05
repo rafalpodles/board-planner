@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const getAuthUser = vi.fn();
 const consumeEnrolmentToken = vi.fn();
 const attachWorkerToEnrolment = vi.fn();
+const enrolmentTokenOwner = vi.fn().mockResolvedValue("Rafal");
 const registerWorker = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
@@ -10,7 +11,7 @@ vi.mock("@/lib/auth", () => ({
   getAuthUser,
   RateLimitError: class RateLimitError extends Error {},
 }));
-vi.mock("@/lib/enrolment", () => ({ consumeEnrolmentToken, attachWorkerToEnrolment }));
+vi.mock("@/lib/enrolment", () => ({ consumeEnrolmentToken, attachWorkerToEnrolment, enrolmentTokenOwner }));
 vi.mock("@/lib/worker-service", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/worker-service")>();
   return { ...actual, registerWorker };

@@ -7,6 +7,7 @@ import { join } from "path";
 // bound repository. main.ts assembles it at runtime; nothing loads it from the environment anymore.
 export interface WorkerConfig {
   autoMerge: boolean;
+  reviewGate: boolean;
   apiBaseUrl: string;
   apiToken: string;
   repoPath: string;
@@ -38,6 +39,7 @@ export function modelOr(value: string | undefined, fallback: string): string {
 // else — project, repository, timing, diff caps — is no longer the operator's to set at boot.
 export interface Bootstrap {
   apiBaseUrl: string;
+  /** @deprecated CP-237: nothing reads this. Every call travels on the worker credential. */
   apiToken: string;
   // Single-use, spent by the first registration. Empty once the operator has removed it, which is
   // the intended end state — an enrolled worker never needs it again.
@@ -51,6 +53,7 @@ export interface Bootstrap {
 // project admin edits in /settings/workers, never the laptop's own environment.
 export interface EffectiveConfig {
   autoMerge: boolean;
+  reviewGate: boolean;
   baseBranch: string;
   pollIntervalMs: number;
   taskTimeoutMs: number;
@@ -65,6 +68,7 @@ export const DEFAULT_POLICY: EffectiveConfig = {
   // Off by default, deliberately: a worker nobody has configured pushes a branch and opens a pull
   // request, and stops there. Merging is a thing an operator turns on.
   autoMerge: false,
+  reviewGate: true,
   baseBranch: "main",
   pollIntervalMs: 30_000,
   taskTimeoutMs: 1_800_000,
@@ -146,7 +150,9 @@ function required(env: Env, key: string): string {
 export function loadBootstrap(env: Env, readSecret: SecretReader = readSecretFile): Bootstrap {
   return {
     apiBaseUrl: required(env, "CP_API_URL").replace(/\/$/, ""),
-    apiToken: requiredSecret(env, "CP_API_TOKEN", readSecret),
+    // Optional since CP-237: the worker holds one credential, minted by registration, whose scope
+    // tracks its assignments. Still read when present so an existing plist keeps booting.
+    apiToken: optionalSecret(env, "CP_API_TOKEN", readSecret),
     enrolmentToken: optionalSecret(env, "CP_ENROLMENT_TOKEN", readSecret),
     enrolmentTokenFile: env.CP_ENROLMENT_TOKEN_FILE?.trim() || "",
     workerName: required(env, "CP_WORKER_NAME"),
@@ -178,6 +184,13 @@ export function applyPolicy(current: EffectiveConfig, patch: unknown): Effective
   const next = { ...current };
 
   if (typeof source.autoMerge === "boolean") next.autoMerge = source.autoMerge;
+  if (typeof source.reviewGate === "boolean") next.reviewGate = source.reviewGate;
+
+  // The worker does not trust a policy it was handed. "Nothing merges unreviewed" is the one
+  // safety property this README asserts outright, and a server that sent the pair — through a bug,
+  // a rollback to an older validator, or otherwise — must not be able to talk this into it. Failing
+  // safe rather than refusing the work: the branch is still pushed and the pull request opened.
+  if (next.autoMerge && !next.reviewGate) next.autoMerge = false;
   if (isNonEmptyString(source.baseBranch)) next.baseBranch = source.baseBranch.trim();
   if (isPositiveNumber(source.pollIntervalMs)) next.pollIntervalMs = source.pollIntervalMs;
   if (isPositiveNumber(source.taskTimeoutMs)) next.taskTimeoutMs = source.taskTimeoutMs;

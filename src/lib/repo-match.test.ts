@@ -160,3 +160,25 @@ describe("hosts", () => {
     expect(sameRepo("git@github.com:owner/repo.git", "https://github.com/owner/repo")).toBe(true);
   });
 });
+
+describe("a project migrated to one repository URL", () => {
+  it("matches on the URL and ignores whatever the legacy fields still say", () => {
+    const project = {
+      _id: "p1",
+      repositoryUrl: "https://github.com/owner/repo",
+      githubRepo: "someone/else",
+      gitlabRepo: "group/other",
+    };
+
+    expect(matchRepo(project, [{ remote: "git@github.com:owner/repo.git", path: "/r" }])).toBe(
+      "git@github.com:owner/repo.git"
+    );
+    expect(matchRepo(project, [{ remote: "git@github.com:someone/else.git", path: "/r" }])).toBeNull();
+  });
+
+  it("offers exactly one candidate", () => {
+    expect(
+      projectRemotes({ _id: "p1", repositoryUrl: "https://gitlab.example.com/group/thing" })
+    ).toEqual(["https://gitlab.example.com/group/thing"]);
+  });
+});

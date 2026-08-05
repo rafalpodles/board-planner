@@ -3,6 +3,60 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // by a hand-rolled reading of them
 import sift from "sift";
 
+// MongoDB's $cond treats only false, null, 0 and missing as false. An **empty string is true** —
+// the opposite of JavaScript. `execution.workerId` defaults to "", so an expression that leaned on
+// truthiness cleared the assignee of every task that had ever carried an execution subdocument,
+// on every ordinary status change. It shipped, because asserting the *shape* of an expression
+// cannot notice what the shape means. This runs it instead.
+function mongoTruthy(value: unknown): boolean {
+  return !(value === false || value === null || value === undefined || value === 0);
+}
+
+function evaluateExpr(expr: unknown, doc: Record<string, unknown>): unknown {
+  if (typeof expr === "string" && expr.startsWith("$")) {
+    return expr
+      .slice(1)
+      .split(".")
+      .reduce<unknown>((at, key) => (at as Record<string, unknown>)?.[key], doc);
+  }
+  if (!expr || typeof expr !== "object" || Array.isArray(expr)) return expr;
+
+  const [op, args] = Object.entries(expr as Record<string, unknown>)[0];
+  const list = (Array.isArray(args) ? args : [args]).map((a) => evaluateExpr(a, doc));
+
+  if (op === "$cond") return mongoTruthy(list[0]) ? list[1] : list[2];
+  if (op === "$ifNull") return list[0] === undefined || list[0] === null ? list[1] : list[0];
+  if (op === "$ne") return list[0] !== list[1];
+  if (op === "$eq") return list[0] === list[1];
+  throw new Error(`the evaluator does not know ${op}`);
+}
+
+
+// Every path that hands a task back to the board became a pipeline update when the assignment
+// started travelling with the run, so the shape these read is [{ $set }, { $unset }] rather than
+// { $set, $unset }. Both are accepted so the tests say what they mean rather than what Mongo wants.
+function setStage(update: unknown): Record<string, unknown> {
+  if (Array.isArray(update)) {
+    const stage = update.find((s) => s && typeof s === "object" && "$set" in s) as
+      | { $set: Record<string, unknown> }
+      | undefined;
+    return stage?.$set ?? {};
+  }
+  return ((update as { $set?: Record<string, unknown> }).$set ?? {}) as Record<string, unknown>;
+}
+
+function unsetKeys(update: unknown): string[] {
+  if (Array.isArray(update)) {
+    const stage = update.find((s) => s && typeof s === "object" && "$unset" in s) as
+      | { $unset: string[] | Record<string, string> }
+      | undefined;
+    const value = stage?.$unset;
+    return Array.isArray(value) ? value : Object.keys(value ?? {});
+  }
+  return Object.keys((update as { $unset?: Record<string, string> }).$unset ?? {});
+}
+
+
 const findOneAndUpdate = vi.fn();
 const updateMany = vi.fn();
 const updateOne = vi.fn();
@@ -168,8 +222,8 @@ describe("releaseTask", () => {
     const [filter, update] = findOneAndUpdate.mock.calls[0];
     expect(filter._id).toBe("t1");
     expect(filter.project).toBe("p1");
-    expect(update.$set.status).toBe("ready");
-    expect(update.$inc["execution.attempts"]).toBe(-1);
+    expect(setStage(update).status).toBe("ready");
+    expect(setStage(update)["execution.attempts"]).toEqual({ $add: ["$execution.attempts", -1] });
   });
 
   it("never drives attempts below zero", async () => {
@@ -324,7 +378,7 @@ describe("releaseExpiredTasks", () => {
     const retryable = updateMany.mock.calls.find(
       ([f]) => f["execution.attempts"]?.$lt === MAX_EXECUTION_ATTEMPTS
     );
-    expect(retryable?.[1].$set.status).toBe("ready");
+    expect(setStage(retryable?.[1]).status).toBe("ready");
   });
 
   it("sends an exhausted task to the column humans watch, not back into the loop", async () => {
@@ -333,7 +387,7 @@ describe("releaseExpiredTasks", () => {
     const spent = updateMany.mock.calls.find(
       ([f]) => f["execution.attempts"]?.$gte === MAX_EXECUTION_ATTEMPTS
     );
-    expect(spent?.[1].$set.status).toBe("escalated");
+    expect(setStage(spent?.[1]).status).toBe("escalated");
   });
 
   // Refunding would let a task that repeatedly outlives its worker cycle forever
@@ -367,7 +421,7 @@ describe("releaseExpiredTasks", () => {
     const spent = updateMany.mock.calls.find(
       ([f]) => f["execution.attempts"]?.$gte === MAX_EXECUTION_ATTEMPTS
     );
-    expect(spent?.[1].$set.status).toBe("ready");
+    expect(setStage(spent?.[1]).status).toBe("ready");
   });
 
   it("does nothing on a board with no active column", async () => {
@@ -516,18 +570,13 @@ describe("clearing the phase on every exit from the active column", () => {
   it("clears it when a gate rejection moves the task to a review column", async () => {
     await changeStatus("p1", "t1", "checking", "actor");
 
-    expect(findOneAndUpdate.mock.calls[0][1].$unset).toEqual({
-      "execution.phase": "",
-      "execution.phaseAt": "",
-      "execution.phaseSeq": "",
-      "execution.runId": "",
-    });
+    expect(unsetKeys(findOneAndUpdate.mock.calls[0][1])).toEqual(RUN_KEYS);
   });
 
   it("clears it when the edit form PUTs a new status", async () => {
     await updateTask("p1", "t1", { status: "checking" }, "actor");
 
-    expect(Object.keys(findOneAndUpdate.mock.calls[0][1].$unset ?? {})).toEqual(RUN_KEYS);
+    expect(unsetKeys(findOneAndUpdate.mock.calls[0][1])).toEqual(RUN_KEYS);
   });
 
   // The phase belongs to the run, not to the card: renaming a task the worker is running must not
@@ -535,7 +584,7 @@ describe("clearing the phase on every exit from the active column", () => {
   it("leaves it alone when the edit touches no status", async () => {
     await updateTask("p1", "t1", { title: "renamed" }, "actor");
 
-    expect(findOneAndUpdate.mock.calls[0][1].$unset).toBeUndefined();
+    expect(unsetKeys(findOneAndUpdate.mock.calls[0][1])).toEqual([]);
   });
 
   it("clears it when the task is released with the attempt refunded", async () => {
@@ -543,7 +592,7 @@ describe("clearing the phase on every exit from the active column", () => {
 
     await releaseTask("p1", "t1");
 
-    expect(Object.keys(findOneAndUpdate.mock.calls[0][1].$unset)).toEqual(RUN_KEYS);
+    expect(unsetKeys(findOneAndUpdate.mock.calls[0][1])).toEqual(RUN_KEYS);
   });
 
   it("clears it when the release charges the attempt", async () => {
@@ -560,7 +609,7 @@ describe("clearing the phase on every exit from the active column", () => {
 
     expect(updateMany.mock.calls).toHaveLength(2);
     for (const [, update] of updateMany.mock.calls) {
-      expect(Object.keys(update.$unset)).toEqual(RUN_KEYS);
+      expect(unsetKeys(update)).toEqual(RUN_KEYS);
     }
   });
 });
@@ -627,5 +676,193 @@ describe("toApiExecution", () => {
     const api = toApiExecution(running)!;
 
     expect(Number.isFinite(Date.parse(api.asOf!))).toBe(true);
+  });
+});
+
+// A worker claims by assigning the task to itself. That is the concurrency answer for several
+// machines on one project, and it makes a task parked for a colleague untouchable — but it opens a
+// trap: a task left assigned to a machine that is no longer running it is a task nobody will ever
+// claim again, and nothing says why. Both halves live or die together.
+describe("claiming by assignment", () => {
+  const board = {
+    columns: [
+      { id: "ready", role: "approved", order: 1 },
+      { id: "doing", role: "active", order: 2 },
+      { id: "checking", role: "review", order: 3, triggersPmReview: true },
+    ],
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    findById.mockReturnValue({ lean: () => Promise.resolve(board) });
+    findOneAndUpdate.mockResolvedValue({ _id: "t1" });
+    updateMany.mockResolvedValue({ modifiedCount: 0 });
+  });
+
+  it("assigns the task to the worker's own identity", async () => {
+    await claimNextTask("p1", "w1", "run-1", "u-worker");
+
+    expect(findOneAndUpdate.mock.calls[0][1].$set.assignee).toBe("u-worker");
+  });
+
+  it("takes nothing that already has an assignee", async () => {
+    await claimNextTask("p1", "w1", "run-1", "u-worker");
+
+    expect(findOneAndUpdate.mock.calls[0][0].assignee).toBeNull();
+  });
+
+  it("claims without assigning when the worker has no identity yet", async () => {
+    await claimNextTask("p1", "w1", "run-1", null);
+
+    expect(findOneAndUpdate.mock.calls[0][1].$set).not.toHaveProperty("assignee");
+    expect(findOneAndUpdate.mock.calls[0][1].$set.status).toBe("doing");
+  });
+});
+
+describe("every way back to the board clears the assignment", () => {
+  const board = {
+    columns: [
+      { id: "ready", role: "approved", order: 1 },
+      { id: "doing", role: "active", order: 2 },
+      { id: "checking", role: "review", order: 3, triggersPmReview: true },
+    ],
+  };
+
+  // Cleared only for a task a worker was running: these same updates are what a person dragging a
+  // card goes through, and clearing their assignment would be a bug of its own
+  const CLEARED = {
+    $cond: [{ $ne: [{ $ifNull: ["$execution.workerId", ""] }, ""] }, null, "$assignee"],
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    findById.mockReturnValue({ lean: () => Promise.resolve(board) });
+    findOne.mockReturnValue({
+      lean: () => Promise.resolve({ _id: "t1", taskNumber: 1, status: "doing", title: "x" }),
+      populate: () => ({
+        lean: () => Promise.resolve({ _id: "t1", taskNumber: 1, status: "doing", title: "x" }),
+      }),
+    });
+    findOneAndUpdate.mockReturnValue({
+      populate: () => Promise.resolve({ _id: "t1", taskNumber: 1, status: "checking", title: "x" }),
+    });
+    updateMany.mockResolvedValue({ modifiedCount: 0 });
+  });
+
+  it("clears it on a gate rejection into a review column", async () => {
+    await changeStatus("p1", "t1", "checking", "actor");
+
+    expect(setStage(findOneAndUpdate.mock.calls[0][1]).assignee).toEqual(CLEARED);
+  });
+
+  it("clears it when the run is released with the attempt refunded", async () => {
+    findOneAndUpdate.mockResolvedValue({ _id: "t1" });
+
+    await releaseTask("p1", "t1");
+
+    expect(setStage(findOneAndUpdate.mock.calls[0][1]).assignee).toEqual(CLEARED);
+  });
+
+  it("clears it when the release charges the attempt", async () => {
+    findOneAndUpdate.mockResolvedValue({ _id: "t1" });
+
+    await releaseTask("p1", "t1", { refund: false });
+
+    expect(setStage(findOneAndUpdate.mock.calls[0][1]).assignee).toEqual(CLEARED);
+  });
+
+  it("clears it on both lease-expiry branches, crashed and exhausted alike", async () => {
+    await releaseExpiredTasks("p1", new Date("2026-07-31T12:00:00.000Z"));
+
+    expect(updateMany.mock.calls).toHaveLength(2);
+    for (const [, update] of updateMany.mock.calls) {
+      expect(setStage(update).assignee).toEqual(CLEARED);
+    }
+  });
+
+  // Mongoose validates a pipeline update only when told it is one; the mock accepts it either way,
+  // so a missing flag would ship silently and every one of these updates would be rejected live
+  it("marks every one of them as a pipeline update", async () => {
+    findOneAndUpdate.mockResolvedValue({ _id: "t1" });
+    await releaseTask("p1", "t1");
+    await releaseTask("p1", "t1", { refund: false });
+    await releaseExpiredTasks("p1", new Date("2026-07-31T12:00:00.000Z"));
+
+    for (const call of findOneAndUpdate.mock.calls) {
+      if (Array.isArray(call[1])) expect(call[2]?.updatePipeline).toBe(true);
+    }
+    for (const call of updateMany.mock.calls) {
+      expect(call[2]?.updatePipeline).toBe(true);
+    }
+  });
+
+  it("leaves a person's own assignment alone when the edit form moves a task nobody is running", async () => {
+    findOne.mockReturnValue({
+      lean: () => Promise.resolve({ _id: "t1", taskNumber: 1, status: "doing", title: "x", execution: {} }),
+      populate: () => ({
+        lean: () => Promise.resolve({ _id: "t1", taskNumber: 1, status: "doing", title: "x", execution: {} }),
+      }),
+    });
+
+    await updateTask("p1", "t1", { status: "checking" }, "actor");
+
+    expect(findOneAndUpdate.mock.calls[0][1].$set).not.toHaveProperty("assignee");
+  });
+
+  it("clears it when the edit form moves a task a worker is running", async () => {
+    findOne.mockReturnValue({
+      lean: () =>
+        Promise.resolve({
+          _id: "t1",
+          taskNumber: 1,
+          status: "doing",
+          title: "x",
+          execution: { workerId: "w1" },
+        }),
+      populate: () => ({
+        lean: () =>
+          Promise.resolve({
+            _id: "t1",
+            taskNumber: 1,
+            status: "doing",
+            title: "x",
+            execution: { workerId: "w1" },
+          }),
+      }),
+    });
+
+    await updateTask("p1", "t1", { status: "checking" }, "actor");
+
+    expect(findOneAndUpdate.mock.calls[0][1].$set.assignee).toBeNull();
+  });
+});
+
+describe("what the clearing expression actually evaluates to", () => {
+  const CLEARING = {
+    $cond: [{ $ne: [{ $ifNull: ["$execution.workerId", ""] }, ""] }, null, "$assignee"],
+  };
+
+  it("keeps a person's assignment on a task no worker has ever run", () => {
+    const doc = { assignee: "USER-A", execution: { workerId: "" } };
+
+    expect(evaluateExpr(CLEARING, doc)).toBe("USER-A");
+  });
+
+  it("keeps it on a task with no execution subdocument at all", () => {
+    expect(evaluateExpr(CLEARING, { assignee: "USER-A" })).toBe("USER-A");
+  });
+
+  it("clears it on a task a worker is running", () => {
+    const doc = { assignee: "u-worker", execution: { workerId: "w1" } };
+
+    expect(evaluateExpr(CLEARING, doc)).toBeNull();
+  });
+
+  // The shipped-and-reverted version, kept as the thing this must never become again
+  it("would have cleared every assignment had it leaned on truthiness", () => {
+    const naive = { $cond: [{ $ifNull: ["$execution.workerId", false] }, null, "$assignee"] };
+    const doc = { assignee: "USER-A", execution: { workerId: "" } };
+
+    expect(evaluateExpr(naive, doc)).toBeNull();
   });
 });

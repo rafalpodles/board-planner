@@ -33,9 +33,9 @@ export function IntegrationsSection({ projectId, project, patchProject, replaceP
   const api = useApi();
   const { toast } = useToast();
 
-  const github = useDraft({ githubRepo: project.githubRepo || "", githubToken: "" });
+  const repository = useDraft({ repositoryUrl: project.repositoryUrl || "" });
+  const github = useDraft({ githubToken: "" });
   const gitlab = useDraft({
-    gitlabRepo: project.gitlabRepo || "",
     gitlabHost: project.gitlabHost || "https://gitlab.com",
     gitlabToken: "",
   });
@@ -66,14 +66,30 @@ export function IntegrationsSection({ projectId, project, patchProject, replaceP
   }
 
   useDirtyGroup(
+    { id: "integrations-repository", section: "integrations", label: "Integrations · Repository", count: repository.count },
+    {
+      save: async () => {
+        try {
+          const updated = await replaceAndReturn({ repositoryUrl: repository.value.repositoryUrl.trim() });
+          repository.commit({ repositoryUrl: updated.repositoryUrl || "" });
+          toast("Repository saved", "success");
+        } catch (err) {
+          fail(err, "Failed to save the repository");
+        }
+      },
+      discard: repository.discard,
+    }
+  );
+
+  useDirtyGroup(
     { id: "integrations-github", section: "integrations", label: "Integrations · GitHub", count: github.count },
     {
       save: async () => {
         try {
-          const payload: Record<string, string> = { githubRepo: github.value.githubRepo.trim() };
+          const payload: Record<string, string> = {};
           if (github.value.githubToken.trim()) payload.githubToken = github.value.githubToken.trim();
-          const updated = await replaceAndReturn(payload);
-          github.commit({ githubRepo: updated.githubRepo || "", githubToken: "" });
+          await replaceAndReturn(payload);
+          github.commit({ githubToken: "" });
           toast("GitHub settings saved", "success");
         } catch (err) {
           fail(err, "Failed to save GitHub settings");
@@ -88,14 +104,10 @@ export function IntegrationsSection({ projectId, project, patchProject, replaceP
     {
       save: async () => {
         try {
-          const payload: Record<string, string> = {
-            gitlabRepo: gitlab.value.gitlabRepo.trim(),
-            gitlabHost: gitlab.value.gitlabHost.trim(),
-          };
+          const payload: Record<string, string> = { gitlabHost: gitlab.value.gitlabHost.trim() };
           if (gitlab.value.gitlabToken.trim()) payload.gitlabToken = gitlab.value.gitlabToken.trim();
           const updated = await replaceAndReturn(payload);
           gitlab.commit({
-            gitlabRepo: updated.gitlabRepo || "",
             gitlabHost: updated.gitlabHost || "https://gitlab.com",
             gitlabToken: "",
           });
@@ -320,6 +332,13 @@ export function IntegrationsSection({ projectId, project, patchProject, replaceP
   const show = (id: IntegrationId) =>
     opened.includes(id) || !!INTEGRATIONS.find((i) => i.id === id)?.isConfigured(project);
 
+  const providerLabel =
+    project.repositoryProvider === "github"
+      ? "GitHub"
+      : project.repositoryProvider === "gitlab"
+        ? "GitLab"
+        : "";
+
   return (
     <>
       <IntegrationCatalogue
@@ -327,20 +346,33 @@ export function IntegrationsSection({ projectId, project, patchProject, replaceP
         opened={opened}
         onOpen={(id) => setOpened((o) => (o.includes(id) ? o : [...o, id]))}
       />
+
+      <SettingsCard
+        title="Repository"
+        status={{ label: providerLabel || "Not recognised", on: !!providerLabel }}
+        description="Where this project's code lives. One URL, whoever hosts it — it is what pull-request linking parses and what a worker is told to fetch."
+      >
+        <Input
+          label="Repository URL"
+          value={repository.value.repositoryUrl}
+          dirty={repository.isDirty("repositoryUrl")}
+          onChange={(e) => repository.set("repositoryUrl", e.target.value)}
+          placeholder="https://github.com/owner/repo"
+        />
+        <p className="text-xs text-text-muted">
+          {providerLabel
+            ? `Recognised as ${providerLabel} from the host.`
+            : "The host is not github.com or gitlab.com. A self-hosted GitLab is recognised once its host below matches this URL; anything else links no pull requests."}
+        </p>
+      </SettingsCard>
+
       {show("github") && (
       <SettingsCard
         title="GitHub"
         status={{ label: project.githubTokenSet ? "Connected" : "Not connected", on: !!project.githubTokenSet }}
-        description="Links pull requests to tasks by task key in the branch name or PR title."
+        description="Links pull requests to tasks by task key in the branch name or PR title. Uses the repository URL above."
       >
         <div className="grid gap-4 sm:grid-cols-2">
-          <Input
-            label="Repository"
-            value={github.value.githubRepo}
-            dirty={github.isDirty("githubRepo")}
-            onChange={(e) => github.set("githubRepo", e.target.value)}
-            placeholder="owner/repo"
-          />
           <div>
             <Input
               label="Access token"
@@ -390,16 +422,9 @@ export function IntegrationsSection({ projectId, project, patchProject, replaceP
       <SettingsCard
         title="GitLab"
         status={{ label: project.gitlabTokenSet ? "Connected" : "Not connected", on: !!project.gitlabTokenSet }}
-        description="Same matching as GitHub, for merge requests."
+        description="Same matching as GitHub, for merge requests. Uses the repository URL above; a self-hosted instance is recognised by the host below."
       >
         <div className="grid gap-4 sm:grid-cols-2">
-          <Input
-            label="Project"
-            value={gitlab.value.gitlabRepo}
-            dirty={gitlab.isDirty("gitlabRepo")}
-            onChange={(e) => gitlab.set("gitlabRepo", e.target.value)}
-            placeholder="group/project"
-          />
           <Input
             label="Host"
             value={gitlab.value.gitlabHost}
@@ -419,7 +444,7 @@ export function IntegrationsSection({ projectId, project, patchProject, replaceP
           }
         />
         <div className="flex flex-wrap gap-2">
-          {project.gitlabTokenSet && project.gitlabRepo && (
+          {project.gitlabTokenSet && project.repositoryProvider === "gitlab" && (
             <Button
               size="sm"
               variant="secondary"
@@ -444,7 +469,7 @@ export function IntegrationsSection({ projectId, project, patchProject, replaceP
               {gitlabSyncing ? "Syncing..." : "Sync merge requests now"}
             </Button>
           )}
-          {(project.gitlabTokenSet || project.gitlabRepo) && (
+          {project.gitlabTokenSet && (
             <Button
               size="sm"
               variant="secondary"
@@ -452,12 +477,11 @@ export function IntegrationsSection({ projectId, project, patchProject, replaceP
                 try {
                   replaceProject(
                     await api.put(`/api/projects/${projectId}`, {
-                      gitlabRepo: "",
                       gitlabHost: "https://gitlab.com",
                       gitlabToken: "",
                     })
                   );
-                  gitlab.commit({ gitlabRepo: "", gitlabHost: "https://gitlab.com", gitlabToken: "" });
+                  gitlab.commit({ gitlabHost: "https://gitlab.com", gitlabToken: "" });
                   toast("GitLab disconnected", "success");
                 } catch (err) {
                   fail(err, "Failed to disconnect GitLab");

@@ -5,7 +5,6 @@ import { Identity, loadIdentity, PROTOCOL_VERSION, Store } from "./registration.
 import { ClaimedTask } from "./types.js";
 
 type Fetch = typeof globalThis.fetch;
-type Credential = "api" | "worker";
 
 const NOT_REGISTERED_MESSAGE = "this worker is not registered — see worker/README.md";
 
@@ -136,22 +135,19 @@ export function createApiClient(
   }
 
   // Path from the api root, so a call can address /api/workers/... as readily as a project
-  async function request(
-    path: string,
-    method: string,
-    body?: unknown,
-    credential: Credential = "api"
-  ): Promise<Response> {
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-
-    if (credential === "worker") {
-      const identity = identityOrThrow();
-      headers.Authorization = `Bearer ${identity.credential}`;
-      headers["X-Worker-Id"] = identity.workerId;
-      headers["X-CP-Protocol"] = String(PROTOCOL_VERSION);
-    } else {
-      headers.Authorization = `Bearer ${config.apiToken}`;
-    }
+  // One credential for everything. A second, project-scoped API token cannot work here: a worker's
+  // grant is recomputed every heartbeat from the checkouts it reports crossed with every enabled
+  // project, while a minted token carries a list fixed at mint time. Enable a second project and
+  // the claim would travel on the worker credential while the report 403s on the API one, leaving
+  // the task in the active column until its lease expired — silently, to every project added.
+  async function request(path: string, method: string, body?: unknown): Promise<Response> {
+    const identity = identityOrThrow();
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${identity.credential}`,
+      "X-Worker-Id": identity.workerId,
+      "X-CP-Protocol": String(PROTOCOL_VERSION),
+    };
 
     const response = await fetchImpl(`${config.apiBaseUrl}${path}`, {
       method,
@@ -159,21 +155,15 @@ export function createApiClient(
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
     if (!response.ok) {
-      if (credential === "worker" && response.status === 401) warnNotRegistered();
+      if (response.status === 401) warnNotRegistered();
       const detail = await response.text().catch(() => "");
       throw new Error(`${method} ${path} failed: ${response.status} ${detail}`);
     }
     return response;
   }
 
-  function send(
-    projectId: string,
-    path: string,
-    method: string,
-    body?: unknown,
-    credential: Credential = "api"
-  ): Promise<Response> {
-    return request(`/api/projects/${projectId}${path}`, method, body, credential);
+  function send(projectId: string, path: string, method: string, body?: unknown): Promise<Response> {
+    return request(`/api/projects/${projectId}${path}`, method, body);
   }
 
   async function readColumns(projectId: string): Promise<BoardColumn[]> {
@@ -208,7 +198,7 @@ export function createApiClient(
 
   return {
     async claim(projectId, runId) {
-      const response = await send(projectId, "/tasks/claim", "POST", { runId }, "worker");
+      const response = await send(projectId, "/tasks/claim", "POST", { runId });
       if (response.status === 204) return null;
 
       const raw = (await response.json()) as RawTask;
@@ -270,8 +260,7 @@ export function createApiClient(
       await request(
         `/api/workers/${workerId}/events`,
         "POST",
-        { ...event, seq: eventSeq },
-        "worker"
+        { ...event, seq: eventSeq }
       );
     },
   };

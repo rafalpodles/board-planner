@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
-import { withProjectAccess, withProjectAdmin, withAdmin, canAdminProject } from "@/lib/middleware";
+import { withProjectAccess, withProjectAdmin, withAdmin, canAdminProject, withProjectAccessOrWorker } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { parseProjectWorkerConfig } from "@/lib/project-worker-config";
 import { User } from "@/models/user";
@@ -18,8 +18,9 @@ import { isAllowedMcpServerUrl } from "@/lib/url-validation";
 import { validatePmConfig, isPmAvailable, mergeMcpServerTokens, sanitizeMcpServers } from "@/lib/pm/config";
 import { sanitizeProjectSecrets } from "@/lib/project-secrets";
 import { PROJECT_ICONS } from "@/types";
+import { projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
 
-export const GET = withProjectAccess(async (_request, { params, user }) => {
+export const GET = withProjectAccessOrWorker(async (_request, { params, user }) => {
   await connectDB();
   const { projectId } = await params;
 
@@ -33,6 +34,11 @@ export const GET = withProjectAccess(async (_request, { params, user }) => {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const obj: any = sanitizeProjectSecrets(project.toObject());
+  // One repository field, resolved here so no consumer has to know the legacy pair still exists
+  obj.repositoryUrl = projectRepositoryUrl(obj);
+  obj.repositoryProvider = repositoryProvider(obj);
+  delete obj.githubRepo;
+  delete obj.gitlabRepo;
   if (obj.pm) obj.pm.mcpServers = sanitizeMcpServers(obj.pm.mcpServers);
   obj.pmAvailable = isPmAvailable();
   obj.canAdmin = canAdminProject(user, project);
@@ -44,7 +50,7 @@ export const PUT = withProjectAdmin(async (request, { params, user }) => {
   const { projectId } = await params;
   const body = await request.json();
 
-  const allowed = ["name", "description", "key", "icon", "githubRepo", "githubToken", "gitlabRepo", "gitlabHost", "gitlabToken", "codaHost", "codaDocId", "codaTableId", "codaToken"];
+  const allowed = ["name", "description", "key", "icon", "repositoryUrl", "githubToken", "gitlabHost", "gitlabToken", "codaHost", "codaDocId", "codaTableId", "codaToken"];
   const updates: Record<string, unknown> = {};
   for (const field of allowed) {
     if (body[field] !== undefined) {
@@ -111,7 +117,12 @@ export const PUT = withProjectAdmin(async (request, { params, user }) => {
     if (!existing) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
-    const parsed = parseProjectWorkerConfig(body.worker, existing.worker?.policyOverrides ?? []);
+    const parsed = parseProjectWorkerConfig(
+      body.worker,
+      existing.worker?.policyOverrides ?? [],
+      // The cross-field rule is judged on the resulting state, so it needs what is stored
+      (existing.worker?.policy ?? {}) as unknown as Record<string, unknown>
+    );
     if (!parsed.ok) {
       return NextResponse.json({ error: parsed.error }, { status: 400 });
     }
@@ -226,6 +237,11 @@ export const PUT = withProjectAdmin(async (request, { params, user }) => {
   delete obj.gitlabToken;
   obj.codaTokenSet = !!obj.codaToken;
   delete obj.codaToken;
+  // One repository field, resolved here so no consumer has to know the legacy pair still exists
+  obj.repositoryUrl = projectRepositoryUrl(obj);
+  obj.repositoryProvider = repositoryProvider(obj);
+  delete obj.githubRepo;
+  delete obj.gitlabRepo;
   if (obj.pm) obj.pm.mcpServers = sanitizeMcpServers(obj.pm.mcpServers);
   obj.pmAvailable = isPmAvailable();
   obj.canAdmin = canAdminProject(user, project);

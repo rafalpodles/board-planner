@@ -4,6 +4,7 @@ import { withWorker, protocolOf } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { Worker } from "@/models/worker";
 import { RepoReport } from "@/lib/repo-match";
+import { WorkerPreflight, WorkerPreflightCheck } from "@/types";
 import { assignmentsFor, overriddenWorkerPolicy, touchWorker, usableRepos } from "@/lib/worker-service";
 
 // A worker reports its own checkouts; anything else is discarded rather than trusted, since this
@@ -21,6 +22,33 @@ function reportedRepos(value: unknown): RepoReport[] | null {
   return out;
 }
 
+// Also worker-reported, so also rebuilt field by field rather than trusted. A malformed report is
+// dropped whole: leaving the previous one standing beats storing half a verdict.
+function reportedPreflight(value: unknown): WorkerPreflight | null {
+  if (typeof value !== "object" || value === null) return null;
+  const { ok, account, checks } = value as { ok?: unknown; account?: unknown; checks?: unknown };
+  if (typeof ok !== "boolean" || !Array.isArray(checks)) return null;
+
+  const cleaned: WorkerPreflightCheck[] = [];
+  for (const entry of checks) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const { name, ok: checkOk, detail } = entry as Record<string, unknown>;
+    if (typeof name !== "string" || !name.trim() || typeof checkOk !== "boolean") continue;
+    cleaned.push({
+      name: name.trim(),
+      ok: checkOk,
+      detail: typeof detail === "string" ? detail.trim().slice(0, 500) : "",
+    });
+  }
+
+  return {
+    ok,
+    account: typeof account === "string" ? account.trim().slice(0, 200) : "",
+    checks: cleaned,
+    reportedAt: new Date(),
+  };
+}
+
 // The only path guaranteed to survive SSE loss, so it carries both the abort
 // verdict and the command acknowledgement
 export const POST = withWorker(async (request, { worker }) => {
@@ -32,6 +60,7 @@ export const POST = withWorker(async (request, { worker }) => {
 
   const protocolVersion = protocolOf(request);
   const repos = reportedRepos(body.repos);
+  const preflight = reportedPreflight(body.preflight);
 
   await touchWorker(String(worker._id), {
     // A missing/unparseable protocol header must not overwrite a valid stored version with NaN
@@ -40,6 +69,8 @@ export const POST = withWorker(async (request, { worker }) => {
     // An ack for a command that is no longer current must not clear the newer one
     ...(body.acked && body.acked === worker.command ? { commandAckedAt: new Date() } : {}),
     ...(typeof body.bindingError === "string" ? { bindingError: body.bindingError } : {}),
+    // Absent means a worker that has not been taught to report it, not one that suddenly passes
+    ...(preflight ? { preflight } : {}),
   });
 
   // An absent list is a worker that has not been taught to report yet, not a worker that suddenly
@@ -69,7 +100,7 @@ export const POST = withWorker(async (request, { worker }) => {
   );
 
   const projects = await Project.find({ "worker.enabled": true })
-    .select("_id githubRepo gitlabRepo worker")
+    .select("_id repositoryUrl githubRepo gitlabRepo gitlabHost worker")
     .lean();
 
   return NextResponse.json({

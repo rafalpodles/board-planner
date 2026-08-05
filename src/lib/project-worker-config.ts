@@ -1,6 +1,6 @@
 import { PROJECT_POLICY_DEFAULTS, isProjectPolicyField } from "@/lib/worker-policy";
 
-const BOOLEAN_FIELDS: ReadonlySet<string> = new Set(["autoMerge"]);
+const BOOLEAN_FIELDS: ReadonlySet<string> = new Set(["autoMerge", "reviewGate"]);
 const STRING_FIELDS: ReadonlySet<string> = new Set([
   "baseBranch",
   "model",
@@ -20,7 +20,11 @@ function isPositiveInt(value: unknown): value is number {
 // overwrote the object would silently reset every field the caller did not mention.
 export function parseProjectWorkerConfig(
   input: unknown,
-  existingOverrides: string[] = []
+  existingOverrides: string[] = [],
+  // The stored values this patch lands on. Needed because the one rule here is cross-field, and a
+  // partial patch cannot be judged on its own: setting autoMerge alone is fine or fatal depending
+  // on a reviewGate the request never mentions.
+  existingPolicy: Record<string, unknown> = {}
 ): WorkerConfigPatch {
   if (typeof input !== "object" || input === null || Array.isArray(input)) {
     return { ok: false, error: "worker must be an object" };
@@ -93,5 +97,23 @@ export function parseProjectWorkerConfig(
   if (Object.keys(update).length === 0) {
     return { ok: false, error: "worker had nothing to update" };
   }
+
+  // The one rule no per-field validator could hold: every field above is checked in isolation, so
+  // nothing would stop merging without review — the single safety property worker/README.md
+  // asserts outright. Judged on the resulting state, never on the patch.
+  const effective = (field: "autoMerge" | "reviewGate"): boolean => {
+    const key = `worker.policy.${field}`;
+    if (key in update) return update[key] as boolean;
+    const stored = existingPolicy[field];
+    return typeof stored === "boolean" ? stored : PROJECT_POLICY_DEFAULTS[field];
+  };
+
+  if (effective("autoMerge") && !effective("reviewGate")) {
+    return {
+      ok: false,
+      error: "autoMerge cannot be on while the review gate is off — that would merge unreviewed code",
+    };
+  }
+
   return { ok: true, update };
 }

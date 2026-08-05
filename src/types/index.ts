@@ -147,6 +147,10 @@ export interface IUser {
   emailNotifications: boolean;
   collapseEmptyColumns: boolean;
   role: UserRole;
+  // A worker's identity is a user record so authorship, mentions, avatars and history keep
+  // working unchanged — but it is not a person, so it stays out of the lists where people are
+  // invited, permissioned or picked as an assignee.
+  kind: "human" | "machine";
   allowedProjects: Types.ObjectId[];
   // Runtime-only, set for project-scoped tokens — a scoped token never gets project-admin
   tokenScoped?: boolean;
@@ -450,6 +454,9 @@ export interface WorkerPolicy {
 
 export interface ProjectWorkerPolicy {
   autoMerge: boolean;
+  // The second model that reads the diff with no memory of writing it. Turning it off is what
+  // separates "write code" from "write and review"; autoMerge may not outlive it.
+  reviewGate: boolean;
   baseBranch: string;
   taskTimeoutMs: number;
   maxDiffLines: number;
@@ -469,6 +476,27 @@ export interface ProjectWorkerConfig {
 export interface WorkerRepo {
   remote: string;
   path: string;
+}
+
+export interface WorkerPreflightCheck {
+  name: string;
+  ok: boolean;
+  detail: string;
+}
+
+// Whether the machine can actually do the work: the four binaries the worker shells out to, the
+// session `claude` and `gh` need, and what the gates require of the bound repository. Reported by
+// the worker, never set here — null until a worker old enough to compute it has checked in.
+export interface WorkerPreflight {
+  ok: boolean;
+  // Which account `claude` is signed into. Empty when the CLI is too old to answer.
+  account: string;
+  checks: WorkerPreflightCheck[];
+  reportedAt: Date;
+}
+
+export interface ApiWorkerPreflight extends Omit<WorkerPreflight, "reportedAt"> {
+  reportedAt: string;
 }
 
 // A single-use, short-lived credential whose only power is to register one worker. Deliberately
@@ -501,7 +529,10 @@ export interface IWorker {
   enabled: boolean;
   lockedByInstance: boolean;
   lastSeenAt: Date | null;
+  // The user this machine acts as — see src/lib/worker-user.ts
+  identity: Types.ObjectId | null;
   bindingError: string;
+  preflight: WorkerPreflight | null;
   command: "" | "pause" | "resume" | "stop";
   commandIssuedAt: Date | null;
   commandAckedAt: Date | null;
@@ -523,6 +554,7 @@ export interface ApiWorker {
   lockedByInstance: boolean;
   lastSeenAt: string | null;
   bindingError: string;
+  preflight: ApiWorkerPreflight | null;
   command: "" | "pause" | "resume" | "stop";
   commandIssuedAt: string | null;
   commandAckedAt: string | null;
@@ -568,8 +600,11 @@ export interface IProject {
   webhooks: IWebhook[];
   notificationChannels: INotificationChannel[];
   worker: ProjectWorkerConfig;
+  repositoryUrl: string;
+  /** @deprecated superseded by repositoryUrl; read only as a migration fallback */
   githubRepo: string;
   githubToken: string;
+  /** @deprecated superseded by repositoryUrl; read only as a migration fallback */
   gitlabRepo: string;
   gitlabHost: string;
   gitlabToken: string;
@@ -798,9 +833,10 @@ export interface ApiProject {
   customFields: ApiCustomField[];
   webhooks: ApiWebhook[];
   notificationChannels: ApiNotificationChannel[];
-  githubRepo: string;
+  repositoryUrl: string;
+  // Which of the two integrations that URL's host resolves to, "" when neither
+  repositoryProvider: "github" | "gitlab" | "";
   githubTokenSet: boolean;
-  gitlabRepo?: string;
   gitlabHost?: string;
   gitlabTokenSet?: boolean;
   codaHost?: string;
