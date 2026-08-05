@@ -22,8 +22,8 @@ export interface GeneratedTask {
   description: string;
   category: string;
   acceptanceCriteria: string;
-  /** Chosen option per project field, keyed by the field's own name */
-  fields: Record<string, string>;
+  /** Chosen option(s) per project field, keyed by the field's own name */
+  fields: Record<string, string | string[]>;
   duplicateOf: number | null;
   duplicateReason: string;
   suggestedBlockedBy: number[];
@@ -95,7 +95,14 @@ You must respond with a JSON object with these exact fields:
 - category: one of ${categoryList.map((c) => `"${c}"`).join(", ")}${
     context.choiceFields.length
       ? `
-- fields: an object keyed by the field names above. Give one of that field's listed values, or an array of them where several apply. Omit a field you cannot judge.`
+- fields: an object keyed by the field names above, each value one of that field's listed values. Omit a field you cannot judge.${
+    context.choiceFields.some((f) => f.multi)
+      ? ` Give an array of values for: ${context.choiceFields
+          .filter((f) => f.multi)
+          .map((f) => f.name)
+          .join(", ")}.`
+      : ""
+  }`
       : ""
   }
 - acceptanceCriteria: markdown checklist of acceptance criteria (use "- [ ]" format)
