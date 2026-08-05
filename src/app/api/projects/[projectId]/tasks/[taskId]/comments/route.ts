@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { withProjectAccess } from "@/lib/middleware";
+import { withProjectAccess, withProjectAccessOrWorker } from "@/lib/middleware";
 import { Comment } from "@/models/comment";
 import { Task } from "@/models/task";
 import { addComment } from "@/lib/task-service";
@@ -23,7 +23,7 @@ export const GET = withProjectAccess(async (_request, { params }) => {
   return NextResponse.json(comments);
 });
 
-export const POST = withProjectAccess(async (request, { params, user }) => {
+export const POST = withProjectAccessOrWorker(async (request, { params, user }) => {
   const { projectId, taskId } = await params;
   await connectDB();
 

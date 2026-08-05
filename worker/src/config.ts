@@ -38,6 +38,7 @@ export function modelOr(value: string | undefined, fallback: string): string {
 // else — project, repository, timing, diff caps — is no longer the operator's to set at boot.
 export interface Bootstrap {
   apiBaseUrl: string;
+  /** @deprecated CP-237: nothing reads this. Every call travels on the worker credential. */
   apiToken: string;
   // Single-use, spent by the first registration. Empty once the operator has removed it, which is
   // the intended end state — an enrolled worker never needs it again.
@@ -146,7 +147,9 @@ function required(env: Env, key: string): string {
 export function loadBootstrap(env: Env, readSecret: SecretReader = readSecretFile): Bootstrap {
   return {
     apiBaseUrl: required(env, "CP_API_URL").replace(/\/$/, ""),
-    apiToken: requiredSecret(env, "CP_API_TOKEN", readSecret),
+    // Optional since CP-237: the worker holds one credential, minted by registration, whose scope
+    // tracks its assignments. Still read when present so an existing plist keeps booting.
+    apiToken: optionalSecret(env, "CP_API_TOKEN", readSecret),
     enrolmentToken: optionalSecret(env, "CP_ENROLMENT_TOKEN", readSecret),
     enrolmentTokenFile: env.CP_ENROLMENT_TOKEN_FILE?.trim() || "",
     workerName: required(env, "CP_WORKER_NAME"),
