@@ -37,7 +37,7 @@ public struct DeviceEnrolmentClient: Sendable {
     private let send: Send
 
     public init(apiURL: String, send: @escaping Send = { try await URLSession.shared.data(for: $0) }) {
-        self.apiURL = apiURL.hasSuffix("/") ? String(apiURL.dropLast()) : apiURL
+        self.apiURL = BoardURL.normalise(apiURL)
         self.send = send
     }
 
