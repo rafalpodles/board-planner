@@ -93,7 +93,7 @@ final class OnboardingModel {
                 pollUntilDecided(client: client, intervalMs: started.intervalMs)
             } catch {
                 busy = false
-                message = "Could not start enrolment: \(error.localizedDescription)"
+                message = "Could not reach \(BoardURL.normalise(apiURL)) — \(error.localizedDescription)"
             }
         }
     }

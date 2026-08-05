@@ -35,7 +35,7 @@ struct FirstRunView: View {
     private var server: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("1 · Where the board lives").font(.subheadline).bold()
-            TextField("https://your-board.example.com", text: $onboarding.apiURL)
+            TextField("your-board.example.com or localhost:3000", text: $onboarding.apiURL)
                 .textFieldStyle(.roundedBorder)
             TextField("This machine's name", text: $onboarding.workerName)
                 .textFieldStyle(.roundedBorder)
