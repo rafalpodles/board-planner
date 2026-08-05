@@ -123,7 +123,12 @@ export const PUT = withProjectAdmin(async (request, { params, user }) => {
     if (!existing) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
-    const parsed = parseProjectWorkerConfig(body.worker, existing.worker?.policyOverrides ?? []);
+    const parsed = parseProjectWorkerConfig(
+      body.worker,
+      existing.worker?.policyOverrides ?? [],
+      // The cross-field rule is judged on the resulting state, so it needs what is stored
+      (existing.worker?.policy ?? {}) as unknown as Record<string, unknown>
+    );
     if (!parsed.ok) {
       return NextResponse.json({ error: parsed.error }, { status: 400 });
     }

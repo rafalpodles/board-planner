@@ -161,3 +161,57 @@ describe("resetting a field to the default", () => {
     expect(parseProjectWorkerConfig({ reset: [7] })).toMatchObject({ ok: false });
   });
 });
+
+// The rule no per-field validator could hold: every field is checked in isolation, so nothing
+// stopped a project from merging without review — the one safety property worker/README.md
+// asserts outright. It has to be judged on the resulting state, because a partial patch cannot be
+// read on its own: setting autoMerge alone is fine or fatal depending on a field it never mentions.
+describe("autoMerge cannot outlive the review gate", () => {
+  it("refuses the pair in one request", () => {
+    const result = parseProjectWorkerConfig({ policy: { autoMerge: true, reviewGate: false } });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/merge unreviewed/);
+  });
+
+  it("refuses turning autoMerge on when review is already off in the stored policy", () => {
+    const result = parseProjectWorkerConfig({ policy: { autoMerge: true } }, [], {
+      reviewGate: false,
+    });
+
+    expect(result.ok).toBe(false);
+  });
+
+  it("refuses turning review off when autoMerge is already on in the stored policy", () => {
+    const result = parseProjectWorkerConfig({ policy: { reviewGate: false } }, [], {
+      autoMerge: true,
+    });
+
+    expect(result.ok).toBe(false);
+  });
+
+  it("allows turning review off on a project that does not merge", () => {
+    const result = parseProjectWorkerConfig({ policy: { reviewGate: false } }, [], {
+      autoMerge: false,
+    });
+
+    expect(result.ok).toBe(true);
+  });
+
+  it("allows both on together", () => {
+    const result = parseProjectWorkerConfig({ policy: { autoMerge: true, reviewGate: true } });
+
+    expect(result.ok).toBe(true);
+  });
+
+  // Resetting is the other way to reach the pair, and it lands on the default rather than on
+  // whatever was stored
+  it("refuses a reset that would leave autoMerge on with review off", () => {
+    const result = parseProjectWorkerConfig({ policy: { reviewGate: false }, reset: ["autoMerge"] }, [], {
+      autoMerge: true,
+    });
+
+    // autoMerge resets to its default of false, so this pair is safe
+    expect(result.ok).toBe(true);
+  });
+});

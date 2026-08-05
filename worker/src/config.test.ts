@@ -124,6 +124,7 @@ describe("applyPolicy", () => {
 
     expect(next).toEqual({
       autoMerge: true,
+      reviewGate: true,
       baseBranch: "develop",
       pollIntervalMs: 5_000,
       taskTimeoutMs: 60_000,
@@ -236,5 +237,34 @@ describe("autoMerge", () => {
     for (const bad of ["true", "false", 1, 0, null, "yes"]) {
       expect(applyPolicy(DEFAULT_POLICY, { autoMerge: bad }).autoMerge).toBe(false);
     }
+  });
+});
+
+// The worker does not trust a policy it was handed. "Nothing merges unreviewed" is the one safety
+// property the README asserts outright, so a server that sends the pair — through a bug, or a
+// rollback to a validator that did not know the rule — must not be able to talk the worker into it.
+describe("refusing to merge unreviewed, whatever the server says", () => {
+  it("turns autoMerge off when the same patch disables the review gate", () => {
+    const next = applyPolicy(DEFAULT_POLICY, { autoMerge: true, reviewGate: false });
+
+    expect(next.autoMerge).toBe(false);
+    expect(next.reviewGate).toBe(false);
+  });
+
+  it("turns autoMerge off when the review gate was already disabled", () => {
+    const without = applyPolicy(DEFAULT_POLICY, { reviewGate: false });
+
+    expect(applyPolicy(without, { autoMerge: true }).autoMerge).toBe(false);
+  });
+
+  it("turns autoMerge off when a later patch removes the review it was allowed under", () => {
+    const merging = applyPolicy(DEFAULT_POLICY, { autoMerge: true });
+    expect(merging.autoMerge).toBe(true);
+
+    expect(applyPolicy(merging, { reviewGate: false }).autoMerge).toBe(false);
+  });
+
+  it("leaves autoMerge alone while the review gate stands", () => {
+    expect(applyPolicy(DEFAULT_POLICY, { autoMerge: true, reviewGate: true }).autoMerge).toBe(true);
   });
 });

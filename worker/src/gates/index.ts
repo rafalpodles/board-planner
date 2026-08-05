@@ -25,6 +25,11 @@ export function buildGates(config: WorkerConfig, runner: Runner): Gate[] {
     testPresenceGate(),
     buildGate(runner, gateTimeoutMs),
     testRunGate(runner, gateTimeoutMs),
-    reviewGate(runner, gateTimeoutMs, config.reviewModel),
+    // "Write code" trades the second model for speed: the static gates, the build and the tests
+    // all still run, and the branch is still pushed and a pull request opened. Nothing merges
+    // without it — applyPolicy refuses autoMerge while this is off, whatever the server said.
+    // `!== false`, not truthiness: a config that never mentions the field — an older caller, a
+    // partial patch — must still review. Only an explicit opt-out removes the second model.
+    ...(config.reviewGate !== false ? [reviewGate(runner, gateTimeoutMs, config.reviewModel)] : []),
   ];
 }
