@@ -24,6 +24,9 @@ struct FirstRunView: View {
                 Text(onboarding.message).font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+
+            Divider()
+            AppFooter()
         }
         .padding(14)
         .frame(width: 380)
