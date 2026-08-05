@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!--
+    Deliberately almost empty, and that is the finding rather than an oversight.
+
+    Notarisation needs the hardened runtime, and the worry recorded on CP-239 was that the hardened
+    runtime would block the app from spawning `node`. It does not: the hardened runtime constrains
+    what THIS process loads into itself — library validation, JIT, DYLD variables — and a child
+    process is a separate process with its own signature. So no entitlement is needed to run node.
+
+    Two that are conspicuously absent, on purpose:
+
+    com.apple.security.app-sandbox
+      Not sandboxed. A sandboxed app could not spawn an arbitrary node, could not read the
+      operator's checkout, and could not write ~/.claudeplanner. Sandboxing this would mean
+      redesigning what the app is for.
+
+    com.apple.security.cs.disable-library-validation
+      Not needed, and not added speculatively. Nothing is loaded into this process at runtime.
+      Adding it "just in case" weakens the app and is exactly what notarisation review asks about.
+  -->
+</dict>
+</plist>
