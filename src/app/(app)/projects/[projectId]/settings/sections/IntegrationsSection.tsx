@@ -246,7 +246,7 @@ export function IntegrationsSection({
     {
       save: async () => {
         const diff = diffById<WebhookDraft>(
-          project.webhooks || [],
+          webhooks.baseline.webhooks,
           webhooks.value.webhooks,
         );
         try {
