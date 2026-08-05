@@ -10,7 +10,7 @@ import {
   MAX_FIELD_NAME_LENGTH,
 } from "@/lib/custom-fields";
 
-export const PATCH = withProjectAdmin(async (request, { params }) => {
+export const PATCH = withProjectAccess(async (request, { params }) => {
   const { projectId, fieldId } = await params;
   await connectDB();
 

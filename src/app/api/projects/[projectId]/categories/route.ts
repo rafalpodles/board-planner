@@ -17,7 +17,7 @@ export const GET = withProjectAccess(async (_request, { params }) => {
   return NextResponse.json(project.categories || []);
 });
 
-export const POST = withProjectAdmin(async (request, { params, user }) => {
+export const POST = withProjectAccess(async (request, { params, user }) => {
   const { projectId } = await params;
   await connectDB();
 
@@ -48,7 +48,7 @@ export const POST = withProjectAdmin(async (request, { params, user }) => {
   return NextResponse.json(project.categories, { status: 201 });
 });
 
-export const PATCH = withProjectAdmin(async (request, { params, user }) => {
+export const PATCH = withProjectAccess(async (request, { params, user }) => {
   const { projectId } = await params;
   await connectDB();
 
@@ -73,10 +73,13 @@ export const PATCH = withProjectAdmin(async (request, { params, user }) => {
   if (!current) {
     return NextResponse.json({ error: "Category not found" }, { status: 404 });
   }
-  if (
-    renaming &&
-    categories.some((c) => c.name !== name && c.name.toLowerCase() === target.toLowerCase())
-  ) {
+  // The rename runs through a window where both names exist, so a target that is already
+  // present alongside the original is this request's own half-finished work — resumable,
+  // not a collision. Only a target without the original is somebody else's category.
+  const collision = categories.find(
+    (c) => c.name !== name && c.name.toLowerCase() === target.toLowerCase()
+  );
+  if (renaming && collision && !current) {
     return NextResponse.json({ error: "Category already exists" }, { status: 409 });
   }
 
@@ -92,9 +95,14 @@ export const PATCH = withProjectAdmin(async (request, { params, user }) => {
   // fail to save. There are no transactions here, so the rename runs through a state
   // where BOTH names are valid: whichever write fails, every task still holds a name the
   // project offers, and re-running the request finishes the job.
-  categories.push({ name: target, color: color || current.color } as typeof categories[number]);
-  project.categories = categories;
-  await project.save();
+  if (!collision) {
+    categories.push({
+      name: target,
+      color: color || current.color,
+    } as typeof categories[number]);
+    project.categories = categories;
+    await project.save();
+  }
 
   await Task.updateMany({ project: projectId, category: name }, { $set: { category: target } });
 

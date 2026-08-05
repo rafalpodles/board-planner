@@ -164,7 +164,7 @@ export function Connections({
 
                 {/* An implied row cannot be removed here — clearing the repository URL is
                     what removes it, and a button that silently did nothing would be worse */}
-                {!implied && (
+                {!implied && !connected && (
                   <button
                     type="button"
                     onClick={() => onRemove(integration.id)}

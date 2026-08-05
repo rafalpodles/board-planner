@@ -92,7 +92,9 @@ export function BoardSection({ projectId, project, patchProject, stats }: Sectio
     }
   );
 
-  const reviewColumns = columns.filter((c) => c.role === "review");
+  // An unsaved column has no id, and an <option> without a value falls back to its
+  // label — picking it matched nothing and silently cleared the hand-off
+  const reviewColumns = columns.filter((c) => c.role === "review" && c.id);
   const escalation = escalationColumnId(columns);
   const explicit = columns.some((c) => c.triggersPmReview);
   // The flag used to be a per-column checkbox, so a project could carry several. Only one
