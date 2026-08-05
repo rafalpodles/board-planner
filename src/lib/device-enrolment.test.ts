@@ -5,10 +5,15 @@ const findOne = vi.fn();
 const find = vi.fn();
 const findOneAndUpdate = vi.fn();
 const updateOne = vi.fn();
+const projectLean = vi.fn();
 
 vi.mock("./db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/deviceEnrolment", () => ({
   DeviceEnrolment: { create, findOne, find, findOneAndUpdate, updateOne },
+}));
+// The poll now also reads the approved project, so the app knows what to clone
+vi.mock("@/models/project", () => ({
+  Project: { findById: () => ({ select: () => ({ lean: projectLean }) }) },
 }));
 
 const {
@@ -31,6 +36,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   create.mockResolvedValue({});
   candidates([]);
+  projectLean.mockResolvedValue({ key: "TP", repositoryUrl: "https://github.com/o/r" });
 });
 
 describe("starting an enrolment", () => {
@@ -92,6 +98,7 @@ describe("polling for the credential", () => {
         status: "approved",
         credential: "cpw_secret",
         worker: "w1",
+        project: "p1",
         expiresAt: new Date(Date.now() + 60_000),
         ...overrides,
       },
@@ -108,12 +115,15 @@ describe("polling for the credential", () => {
   it("hands back the credential once approved", async () => {
     const { deviceCode, doc } = await row();
     candidates([doc]);
-    findOneAndUpdate.mockResolvedValue({ credential: "cpw_secret", worker: "w1" });
+    findOneAndUpdate.mockResolvedValue({ credential: "cpw_secret", worker: "w1", project: "p1" });
 
     expect(await pollDeviceEnrolment(deviceCode)).toEqual({
       state: "approved",
       workerId: "w1",
       credential: "cpw_secret",
+      // What the app clones, and where it puts it — <folder>/<projectKey>
+      repositoryUrl: "https://github.com/o/r",
+      projectKey: "TP",
     });
   });
 
@@ -122,7 +132,7 @@ describe("polling for the credential", () => {
   it("claims the credential with a conditional update, not a read then a write", async () => {
     const { deviceCode, doc } = await row();
     candidates([doc]);
-    findOneAndUpdate.mockResolvedValue({ credential: "cpw_secret", worker: "w1" });
+    findOneAndUpdate.mockResolvedValue({ credential: "cpw_secret", worker: "w1", project: "p1" });
 
     await pollDeviceEnrolment(deviceCode);
 
