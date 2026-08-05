@@ -128,3 +128,27 @@ describe("buildGates", () => {
     expect(Math.max(...run.mock.calls.map((call) => call[2].timeoutMs))).toBe(600_000);
   });
 });
+
+// The one difference between the "write code" and "write and review" presets. Everything else —
+// the static gates, the build, the tests, the push and the pull request — is identical.
+describe("the review gate is the thing a preset turns off", () => {
+  const runner = { run: vi.fn() } as unknown as Runner;
+  const names = (overrides: Partial<WorkerConfig>) =>
+    buildGates(config(overrides), runner).map((g) => g.name);
+
+  it("drops only the reviewer when it is switched off", () => {
+    const withReview = names({ reviewGate: true });
+    const without = names({ reviewGate: false });
+
+    expect(withReview).toContain("review");
+    expect(without).not.toContain("review");
+    expect(without).toEqual(withReview.filter((n) => n !== "review"));
+  });
+
+  // Failing safe: an older caller, or a partial config, must still review. Only an explicit
+  // opt-out removes the second model — this is the property that keeps "nothing merges
+  // unreviewed" true when something upstream forgets the field.
+  it("still reviews when the config never mentions the field", () => {
+    expect(names({})).toContain("review");
+  });
+});
