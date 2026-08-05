@@ -85,14 +85,17 @@ describe("createApiClient", () => {
     expect(url).toBe("https://app.example.com/api/projects/CP/tasks/claim");
   });
 
-  it("sends the api token on a project-scoped call", async () => {
+  // CP-237: one credential for everything. A project-scoped API token could not follow a grant
+  // that is recomputed every heartbeat, so a second project silently 403'd the report while the
+  // claim succeeded.
+  it("reports status on the worker credential, never a separate api token", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
     const api = createApiClient(config, fetchMock as never, identityStore);
     await api.setStatus("CP", "t1", "done");
     const init = fetchMock.mock.calls[0][1];
-    expect(init.headers.Authorization).toBe("Bearer cp_token");
-    expect(init.headers["X-Worker-Id"]).toBeUndefined();
-    expect(init.headers["X-CP-Protocol"]).toBeUndefined();
+    expect(init.headers.Authorization).toBe("Bearer cpw_secret");
+    expect(init.headers["X-Worker-Id"]).toBe("w1");
+    expect(init.headers["X-CP-Protocol"]).toBe("1");
   });
 
   it("sends the worker credential, X-Worker-Id and X-CP-Protocol on claim, not the api token", async () => {
@@ -155,7 +158,7 @@ describe("createApiClient", () => {
     expect(init.body).toBe(JSON.stringify({ status: "done" }));
   });
 
-  it("sends the comment via POST, with the api token, not the worker credential", async () => {
+  it("sends the comment via POST on the worker credential", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 201 });
     const api = createApiClient(config, fetchMock as never, identityStore);
 
@@ -165,8 +168,8 @@ describe("createApiClient", () => {
     expect(url).toBe("https://app.example.com/api/projects/CP/tasks/t1/comments");
     expect(init.method).toBe("POST");
     expect(init.body).toBe(JSON.stringify({ body: "hello" }));
-    expect(init.headers.Authorization).toBe("Bearer cp_token");
-    expect(init.headers["X-Worker-Id"]).toBeUndefined();
+    expect(init.headers.Authorization).toBe("Bearer cpw_secret");
+    expect(init.headers["X-Worker-Id"]).toBe("w1");
   });
 
   it("drops checklist items without a string text field", async () => {
@@ -189,7 +192,7 @@ describe("createApiClient", () => {
     expect(task?.acceptanceCriteria).toEqual(["first"]);
   });
 
-  it("releases via POST with no body, so the server owns the target column, using the api token", async () => {
+  it("releases via POST with no body, so the server owns the target column", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
     const api = createApiClient(config, fetchMock as never, identityStore);
 
@@ -199,8 +202,8 @@ describe("createApiClient", () => {
     expect(url).toBe("https://app.example.com/api/projects/CP/tasks/t1/release");
     expect(init.method).toBe("POST");
     expect(init.body).toBeUndefined();
-    expect(init.headers.Authorization).toBe("Bearer cp_token");
-    expect(init.headers["X-Worker-Id"]).toBeUndefined();
+    expect(init.headers.Authorization).toBe("Bearer cpw_secret");
+    expect(init.headers["X-Worker-Id"]).toBe("w1");
   });
 
   it("lists the ids of every column the board carries", async () => {
@@ -385,7 +388,7 @@ describe("createApiClient", () => {
 
   // Was misnamed "...a worker token can reach" — it is the api token, like every other
   // project-scoped call; only claim() uses the worker credential
-  it("reads columns (backing statusIds/columnIds) with the api token, not the worker credential", async () => {
+  it("reads columns on the worker credential", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -398,12 +401,12 @@ describe("createApiClient", () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("https://app.example.com/api/projects/CP");
     expect(init.method).toBe("GET");
-    expect(init.headers.Authorization).toBe("Bearer cp_token");
-    expect(init.headers["X-Worker-Id"]).toBeUndefined();
-    expect(init.headers["X-CP-Protocol"]).toBeUndefined();
+    expect(init.headers.Authorization).toBe("Bearer cpw_secret");
+    expect(init.headers["X-Worker-Id"]).toBe("w1");
+    expect(init.headers["X-CP-Protocol"]).toBe("1");
   });
 
-  it("reads columns for columnIds with the api token too", async () => {
+  it("reads columns for columnIds on the worker credential too", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -414,8 +417,8 @@ describe("createApiClient", () => {
     await api.columnIds("CP");
 
     const [, init] = fetchMock.mock.calls[0];
-    expect(init.headers.Authorization).toBe("Bearer cp_token");
-    expect(init.headers["X-Worker-Id"]).toBeUndefined();
+    expect(init.headers.Authorization).toBe("Bearer cpw_secret");
+    expect(init.headers["X-Worker-Id"]).toBe("w1");
   });
 
   it("posts a phase event to the worker's own events endpoint, not a project one", async () => {
