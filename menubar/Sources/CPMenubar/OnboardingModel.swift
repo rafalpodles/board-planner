@@ -60,16 +60,6 @@ final class OnboardingModel {
 
         state = Onboarding.folderChosen(state, path: path)
         persist()
-
-        // repos.json is what grants this directory locally, and it is still the only thing that can
-        do {
-            let file = ReposFile(path: ReposFile.path(in: stateDirectory))
-            var repos = (try? file.read()) ?? []
-            if !repos.contains(path) { repos.append(path) }
-            try file.write(repos)
-        } catch {
-            message = "Could not write repos.json: \(error.localizedDescription)"
-        }
     }
 
     func connect() {
@@ -116,8 +106,10 @@ final class OnboardingModel {
                     persist()
                     message = "That enrolment ended without a credential. Try connecting again."
                     return
-                case .approved(let workerID, let credential, let heartbeatMs):
-                    adopt(workerID: workerID, credential: credential, heartbeatMs: heartbeatMs)
+                case .approved(let workerID, let credential, let heartbeatMs, let repositoryURL, let projectKey):
+                    adopt(
+                        workerID: workerID, credential: credential, heartbeatMs: heartbeatMs,
+                        repositoryURL: repositoryURL, projectKey: projectKey)
                     return
                 }
             }
@@ -126,7 +118,10 @@ final class OnboardingModel {
 
     // The credential goes where registration would have put it, so a worker enrolled by the app is
     // indistinguishable from one enrolled by hand — which is what keeps the launchd path alive.
-    private func adopt(workerID: String, credential: String, heartbeatMs: Int) {
+    private func adopt(
+        workerID: String, credential: String, heartbeatMs: Int,
+        repositoryURL: String, projectKey: String
+    ) {
         do {
             try IdentityFile(path: IdentityFile.path(in: stateDirectory)).write(
                 WorkerIdentity(workerId: workerID, credential: credential, heartbeatMs: heartbeatMs))
@@ -136,7 +131,36 @@ final class OnboardingModel {
         }
         state = Onboarding.approved(state, workerID: workerID)
         persist()
-        startWorker()
+
+        // Registration handed back a credential before anything was cloned, so a worker exists on
+        // the board that cannot yet do a thing. It is not started until the clone is there and a
+        // push has been shown to work — there is never one that looks ready and is not.
+        message = "Cloning \(repositoryURL)…"
+        switch WorkerProcess.cloneStep(toolPath: state.toolPath).run(
+            repositoryURL: repositoryURL, parent: state.checkoutsFolder, projectKey: projectKey)
+        {
+        case .cloned(let path), .reused(let path):
+            state = Onboarding.cloned(state, at: path)
+            persist()
+            grantLocally(path)
+            startWorker()
+        case .failed(let reason):
+            // The credential is kept: the enrolment succeeded, only the clone did not, and redoing
+            // the approval would spend a second one for nothing.
+            message = reason
+        }
+    }
+
+    // repos.json is what grants this directory locally, and it stays the only thing that can
+    private func grantLocally(_ path: String) {
+        do {
+            let file = ReposFile(path: ReposFile.path(in: stateDirectory))
+            var repos = (try? file.read()) ?? []
+            if !repos.contains(path) { repos.append(path) }
+            try file.write(repos)
+        } catch {
+            message = "Could not write repos.json: \(error.localizedDescription)"
+        }
     }
 
     func startWorker() {

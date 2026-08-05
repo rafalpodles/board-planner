@@ -94,6 +94,28 @@ enum WorkerProcess {
         return process
     }
 
+    // git runs on the PATH preflight resolved, not the one Finder handed this app — the same trap
+    // the worker itself hits, one level up.
+    static func cloneStep(toolPath: String) -> CloneStep {
+        CloneStep(run: { tool, args, cwd in
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = [tool] + args
+            var environment = ProcessInfo.processInfo.environment
+            if !toolPath.isEmpty { environment["PATH"] = toolPath }
+            process.environment = environment
+            if let cwd { process.currentDirectoryURL = URL(fileURLWithPath: cwd) }
+
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = pipe
+            do { try process.run() } catch { return (1, String(describing: error)) }
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            return (process.terminationStatus, String(data: data, encoding: .utf8) ?? "")
+        })
+    }
+
     private static func workerEntry(checkout: String) -> String? {
         WorkerLauncher.entryPoint(
             bundledAt: WorkerLauncher.bundledEntryPoint(resourcePath: Bundle.main.resourcePath),

@@ -44,9 +44,9 @@ struct FirstRunView: View {
 
     private var checkout: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("2 · Which checkout it may use").font(.subheadline).bold()
+            Text("2 · Where it keeps its checkouts").font(.subheadline).bold()
             HStack {
-                Text(onboarding.state.checkoutPath.isEmpty ? "No folder chosen" : onboarding.state.checkoutPath)
+                Text(onboarding.state.checkoutsFolder.isEmpty ? "No folder chosen" : onboarding.state.checkoutsFolder)
                     .font(.caption).lineLimit(1).truncationMode(.head)
                 Spacer()
                 Button("Choose…") { chooseFolder() }
@@ -98,6 +98,10 @@ struct FirstRunView: View {
         case .running:
             VStack(alignment: .leading, spacing: 6) {
                 Label("Connected and running", systemImage: "checkmark.seal")
+                if !onboarding.state.checkoutPath.isEmpty {
+                    Text("Working in \(onboarding.state.checkoutPath)")
+                        .font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
+                }
                 Text(LoginItem.statusDescription).font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Button("Start at login") { onboarding.registerLoginItem() }
@@ -107,9 +111,9 @@ struct FirstRunView: View {
         default:
             HStack {
                 Button("Check this machine") {
-                    onboarding.runPreflight(checkout: onboarding.state.checkoutPath)
+                    onboarding.runPreflight(checkout: onboarding.state.checkoutsFolder)
                 }
-                .disabled(onboarding.state.checkoutPath.isEmpty || onboarding.busy)
+                .disabled(onboarding.state.checkoutsFolder.isEmpty || onboarding.busy)
 
                 Button("Connect") { onboarding.connect() }
                     .buttonStyle(.borderedProminent)
@@ -121,7 +125,7 @@ struct FirstRunView: View {
     private var canConnect: Bool {
         !onboarding.busy
             && !onboarding.apiURL.isEmpty
-            && !onboarding.state.checkoutPath.isEmpty
+            && !onboarding.state.checkoutsFolder.isEmpty
             && onboarding.preflight?.ok == true
     }
 
@@ -133,8 +137,8 @@ struct FirstRunView: View {
         // NSOpenPanel hides this by default, unlike NSSavePanel — so someone who has not already
         // made the folder has nowhere to go but Finder and back
         panel.canCreateDirectories = true
-        panel.message = "Choose the checkout this machine may work in"
-        panel.prompt = "Use this checkout"
+        panel.message = "Choose the folder where this machine keeps its checkouts. The worker clones its own copy inside it."
+        panel.prompt = "Keep checkouts here"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         onboarding.chooseFolder(url.path)
     }

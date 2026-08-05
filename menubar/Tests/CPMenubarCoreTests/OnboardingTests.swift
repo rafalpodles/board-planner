@@ -22,7 +22,7 @@ final class OnboardingTests: XCTestCase {
         let reloaded = Onboarding.load(defaults: store)
 
         XCTAssertEqual(reloaded.step, .awaitingApproval)
-        XCTAssertEqual(reloaded.checkoutPath, "/checkout")
+        XCTAssertEqual(reloaded.checkoutsFolder, "/checkout")
         XCTAssertEqual(reloaded.toolPath, "/opt/bin")
     }
 
@@ -35,7 +35,7 @@ final class OnboardingTests: XCTestCase {
         let after = Onboarding.approvalAbandoned(state)
 
         XCTAssertEqual(after.step, .awaitingApproval)
-        XCTAssertEqual(after.checkoutPath, "/checkout")
+        XCTAssertEqual(after.checkoutsFolder, "/checkout")
         XCTAssertEqual(after.deviceCode, "", "an abandoned device code must not be kept")
         XCTAssertEqual(after.userCode, "")
     }
@@ -72,7 +72,7 @@ final class OnboardingTests: XCTestCase {
         let after = Onboarding.folderChosen(state, path: "/two")
 
         XCTAssertEqual(after.step, .running)
-        XCTAssertEqual(after.checkoutPath, "/two")
+        XCTAssertEqual(after.checkoutsFolder, "/two")
     }
 
     func testEachStepIsSafeToRepeat() {

@@ -55,10 +55,10 @@ final class DeviceEnrolmentTests: XCTestCase {
     func testPollingHandsBackTheCredential() async throws {
         let sut = client(
             status: 200,
-            body: #"{"state":"approved","workerId":"w1","credential":"cpw_secret","heartbeatMs":60000}"#)
+            body: #"{"state":"approved","workerId":"w1","credential":"cpw_secret","heartbeatMs":60000,"repositoryUrl":"https://github.com/o/r","projectKey":"TP"}"#)
 
         let result = try await sut.poll(deviceCode: "cpd_x")
-        XCTAssertEqual(result, .approved(workerID: "w1", credential: "cpw_secret", heartbeatMs: 60000))
+        XCTAssertEqual(result, .approved(workerID: "w1", credential: "cpw_secret", heartbeatMs: 60000, repositoryURL: "https://github.com/o/r", projectKey: "TP"))
     }
 
     // Refused, expired, or already collected all answer 410 — the server does not distinguish them
