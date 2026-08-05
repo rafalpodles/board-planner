@@ -1,21 +1,39 @@
 #!/bin/bash
-# Wraps the SwiftPM executable in a .app bundle.
+# Builds the .app, and — when given a Developer ID — signs it with the hardened runtime, notarises
+# it and staples the ticket, which is what lets it open on a Mac other than this one.
 #
-# Not optional packaging: UNUserNotificationCenter throws `bundleProxyForCurrentProcess is nil` for
-# a bare binary, so the app cannot start at all outside a bundle. LSUIElement keeps it out of the
-# Dock, which is what a menubar app wants.
+# Ad-hoc by default, so a normal build needs no account and no secrets. The two paths differ only
+# in the identity: everything else, hardened runtime included, is the same either way, so a problem
+# shows up on the build machine rather than after a submission.
+#
+#   ./bundle.sh                                   ad-hoc, hardened runtime, runs here only
+#   CP_SIGN_IDENTITY="Developer ID Application: …" ./bundle.sh release
+#   CP_SIGN_IDENTITY=… CP_NOTARY_PROFILE=… ./bundle.sh release   also notarises and staples
 set -euo pipefail
 
 CONFIG="${1:-debug}"
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-BIN="$(swift build --package-path "$ROOT" -c "$CONFIG" --show-bin-path)/CPMenubar"
+IDENTITY="${CP_SIGN_IDENTITY:--}"
+NOTARY_PROFILE="${CP_NOTARY_PROFILE:-}"
 
 swift build --package-path "$ROOT" -c "$CONFIG"
+BIN="$(swift build --package-path "$ROOT" -c "$CONFIG" --show-bin-path)/CPMenubar"
 
 APP="$ROOT/.build/CPMenubar.app"
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/CPMenubar"
+
+# The worker ships inside the app. A distributed app cannot read one out of the operator's
+# checkout — that checkout is their project, and only a ClaudePlanner clone has worker/ in it.
+# Zero runtime dependencies, so this is about 200 KB of JavaScript and no node.
+WORKER_DIST="$ROOT/../worker/dist"
+if [ -d "$WORKER_DIST" ]; then
+  mkdir -p "$APP/Contents/Resources/worker"
+  cp -R "$WORKER_DIST"/* "$APP/Contents/Resources/worker/"
+else
+  echo "warning: no worker build at $WORKER_DIST — run npm run build in worker/ first" >&2
+fi
 
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -35,8 +53,37 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
-# Ad-hoc signing is enough for UserNotifications to accept the bundle locally; without any
-# signature the notification centre refuses to register it.
-codesign --force --sign - "$APP" >/dev/null 2>&1 || echo "codesign failed; notifications may not register"
+# --options runtime on both paths on purpose. Ad-hoc plus hardened runtime is how the spawning and
+# login-item behaviour get exercised here, instead of being discovered after a notarisation round.
+codesign --force --options runtime \
+  --entitlements "$ROOT/Resources/CPMenubar.entitlements" \
+  --sign "$IDENTITY" "$APP"
 
-echo "$APP"
+codesign --verify --strict --verbose=2 "$APP" 2>&1 | sed 's/^/  /'
+
+if [ "$IDENTITY" = "-" ]; then
+  echo "$APP"
+  echo "note: ad-hoc signed — this opens on this Mac only. Set CP_SIGN_IDENTITY to distribute." >&2
+  exit 0
+fi
+
+# Notarisation takes a zip, and the ticket is stapled to the .app afterwards
+ZIP="$ROOT/.build/CPMenubar.zip"
+rm -f "$ZIP"
+ditto -c -k --keepParent "$APP" "$ZIP"
+
+if [ -z "$NOTARY_PROFILE" ]; then
+  echo "$APP"
+  echo "note: signed but NOT notarised. Set CP_NOTARY_PROFILE to a stored notarytool profile." >&2
+  exit 0
+fi
+
+xcrun notarytool submit "$ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
+xcrun stapler staple "$APP"
+# The stapled ticket lives in the .app, so the zip has to be rebuilt from it
+rm -f "$ZIP"
+ditto -c -k --keepParent "$APP" "$ZIP"
+
+# What a first launch on someone else's Mac will actually decide
+spctl --assess --type execute --verbose=4 "$APP" 2>&1 | sed 's/^/  /'
+echo "$ZIP"

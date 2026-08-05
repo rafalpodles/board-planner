@@ -499,6 +499,29 @@ export interface ApiWorkerPreflight extends Omit<WorkerPreflight, "reportedAt"> 
   reportedAt: string;
 }
 
+// How much autonomy a worker is given, worded as a choice rather than a gate checklist. The pair
+// the validator refuses — merging without review — is unreachable from these by construction.
+export type WorkerPreset = "write" | "review" | "merge";
+
+// An enrolment in progress: the app holds the device code, the operator approves the user code in
+// a browser, and the credential is handed back exactly once.
+export interface IDeviceEnrolment {
+  _id: Types.ObjectId;
+  deviceCodeHash: string;
+  userCode: string;
+  machineName: string;
+  machineHost: string;
+  status: "pending" | "approved" | "denied";
+  approvedBy: Types.ObjectId | null;
+  project: Types.ObjectId | null;
+  preset: WorkerPreset;
+  worker: Types.ObjectId | null;
+  credential: string;
+  deliveredAt: Date | null;
+  expiresAt: Date;
+  createdAt: Date;
+}
+
 // A single-use, short-lived credential whose only power is to register one worker. Deliberately
 // not an ApiToken: an ApiToken can be used repeatedly and carries its owner's access.
 export interface IEnrolmentToken {
