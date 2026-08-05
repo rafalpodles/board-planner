@@ -22,6 +22,7 @@ import { WorkersSection } from "./sections/WorkersSection";
 import { AuditSection } from "./sections/AuditSection";
 import Link from "next/link";
 import { PageHeader } from "@/components/shell/PageHeader";
+import { SettingsStats } from "./sections/types";
 
 type Access = "member" | "projectAdmin" | "instanceAdmin";
 
@@ -51,6 +52,9 @@ function Icon({ d }: { d: string }) {
     </svg>
   );
 }
+
+// The sections that print a task or usage count
+const COUNTS_NEEDED = new Set(["general", "board", "fields"]);
 
 const SECTIONS: SectionMeta[] = [
   {
@@ -146,6 +150,7 @@ export default function ProjectSettingsPage() {
   const [section, setSection] = useState("");
   const [query, setQuery] = useState("");
   const [confirmLeave, setConfirmLeave] = useState(false);
+  const [stats, setStats] = useState<SettingsStats | null>(null);
 
   const { register, unregister, pending, total } = useDirtyRegistry();
 
@@ -227,6 +232,22 @@ export default function ProjectSettingsPage() {
     if (scroll) window.scrollTo({ top: 0, behavior: "smooth" });
   }, []);
 
+  // /stats runs several aggregations, so it is only paid for once a section that
+  // prints a count is opened — and then shared, rather than fetched three times
+  useEffect(() => {
+    if (stats || !COUNTS_NEEDED.has(active)) return;
+    api
+      .get(`/api/projects/${projectId}/stats`)
+      .then(setStats)
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, stats, projectId]);
+
+  const dirtySections = useMemo(
+    () => new Set(pending.map((g) => g.section)),
+    [pending]
+  );
+
   const badges = useMemo(() => {
     if (!project) return {} as Record<string, { count?: number; on?: boolean }>;
     return {
@@ -263,6 +284,7 @@ export default function ProjectSettingsPage() {
     patchProject,
     replaceProject,
     isAdmin,
+    stats,
   };
 
   function navButton(s: SectionMeta, mobile: boolean) {
@@ -280,6 +302,12 @@ export default function ProjectSettingsPage() {
           }`}
         >
           {s.label}
+          {dirtySections.has(s.id) && (
+            <span
+              className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-warning align-middle"
+              title="Unsaved changes"
+            />
+          )}
         </button>
       );
     }
@@ -296,6 +324,12 @@ export default function ProjectSettingsPage() {
       >
         <span className={s.id === active ? "text-primary" : ""}>{s.icon}</span>
         <span className="flex-1 truncate">{s.label}</span>
+        {dirtySections.has(s.id) && (
+          <span
+            className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning"
+            title="Unsaved changes"
+          />
+        )}
         {badge?.count !== undefined && (
           <span className="rounded-full bg-bg-input px-1.5 text-[11px] text-text-muted">
             {badge.count}
@@ -425,12 +459,7 @@ export default function ProjectSettingsPage() {
               {visible.map((s) => (
                 <div key={s.id} className={s.id === active ? "" : "hidden"}>
                   {s.id === "general" && <GeneralSection {...sectionProps} />}
-                  {s.id === "board" && (
-                    <BoardSection
-                      {...sectionProps}
-                      active={active === "board"}
-                    />
-                  )}
+                  {s.id === "board" && <BoardSection {...sectionProps} />}
                   {s.id === "fields" && <TaskFieldsSection {...sectionProps} />}
                   {s.id === "integrations" && (
                     <IntegrationsSection {...sectionProps} />

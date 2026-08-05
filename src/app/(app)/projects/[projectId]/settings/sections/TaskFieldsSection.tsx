@@ -27,7 +27,7 @@ import { categoryDiff, CategoryDraft } from "@/lib/category-diff";
 import { nextColour } from "@/lib/palette";
 import { SectionProps } from "./types";
 
-export function TaskFieldsSection({ projectId, project, patchProject }: SectionProps) {
+export function TaskFieldsSection({ projectId, project, patchProject, stats }: SectionProps) {
   const api = useApi();
   const { toast } = useToast();
 
@@ -257,6 +257,7 @@ export function TaskFieldsSection({ projectId, project, patchProject }: SectionP
                 onEdit={() => setFieldForm(field._id)}
                 onSave={(patch) => saveCustomField(field._id, patch)}
                 onDelete={() => removeCustomField(field._id)}
+                usage={stats?.customFieldUsage[field._id] ?? (stats ? 0 : undefined)}
               />
             )
           )}
