@@ -15,9 +15,7 @@ import {
 } from "./custom-fields";
 import { DEFAULT_OPTION_COLOR, ICustomField } from "@/types";
 
-function field(
-  over: Partial<Omit<ICustomField, "_id">> & { _id: string },
-): ICustomField {
+function field(over: Partial<Omit<ICustomField, "_id">> & { _id: string }): ICustomField {
   return {
     name: "Owoce",
     fieldType: "dropdown",
@@ -60,9 +58,7 @@ describe("normalizeOptions", () => {
 
 describe("normalizeFields", () => {
   it("gives a pre-CP-211 definition every new property with a safe default", () => {
-    const [f] = normalizeFields([
-      { name: "Owoce", fieldType: "dropdown", options: ["Apples"] },
-    ]);
+    const [f] = normalizeFields([{ name: "Owoce", fieldType: "dropdown", options: ["Apples"] }]);
     expect(f).toMatchObject({
       required: false,
       order: 0,
@@ -76,13 +72,7 @@ describe("normalizeFields", () => {
 
   it("does not overwrite properties a field already carries", () => {
     const [f] = normalizeFields([
-      {
-        name: "X",
-        fieldType: "number",
-        showOnCard: true,
-        order: 5,
-        archived: true,
-      },
+      { name: "X", fieldType: "number", showOnCard: true, order: 5, archived: true },
     ]);
     expect(f.showOnCard).toBe(true);
     expect(f.order).toBe(5);
@@ -125,12 +115,8 @@ describe("validateCustomFieldValues", () => {
   });
 
   it("accepts an option id and rejects the option's text", () => {
-    expect(validateCustomFieldValues({ d1: "opt1" }, [dropdown]).valid).toBe(
-      true,
-    );
-    expect(validateCustomFieldValues({ d1: "Apples" }, [dropdown]).valid).toBe(
-      false,
-    );
+    expect(validateCustomFieldValues({ d1: "opt1" }, [dropdown]).valid).toBe(true);
+    expect(validateCustomFieldValues({ d1: "Apples" }, [dropdown]).valid).toBe(false);
   });
 
   it("accepts a list of known ids for a multiselect and rejects an unknown one", () => {
@@ -142,12 +128,8 @@ describe("validateCustomFieldValues", () => {
         { id: "b", value: "B", color: "#000", order: 1 },
       ],
     });
-    expect(validateCustomFieldValues({ m1: ["a", "b"] }, [multi]).valid).toBe(
-      true,
-    );
-    expect(validateCustomFieldValues({ m1: ["a", "zz"] }, [multi]).valid).toBe(
-      false,
-    );
+    expect(validateCustomFieldValues({ m1: ["a", "b"] }, [multi]).valid).toBe(true);
+    expect(validateCustomFieldValues({ m1: ["a", "zz"] }, [multi]).valid).toBe(false);
     expect(validateCustomFieldValues({ m1: "a" }, [multi]).valid).toBe(false);
   });
 
@@ -170,15 +152,11 @@ describe("validateCustomFieldValues", () => {
 
   it("stops policing the value of an archived field", () => {
     const archived = field({ _id: "d1", archived: true, options: [] });
-    expect(
-      validateCustomFieldValues({ d1: "gone-option" }, [archived]).valid,
-    ).toBe(true);
+    expect(validateCustomFieldValues({ d1: "gone-option" }, [archived]).valid).toBe(true);
   });
 
   it("still refuses a value for a field that does not exist", () => {
-    expect(validateCustomFieldValues({ nope: "x" }, [dropdown]).valid).toBe(
-      false,
-    );
+    expect(validateCustomFieldValues({ nope: "x" }, [dropdown]).valid).toBe(false);
   });
 });
 
@@ -187,15 +165,11 @@ describe("sanitizeCustomFieldValues", () => {
   // every task on its next save
   it("keeps the values of an archived field", () => {
     const archived = field({ _id: "a1", archived: true });
-    expect(sanitizeCustomFieldValues({ a1: "kept" }, [archived])).toEqual({
-      a1: "kept",
-    });
+    expect(sanitizeCustomFieldValues({ a1: "kept" }, [archived])).toEqual({ a1: "kept" });
   });
 
   it("drops values whose field is gone entirely", () => {
-    expect(
-      sanitizeCustomFieldValues({ a1: "x", gone: "y" }, [field({ _id: "a1" })]),
-    ).toEqual({
+    expect(sanitizeCustomFieldValues({ a1: "x", gone: "y" }, [field({ _id: "a1" })])).toEqual({
       a1: "x",
     });
   });
@@ -228,22 +202,12 @@ describe("matchesFieldFilter", () => {
   });
 
   it("compares dates chronologically", () => {
-    expect(
-      matchesFieldFilter(
-        "2026-05-01",
-        { from: "2026-01-01", to: "2026-12-31" },
-        date,
-      ),
-    ).toBe(true);
-    expect(matchesFieldFilter("2025-05-01", { from: "2026-01-01" }, date)).toBe(
-      false,
-    );
+    expect(matchesFieldFilter("2026-05-01", { from: "2026-01-01", to: "2026-12-31" }, date)).toBe(true);
+    expect(matchesFieldFilter("2025-05-01", { from: "2026-01-01" }, date)).toBe(false);
   });
 
   it("matches text by case-insensitive substring", () => {
-    expect(matchesFieldFilter("Hello World", { value: "wor" }, text)).toBe(
-      true,
-    );
+    expect(matchesFieldFilter("Hello World", { value: "wor" }, text)).toBe(true);
     expect(matchesFieldFilter("Hello", { value: "zzz" }, text)).toBe(false);
   });
 
@@ -268,27 +232,13 @@ describe("matchesAllFieldFilters", () => {
 
   it("requires every filter to pass", () => {
     const values = { f1: 5, f2: "hello" };
-    expect(
-      matchesAllFieldFilters(
-        values,
-        { f1: { from: "3" }, f2: { value: "hell" } },
-        definitions,
-      ),
-    ).toBe(true);
-    expect(
-      matchesAllFieldFilters(
-        values,
-        { f1: { from: "9" }, f2: { value: "hell" } },
-        definitions,
-      ),
-    ).toBe(false);
+    expect(matchesAllFieldFilters(values, { f1: { from: "3" }, f2: { value: "hell" } }, definitions)).toBe(true);
+    expect(matchesAllFieldFilters(values, { f1: { from: "9" }, f2: { value: "hell" } }, definitions)).toBe(false);
   });
 
   // A stale filter should not blank the board while it is being cleaned up
   it("ignores a filter whose field is gone rather than hiding everything", () => {
-    expect(
-      matchesAllFieldFilters({ f1: 5 }, { ghost: { value: "x" } }, definitions),
-    ).toBe(true);
+    expect(matchesAllFieldFilters({ f1: 5 }, { ghost: { value: "x" } }, definitions)).toBe(true);
   });
 });
 
@@ -311,88 +261,56 @@ describe("resolveFieldsByName", () => {
         { id: "t2", value: "two", color: "#000", order: 1 },
       ],
     },
-    {
-      _id: "f5",
-      name: "Gone",
-      fieldType: "text" as const,
-      options: [],
-      archived: true,
-    },
+    { _id: "f5", name: "Gone", fieldType: "text" as const, options: [], archived: true },
   ];
 
   // An MCP client knows the name a human gave the field, never its id
   it("resolves a field name and an option name to their ids", () => {
-    expect(resolveFieldsByName({ Owoce: "Apples" }, definitions)).toEqual({
-      f1: "opt-a",
-    });
+    expect(resolveFieldsByName({ Owoce: "Apples" }, definitions)).toEqual({ f1: "opt-a" });
   });
 
   it("matches case-insensitively on both the field and the option", () => {
-    expect(resolveFieldsByName({ owoce: "apples" }, definitions)).toEqual({
-      f1: "opt-a",
-    });
+    expect(resolveFieldsByName({ owoce: "apples" }, definitions)).toEqual({ f1: "opt-a" });
   });
 
   // So a client can send back exactly what it read
   it("accepts an option id as well as its name", () => {
-    expect(resolveFieldsByName({ Owoce: "opt-a" }, definitions)).toEqual({
-      f1: "opt-a",
-    });
+    expect(resolveFieldsByName({ Owoce: "opt-a" }, definitions)).toEqual({ f1: "opt-a" });
   });
 
   it("takes a list for a multiselect, and a bare value as a list of one", () => {
-    expect(resolveFieldsByName({ Tags: ["one", "two"] }, definitions)).toEqual({
-      f4: ["t1", "t2"],
-    });
-    expect(resolveFieldsByName({ Tags: "two" }, definitions)).toEqual({
-      f4: ["t2"],
-    });
+    expect(resolveFieldsByName({ Tags: ["one", "two"] }, definitions)).toEqual({ f4: ["t1", "t2"] });
+    expect(resolveFieldsByName({ Tags: "two" }, definitions)).toEqual({ f4: ["t2"] });
   });
 
   it("coerces numbers and checkboxes", () => {
-    expect(resolveFieldsByName({ Points: "8" }, definitions)).toEqual({
-      f2: 8,
-    });
-    expect(resolveFieldsByName({ Done: "true" }, definitions)).toEqual({
-      f3: true,
-    });
+    expect(resolveFieldsByName({ Points: "8" }, definitions)).toEqual({ f2: 8 });
+    expect(resolveFieldsByName({ Done: "true" }, definitions)).toEqual({ f3: true });
   });
 
   // Silently dropping would leave the caller thinking the value was stored
   it("throws on an unknown field, and lists what is available", () => {
-    expect(() => resolveFieldsByName({ Nope: "x" }, definitions)).toThrow(
-      /Unknown field "Nope"/,
-    );
-    expect(() => resolveFieldsByName({ Nope: "x" }, definitions)).toThrow(
-      /Owoce/,
-    );
+    expect(() => resolveFieldsByName({ Nope: "x" }, definitions)).toThrow(/Unknown field "Nope"/);
+    expect(() => resolveFieldsByName({ Nope: "x" }, definitions)).toThrow(/Owoce/);
   });
 
   it("throws on a value that is not one of the field's options", () => {
-    expect(() =>
-      resolveFieldsByName({ Owoce: "Bananas" }, definitions),
-    ).toThrow(/not an option/);
+    expect(() => resolveFieldsByName({ Owoce: "Bananas" }, definitions)).toThrow(/not an option/);
   });
 
   it("throws on a number that is not a number", () => {
-    expect(() => resolveFieldsByName({ Points: "eight" }, definitions)).toThrow(
-      /must be a number/,
-    );
+    expect(() => resolveFieldsByName({ Points: "eight" }, definitions)).toThrow(/must be a number/);
   });
 
   it("refuses to write to an archived field", () => {
-    expect(() => resolveFieldsByName({ Gone: "x" }, definitions)).toThrow(
-      /Unknown field/,
-    );
+    expect(() => resolveFieldsByName({ Gone: "x" }, definitions)).toThrow(/Unknown field/);
   });
 });
 
 describe("parseOptions ids", () => {
   // The editor adds a row with no id yet; "" used to survive and become the option's id
   it("mints an id for an option that arrives without one", () => {
-    const result = parseOptions([
-      { id: "", value: "Apples", color: "#ef4444", order: 0 },
-    ]);
+    const result = parseOptions([{ id: "", value: "Apples", color: "#ef4444", order: 0 }]);
     expect(result.error).toBeUndefined();
     expect(result.options?.[0].id).toBeTruthy();
     expect(result.options?.[0].id).not.toBe("");
@@ -408,13 +326,8 @@ describe("parseOptions ids", () => {
   });
 
   it("keeps the id of an option that already exists, so tasks survive a rename", () => {
-    const existing = [
-      { id: "ui-a1b2", value: "ui", color: "#3b82f6", order: 0 },
-    ];
-    const result = parseOptions(
-      [{ id: "ui-a1b2", value: "Interface", color: "#3b82f6", order: 0 }],
-      existing,
-    );
+    const existing = [{ id: "ui-a1b2", value: "ui", color: "#3b82f6", order: 0 }];
+    const result = parseOptions([{ id: "ui-a1b2", value: "Interface", color: "#3b82f6", order: 0 }], existing);
     expect(result.options?.[0].id).toBe("ui-a1b2");
   });
 });
