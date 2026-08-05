@@ -174,6 +174,25 @@ final class OnboardingModel {
         }
     }
 
+    /// Run when the app comes up, so an already-onboarded machine has a worker rather than a panel
+    /// retrying a socket forever.
+    func resumeWorker(listening: () async -> Bool = OnboardingModel.somethingIsListening) async {
+        guard
+            WorkerResume.shouldStart(
+                isOnboarded: state.isOnboarded,
+                weAlreadyStartedOne: RunningWorker.shared.isOurs,
+                somethingIsListening: await listening())
+        else { return }
+
+        startWorker()
+    }
+
+    private static func somethingIsListening() async -> Bool {
+        let client = SocketClient(
+            socketPath: SocketClient.defaultSocketPath(), transport: POSIXTransport())
+        return (try? await client.status()) != nil
+    }
+
     func registerLoginItem() {
         do {
             try LoginItem.register()

@@ -12,6 +12,14 @@ final class OnboardingTests: XCTestCase {
         XCTAssertFalse(OnboardingState().isOnboarded)
     }
 
+    // Stored canonical, so the next consumer does not have to know it needs fixing up
+    func testWhatSomebodyTypesIsStoredAsAnAddressThatWorks() {
+        let state = Onboarding.preflightPassed(
+            OnboardingState(), apiURL: "localhost:3973", workerName: "mac", toolPath: "/bin")
+
+        XCTAssertEqual(state.apiURL, "http://localhost:3973")
+    }
+
     func testSurvivesARelaunch() {
         let store = defaults()
         var state = OnboardingState()
