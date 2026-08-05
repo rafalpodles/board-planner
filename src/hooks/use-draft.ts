@@ -32,5 +32,19 @@ export function useDraft<T extends Record<string, unknown>>(initial: T) {
     setValue(next);
   }, []);
 
-  return { value, set, setValue, dirtyKeys, count: dirtyKeys.length, isDirty, discard, commit };
+  // Exposed because a list reconciles on save by diffing against what it started from.
+  // Diffing against the live source instead lets a row that arrived underneath — from
+  // another tab, the MCP server, or this page's own instant "Add admin" — read as one
+  // the user deleted, and the save then issues a DELETE nobody asked for.
+  return {
+    value,
+    baseline,
+    set,
+    setValue,
+    dirtyKeys,
+    count: dirtyKeys.length,
+    isDirty,
+    discard,
+    commit,
+  };
 }

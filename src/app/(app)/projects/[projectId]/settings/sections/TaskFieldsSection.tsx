@@ -60,7 +60,7 @@ export function TaskFieldsSection({ projectId, project, patchProject, stats }: S
     },
     {
       save: async () => {
-        const diff = categoryDiff(project.categories || [], categories.value.categories);
+        const diff = categoryDiff(categories.baseline.categories, categories.value.categories);
         try {
           let saved = project.categories || [];
           // Renames first: a name freed by a rename may be the one an added row wants,
@@ -96,7 +96,7 @@ export function TaskFieldsSection({ projectId, project, patchProject, stats }: S
     },
     {
       save: async () => {
-        const diff = diffById(project.taskTemplates || [], templates.value.templates);
+        const diff = diffById(templates.baseline.templates, templates.value.templates);
         try {
           let saved = project.taskTemplates || [];
           for (const row of diff.added) {
