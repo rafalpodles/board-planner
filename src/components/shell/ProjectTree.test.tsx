@@ -131,6 +131,30 @@ describe("ProjectTree", () => {
     expect(screen.queryByText("Settings")).toBeNull();
   });
 
+  it("shows Settings to a project admin who is not an instance admin", () => {
+    renderTree({
+      isAdmin: false,
+      projects: [project({ _id: "1", key: "TP", canAdmin: true })],
+    });
+    expect(screen.getByText("Settings")).toBeTruthy();
+  });
+
+  it("hides Settings from a member of a project they cannot administer", () => {
+    renderTree({
+      isAdmin: false,
+      projects: [project({ _id: "1", key: "TP", canAdmin: false })],
+    });
+    expect(screen.queryByText("Settings")).toBeNull();
+  });
+
+  it("still keeps New project to instance admins even for a project admin", () => {
+    renderTree({
+      isAdmin: false,
+      projects: [project({ _id: "1", key: "TP", canAdmin: true })],
+    });
+    expect(screen.queryByLabelText("New project")).toBeNull();
+  });
+
   it("offers New project only to admins", () => {
     renderTree();
     expect(screen.getByLabelText("New project")).toBeTruthy();
