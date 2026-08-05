@@ -312,7 +312,7 @@ export default function ProjectSettingsPage() {
 
   return (
     <>
-      <div className="pb-32">
+      <div className="pb-8">
         <PageHeader title="Settings" />
 
         <div className="md:grid md:grid-cols-[236px_minmax(0,1fr)] md:gap-7">
@@ -420,12 +420,10 @@ export default function ProjectSettingsPage() {
                 </div>
               ))}
             </SettingsProvider>
+            <SaveBar pending={pending} total={total} onGoToSection={goToSection} />
           </main>
         </div>
       </div>
-
-      <SaveBar pending={pending} total={total} onGoToSection={goToSection} />
-
     </>
   );
 }
