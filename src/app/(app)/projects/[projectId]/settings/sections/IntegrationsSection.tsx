@@ -228,9 +228,8 @@ export function IntegrationsSection({
           toast("Channels saved", "success");
         } catch (err) {
           fail(err, "Failed to save channels");
-        } finally {
           patchProject({ notificationChannels: saved });
-          channels.commit({ channels: saved });
+          channels.rebase({ channels: saved });
         }
       },
       discard: channels.discard,
@@ -273,9 +272,8 @@ export function IntegrationsSection({
           toast("Webhooks saved", "success");
         } catch (err) {
           fail(err, "Failed to save webhooks");
-        } finally {
           patchProject({ webhooks: saved });
-          webhooks.commit({ webhooks: saved });
+          webhooks.rebase({ webhooks: saved });
         }
       },
       discard: webhooks.discard,
@@ -338,6 +336,7 @@ export function IntegrationsSection({
       toast("Webhook URL replaced", "success");
     } catch (err) {
       fail(err, "Failed to replace the URL");
+      return false;
     }
   }
 
@@ -392,6 +391,7 @@ export function IntegrationsSection({
       toast("Webhook URL replaced", "success");
     } catch (err) {
       fail(err, "Failed to replace the URL");
+      return false;
     }
   }
 
