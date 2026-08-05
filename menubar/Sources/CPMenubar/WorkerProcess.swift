@@ -28,7 +28,7 @@ enum WorkerProcessError: LocalizedError {
         case .noNode:
             return "Could not find node on this machine. Install Node, then try again."
         case .noWorkerBuild(let path):
-            return "There is no built worker at \(path). Run npm install && npm run build in the worker folder."
+            return "This app has no worker to run, and there is none in \(path) either. Reinstall the app."
         case .preflightUnreadable(let output):
             return "Could not read the preflight result: \(output)"
         }
@@ -60,9 +60,8 @@ enum WorkerProcess {
 
     static func preflight(checkout: String) throws -> PreflightReport {
         guard let node = resolveNode() else { throw WorkerProcessError.noNode }
-        let entry = WorkerLauncher.entryPoint(inCheckout: checkout)
-        guard FileManager.default.fileExists(atPath: entry) else {
-            throw WorkerProcessError.noWorkerBuild(entry)
+        guard let entry = workerEntry(checkout: checkout) else {
+            throw WorkerProcessError.noWorkerBuild(checkout)
         }
 
         // Exit code 1 means "this machine cannot do the work", which is an answer, not a failure —
@@ -79,9 +78,8 @@ enum WorkerProcess {
     @discardableResult
     static func spawn(state: OnboardingState, stateDirectory: String) throws -> Process {
         guard let node = resolveNode() else { throw WorkerProcessError.noNode }
-        let entry = WorkerLauncher.entryPoint(inCheckout: state.checkoutPath)
-        guard FileManager.default.fileExists(atPath: entry) else {
-            throw WorkerProcessError.noWorkerBuild(entry)
+        guard let entry = workerEntry(checkout: state.checkoutPath) else {
+            throw WorkerProcessError.noWorkerBuild(state.checkoutPath)
         }
 
         let plan = WorkerLauncher.plan(
@@ -93,6 +91,12 @@ enum WorkerProcess {
         process.environment = plan.environment
         try process.run()
         return process
+    }
+
+    private static func workerEntry(checkout: String) -> String? {
+        WorkerLauncher.entryPoint(
+            bundledAt: WorkerLauncher.bundledEntryPoint(resourcePath: Bundle.main.resourcePath),
+            checkout: checkout)
     }
 
     private static func runCapturing(_ launchPath: String, _ arguments: [String]) -> String? {

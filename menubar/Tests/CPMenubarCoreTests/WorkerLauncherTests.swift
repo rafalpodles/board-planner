@@ -74,10 +74,56 @@ final class WorkerLauncherTests: XCTestCase {
         XCTAssertNil(plan.environment["CP_ENROLMENT_TOKEN"])
     }
 
-    func testItRunsTheBuiltWorkerFromTheChosenCheckout() {
+    // The app has to carry its own worker. A distributed app cannot read one out of the operator's
+    // checkout, because that checkout is *their* project — only a ClaudePlanner clone has worker/.
+    // This looked fine right up until the app would have left the machine that built it.
+    func testItPrefersTheWorkerShippedInsideTheApp() throws {
+        let bundled = try temporaryFile(named: "main.js")
+        defer { try? FileManager.default.removeItem(atPath: bundled) }
+
         XCTAssertEqual(
-            WorkerLauncher.entryPoint(inCheckout: "/Users/rpo/checkouts/thing"),
-            "/Users/rpo/checkouts/thing/worker/dist/main.js")
+            WorkerLauncher.entryPoint(bundledAt: bundled, checkout: "/Users/rpo/anything"),
+            bundled)
+    }
+
+    func testItFallsBackToACheckoutThatHasOne() throws {
+        let checkout = try temporaryCheckoutWithWorker()
+        defer { try? FileManager.default.removeItem(atPath: checkout) }
+
+        XCTAssertEqual(
+            WorkerLauncher.entryPoint(bundledAt: "/nope/main.js", checkout: checkout),
+            (checkout as NSString).appendingPathComponent("worker/dist/main.js"))
+    }
+
+    // Someone else's project, and no worker in the app: saying so beats spawning a path that is
+    // not there and reporting whatever node says about it
+    func testItAnswersNothingWhenNeitherExists() {
+        XCTAssertNil(WorkerLauncher.entryPoint(bundledAt: "/nope/main.js", checkout: "/Users/rpo/their-project"))
+    }
+
+    func testTheBundledWorkerLivesUnderResources() {
+        XCTAssertEqual(
+            WorkerLauncher.bundledEntryPoint(resourcePath: "/Apps/CPMenubar.app/Contents/Resources"),
+            "/Apps/CPMenubar.app/Contents/Resources/worker/main.js")
+        XCTAssertNil(WorkerLauncher.bundledEntryPoint(resourcePath: nil))
+    }
+
+    private func temporaryFile(named name: String) throws -> String {
+        let directory = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("cp-launch-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let file = directory.appendingPathComponent(name)
+        try Data().write(to: file)
+        return file.path
+    }
+
+    private func temporaryCheckoutWithWorker() throws -> String {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("cp-checkout-\(UUID().uuidString)")
+        let dist = root.appendingPathComponent("worker/dist")
+        try FileManager.default.createDirectory(at: dist, withIntermediateDirectories: true)
+        try Data().write(to: dist.appendingPathComponent("main.js"))
+        return root.path
     }
 
     func testItSpawnsNodeWithTheEntryPoint() {
