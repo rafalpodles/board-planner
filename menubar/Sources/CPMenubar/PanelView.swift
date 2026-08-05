@@ -28,6 +28,9 @@ struct PanelView: View {
             Text("\(model.state.mergedToday) merged today")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+            Divider()
+            AppFooter()
         }
         .padding(14)
         .frame(width: 320)
