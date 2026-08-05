@@ -87,7 +87,9 @@ public enum Onboarding {
         toolPath: String
     ) -> OnboardingState {
         var next = state
-        next.apiURL = apiURL
+        // Stored in the form everything downstream needs, so there is one canonical value rather
+        // than a raw one that each consumer has to remember to fix up
+        next.apiURL = BoardURL.normalise(apiURL)
         next.workerName = workerName
         next.toolPath = toolPath
         // Only ever forward from the step it answers. A machine already running must not be walked

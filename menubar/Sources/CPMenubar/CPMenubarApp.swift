@@ -6,7 +6,7 @@ struct CPMenubarApp: App {
     // No default initialiser here: writing `= AppModel()` alongside the assignment below constructs
     // two models, starts the pump on one and renders the other.
     @State private var model: AppModel
-    @State private var onboarding = OnboardingModel()
+    @State private var onboarding: OnboardingModel
 
     init() {
         // A scriptable way to exercise the login item without clicking through the menu bar. It
@@ -17,6 +17,13 @@ struct CPMenubarApp: App {
         let model = AppModel()
         _model = State(initialValue: model)
         model.start()
+
+        // Same reason as the model above: constructing this inline would make two, and the one that
+        // resumes the worker would not be the one on screen.
+        let onboarding = OnboardingModel()
+        _onboarding = State(initialValue: onboarding)
+        Task { await onboarding.resumeWorker() }
+
         Notifier.shared.requestAuthorization()
     }
 

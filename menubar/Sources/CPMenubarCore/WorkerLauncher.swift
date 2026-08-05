@@ -29,7 +29,11 @@ public enum WorkerLauncher {
         var environment = baseEnvironment
         // Same variables the launchd plist sets. The app is a convenience over that contract, never
         // a replacement — a worker started by hand has to keep working exactly as it does now.
-        environment["CP_API_URL"] = state.apiURL
+        // Normalised here because this value crosses into another program with stricter parsing.
+        // "localhost:3973" is what people type and what Swift's own client copes with; Node's fetch
+        // rejects it as an unknown scheme, so every request the worker makes fails — it registers,
+        // clones, starts, and then never reports, which reads as a dead machine rather than a typo.
+        environment["CP_API_URL"] = BoardURL.normalise(state.apiURL)
         environment["CP_WORKER_NAME"] = state.workerName
         environment["CP_STATE_DIR"] = stateDirectory
         if !state.toolPath.isEmpty { environment["PATH"] = state.toolPath }
