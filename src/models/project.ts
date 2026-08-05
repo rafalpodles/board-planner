@@ -158,6 +158,33 @@ const projectSchema = new Schema<IProject>(
         default: [],
       },
     },
+    // Whether workers may run this project, and how. The repository path is deliberately absent:
+    // a worker reports the checkouts it has and matches this project by its remote, so the server
+    // never names a directory on someone else's machine.
+    worker: {
+      enabled: { type: Boolean, default: false },
+      policy: {
+        autoMerge: { type: Boolean, default: false },
+        reviewGate: { type: Boolean, default: true },
+        baseBranch: { type: String, default: "main" },
+        taskTimeoutMs: { type: Number, default: 1_800_000 },
+        maxDiffLines: { type: Number, default: 400 },
+        maxDiffFiles: { type: Number, default: 10 },
+        model: { type: String, default: "opus" },
+        fallbackModel: { type: String, default: "sonnet" },
+        reviewModel: { type: String, default: "opus" },
+      },
+      policyOverrides: { type: [String], default: [] },
+    },
+    // The one place a project names its repository, whoever hosts it. The provider is derived from
+    // the host — see src/lib/repository.ts.
+    repositoryUrl: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    // Superseded by repositoryUrl and no longer read or written by the app; kept so the migration
+    // is reversible until scripts/migrate-repository-url.ts has run everywhere.
     githubRepo: {
       type: String,
       default: "",

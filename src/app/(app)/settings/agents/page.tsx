@@ -45,6 +45,8 @@ export default function AdminAgentsPage() {
   const [defaultModel, setDefaultModel] = useState("");
   const [defaultCap, setDefaultCap] = useState("0");
   const [savingDefaults, setSavingDefaults] = useState(false);
+  const [aiModel, setAiModel] = useState("");
+  const [savingAiModel, setSavingAiModel] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -52,6 +54,8 @@ export default function AdminAgentsPage() {
       setData(res);
       setDefaultModel(res.defaults.pmDefaultModel);
       setDefaultCap(String(res.defaults.pmDefaultDailyTurnCap));
+      const settings = await api.get("/api/settings");
+      setAiModel(settings?.aiModel ?? "");
     } catch {
       toast("Failed to load agents", "error");
     } finally {
@@ -86,6 +90,25 @@ export default function AdminAgentsPage() {
       load();
     } finally {
       setSavingId(null);
+    }
+  }
+
+  // Its own endpoint and its own button: it is a different setting from the PM
+  // defaults, and blanking it used to be a silent no-op with the save bar still lit
+  async function saveAiModel() {
+    const value = aiModel.trim();
+    if (!value) {
+      toast("Give the model a name, or the AI task generator has nothing to call.", "error");
+      return;
+    }
+    setSavingAiModel(true);
+    try {
+      await api.put("/api/settings", { aiModel: value });
+      toast("Model saved", "success");
+    } catch {
+      toast("Failed to save the model", "error");
+    } finally {
+      setSavingAiModel(false);
     }
   }
 
@@ -139,7 +162,28 @@ export default function AdminAgentsPage() {
       )}
 
       <section className="mb-8 rounded-xl border border-border bg-bg-card p-4">
-        <h2 className="font-semibold mb-1">Instance defaults</h2>
+        <h2 className="font-semibold mb-1">Task generation</h2>
+        <p className="text-xs text-text-muted mb-4">
+          The model used when a task is drafted with AI. Separate from the PM agent below —
+          it lived in one project&apos;s settings until now, despite applying to all of them.
+        </p>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Input
+            label="Model"
+            value={aiModel}
+            onChange={(e) => setAiModel(e.target.value)}
+            placeholder="gpt-4o-mini"
+          />
+        </div>
+        <div className="mt-3">
+          <Button size="sm" onClick={saveAiModel} disabled={savingAiModel}>
+            {savingAiModel ? "Saving..." : "Save model"}
+          </Button>
+        </div>
+      </section>
+
+      <section className="mb-8 rounded-xl border border-border bg-bg-card p-4">
+        <h2 className="font-semibold mb-1">PM agent defaults</h2>
         <p className="text-xs text-text-muted mb-4">
           Used by any project that leaves its own value blank. Without them the fallback is the{" "}
           <code className="font-mono">PM_MODEL</code> environment variable, which needs a redeploy to

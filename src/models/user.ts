@@ -39,6 +39,12 @@ const userSchema = new Schema<IUser>({
     enum: ["admin", "member"],
     default: "member",
   },
+  // Everything that existed before this field is a person, which is what the default has to say
+  kind: {
+    type: String,
+    enum: ["human", "machine"],
+    default: "human",
+  },
   allowedProjects: {
     type: [{ type: Schema.Types.ObjectId, ref: "Project" }],
     default: [],

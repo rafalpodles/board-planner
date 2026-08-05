@@ -6,372 +6,464 @@ import { useToast } from "@/components/ui/Toast";
 import {
   ApiCustomField,
   ApiTaskTemplate,
-  CUSTOM_FIELD_TYPES,
   CATEGORIES,
   Category,
-  CustomFieldType,
 } from "@/types";
 import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
 import { Button } from "@/components/ui/Button";
 import { CustomFieldEditor } from "./CustomFieldEditor";
+import {
+  CustomFieldForm,
+  FieldDraft,
+} from "@/components/settings/CustomFieldForm";
 import { sortedFields } from "@/lib/custom-fields";
-import { SettingsCard, EmptyState, ListRow } from "@/components/settings/SettingsCard";
+import {
+  SettingsCard,
+  EmptyState,
+  ListRow,
+} from "@/components/settings/SettingsCard";
+import { ListEditor } from "@/components/settings/ListEditor";
+import { useDirtyGroup } from "@/components/settings/settings-context";
+import { useDraft } from "@/hooks/use-draft";
+import { Popover } from "@/components/ui/Popover";
+import { SwatchPicker } from "@/components/ui/SwatchPicker";
+import { categoryDiff, CategoryDraft } from "@/lib/category-diff";
+import { diffById } from "@/lib/row-diff";
+import { nextColour } from "@/lib/palette";
 import { SectionProps } from "./types";
 
-export function TaskFieldsSection({ projectId, project, patchProject }: SectionProps) {
+export function TaskFieldsSection({
+  projectId,
+  project,
+  patchProject,
+  stats,
+}: SectionProps) {
+  // Deleting a category, field or template is admin-only on the server; offering the
+  // control to a member stages a removal that only fails when the save runs
+  const canDelete = !!project.canAdmin;
   const api = useApi();
   const { toast } = useToast();
 
-  const [newCategoryName, setNewCategoryName] = useState("");
-  const [newCategoryColor, setNewCategoryColor] = useState("#3b82f6");
-  const [newFieldName, setNewFieldName] = useState("");
-  const [newFieldType, setNewFieldType] = useState<CustomFieldType>("text");
-  const [newFieldOptions, setNewFieldOptions] = useState("");
-  const [newFieldRequired, setNewFieldRequired] = useState(false);
-  const [newTemplateName, setNewTemplateName] = useState("");
-  const [editingTemplate, setEditingTemplate] = useState<ApiTaskTemplate | null>(null);
+  // Explicit, because a row added here has no _id until it is saved
+  const categories = useDraft<{ categories: CategoryDraft[] }>({
+    categories: (project.categories || []).map((c) => ({
+      _id: c._id,
+      name: c.name,
+      color: c.color,
+    })),
+  });
+  // "new" opens the create form; a field id opens the same form over that field
+  const [fieldForm, setFieldForm] = useState<"new" | string | null>(null);
+  const templates = useDraft<{ templates: ApiTaskTemplate[] }>({
+    templates: project.taskTemplates || [],
+  });
+  const [expandedTemplate, setExpandedTemplate] = useState<string | null>(null);
 
   function fail(err: unknown, fallback: string) {
     toast(err instanceof Error ? err.message : fallback, "error");
   }
 
-  async function addCategory() {
-    if (!newCategoryName.trim()) return;
-    try {
-      const categories = await api.post(`/api/projects/${projectId}/categories`, {
-        name: newCategoryName.trim(),
-        color: newCategoryColor,
-      });
-      patchProject({ categories });
-      setNewCategoryName("");
-      setNewCategoryColor("#3b82f6");
-    } catch (err) {
-      fail(err, "Failed to add category");
-    }
-  }
-
-  async function removeCategory(name: string) {
-    try {
-      patchProject({ categories: await api.del(`/api/projects/${projectId}/categories`, { name }) });
-    } catch (err) {
-      fail(err, "Failed to remove category");
-    }
-  }
-
-  async function addCustomField() {
-    if (!newFieldName.trim()) return;
-    try {
-      const customFields: ApiCustomField[] = await api.post(
-        `/api/projects/${projectId}/custom-fields`,
-        {
-          name: newFieldName.trim(),
-          fieldType: newFieldType,
-          options:
-            newFieldType === "dropdown"
-              ? newFieldOptions.split(",").map((o) => o.trim()).filter(Boolean)
-              : [],
-          required: newFieldRequired,
+  useDirtyGroup(
+    {
+      id: "fields-categories",
+      section: "fields",
+      label: "Task fields · Categories",
+      count: categories.count,
+    },
+    {
+      save: async () => {
+        const diff = categoryDiff(
+          categories.baseline.categories,
+          categories.value.categories,
+        );
+        let saved = project.categories || [];
+        try {
+          // Renames first: a name freed by a rename may be the one an added row wants,
+          // and a removal checks the tasks still holding the old name
+          for (const change of diff.changed) {
+            saved = await api.patch(
+              `/api/projects/${projectId}/categories`,
+              change,
+            );
+          }
+          for (const added of diff.added) {
+            saved = await api.post(
+              `/api/projects/${projectId}/categories`,
+              added,
+            );
+          }
+          for (const name of diff.removed) {
+            saved = await api.del(`/api/projects/${projectId}/categories`, {
+              name,
+            });
+          }
+          toast("Categories saved", "success");
+        } catch (err) {
+          fail(err, "Failed to save categories");
+          // Whatever landed before the failure is real, so the baseline moves — but the
+          // edits that did not land stay on screen rather than being thrown away
+          patchProject({ categories: saved });
+          categories.rebase({
+            categories: saved.map((c) => ({
+              _id: c._id,
+              name: c.name,
+              color: c.color,
+            })),
+          });
         }
-      );
-      patchProject({ customFields });
-      setNewFieldName("");
-      setNewFieldOptions("");
-      setNewFieldRequired(false);
-    } catch (err) {
-      fail(err, "Failed to add custom field");
-    }
+      },
+      discard: categories.discard,
+    },
+  );
+
+  useDirtyGroup(
+    {
+      id: "fields-templates",
+      section: "fields",
+      label: "Task fields · Templates",
+      count: templates.count,
+    },
+    {
+      save: async () => {
+        const diff = diffById(
+          templates.baseline.templates,
+          templates.value.templates,
+        );
+        let saved = project.taskTemplates || [];
+        try {
+          for (const row of diff.added) {
+            // Same reason as the changed path: a name this draft remembers may have been
+            // renamed by the categories group in this very save
+            const { category, ...rest } = row;
+            const live = categories.value.categories.some((c) => c.name === category);
+            saved = await api.post(`/api/projects/${projectId}/templates`, {
+              ...rest,
+              ...(live ? { category } : {}),
+            });
+          }
+          for (const row of diff.changed) {
+            // Categories may have been renamed by their own group in this same save, so a
+            // name this draft still remembers can already be gone
+            // The categories group may be saving renames in this same pass and `project` has
+            // not caught up, so its own draft is where the new names are
+            const live = categories.value.categories.some(
+              (c) => c.name === row.category,
+            );
+            const { category, ...rest } = row;
+            saved = await api.put(`/api/projects/${projectId}/templates`, {
+              templateId: row._id,
+              ...rest,
+              ...(live ? { category } : {}),
+            });
+          }
+          for (const templateId of diff.removed) {
+            saved = await api.del(`/api/projects/${projectId}/templates`, {
+              templateId,
+            });
+          }
+          toast("Templates saved", "success");
+        } catch (err) {
+          fail(err, "Failed to save templates");
+          patchProject({ taskTemplates: saved });
+          templates.rebase({ templates: saved });
+        }
+      },
+      discard: templates.discard,
+    },
+  );
+
+  // Throws rather than toasting: the form stays open on failure and shows the reason
+  // beside the field, instead of closing and dropping what was typed
+  async function addCustomField(draft: FieldDraft) {
+    const customFields: ApiCustomField[] = await api.post(
+      `/api/projects/${projectId}/custom-fields`,
+      draft,
+    );
+    patchProject({ customFields });
+    setFieldForm(null);
   }
 
-  async function saveCustomField(fieldId: string, patch: Record<string, unknown>) {
-    try {
-      patchProject({
-        customFields: await api.patch(
-          `/api/projects/${projectId}/custom-fields/${fieldId}`,
-          patch
-        ),
-      });
-    } catch (err) {
-      fail(err, "Failed to save custom field");
-    }
+  async function saveCustomField(
+    fieldId: string,
+    patch: FieldDraft | Record<string, unknown>,
+  ) {
+    patchProject({
+      customFields: await api.patch(
+        `/api/projects/${projectId}/custom-fields/${fieldId}`,
+        patch,
+      ),
+    });
+    setFieldForm(null);
   }
 
   async function removeCustomField(fieldId: string) {
     try {
       patchProject({
-        customFields: await api.del(`/api/projects/${projectId}/custom-fields/${fieldId}`),
+        customFields: await api.del(
+          `/api/projects/${projectId}/custom-fields/${fieldId}`,
+        ),
       });
     } catch (err) {
       fail(err, "Failed to remove custom field");
     }
   }
 
-  async function addTemplate() {
-    if (!newTemplateName.trim()) return;
-    try {
-      const taskTemplates: ApiTaskTemplate[] = await api.post(
-        `/api/projects/${projectId}/templates`,
-        { name: newTemplateName.trim() }
-      );
-      patchProject({ taskTemplates });
-      setNewTemplateName("");
-    } catch (err) {
-      fail(err, "Failed to add template");
-    }
-  }
-
-  async function removeTemplate(templateId: string) {
-    try {
-      patchProject({
-        taskTemplates: await api.del(`/api/projects/${projectId}/templates`, { templateId }),
-      });
-    } catch (err) {
-      fail(err, "Failed to remove template");
-    }
-  }
-
-  async function saveTemplate(template: ApiTaskTemplate) {
-    try {
-      const taskTemplates: ApiTaskTemplate[] = await api.put(
-        `/api/projects/${projectId}/templates`,
-        { templateId: template._id, ...template }
-      );
-      patchProject({ taskTemplates });
-      setEditingTemplate(null);
-      toast("Template saved", "success");
-    } catch (err) {
-      fail(err, "Failed to save template");
-    }
+  function editTemplate(index: number, patch: Partial<ApiTaskTemplate>) {
+    templates.set(
+      "templates",
+      templates.value.templates.map((t, i) =>
+        i === index ? { ...t, ...patch } : t,
+      ),
+    );
   }
 
   return (
     <>
       <SettingsCard
         title="Categories"
-        contract="live"
         description="The kind of work a task is. A category in use by tasks can't be removed."
       >
-        <div className="flex flex-wrap gap-2">
-          {(project.categories || []).map((cat) => (
-            <span
-              key={cat._id}
-              className="inline-flex items-center gap-1 rounded-full px-3 py-1 text-sm"
-              style={{ backgroundColor: `${cat.color}33`, color: cat.color }}
-            >
-              {cat.name}
-              <button
-                onClick={() => removeCategory(cat.name)}
-                aria-label={`Remove ${cat.name}`}
-                className="ml-1 flex min-h-[24px] min-w-[24px] items-center justify-center hover:opacity-70"
+        <ListEditor
+          items={categories.value.categories}
+          onChange={(next) => categories.set("categories", next)}
+          keyOf={(c, i) => c._id ?? `new-${i}`}
+          nameOf={(c) => c.name || "this category"}
+          reorderable={false}
+          addLabel="Add category"
+          canRemove={(c) =>
+            (canDelete || !c._id) && categories.value.categories.length > 1
+          }
+          onAdd={() =>
+            categories.set("categories", [
+              ...categories.value.categories,
+              {
+                name: "",
+                color: nextColour(
+                  categories.value.categories.map((c) => c.color),
+                ),
+              },
+            ])
+          }
+          empty={
+            <EmptyState>
+              No categories yet. Add one to describe what kind of work a task
+              is.
+            </EmptyState>
+          }
+          renderRow={(cat, i) => (
+            <>
+              {/* Input renders a w-full wrapper, so it needs a sized box or it pushes
+                  everything after it onto the next line */}
+              <div className="w-[240px] shrink-0">
+                <Input
+                  value={cat.name}
+                  aria-label="Category name"
+                  placeholder="Category name..."
+                  className="min-h-[38px] py-1.5"
+                  onChange={(e) =>
+                    categories.set(
+                      "categories",
+                      categories.value.categories.map((c, idx) =>
+                        idx === i ? { ...c, name: e.target.value } : c,
+                      ),
+                    )
+                  }
+                />
+              </div>
+              <Popover
+                width="w-auto"
+                trigger={({ toggle }) => (
+                  <button
+                    type="button"
+                    onClick={toggle}
+                    aria-label={`Colour for ${cat.name || "this category"}`}
+                    className="focus-ring h-9 w-9 shrink-0 rounded-lg border border-border"
+                    style={{ backgroundColor: cat.color }}
+                  />
+                )}
               >
-                &times;
-              </button>
-            </span>
-          ))}
-          {(project.categories || []).length === 0 && (
-            <EmptyState>No categories yet. Add one to describe what kind of work a task is.</EmptyState>
+                {({ close }) => (
+                  <div className="p-2">
+                    <SwatchPicker
+                      value={cat.color}
+                      label={`Colour for ${cat.name || "this category"}`}
+                      onChange={(hex) => {
+                        categories.set(
+                          "categories",
+                          categories.value.categories.map((c, idx) =>
+                            idx === i ? { ...c, color: hex } : c,
+                          ),
+                        );
+                        close();
+                      }}
+                    />
+                  </div>
+                )}
+              </Popover>
+            </>
           )}
-        </div>
-        <div className="flex items-center gap-2">
-          <Input
-            value={newCategoryName}
-            onChange={(e) => setNewCategoryName(e.target.value)}
-            placeholder="Category name..."
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                addCategory();
-              }
-            }}
-          />
-          <input
-            type="color"
-            value={newCategoryColor}
-            onChange={(e) => setNewCategoryColor(e.target.value)}
-            aria-label="Category colour"
-            className="h-10 w-10 cursor-pointer rounded-lg border border-border bg-transparent"
-          />
-          <Button variant="secondary" onClick={addCategory}>
-            Add
-          </Button>
-        </div>
+        />
       </SettingsCard>
-
 
       <SettingsCard
         title="Custom fields"
-        contract="live"
-        description="Extra fields shown on every task in this project."
+        description="Extra fields carried by every task in this project. Archived fields keep the values already on tasks and stop appearing in pickers."
       >
         <div className="space-y-2">
-          {sortedFields(project.customFields || []).map((field) => (
-            <CustomFieldEditor
-              key={field._id}
-              field={field}
-              onSave={(patch) => saveCustomField(field._id, patch)}
-              onDelete={() => removeCustomField(field._id)}
-            />
-          ))}
-          {(project.customFields || []).length === 0 && (
-            <EmptyState>No custom fields yet. Add one to capture something the built-in fields don&apos;t.</EmptyState>
-          )}
-        </div>
-        <div className="space-y-2">
-          <div className="flex gap-2">
-            <Input
-              value={newFieldName}
-              onChange={(e) => setNewFieldName(e.target.value)}
-              placeholder="Field name..."
-            />
-            <select
-              value={newFieldType}
-              onChange={(e) => setNewFieldType(e.target.value as CustomFieldType)}
-              className="rounded-lg border border-border bg-bg-input px-3 py-2 text-sm"
-            >
-              {CUSTOM_FIELD_TYPES.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
-          </div>
-          {newFieldType === "dropdown" && (
-            <Input
-              value={newFieldOptions}
-              onChange={(e) => setNewFieldOptions(e.target.value)}
-              placeholder="Options (comma-separated)..."
-            />
-          )}
-          <div className="flex items-center gap-4">
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={newFieldRequired}
-                onChange={(e) => setNewFieldRequired(e.target.checked)}
-                className="rounded border-border"
+          {sortedFields(project.customFields || []).map((field) =>
+            fieldForm === field._id ? (
+              <CustomFieldForm
+                key={field._id}
+                field={field}
+                onSubmit={(draft) => saveCustomField(field._id, draft)}
+                onCancel={() => setFieldForm(null)}
               />
-              Required
-            </label>
-            <Button variant="secondary" size="sm" onClick={addCustomField}>
-              Add field
-            </Button>
-          </div>
+            ) : (
+              <CustomFieldEditor
+                key={field._id}
+                field={field}
+                onEdit={() => setFieldForm(field._id)}
+                onSave={(patch) => saveCustomField(field._id, patch)}
+                onDelete={() => removeCustomField(field._id)}
+                usage={
+                  stats?.customFieldUsage[field._id] ?? (stats ? 0 : undefined)
+                }
+                canDelete={canDelete}
+              />
+            ),
+          )}
+          {(project.customFields || []).length === 0 && fieldForm !== "new" && (
+            <EmptyState>
+              No custom fields yet. Add one to capture something the built-in
+              fields don&apos;t.
+            </EmptyState>
+          )}
         </div>
+
+        {fieldForm === "new" ? (
+          <CustomFieldForm
+            onSubmit={addCustomField}
+            onCancel={() => setFieldForm(null)}
+          />
+        ) : (
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => setFieldForm("new")}
+          >
+            + Add field
+          </Button>
+        )}
       </SettingsCard>
 
       <SettingsCard
         title="Task templates"
-        contract="live"
         description="Pre-filled starting points for tasks people create often."
       >
-        <div className="space-y-2">
-          {(project.taskTemplates || []).map((tpl) => (
-            <div key={tpl._id} className="rounded-lg border border-border p-3">
-              {editingTemplate?._id === tpl._id ? (
-                <div className="space-y-3">
+        <ListEditor
+          items={templates.value.templates}
+          onChange={(next) => templates.set("templates", next)}
+          keyOf={(t, i) => t._id || `new-${i}`}
+          nameOf={(t) => t.name || "this template"}
+          canRemove={(t) => canDelete || !t._id}
+          reorderable={false}
+          addLabel="Add template"
+          onAdd={() =>
+            templates.set("templates", [
+              ...templates.value.templates,
+              {
+                _id: "",
+                name: "",
+                title: "",
+                description: "",
+                category: categories.value.categories[0]?.name ?? CATEGORIES[0],
+                acceptanceCriteria: "",
+              } as ApiTaskTemplate,
+            ])
+          }
+          empty={
+            <EmptyState>
+              Add a template to skip filling in the same fields every time.
+            </EmptyState>
+          }
+          renderRow={(tpl, i) => {
+            const key = tpl._id || `new-${i}`;
+            const open = expandedTemplate === key;
+            return (
+              <>
+                <div className="w-[220px] shrink-0">
                   <Input
-                    label="Name"
-                    value={editingTemplate.name}
-                    onChange={(e) => setEditingTemplate({ ...editingTemplate, name: e.target.value })}
+                    value={tpl.name}
+                    aria-label="Template name"
+                    placeholder="Template name..."
+                    className="min-h-[38px] py-1.5"
+                    onChange={(e) => editTemplate(i, { name: e.target.value })}
                   />
-                  <Input
-                    label="Title template"
-                    value={editingTemplate.title}
-                    onChange={(e) => setEditingTemplate({ ...editingTemplate, title: e.target.value })}
-                    placeholder="Pre-filled title"
-                  />
-                  <div className="grid gap-2 sm:grid-cols-2">
+                </div>
+                <span className="text-xs text-text-muted">{tpl.category}</span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setExpandedTemplate(open ? null : key)}
+                >
+                  {open ? "Done" : "Edit"}
+                </Button>
+                {open && (
+                  <div className="w-full space-y-3 pt-2">
+                    <Input
+                      label="Title template"
+                      value={tpl.title}
+                      placeholder="Pre-filled title"
+                      onChange={(e) =>
+                        editTemplate(i, { title: e.target.value })
+                      }
+                    />
                     <div>
-                      <label className="mb-1 block text-sm font-medium text-text-muted">Category</label>
+                      <label className="mb-1 block text-sm font-medium text-text-muted">
+                        Category
+                      </label>
                       <select
-                        value={editingTemplate.category}
+                        value={tpl.category}
+                        aria-label="Template category"
                         onChange={(e) =>
-                          setEditingTemplate({
-                            ...editingTemplate,
+                          editTemplate(i, {
                             category: e.target.value as Category,
                           })
                         }
-                        className="w-full rounded-lg border border-border bg-bg-input px-3 py-2 text-sm"
+                        className="focus-ring w-full rounded-lg border border-border bg-bg-input px-3 py-2 text-sm"
                       >
-                        {(project.categories?.map((x) => x.name) || CATEGORIES).map((c) => (
+                        {(
+                          project.categories?.map((x) => x.name) || CATEGORIES
+                        ).map((c) => (
                           <option key={c} value={c}>
                             {c}
                           </option>
                         ))}
                       </select>
                     </div>
+                    <Textarea
+                      label="Description"
+                      value={tpl.description}
+                      rows={3}
+                      onChange={(e) =>
+                        editTemplate(i, { description: e.target.value })
+                      }
+                    />
+                    <Textarea
+                      label="Acceptance Criteria"
+                      value={tpl.acceptanceCriteria}
+                      rows={3}
+                      onChange={(e) =>
+                        editTemplate(i, { acceptanceCriteria: e.target.value })
+                      }
+                    />
                   </div>
-                  <Textarea
-                    label="Description"
-                    value={editingTemplate.description}
-                    onChange={(e) =>
-                      setEditingTemplate({ ...editingTemplate, description: e.target.value })
-                    }
-                    rows={3}
-                  />
-                  <Textarea
-                    label="Acceptance Criteria"
-                    value={editingTemplate.acceptanceCriteria}
-                    onChange={(e) =>
-                      setEditingTemplate({ ...editingTemplate, acceptanceCriteria: e.target.value })
-                    }
-                    rows={3}
-                  />
-                  <div className="flex gap-2">
-                    <Button size="sm" onClick={() => saveTemplate(editingTemplate)}>
-                      Save
-                    </Button>
-                    <Button size="sm" variant="secondary" onClick={() => setEditingTemplate(null)}>
-                      Cancel
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex items-center justify-between">
-                  <div>
-                    <span className="text-sm font-medium">{tpl.name}</span>
-                    <span className="ml-2 text-xs text-text-muted">
-                      {tpl.category}
-                    </span>
-                  </div>
-                  <div className="flex gap-1">
-                    <button
-                      onClick={() => setEditingTemplate({ ...tpl })}
-                      className="px-2 py-1 text-xs text-text-muted hover:text-text"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      onClick={() => removeTemplate(tpl._id)}
-                      className="px-2 py-1 text-xs text-text-muted hover:text-danger"
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          ))}
-          {(project.taskTemplates || []).length === 0 && (
-            <EmptyState>Add a template to skip filling in the same fields every time.</EmptyState>
-          )}
-        </div>
-        <div className="flex gap-2">
-          <Input
-            value={newTemplateName}
-            onChange={(e) => setNewTemplateName(e.target.value)}
-            placeholder="Template name..."
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                addTemplate();
-              }
-            }}
-          />
-          <Button variant="secondary" onClick={addTemplate}>
-            Add
-          </Button>
-        </div>
+                )}
+              </>
+            );
+          }}
+        />
       </SettingsCard>
     </>
   );

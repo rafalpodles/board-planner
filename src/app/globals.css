@@ -128,12 +128,13 @@ body {
   outline-offset: -2px;
 }
 
-/* Scrolls, but without a visible bar */
-.no-scrollbar {
+/* Every scroll container scrolls without a visible bar. Only the bar's appearance
+   goes — wheel, trackpad and keyboard scrolling are untouched. */
+* {
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
-.no-scrollbar::-webkit-scrollbar {
+*::-webkit-scrollbar {
   display: none;
 }
 

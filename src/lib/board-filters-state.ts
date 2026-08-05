@@ -1,5 +1,5 @@
 import { ApiCustomField, SortDir, SortField, SortKey } from "@/types";
-import { ListColumnId, DEFAULT_HIDDEN, sanitizeHidden } from "./list-columns";
+import { ListColumnId, defaultHidden, sanitizeHidden } from "./list-columns";
 
 /** Range for number and date fields; `value` carries every other type */
 export interface FieldFilter {
@@ -24,6 +24,12 @@ export interface PersistedBoardFilters {
   showFilters: boolean;
   hiddenColumns: ListColumnId[];
 }
+
+/**
+ * Sentinel for "has no assignee" in the assignee filter. Not "" — that already means
+ * "any assignee" — and the "@" keeps it out of reach of a real username.
+ */
+export const UNASSIGNED = "@none";
 
 export const EMPTY_FILTERS: BoardFilterValues = {
   fields: {},
@@ -63,7 +69,7 @@ const DEFAULTS: PersistedBoardFilters = {
   sortField: "manual",
   sortDir: "asc",
   showFilters: false,
-  hiddenColumns: DEFAULT_HIDDEN,
+  hiddenColumns: [],
 };
 
 function str(value: unknown): string {
@@ -77,14 +83,23 @@ export function migratePersistedFilters(
   currentUsername?: string,
   // Passed so a hidden project-field column survives a reload, and an archived
   // field's entry is dropped instead of lingering where nobody can clear it
-  customFields: ApiCustomField[] = []
+  customFields: ApiCustomField[] = [],
+  // Undefined means "not known yet" and leaves the filter alone; a list means a name
+  // outside it was renamed away and the filter has to go with it
+  categories?: string[]
 ): PersistedBoardFilters {
-  if (!raw || typeof raw !== "object") return DEFAULTS;
+  if (!raw || typeof raw !== "object") {
+    return { ...DEFAULTS, hiddenColumns: defaultHidden(customFields) };
+  }
   const blob = raw as Record<string, unknown>;
   const stored = (blob.filters ?? {}) as Record<string, unknown>;
 
   const filters = { ...EMPTY_FILTERS };
   for (const key of FILTER_KEYS) filters[key] = str(stored[key]);
+
+  if (categories && filters.category && !categories.includes(filters.category)) {
+    filters.category = "";
+  }
 
   // An explicit assignee is a later, more specific choice than the legacy toggle
   if (blob.myTasks === true && !filters.assignee && currentUsername) {

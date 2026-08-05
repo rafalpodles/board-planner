@@ -204,8 +204,11 @@ export function parseOptions(
     const source = typeof raw === "string" ? { value: raw } : (raw as Partial<ICustomFieldOption>);
     const value = String(source?.value ?? "").trim();
     if (!value) return { error: "Every option needs a value" };
-    // Keep the id of an option that already exists, or every task loses it on rename
-    const id = source?.id && byId.has(source.id) ? source.id : (source?.id ?? newOptionId(value));
+    // Keep the id of an option that already exists, or every task loses it on rename.
+    // `||` not `??`: the editor sends "" for a row the user just added, and ?? keeps
+    // an empty string — which then reads as "no value" everywhere downstream, and
+    // collides with the next new option on the uniqueness check.
+    const id = source?.id && byId.has(source.id) ? source.id : source?.id || newOptionId(value);
     options.push({
       id,
       value,

@@ -1,0 +1,17 @@
+{
+  "name": "claudeplanner-worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/main.js",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.0",
+    "typescript": "^5.9.3",
+    "vitest": "^3.0.0"
+  }
+}

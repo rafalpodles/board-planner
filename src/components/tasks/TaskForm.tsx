@@ -1,20 +1,17 @@
 "use client";
 
-import { useState, useCallback, useRef, FormEvent, useEffect, type CSSProperties } from "react";
+import { useState, useCallback, FormEvent, useEffect, type CSSProperties } from "react";
 import { useApi } from "@/hooks/use-api";
-import { emitBoardRefresh } from "@/lib/board-refresh";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { MarkdownEditor } from "@/components/ui/MarkdownEditor";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
 import {
-  ApiTask,
   ApiUser,
   ApiTaskTemplate,
   ApiSprint,
   ApiCustomField,
-  ApiChecklistItem,
   RecurrenceFrequency,
   TaskStatus,
   Priority,
@@ -29,39 +26,18 @@ import { parseChecklistString } from "@/lib/checklist";
 import { activeFields, sortedFields, orderedOptions } from "@/lib/custom-fields";
 import type { GeneratedTask } from "@/lib/ai";
 
-const AUTOSAVE_DEBOUNCE_MS = 700;
-
-type AutoSaveState = "idle" | "saving" | "saved" | "error";
-
-// Mirrors the shape the form submits, so a field-by-field diff against it is meaningful
-function serverSnapshot(task: ApiTask): Record<string, unknown> {
-  return {
-    title: task.title || "",
-    description: task.description || "",
-    priority: task.priority || "medium",
-    category: task.category,
-    status: task.status,
-    assignee:
-      (task.assignee && typeof task.assignee === "object" ? task.assignee.username : "") || null,
-    dueDate: (task.dueDate ? task.dueDate.substring(0, 10) : "") || null,
-    checklist: task.checklist || [],
-    sprint: task.sprint || null,
-    recurrence: task.recurrence
-      ? { frequency: task.recurrence.frequency, interval: task.recurrence.interval }
-      : null,
-    customFieldValues: task.customFieldValues || {},
-  };
-}
-
+/**
+ * Creates a task. An existing one is edited in place by the detail view, which owns
+ * the autosave — see `detail/useTaskEditor`.
+ */
 interface TaskFormProps {
   projectId: string;
   projectKey?: string;
-  task?: ApiTask;
   categories?: string[];
   columns?: ApiProjectColumn[];
   taskTemplates?: ApiTaskTemplate[];
   sprints?: ApiSprint[];
-  /** Pre-selects a sprint when creating; ignored when editing an existing task */
+  /** Pre-selects a sprint on the new task */
   defaultSprint?: string;
   customFields?: ApiCustomField[];
   onSaved: () => void;
@@ -73,7 +49,6 @@ interface TaskFormProps {
 export function TaskForm({
   projectId,
   projectKey,
-  task,
   categories = [],
   columns,
   taskTemplates = [],
@@ -84,38 +59,24 @@ export function TaskForm({
   parentTaskId,
   onCancel,
 }: TaskFormProps) {
-  const [title, setTitle] = useState(task?.title || "");
-  const [description, setDescription] = useState(task?.description || "");
-  const [priority, setPriority] = useState<Priority>(task?.priority || "medium");
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [priority, setPriority] = useState<Priority>("medium");
   const [category, setCategory] = useState<Category>(
-    task?.category || (categories.includes("user-story") ? "user-story" : categories[0] || "user-story")
+    categories.includes("user-story") ? "user-story" : categories[0] || "user-story"
   );
   const formColumns = effectiveColumns(columns);
   const [status, setStatus] = useState<TaskStatus>(
-    task?.status || ((formColumns.find((c) => c.role === "backlog")?.id ?? formColumns[0].id) as TaskStatus)
+    (formColumns.find((c) => c.role === "backlog")?.id ?? formColumns[0].id) as TaskStatus
   );
-  const [assignee, setAssignee] = useState(
-    task?.assignee && typeof task.assignee === "object"
-      ? task.assignee.username
-      : ""
-  );
-  const [dueDate, setDueDate] = useState(
-    task?.dueDate ? task.dueDate.substring(0, 10) : ""
-  );
-  const [checklist, setChecklist] = useState<{ text: string; done: boolean }[]>(
-    task?.checklist || []
-  );
+  const [assignee, setAssignee] = useState("");
+  const [dueDate, setDueDate] = useState("");
+  const [checklist, setChecklist] = useState<{ text: string; done: boolean }[]>([]);
   const [newChecklistItem, setNewChecklistItem] = useState("");
-  const [sprint, setSprint] = useState(task?.sprint || defaultSprint || "");
-  const [customFieldValues, setCustomFieldValues] = useState<Record<string, unknown>>(
-    task?.customFieldValues || {}
-  );
-  const [recurrenceFreq, setRecurrenceFreq] = useState<RecurrenceFrequency | "">(
-    task?.recurrence?.frequency || ""
-  );
-  const [recurrenceInterval, setRecurrenceInterval] = useState(
-    task?.recurrence?.interval || 1
-  );
+  const [sprint, setSprint] = useState(defaultSprint || "");
+  const [customFieldValues, setCustomFieldValues] = useState<Record<string, unknown>>({});
+  const [recurrenceFreq, setRecurrenceFreq] = useState<RecurrenceFrequency | "">("");
+  const [recurrenceInterval, setRecurrenceInterval] = useState(1);
   const [users, setUsers] = useState<ApiUser[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -123,18 +84,15 @@ export function TaskForm({
   const [aiLoading, setAiLoading] = useState(false);
   const [aiEnabled, setAiEnabled] = useState(false);
   const [aiInsights, setAiInsights] = useState<GeneratedTask | null>(null);
-  const [autoSaveState, setAutoSaveState] = useState<AutoSaveState>("idle");
   const api = useApi();
   const { toast } = useToast();
 
   useEffect(() => {
     api.get("/api/users").then(setUsers).catch(() => toast("Failed to load users", "error"));
-    if (!task) {
-      api
-        .get(`/api/projects/${projectId}/ai/generate-task`)
-        .then((res: { enabled: boolean }) => setAiEnabled(res.enabled))
-        .catch(() => setAiEnabled(false));
-    }
+    api
+      .get(`/api/projects/${projectId}/ai/generate-task`)
+      .then((res: { enabled: boolean }) => setAiEnabled(res.enabled))
+      .catch(() => setAiEnabled(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -188,132 +146,26 @@ export function TaskForm({
     customFieldValues,
   };
 
-  // What the server last told us each field holds. A field counts as edited only when it
-  // differs from this, and auto-save sends edited fields alone — so a concurrent change to
-  // a field this form never touched (a PM status move, say) is not written back over.
-  const serverValues = useRef<Record<string, unknown> | null>(task ? serverSnapshot(task) : null);
-  const localValues = useRef(body as Record<string, unknown>);
-  localValues.current = body as Record<string, unknown>;
-
-  function applyServerValue(key: string, value: unknown) {
-    switch (key) {
-      case "title": return setTitle(value as string);
-      case "description": return setDescription(value as string);
-      case "priority": return setPriority(value as Priority);
-      case "category": return setCategory(value as Category);
-      case "status": return setStatus(value as TaskStatus);
-      case "assignee": return setAssignee((value as string) ?? "");
-      case "dueDate": return setDueDate((value as string) ?? "");
-      case "checklist": return setChecklist(value as { text: string; done: boolean }[]);
-      case "sprint": return setSprint((value as string) ?? "");
-      case "customFieldValues": return setCustomFieldValues(value as Record<string, unknown>);
-      case "recurrence": {
-        const rec = value as { frequency?: RecurrenceFrequency; interval?: number } | null;
-        setRecurrenceFreq(rec?.frequency ?? "");
-        setRecurrenceInterval(rec?.interval ?? 1);
-        return;
-      }
-    }
-  }
-
-  // The task was reloaded from the server: adopt whatever changed underneath us, but only
-  // for fields the user has not edited — their in-progress edits win and stay pending.
-  useEffect(() => {
-    if (!task) return;
-    const next = serverSnapshot(task);
-    const previous = serverValues.current;
-    if (!previous) {
-      serverValues.current = next;
-      return;
-    }
-    for (const key of Object.keys(next)) {
-      const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
-      if (same(next[key], previous[key])) continue;
-      if (same(localValues.current[key], previous[key])) applyServerValue(key, next[key]);
-    }
-    serverValues.current = next;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [task]);
-
-  // Auto-save (existing tasks only — a new task has nothing to PATCH until it is created).
-  const editedFields = (): Record<string, unknown> => {
-    const base = serverValues.current;
-    if (!base) return {};
-    const edited: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(body)) {
-      if (JSON.stringify(value) !== JSON.stringify(base[key])) edited[key] = value;
-    }
-    return edited;
-  };
-
-  const signature = JSON.stringify(editedFields());
-
-  async function persist(edited: Record<string, unknown>) {
-    if (!task) return;
-    setAutoSaveState("saving");
-    try {
-      await api.put(`/api/projects/${projectId}/tasks/${task._id}`, edited);
-      serverValues.current = { ...(serverValues.current || {}), ...edited };
-      setAutoSaveState("saved");
-      emitBoardRefresh(projectId);
-    } catch {
-      setAutoSaveState("error");
-    }
-  }
-
-  useEffect(() => {
-    if (!task || signature === "{}") return;
-    const timer = setTimeout(() => persist(JSON.parse(signature)), AUTOSAVE_DEBOUNCE_MS);
-    return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [signature, task?._id, projectId]);
-
-  // Closing within the debounce window used to drop the edit on the floor: the
-  // cleanup above also runs on unmount. Now the pending edit goes out on the way.
-  const pendingRef = useRef("{}");
-  pendingRef.current = signature;
-  useEffect(() => {
-    if (!task) return;
-    const taskId = task._id;
-    return () => {
-      const pending = pendingRef.current;
-      if (pending === "{}") return;
-      api
-        .put(`/api/projects/${projectId}/tasks/${taskId}`, JSON.parse(pending))
-        .then(() => emitBoardRefresh(projectId))
-        .catch(() => {});
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [task?._id, projectId]);
-
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError("");
     setLoading(true);
 
     try {
-      if (task) {
-        // Same rule as auto-save: only what this form actually edited goes over the wire
-        const edited = editedFields();
-        await api.put(`/api/projects/${projectId}/tasks/${task._id}`, edited);
-        serverValues.current = { ...(serverValues.current || {}), ...edited };
-        setAutoSaveState("saved");
-      } else {
-        const created = await api.post(`/api/projects/${projectId}/tasks`, body);
-        if (parentTaskId) {
-          try {
-            await api.post(`/api/projects/${projectId}/tasks/${parentTaskId}/links`, {
-              taskId: created._id,
-              type: "parent_of",
-            });
-          } catch {
-            // The task exists by now; reporting a plain failure would invite a
-            // second submit and a duplicate
-            toast("Task created, but linking it to the parent failed", "error");
-          }
+      const created = await api.post(`/api/projects/${projectId}/tasks`, body);
+      if (parentTaskId) {
+        try {
+          await api.post(`/api/projects/${projectId}/tasks/${parentTaskId}/links`, {
+            taskId: created._id,
+            type: "parent_of",
+          });
+        } catch {
+          // The task exists by now; reporting a plain failure would invite a
+          // second submit and a duplicate
+          toast("Task created, but linking it to the parent failed", "error");
         }
       }
-      toast(task ? "Task updated" : "Task created", "success");
+      toast("Task created", "success");
       onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save");
@@ -324,35 +176,7 @@ export function TaskForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      {task && (
-        <div className="flex justify-end">
-          {autoSaveState === "error" ? (
-            <button
-              type="button"
-              onClick={() => persist(editedFields())}
-              className="focus-ring flex items-center gap-1.5 rounded px-1.5 py-0.5 text-xs text-danger hover:underline"
-            >
-              ⚠ Save failed — retry
-            </button>
-          ) : (
-            <span
-              aria-live="polite"
-              className="flex items-center gap-1.5 px-1.5 py-0.5 text-xs text-text-muted"
-            >
-              {autoSaveState === "saving" && (
-                <span className="h-3 w-3 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-              )}
-              {autoSaveState === "saving"
-                ? "Saving…"
-                : autoSaveState === "saved"
-                  ? "✓ Saved"
-                  : "Saves automatically"}
-            </span>
-          )}
-        </div>
-      )}
-
-      {!task && taskTemplates.length > 0 && (
+      {taskTemplates.length > 0 && (
         <Select
           label="Template"
           value=""
@@ -370,7 +194,7 @@ export function TaskForm({
         />
       )}
 
-      {aiEnabled && !task && (
+      {aiEnabled && (
         <div className="bg-bg-input border border-border rounded-lg p-3 space-y-2">
           <label className="text-sm font-medium">AI Assist</label>
           <div className="flex gap-2">
@@ -732,14 +556,11 @@ export function TaskForm({
       {error && <p className="text-sm text-danger">{error}</p>}
 
       <div className="flex gap-3 items-center">
-        {/* An existing task saves itself; only creation still needs a verb */}
-        {!task && (
-          <Button type="submit" disabled={loading}>
-            {loading ? "Saving..." : "Create Task"}
-          </Button>
-        )}
+        <Button type="submit" disabled={loading}>
+          {loading ? "Saving..." : "Create Task"}
+        </Button>
         <Button type="button" variant="secondary" onClick={onCancel}>
-          {task ? "Close" : "Cancel"}
+          Cancel
         </Button>
       </div>
     </form>

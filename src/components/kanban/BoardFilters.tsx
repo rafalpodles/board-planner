@@ -27,11 +27,13 @@ import {
   countActiveFilters,
   migratePersistedFilters,
   isFieldFilterSet,
+  UNASSIGNED,
   type FieldFilter,
   type BuiltInFilterKey,
 } from "@/lib/board-filters-state";
 import {
   activeFields,
+  isOptionField,
   matchesAllFieldFilters,
   orderedOptions,
   sortedFields,
@@ -80,6 +82,9 @@ interface BoardFiltersProps {
   hiddenColumns?: ListColumnId[];
   customFields?: ApiCustomField[];
   onHiddenColumnsChange?: (hidden: ListColumnId[]) => void;
+  /** Separate from the handler above: the board has no columns to pick, but it still
+      has to hydrate the stored set, or the next load writes an empty one back */
+  showColumnPicker?: boolean;
   onFilter: (filtered: ApiTask[]) => void;
 }
 
@@ -98,6 +103,7 @@ export function BoardFilters({
   sortContext,
   hiddenColumns,
   onHiddenColumnsChange,
+  showColumnPicker,
   onFilter,
   customFields = [],
 }: BoardFiltersProps) {
@@ -115,7 +121,14 @@ export function BoardFilters({
     } catch {
       raw = null;
     }
-    const state = migratePersistedFilters(raw, currentUsername, customFields);
+    // Empty means the project's categories have not loaded, not that it has none —
+    // passing [] here would clear everyone's category filter on every first render
+    const state = migratePersistedFilters(
+      raw,
+      currentUsername,
+      customFields,
+      categories.length > 0 ? categories : undefined
+    );
     setFilters((f) => ({ ...f, ...state.filters }));
     onSortChange(state.sortField, state.sortDir);
     onHiddenColumnsChange?.(state.hiddenColumns);
@@ -179,7 +192,9 @@ export function BoardFilters({
         return key.includes(q) || String(t.taskNumber).startsWith(q);
       });
     }
-    if (filters.assignee) {
+    if (filters.assignee === UNASSIGNED) {
+      result = result.filter((t) => !t.assignee);
+    } else if (filters.assignee) {
       result = result.filter(
         (t) =>
           t.assignee &&
@@ -241,7 +256,12 @@ export function BoardFilters({
     setFilters((f) => ({ ...f, [key]: "" }));
   }
 
-  const filterableFields = sortedFields(activeFields(customFields)).filter((f) => f.filterable);
+  // An option field with no options renders a picker whose only entry is "All", so it
+  // filters nothing. Every other type carries its own values — a checkbox is yes/no,
+  // and text, number and date are typed in.
+  const filterableFields = sortedFields(activeFields(customFields)).filter(
+    (f) => f.filterable && (!isOptionField(f) || orderedOptions(f).length > 0)
+  );
 
   function fieldFilter(fieldId: string): FieldFilter {
     return filters.fields?.[fieldId] ?? {};
@@ -276,8 +296,9 @@ export function BoardFilters({
   if (filters.assignee) {
     chips.push({
       key: "assignee",
-      label: filters.assignee,
-      initial: filters.assignee.charAt(0).toUpperCase(),
+      label: filters.assignee === UNASSIGNED ? "Unassigned" : filters.assignee,
+      initial:
+        filters.assignee === UNASSIGNED ? "–" : filters.assignee.charAt(0).toUpperCase(),
     });
   }
   if (filters.category) {
@@ -417,6 +438,7 @@ export function BoardFilters({
                   className={selectClass}
                 >
                   <option value="">All assignees</option>
+                  <option value={UNASSIGNED}>Unassigned</option>
                   {assignees.map((a) => (
                     <option key={a.username} value={a.username}>
                       {a.username}
@@ -566,16 +588,25 @@ export function BoardFilters({
         </select>
         <div className="h-full w-px bg-border" />
         <button
+          // Manual order is the order people dragged the rows into; reversing it
+          // would also invert what a drag means, since the list reindexes on drop
+          disabled={sortField === "manual"}
           onClick={() => onSortChange(sortField, sortDir === "asc" ? "desc" : "asc")}
-          title={sortDir === "asc" ? "Ascending" : "Descending"}
+          title={
+            sortField === "manual"
+              ? "Manual order has no direction"
+              : sortDir === "asc"
+                ? "Ascending"
+                : "Descending"
+          }
           aria-label={sortDir === "asc" ? "Sort ascending" : "Sort descending"}
-          className="focus-ring-inset h-full w-[30px] rounded-r-lg text-[13px] text-text-muted transition-colors hover:text-text"
+          className="focus-ring-inset h-full w-[30px] rounded-r-lg text-[13px] text-text-muted transition-colors hover:text-text disabled:pointer-events-none disabled:opacity-40"
         >
           {sortDir === "asc" ? "↑" : "↓"}
         </button>
       </div>
 
-      {onHiddenColumnsChange && (
+      {showColumnPicker && onHiddenColumnsChange && (
         <ColumnPicker
           hidden={hiddenColumns ?? []}
           onChange={onHiddenColumnsChange}

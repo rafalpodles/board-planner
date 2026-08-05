@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { withProjectAccess } from "@/lib/middleware";
+import { withProjectAccess, withProjectAdmin } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { Task } from "@/models/task";
 import {
@@ -66,7 +66,7 @@ export const PATCH = withProjectAccess(async (request, { params }) => {
   return NextResponse.json(project.customFields);
 });
 
-export const DELETE = withProjectAccess(async (_request, { params }) => {
+export const DELETE = withProjectAdmin(async (_request, { params }) => {
   const { projectId, fieldId } = await params;
   await connectDB();
 

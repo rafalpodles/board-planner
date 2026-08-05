@@ -62,10 +62,6 @@ const taskSchema = new Schema<ITask>(
       }],
       default: [],
     },
-    pinned: {
-      type: Boolean,
-      default: false,
-    },
     blockedBy: {
       type: [{ type: Schema.Types.ObjectId, ref: "Task" }],
       default: [],
@@ -109,6 +105,18 @@ const taskSchema = new Schema<ITask>(
       type: Number,
       default: 0,
     },
+    execution: {
+      runId: { type: String, default: "" },
+      workerId: { type: String, default: "" },
+      attempts: { type: Number, default: 0 },
+      startedAt: { type: Date, default: null },
+      lastError: { type: String, default: "" },
+      // No defaults: the phase trio is written by a live run and unset when it ends, so a task
+      // that is not running carries no phase fields at all
+      phase: { type: String },
+      phaseAt: { type: Date },
+      phaseSeq: { type: Number },
+    },
     createdBy: {
       type: Schema.Types.ObjectId,
       ref: "User",
@@ -124,6 +132,8 @@ taskSchema.index({ project: 1, taskNumber: 1 }, { unique: true });
 taskSchema.index({ project: 1, status: 1 });
 taskSchema.index({ assignee: 1 });
 taskSchema.index({ sprint: 1 });
+// The fleet console polls the worker join every 5s; unindexed, each poll scans the collection
+taskSchema.index({ "execution.workerId": 1 });
 
 export const Task: Model<ITask> =
   mongoose.models.Task || mongoose.model<ITask>("Task", taskSchema);

@@ -1,6 +1,7 @@
 # dependencies
 /node_modules
 /mcp-server/node_modules
+/worker/node_modules
 
 # next.js
 /.next/
@@ -32,3 +33,12 @@ next-env.d.ts
 
 # mcp-server build
 /mcp-server/dist/
+
+# worker build
+/worker/dist/
+
+# superpowers sdd scratch
+/.superpowers/
+
+# Database snapshots taken before migrations — never commit, they hold every task
+backups/

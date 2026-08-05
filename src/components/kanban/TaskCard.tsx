@@ -96,11 +96,6 @@ export function TaskCard({
     >
       <div className="flex flex-wrap items-center gap-1 mb-2 pr-6">
         <span className="text-xs font-mono text-text-muted flex items-center gap-1 mr-0.5">
-          {task.pinned && (
-            <svg className="w-3 h-3 text-primary" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2z"/>
-            </svg>
-          )}
           {task.recurrence && (
             <svg className="w-3 h-3 text-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />

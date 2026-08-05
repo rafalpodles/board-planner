@@ -2,10 +2,13 @@ import { NextResponse } from "next/server";
 import { isValidObjectId, Types } from "mongoose";
 import { getAuthUser, RateLimitError } from "./auth";
 import { connectDB } from "./db";
+import { verifyWorkerCredential } from "./worker-service";
 import { Project } from "@/models/project";
+import { User } from "@/models/user";
 import { Task } from "@/models/task";
-import { IProject, IUser } from "@/types";
+import { IProject, IUser, IWorker } from "@/types";
 import { PROJECT_KEY_PATTERN } from "./urls";
+import { matchRepo } from "./repo-match";
 
 type AuthenticatedHandler = (
   request: Request,
@@ -42,6 +45,42 @@ export function withAdmin(handler: AuthenticatedHandler) {
     }
     return handler(request, context);
   });
+}
+
+export function protocolOf(request: Request): number {
+  return Number(request.headers.get("x-cp-protocol") ?? NaN);
+}
+
+export function withWorker(
+  handler: (
+    request: Request,
+    context: { params: Promise<Record<string, string>>; worker: IWorker }
+  ) => Promise<Response>
+) {
+  return async (request: Request, context: { params: Promise<Record<string, string>> }) => {
+    const header = request.headers.get("authorization") ?? "";
+    const workerId = request.headers.get("x-worker-id") ?? "";
+    if (!header.startsWith("Bearer ") || !workerId) {
+      return NextResponse.json({ error: "Worker credential required" }, { status: 401 });
+    }
+
+    const worker = await verifyWorkerCredential(workerId, header.slice("Bearer ".length));
+    if (!worker) {
+      return NextResponse.json({ error: "Worker credential rejected" }, { status: 401 });
+    }
+    // credentialHash is only loaded to verify the credential above; clear it so no
+    // downstream handler can spread it into a response
+    worker.credentialHash = "";
+
+    // The path segment is authoritative on /api/workers/:id, so a credential must not act on
+    // someone else's record just because the route happens to carry an id
+    const params = await context.params;
+    if (params.workerId && params.workerId !== String(worker._id)) {
+      return NextResponse.json({ error: "Not your worker" }, { status: 403 });
+    }
+
+    return handler(request, { ...context, worker });
+  };
 }
 
 function refId(ref: Types.ObjectId | IUser): string {
@@ -161,6 +200,62 @@ export function withProjectAdmin(handler: AuthenticatedHandler) {
     if (!resolved.ok) return resolved.response;
     return handler(request, resolved.context);
   });
+}
+
+// A worker reports on the tasks it runs with its own credential, rather than a second, static API
+// token. The reason the second token cannot work: a worker's grant is recomputed every heartbeat
+// from the checkouts it reports crossed with every enabled project, while a project-scoped API
+// token is a list fixed when it was minted. Enable a second project and the worker is assigned it
+// on its cpw_ credential while its cp_ token cannot write there — the task claims, the report 403s,
+// and it sits in the active column until the lease expires.
+//
+// So the grant is re-derived here on every call, which makes the scope track the assignments by
+// construction. Deliberately NOT the full claim-time verdict: a worker that lost a contested
+// checkout must still be able to report the outcome of a task it already holds, or refusing it
+// would strand that task — the failure this whole design keeps working to avoid.
+export function withProjectAccessOrWorker(handler: AuthenticatedHandler) {
+  const asPerson = withProjectAccess(handler);
+
+  return async (request: Request, context: { params: Promise<Record<string, string>> }) => {
+    const credential = request.headers.get("authorization") ?? "";
+    const workerId = request.headers.get("x-worker-id") ?? "";
+    if (!workerId || !credential.startsWith("Bearer ")) return asPerson(request, context);
+
+    const worker = await verifyWorkerCredential(workerId, credential.slice("Bearer ".length));
+    if (!worker) {
+      return NextResponse.json({ error: "Worker credential rejected" }, { status: 401 });
+    }
+    if (!worker.enabled || worker.lockedByInstance) {
+      return NextResponse.json({ error: "this worker may not run" }, { status: 403 });
+    }
+
+    const params = await context.params;
+    const projectId = params.projectId ? await resolveProjectId(params.projectId) : null;
+    if (!projectId) return NextResponse.json({ error: "Project not found" }, { status: 404 });
+
+    await connectDB();
+    const project = await Project.findById(projectId)
+      .select("_id repositoryUrl githubRepo gitlabRepo gitlabHost worker")
+      .lean();
+    if (!project?.worker?.enabled || !matchRepo(project as never, worker.repos ?? [])) {
+      return NextResponse.json(
+        { error: "this worker is not assigned to this project" },
+        { status: 403 }
+      );
+    }
+
+    // It acts as its own identity, so a comment it leaves is authored by the machine rather than by
+    // whoever's credential it was holding — the audit trail CP-241 exists to keep honest.
+    const identity = worker.identity ? await User.findById(worker.identity) : null;
+    if (!identity) {
+      return NextResponse.json({ error: "this worker has no identity yet" }, { status: 403 });
+    }
+    identity.viaMachineCredential = true;
+
+    const resolved = await withResolvedIds({ ...context, user: identity }, params, projectId);
+    if (!resolved.ok) return resolved.response;
+    return handler(request, resolved.context);
+  };
 }
 
 export function withProjectAccess(handler: AuthenticatedHandler) {

@@ -10,8 +10,9 @@ export default function TaskDetailModal() {
   const router = useRouter();
   const [title, setTitle] = useState("");
 
+  // `bare`: the detail view draws its own top bar, and the modal chrome would double it
   return (
-    <Modal open onClose={() => router.back()} title={title} size="xl">
+    <Modal open onClose={() => router.back()} title={title} size="xl" bare>
       <TaskDetail
         projectId={projectId}
         taskId={taskId}

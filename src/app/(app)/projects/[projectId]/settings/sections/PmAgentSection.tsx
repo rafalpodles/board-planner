@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { Textarea } from "@/components/ui/Textarea";
 import { Button } from "@/components/ui/Button";
+import { Switch } from "@/components/ui/Switch";
 import { firstReviewHour, reviewHoursOfDay } from "@/lib/pm/autonomy";
 import { SettingsCard, EmptyState, ListRow } from "@/components/settings/SettingsCard";
 import { useDirtyGroup } from "@/components/settings/settings-context";
@@ -206,7 +207,7 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
 
   if (!project.pmAvailable) {
     return (
-      <SettingsCard title="PM agent" contract="readonly">
+      <SettingsCard title="PM agent">
         <p className="text-sm text-text-muted">
           Set the <code>OPENROUTER_API_KEY</code> environment variable on the server to enable the PM
           agent (optionally <code>PM_MODEL</code> for the default model).
@@ -229,21 +230,13 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
         </div>
       )}
       {isAdmin ? (
-        <SettingsCard title="Availability & cost" contract="draft" instanceScoped>
-          <label className="flex cursor-pointer items-start gap-3">
-            <input
-              type="checkbox"
-              checked={draft.value.enabled}
-              onChange={(e) => draft.set("enabled", e.target.checked)}
-              className="mt-1"
-            />
-            <span>
-              <span className="text-sm">Run the PM agent on this project</span>
-              <span className="mt-0.5 block text-xs text-text-muted">
-                Turns on chat and, if you allow it below, autonomous turns.
-              </span>
-            </span>
-          </label>
+        <SettingsCard title="Availability & cost" instanceScoped>
+          <Switch
+            checked={draft.value.enabled}
+            onChange={(v) => draft.set("enabled", v)}
+            label="Run the PM agent on this project"
+            hint="Turns on chat and, if you allow it below, autonomous turns."
+          />
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <Input
@@ -272,7 +265,7 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
         </div>
       )}
 
-      <SettingsCard title="What the agent knows" contract="draft">
+      <SettingsCard title="What the agent knows">
         <div>
           <Textarea
             label="Project context"
@@ -347,25 +340,14 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
 
       <SettingsCard
         title="When it acts on its own"
-        contract="draft"
         description="Autonomous turns count against the daily turn cap and post into the PM chat thread."
       >
-        <label className="flex cursor-pointer items-start gap-3">
-          <input
-            type="checkbox"
-            checked={draft.value.dailyReview}
-            onChange={(e) => draft.set("dailyReview", e.target.checked)}
-            className="mt-1 rounded border-border"
-          />
-          <span>
-            <span className="text-sm">Review the board on a schedule</span>
-            <span className="mt-0.5 block text-xs text-text-muted">
-              Flags tasks with no acceptance criteria, tasks stuck in one column and likely
-              duplicates, then posts a report into the PM chat thread. It refines task text but
-              never moves or creates tasks.
-            </span>
-          </span>
-        </label>
+        <Switch
+          checked={draft.value.dailyReview}
+          onChange={(v) => draft.set("dailyReview", v)}
+          label="Review the board on a schedule"
+          hint={`Flags tasks with no acceptance criteria, tasks stuck in one column and likely duplicates, then posts a report into the PM chat thread. It refines task text but never moves or creates tasks.`}
+        />
         {draft.value.dailyReview && (
           <div className="ml-6 space-y-2 border-l-2 border-border pl-4">
             <div className="grid gap-4 sm:grid-cols-3">
@@ -401,26 +383,17 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
             </p>
           </div>
         )}
-        <label className="flex cursor-pointer items-start gap-3">
-          <input
-            type="checkbox"
-            checked={draft.value.handleNhr}
-            onChange={(e) => draft.set("handleNhr", e.target.checked)}
-            className="mt-1 rounded border-border"
-          />
-          <span>
-            <span className="text-sm">Review tasks that land in &quot;Needs human review&quot;</span>
-            <span className="mt-0.5 block text-xs text-text-muted">
-              Queued as they arrive, one turn each.
-            </span>
-          </span>
-        </label>
+        <Switch
+          checked={draft.value.handleNhr}
+          onChange={(v) => draft.set("handleNhr", v)}
+          label={'Review tasks that land in "Needs human review"'}
+          hint="Queued as they arrive, one turn each."
+        />
       </SettingsCard>
 
       {isAdmin && (
         <SettingsCard
           title="MCP connections"
-          contract="draft"
           instanceScoped
           description="External MCP servers the agent may read at the start of a turn. Writing is off unless you allow it per server."
         >
@@ -529,22 +502,16 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
                   placeholder="Tool allowlist, comma-separated (empty = all)"
                 />
                 <div className="flex flex-wrap items-center gap-4 text-sm">
-                  <label className="flex cursor-pointer items-center gap-1.5">
-                    <input
-                      type="checkbox"
-                      checked={server.enabled}
-                      onChange={(e) => updateServer(i, { enabled: e.target.checked })}
-                    />
-                    Enabled
-                  </label>
-                  <label className="flex cursor-pointer items-center gap-1.5">
-                    <input
-                      type="checkbox"
-                      checked={server.allowWrites}
-                      onChange={(e) => updateServer(i, { allowWrites: e.target.checked })}
-                    />
-                    Allow writes
-                  </label>
+                  <Switch
+                    checked={server.enabled}
+                    onChange={(v) => updateServer(i, { enabled: v })}
+                    label="Enabled"
+                  />
+                  <Switch
+                    checked={server.allowWrites}
+                    onChange={(v) => updateServer(i, { allowWrites: v })}
+                    label="Allow writes"
+                  />
                   <Button
                     variant="secondary"
                     size="sm"
