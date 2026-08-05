@@ -43,12 +43,15 @@ export function SaveBar({ pending, total, onGoToSection }: SaveBarProps) {
   }
 
   return (
+    // Sticky inside the content column, not fixed across the viewport: the bar belongs to
+    // the settings it saves, and a fixed one runs under the sidebar. max-height rather
+    // than a transform so a closed bar reserves no space in the flow.
     <div
-      className={`fixed inset-x-0 bottom-0 z-40 border-t border-warning/45 bg-bg-card/95 backdrop-blur
-        transition-transform duration-200 ${open ? "translate-y-0" : "translate-y-full pointer-events-none"}`}
+      className={`sticky bottom-0 z-40 overflow-hidden transition-[max-height] duration-200
+        ${open ? "max-h-32" : "max-h-0 pointer-events-none"}`}
       aria-hidden={!open}
     >
-      <div className="flex w-full flex-wrap items-center gap-3 px-4 py-3 sm:px-6">
+      <div className="flex w-full flex-wrap items-center gap-3 rounded-t-xl border border-b-0 border-warning/45 bg-bg-card/95 px-4 py-3 backdrop-blur sm:px-6">
         <span className="h-2 w-2 shrink-0 rounded-full bg-warning" />
         <div className="text-sm">
           {view.total === 1 ? "1 unsaved change" : `${view.total} unsaved changes`}
