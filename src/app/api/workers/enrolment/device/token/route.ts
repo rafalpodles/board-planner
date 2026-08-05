@@ -18,6 +18,9 @@ export async function POST(request: Request) {
       workerId: result.workerId,
       credential: result.credential,
       heartbeatMs: WORKER_HEARTBEAT_MS,
+      // The app clones this into the folder the operator chose, as <folder>/<projectKey>
+      repositoryUrl: result.repositoryUrl,
+      projectKey: result.projectKey,
     });
   }
 

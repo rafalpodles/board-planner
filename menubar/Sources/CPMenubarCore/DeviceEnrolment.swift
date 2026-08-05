@@ -9,7 +9,7 @@ public struct DeviceEnrolmentStart: Decodable, Equatable, Sendable {
 
 public enum DeviceEnrolmentPoll: Equatable, Sendable {
     case pending
-    case approved(workerID: String, credential: String, heartbeatMs: Int)
+    case approved(workerID: String, credential: String, heartbeatMs: Int, repositoryURL: String, projectKey: String)
     /// Refused, expired, or already collected. The server answers these alike on purpose, so the
     /// app treats them alike too: start again.
     case finished
@@ -25,6 +25,8 @@ private struct PollBody: Decodable {
     let workerId: String?
     let credential: String?
     let heartbeatMs: Int?
+    let repositoryUrl: String?
+    let projectKey: String?
 }
 
 // The app's half of CP-237: begin, open the browser, poll. Nothing here is authenticated, because
@@ -77,7 +79,8 @@ public struct DeviceEnrolmentClient: Sendable {
                 throw DeviceEnrolmentError.malformed
             }
             return .approved(
-                workerID: workerID, credential: credential, heartbeatMs: body.heartbeatMs ?? 60_000)
+                workerID: workerID, credential: credential, heartbeatMs: body.heartbeatMs ?? 60_000,
+                repositoryURL: body.repositoryUrl ?? "", projectKey: body.projectKey ?? "")
         default:
             return .finished
         }

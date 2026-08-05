@@ -10,6 +10,7 @@ final class WorkerLauncherTests: XCTestCase {
             step: .starting,
             apiURL: "https://app.example.com",
             workerName: "rpo-MacBook",
+            checkoutsFolder: "/Users/rpo/checkouts",
             checkoutPath: "/Users/rpo/checkouts/thing",
             toolPath: "/Users/rpo/.nvm/versions/node/v22/bin:/opt/homebrew/bin:/Users/rpo/.local/bin:/usr/bin:/bin"
         )

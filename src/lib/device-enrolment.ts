@@ -2,6 +2,8 @@ import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import { connectDB } from "./db";
 import { DeviceEnrolment } from "@/models/deviceEnrolment";
+import { Project } from "@/models/project";
+import { projectRepositoryUrl } from "./repository";
 import { IDeviceEnrolment, WorkerPreset } from "@/types";
 
 // Long enough that guessing the app's half is hopeless
@@ -89,7 +91,16 @@ export type PollResult =
   | { state: "pending" }
   | { state: "denied" }
   | { state: "expired" }
-  | { state: "approved"; workerId: string; credential: string };
+  | {
+      state: "approved";
+      workerId: string;
+      credential: string;
+      // What to clone and where to put it. The worker gets its own clone rather than borrowing the
+      // operator's checkout — it registers worktrees inside whatever it is given and reaps beside
+      // them, which is a hazard that has already bitten in this repository.
+      repositoryUrl: string;
+      projectKey: string;
+    };
 
 // The app's half. Matching is a bcrypt compare over the candidates sharing a user code, so a
 // device code that was never issued cannot be told from one that was — and an approved row hands
@@ -121,10 +132,16 @@ export async function pollDeviceEnrolment(
     );
     if (!claimed?.credential) return { state: "expired" };
 
+    const project = claimed.project
+      ? await Project.findById(claimed.project).select("key repositoryUrl githubRepo gitlabRepo gitlabHost").lean()
+      : null;
+
     return {
       state: "approved",
       workerId: String(claimed.worker ?? ""),
       credential: claimed.credential,
+      repositoryUrl: project ? projectRepositoryUrl(project) : "",
+      projectKey: project?.key ?? "",
     };
   }
 

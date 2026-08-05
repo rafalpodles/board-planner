@@ -4,7 +4,7 @@ import XCTest
 final class RepositoryCheckTests: XCTestCase {
     private func good(
         resolved: String = "/Users/rpo/checkout",
-        hasGit: Bool = true,
+        hasGit: Bool = false,
         permissions: Int = 0o755,
         owned: Bool = true
     ) -> RepositoryInspection {
@@ -13,7 +13,7 @@ final class RepositoryCheckTests: XCTestCase {
             hasGitDirectory: hasGit, posixPermissions: permissions, ownedByCurrentUser: owned)
     }
 
-    func testAGoodCheckoutHasNothingToSay() {
+    func testAPlainFolderHasNothingToSay() {
         XCTAssertTrue(RepositoryCheck.problems(at: "/Users/rpo/checkout", good()).isEmpty)
     }
 
@@ -38,13 +38,15 @@ final class RepositoryCheckTests: XCTestCase {
         XCTAssertTrue(problems[0].fix.contains("/Volumes/work/checkout"), "the fix should be the path to pick")
     }
 
-    // A package inside a monorepo is the most plausible wrong pick of all
-    func testAFolderWithNoGitIsRefusedWithTheReason() {
-        let problems = RepositoryCheck.problems(at: "/Users/rpo/checkout", good(hasGit: false))
+    // The pick this whole design exists to prevent. The worker gets its own clone rather than
+    // working inside the operator's — it registers worktrees in whatever it is handed and reaps
+    // directories beside them, which has already bitten in this repository.
+    func testPickingAnActualCheckoutIsRefusedWithTheReason() {
+        let problems = RepositoryCheck.problems(at: "/Users/rpo/checkout", good(hasGit: true))
 
         XCTAssertEqual(problems.count, 1)
-        XCTAssertTrue(problems[0].summary.contains("not the top of a git repository"))
-        XCTAssertTrue(problems[0].fix.contains(".git"))
+        XCTAssertTrue(problems[0].summary.contains("itself a checkout"))
+        XCTAssertTrue(problems[0].fix.contains("clones its own copy"))
     }
 
     func testAGroupWritableCheckoutIsRefused() {
@@ -65,7 +67,7 @@ final class RepositoryCheckTests: XCTestCase {
 
     func testEveryProblemCarriesSomethingToDoAboutIt() {
         let problems = RepositoryCheck.problems(
-            at: "/Users/rpo/link", good(resolved: "/elsewhere", hasGit: false, permissions: 0o777, owned: false))
+            at: "/Users/rpo/link", good(resolved: "/elsewhere", hasGit: true, permissions: 0o777, owned: false))
 
         XCTAssertEqual(problems.count, 4, "all of them, not just the first")
         for problem in problems {
@@ -80,15 +82,20 @@ final class RepositoryCheckTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
 
-        let withoutGit = RepositoryCheck.inspect(directory.path)
-        XCTAssertTrue(withoutGit.exists)
-        XCTAssertTrue(withoutGit.isDirectory)
-        XCTAssertTrue(withoutGit.ownedByCurrentUser)
-        XCTAssertFalse(withoutGit.hasGitDirectory)
+        let empty = RepositoryCheck.inspect(directory.path)
+        XCTAssertTrue(empty.exists)
+        XCTAssertTrue(empty.isDirectory)
+        XCTAssertTrue(empty.ownedByCurrentUser)
+        XCTAssertFalse(empty.hasGitDirectory)
+        XCTAssertTrue(
+            RepositoryCheck.problems(at: directory.path, empty).isEmpty,
+            "an ordinary empty folder is exactly what this asks for")
 
+        // …and the same folder becomes a refusal the moment it is a checkout
         try FileManager.default.createDirectory(
             at: directory.appendingPathComponent(".git"), withIntermediateDirectories: true)
-        XCTAssertTrue(RepositoryCheck.inspect(directory.path).hasGitDirectory)
-        XCTAssertTrue(RepositoryCheck.problems(at: directory.path, RepositoryCheck.inspect(directory.path)).isEmpty)
+        let asCheckout = RepositoryCheck.inspect(directory.path)
+        XCTAssertTrue(asCheckout.hasGitDirectory)
+        XCTAssertEqual(RepositoryCheck.problems(at: directory.path, asCheckout).count, 1)
     }
 }
