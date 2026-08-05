@@ -3,6 +3,20 @@
 Everything below the "one-time" section is already wired up. `bundle.sh` signs with the hardened
 runtime, notarises, staples and produces a zip — it just needs an identity to sign with.
 
+## The signing path is already proven with a real certificate
+
+Dry-run with the existing `Apple Development` identity — not ad-hoc — so the only untested part is
+substituting the Developer ID:
+
+```
+flags=0x10000(runtime)                     hardened runtime on, no longer adhoc
+Authority=Apple Development: … → Apple Worldwide Developer Relations CA → Apple Root CA
+TeamIdentifier=7RSD626AHC
+```
+
+`bundle.sh` then stopped by itself with "signed but NOT notarised", which is the branch that runs
+when `CP_NOTARY_PROFILE` is unset.
+
 ## What is already true, measured rather than assumed
 
 Both risks recorded on CP-239 were tested on the build machine with an **ad-hoc signature and the
@@ -23,8 +37,18 @@ could not read the operator's checkout, and could not write `~/.claudeplanner`.
 ## One-time, and only you can do these
 
 1. **Take out the paid Apple Developer Program membership.** The machine already has an
-   `Apple Development` certificate on team `7KJ3M7A835`; that one comes with a free account and is
-   for development only. It satisfies neither Gatekeeper on another Mac nor notarisation.
+   `Apple Development` certificate; that one comes with a free account and is for development only.
+   It satisfies neither Gatekeeper on another Mac nor notarisation.
+
+   **The team id is `7RSD626AHC`.** Not `7KJ3M7A835` — that number appears in the certificate's
+   common name (`Apple Development: … (7KJ3M7A835)`) and is the *certificate* id, which is easy to
+   copy by mistake. The team is the `OU` field, and `codesign -d --verbose=2` prints it as
+   `TeamIdentifier`. Getting this wrong makes `notarytool store-credentials` fail in a way that
+   looks like a bad password:
+
+   ```bash
+   codesign -d --verbose=2 <any signed .app> 2>&1 | grep TeamIdentifier
+   ```
 2. **Create a _Developer ID Application_ certificate** and install it. Check it landed:
 
    ```bash
@@ -35,14 +59,14 @@ could not read the operator's checkout, and could not write `~/.claudeplanner`.
 
    ```bash
    xcrun notarytool store-credentials "claudeplanner" \
-     --apple-id "you@example.com" --team-id "7KJ3M7A835" --password "app-specific-password"
+     --apple-id "you@example.com" --team-id "7RSD626AHC" --password "app-specific-password"
    ```
 
 ## Then
 
 ```bash
 cd worker && npm ci && npm run build && cd ..          # the 200 KB the app carries
-CP_SIGN_IDENTITY="Developer ID Application: … (7KJ3M7A835)" \
+CP_SIGN_IDENTITY="Developer ID Application: … (7RSD626AHC)" \
 CP_NOTARY_PROFILE="claudeplanner" \
   menubar/bundle.sh release
 ```
