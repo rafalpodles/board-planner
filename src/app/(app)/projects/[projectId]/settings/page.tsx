@@ -1,11 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/components/ui/Toast";
-import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { ApiProject } from "@/types";
 import {
   SettingsProvider,
@@ -139,7 +138,6 @@ const SECTIONS: SectionMeta[] = [
 
 export default function ProjectSettingsPage() {
   const { projectId } = useParams<{ projectId: string }>();
-  const router = useRouter();
   const api = useApi();
   const { isAdmin } = useAuth();
   const { toast } = useToast();
@@ -148,7 +146,6 @@ export default function ProjectSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [section, setSection] = useState("");
   const [query, setQuery] = useState("");
-  const [confirmLeave, setConfirmLeave] = useState(false);
   const [stats, setStats] = useState<SettingsStats | null>(null);
 
   const { register, unregister, pending, total } = useDirtyRegistry();
@@ -316,25 +313,7 @@ export default function ProjectSettingsPage() {
   return (
     <>
       <div className="pb-32">
-        <PageHeader
-          title="Settings"
-          icon={project.icon || "📋"}
-          subtitle={`${project.name} · ${project.key}`}
-          actions={
-            // Kept, unlike the other pages' back arrows: this one is the only
-            // trigger for the unsaved-changes guard
-            <button
-              onClick={() =>
-                total > 0
-                  ? setConfirmLeave(true)
-                  : router.push(`/projects/${projectId}`)
-              }
-              className="focus-ring rounded px-2 py-1 text-sm text-text-muted hover:text-text"
-            >
-              Back to board
-            </button>
-          }
-        />
+        <PageHeader title="Settings" />
 
         <div className="md:grid md:grid-cols-[236px_minmax(0,1fr)] md:gap-7">
           <nav
@@ -447,14 +426,6 @@ export default function ProjectSettingsPage() {
 
       <SaveBar pending={pending} total={total} onGoToSection={goToSection} />
 
-      <ConfirmDialog
-        open={confirmLeave}
-        onClose={() => setConfirmLeave(false)}
-        onConfirm={() => router.push(`/projects/${projectId}`)}
-        title="Leave without saving?"
-        message={`You have ${total === 1 ? "1 unsaved change" : `${total} unsaved changes`}. Leaving now discards them.`}
-        confirmLabel="Discard and leave"
-      />
     </>
   );
 }
