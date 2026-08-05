@@ -90,6 +90,7 @@ enum WorkerProcess {
         process.arguments = plan.arguments
         process.environment = plan.environment
         try process.run()
+        // The app now owns this one's lifetime — see RunningWorker
         return process
     }
 
