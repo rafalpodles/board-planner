@@ -16,6 +16,7 @@ import {
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { SecretField } from "@/components/ui/SecretField";
+import { diffById } from "@/lib/row-diff";
 import { SettingsCard, EmptyState } from "@/components/settings/SettingsCard";
 import {
   INTEGRATIONS,
@@ -24,6 +25,9 @@ import {
 } from "@/components/settings/IntegrationCatalogue";
 import { useDirtyGroup } from "@/components/settings/settings-context";
 import { SectionProps } from "./types";
+
+type ChannelDraft = ApiNotificationChannel & { webhookUrl?: string };
+type WebhookDraft = ApiWebhook & { url?: string };
 
 export function IntegrationsSection({ projectId, project, patchProject, replaceProject }: SectionProps) {
   const api = useApi();
@@ -42,6 +46,12 @@ export function IntegrationsSection({ projectId, project, patchProject, replaceP
     codaHost: project.codaHost || "https://coda.io",
     codaToken: "",
   });
+
+  // A new row carries a real URL; an existing one only ever has the mask
+  const channels = useDraft<{ channels: ChannelDraft[] }>({
+    channels: project.notificationChannels || [],
+  });
+  const webhooks = useDraft<{ webhooks: WebhookDraft[] }>({ webhooks: project.webhooks || [] });
 
   const [githubSyncing, setGithubSyncing] = useState(false);
   const [codaSyncing, setCodaSyncing] = useState(false);
@@ -125,80 +135,178 @@ export function IntegrationsSection({ projectId, project, patchProject, replaceP
     }
   );
 
+  useDirtyGroup(
+    {
+      id: "integrations-channels",
+      section: "integrations",
+      label: "Integrations · Slack & Discord",
+      count: channels.count,
+    },
+    {
+      save: async () => {
+        const diff = diffById<ChannelDraft>(project.notificationChannels || [], channels.value.channels);
+        try {
+          let saved = project.notificationChannels || [];
+          for (const row of diff.added) {
+            saved = await api.post(`/api/projects/${projectId}/notifications`, {
+              type: row.type,
+              name: row.name,
+              webhookUrl: row.webhookUrl,
+              events: row.events,
+            });
+          }
+          for (const row of diff.changed) {
+            saved = await api.put(`/api/projects/${projectId}/notifications`, {
+              channelId: row._id,
+              name: row.name,
+              events: row.events,
+              enabled: row.enabled,
+            });
+          }
+          for (const channelId of diff.removed) {
+            saved = await api.del(`/api/projects/${projectId}/notifications`, { channelId });
+          }
+          patchProject({ notificationChannels: saved });
+          channels.commit({ channels: saved });
+          toast("Channels saved", "success");
+        } catch (err) {
+          fail(err, "Failed to save channels");
+        }
+      },
+      discard: channels.discard,
+    }
+  );
+
+  useDirtyGroup(
+    {
+      id: "integrations-webhooks",
+      section: "integrations",
+      label: "Integrations · Webhooks",
+      count: webhooks.count,
+    },
+    {
+      save: async () => {
+        const diff = diffById<WebhookDraft>(project.webhooks || [], webhooks.value.webhooks);
+        try {
+          let saved = project.webhooks || [];
+          for (const row of diff.added) {
+            saved = await api.post(`/api/projects/${projectId}/webhooks`, {
+              url: row.url,
+              events: row.events,
+            });
+          }
+          for (const row of diff.changed) {
+            saved = await api.put(`/api/projects/${projectId}/webhooks`, {
+              webhookId: row._id,
+              events: row.events,
+              enabled: row.enabled,
+            });
+          }
+          for (const webhookId of diff.removed) {
+            saved = await api.del(`/api/projects/${projectId}/webhooks`, { webhookId });
+          }
+          patchProject({ webhooks: saved });
+          webhooks.commit({ webhooks: saved });
+          toast("Webhooks saved", "success");
+        } catch (err) {
+          fail(err, "Failed to save webhooks");
+        }
+      },
+      discard: webhooks.discard,
+    }
+  );
+
   async function replaceAndReturn(payload: Record<string, string>) {
     const updated = await api.put(`/api/projects/${projectId}`, payload);
     replaceProject(updated);
     return updated;
   }
 
-  async function addWebhook() {
+  function addWebhook() {
     if (!newWebhookUrl.trim()) return;
-    try {
-      const webhooks: ApiWebhook[] = await api.post(`/api/projects/${projectId}/webhooks`, {
+    webhooks.set("webhooks", [
+      ...webhooks.value.webhooks,
+      {
+        urlMasked: newWebhookUrl.trim(),
         url: newWebhookUrl.trim(),
-      });
-      patchProject({ webhooks });
-      setNewWebhookUrl("");
-      toast("Webhook added", "success");
-    } catch (err) {
-      fail(err, "Failed to add webhook");
-    }
+        events: [...WEBHOOK_EVENTS],
+        enabled: true,
+      } as WebhookDraft,
+    ]);
+    setNewWebhookUrl("");
   }
 
-  async function updateWebhook(webhookId: string, patch: Record<string, unknown>) {
+  function updateWebhook(webhookId: string, patch: Record<string, unknown>) {
+    webhooks.set(
+      "webhooks",
+      webhooks.value.webhooks.map((w) => (w._id === webhookId ? { ...w, ...patch } : w))
+    );
+  }
+
+  function removeWebhook(webhookId: string) {
+    webhooks.set(
+      "webhooks",
+      webhooks.value.webhooks.filter((w) => w._id !== webhookId)
+    );
+  }
+
+  /** Rotating a credential is an action with a verb, so it happens now, not on save. */
+  async function replaceWebhookUrl(webhookId: string, url: string) {
     try {
-      patchProject({
-        webhooks: await api.put(`/api/projects/${projectId}/webhooks`, { webhookId, ...patch }),
+      const saved: ApiWebhook[] = await api.put(`/api/projects/${projectId}/webhooks`, {
+        webhookId,
+        url,
       });
+      patchProject({ webhooks: saved });
+      webhooks.commit({ webhooks: saved });
+      toast("Webhook URL replaced", "success");
     } catch (err) {
-      fail(err, "Failed to update webhook");
+      fail(err, "Failed to replace the URL");
     }
   }
 
-  async function removeWebhook(webhookId: string) {
-    try {
-      patchProject({ webhooks: await api.del(`/api/projects/${projectId}/webhooks`, { webhookId }) });
-    } catch (err) {
-      fail(err, "Failed to remove webhook");
-    }
-  }
-
-  async function addChannel() {
+  function addChannel() {
     if (!newChannelName.trim() || !newChannelUrl.trim()) return;
+    channels.set("channels", [
+      ...channels.value.channels,
+      {
+        type: newChannelType,
+        name: newChannelName.trim(),
+        webhookUrlMasked: newChannelUrl.trim(),
+        webhookUrl: newChannelUrl.trim(),
+        events: [...WEBHOOK_EVENTS],
+        enabled: true,
+      } as ChannelDraft,
+    ]);
+    setNewChannelName("");
+    setNewChannelUrl("");
+  }
+
+  function updateChannel(channelId: string, patch: Record<string, unknown>) {
+    channels.set(
+      "channels",
+      channels.value.channels.map((c) => (c._id === channelId ? { ...c, ...patch } : c))
+    );
+  }
+
+  function removeChannel(channelId: string) {
+    channels.set(
+      "channels",
+      channels.value.channels.filter((c) => c._id !== channelId)
+    );
+  }
+
+  async function replaceChannelUrl(channelId: string, webhookUrl: string) {
     try {
-      const notificationChannels: ApiNotificationChannel[] = await api.post(
+      const saved: ApiNotificationChannel[] = await api.put(
         `/api/projects/${projectId}/notifications`,
-        { type: newChannelType, name: newChannelName.trim(), webhookUrl: newChannelUrl.trim() }
+        { channelId, webhookUrl }
       );
-      patchProject({ notificationChannels });
-      setNewChannelName("");
-      setNewChannelUrl("");
-      toast("Channel added", "success");
+      patchProject({ notificationChannels: saved });
+      channels.commit({ channels: saved });
+      toast("Webhook URL replaced", "success");
     } catch (err) {
-      fail(err, "Failed to add channel");
-    }
-  }
-
-  async function updateChannel(channelId: string, patch: Record<string, unknown>) {
-    try {
-      patchProject({
-        notificationChannels: await api.put(`/api/projects/${projectId}/notifications`, {
-          channelId,
-          ...patch,
-        }),
-      });
-    } catch (err) {
-      fail(err, "Failed to update channel");
-    }
-  }
-
-  async function removeChannel(channelId: string) {
-    try {
-      patchProject({
-        notificationChannels: await api.del(`/api/projects/${projectId}/notifications`, { channelId }),
-      });
-    } catch (err) {
-      fail(err, "Failed to remove channel");
+      fail(err, "Failed to replace the URL");
     }
   }
 
@@ -462,8 +570,8 @@ export function IntegrationsSection({ projectId, project, patchProject, replaceP
         description="Posts a formatted message to a channel when something happens on the board."
       >
         <div className="space-y-3">
-          {(project.notificationChannels || []).map((ch) => (
-            <div key={ch._id} className="rounded-lg border border-border p-3">
+          {channels.value.channels.map((ch) => (
+            <div key={ch._id ?? `new-${ch.name}`} className="rounded-lg border border-border p-3">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <span
@@ -496,6 +604,7 @@ export function IntegrationsSection({ projectId, project, patchProject, replaceP
               </div>
               <div className="mb-2">
                 <SecretField
+                  disabled={!ch._id}
                   label={`Webhook URL for ${ch.name}`}
                   masked={ch.webhookUrlMasked}
                   placeholder={
@@ -503,7 +612,7 @@ export function IntegrationsSection({ projectId, project, patchProject, replaceP
                       ? "https://hooks.slack.com/services/..."
                       : "https://discord.com/api/webhooks/..."
                   }
-                  onReplace={(webhookUrl) => updateChannel(ch._id, { webhookUrl })}
+                  onReplace={(webhookUrl) => replaceChannelUrl(ch._id, webhookUrl)}
                 />
               </div>
               <div className="flex flex-wrap gap-1">
@@ -523,7 +632,7 @@ export function IntegrationsSection({ projectId, project, patchProject, replaceP
               </div>
             </div>
           ))}
-          {(project.notificationChannels || []).length === 0 && (
+          {channels.value.channels.length === 0 && (
             <EmptyState>No channels yet. Add one to get board updates in Slack or Discord.</EmptyState>
           )}
         </div>
@@ -575,15 +684,16 @@ export function IntegrationsSection({ projectId, project, patchProject, replaceP
         description="Raw HTTP POST to your own endpoint when an event fires."
       >
         <div className="space-y-3">
-          {(project.webhooks || []).map((wh) => (
-            <div key={wh._id} className="rounded-lg border border-border p-3">
+          {webhooks.value.webhooks.map((wh) => (
+            <div key={wh._id ?? `new-${wh.urlMasked}`} className="rounded-lg border border-border p-3">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <div className="min-w-0 max-w-[380px] flex-1">
                   <SecretField
+                    disabled={!wh._id}
                     label="Webhook URL"
                     masked={wh.urlMasked}
                     placeholder="https://example.com/hooks/board"
-                    onReplace={(url) => updateWebhook(wh._id, { url })}
+                    onReplace={(url) => replaceWebhookUrl(wh._id, url)}
                   />
                 </div>
                 <div className="flex items-center gap-2">
@@ -620,7 +730,7 @@ export function IntegrationsSection({ projectId, project, patchProject, replaceP
               </div>
             </div>
           ))}
-          {(project.webhooks || []).length === 0 && (
+          {webhooks.value.webhooks.length === 0 && (
             <EmptyState>No webhooks yet. Add a URL to receive board events as JSON.</EmptyState>
           )}
         </div>
