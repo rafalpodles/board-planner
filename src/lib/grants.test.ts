@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { decide, Principal, principalOf } from "./grants";
 import { IUser } from "@/types";
+import { Types } from "mongoose";
 
 const P = "69a52e3b399b27d3cbb2c5a5";
 const OTHER = "69a52e3b399b27d3cbb2c5a6";
@@ -13,6 +14,23 @@ function principal(over: Partial<Principal> = {}): Principal {
     instanceAdminBeforeScope: false,
     ...over,
   };
+}
+
+function fakeUser(over: Partial<IUser> = {}) {
+  return {
+    _id: new Types.ObjectId(),
+    username: "test",
+    password: "hash",
+    fullName: "Test User",
+    email: "test@example.com",
+    emailNotifications: true,
+    collapseEmptyColumns: false,
+    role: "member" as const,
+    kind: "human" as const,
+    allowedProjects: [],
+    createdAt: new Date(),
+    ...over,
+  } as IUser;
 }
 
 describe("decide", () => {
@@ -67,10 +85,7 @@ describe("decide", () => {
 
 describe("principalOf", () => {
   it("maps a plain user to the right principal", () => {
-    const user = {
-      _id: "u1" as any,
-      role: "member" as const,
-    } as IUser;
+    const user = fakeUser({ role: "member" });
     expect(principalOf(user)).toEqual({
       instanceAdmin: false,
       tokenScoped: false,
@@ -80,22 +95,19 @@ describe("principalOf", () => {
   });
 
   it("maps an instance admin correctly", () => {
-    const user = {
-      _id: "a1" as any,
-      role: "admin" as const,
-    } as IUser;
+    const user = fakeUser({ role: "admin" });
     const result = principalOf(user);
     expect(result.instanceAdmin).toBe(true);
   });
 
   it("converts tokenScope ObjectIds to strings", () => {
-    const user = {
-      _id: "u1" as any,
-      role: "member" as const,
+    const objectId = new Types.ObjectId(P);
+    const user = fakeUser({
+      role: "member",
       tokenScoped: true,
-      tokenScope: [P] as any,
+      tokenScope: [objectId],
       instanceAdminBeforeScope: true,
-    } as IUser;
+    });
     const result = principalOf(user);
     expect(result.tokenScope).toEqual([P]);
     expect(result.tokenScoped).toBe(true);
