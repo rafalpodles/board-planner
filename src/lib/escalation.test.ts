@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { escalationColumnId, flaggedColumnIds, withEscalationColumn } from "./escalation";
+import {
+  escalationColumnId,
+  explicitEscalationColumnId,
+  flaggedColumnIds,
+  withEscalationColumn,
+} from "./escalation";
 import { AnyColumn } from "./columns";
 import { ColumnRole } from "@/types";
 
@@ -35,6 +40,24 @@ describe("escalationColumnId", () => {
 
   it("returns undefined when the board has no review column", () => {
     expect(escalationColumnId([col("todo", "approved"), col("done", "done")])).toBeUndefined();
+  });
+});
+
+describe("explicitEscalationColumnId", () => {
+  // A PM trigger is opt-in. The falling-back resolver turned zero flags into "the first
+  // review column", so every routine move into review would queue a turn against the cap
+  it("is undefined when no column carries the flag", () => {
+    expect(
+      explicitEscalationColumnId(BOARD.map((c) => ({ ...c, triggersPmReview: false })))
+    ).toBeUndefined();
+  });
+
+  it("is the flagged review column when there is one", () => {
+    expect(explicitEscalationColumnId(BOARD)).toBe("needs_human_review");
+  });
+
+  it("ignores a flag on a column that is not a review column", () => {
+    expect(explicitEscalationColumnId([col("todo", "approved", true)])).toBeUndefined();
   });
 });
 
