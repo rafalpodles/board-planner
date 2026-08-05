@@ -291,7 +291,7 @@ export function ProjectTree({
                     dot={project.pm?.enabled}
                   />
                 )}
-                {isAdmin && (
+                {(project.canAdmin ?? isAdmin) && (
                   <SubItem
                     href={`${base}/settings`}
                     icon={SUB_ICONS.settings}
