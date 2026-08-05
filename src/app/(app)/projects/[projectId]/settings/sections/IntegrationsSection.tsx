@@ -188,10 +188,7 @@ export function IntegrationsSection({
     },
     {
       save: async () => {
-        const diff = diffById<ChannelDraft>(
-          project.notificationChannels || [],
-          channels.value.channels,
-        );
+        const diff = diffById<ChannelDraft>(channels.baseline.channels, channels.value.channels);
         try {
           let saved = project.notificationChannels || [];
           for (const row of diff.added) {
