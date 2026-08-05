@@ -65,6 +65,51 @@ final class WorkerLauncherTests: XCTestCase {
         XCTAssertEqual(plan.environment["CP_STATE_DIR"], "/Users/rpo/.claudeplanner")
     }
 
+    // Shipped once. The worker registered, cloned, started and then never reported, and the fleet
+    // console said "stale" — because Node's fetch rejects a scheme-less URL outright while every
+    // Swift-side client had quietly normalised it first. The old test used a fixture that already
+    // carried https://, so it passed throughout.
+    func testTheWorkerIsHandedSomethingFetchCanParse() {
+        for typed in ["localhost:3973", "board.example.com", "127.0.0.1:3000", "shed.local:8080"] {
+            var typedByHand = state()
+            typedByHand.apiURL = typed
+
+            let plan = WorkerLauncher.plan(
+                nodePath: "/n", workerEntry: "/e", state: typedByHand,
+                stateDirectory: "/s", baseEnvironment: finderEnvironment)
+
+            let handed = plan.environment["CP_API_URL"] ?? ""
+            XCTAssertTrue(
+                handed.hasPrefix("http://") || handed.hasPrefix("https://"),
+                "\(typed) reached the worker as \(handed), which fetch cannot parse")
+            XCTAssertNotNil(URL(string: handed)?.host, "\(handed) has no host")
+        }
+    }
+
+    func testAnAddressThatLeavesTheMachineKeepsTLS() {
+        var typedByHand = state()
+        typedByHand.apiURL = "board.example.com"
+
+        let plan = WorkerLauncher.plan(
+            nodePath: "/n", workerEntry: "/e", state: typedByHand,
+            stateDirectory: "/s", baseEnvironment: finderEnvironment)
+
+        XCTAssertEqual(plan.environment["CP_API_URL"], "https://board.example.com")
+    }
+
+    func testAnExplicitSchemeIsLeftExactlyAsGiven() {
+        for typed in ["http://localhost:3973", "https://board.example.com"] {
+            var typedByHand = state()
+            typedByHand.apiURL = typed
+
+            let plan = WorkerLauncher.plan(
+                nodePath: "/n", workerEntry: "/e", state: typedByHand,
+                stateDirectory: "/s", baseEnvironment: finderEnvironment)
+
+            XCTAssertEqual(plan.environment["CP_API_URL"], typed)
+        }
+    }
+
     // CP-237 removed it as a boot requirement, and the app must not quietly reintroduce one
     func testItDoesNotInventAnApiToken() {
         let plan = WorkerLauncher.plan(
