@@ -64,14 +64,14 @@ export async function verifyCredentials(
 // access limited to (scope ∩ owner's current access), enforced at every auth
 // so all existing project-access checks honor it. Empty scope = full inherit.
 function applyTokenScope(user: IUser, scope: Types.ObjectId[]): IUser {
-  const effective =
-    user.role === "admin"
-      ? scope
-      : (user.allowedProjects || []).filter((p) =>
-          scope.some((s) => s.toString() === p.toString())
-        );
+  user.instanceAdminBeforeScope = user.role === "admin";
   user.role = "member";
-  user.allowedProjects = effective;
+  user.tokenScope = scope;
+  user.allowedProjects = user.instanceAdminBeforeScope
+    ? scope
+    : (user.allowedProjects || []).filter((p) =>
+        scope.some((s) => s.toString() === p.toString())
+      );
   user.tokenScoped = true;
   return user;
 }
