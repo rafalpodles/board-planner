@@ -23,6 +23,21 @@ enum LoginItemCommand {
                 print("failed: \(error)")
                 exit(1)
             }
+        case "--preflight":
+            // Runs the whole spawn path from inside the bundle: login shell to find node, then node
+            // to run the worker's own preflight. Under the hardened runtime this is the thing
+            // CP-239 flagged as a risk, so it needs to be checkable without clicking anything.
+            do {
+                let checkout = arguments.count > 2 ? arguments[2] : FileManager.default.currentDirectoryPath
+                let report = try WorkerProcess.preflight(checkout: checkout)
+                print("ok: \(report.ok)  account: \(report.account)")
+                for check in report.checks { print("  \(check.ok ? "ok " : "FAIL") \(check.name)") }
+                print("path: \(report.path)")
+                exit(report.ok ? 0 : 1)
+            } catch {
+                print("failed: \(error.localizedDescription)")
+                exit(1)
+            }
         case "--unregister-login-item":
             do {
                 try LoginItem.unregister()
