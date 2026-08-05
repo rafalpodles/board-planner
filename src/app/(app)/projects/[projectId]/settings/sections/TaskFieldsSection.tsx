@@ -6,10 +6,8 @@ import { useToast } from "@/components/ui/Toast";
 import {
   ApiCustomField,
   ApiTaskTemplate,
-  CUSTOM_FIELD_TYPES,
   CATEGORIES,
   Category,
-  CustomFieldType,
 } from "@/types";
 import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
@@ -103,11 +101,10 @@ export function TaskFieldsSection({
           toast("Categories saved", "success");
         } catch (err) {
           fail(err, "Failed to save categories");
-        } finally {
-          // Whatever landed before the failure is real. Adopting it stops the retry
-          // re-creating rows that already exist.
+          // Whatever landed before the failure is real, so the baseline moves — but the
+          // edits that did not land stay on screen rather than being thrown away
           patchProject({ categories: saved });
-          categories.commit({
+          categories.rebase({
             categories: saved.map((c) => ({
               _id: c._id,
               name: c.name,
@@ -136,7 +133,14 @@ export function TaskFieldsSection({
         let saved = project.taskTemplates || [];
         try {
           for (const row of diff.added) {
-            saved = await api.post(`/api/projects/${projectId}/templates`, row);
+            // Same reason as the changed path: a name this draft remembers may have been
+            // renamed by the categories group in this very save
+            const { category, ...rest } = row;
+            const live = categories.value.categories.some((c) => c.name === category);
+            saved = await api.post(`/api/projects/${projectId}/templates`, {
+              ...rest,
+              ...(live ? { category } : {}),
+            });
           }
           for (const row of diff.changed) {
             // Categories may have been renamed by their own group in this same save, so a
@@ -161,9 +165,8 @@ export function TaskFieldsSection({
           toast("Templates saved", "success");
         } catch (err) {
           fail(err, "Failed to save templates");
-        } finally {
           patchProject({ taskTemplates: saved });
-          templates.commit({ templates: saved });
+          templates.rebase({ templates: saved });
         }
       },
       discard: templates.discard,
@@ -228,7 +231,9 @@ export function TaskFieldsSection({
           nameOf={(c) => c.name || "this category"}
           reorderable={false}
           addLabel="Add category"
-          canRemove={() => canDelete && categories.value.categories.length > 1}
+          canRemove={(c) =>
+            (canDelete || !c._id) && categories.value.categories.length > 1
+          }
           onAdd={() =>
             categories.set("categories", [
               ...categories.value.categories,
@@ -361,7 +366,7 @@ export function TaskFieldsSection({
           onChange={(next) => templates.set("templates", next)}
           keyOf={(t, i) => t._id || `new-${i}`}
           nameOf={(t) => t.name || "this template"}
-          canRemove={() => canDelete}
+          canRemove={(t) => canDelete || !t._id}
           reorderable={false}
           addLabel="Add template"
           onAdd={() =>
@@ -372,7 +377,7 @@ export function TaskFieldsSection({
                 name: "",
                 title: "",
                 description: "",
-                category: project.categories?.[0]?.name ?? CATEGORIES[0],
+                category: categories.value.categories[0]?.name ?? CATEGORIES[0],
                 acceptanceCriteria: "",
               } as ApiTaskTemplate,
             ])

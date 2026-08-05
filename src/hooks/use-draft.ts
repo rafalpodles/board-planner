@@ -32,6 +32,13 @@ export function useDraft<T extends Record<string, unknown>>(initial: T) {
     setValue(next);
   }, []);
 
+  /**
+   * Moves the baseline without touching what the user has typed — for a save that failed
+   * part-way. The retry then re-diffs against what actually landed instead of repeating
+   * it, and the edits that did not land are still on screen.
+   */
+  const rebase = useCallback((next: T) => setBaseline(next), []);
+
   // Exposed because a list reconciles on save by diffing against what it started from.
   // Diffing against the live source instead lets a row that arrived underneath — from
   // another tab, the MCP server, or this page's own instant "Add admin" — read as one
@@ -46,5 +53,6 @@ export function useDraft<T extends Record<string, unknown>>(initial: T) {
     isDirty,
     discard,
     commit,
+    rebase,
   };
 }

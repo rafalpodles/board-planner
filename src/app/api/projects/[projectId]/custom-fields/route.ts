@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { withProjectAccess, withProjectAdmin } from "@/lib/middleware";
+import { withProjectAccess } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { CUSTOM_FIELD_TYPES, CustomFieldType } from "@/types";
 import { isOptionField, parseOptions, MAX_FIELD_NAME_LENGTH } from "@/lib/custom-fields";

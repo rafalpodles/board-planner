@@ -238,6 +238,16 @@ export default function ProjectSettingsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, stats, projectId]);
 
+  // The redesign moved channels, webhooks, categories and templates out of instant-save,
+  // so an accidental reload now costs real work. main guarded one button; this guards the
+  // exits a browser actually offers.
+  useEffect(() => {
+    if (total === 0) return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [total]);
+
   const dirtySections = useMemo(
     () => new Set(pending.map((g) => g.section)),
     [pending]

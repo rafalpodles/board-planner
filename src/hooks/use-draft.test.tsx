@@ -44,6 +44,21 @@ describe("useDraft baseline", () => {
     expect(result.current.count).toBe(0);
   });
 
+  // A save that fails part-way must adopt what landed without throwing away the edits
+  // that did not: commit() moves both sides, which reverted the user's work
+  it("moves the baseline on rebase and leaves the draft alone", () => {
+    const { result } = renderHook(() =>
+      useDraft<{ rows: Row[] }>({ rows: [{ _id: "1", name: "A" }] })
+    );
+
+    act(() => result.current.set("rows", [{ _id: "1", name: "A" }, { name: "new" }]));
+    act(() => result.current.rebase({ rows: [{ _id: "1", name: "A" }, { _id: "2", name: "landed" }] }));
+
+    expect(result.current.baseline.rows).toHaveLength(2);
+    expect(result.current.value.rows).toEqual([{ _id: "1", name: "A" }, { name: "new" }]);
+    expect(result.current.count).toBe(1);
+  });
+
   it("returns the draft to the baseline on discard", () => {
     const { result } = renderHook(() =>
       useDraft<{ rows: Row[] }>({ rows: [{ _id: "1", name: "A" }] })
