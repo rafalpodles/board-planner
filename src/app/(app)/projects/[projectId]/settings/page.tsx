@@ -83,7 +83,7 @@ const SECTIONS: SectionMeta[] = [
       "The vocabulary tasks are described with: what they are, what part of the product they touch, and any extra fields you need.",
     keywords:
       "categories custom fields templates tags dropdown required",
-    access: "projectAdmin",
+    access: "member",
     icon: (
       <Icon d="M20.6 13.4L12 22l-9-9V3h10l7.6 7.6a2 2 0 010 2.8zM7.5 7.5h.01" />
     ),

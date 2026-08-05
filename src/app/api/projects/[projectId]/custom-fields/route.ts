@@ -19,7 +19,7 @@ export const GET = withProjectAccess(async (_request, { params }) => {
   return NextResponse.json(project.customFields || []);
 });
 
-export const POST = withProjectAdmin(async (request, { params }) => {
+export const POST = withProjectAccess(async (request, { params }) => {
   const { projectId } = await params;
   await connectDB();
 

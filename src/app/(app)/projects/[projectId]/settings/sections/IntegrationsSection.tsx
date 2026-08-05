@@ -319,6 +319,10 @@ export function IntegrationsSection({
 
   /** Rotating a credential is an action with a verb, so it happens now, not on save. */
   async function replaceWebhookUrl(webhookId: string, url: string) {
+    if (webhooks.count > 0) {
+      toast("Save or discard your webhook changes before replacing a URL", "error");
+      return;
+    }
     try {
       const saved: ApiWebhook[] = await api.put(
         `/api/projects/${projectId}/webhooks`,
@@ -370,6 +374,12 @@ export function IntegrationsSection({
   }
 
   async function replaceChannelUrl(channelId: string, webhookUrl: string) {
+    // Rotating commits the server's answer over the whole draft, which would swallow any
+    // row staged but not saved. Ask for that to be settled rather than losing it silently.
+    if (channels.count > 0) {
+      toast("Save or discard your channel changes before replacing a URL", "error");
+      return;
+    }
     try {
       const saved: ApiNotificationChannel[] = await api.put(
         `/api/projects/${projectId}/notifications`,

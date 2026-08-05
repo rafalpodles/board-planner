@@ -16,7 +16,7 @@ export const GET = withProjectAccess(async (_request, { params }) => {
   return NextResponse.json(project.taskTemplates || []);
 });
 
-export const POST = withProjectAdmin(async (request, { params, user }) => {
+export const POST = withProjectAccess(async (request, { params, user }) => {
   const { projectId } = await params;
   await connectDB();
 
@@ -52,7 +52,7 @@ export const POST = withProjectAdmin(async (request, { params, user }) => {
   return NextResponse.json(project.taskTemplates, { status: 201 });
 });
 
-export const PUT = withProjectAdmin(async (request, { params, user }) => {
+export const PUT = withProjectAccess(async (request, { params, user }) => {
   const { projectId } = await params;
   await connectDB();
 

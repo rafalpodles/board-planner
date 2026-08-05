@@ -103,9 +103,14 @@ export function TaskFieldsSection({ projectId, project, patchProject, stats }: S
             saved = await api.post(`/api/projects/${projectId}/templates`, row);
           }
           for (const row of diff.changed) {
+            // Categories may have been renamed by their own group in this same save, so a
+            // name this draft still remembers can already be gone
+            const live = (project.categories || []).some((c) => c.name === row.category);
+            const { category, ...rest } = row;
             saved = await api.put(`/api/projects/${projectId}/templates`, {
               templateId: row._id,
-              ...row,
+              ...rest,
+              ...(live ? { category } : {}),
             });
           }
           for (const templateId of diff.removed) {
