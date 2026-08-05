@@ -228,15 +228,8 @@ export const PUT = withProjectAdmin(async (request, { params, user }) => {
     : `Changed: ${changedFields}`;
   logProjectAudit(projectId, user._id, "settings_updated", auditDetail);
 
-  // Strip token from response
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const obj: any = project.toObject();
-  obj.githubTokenSet = !!obj.githubToken;
-  delete obj.githubToken;
-  obj.gitlabTokenSet = !!obj.gitlabToken;
-  delete obj.gitlabToken;
-  obj.codaTokenSet = !!obj.codaToken;
-  delete obj.codaToken;
+  const obj: any = sanitizeProjectSecrets(project.toObject());
   // One repository field, resolved here so no consumer has to know the legacy pair still exists
   obj.repositoryUrl = projectRepositoryUrl(obj);
   obj.repositoryProvider = repositoryProvider(obj);

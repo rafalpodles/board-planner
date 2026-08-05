@@ -78,5 +78,5 @@ export const POST = withAdmin(async (request, { user }) => {
   });
 
   const populated = await project.populate("owner", "username fullName");
-  return NextResponse.json(populated, { status: 201 });
+  return NextResponse.json(sanitizeProjectSecrets(populated.toObject()), { status: 201 });
 });
