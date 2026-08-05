@@ -84,6 +84,27 @@ Size comes from the project's **Difficulty** field — an ordinary project-defin
 - Assignees use **usernames** (not IDs). `claude` = Claude Code, `rpo` = you.
 - Branch naming: `cp-<number>/<short-slug>` (e.g. `cp-3/dropdown-menu`)
 
+### GitHub — always the `rafalpodles` account
+
+This repo belongs to `rafalpodles`. The machine has a second `gh` account, `podlesrafal`, which is
+**not** a collaborator here, so anything it does fails with `must be a collaborator` — a message that
+reads like a repository permission problem and is really the wrong identity.
+
+```bash
+gh api user -q .login            # must print rafalpodles
+gh auth switch --user rafalpodles
+```
+
+`gh auth switch` is global machine state shared with every other session, so **the active account can
+flip mid-session** — "it worked ten minutes ago" is not evidence it is still right. Check it
+immediately before each of create / merge / delete, not once at the start.
+
+**Never merge and delete the branch in one command.** `gh pr merge --delete-branch` is not atomic: a
+flip between the two steps has already left a merge refused while the branch delete went through, and
+**deleting the head branch closes the PR**. The result reads as `CLOSED` with the commit only in the
+local worktree and `main` untouched, which is easy to mistake for "merged". Recovery: re-push the
+branch, `gh pr reopen <n>`, merge.
+
 ## Tech stack
 - Next.js 16 (App Router) + TypeScript
 - MongoDB 4.4+ (Railway) + Mongoose ODM — aggregations must avoid 5.0-only operators (`$dateTrunc`, `$dateAdd`/`$dateDiff`, `$setWindowFields`, `$lookup` mixing `localField`/`foreignField` with an inline `pipeline`)
