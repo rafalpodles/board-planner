@@ -56,6 +56,7 @@ do what, with the two marked exceptions.
 | **PM agent MCP OAuth and test** | ✓ | ✓ *(moved from admin)* | — |
 | Board columns | ✓ | ✓ | — |
 | Webhooks, notification channels, Coda sync | ✓ | ✓ | — |
+| **Seeing every human account**, in order to grant to them | ✓ | ✓ *(widened)* | — |
 | Member list, granting and revoking roles | ✓ | ✓ | — |
 | **Deleting** categories, custom fields, templates | ✓ | ✓ | — |
 
@@ -79,8 +80,17 @@ Two principals are narrowings rather than roles, and both keep their current beh
 
 Two inconsistencies the scan surfaced are **deliberately preserved**, not fixed here: a member can
 delete a sprint but not a category, and can change a custom field's type — as destructive as
-deleting it — while deletion is owner-only. Straightening those is a separate task, so the change
-is visible in its own diff instead of hiding inside this refactor.
+deleting it — while deletion is owner-only. Straightening those is a separate task (CP-247), so the
+change is visible in its own diff instead of hiding inside this refactor.
+
+Two footnotes on the owner row, both deliberate:
+
+- **PM agent MCP: the owner may run OAuth but not choose the servers.** `pm.mcpServers` stays in
+  `instanceFields` (`src/app/api/projects/[projectId]/route.ts:141`), so which servers exist remains
+  an instance decision while connecting the board to them is the owner's. Written down because it
+  otherwise reads as an oversight.
+- **The members list widens.** It returns every human account rather than only current members —
+  you cannot grant access to somebody you cannot see. Worker machine identities stay out of it.
 
 ## Data model
 
@@ -154,7 +164,7 @@ Moving scopes into `grants` would conflate the two and let a token outlive its o
 
 | before | after |
 |---|---|
-| `project.owner` | `project.createdBy` — informational, carries no rights |
+| `project.owner` | `project.createdBy` — informational, carries no rights, and **empty for every board that already exists**: renaming a Mongoose path does not rename the stored field, and there is no backfill. It is `default: null`, not `required`, for that reason |
 | `project.admins[]` | gone → `owner` grants |
 | `user.allowedProjects` | gone → `member` grants |
 | token `allowedProjects` | unchanged |
@@ -200,9 +210,10 @@ The permission matrix is the gate:
 
 ## Delivery
 
-One PR, by explicit decision, with the risk understood: `allowedProjects` has 61 references
-across 22 files, including token minting. CP-245 ships separately and first, because a real user
-is blocked today and the sidebar fix neither depends on nor conflicts with this work.
+One PR, by explicit decision, with the risk understood: `allowedProjects` has **73 references
+across 27 files**, including token minting. CP-245 ships separately and **first** — this work
+rebases onto it, because `GET /api/projects` returning `canAdmin` and the sidebar gate are
+prerequisites here, not niceties.
 
 Deploy order: merge, let Railway deploy, then rpo grants the roles through the UI. Nobody but the
 instance admins can work in between, which at five users is a short and acceptable gap.
