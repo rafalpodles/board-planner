@@ -7,7 +7,6 @@ import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/components/ui/Toast";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { ApiProject } from "@/types";
-import { effectiveColumns } from "@/lib/columns";
 import {
   SettingsProvider,
   useDirtyRegistry,
@@ -248,27 +247,6 @@ export default function ProjectSettingsPage() {
     [pending]
   );
 
-  const badges = useMemo(() => {
-    if (!project) return {} as Record<string, { count?: number; on?: boolean }>;
-    return {
-      board: { count: effectiveColumns(project.columns).length },
-      fields: {
-        count:
-          (project.categories?.length || 0) +
-          (project.customFields?.length || 0) +
-          (project.taskTemplates?.length || 0),
-      },
-      integrations: {
-        on:
-          !!project.githubTokenSet ||
-          !!project.gitlabTokenSet ||
-          (project.notificationChannels?.length || 0) > 0 ||
-          (project.webhooks?.length || 0) > 0,
-      },
-      pm: { on: !!project.pm?.enabled && !project.pm?.lockedByInstance },
-    } as Record<string, { count?: number; on?: boolean }>;
-  }, [project]);
-
   if (loading || !project) {
     return (
       <div className="flex justify-center py-12">
@@ -288,7 +266,6 @@ export default function ProjectSettingsPage() {
   };
 
   function navButton(s: SectionMeta, mobile: boolean) {
-    const badge = badges[s.id];
     if (mobile) {
       return (
         <button
@@ -328,17 +305,6 @@ export default function ProjectSettingsPage() {
           <span
             className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning"
             title="Unsaved changes"
-          />
-        )}
-        {badge?.count !== undefined && (
-          <span className="rounded-full bg-bg-input px-1.5 text-[11px] text-text-muted">
-            {badge.count}
-          </span>
-        )}
-        {badge?.on !== undefined && (
-          <span
-            className={`h-1.5 w-1.5 rounded-full ${badge.on ? "bg-success" : "bg-text-muted/50"}`}
-            title={badge.on ? "Configured" : "Not configured"}
           />
         )}
       </button>
