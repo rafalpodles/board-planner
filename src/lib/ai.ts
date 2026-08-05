@@ -1,8 +1,8 @@
 import OpenAI from "openai";
+import type { PromptField } from "./ai-fields";
 
 /** The sizes a project gets seeded with; only used to decide whether the prompt
  * can explain what each one means */
-const DEFAULT_SIZES = ["S", "M", "L", "XL"];
 
 const apiKey = process.env.OPENAI_API_KEY || process.env.OPENAPI_KEY;
 
@@ -20,16 +20,16 @@ function getClient(): OpenAI {
 export interface GeneratedTask {
   title: string;
   description: string;
-  difficulty: string;
   category: string;
   acceptanceCriteria: string;
-  component: string;
+  /** Chosen option per project field, keyed by the field's own name */
+  fields: Record<string, string>;
   duplicateOf: number | null;
   duplicateReason: string;
   suggestedBlockedBy: number[];
   suggestedBlocking: number[];
   dependencyReason: string;
-  /** Difficulty and Component resolved to option ids by the route that knows the project */
+  /** `fields` resolved to option ids by the route that holds the definitions */
   customFieldValues?: Record<string, unknown>;
 }
 
@@ -43,9 +43,8 @@ export interface ExistingTaskSummary {
 interface ProjectContext {
   name: string;
   description: string;
-  components: string[];
-  /** Since CP-213 both live as project fields; the fixed lists are only a fallback */
-  difficulties?: string[];
+  /** The project's own choice fields; nothing is asked about a field it does not define */
+  choiceFields: PromptField[];
   categories?: string[];
   readme?: string;
   existingTasks?: ExistingTaskSummary[];
@@ -63,23 +62,11 @@ export async function generateTask(
       ? context.categories
       : ["bug", "doc", "user-story", "idea"];
 
-  const componentList =
-    context.components.length > 0
-      ? `Available components: ${context.components.join(", ")}`
-      : "No components defined yet.";
-
-  // Driven by the project's own field, so a project that renamed or reordered its
-  // sizes still gets a value it can store (CP-213)
-  const difficultyList = context.difficulties?.length ? context.difficulties : DEFAULT_SIZES;
-  const usingDefaultSizes =
-    difficultyList.length === DEFAULT_SIZES.length &&
-    difficultyList.every((d: string, i: number) => d === DEFAULT_SIZES[i]);
-  const difficultyGuide = usingDefaultSizes
-    ? `
-  - S = trivial, few lines of code or config change
-  - M = moderate, a few files, clear approach
-  - L = significant, multiple components, some design decisions
-  - XL = major feature, architectural changes, many files`
+  const fieldsSection = context.choiceFields.length
+    ? `\n\nThis project's fields, and the only values each accepts:\n` +
+      context.choiceFields
+        .map((f) => `- ${f.name}: ${f.options.map((o) => `"${o}"`).join(", ")}`)
+        .join("\n")
     : "";
 
   const readmeSection = context.readme
@@ -100,15 +87,18 @@ export async function generateTask(
 
 Project: ${context.name}
 ${context.description ? `Project description: ${context.description}` : ""}
-${componentList}${readmeSection}${existingTasksSection}
+${fieldsSection}${readmeSection}${existingTasksSection}
 
 You must respond with a JSON object with these exact fields:
 - title: concise imperative task title (max 80 chars)
 - description: detailed description explaining what needs to be done, context, and implementation hints. Use markdown formatting.
-- difficulty: one of ${difficultyList.map((d: string) => `"${d}"`).join(", ")} based on estimated complexity${difficultyGuide}
-- category: one of ${categoryList.map((c) => `"${c}"`).join(", ")}
+- category: one of ${categoryList.map((c) => `"${c}"`).join(", ")}${
+    context.choiceFields.length
+      ? `
+- fields: an object keyed by the field names above. Give one of that field's listed values, or an array of them where several apply. Omit a field you cannot judge.`
+      : ""
+  }
 - acceptanceCriteria: markdown checklist of acceptance criteria (use "- [ ]" format)
-- component: best matching component from the available list, or empty string if none match
 - duplicateOf: task number (integer) if this task is a duplicate or very similar to an existing task, or null if not a duplicate
 - duplicateReason: brief explanation if duplicate detected, or empty string
 - suggestedBlockedBy: array of existing task numbers (integers) that should be completed before this new task can start (dependencies). Empty array if none.
@@ -137,19 +127,14 @@ When analyzing duplicates and dependencies, consider the semantic meaning, not j
   const parsed = JSON.parse(content) as GeneratedTask;
 
   // Validate and sanitize
-  const validDifficulties = difficultyList;
   const validCategories = categoryList;
 
-  if (!validDifficulties.includes(parsed.difficulty)) {
-    // Middle of whatever the project's scale is, not a hardcoded "M"
-    parsed.difficulty = (validDifficulties[Math.floor(validDifficulties.length / 2)] ??
-      validDifficulties[0]) as GeneratedTask["difficulty"];
-  }
   if (!validCategories.includes(parsed.category)) {
     parsed.category = validCategories.includes("user-story") ? "user-story" : validCategories[0];
   }
-  if (!context.components.includes(parsed.component)) {
-    parsed.component = "";
+  // `fields` is validated where the definitions live, by the route that resolves it
+  if (!parsed.fields || typeof parsed.fields !== "object") {
+    parsed.fields = {};
   }
 
   // Coerce acceptanceCriteria array to string (LLM sometimes returns arrays)

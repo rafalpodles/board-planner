@@ -4,8 +4,7 @@ import { withProjectAccess } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { Task } from "@/models/task";
 import { isAIEnabled, generateTask, ExistingTaskSummary } from "@/lib/ai";
-import { findLegacyField } from "@/lib/legacy-fields";
-import { orderedOptions, matchOptionValue } from "@/lib/custom-fields";
+import { choiceFieldsForPrompt, resolveGeneratedFields } from "@/lib/ai-fields";
 import { getSettings } from "@/models/settings";
 import { projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
 
@@ -83,14 +82,7 @@ export const POST = withProjectAccess(async (request, { params }) => {
     description: t.description || "",
   }));
 
-  const componentField = findLegacyField(project.customFields || [], "component");
-  const difficultyField = findLegacyField(project.customFields || [], "difficulty");
-  const componentOptions = componentField
-    ? orderedOptions(componentField).map((o) => o.value)
-    : [];
-  const difficultyOptions = difficultyField
-    ? orderedOptions(difficultyField).map((o) => o.value)
-    : undefined;
+  const choiceFields = choiceFieldsForPrompt(project.customFields || []);
 
   try {
     const settings = await getSettings();
@@ -99,8 +91,7 @@ export const POST = withProjectAccess(async (request, { params }) => {
       {
         name: project.name,
         description: project.description || "",
-        components: componentOptions,
-        difficulties: difficultyOptions,
+        choiceFields,
         categories: (project.categories || []).map((c) => c.name),
         readme,
         existingTasks,
@@ -108,17 +99,9 @@ export const POST = withProjectAccess(async (request, { params }) => {
       settings.aiModel
     );
 
-    // The model answers with option text; the client should never have to work out
-    // which field that belongs to, so it is resolved here where the definitions are
-    const customFieldValues: Record<string, unknown> = {};
-    const difficultyOption = matchOptionValue(difficultyField, task.difficulty);
-    if (difficultyField && difficultyOption) {
-      customFieldValues[String(difficultyField._id)] = difficultyOption;
-    }
-    const componentOption = matchOptionValue(componentField, task.component);
-    if (componentField && componentOption) {
-      customFieldValues[String(componentField._id)] = componentOption;
-    }
+    // Resolved here, where the field definitions live, so the client never has to work
+    // out which field an answer belongs to
+    const customFieldValues = resolveGeneratedFields(task.fields, project.customFields || []);
 
     return NextResponse.json({ ...task, customFieldValues });
   } catch (err) {
