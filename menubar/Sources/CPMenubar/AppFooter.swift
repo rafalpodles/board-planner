@@ -11,9 +11,16 @@ struct AppFooter: View {
     var body: some View {
         HStack {
             Spacer()
-            Button("Quit") { NSApplication.shared.terminate(nil) }
-                .keyboardShortcut("q")
-                .help("Quits this app. A worker it started keeps running.")
+            Button(RunningWorker.shared.isOurs ? "Quit and stop the worker" : "Quit") {
+                // Stops the worker this app started, and only that one. One started from a launchd
+                // plist or by hand belongs to whoever started it and is left alone.
+                RunningWorker.shared.stop()
+                NSApplication.shared.terminate(nil)
+            }
+            .keyboardShortcut("q")
+            .help(RunningWorker.shared.isOurs
+                ? "Stops the worker this app started, then quits."
+                : "Quits this app. A worker started some other way is left running.")
         }
     }
 }
