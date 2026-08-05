@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const getAuthUser = vi.fn();
+const check = vi.fn();
 const workerFindByIdAndUpdate = vi.fn();
 const publishToWorker = vi.fn();
 
@@ -9,14 +10,16 @@ vi.mock("@/lib/auth", () => ({
   getAuthUser,
   RateLimitError: class RateLimitError extends Error {},
 }));
+vi.mock("@/lib/grants", () => ({ check, accessibleProjectIds: vi.fn() }));
 vi.mock("@/models/worker", () => ({ Worker: { findByIdAndUpdate: workerFindByIdAndUpdate } }));
 vi.mock("@/lib/worker-events", () => ({ publishToWorker }));
 
 const { POST } = await import("./route");
 
 const WORKER_ID = "69a52e3b399b27d3cbb2c5a5";
-const ADMIN = { _id: "admin-1", role: "admin", tokenScoped: false, allowedProjects: [] };
-const MEMBER = { _id: "member-1", role: "member", tokenScoped: false, allowedProjects: [] };
+const ADMIN = { _id: "admin-1", role: "admin", tokenScoped: false };
+// The strongest principal that is not an instance admin: someone who owns a project outright
+const PROJECT_OWNER = { _id: "owner-1", role: "member", tokenScoped: false };
 
 function request(body: unknown, workerId = WORKER_ID) {
   return {
@@ -31,6 +34,7 @@ function request(body: unknown, workerId = WORKER_ID) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  check.mockResolvedValue(false);
   getAuthUser.mockResolvedValue(ADMIN);
   workerFindByIdAndUpdate.mockResolvedValue({
     _id: WORKER_ID,
@@ -40,8 +44,9 @@ beforeEach(() => {
 });
 
 describe("POST /api/workers/:workerId/command", () => {
-  it("refuses a non-admin", async () => {
-    getAuthUser.mockResolvedValue(MEMBER);
+  it("refuses a project owner", async () => {
+    getAuthUser.mockResolvedValue(PROJECT_OWNER);
+    check.mockResolvedValue(true);
     const { req, ctx } = request({ command: "pause" });
 
     const response = await POST(req, ctx);

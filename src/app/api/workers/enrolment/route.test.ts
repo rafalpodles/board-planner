@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const getAuthUser = vi.fn();
+const check = vi.fn();
 const mintEnrolmentToken = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
@@ -8,18 +9,19 @@ vi.mock("@/lib/auth", () => ({
   getAuthUser,
   RateLimitError: class RateLimitError extends Error {},
 }));
+vi.mock("@/lib/grants", () => ({ check, accessibleProjectIds: vi.fn() }));
 vi.mock("@/lib/enrolment", () => ({ mintEnrolmentToken }));
 
 const { POST } = await import("./route");
 
-const SESSION_ADMIN = { _id: "admin-1", role: "admin", allowedProjects: [] };
+const SESSION_ADMIN = { _id: "admin-1", role: "admin" };
 const UNSCOPED_ADMIN_TOKEN = {
   _id: "admin-1",
   role: "admin",
   viaMachineCredential: true,
-  allowedProjects: [],
 };
-const MEMBER = { _id: "m1", role: "member", allowedProjects: [] };
+// Enrolling a machine is the instance's business, so not even a project owner reaches it
+const PROJECT_OWNER = { _id: "owner-1", role: "member" };
 
 function request(body: unknown = {}) {
   return new Request("http://localhost/api/workers/enrolment", {
@@ -31,6 +33,7 @@ function request(body: unknown = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  check.mockResolvedValue(false);
   mintEnrolmentToken.mockResolvedValue({
     token: "cpe_secret",
     expiresAt: new Date("2026-08-03T13:00:00.000Z"),
@@ -59,8 +62,9 @@ describe("POST /api/workers/enrolment", () => {
     expect(mintEnrolmentToken).not.toHaveBeenCalled();
   });
 
-  it("refuses a member", async () => {
-    getAuthUser.mockResolvedValue(MEMBER);
+  it("refuses a project owner", async () => {
+    getAuthUser.mockResolvedValue(PROJECT_OWNER);
+    check.mockResolvedValue(true);
 
     expect((await POST(request(), { params: Promise.resolve({}) })).status).toBe(403);
     expect(mintEnrolmentToken).not.toHaveBeenCalled();
