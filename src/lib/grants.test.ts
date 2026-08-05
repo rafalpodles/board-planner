@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { decide, Principal, principalOf } from "./grants";
 import { IUser } from "@/types";
 import { Types } from "mongoose";
@@ -112,5 +112,88 @@ describe("principalOf", () => {
     expect(result.tokenScope).toEqual([P]);
     expect(result.tokenScoped).toBe(true);
     expect(result.instanceAdminBeforeScope).toBe(true);
+  });
+});
+
+const findOne = vi.fn();
+const find = vi.fn();
+vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
+vi.mock("@/models/grant", () => ({
+  Grant: {
+    findOne: (...args: unknown[]) => findOne(...args),
+    find: (...args: unknown[]) => find(...args),
+  },
+}));
+
+const { check, accessibleProjectIds } = await import("./grants");
+
+function lean(value: unknown) {
+  return { select: () => ({ lean: () => Promise.resolve(value) }) };
+}
+
+describe("check", () => {
+  beforeEach(() => {
+    findOne.mockReset();
+    find.mockReset();
+  });
+
+  it("reads the grant for an ordinary user", async () => {
+    findOne.mockReturnValue(lean({ relation: "owner" }));
+    const user = { _id: "u1", role: "member" } as never;
+    expect(await check(user, P, "admin")).toBe(true);
+    expect(findOne).toHaveBeenCalledWith({ subject: "u1", objectType: "project", object: P });
+  });
+
+  it("denies cleanly when the collection is empty", async () => {
+    findOne.mockReturnValue(lean(null));
+    const user = { _id: "u1", role: "member" } as never;
+    expect(await check(user, P, "access")).toBe(false);
+  });
+
+  it("answers for an instance admin without querying at all", async () => {
+    const user = { _id: "a1", role: "admin" } as never;
+    expect(await check(user, P, "admin")).toBe(true);
+    expect(findOne).not.toHaveBeenCalled();
+  });
+
+  it("answers out-of-scope tokens without querying at all", async () => {
+    const user = { _id: "u1", role: "member", tokenScoped: true, tokenScope: [OTHER] } as never;
+    expect(await check(user, P, "access")).toBe(false);
+    expect(findOne).not.toHaveBeenCalled();
+  });
+});
+
+describe("accessibleProjectIds", () => {
+  beforeEach(() => {
+    findOne.mockReset();
+    find.mockReset();
+  });
+
+  it("returns null for an unscoped instance admin", async () => {
+    const user = { _id: "a1", role: "admin" } as never;
+    expect(await accessibleProjectIds(user)).toBe(null);
+  });
+
+  it("returns the scope for an instance admin's scoped token", async () => {
+    const user = {
+      _id: "a1",
+      role: "member",
+      tokenScoped: true,
+      tokenScope: [P],
+      instanceAdminBeforeScope: true,
+    } as never;
+    expect(await accessibleProjectIds(user)).toEqual([P]);
+  });
+
+  it("returns the granted projects for an ordinary user", async () => {
+    find.mockReturnValue(lean([{ object: P }, { object: OTHER }]));
+    const user = { _id: "u1", role: "member" } as never;
+    expect(await accessibleProjectIds(user)).toEqual([P, OTHER]);
+  });
+
+  it("intersects grants with a token scope", async () => {
+    find.mockReturnValue(lean([{ object: P }, { object: OTHER }]));
+    const user = { _id: "u1", role: "member", tokenScoped: true, tokenScope: [OTHER] } as never;
+    expect(await accessibleProjectIds(user)).toEqual([OTHER]);
   });
 });
