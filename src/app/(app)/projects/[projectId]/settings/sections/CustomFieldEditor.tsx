@@ -4,13 +4,15 @@ import { useState } from "react";
 import { ApiCustomField, FIELD_TYPE_LABELS } from "@/types";
 import { isOptionField, orderedOptions } from "@/lib/custom-fields";
 import { Button } from "@/components/ui/Button";
-import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { DangerAction } from "@/components/settings/DangerAction";
 
 interface Props {
   field: ApiCustomField;
   onEdit: () => void;
   onSave: (patch: Record<string, unknown>) => Promise<void>;
   onDelete: () => void;
+  /** Tasks holding a value for this field; undefined until /stats lands */
+  usage?: number;
 }
 
 const FLAG_CHIPS = [
@@ -25,8 +27,7 @@ const FLAG_CHIPS = [
  * that creates one. Keeping those apart is what left three of the four flags
  * unreachable until after a field already existed.
  */
-export function CustomFieldEditor({ field, onEdit, onSave, onDelete }: Props) {
-  const [confirming, setConfirming] = useState(false);
+export function CustomFieldEditor({ field, onEdit, onSave, onDelete, usage }: Props) {
   const [busy, setBusy] = useState(false);
 
   const optionCount = isOptionField(field) ? orderedOptions(field).length : 0;
@@ -81,25 +82,23 @@ export function CustomFieldEditor({ field, onEdit, onSave, onDelete }: Props) {
         <Button variant="ghost" size="sm" onClick={toggleArchived} disabled={busy}>
           {field.archived ? "Restore" : "Archive"}
         </Button>
-        <Button variant="ghost" size="sm" onClick={() => setConfirming(true)} disabled={busy}>
-          Delete
-        </Button>
+        <DangerAction
+          label="Delete"
+          title={`Delete “${field.name}”?`}
+          message="Every task's value for this field is erased and cannot be recovered."
+          usage={
+            usage === undefined
+              ? undefined
+              : usage === 0
+                ? "No task holds a value for it."
+                : `Used by ${usage === 1 ? "1 task" : `${usage} tasks`}. Archiving hides the field and keeps their values.`
+          }
+          alternative={field.archived ? undefined : { label: "Archive instead", onSelect: toggleArchived }}
+          confirmLabel="Delete field"
+          disabled={busy}
+          onConfirm={onDelete}
+        />
       </div>
-
-      <ConfirmDialog
-        open={confirming}
-        title={`Delete “${field.name}”?`}
-        message={
-          "Every task's value for this field is erased and cannot be recovered. " +
-          "Archive instead to hide the field and keep them."
-        }
-        confirmLabel="Delete field"
-        onConfirm={() => {
-          setConfirming(false);
-          onDelete();
-        }}
-        onClose={() => setConfirming(false)}
-      />
     </div>
   );
 }

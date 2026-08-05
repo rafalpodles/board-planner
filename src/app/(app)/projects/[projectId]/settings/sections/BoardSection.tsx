@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { useDraft } from "@/hooks/use-draft";
 import { useToast } from "@/components/ui/Toast";
@@ -33,31 +33,14 @@ function toDrafts(columns: Parameters<typeof effectiveColumns>[0]): ColumnDraft[
   }));
 }
 
-export function BoardSection({
-  projectId,
-  project,
-  patchProject,
-  active,
-}: SectionProps & { active: boolean }) {
+export function BoardSection({ projectId, project, patchProject, stats }: SectionProps) {
   const api = useApi();
   const { toast } = useToast();
 
   const draft = useDraft({ columns: toDrafts(project.columns) });
   const [newLabel, setNewLabel] = useState("");
-  const [taskCounts, setTaskCounts] = useState<Record<string, number>>({});
-  const [countsRequested, setCountsRequested] = useState(false);
+  const taskCounts = stats?.statusBreakdown ?? {};
   const dragIndex = useRef<number | null>(null);
-
-  // /stats runs several aggregations — only pay for it once the section is opened
-  useEffect(() => {
-    if (!active || countsRequested) return;
-    setCountsRequested(true);
-    api
-      .get(`/api/projects/${projectId}/stats`)
-      .then((s: { statusBreakdown: Record<string, number> }) => setTaskCounts(s.statusBreakdown || {}))
-      .catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, countsRequested, projectId]);
 
   const columns = draft.value.columns;
 

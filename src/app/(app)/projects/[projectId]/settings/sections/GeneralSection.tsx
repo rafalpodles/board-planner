@@ -10,12 +10,12 @@ import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
 import { Button } from "@/components/ui/Button";
 import { IconPicker } from "@/components/ui/IconPicker";
-import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { SettingsCard, ListRow } from "@/components/settings/SettingsCard";
+import { DangerAction } from "@/components/settings/DangerAction";
 import { useDirtyGroup } from "@/components/settings/settings-context";
 import { SectionProps } from "./types";
 
-export function GeneralSection({ projectId, project, replaceProject, isAdmin }: SectionProps) {
+export function GeneralSection({ projectId, project, replaceProject, isAdmin, stats }: SectionProps) {
   const api = useApi();
   const router = useRouter();
   const { toast } = useToast();
@@ -29,8 +29,6 @@ export function GeneralSection({ projectId, project, replaceProject, isAdmin }: 
   const [members, setMembers] = useState<ApiProjectMember[]>([]);
   const [newAdminId, setNewAdminId] = useState("");
   const [adminsSaving, setAdminsSaving] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     api
@@ -74,14 +72,11 @@ export function GeneralSection({ projectId, project, replaceProject, isAdmin }: 
   }
 
   async function handleDelete() {
-    setDeleting(true);
     try {
       await api.del(`/api/projects/${projectId}`);
       router.replace("/projects");
     } catch {
       toast("Failed to delete project", "error");
-      setDeleting(false);
-      setConfirmDelete(false);
     }
   }
 
@@ -182,23 +177,22 @@ export function GeneralSection({ projectId, project, replaceProject, isAdmin }: 
         <SettingsCard
           title="Delete project"
           danger
-          description={`Deletes ${project.name} and all its tasks, comments and history. This can't be undone.`}
+          description={`Removes ${project.name}, its tasks, sprints and comments. This can't be undone.`}
         >
-          <Button variant="danger" onClick={() => setConfirmDelete(true)}>
-            Delete project
-          </Button>
+          <DangerAction
+            label="Delete project..."
+            title={`Delete "${project.name}"?`}
+            message="The project, its sprints, its comments and its history go with it."
+            usage={
+              stats
+                ? `${stats.total === 1 ? "1 task" : `${stats.total} tasks`} will be deleted and cannot be restored.`
+                : undefined
+            }
+            confirmLabel="Delete project"
+            onConfirm={handleDelete}
+          />
         </SettingsCard>
       )}
-
-      <ConfirmDialog
-        open={confirmDelete}
-        onClose={() => setConfirmDelete(false)}
-        onConfirm={handleDelete}
-        title="Delete Project"
-        message={`Are you sure you want to delete "${project.name}" and all its tasks? This action cannot be undone.`}
-        confirmLabel="Delete Project"
-        loading={deleting}
-      />
     </>
   );
 }
