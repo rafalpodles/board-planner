@@ -18,7 +18,6 @@ import { IntegrationsSection } from "./sections/IntegrationsSection";
 import { PmAgentSection } from "./sections/PmAgentSection";
 import { WorkersSection } from "./sections/WorkersSection";
 import { AuditSection } from "./sections/AuditSection";
-import Link from "next/link";
 import { PageHeader } from "@/components/shell/PageHeader";
 import { SettingsStats } from "./sections/types";
 
@@ -348,25 +347,6 @@ export default function ProjectSettingsPage() {
               </div>
             )}
 
-            {isAdmin && (
-              <div className="mt-4">
-                <h2 className="mb-1.5 ml-2.5 text-[10.5px] font-bold uppercase tracking-wider text-text-muted">
-                  All projects
-                </h2>
-                {/* Nothing instance-wide is edited here any more — the link is the
-                    whole point, so a setting that affects every project cannot be
-                    mistaken for one of this project's */}
-                <Link
-                  href="/settings/agents"
-                  className="focus-ring flex min-h-[40px] w-full items-center gap-2 rounded-lg px-2.5 text-left text-[13.5px] text-text-muted transition-colors hover:bg-bg-hover hover:text-text"
-                >
-                  AI &amp; agents ↗
-                </Link>
-                <p className="mt-1 px-2.5 text-[11.5px] leading-snug text-text-muted">
-                  Instance settings live outside this project.
-                </p>
-              </div>
-            )}
 
             {matches.length === 0 && (
               <p className="px-2.5 text-sm text-text-muted">
