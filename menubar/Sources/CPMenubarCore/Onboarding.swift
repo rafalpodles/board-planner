@@ -16,6 +16,9 @@ public struct OnboardingState: Codable, Equatable, Sendable {
     public var step: OnboardingStep
     public var apiURL: String
     public var workerName: String
+    /// Where the worker keeps its checkouts. Chosen by the operator; never a checkout itself.
+    public var checkoutsFolder: String
+    /// The clone the app made inside it, once there is one. Empty until the clone succeeds.
     public var checkoutPath: String
     public var userCode: String
     public var verificationURL: String
@@ -30,6 +33,7 @@ public struct OnboardingState: Codable, Equatable, Sendable {
         step: OnboardingStep = .needsPreflight,
         apiURL: String = "",
         workerName: String = "",
+        checkoutsFolder: String = "",
         checkoutPath: String = "",
         userCode: String = "",
         verificationURL: String = "",
@@ -40,6 +44,7 @@ public struct OnboardingState: Codable, Equatable, Sendable {
         self.step = step
         self.apiURL = apiURL
         self.workerName = workerName
+        self.checkoutsFolder = checkoutsFolder
         self.checkoutPath = checkoutPath
         self.userCode = userCode
         self.verificationURL = verificationURL
@@ -93,7 +98,7 @@ public enum Onboarding {
 
     public static func folderChosen(_ state: OnboardingState, path: String) -> OnboardingState {
         var next = state
-        next.checkoutPath = path
+        next.checkoutsFolder = path
         if next.step == .needsFolder || next.step == .needsPreflight { next.step = .awaitingApproval }
         return next
     }
@@ -131,6 +136,13 @@ public enum Onboarding {
         next.userCode = ""
         next.verificationURL = ""
         next.step = .awaitingApproval
+        return next
+    }
+
+    /// The clone exists and a push has been shown to work. Only now is there something to run.
+    public static func cloned(_ state: OnboardingState, at path: String) -> OnboardingState {
+        var next = state
+        next.checkoutPath = path
         return next
     }
 

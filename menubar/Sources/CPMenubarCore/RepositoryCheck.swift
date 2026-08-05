@@ -1,8 +1,12 @@
 import Foundation
 
-// Every one of these is a plausible first pick, and today each surfaces only as a string in the
-// fleet console after the machine has already been enrolled. `bindRepository` refuses them for
-// good reasons; saying so at the picker costs one sentence and saves the round trip.
+// The folder the worker will keep its checkouts in — not a checkout. The worker gets its own clone
+// rather than borrowing the operator's: it registers worktrees inside whatever it is handed and
+// reaps directories beside them, a hazard that has already bitten in this repository, and it drags
+// in uncommitted work and switched branches with it.
+//
+// Every problem below is a plausible first pick, and each one otherwise surfaces only as a string
+// in the fleet console after the machine has already been enrolled.
 public struct RepositoryProblem: Equatable, Sendable {
     public let summary: String
     public let fix: String
@@ -63,13 +67,13 @@ public enum RepositoryCheck {
             )
         }
 
-        // A package inside a monorepo has no .git of its own. The worker builds worktrees against a
-        // repository toplevel, so this is the difference between working and refusing.
-        if !inspection.hasGitDirectory {
+        // Picking a checkout is the mistake this design exists to prevent, so it is named rather
+        // than silently accepted
+        if inspection.hasGitDirectory {
             found.append(
                 RepositoryProblem(
-                    summary: "\(inspection.resolved) is not the top of a git repository.",
-                    fix: "Pick the folder that contains .git — not a package inside it."
+                    summary: "\(inspection.resolved) is itself a checkout.",
+                    fix: "Pick the folder that holds your checkouts. The worker clones its own copy inside it."
                 )
             )
         }
