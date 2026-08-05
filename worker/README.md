@@ -48,13 +48,20 @@ registration mints. Nothing else is read from the environment.
 | Variable | Required | Default |
 |---|---|---|
 | `CP_API_URL` | yes | — |
-| `CP_API_TOKEN` or `CP_API_TOKEN_FILE` | yes | — |
+| `CP_ENROLMENT_TOKEN` or `CP_ENROLMENT_TOKEN_FILE` | first start only | — |
 | `CP_WORKER_NAME` | yes | — |
 | `CP_STATE_DIR` | no | `~/.claudeplanner` |
 
-`CP_API_TOKEN` must belong to an instance admin. The worker spends it once, to register itself —
-every call after that, to `/tasks/claim` and the rest of `/api/workers/**`, authenticates with the
-credential registration returns instead. See Registration below.
+A worker holds **one** credential. An enrolment token is spent by the first registration, and
+everything after that — claiming, reporting status, commenting, releasing, and all of
+`/api/workers/**` — authenticates with the `cpw_` credential registration returns. See Registration
+below.
+
+There is deliberately no second, project-scoped API token. Its scope would be a list fixed when it
+was minted, while a worker's grant is recomputed every heartbeat from the checkouts it reports
+crossed with every enabled project — so enabling a second project would let the claim succeed on the
+worker credential while the report 403'd on the API one, stranding the task until its lease expired.
+`CP_API_TOKEN` is still read if present, so an existing plist keeps booting, but nothing uses it.
 
 Claude Code runs on the logged-in CLI session. Never set `ANTHROPIC_API_KEY`, or runs bill per
 token instead of drawing on the subscription.
@@ -80,7 +87,7 @@ A worker has no identity until an instance admin registers it and assigns it one
 in `/settings/workers`. Until then it polls but claims nothing: `/tasks/claim` and the rest of
 `/api/workers/**` refuse any request without a credential the server itself issued.
 
-On first run the worker registers itself with `CP_API_TOKEN` and persists the response — a
+On first run the worker registers itself with its enrolment token and persists the response — a
 `workerId` and a `cpw_`-prefixed credential — to `<CP_STATE_DIR>/worker.json`, mode `0600`. Every
 later run reuses that file; the worker registers again only if the file is missing or the server
 rejects its stored credential with 401. A run that reuses a stored identity, rather than
@@ -105,15 +112,15 @@ cp launchd/com.claudeplanner.worker.plist ~/Library/LaunchAgents/
 launchctl load ~/Library/LaunchAgents/com.claudeplanner.worker.plist
 ```
 
-Put the token in a file only you can read, and point `CP_API_TOKEN_FILE` at it — never in the
-plist, which sits at `0644` and rides along into Time Machine:
+Put the enrolment token in a file only you can read, and point `CP_ENROLMENT_TOKEN_FILE` at it —
+never in the plist, which sits at `0644` and rides along into Time Machine:
 
 ```bash
 install -m 600 /dev/null ~/.claudeplanner/token && pbpaste > ~/.claudeplanner/token
 ```
 
-The worker refuses to start if that file is readable by group or others. `CP_API_TOKEN` still
-works inline for a container, where there is no file to protect.
+The worker refuses to read a secret file that is readable by group or others. The inline variable
+still works for a container, where there is no file to protect.
 
 The plist carries the paths for this machine — check `ProgramArguments` and `PATH` before loading
 it anywhere else. Logs go to `/tmp/claudeplanner-worker.log` and
@@ -131,7 +138,7 @@ and `SIGINT` both finish the task in flight before the loop exits.
   npm on the worktree, and installs run with `--ignore-scripts`. Cost ordering alone would have
   executed agent-written lifecycle scripts first.
 - **No subprocess inherits the worker's secrets.** The child environment is an allowlist, so
-  `CP_API_TOKEN` reaches neither the agent nor any dependency's install script. Only delivery,
+  the worker's credential reaches neither the agent nor any dependency's install script. Only delivery,
   which runs our own commands, carries what `git` and `gh` need for the remote.
 - **The executor runs with `bypassPermissions` inside the worktree**, so the worktree is checked
   for uncommitted files before the gates run — an agent cannot hide a change from the gates by
@@ -172,11 +179,10 @@ server-side, the worker deletes the file, and it is never needed again — a wor
 in `worker.json` does not re-register. Optional by design: an enrolled worker must keep booting
 after you remove it.
 
-**`CP_API_TOKEN` / `CP_API_TOKEN_FILE`** — the operational credential for claiming and reporting.
-**Scope it to the projects this worker serves.** A scoped token is downgraded to member level with
-`tokenScoped: true`, and `PATCH /api/workers/:id` refuses every machine credential — which is what
-makes the kill switch hold. An unscoped admin token works operationally and is exactly what must
-not be used here.
+**`CP_API_TOKEN` / `CP_API_TOKEN_FILE`** — **no longer used.** The worker's own `cpw_` credential
+does the claiming and the reporting, and its scope is re-derived on every call from the projects
+this machine is actually assigned to, so it cannot drift the way a minted list does. The kill switch
+still holds: `PATCH /api/workers/:id` refuses every machine credential, worker credentials included.
 
 Claiming itself uses neither: `worker.json` holds a `cpw_` credential minted at registration, which
 no route outside the worker API accepts.

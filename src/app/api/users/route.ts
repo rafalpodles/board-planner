@@ -5,9 +5,12 @@ import { getAuthUser } from "@/lib/auth";
 import { withAdmin } from "@/lib/middleware";
 import { User } from "@/models/user";
 
+// Machines are excluded: worker identities are accounts, but not people to invite, permission or
+// delete from here, and a team that connects five machines would otherwise have a user list that is
+// half machines.
 export const GET = withAdmin(async () => {
   await connectDB();
-  const users = await User.find().sort({ createdAt: 1 });
+  const users = await User.find({ kind: { $ne: "machine" } }).sort({ createdAt: 1 });
   return NextResponse.json(users);
 });
 

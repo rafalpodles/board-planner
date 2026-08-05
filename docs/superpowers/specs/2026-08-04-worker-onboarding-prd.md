@@ -257,6 +257,29 @@ repository is proven. The worker therefore registers in a *configuring* state, s
 claiming nothing, and either completes or fails with a reason. There is never a worker that looks
 ready and is not.
 
+## Settled second round
+
+**A machine that already has a worker is detected, and the operator is asked.** Adding another
+project to the same machine is the common case and should cost only a project choice. The other two
+answers — replace this worker, or register a second one — are offered explicitly. Today a repeated
+registration silently overwrites the credential and kills the running worker.
+
+**Clones live at `<chosen folder>/<project key>/`.** The key is disabled in the settings UI, so the
+directory name will not start lying — though the API still accepts a key change, which is worth
+either closing or handling. The known cost of keying on the project rather than the repository:
+**two projects sharing one repository get two identical clones.** Accepted; detect it and say so
+rather than pretending it did not happen.
+
+**The worker identity is visible where authorship matters and hidden where people are managed.** It
+appears as comment author, as assignee and in history — that is the entire point. It does not appear
+in the user list for invitations, permissions, or a human picking an assignee. That makes it a
+distinct kind of account rather than an ordinary user with an odd name, and keeps the user list from
+becoming half machines once a team connects five.
+
+**Rate limiting waits.** After a worker takes only unassigned tasks it can no longer eat a column
+meant for people, so the remaining reason for a cap is the token bill — and nobody has seen that
+number yet. Set it against a real figure rather than guessing one now.
+
 ## Design decisions
 
 **Device flow, not a pasted token.** The app initiates and the browser approves, which is RFC 8628's

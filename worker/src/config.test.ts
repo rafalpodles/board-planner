@@ -56,8 +56,10 @@ describe("loadBootstrap", () => {
     expect(() => loadBootstrap(base)).not.toThrow();
   });
 
-  it("throws naming the missing variable", () => {
-    expect(() => loadBootstrap({ ...base, CP_API_TOKEN: undefined })).toThrow(/CP_API_TOKEN/);
+  // CP-237 removed the second credential, so this is no longer a boot requirement. The worker's
+  // own credential is minted by registration and its scope follows its assignments.
+  it("boots with no CP_API_TOKEN at all", () => {
+    expect(() => loadBootstrap({ ...base, CP_API_TOKEN: undefined })).not.toThrow();
   });
 
   it("throws when the worker name is missing", () => {
@@ -65,7 +67,8 @@ describe("loadBootstrap", () => {
   });
 });
 
-describe("the api token", () => {
+// Nothing reads this any more; it is still parsed so an existing plist keeps booting unchanged.
+describe("the legacy api token", () => {
   const base = { CP_API_URL: "https://app.example.com", CP_WORKER_NAME: "worker-1" };
 
   it("reads it from a file when the environment does not carry it", () => {
@@ -84,24 +87,24 @@ describe("the api token", () => {
     expect(read).not.toHaveBeenCalled();
   });
 
-  it("names both ways when neither is set", () => {
-    expect(() => loadBootstrap(base, vi.fn())).toThrow(/CP_API_TOKEN or CP_API_TOKEN_FILE/);
+  it("is simply empty when neither way is set, rather than refusing to boot", () => {
+    expect(loadBootstrap(base, vi.fn()).apiToken).toBe("");
   });
 
-  it("refuses an empty secret file rather than authenticating as nobody", () => {
-    expect(() =>
-      loadBootstrap({ ...base, CP_API_TOKEN_FILE: "/secrets/token" }, () => "  \n")
-    ).toThrow(/empty file/);
+  it("is empty rather than fatal when the file is empty", () => {
+    expect(
+      loadBootstrap({ ...base, CP_API_TOKEN_FILE: "/secrets/token" }, () => "  \n").apiToken
+    ).toBe("");
   });
 
-  it("lets the reader's own refusal through, so loose file permissions stop the boot", () => {
+  // It used to stop the boot, which was right while the token was load-bearing. Now that nothing
+  // reads it, a badly-permissioned leftover file must not keep a working worker from starting.
+  it("does not stop the boot over a badly-permissioned leftover file", () => {
     const read = vi.fn(() => {
       throw new Error("/secrets/token is readable by group or others (mode 644)");
     });
 
-    expect(() => loadBootstrap({ ...base, CP_API_TOKEN_FILE: "/secrets/token" }, read)).toThrow(
-      /readable by group or others/
-    );
+    expect(() => loadBootstrap({ ...base, CP_API_TOKEN_FILE: "/secrets/token" }, read)).not.toThrow();
   });
 });
 
@@ -121,6 +124,7 @@ describe("applyPolicy", () => {
 
     expect(next).toEqual({
       autoMerge: true,
+      reviewGate: true,
       baseBranch: "develop",
       pollIntervalMs: 5_000,
       taskTimeoutMs: 60_000,
@@ -233,5 +237,34 @@ describe("autoMerge", () => {
     for (const bad of ["true", "false", 1, 0, null, "yes"]) {
       expect(applyPolicy(DEFAULT_POLICY, { autoMerge: bad }).autoMerge).toBe(false);
     }
+  });
+});
+
+// The worker does not trust a policy it was handed. "Nothing merges unreviewed" is the one safety
+// property the README asserts outright, so a server that sends the pair — through a bug, or a
+// rollback to a validator that did not know the rule — must not be able to talk the worker into it.
+describe("refusing to merge unreviewed, whatever the server says", () => {
+  it("turns autoMerge off when the same patch disables the review gate", () => {
+    const next = applyPolicy(DEFAULT_POLICY, { autoMerge: true, reviewGate: false });
+
+    expect(next.autoMerge).toBe(false);
+    expect(next.reviewGate).toBe(false);
+  });
+
+  it("turns autoMerge off when the review gate was already disabled", () => {
+    const without = applyPolicy(DEFAULT_POLICY, { reviewGate: false });
+
+    expect(applyPolicy(without, { autoMerge: true }).autoMerge).toBe(false);
+  });
+
+  it("turns autoMerge off when a later patch removes the review it was allowed under", () => {
+    const merging = applyPolicy(DEFAULT_POLICY, { autoMerge: true });
+    expect(merging.autoMerge).toBe(true);
+
+    expect(applyPolicy(merging, { reviewGate: false }).autoMerge).toBe(false);
+  });
+
+  it("leaves autoMerge alone while the review gate stands", () => {
+    expect(applyPolicy(DEFAULT_POLICY, { autoMerge: true, reviewGate: true }).autoMerge).toBe(true);
   });
 });

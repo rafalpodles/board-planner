@@ -5,12 +5,13 @@ import { Project } from "@/models/project";
 import { Task } from "@/models/task";
 import { fetchTaskBranches, fetchTaskCommits, parseGitlabRepo } from "@/lib/gitlab";
 import { decryptSecret } from "@/lib/encryption";
+import { projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
 
 export const GET = withProjectAccess(async (_request, { params }) => {
   const { projectId, taskId } = await params;
   await connectDB();
 
-  const project = await Project.findById(projectId, "key gitlabRepo gitlabHost gitlabToken").lean();
+  const project = await Project.findById(projectId, "key repositoryUrl githubRepo gitlabRepo gitlabHost gitlabToken").lean();
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
@@ -20,7 +21,8 @@ export const GET = withProjectAccess(async (_request, { params }) => {
     return NextResponse.json({ error: "Task not found" }, { status: 404 });
   }
 
-  const projectPath = project.gitlabRepo ? parseGitlabRepo(project.gitlabRepo) : null;
+  const projectPath =
+    repositoryProvider(project) === "gitlab" ? parseGitlabRepo(projectRepositoryUrl(project)) : null;
   if (!projectPath || !project.gitlabToken) {
     return NextResponse.json({ configured: false, branches: [], commits: [] });
   }

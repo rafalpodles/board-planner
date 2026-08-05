@@ -36,6 +36,15 @@ export async function mintEnrolmentToken(
   return { token, expiresAt };
 }
 
+// Who enrolled this machine, used to name its identity — "Rafal · MacBook". Empty rather than
+// throwing: a machine whose enroller has since been deleted still needs a working identity.
+export async function enrolmentTokenOwner(tokenId: string): Promise<string> {
+  await connectDB();
+  const token = await EnrolmentToken.findById(tokenId).populate("createdBy", "fullName username").lean();
+  const owner = token?.createdBy as { fullName?: string; username?: string } | null | undefined;
+  return owner?.fullName?.trim() || owner?.username?.trim() || "";
+}
+
 // Spending is a single conditional update, not read-then-write: two workers handed the same string
 // would both pass a read check and both register, which is exactly the second live worker this
 // credential exists to prevent.

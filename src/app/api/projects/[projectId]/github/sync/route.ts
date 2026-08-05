@@ -7,6 +7,7 @@ import { fetchPullRequests, matchPRsToTasks, parseRepoString } from "@/lib/githu
 import { logActivity } from "@/lib/activity";
 import { decryptSecret } from "@/lib/encryption";
 import { getProjectColumns } from "@/lib/columns";
+import { projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
 
 export const POST = withProjectAccess(async (_request, { params, user }) => {
   const { projectId } = await params;
@@ -17,17 +18,25 @@ export const POST = withProjectAccess(async (_request, { params, user }) => {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
-  if (!project.githubRepo || !project.githubToken) {
+  const repositoryUrl = projectRepositoryUrl(project);
+  if (!repositoryUrl || !project.githubToken) {
     return NextResponse.json(
-      { error: "GitHub repo and token must be configured in project settings" },
+      { error: "A repository URL and a GitHub token must be configured in project settings" },
       { status: 400 }
     );
   }
 
-  const parsed = parseRepoString(project.githubRepo);
+  if (repositoryProvider(project) !== "github") {
+    return NextResponse.json(
+      { error: `${repositoryUrl} is not a GitHub repository, so there are no pull requests to sync` },
+      { status: 400 }
+    );
+  }
+
+  const parsed = parseRepoString(repositoryUrl);
   if (!parsed) {
     return NextResponse.json(
-      { error: "Invalid GitHub repo format. Use 'owner/repo'." },
+      { error: `Could not read an owner and repository out of ${repositoryUrl}` },
       { status: 400 }
     );
   }

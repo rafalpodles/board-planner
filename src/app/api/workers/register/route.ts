@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { protocolOf } from "@/lib/middleware";
 import { PROTOCOL_VERSION, WORKER_HEARTBEAT_MS, overriddenWorkerPolicy, registerWorker } from "@/lib/worker-service";
-import { attachWorkerToEnrolment, consumeEnrolmentToken } from "@/lib/enrolment";
+import { attachWorkerToEnrolment, consumeEnrolmentToken, enrolmentTokenOwner } from "@/lib/enrolment";
 
 // Authenticated by a single-use enrolment token, NOT by an admin session or an admin API token.
 //
@@ -47,6 +47,8 @@ export async function POST(request: Request) {
     host,
     platform: String(body.platform ?? ""),
     version: String(body.version ?? ""),
+    // Names the machine's identity after the person who enrolled it — "Rafal · MacBook"
+    owner: await enrolmentTokenOwner(consumed.tokenId),
   });
 
   await attachWorkerToEnrolment(consumed.tokenId, String(worker._id));

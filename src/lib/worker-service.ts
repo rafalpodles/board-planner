@@ -6,6 +6,7 @@ import { Worker } from "@/models/worker";
 import { ApiWorker, ApiWorkerTask, IWorker } from "@/types";
 import { PROJECT_POLICY_DEFAULTS, WORKER_POLICY_DEFAULTS } from "@/lib/worker-policy";
 import { MatchableProject, RepoReport, matchRepo } from "@/lib/repo-match";
+import { ensureWorkerUser } from "@/lib/worker-user";
 
 export const PROTOCOL_VERSION = 1;
 export const WORKER_STALE_MS = 5 * 60 * 1000;
@@ -188,17 +189,20 @@ export async function registerWorker(input: {
   host: string;
   platform: string;
   version: string;
+  // Whoever minted the enrolment token. Only used to name the machine's identity.
+  owner?: string;
 }): Promise<{ worker: IWorker; credential: string }> {
   await connectDB();
   const credential = `cpw_${crypto.randomBytes(32).toString("hex")}`;
+  const { owner, ...fields } = input;
 
   // Re-registration reclaims the identity rather than creating a ghost that holds the
   // assignments while the live worker sits idle with none
   const worker = await Worker.findOneAndUpdate(
-    { name: input.name, host: input.host },
+    { name: fields.name, host: fields.host },
     {
       $set: {
-        ...input,
+        ...fields,
         protocolVersion: PROTOCOL_VERSION,
         credentialHash: await bcrypt.hash(credential, 10),
         lastSeenAt: new Date(),
@@ -206,6 +210,16 @@ export async function registerWorker(input: {
     },
     { new: true, upsert: true, setDefaultsOnInsert: true }
   );
+
+  // The user this machine will act as. Created after the worker so it can be keyed on the worker's
+  // id, which is what makes two machines two identities rather than one shared "worker" account.
+  const identity = await ensureWorkerUser({
+    workerId: String(worker._id),
+    machine: fields.name,
+    owner: owner ?? "",
+  });
+  worker.identity = identity._id;
+  await Worker.updateOne({ _id: worker._id }, { $set: { identity: identity._id } });
 
   return { worker: worker as IWorker, credential };
 }
@@ -224,7 +238,9 @@ export async function verifyWorkerCredential(
 
 export async function touchWorker(
   workerId: string,
-  patch: Partial<Pick<IWorker, "protocolVersion" | "version" | "commandAckedAt" | "bindingError">> = {}
+  patch: Partial<
+    Pick<IWorker, "protocolVersion" | "version" | "commandAckedAt" | "bindingError" | "preflight">
+  > = {}
 ): Promise<void> {
   await connectDB();
   await Worker.updateOne({ _id: workerId }, { $set: { lastSeenAt: new Date(), ...patch } });
@@ -254,6 +270,18 @@ export function toApiWorker(
     lockedByInstance: worker.lockedByInstance,
     lastSeenAt: worker.lastSeenAt ? new Date(worker.lastSeenAt).toISOString() : null,
     bindingError: worker.bindingError,
+    preflight: worker.preflight
+      ? {
+          ok: worker.preflight.ok,
+          account: worker.preflight.account,
+          checks: (worker.preflight.checks ?? []).map((c) => ({
+            name: c.name,
+            ok: c.ok,
+            detail: c.detail,
+          })),
+          reportedAt: new Date(worker.preflight.reportedAt).toISOString(),
+        }
+      : null,
     command: worker.command,
     commandIssuedAt: worker.commandIssuedAt ? new Date(worker.commandIssuedAt).toISOString() : null,
     commandAckedAt: worker.commandAckedAt ? new Date(worker.commandAckedAt).toISOString() : null,
