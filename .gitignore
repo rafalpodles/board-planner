@@ -39,3 +39,6 @@ next-env.d.ts
 
 # superpowers sdd scratch
 /.superpowers/
+
+# Database snapshots taken before migrations — never commit, they hold every task
+backups/
