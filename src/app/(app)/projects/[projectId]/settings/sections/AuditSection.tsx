@@ -27,22 +27,34 @@ export function AuditSection({ projectId, active }: { projectId: string; active:
       {logs.length === 0 ? (
         <EmptyState>No settings changes recorded yet.</EmptyState>
       ) : (
-        <div className="max-h-[420px] space-y-1 overflow-y-auto">
-          {logs.map((log) => (
-            <div
-              key={log._id}
-              className="flex items-start gap-2 border-b border-border/50 py-1.5 text-xs last:border-b-0"
-            >
-              <span className="whitespace-nowrap text-text-muted">
-                {new Date(log.createdAt).toLocaleString()}
-              </span>
-              <span className="whitespace-nowrap font-medium">
-                {typeof log.user === "object" ? log.user.username : "system"}
-              </span>
-              <span className="text-text-muted">{log.action.replace(/_/g, " ")}</span>
-              {log.detail && <span className="truncate text-text">{log.detail}</span>}
-            </div>
-          ))}
+        // A table, so the columns line up across rows: separate flex rows each sized
+        // themselves, which is why "settings updated" wrapped in one row and not the next
+        <div className="max-h-[420px] overflow-y-auto">
+          <table className="w-full text-xs">
+            <tbody>
+              {logs.map((log) => (
+                <tr key={log._id} className="border-b border-border/50 last:border-b-0">
+                  <td className="whitespace-nowrap py-1.5 pr-3 align-top text-text-muted">
+                    {new Date(log.createdAt).toLocaleString()}
+                  </td>
+                  <td className="whitespace-nowrap py-1.5 pr-3 align-top font-medium">
+                    {typeof log.user === "object" ? log.user.username : "system"}
+                  </td>
+                  <td className="whitespace-nowrap py-1.5 pr-3 align-top text-text-muted">
+                    {log.action.replace(/_/g, " ")}
+                  </td>
+                  {/* w-full + max-w-0 is what lets a table cell truncate instead of
+                      pushing the table past its container */}
+                  <td
+                    className="w-full max-w-0 truncate py-1.5 align-top text-text"
+                    title={log.detail || undefined}
+                  >
+                    {log.detail}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </SettingsCard>
