@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { withAdmin } from "@/lib/middleware";
+import { withProjectOwner } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { isAllowedMcpServerUrl } from "@/lib/url-validation";
 import { McpClient } from "@/lib/pm/mcp-client";
 import { isReadSafe, resolveServerToken } from "@/lib/pm/mcp-tools";
 
-export const POST = withAdmin(async (request, { params }) => {
+export const POST = withProjectOwner(async (request, { params }) => {
   await connectDB();
   const { projectId } = await params;
   const body = await request.json();

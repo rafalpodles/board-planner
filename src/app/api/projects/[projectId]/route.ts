@@ -242,7 +242,7 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
   return NextResponse.json(obj);
 });
 
-export const DELETE = withAdmin(async (_request, { params }) => {
+export const DELETE = withProjectOwner(async (_request, { params }) => {
   await connectDB();
   const { projectId } = await params;
 
