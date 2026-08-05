@@ -14,6 +14,8 @@ type FieldLike = {
 export interface PromptField {
   name: string;
   options: string[];
+  /** Several values may apply, so the prompt may offer an array for this one */
+  multi: boolean;
 }
 
 /**
@@ -26,7 +28,11 @@ export interface PromptField {
 export function choiceFieldsForPrompt(definitions: FieldLike[]): PromptField[] {
   return activeFields(definitions)
     .filter(isOptionField)
-    .map((f) => ({ name: f.name, options: orderedOptions(f).map((o) => o.value) }))
+    .map((f) => ({
+      name: f.name,
+      options: orderedOptions(f).map((o) => o.value),
+      multi: f.fieldType === "multiselect",
+    }))
     .filter((f) => f.options.length > 0);
 }
 
@@ -56,16 +62,18 @@ export function resolveGeneratedFields(
 
     // A multi-choice field stores an array; a bare string there fails validation on save,
     // and the user would see the task they just generated refuse to save
-    if (field.fieldType === "multiselect") {
-      const chosen = (Array.isArray(value) ? value : [value])
+    const chosen = [...new Set(
+      (Array.isArray(value) ? value : [value])
         .map((v) => matchOptionValue(field, v))
-        .filter((id): id is string => !!id);
-      if (chosen.length) resolved[String(field._id)] = chosen;
-      continue;
-    }
+        .filter((id): id is string => !!id)
+    )];
+    if (!chosen.length) continue;
 
-    const option = matchOptionValue(field, value);
-    if (option) resolved[String(field._id)] = option;
+    // A single-choice field takes the first value the model offered that the project
+    // actually has — dropping the whole answer because it arrived as a list would be the
+    // same fault this module exists to remove
+    resolved[String(field._id)] =
+      field.fieldType === "multiselect" ? chosen : chosen[0];
   }
   return resolved;
 }

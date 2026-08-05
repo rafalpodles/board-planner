@@ -159,7 +159,6 @@ export function sanitizeCustomFieldValues(
   return result;
 }
 
-/** Options in their configured order; dropdown and multiselect both render from this */
 /**
  * The option id for a value written the way a human or a model would write it, or
  * undefined when the field does not offer it. Unlike resolveFieldsByName this never
@@ -179,6 +178,7 @@ export function matchOptionValue(
   return match?.id;
 }
 
+/** Options in their configured order; dropdown and multiselect both render from this */
 export function orderedOptions(field: { options?: LegacyOption[] }): ICustomFieldOption[] {
   return normalizeOptions(field.options).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 }

@@ -43,8 +43,8 @@ describe("choiceFieldsForPrompt", () => {
 
   it("offers each choice field by its own name and options", () => {
     expect(choiceFieldsForPrompt([size, area])).toEqual([
-      { name: "Size", options: ["S", "L"] },
-      { name: "Area", options: ["backend"] },
+      { name: "Size", options: ["S", "L"], multi: false },
+      { name: "Area", options: ["backend"], multi: false },
     ]);
   });
 
@@ -61,7 +61,9 @@ describe("choiceFieldsForPrompt", () => {
       fieldType: "multiselect",
       options: [{ id: "ios", value: "iOS", color: "#000", order: 0 }],
     });
-    expect(choiceFieldsForPrompt([platforms]).map((f) => f.name)).toEqual(["Platforms"]);
+    expect(choiceFieldsForPrompt([platforms])).toEqual([
+      { name: "Platforms", options: ["iOS"], multi: true },
+    ]);
   });
 });
 
@@ -121,6 +123,27 @@ describe("resolveGeneratedFields", () => {
 
   it("keeps a single-choice answer a plain value, not an array", () => {
     expect(resolveGeneratedFields({ Size: "L" }, [size])).toEqual({ "f-size": "l" });
+  });
+
+  // The prompt allows an array where several values apply, and a model will sometimes
+  // send one for a single-choice field too. Dropping it silently is the same fault this
+  // change exists to remove: asking, then throwing the answer away.
+  it("takes the first usable value when a single-choice field answers with a list", () => {
+    expect(resolveGeneratedFields({ Size: ["L", "S"] }, [size])).toEqual({ "f-size": "l" });
+    expect(resolveGeneratedFields({ Size: ["nope", "S"] }, [size])).toEqual({ "f-size": "s" });
+    expect(resolveGeneratedFields({ Size: ["nope"] }, [size])).toEqual({});
+  });
+
+  it("does not store the same option twice", () => {
+    const platforms = field({
+      _id: "f-plat",
+      name: "Platforms",
+      fieldType: "multiselect",
+      options: [{ id: "ios", value: "iOS", color: "#000", order: 0 }],
+    });
+    expect(resolveGeneratedFields({ Platforms: ["iOS", "ios"] }, [platforms])).toEqual({
+      "f-plat": ["ios"],
+    });
   });
 
   it("never writes to an archived field", () => {
