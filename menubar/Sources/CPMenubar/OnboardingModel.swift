@@ -193,14 +193,6 @@ final class OnboardingModel {
         return (try? await client.status()) != nil
     }
 
-    func registerLoginItem() {
-        do {
-            try LoginItem.register()
-            message = LoginItem.statusDescription
-        } catch {
-            message = "Could not register as a login item: \(error.localizedDescription)"
-        }
-    }
 
     func startAgain() {
         poller?.cancel()
