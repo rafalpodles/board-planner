@@ -16,6 +16,18 @@ export function escalationColumnId(columns: Column[]): string | undefined {
   return (review.find((c) => c.triggersPmReview) ?? review[0])?.id;
 }
 
+/**
+ * The chosen column, with no fallback — for consumers where doing nothing is the right
+ * answer when nobody chose one.
+ *
+ * A PM turn is opt-in and costs against the daily cap, so falling back to the first
+ * review column would queue one on every ordinary move into review. Parking a failed
+ * worker run is not optional, which is why `escalationColumnId` still falls back.
+ */
+export function explicitEscalationColumnId(columns: Column[]): string | undefined {
+  return columns.find((c) => c.role === "review" && c.triggersPmReview)?.id;
+}
+
 /** Every column carrying the flag, so settings can warn about ones about to lose it. */
 export function flaggedColumnIds(columns: Column[]): string[] {
   return columns.flatMap((c) => (c.triggersPmReview && c.id ? [c.id] : []));

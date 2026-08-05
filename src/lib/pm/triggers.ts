@@ -3,7 +3,7 @@ import { Task } from "@/models/task";
 import { PmTrigger } from "@/models/pmTrigger";
 import { IPmTrigger } from "@/types";
 import { createNotifications, collectRecipients } from "@/lib/in-app-notifications";
-import { escalationColumnId } from "@/lib/escalation";
+import { explicitEscalationColumnId } from "@/lib/escalation";
 import { getPmUser } from "./pm-user";
 import { runPmTurn } from "./agent";
 import { isOverDailyTurnCap } from "./turn-cap";
@@ -43,7 +43,7 @@ export async function onTaskStatusChanged(args: {
   const project = await Project.findById(args.projectId, "key pm columns").lean();
   if (!isPmRunnable(project?.pm) || !project?.pm?.autonomy?.handleNeedsHumanReview) return;
 
-  const escalation = escalationColumnId(getProjectColumns(project));
+  const escalation = explicitEscalationColumnId(getProjectColumns(project));
   if (!escalation || args.newStatus !== escalation || args.oldStatus === escalation) return;
 
   const pmUser = await getPmUser();
