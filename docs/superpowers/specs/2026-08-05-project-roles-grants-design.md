@@ -33,6 +33,55 @@ Owner's ceiling is everything on their own board, **including deleting it** and 
 agent's OAuth/MCP endpoints — both instance-admin-only today. Creating new boards stays with the
 instance admin; changing that is a product decision (quotas, billing), not part of this rework.
 
+## Permission matrix
+
+Derived from every `route.ts` under `src/app/api` and the middleware each one wraps. The `member`
+row is today's boundary transcribed exactly — this rework changes the source of truth, not who can
+do what, with the two marked exceptions.
+
+**Instance level — `admin` only, unchanged**
+
+| capability | admin | owner | member |
+|---|:--:|:--:|:--:|
+| Create project, reorder projects | ✓ | — | — |
+| Instance settings, users, OAuth clients | ✓ | — | — |
+| Worker enrolment, commands, kill switch | ✓ | — | — |
+
+**Board level — `owner`**
+
+| capability | admin | owner | member |
+|---|:--:|:--:|:--:|
+| Edit project (name, key, integrations) | ✓ | ✓ | — |
+| **Delete project** | ✓ | ✓ *(moved from admin)* | — |
+| **PM agent MCP OAuth and test** | ✓ | ✓ *(moved from admin)* | — |
+| Board columns | ✓ | ✓ | — |
+| Webhooks, notification channels, Coda sync | ✓ | ✓ | — |
+| Member list, granting and revoking roles | ✓ | ✓ | — |
+| **Deleting** categories, custom fields, templates | ✓ | ✓ | — |
+
+**Board level — `member`**
+
+| capability | admin | owner | member |
+|---|:--:|:--:|:--:|
+| Tasks: create, edit, delete, status, reorder | ✓ | ✓ | ✓ |
+| Comments, checklists, links, watching | ✓ | ✓ | ✓ |
+| Sprints: create, edit, **delete** | ✓ | ✓ | ✓ |
+| **Creating and editing** categories, custom fields, templates | ✓ | ✓ | ✓ |
+| AI task generation, GitHub/GitLab sync | ✓ | ✓ | ✓ |
+| Audit log, stats, PM chat | ✓ | ✓ | ✓ |
+
+Two principals are narrowings rather than roles, and both keep their current behaviour:
+
+| principal | reach |
+|---|---|
+| scoped token | its owner's rights ∩ scope, and **never owner** — a token cannot reconfigure a board |
+| worker (machine credential) | `claim`, `status`, `release`, comments and heartbeat only, on projects matched by remote; no settings, no worker record |
+
+Two inconsistencies the scan surfaced are **deliberately preserved**, not fixed here: a member can
+delete a sprint but not a category, and can change a custom field's type — as destructive as
+deleting it — while deletion is owner-only. Straightening those is a separate task, so the change
+is visible in its own diff instead of hiding inside this refactor.
+
 ## Data model
 
 One collection, `grants`, shaped like a Zanzibar tuple:
