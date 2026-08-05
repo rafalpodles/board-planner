@@ -20,10 +20,12 @@ export function SwatchPicker({ value, onChange, label, disabled }: SwatchPickerP
 
   return (
     <div>
+      {/* Fixed column width, not grid-cols-10: fractional columns collapse to whatever
+          the container gives them, and a narrow popover squashed this to 19px squares */}
       <div
         role="group"
         aria-label={label}
-        className="grid max-w-[336px] grid-cols-10 gap-1.5"
+        className="grid w-max grid-cols-[repeat(10,1.75rem)] gap-1.5"
       >
         {PALETTE.map((colour) => {
           const active = colour.hex.toLowerCase() === selected;
@@ -36,7 +38,7 @@ export function SwatchPicker({ value, onChange, label, disabled }: SwatchPickerP
               aria-pressed={active}
               onClick={() => onChange(colour.hex)}
               style={{ backgroundColor: colour.hex }}
-              className={`focus-ring relative aspect-square rounded-md border-2 transition-transform
+              className={`focus-ring relative h-7 w-7 rounded-md border-2 transition-transform
                 disabled:cursor-not-allowed disabled:opacity-50
                 ${active ? "border-text" : "border-transparent hover:scale-110"}`}
             >
