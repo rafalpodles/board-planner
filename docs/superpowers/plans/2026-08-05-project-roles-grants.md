@@ -9,56 +9,64 @@
 **Tech Stack:** Next.js 16 App Router, TypeScript, Mongoose, Vitest, Tailwind 4.
 
 **Spec:** `docs/superpowers/specs/2026-08-05-project-roles-grants-design.md`
-**Task:** CP-246. **Branch:** `cp-246/project-roles-grants` (already exists, holds the spec commits).
+**Task:** CP-246. **Branch:** `cp-246/project-roles-grants`.
+
+*Revision 2, after an independent review. Findings that changed the plan are marked **[review]** at the point they apply, so an implementer can see which steps exist because something was nearly missed.*
 
 ## Global Constraints
 
 - **No backfill script.** rpo assigns grants by hand after deploy. An empty `grants` collection must leave instance admins working and everyone else cleanly denied — never crash.
-- **The `member` row is transcribed 1:1.** Exactly two capabilities move: deleting a project and the PM agent MCP OAuth/test endpoints go from instance admin to owner. Anything else changing who can do what is a bug in this plan. Sprint deletion and custom-field editing stay with `member` even though they are inconsistent — that is CP-247.
+- **Exactly three capability changes are permitted**, and no others. Anything else changing who can do what is a bug in this plan:
+  1. Deleting a project moves from instance admin to owner.
+  2. The PM agent MCP OAuth/test endpoints move from instance admin to owner.
+  3. **[review]** `GET /api/projects/:id/members` returns every human account rather than only the project's current members. You cannot grant access to somebody you cannot see. This is a real widening of who is visible to a project owner and is recorded as such in the spec's matrix.
+- Sprint deletion and custom-field editing stay with `member` even though they are inconsistent — that is CP-247.
 - **Token scope fields stay put.** `apiToken.allowedProjects`, `oauthToken.allowedProjects`, `oauthCode.allowedProjects` are scopes, not grants. Do not touch them.
 - **Instance admins hold no grant rows.** Their access comes from `role === "admin"`. Never write grants for them.
+- **No commit may leave authorization wider than it is today.** Narrower for a commit or two is acceptable; wider is a defect. Task 3 exists as one commit for exactly this reason.
 - MongoDB 4.4: no `$dateTrunc`, `$dateAdd`/`$dateDiff`, `$setWindowFields`, and no `$lookup` mixing `localField`/`foreignField` with an inline `pipeline`.
-- Comments: default to none. Only a one-liner for a genuinely non-obvious workaround. No javadoc, no narration.
+- Comments: default to none. Only a one-liner for a genuinely non-obvious workaround.
 - Code, commits and PR text in English. Conventional commits. No `Co-Authored-By`, no generated-with footer.
-- Every commit must leave `npx vitest run` green. Intermediate commits may leave the local app unusable until grants are seeded; that is expected and called out where it happens.
+- Every commit must leave `npx vitest run` green.
+
+## Scale, measured
+
+`grep -rn "allowedProjects" src` → **73 hits across 27 files** (not the 61/22 quoted in revision 1 and in the spec; that count omitted test fixtures). Of those, the ones that are *token scope* and must survive untouched live in `src/app/(app)/settings/tokens/page.tsx`, `src/app/api/oauth/connections/route.ts`, `src/app/oauth/token/route.ts`, `src/app/api/tokens/route.ts`, `src/models/apiToken.ts`, `src/models/oauthToken.ts`, `src/models/oauthCode.ts`, `src/lib/auth.ts:101,121` and the token-scope entries in `src/types/index.ts`.
 
 ---
 
-## File Structure
+## Task 0: Land CP-245 first and rebase
 
-**Created**
-- `src/models/grant.ts` — the Mongoose schema and its two indexes. Nothing else.
-- `src/lib/grants.ts` — authorisation. `decide()` (pure), `check()` and `accessibleProjectIds()` (one query each), `principalOf()`.
-- `src/lib/grants.test.ts` — the permission matrix as pure-logic tests.
-- `src/app/api/projects/[projectId]/members/route.test.ts` — grant/revoke API tests.
+**[review]** Revision 1 assumed CP-245's changes were on this branch. They are not: `git merge-base --is-ancestor d4a0783 HEAD` returns false. `cp-246/project-roles-grants` branched from `8e954d1` and carries only documentation commits. Everything below depends on `GET /api/projects` returning `canAdmin` and on `ProjectTree` gating the Settings link on it — neither of which exists here.
 
-**Modified**
-- `src/types/index.ts` — `IGrant`, `GrantRelation`; two runtime-only fields on `IUser`; drop `allowedProjects` and `IProject.admins` at the end.
-- `src/lib/auth.ts` — `applyTokenScope` records the scope and the pre-downgrade admin flag instead of rewriting `allowedProjects`.
-- `src/lib/middleware.ts` — `withProjectAccess` and `withProjectOwner` (renamed from `withProjectAdmin`) delegate to `check()`; `canAdminProject` is deleted.
-- `src/models/project.ts` — `admins` removed, `owner` renamed `createdBy`.
-- `src/models/user.ts` — `allowedProjects` removed.
-- Route handlers listed per task.
-- `src/app/(app)/projects/[projectId]/settings/sections/GeneralSection.tsx` — member management replaces the admins picker.
-- `src/app/(app)/settings/users/page.tsx` — per-user project assignment moves onto grants.
+- [ ] **Step 1: Confirm CP-245 is merged**
+
+Run: `git fetch origin && git log --oneline origin/main | head -5`
+Expected: a merge commit for PR #99. If it is not there, stop — rpo merges it, since `gh pr merge` is not available to an agent.
+
+- [ ] **Step 2: Rebase**
+
+```bash
+git rebase origin/main
+```
+
+- [ ] **Step 3: Confirm the two prerequisites now exist**
+
+Run: `grep -n "canAdmin" src/app/api/projects/route.ts src/components/shell/ProjectTree.tsx`
+Expected: `obj.canAdmin = canAdminProject(user, p);` in the API route and `{(project.canAdmin ?? isAdmin) && (` in `ProjectTree.tsx`. If either is missing the rebase did not take, and Tasks 3 and 9 will not work as written.
 
 ---
 
 ### Task 1: Grant model and the pure decision function
 
-The whole permission matrix becomes testable without a database. Everything later in the plan leans on `decide()`.
-
 **Files:**
-- Create: `src/models/grant.ts`
-- Create: `src/lib/grants.ts`
-- Create: `src/lib/grants.test.ts`
+- Create: `src/models/grant.ts`, `src/lib/grants.ts`, `src/lib/grants.test.ts`
 - Modify: `src/types/index.ts`
 
 **Interfaces:**
 - Consumes: nothing.
 - Produces:
-  - `type GrantRelation = "owner" | "member"`
-  - `type Need = "access" | "admin"`
+  - `type GrantRelation = "owner" | "member"`, `type Need = "access" | "admin"`
   - `interface Principal { instanceAdmin: boolean; tokenScoped: boolean; tokenScope: string[] | null; instanceAdminBeforeScope: boolean }`
   - `function decide(principal: Principal, grant: GrantRelation | null, need: Need, projectId: string): boolean`
   - `function principalOf(user: IUser): Principal`
@@ -66,7 +74,7 @@ The whole permission matrix becomes testable without a database. Everything late
 
 - [ ] **Step 1: Add the types**
 
-In `src/types/index.ts`, next to the other model interfaces:
+In `src/types/index.ts`, beside the other model interfaces:
 
 ```ts
 export const GRANT_RELATIONS = ["owner", "member"] as const;
@@ -84,7 +92,7 @@ export interface IGrant {
 }
 ```
 
-In `interface IUser`, directly below the existing `tokenScoped` field, add:
+In `interface IUser`, directly below the existing `tokenScoped` field (`src/types/index.ts:156`):
 
 ```ts
   // Runtime-only, set for project-scoped tokens — the projects the token narrowed to
@@ -151,33 +159,29 @@ describe("decide", () => {
     expect(decide(p, "owner", "access", P)).toBe(true);
   });
 
+  // An UNSCOPED token leaves tokenScoped false, so its bearer keeps admin rights via their grant.
+  // This is today's behaviour at middleware.ts:96 and must not tighten.
+  it("lets an unscoped token administer a board its bearer owns", () => {
+    const p = principal({ tokenScoped: false, tokenScope: null });
+    expect(decide(p, "owner", "admin", P)).toBe(true);
+  });
+
   // The regression the spec is built around: applyTokenScope downgrades an instance admin to
   // member, and instance admins hold no grant rows, so a naive lookup strips all their access.
   it("keeps an instance admin's scoped token working inside its scope", () => {
-    const p = principal({
-      tokenScoped: true,
-      tokenScope: [P],
-      instanceAdminBeforeScope: true,
-    });
+    const p = principal({ tokenScoped: true, tokenScope: [P], instanceAdminBeforeScope: true });
     expect(decide(p, null, "access", P)).toBe(true);
     expect(decide(p, null, "admin", P)).toBe(false);
   });
 
   it("still confines an instance admin's scoped token to its scope", () => {
-    const p = principal({
-      tokenScoped: true,
-      tokenScope: [OTHER],
-      instanceAdminBeforeScope: true,
-    });
+    const p = principal({ tokenScoped: true, tokenScope: [OTHER], instanceAdminBeforeScope: true });
     expect(decide(p, null, "access", P)).toBe(false);
-  });
-
-  it("treats an unscoped token as its owner, admin rights included", () => {
-    const p = principal({ instanceAdmin: true, tokenScoped: false, tokenScope: null });
-    expect(decide(p, null, "admin", P)).toBe(true);
   });
 });
 ```
+
+**[review]** Revision 1's last test passed the helper's own defaults and was therefore a duplicate of the first. It is replaced above by the unscoped-token case, which is a genuinely distinct principal and encodes a rule that must not tighten.
 
 - [ ] **Step 3: Run it and confirm it fails**
 
@@ -249,7 +253,7 @@ export function principalOf(user: IUser): Principal {
 }
 ```
 
-- [ ] **Step 6: Run the tests and confirm they pass**
+- [ ] **Step 6: Run the tests**
 
 Run: `npx vitest run src/lib/grants.test.ts`
 Expected: PASS, 9 tests.
@@ -266,25 +270,18 @@ git commit -m "feat(auth): add the grants model and the permission decision func
 ### Task 2: check(), accessibleProjectIds() and the token-scope principal
 
 **Files:**
-- Modify: `src/lib/grants.ts`
-- Modify: `src/lib/grants.test.ts`
-- Modify: `src/lib/auth.ts:66-77`
+- Modify: `src/lib/grants.ts`, `src/lib/grants.test.ts`, `src/lib/auth.ts:66-77`
 
 **Interfaces:**
-- Consumes: `decide`, `principalOf`, `Grant` from Task 1.
-- Produces:
-  - `async function check(user: IUser, projectId: string, need: Need): Promise<boolean>`
-  - `async function accessibleProjectIds(user: IUser): Promise<string[] | null>` — `null` means "no restriction", i.e. an unscoped instance admin.
+- Produces: `check(user, projectId, need): Promise<boolean>`; `accessibleProjectIds(user): Promise<string[] | null>` where `null` means "no restriction" (unscoped instance admin).
 
-**Do NOT remove `user.allowedProjects = effective` from `applyTokenScope` in this task.** The middleware still reads `allowedProjects` until Task 3; dropping the narrowing here would widen a scoped token's reach for one commit. Task 3 removes that line.
+**Do NOT remove `user.allowedProjects = effective` from `applyTokenScope` in this task.** Two places still read that field until Task 3 — `withProjectAccess` and, less obviously, the hand-rolled check in `pm/chat`. Dropping the narrowing here would widen every scoped token's reach for one commit.
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `src/lib/grants.test.ts`:
+Append to `src/lib/grants.test.ts` (and add `vi`, `beforeEach` to the vitest import at the top):
 
 ```ts
-import { vi } from "vitest";
-
 const findOne = vi.fn();
 const find = vi.fn();
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
@@ -369,24 +366,25 @@ describe("accessibleProjectIds", () => {
 });
 ```
 
-Add `beforeEach` to the vitest import at the top of the file.
-
-- [ ] **Step 2: Run the tests and confirm they fail**
+- [ ] **Step 2: Run and confirm failure**
 
 Run: `npx vitest run src/lib/grants.test.ts`
 Expected: FAIL — `check is not a function`.
 
 - [ ] **Step 3: Implement both functions**
 
-Append to `src/lib/grants.ts` (and add the imports `connectDB` from `./db` and `Grant` from `@/models/grant`):
+Append to `src/lib/grants.ts`, adding imports of `connectDB` from `./db` and `Grant` from `@/models/grant`:
 
 ```ts
 export async function check(user: IUser, projectId: string, need: Need): Promise<boolean> {
   const principal = principalOf(user);
-  if (principal.tokenScope && !principal.tokenScope.includes(projectId)) return false;
-  if (principal.instanceAdmin || principal.instanceAdminBeforeScope) {
-    return decide(principal, null, need, projectId);
-  }
+  // The query is skipped where no grant can change the verdict; the verdict itself always
+  // comes from decide(), so the rule ordering lives in exactly one place.
+  const withoutGrant =
+    principal.instanceAdmin ||
+    principal.instanceAdminBeforeScope ||
+    (principal.tokenScope !== null && !principal.tokenScope.includes(projectId));
+  if (withoutGrant) return decide(principal, null, need, projectId);
 
   await connectDB();
   const grant = await Grant.findOne({
@@ -416,32 +414,33 @@ export async function accessibleProjectIds(user: IUser): Promise<string[] | null
 }
 ```
 
+**[review]** `check()` must not re-implement rule 1. Revision 1 had the scope test inline *and* inside `decide()`, so a future edit to the rule ordering would silently diverge from the tested function. The shape above keeps the query optimisation without duplicating policy.
+
 - [ ] **Step 4: Record the scope on the principal in auth.ts**
 
-Replace `applyTokenScope` in `src/lib/auth.ts:66-77` with:
+Replace `applyTokenScope` (`src/lib/auth.ts:66-77`) with:
 
 ```ts
 function applyTokenScope(user: IUser, scope: Types.ObjectId[]): IUser {
   user.instanceAdminBeforeScope = user.role === "admin";
   user.role = "member";
   user.tokenScope = scope;
-  user.allowedProjects =
-    user.instanceAdminBeforeScope
-      ? scope
-      : (user.allowedProjects || []).filter((p) =>
-          scope.some((s) => s.toString() === p.toString())
-        );
+  user.allowedProjects = user.instanceAdminBeforeScope
+    ? scope
+    : (user.allowedProjects || []).filter((p) =>
+        scope.some((s) => s.toString() === p.toString())
+      );
   user.tokenScoped = true;
   return user;
 }
 ```
 
-The `allowedProjects` narrowing is unchanged and stays until Task 3. Only the two new fields are added. Keep the existing comment above the function.
+Keep the existing comment above the function. The `allowedProjects` narrowing is deliberately unchanged and goes away in Task 3.
 
 - [ ] **Step 5: Run the whole suite**
 
 Run: `npx vitest run`
-Expected: PASS — 13 new tests in `grants.test.ts`, everything else unchanged.
+Expected: PASS. `grants.test.ts` now holds **17** tests (9 from Task 1, 8 added here).
 
 - [ ] **Step 6: Commit**
 
@@ -452,24 +451,24 @@ git commit -m "feat(auth): resolve grants and carry token scope on the principal
 
 ---
 
-### Task 3: Middleware and the project list read from grants
+### Task 3: Every reader switches to grants, in one commit
 
-After this commit the app authorises entirely from `grants`. **Local dev will show no projects to non-admins until you insert a grant row** — expected, not a bug.
+The single commit where the source of truth changes. It must move **every** reader at once — a reader left on `allowedProjects` after the narrowing is dropped is a widened permission.
+
+**[review]** Revision 1 moved the middleware but missed three readers: the hand-rolled check in `pm/chat`, the two `canAdminProject` call sites in `[projectId]/route.ts`, and `/api/auth/me`. The first is a security defect, the second silently blanks the settings UI for everyone, the third leaks an un-narrowed scope.
 
 **Files:**
-- Modify: `src/lib/middleware.ts` — delete `canAdminProject`, rewrite `withProjectAccess`, rename `withProjectAdmin` → `withProjectOwner`
+- Modify: `src/lib/middleware.ts` — delete `refId` and `canAdminProject` (lines 86-104), rewrite both middlewares, rename `withProjectAdmin` → `withProjectOwner`
 - Modify: `src/lib/auth.ts` — drop the `allowedProjects` narrowing
-- Modify: `src/app/api/projects/route.ts:14-17` — filter on grants
-- Modify: `src/app/api/search/route.ts:27`, `src/app/api/tasks/mine/route.ts:14`
-- Modify: every file importing `withProjectAdmin` (7 route files, listed below)
-
-**Interfaces:**
-- Consumes: `check`, `accessibleProjectIds` from Task 2.
-- Produces: `withProjectOwner(handler)` replacing `withProjectAdmin`; `canAdminProject` no longer exists.
+- Modify: `src/app/api/projects/[projectId]/pm/chat/route.ts:46-50`
+- Modify: `src/app/api/projects/[projectId]/route.ts:4, :44, :240`
+- Modify: `src/app/api/auth/me/route.ts:27`
+- Modify: `src/app/api/projects/route.ts` (filter and `canAdmin`), `src/app/api/search/route.ts:27`, `src/app/api/tasks/mine/route.ts:14`
+- Modify: the nine files carrying `withProjectAdmin`
 
 - [ ] **Step 1: Rewrite the two middlewares**
 
-In `src/lib/middleware.ts`, delete `refId` and `canAdminProject` entirely (lines 86-104), add `import { check, accessibleProjectIds } from "./grants";`, and replace the bodies:
+In `src/lib/middleware.ts` delete `refId` and `canAdminProject` entirely, add `import { check, accessibleProjectIds } from "./grants";`, and replace both bodies:
 
 ```ts
 export function withProjectOwner(handler: AuthenticatedHandler) {
@@ -513,13 +512,48 @@ export function withProjectAccess(handler: AuthenticatedHandler) {
 }
 ```
 
-`withProjectAccessOrWorker` needs no change — its worker branch resolves the identity itself and never consults grants, and its person branch calls the rewritten `withProjectAccess`.
+`withProjectAccessOrWorker` (`middleware.ts:216-259`) needs no change — its worker branch builds the identity itself and never consults membership, and its person branch calls the rewritten `withProjectAccess`. Task 3 Step 7 proves that rather than assuming it.
 
-Note the behaviour change in `withProjectOwner`: a missing project now returns 403 rather than 404 for a non-admin, because the grant lookup fails before any project lookup. That matches the `unresolvedProject` policy of not leaking which projects exist.
+Behaviour change to expect: for a non-admin, a project that does not exist now returns 403 rather than 404, because the grant lookup fails before any project lookup. That matches `unresolvedProject`'s existing policy of not leaking which projects exist.
 
-- [ ] **Step 2: Drop the allowedProjects narrowing**
+- [ ] **Step 2: Fix the hand-rolled check in pm/chat**
 
-In `src/lib/auth.ts`, `applyTokenScope` becomes:
+**[review]** `src/app/api/projects/[projectId]/pm/chat/route.ts` authenticates by hand because it streams SSE, and says so at line 39. Its gate at lines 46-50 reads `user.allowedProjects` directly. Replace:
+
+```ts
+  if (
+    user.role !== "admin" &&
+    !(user.allowedProjects || []).some((p) => p.toString() === projectId)
+  ) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+```
+
+with:
+
+```ts
+  if (!(await check(user, projectId, "access"))) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+```
+
+importing `check` from `@/lib/grants`.
+
+- [ ] **Step 3: Replace both canAdminProject call sites**
+
+**[review]** `src/app/api/projects/[projectId]/route.ts:44` (inside `GET`, wrapped in `withProjectAccessOrWorker`) and `:240` (inside `PUT`). Both become:
+
+```ts
+  obj.canAdmin = await check(user, String(project._id), "admin");
+```
+
+Do **not** simply delete these lines to make the build pass. `project.canAdmin` gates every project-admin section of the settings page (`src/app/(app)/projects/[projectId]/settings/page.tsx:202` and `:367`, plus `TaskFieldsSection.tsx:44`); an `undefined` there hides the member-management UI from everybody including instance admins, and with no backfill that leaves no way to create the first grant at all.
+
+On the `GET` path `user` may be a worker identity, which holds no grant and so gets `false` — the same answer it gets today.
+
+- [ ] **Step 4: Drop the allowedProjects narrowing**
+
+`applyTokenScope` in `src/lib/auth.ts` becomes:
 
 ```ts
 function applyTokenScope(user: IUser, scope: Types.ObjectId[]): IUser {
@@ -531,32 +565,20 @@ function applyTokenScope(user: IUser, scope: Types.ObjectId[]): IUser {
 }
 ```
 
-- [ ] **Step 3: Rename every call site**
+- [ ] **Step 5: Move the four list queries onto grants**
 
-Replace `withProjectAdmin` with `withProjectOwner` in:
-
-```bash
-grep -rl "withProjectAdmin" src | xargs sed -i '' 's/withProjectAdmin/withProjectOwner/g'
-```
-
-Files touched: `projects/[projectId]/route.ts`, `categories/route.ts`, `coda/sync/route.ts`, `columns/route.ts`, `custom-fields/[fieldId]/route.ts`, `members/route.ts`, `notifications/route.ts`, `webhooks/route.ts`, plus `src/lib/middleware.ts`.
-
-- [ ] **Step 4: Move the three list queries onto grants**
-
-`src/app/api/projects/route.ts` — replace lines 14-17 and the `canAdmin` line added by CP-245:
+`src/app/api/projects/route.ts` — replace the `filter` derivation:
 
 ```ts
   const ids = await accessibleProjectIds(user);
   const filter = ids === null ? {} : { _id: { $in: ids } };
 ```
 
-and inside the `map`, replace the `canAdminProject` call with:
+and, because `canAdmin` now needs `await`, change the `map` to `const sanitized = await Promise.all(projects.map(async (p) => { … }));` with:
 
 ```ts
     obj.canAdmin = await check(user, String(p._id), "admin");
 ```
-
-Because `map` now returns promises, wrap it: `const sanitized = await Promise.all(projects.map(async (p) => { … }));`
 
 `src/app/api/search/route.ts:27` and `src/app/api/tasks/mine/route.ts:14` — replace `const allowed = user.allowedProjects || [];` with:
 
@@ -564,19 +586,46 @@ Because `map` now returns promises, wrap it: `const sanitized = await Promise.al
   const allowed = (await accessibleProjectIds(user)) ?? [];
 ```
 
-In both files the surrounding code already branches on `user.role === "admin"` to skip the filter; leave that branch alone — `accessibleProjectIds` returning `null` only happens on that same branch, and `?? []` keeps the non-admin path correct.
+Leave the surrounding `user.role === "admin"` branch alone in both.
 
-- [ ] **Step 5: Run the whole suite**
+**[review]** `src/app/api/auth/me/route.ts:27` must move in this commit too, not in Task 8 — from Task 3 onward `user.allowedProjects` is the raw stored array, so leaving it here reports an un-narrowed scope to a scoped session. Replace `allowedProjects: user.allowedProjects || []` with:
+
+```ts
+    allowedProjects: (await accessibleProjectIds(user)) ?? [],
+```
+
+and note the known wart: an unscoped instance admin gets `[]` from that `??`. Task 8 Step 6 removes the key entirely, which is the real fix; nothing reads it in the meantime (verified: the only `allowedProjects` readers under `src/app` and `src/components` are the users page, which Task 7 changes, and the tokens page, which reads token scopes).
+
+- [ ] **Step 6: Rename every withProjectAdmin call site**
+
+There are **nine** files, not seven:
+
+`projects/[projectId]/route.ts`, `templates/route.ts`, `members/route.ts`, `columns/route.ts`, `custom-fields/[fieldId]/route.ts`, `webhooks/route.ts`, `categories/route.ts`, `coda/sync/route.ts`, `notifications/route.ts` — plus `src/lib/middleware.ts` itself.
+
+```bash
+grep -rl "withProjectAdmin" src | xargs sed -i '' 's/withProjectAdmin/withProjectOwner/g'
+```
+
+**[review]** That `grep -rl` also matches `src/app/api/workers/[workerId]/route.ts`, where `withProjectAdmin` appears only inside a prose comment. Read the resulting diff on that file and reword the comment rather than leaving a renamed reference to a middleware it never used.
+
+- [ ] **Step 7: Run the whole suite**
 
 Run: `npx vitest run`
-Expected: PASS. If a route test fails because it stubbed `allowedProjects` on a fake user, update that fixture to mock `@/lib/grants`'s `check` instead — the fixture was asserting the old source of truth.
+Expected: PASS, including `src/lib/middleware.worker-credential.test.ts` — that file is the evidence for the "worker path needs no change" claim in Step 1.
 
-- [ ] **Step 6: Build**
+**[review]** Four fixtures express "project admin" as `allowedProjects: [...]` and will keep passing while no longer meaning anything: `src/app/api/workers/[workerId]/route.test.ts:35-47`, `command/route.test.ts:18-19`, `enrolment/route.test.ts:15-22`, `admin/workers/route.test.ts:17-18`. Re-express each — a project owner is now a user with an `owner` grant, so the fixture should mock `@/lib/grants`'s `check` — and fix the now-false comments above them. Do this even though the tests are green; a fixture that no longer expresses its intent is a test that has stopped testing.
+
+- [ ] **Step 8: Prove no reader was left behind**
+
+Run: `grep -rn "allowedProjects" src --include="*.ts" --include="*.tsx" | grep -v "apiToken\|oauthToken\|oauthCode\|tokens/page\|tokens/route\|oauth/\|types/index"`
+Expected: only `src/lib/auth.ts:101,121` (reading token scope off the token record) and `src/lib/worker-user.ts:45` and `src/lib/pm/pm-user.ts:26` (both writing `[]` into a user document, removed in Task 8). Anything else is a reader this task missed.
+
+- [ ] **Step 9: Build**
 
 Run: `npm run build`
-Expected: exit 0. A TypeScript error naming `canAdminProject` means a call site was missed.
+Expected: exit 0.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
 git add -A
@@ -587,37 +636,32 @@ git commit -m "refactor(auth): authorise from grants instead of allowedProjects 
 
 ### Task 4: Move project delete and the PM agent endpoints to the owner
 
-The only two capability changes in this plan.
-
 **Files:**
-- Modify: `src/app/api/projects/[projectId]/route.ts:220` — `withAdmin` → `withProjectOwner`
-- Modify: `src/app/api/projects/[projectId]/pm/mcp-test/route.ts:9`
-- Modify: `src/app/api/projects/[projectId]/pm/mcp-oauth/start/route.ts:18`
-- Modify: `src/app/api/projects/[projectId]/pm/mcp-oauth/disconnect/route.ts:6`
-
-**Interfaces:**
-- Consumes: `withProjectOwner` from Task 3.
-- Produces: nothing new.
+- Modify: `src/app/api/projects/[projectId]/route.ts:244` — `withAdmin` → `withProjectOwner`
+- Modify: `pm/mcp-test/route.ts:9`, `pm/mcp-oauth/start/route.ts:18`, `pm/mcp-oauth/disconnect/route.ts:6`
 
 - [ ] **Step 1: Swap the middleware in all four routes**
 
-In each of the four files, change the import from `withAdmin` to `withProjectOwner` (keep other imports) and the wrapper on the listed export. `DELETE` in `projects/[projectId]/route.ts` becomes:
+In each file change the import from `withAdmin` to `withProjectOwner` and the wrapper on the listed export. `DELETE` becomes:
 
 ```ts
 export const DELETE = withProjectOwner(async (_request, { params }) => {
 ```
 
-- [ ] **Step 2: Verify nothing else in those files depended on withAdmin**
+- [ ] **Step 2: Note the half that deliberately does not move**
 
-Run: `grep -n "withAdmin" src/app/api/projects/[projectId]/route.ts src/app/api/projects/[projectId]/pm/mcp-*/**/route.ts src/app/api/projects/[projectId]/pm/mcp-test/route.ts`
+**[review]** `pm.mcpServers` stays in `instanceFields` at `src/app/api/projects/[projectId]/route.ts:141`, so after this task an owner can run OAuth against and disconnect MCP servers they cannot add or configure. That is intentional — configuring which servers exist is an instance concern — but it must be written into the spec's matrix as a footnote, otherwise it reads as an oversight. Add that footnote now.
+
+- [ ] **Step 3: Confirm nothing else in those files needed withAdmin**
+
+Run: `grep -rn "withAdmin" "src/app/api/projects/[projectId]/route.ts" src/app/api/projects/*/pm/`
 Expected: no output.
 
-- [ ] **Step 3: Run the suite and build**
+- [ ] **Step 4: Run the suite and build**
 
 Run: `npx vitest run && npm run build`
-Expected: both green.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add -A
@@ -631,27 +675,29 @@ git commit -m "feat(auth): let a project owner delete the board and run its PM a
 **Files:**
 - Modify: `src/app/api/projects/[projectId]/members/route.ts`
 - Create: `src/app/api/projects/[projectId]/members/route.test.ts`
-- Modify: `src/types/index.ts` — extend `ApiProjectMember` with `relation`
+- Modify: `src/types/index.ts` — `ApiProjectMember`
 
 **Interfaces:**
-- Consumes: `Grant`, `withProjectOwner`.
-- Produces:
-  - `GET /api/projects/:projectId/members` → `{ _id, username, fullName, relation: "owner" | "member" | null, instanceAdmin: boolean }[]`
-  - `PUT /api/projects/:projectId/members` with `{ userId, relation }` → upserts one grant
-  - `DELETE /api/projects/:projectId/members?userId=…` → removes the grant
+- `GET` → `{ _id, username, fullName, relation: "owner" | "member" | null, instanceAdmin: boolean }[]`
+- `PUT { userId, relation }` → upserts one grant
+- `DELETE ?userId=…` → removes the grant
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `src/app/api/projects/[projectId]/members/route.test.ts`:
+Create `src/app/api/projects/[projectId]/members/route.test.ts`. Note that every mock is a `vi.fn()` so the query filters themselves are assertable — a members endpoint whose filters are unobservable is not tested.
 
 ```ts
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const getAuthUser = vi.fn();
 const grantFind = vi.fn();
+const grantFindLean = vi.fn();
 const grantUpdateOne = vi.fn();
 const grantDeleteOne = vi.fn();
+const grantCountDocuments = vi.fn();
 const userFind = vi.fn();
+const userFindLean = vi.fn();
+const userFindById = vi.fn();
 const check = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
@@ -665,13 +711,17 @@ vi.mock("@/lib/grants", async (importOriginal) => {
 });
 vi.mock("@/models/grant", () => ({
   Grant: {
-    find: () => ({ select: () => ({ lean: grantFind }) }),
+    find: (...a: unknown[]) => (grantFind(...a), { select: () => ({ lean: grantFindLean }) }),
     updateOne: grantUpdateOne,
     deleteOne: grantDeleteOne,
+    countDocuments: grantCountDocuments,
   },
 }));
 vi.mock("@/models/user", () => ({
-  User: { find: () => ({ select: () => ({ sort: () => ({ lean: userFind }) }) }) },
+  User: {
+    find: (...a: unknown[]) => (userFind(...a), { select: () => ({ sort: () => ({ lean: userFindLean }) }) }),
+    findById: (...a: unknown[]) => (userFindById(...a), { select: () => Promise.resolve({ _id: "u1", role: "member", kind: "human" }) }),
+  },
 }));
 vi.mock("@/models/project", () => ({ Project: { findOne: vi.fn() } }));
 vi.mock("@/models/task", () => ({ Task: {} }));
@@ -679,35 +729,33 @@ vi.mock("@/models/task", () => ({ Task: {} }));
 const { GET, PUT, DELETE } = await import("./route");
 
 const PROJECT = "69a52e3b399b27d3cbb2c5a5";
-const OWNER = { _id: "o1", role: "member" };
 const params = Promise.resolve({ projectId: PROJECT });
 
-function req(body?: unknown, url = `http://x/api/projects/${PROJECT}/members`) {
-  return new Request(url, {
-    method: body ? "PUT" : "GET",
-    body: body ? JSON.stringify(body) : undefined,
+function put(body: unknown) {
+  return new Request(`http://x/api/projects/${PROJECT}/members`, {
+    method: "PUT",
+    body: JSON.stringify(body),
   });
 }
 
 beforeEach(() => {
-  getAuthUser.mockResolvedValue(OWNER);
+  vi.clearAllMocks();
+  getAuthUser.mockResolvedValue({ _id: "o1", role: "member" });
   check.mockResolvedValue(true);
-  grantFind.mockResolvedValue([]);
-  userFind.mockResolvedValue([]);
-  grantUpdateOne.mockReset();
-  grantDeleteOne.mockReset();
+  grantFindLean.mockResolvedValue([]);
+  userFindLean.mockResolvedValue([]);
+  grantCountDocuments.mockResolvedValue(2);
 });
 
 describe("GET members", () => {
   it("labels each user with their relation on this project", async () => {
-    userFind.mockResolvedValue([
+    userFindLean.mockResolvedValue([
       { _id: "u1", username: "ann", fullName: "Ann", role: "member" },
       { _id: "u2", username: "bo", fullName: "Bo", role: "member" },
     ]);
-    grantFind.mockResolvedValue([{ subject: "u1", relation: "owner" }]);
+    grantFindLean.mockResolvedValue([{ subject: "u1", relation: "owner" }]);
 
-    const res = await GET(req(), { params });
-    const body = await res.json();
+    const body = await (await GET(new Request("http://x"), { params })).json();
 
     expect(body).toEqual([
       { _id: "u1", username: "ann", fullName: "Ann", relation: "owner", instanceAdmin: false },
@@ -715,17 +763,26 @@ describe("GET members", () => {
     ]);
   });
 
+  it("scopes the grant query to this project", async () => {
+    await GET(new Request("http://x"), { params });
+    expect(grantFind).toHaveBeenCalledWith({ objectType: "project", object: PROJECT });
+  });
+
+  it("never offers worker machine identities as grantable members", async () => {
+    await GET(new Request("http://x"), { params });
+    expect(userFind).toHaveBeenCalledWith({ kind: { $ne: "machine" } });
+  });
+
   it("marks instance admins, who hold no grants", async () => {
-    userFind.mockResolvedValue([{ _id: "a1", username: "root", fullName: "Root", role: "admin" }]);
-    const res = await GET(req(), { params });
-    const body = await res.json();
+    userFindLean.mockResolvedValue([{ _id: "a1", username: "root", fullName: "Root", role: "admin" }]);
+    const body = await (await GET(new Request("http://x"), { params })).json();
     expect(body[0]).toMatchObject({ relation: null, instanceAdmin: true });
   });
 });
 
 describe("PUT members", () => {
   it("upserts one grant for the named user", async () => {
-    const res = await PUT(req({ userId: "u1", relation: "owner" }), { params });
+    const res = await PUT(put({ userId: "u1", relation: "owner" }), { params });
     expect(res.status).toBe(200);
     expect(grantUpdateOne).toHaveBeenCalledWith(
       { subject: "u1", objectType: "project", object: PROJECT },
@@ -735,32 +792,56 @@ describe("PUT members", () => {
   });
 
   it("rejects a relation that is not owner or member", async () => {
-    const res = await PUT(req({ userId: "u1", relation: "root" }), { params });
+    const res = await PUT(put({ userId: "u1", relation: "root" }), { params });
     expect(res.status).toBe(400);
     expect(grantUpdateOne).not.toHaveBeenCalled();
   });
 
   it("refuses anyone who is not an owner of this project", async () => {
     check.mockResolvedValue(false);
-    const res = await PUT(req({ userId: "u1", relation: "owner" }), { params });
+    const res = await PUT(put({ userId: "u1", relation: "owner" }), { params });
     expect(res.status).toBe(403);
     expect(grantUpdateOne).not.toHaveBeenCalled();
+  });
+
+  it("refuses to demote the last owner", async () => {
+    grantCountDocuments.mockResolvedValue(1);
+    const res = await PUT(put({ userId: "u1", relation: "member" }), { params });
+    expect(res.status).toBe(409);
+    expect(grantUpdateOne).not.toHaveBeenCalled();
+  });
+
+  it("survives a concurrent double submit", async () => {
+    grantUpdateOne.mockRejectedValueOnce(Object.assign(new Error("dup"), { code: 11000 }));
+    const res = await PUT(put({ userId: "u1", relation: "owner" }), { params });
+    expect(res.status).toBe(200);
   });
 });
 
 describe("DELETE members", () => {
   it("removes the grant for the named user", async () => {
-    const url = `http://x/api/projects/${PROJECT}/members?userId=u1`;
+    const url = `http://x/api/projects/${PROJECT}/members?userId=u2`;
     const res = await DELETE(new Request(url, { method: "DELETE" }), { params });
     expect(res.status).toBe(200);
     expect(grantDeleteOne).toHaveBeenCalledWith({
-      subject: "u1",
+      subject: "u2",
       objectType: "project",
       object: PROJECT,
     });
   });
+
+  it("refuses to remove the last owner", async () => {
+    grantCountDocuments.mockResolvedValue(1);
+    grantFindLean.mockResolvedValue([{ subject: "u2", relation: "owner" }]);
+    const url = `http://x/api/projects/${PROJECT}/members?userId=u2`;
+    const res = await DELETE(new Request(url, { method: "DELETE" }), { params });
+    expect(res.status).toBe(409);
+    expect(grantDeleteOne).not.toHaveBeenCalled();
+  });
 });
 ```
+
+**[review]** The last-owner guard, the duplicate-key case and the two filter assertions all exist because the review found them missing. `src/app/api/users/[userId]/route.ts:43-51` already refuses to demote the last instance admin, so this is the codebase's own established guard, not a new invention.
 
 - [ ] **Step 2: Run and confirm failure**
 
@@ -778,6 +859,10 @@ import { withProjectOwner } from "@/lib/middleware";
 import { User } from "@/models/user";
 import { Grant } from "@/models/grant";
 import { GRANT_RELATIONS, GrantRelation } from "@/types";
+
+async function ownerCount(projectId: string): Promise<number> {
+  return Grant.countDocuments({ objectType: "project", object: projectId, relation: "owner" });
+}
 
 export const GET = withProjectOwner(async (_request, { params }) => {
   await connectDB();
@@ -822,11 +907,23 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
 
-  await Grant.updateOne(
-    { subject: userId, objectType: "project", object: projectId },
-    { $set: { relation }, $setOnInsert: { createdBy: user._id } },
-    { upsert: true }
-  );
+  if (relation !== "owner" && (await ownerCount(projectId)) <= 1) {
+    return NextResponse.json(
+      { error: "A board must keep at least one owner" },
+      { status: 409 }
+    );
+  }
+
+  try {
+    await Grant.updateOne(
+      { subject: userId, objectType: "project", object: projectId },
+      { $set: { relation }, $setOnInsert: { createdBy: user._id } },
+      { upsert: true }
+    );
+  } catch (e) {
+    // Two concurrent grants of the same pair race the unique index; the row exists either way
+    if ((e as { code?: number }).code !== 11000) throw e;
+  }
 
   return NextResponse.json({ ok: true });
 });
@@ -839,15 +936,28 @@ export const DELETE = withProjectOwner(async (request, { params }) => {
   }
 
   await connectDB();
+  if ((await ownerCount(projectId)) <= 1) {
+    const remaining = await Grant.find({ objectType: "project", object: projectId })
+      .select("subject relation")
+      .lean();
+    const isLastOwner = remaining.some(
+      (g) => String(g.subject) === userId && g.relation === "owner"
+    );
+    if (isLastOwner) {
+      return NextResponse.json(
+        { error: "A board must keep at least one owner" },
+        { status: 409 }
+      );
+    }
+  }
+
   await Grant.deleteOne({ subject: userId, objectType: "project", object: projectId });
 
   return NextResponse.json({ ok: true });
 });
 ```
 
-The test mocks `User.findById` implicitly through the `@/models/user` mock; extend that mock with `findById: () => ({ select: () => Promise.resolve({ _id: "u1", role: "member", kind: "human" }) })` so the PUT tests reach the upsert.
-
-In `src/types/index.ts`, replace the `ApiProjectMember` interface with:
+In `src/types/index.ts` replace `ApiProjectMember` with:
 
 ```ts
 export interface ApiProjectMember {
@@ -862,7 +972,7 @@ export interface ApiProjectMember {
 - [ ] **Step 4: Run the tests**
 
 Run: `npx vitest run "src/app/api/projects/[projectId]/members/route.test.ts"`
-Expected: PASS, 6 tests.
+Expected: PASS, 11 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -878,13 +988,9 @@ git commit -m "feat(auth): grant and revoke project roles through the members AP
 **Files:**
 - Modify: `src/app/(app)/projects/[projectId]/settings/sections/GeneralSection.tsx`
 
-**Interfaces:**
-- Consumes: the members API from Task 5, `ApiProjectMember` with `relation` and `instanceAdmin`.
-- Produces: nothing other tasks read.
-
 - [ ] **Step 1: Replace the admins picker with a role list**
 
-In `GeneralSection.tsx`, delete `newAdminId`, `adminsSaving` and `saveAdmins`, and the `ownerName`/`ownerId` derivation. Replace the "Who can change settings" card's body with a list of `members` where each row carries a native `<select>` bound to that member's relation:
+Delete `newAdminId`, `adminsSaving`, `saveAdmins`, and the `ownerName`/`ownerId` derivation. Add:
 
 ```tsx
 async function setRelation(userId: string, relation: string) {
@@ -901,6 +1007,8 @@ async function setRelation(userId: string, relation: string) {
   }
 }
 ```
+
+and replace the "Who can change settings" card:
 
 ```tsx
 <SettingsCard
@@ -931,17 +1039,18 @@ async function setRelation(userId: string, relation: string) {
 </SettingsCard>
 ```
 
-A native `<select>` is deliberate: it is keyboard-accessible for free and it is the pattern the board's list view already uses for status and assignee.
+Check the actual `SettingsCard` and `ListRow` prop signatures in `src/components/settings/` before pasting; the JSX above assumes the shape the file already uses for its other cards.
 
-- [ ] **Step 2: Check nothing else still sends `admins`**
+A native `<select>` is deliberate — keyboard-accessible for free, and the pattern the board's list view already uses for status and assignee.
 
-Run: `grep -rn "admins" src/app src/components`
-Expected: no hits outside the settings copy you just replaced. Anything left is a call site to fix now.
+- [ ] **Step 2: Check nothing still sends `admins`**
+
+Run: `grep -rn "admins" src/app src/components src/types src/lib`
+Expected: only `src/types/index.ts:877` (`admins?: ApiProjectMember[]`), removed in Task 8. **[review]** `src/types` was outside revision 1's grep, which is how the dead API shape survived both of its verification steps.
 
 - [ ] **Step 3: Build**
 
 Run: `npm run build`
-Expected: exit 0.
 
 - [ ] **Step 4: Commit**
 
@@ -955,20 +1064,15 @@ git commit -m "feat(settings): manage board access by role instead of an admins 
 ### Task 7: Per-user project assignment in instance settings
 
 **Files:**
-- Modify: `src/app/(app)/settings/users/page.tsx:79-100`
-- Modify: `src/app/api/users/[userId]/route.ts:56-72`
-
-**Interfaces:**
-- Consumes: `Grant`.
-- Produces: `PUT /api/users/:id` accepts `{ role }` only; project assignment moves to the members API.
+- Modify: `src/app/api/users/[userId]/route.ts:56-72`, `src/app/(app)/settings/users/page.tsx:79-100`
 
 - [ ] **Step 1: Stop accepting allowedProjects on the user route**
 
-In `src/app/api/users/[userId]/route.ts`, delete the whole `if (body.allowedProjects !== undefined) { … }` block (lines 56-72). Instance-level user editing now covers the instance role only; board access is granted per board.
+Delete the whole `if (body.allowedProjects !== undefined) { … }` block (lines 56-72). Leave the self-demotion and last-admin guards at `:36` and `:43-51` untouched.
 
 - [ ] **Step 2: Drop the project picker from the users page**
 
-In `src/app/(app)/settings/users/page.tsx`, remove `editProjects`/`setEditProjects`, the `allowedProjects` line in `openEdit`, the `allowedProjects` key in the `api.put` payload, and the project checkbox list from the edit dialog. Add below the role field:
+Remove `editProjects`/`setEditProjects`, the `allowedProjects` line in `openEdit`, the `allowedProjects` key in the `api.put` payload, and the project checkbox list. Add below the role field:
 
 ```tsx
 <p className="text-sm text-text-muted">
@@ -979,7 +1083,6 @@ In `src/app/(app)/settings/users/page.tsx`, remove `editProjects`/`setEditProjec
 - [ ] **Step 3: Run the suite and build**
 
 Run: `npx vitest run && npm run build`
-Expected: both green.
 
 - [ ] **Step 4: Commit**
 
@@ -992,78 +1095,109 @@ git commit -m "refactor(settings): grant board access per board rather than per 
 
 ### Task 8: Remove the old fields
 
-Last code task. Nothing should read these any more; this makes that true by construction.
-
 **Files:**
-- Modify: `src/models/user.ts:42-45`, `src/models/project.ts:229-237`
-- Modify: `src/types/index.ts` — `IUser.allowedProjects`, `IProject.admins`, `IProject.owner`
-- Modify: `src/app/api/auth/me/route.ts:27`, `src/lib/pm/pm-user.ts:26`
-- Modify: `src/app/api/projects/route.ts`, `src/app/api/projects/[projectId]/route.ts`
-- Modify: `src/app/oauth/authorize/route.ts:154`, `src/app/api/tokens/route.ts:41`
+- Modify: `src/models/user.ts:48-51`, `src/models/project.ts:239-247`
+- Modify: `src/types/index.ts` — `IUser.allowedProjects`, `IProject.owner`, `IProject.admins`, `ApiProject.owner` (`:876`), `ApiProject.admins` (`:877`), `ApiProjectMember.role` (`:887`), `ApiUser.allowedProjects` (`:820`)
+- Modify: `src/app/api/projects/route.ts` (POST), `src/app/api/projects/[projectId]/route.ts:28-29, :71-105, :216-217`
+- Modify: `src/lib/pm/pm-user.ts:26`, `src/lib/worker-user.ts:45`
+- Modify: `src/app/api/auth/me/route.ts`, `src/app/oauth/authorize/route.ts:154`, `src/app/api/tokens/route.ts:41`
 
-**Interfaces:**
-- Consumes: `accessibleProjectIds` from Task 2.
-- Produces: `project.createdBy` replaces `project.owner`; `user.allowedProjects` no longer exists.
+**[review]** Revision 1's line citations in this task were wrong in five places and it missed `worker-user.ts` and the four `Api*` type shapes entirely. The numbers above are re-read from the tree.
 
-- [ ] **Step 1: Rename owner to createdBy**
+- [ ] **Step 1: Decide what happens to the stored `owner` value**
 
-In `src/models/project.ts`, rename the `owner` field to `createdBy` and delete the `admins` field. In `src/types/index.ts`, rename `IProject.owner` to `createdBy` and delete `IProject.admins`.
+**[review]** Renaming a Mongoose schema path does **not** rename the field in stored documents. With no backfill, renaming `owner` → `createdBy` leaves every existing project with an unmapped `owner` and an empty `createdBy`, and `.populate("createdBy", …)` yields `null` — silently, because Mongoose does not validate on update.
 
-In `src/app/api/projects/route.ts` (POST) change `owner: user._id` to `createdBy: user._id` and `.populate("owner", …)` to `.populate("createdBy", …)`. Do the same for both `.populate` calls in `src/app/api/projects/[projectId]/route.ts` (lines 29 and 217) and delete the `.populate("admins", …)` calls and the whole `if (body.admins !== undefined) { … }` validation block (lines 71-104).
+So: make `createdBy` **not** `required`, and add to the spec that it is empty for every board that existed before this deploy. It is informational only, so an empty value costs nothing — but a `required: true` path that is empty in every document is a trap for the next person.
 
-- [ ] **Step 2: Grant the creator ownership**
-
-Still in `POST /api/projects`, after `Project.create`, add:
+In `src/models/project.ts`, replace the `owner` field (`:239-243`) with:
 
 ```ts
-  await Grant.create({
-    subject: user._id,
-    relation: "owner",
-    objectType: "project",
-    object: project._id,
+    createdBy: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+```
+
+and delete the `admins` field (`:244-247`).
+
+- [ ] **Step 2: Update the project routes**
+
+In `src/app/api/projects/[projectId]/route.ts`: change `.populate("owner", …)` to `.populate("createdBy", …)` at `:28` and `:216`, delete `.populate("admins", …)` at `:29` and `:217`, and delete the whole `if (body.admins !== undefined) { … }` block (`:71-105`).
+
+In `src/app/api/projects/route.ts` (POST) change `owner: user._id` to `createdBy: user._id` and `.populate("owner", …)` to `.populate("createdBy", …)`.
+
+- [ ] **Step 3: Grant the creator ownership, and fail loudly if that cannot happen**
+
+Still in `POST /api/projects`, replace the `Project.create` block with:
+
+```ts
+  const project = await Project.create({
+    name,
+    key,
+    description: description || "",
     createdBy: user._id,
+    customFields: legacyFieldSeeds({}),
   });
+
+  try {
+    await Grant.create({
+      subject: user._id,
+      relation: "owner",
+      objectType: "project",
+      object: project._id,
+      createdBy: user._id,
+    });
+  } catch (e) {
+    await Project.deleteOne({ _id: project._id });
+    throw e;
+  }
 ```
 
-Without this a newly created board would have no owner at all — the creator is an instance admin and would still reach it, but nobody else could ever be granted access by a non-admin.
+**[review]** Without the rollback a failed grant leaves a board with no owner at all — the exact state this step exists to prevent.
 
-- [ ] **Step 3: Remove allowedProjects from the user model**
+- [ ] **Step 4: Remove allowedProjects from the user model and its two writers**
 
-Delete the `allowedProjects` field from `src/models/user.ts` and from `IUser` in `src/types/index.ts`. Delete `allowedProjects: []` from `src/lib/pm/pm-user.ts:26`.
+Delete the `allowedProjects` field from `src/models/user.ts:48-51` and from `IUser`. Delete `allowedProjects: []` from `src/lib/pm/pm-user.ts:26` **and from `src/lib/worker-user.ts:45`**, where it sits inside a `$setOnInsert`. Mongoose's `UpdateQuery` typing will not reject that key once the schema path is gone, so the build stays green and it survives as a silent no-op unless removed by hand.
 
-In `src/app/api/auth/me/route.ts:27`, replace `allowedProjects: user.allowedProjects || []` with:
+- [ ] **Step 5: Remove the dead API shapes**
 
-```ts
-    allowedProjects: (await accessibleProjectIds(user)) ?? [],
-```
+In `src/types/index.ts` delete `IProject.owner`, `IProject.admins`, `ApiProject.owner` (`:876`), `ApiProject.admins` (`:877`), `ApiProjectMember.role` (`:887`) and `ApiUser.allowedProjects` (`:820`). Add `createdBy?: ApiUser | string;` to `ApiProject`. Fix whatever the build then reports.
 
-The response key stays — the frontend reads it, and it still means "the projects this session may open".
+- [ ] **Step 6: Drop the allowedProjects key from /api/auth/me**
 
-- [ ] **Step 4: Fix the two token-minting project pickers**
+Remove the key entirely rather than publishing `[]` for instance admins. Nothing reads it: verified by `grep -rn "allowedProjects" src/app src/components` returning only the users page (changed in Task 7) and the tokens page (token scopes).
 
-`src/app/oauth/authorize/route.ts:154` and `src/app/api/tokens/route.ts:41` both build a filter of projects the minting user may scope a token to. Replace each:
+- [ ] **Step 7: Fix the two token-minting project pickers**
+
+`src/app/oauth/authorize/route.ts:154` and `src/app/api/tokens/route.ts:41` each build a filter of projects the minting user may scope a token to:
 
 ```ts
   const accessible = await accessibleProjectIds(user);
   const filter = accessible === null ? {} : { _id: { $in: accessible } };
 ```
 
-Leave every `allowedProjects` field on `apiToken`, `oauthToken` and `oauthCode` untouched — those are scopes.
+Every `allowedProjects` field on `apiToken`, `oauthToken` and `oauthCode` stays untouched.
 
-- [ ] **Step 5: Prove nothing references the removed fields**
+- [ ] **Step 8: Prove the removal is complete**
 
-Run: `grep -rn "allowedProjects" src | grep -v "apiToken\|oauthToken\|oauthCode\|models/apiToken\|models/oauthToken\|models/oauthCode\|auth/me"`
-Expected: only hits inside token minting and the `auth/me` response key.
+```bash
+grep -rln "allowedProjects" src
+```
+Expected exactly: `src/lib/auth.ts`, `src/models/apiToken.ts`, `src/models/oauthToken.ts`, `src/models/oauthCode.ts`, `src/types/index.ts`, `src/app/api/tokens/route.ts`, `src/app/oauth/token/route.ts`, `src/app/oauth/authorize/route.ts`, `src/app/api/oauth/connections/route.ts`, `src/app/(app)/settings/tokens/page.tsx` — all token scope, all intended.
 
-Run: `grep -rn "\.admins\|project.owner" src`
-Expected: no output.
+```bash
+grep -rn "admins" src
+grep -rn "project\.owner\|\"owner\"" src --include="*.ts" --include="*.tsx"
+```
+Expected: no output from the first; from the second only git-remote `owner/repo` strings.
 
-- [ ] **Step 6: Run the suite and build**
+- [ ] **Step 9: Run the suite and build**
 
 Run: `npx vitest run && npm run build`
-Expected: both green.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
 git add -A
@@ -1074,50 +1208,73 @@ git commit -m "refactor(auth): drop project.admins and user.allowedProjects"
 
 ### Task 9: Live verification
 
-The suite mocks Mongoose throughout, so it cannot prove the unique index exists, that the upsert actually upserts, or that login survives. This task is the one that does. **A green suite is not evidence for any of the claims below.**
+The suite mocks Mongoose throughout, so it cannot prove the unique index exists, that the upsert upserts, or that login survives. **A green suite is not evidence for any claim below.** Do not commit code in this task; a defect found here gets its own task.
 
-**Files:** none. Do not commit code in this task; if it finds a defect, fix it in a task of its own.
+- [ ] **Step 1: Snapshot production-shaped data first**
 
-- [ ] **Step 1: Bring the app up**
+`scripts/dump-collections.ts` defaults to `["projects", "tasks"]`, so pass the collections this change actually touches:
 
-`.env.local` already exists and Mongo listens on 27017. Start with `preview_start {name: "claudeplanner-dev"}` (port 3456). Never start a dev server through Bash.
+```bash
+npx tsx scripts/dump-collections.ts users grants projects
+```
 
-- [ ] **Step 2: Confirm the empty-collection state**
+- [ ] **Step 2: Bring the app up**
 
-With no grants at all: log in as an instance admin — full access to every board. Log in as `boardadmin` (seeded, password `test123`) — the projects list must be empty and `/projects/TP` must 403, cleanly, with no stack trace in `preview_logs`.
+`.env.local` exists and Mongo listens on 27017. Use `preview_start {name: "claudeplanner-dev"}` (port 3456). Never start a dev server through Bash.
 
-- [ ] **Step 3: Grant through the UI and confirm it takes effect without a re-login**
+- [ ] **Step 3: Confirm the empty-collection state**
 
-As the instance admin, open `/projects/TP/settings`, set `boardadmin` to **Owner** and `plainuser` to **Member**. In `boardadmin`'s session, reload — the board and its Settings link must appear.
+With no grants: an instance admin has full access to every board. `boardadmin` (seeded, `test123`) sees an empty projects list, and `/projects/TP` 403s cleanly with no stack trace in `preview_logs`.
 
-- [ ] **Step 4: Walk the matrix as each role**
+- [ ] **Step 4: Confirm the old fields survived in Mongo**
 
-As `boardadmin` (owner): edit the project name, open Board columns, add a webhook, open the members list. As `plainuser` (member): create and edit a task, create a sprint — then confirm `/projects/TP/settings` is refused and the Settings link is absent.
+This is what makes hand-assignment a five-minute job and keeps rollback possible: dropping a schema path does not delete stored data. Read and record:
 
-- [ ] **Step 5: Verify the index is real**
+```
+db.users.find({}, { username: 1, allowedProjects: 1 })
+db.projects.find({}, { key: 1, owner: 1, admins: 1 })
+```
 
-Mocked Mongoose cannot prove this. From a scratchpad script against `mongodb://localhost:27017/claudeplanner`, read `db.grants.getIndexes()` and confirm `{subject: 1, objectType: 1, object: 1}` is present **and unique**. Then attempt a second `insertOne` for a pair that already exists and confirm it fails with duplicate key 11000.
+Both should still show the pre-migration values. Paste the output into CP-246.
 
-- [ ] **Step 6: Verify token minting end-to-end**
+- [ ] **Step 5: Grant through the UI, confirm no re-login is needed**
 
-In the UI as `boardadmin`, go to `/settings/tokens` and mint a token scoped to TP. Confirm the project appears as a scopable option at all (this is `accessibleProjectIds` on the minting path). Then call `GET /api/projects` with that token: TP present, `canAdmin` **false** — a scoped token is never owner.
+As the instance admin open `/projects/TP/settings`, set `boardadmin` to **Owner** and `plainuser` to **Member**. In `boardadmin`'s existing session, reload — board and Settings link both appear.
 
-- [ ] **Step 7: Verify the instance admin's scoped token**
+- [ ] **Step 6: Walk the matrix as each role**
 
-Mint a token scoped to TP as the **instance admin**. Call `GET /api/projects/TP/tasks` with it: must succeed. Call `PUT /api/projects/TP` with it: must 403. This is the regression the spec is built around; a failure here means `instanceAdminBeforeScope` is not reaching `decide()`.
+As `boardadmin` (owner): edit the project name, open Board columns, add a webhook, open the members list, **delete a throwaway project you created for this** (capability move 1), and open the PM agent OAuth screen (capability move 2). As `plainuser` (member): create and edit a task, create a sprint, then confirm `/projects/TP/settings` is refused and the sidebar has no Settings link.
 
-- [ ] **Step 8: Write the results into CP-246**
+- [ ] **Step 7: Try to strand a board**
 
-Add a comment recording which paths were driven for real and which were synthesised, and paste the index output. State plainly anything not exercised.
+As `boardadmin`, attempt to set yourself to Member and to remove yourself while you are the only owner. Both must be refused with the 409 from Task 5, and the board must still be reachable afterwards.
+
+- [ ] **Step 8: Verify the index is real**
+
+Mocked Mongoose cannot prove this. From a scratchpad script against `mongodb://localhost:27017/claudeplanner`, read `db.grants.getIndexes()` and confirm `{subject: 1, objectType: 1, object: 1}` is present **and unique**. Then attempt a duplicate `insertOne` and confirm error 11000.
+
+- [ ] **Step 9: Verify token minting and scoped-token behaviour**
+
+In the UI as `boardadmin`, mint a token at `/settings/tokens` scoped to TP — confirm TP is offered at all (that is `accessibleProjectIds` on the minting path). With that token: `GET /api/projects` shows TP with `canAdmin` **false**; `PUT /api/projects/:id/members` is refused.
+
+- [ ] **Step 10: Verify the instance admin's scoped token**
+
+Mint a token scoped to TP as the **instance admin**. `GET /api/projects/TP/tasks` must succeed; `PUT /api/projects/TP` must 403. Then `POST /api/projects/TP/pm/chat` must succeed, and the same call against a project outside the scope must 403 — that route authenticates by hand and is the one the review caught. A failure on the first two means `instanceAdminBeforeScope` is not reaching `decide()`.
+
+- [ ] **Step 11: Write the results into CP-246**
+
+Record which paths were driven for real and which were synthesised, paste the index output and the Step 4 reads, and state plainly anything not exercised.
 
 ---
 
 ## Self-Review
 
-**Spec coverage.** Roles → Tasks 3-5. Permission matrix → Tasks 3, 4 (the two moves), 9 (walked live). Data model → Task 1. `check()` including the rule-3 trap → Tasks 1, 2, 9 step 7. Token scope is not a grant → Task 2 step 4, Task 8 step 4. What is removed → Task 8. No migration → Task 9 step 2 verifies the empty-collection state. API and UI changes → Tasks 4-7. Testing → per-task plus Task 9. `GET /api/projects` returning `canAdmin` already shipped in CP-245 and is re-pointed at grants in Task 3 step 4.
+**Spec coverage.** Roles → Tasks 3-5. Matrix → Tasks 3, 4, and 9 step 6, which now exercises both capability moves rather than only asserting them. Data model → Task 1. `check()` and the rule-3 trap → Tasks 1, 2, and 9 step 10. Token scope is not a grant → Tasks 2, 3, 8. Removals → Task 8. No migration → Task 9 steps 3 and 4. API and UI → Tasks 4-7.
 
-**Placeholders.** None: every code step carries the code, every verification step carries the command and the expected result.
+**Placeholders.** None: every code step carries code, every verification step carries the command and the expected output.
 
-**Type consistency.** `decide`/`principalOf`/`check`/`accessibleProjectIds` keep the same signatures from Task 1 through Task 8. `Need` is `"access" | "admin"` everywhere. `GrantRelation` is `"owner" | "member"` in the model, the API and `ApiProjectMember`. `accessibleProjectIds` returns `string[] | null` and every consumer handles `null` explicitly.
+**Type consistency.** `decide`/`principalOf`/`check`/`accessibleProjectIds` keep one signature throughout. `Need` is `"access" | "admin"`; `GrantRelation` is `"owner" | "member"` in model, API and `ApiProjectMember`. `accessibleProjectIds` returns `string[] | null` and every consumer handles `null` explicitly.
 
-**Known gap, deliberate.** `withProjectOwner` turns a non-existent project into 403 rather than 404 for non-admins (Task 3 step 1). That is consistent with the existing `unresolvedProject` policy of not leaking which projects exist, and is noted so a reviewer does not read it as an accident.
+**Deliberate, flagged deviations.** (a) `withProjectOwner` answers 403 rather than 404 for a non-existent project, for non-admins — consistent with `unresolvedProject`. (b) `GET …/members` returns every human account, the third capability change, recorded in Global Constraints. (c) `project.createdBy` is empty for every board created before this deploy, and is `default: null` rather than `required` for that reason. (d) An owner can run PM MCP OAuth against servers only an instance admin can configure.
+
+**Spec edits this revision requires.** The spec still says "61 references across 22 files" (real: 73/27) and still lists exactly two capability moves. Update both, and add the `pm.mcpServers` and `createdBy`-is-empty footnotes, before starting Task 1.
