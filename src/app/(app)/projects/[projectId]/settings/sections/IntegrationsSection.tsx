@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { useDraft } from "@/hooks/use-draft";
 import { CODA_COLUMNS, CODA_KEY_COLUMN } from "@/lib/coda";
@@ -23,8 +23,11 @@ import { Connections, IntegrationId } from "@/components/settings/Connections";
 import { useDirtyGroup } from "@/components/settings/settings-context";
 import { SectionProps } from "./types";
 
-type ChannelDraft = ApiNotificationChannel & { webhookUrl?: string };
-type WebhookDraft = ApiWebhook & { url?: string };
+type ChannelDraft = ApiNotificationChannel & {
+  webhookUrl?: string;
+  tempId?: string;
+};
+type WebhookDraft = ApiWebhook & { url?: string; tempId?: string };
 
 export function IntegrationsSection({
   projectId,
@@ -56,6 +59,13 @@ export function IntegrationsSection({
   const webhooks = useDraft<{ webhooks: WebhookDraft[] }>({
     webhooks: project.webhooks || [],
   });
+
+  // Rows have no _id until they are saved, and undefined === undefined, so without this
+  // removing one unsaved row removed every unsaved row
+  const nextTempId = useRef(0);
+  const makeTempId = () => `new-${(nextTempId.current += 1)}`;
+  const rowKey = (r: { _id?: string; tempId?: string }) =>
+    r._id || r.tempId || "";
 
   const [githubSyncing, setGithubSyncing] = useState(false);
   const [codaSyncing, setCodaSyncing] = useState(false);
@@ -188,7 +198,10 @@ export function IntegrationsSection({
     },
     {
       save: async () => {
-        const diff = diffById<ChannelDraft>(channels.baseline.channels, channels.value.channels);
+        const diff = diffById<ChannelDraft>(
+          channels.baseline.channels,
+          channels.value.channels,
+        );
         try {
           let saved = project.notificationChannels || [];
           for (const row of diff.added) {
@@ -278,6 +291,7 @@ export function IntegrationsSection({
     webhooks.set("webhooks", [
       ...webhooks.value.webhooks,
       {
+        tempId: makeTempId(),
         urlMasked: newWebhookUrl.trim(),
         url: newWebhookUrl.trim(),
         events: [...WEBHOOK_EVENTS],
@@ -291,7 +305,7 @@ export function IntegrationsSection({
     webhooks.set(
       "webhooks",
       webhooks.value.webhooks.map((w) =>
-        w._id === webhookId ? { ...w, ...patch } : w,
+        rowKey(w) === webhookId ? { ...w, ...patch } : w,
       ),
     );
   }
@@ -299,7 +313,7 @@ export function IntegrationsSection({
   function removeWebhook(webhookId: string) {
     webhooks.set(
       "webhooks",
-      webhooks.value.webhooks.filter((w) => w._id !== webhookId),
+      webhooks.value.webhooks.filter((w) => rowKey(w) !== webhookId),
     );
   }
 
@@ -328,6 +342,7 @@ export function IntegrationsSection({
       {
         type: newChannelType,
         name: newChannelName.trim(),
+        tempId: makeTempId(),
         webhookUrlMasked: newChannelUrl.trim(),
         webhookUrl: newChannelUrl.trim(),
         events: [...WEBHOOK_EVENTS],
@@ -342,7 +357,7 @@ export function IntegrationsSection({
     channels.set(
       "channels",
       channels.value.channels.map((c) =>
-        c._id === channelId ? { ...c, ...patch } : c,
+        rowKey(c) === channelId ? { ...c, ...patch } : c,
       ),
     );
   }
@@ -350,7 +365,7 @@ export function IntegrationsSection({
   function removeChannel(channelId: string) {
     channels.set(
       "channels",
-      channels.value.channels.filter((c) => c._id !== channelId),
+      channels.value.channels.filter((c) => rowKey(c) !== channelId),
     );
   }
 
@@ -393,7 +408,10 @@ export function IntegrationsSection({
         // Only once something is typed: an empty field is not a failure to recognise
         status={
           repository.value.repositoryUrl.trim()
-            ? { label: providerLabel || "Host not recognised", on: !!providerLabel }
+            ? {
+                label: providerLabel || "Host not recognised",
+                on: !!providerLabel,
+              }
             : undefined
         }
         description="One URL, whoever hosts it. Pull-request linking parses it, a worker is told to fetch it — and pasting a GitHub or GitLab address is what adds that connection below."
@@ -708,7 +726,7 @@ export function IntegrationsSection({
                   <div className="space-y-3">
                     {channels.value.channels.map((ch) => (
                       <div
-                        key={ch._id ?? `new-${ch.name}`}
+                        key={rowKey(ch)}
                         className="rounded-lg border border-border p-3"
                       >
                         <div className="mb-2 flex items-center justify-between gap-2">
@@ -729,7 +747,9 @@ export function IntegrationsSection({
                           <div className="flex items-center gap-2">
                             <button
                               onClick={() =>
-                                updateChannel(ch._id, { enabled: !ch.enabled })
+                                updateChannel(rowKey(ch), {
+                                  enabled: !ch.enabled,
+                                })
                               }
                               className={`rounded px-2 py-0.5 text-xs ${
                                 ch.enabled
@@ -740,7 +760,7 @@ export function IntegrationsSection({
                               {ch.enabled ? "Active" : "Disabled"}
                             </button>
                             <button
-                              onClick={() => removeChannel(ch._id)}
+                              onClick={() => removeChannel(rowKey(ch))}
                               className="text-xs text-text-muted hover:text-danger"
                             >
                               Delete
@@ -767,7 +787,7 @@ export function IntegrationsSection({
                             <button
                               key={evt}
                               onClick={() =>
-                                updateChannel(ch._id, {
+                                updateChannel(rowKey(ch), {
                                   events: toggleEvent(ch.events, evt),
                                 })
                               }
@@ -845,7 +865,7 @@ export function IntegrationsSection({
                   <div className="space-y-3">
                     {webhooks.value.webhooks.map((wh) => (
                       <div
-                        key={wh._id ?? `new-${wh.urlMasked}`}
+                        key={rowKey(wh)}
                         className="rounded-lg border border-border p-3"
                       >
                         <div className="mb-2 flex items-center justify-between gap-2">
@@ -863,7 +883,9 @@ export function IntegrationsSection({
                           <div className="flex items-center gap-2">
                             <button
                               onClick={() =>
-                                updateWebhook(wh._id, { enabled: !wh.enabled })
+                                updateWebhook(rowKey(wh), {
+                                  enabled: !wh.enabled,
+                                })
                               }
                               className={`rounded px-2 py-0.5 text-xs ${
                                 wh.enabled
@@ -874,7 +896,7 @@ export function IntegrationsSection({
                               {wh.enabled ? "Active" : "Disabled"}
                             </button>
                             <button
-                              onClick={() => removeWebhook(wh._id)}
+                              onClick={() => removeWebhook(rowKey(wh))}
                               className="text-xs text-text-muted hover:text-danger"
                             >
                               Delete
@@ -886,7 +908,7 @@ export function IntegrationsSection({
                             <button
                               key={evt}
                               onClick={() =>
-                                updateWebhook(wh._id, {
+                                updateWebhook(rowKey(wh), {
                                   events: toggleEvent(wh.events, evt),
                                 })
                               }
