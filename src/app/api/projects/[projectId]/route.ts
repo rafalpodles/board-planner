@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
-import { withProjectAccess, withProjectAdmin, withAdmin, canAdminProject, withProjectAccessOrWorker } from "@/lib/middleware";
+import { withProjectAccess, withProjectOwner, withAdmin, withProjectAccessOrWorker } from "@/lib/middleware";
+import { check } from "@/lib/grants";
 import { Project } from "@/models/project";
 import { parseProjectWorkerConfig } from "@/lib/project-worker-config";
 import { User } from "@/models/user";
@@ -41,11 +42,11 @@ export const GET = withProjectAccessOrWorker(async (_request, { params, user }) 
   delete obj.gitlabRepo;
   if (obj.pm) obj.pm.mcpServers = sanitizeMcpServers(obj.pm.mcpServers);
   obj.pmAvailable = isPmAvailable();
-  obj.canAdmin = canAdminProject(user, project);
+  obj.canAdmin = await check(user, String(project._id), "admin");
   return NextResponse.json(obj);
 });
 
-export const PUT = withProjectAdmin(async (request, { params, user }) => {
+export const PUT = withProjectOwner(async (request, { params, user }) => {
   await connectDB();
   const { projectId } = await params;
   const body = await request.json();
@@ -237,7 +238,7 @@ export const PUT = withProjectAdmin(async (request, { params, user }) => {
   delete obj.gitlabRepo;
   if (obj.pm) obj.pm.mcpServers = sanitizeMcpServers(obj.pm.mcpServers);
   obj.pmAvailable = isPmAvailable();
-  obj.canAdmin = canAdminProject(user, project);
+  obj.canAdmin = await check(user, String(project._id), "admin");
   return NextResponse.json(obj);
 });
 

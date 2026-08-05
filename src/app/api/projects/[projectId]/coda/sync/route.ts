@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { withProjectAdmin } from "@/lib/middleware";
+import { withProjectOwner } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { Task } from "@/models/task";
 import { User } from "@/models/user";
@@ -14,7 +14,7 @@ import {
   upsertTaskRows,
 } from "@/lib/coda";
 
-export const POST = withProjectAdmin(async (_request, { params }) => {
+export const POST = withProjectOwner(async (_request, { params }) => {
   const { projectId } = await params;
   await connectDB();
 

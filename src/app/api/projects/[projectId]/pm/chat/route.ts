@@ -13,6 +13,7 @@ import {
   modelAcceptsImages,
 } from "@/lib/pm/attachments";
 import { resolveProjectId } from "@/lib/middleware";
+import { check } from "@/lib/grants";
 import { PmAttachment } from "@/types";
 
 export const maxDuration = 300;
@@ -43,10 +44,7 @@ export async function POST(
   if (!projectId) {
     return NextResponse.json({ error: "Invalid project id" }, { status: 400 });
   }
-  if (
-    user.role !== "admin" &&
-    !(user.allowedProjects || []).some((p) => p.toString() === projectId)
-  ) {
+  if (!(await check(user, projectId, "access"))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

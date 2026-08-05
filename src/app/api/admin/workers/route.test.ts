@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const getAuthUser = vi.fn();
+const check = vi.fn();
 const workerFind = vi.fn();
 const taskFind = vi.fn();
 
@@ -9,13 +10,15 @@ vi.mock("@/lib/auth", () => ({
   getAuthUser,
   RateLimitError: class RateLimitError extends Error {},
 }));
+vi.mock("@/lib/grants", () => ({ check, accessibleProjectIds: vi.fn() }));
 vi.mock("@/models/worker", () => ({ Worker: { find: workerFind } }));
 vi.mock("@/models/task", () => ({ Task: { find: taskFind } }));
 
 const { GET } = await import("./route");
 
-const ADMIN = { _id: "admin-1", role: "admin", tokenScoped: false, allowedProjects: [] };
-const MEMBER = { _id: "member-1", role: "member", tokenScoped: false, allowedProjects: [] };
+const ADMIN = { _id: "admin-1", role: "admin", tokenScoped: false };
+// The fleet spans every project, so owning one is not a way in
+const PROJECT_OWNER = { _id: "owner-1", role: "member", tokenScoped: false };
 
 function workerDoc(overrides: Record<string, unknown> = {}) {
   return {
@@ -97,6 +100,7 @@ function runningTask(workerId: string, overrides: Record<string, unknown> = {}) 
 
 beforeEach(() => {
   vi.clearAllMocks();
+  check.mockResolvedValue(false);
   sorts.length = 0;
   selects.length = 0;
   populates.length = 0;
@@ -106,8 +110,9 @@ beforeEach(() => {
 });
 
 describe("GET /api/admin/workers", () => {
-  it("refuses a non-admin", async () => {
-    getAuthUser.mockResolvedValue(MEMBER);
+  it("refuses a project owner", async () => {
+    getAuthUser.mockResolvedValue(PROJECT_OWNER);
+    check.mockResolvedValue(true);
 
     const response = await GET(request(), { params: Promise.resolve({}) });
 

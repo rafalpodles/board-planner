@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { withAuth, withAdmin, canAdminProject } from "@/lib/middleware";
+import { withAuth, withAdmin } from "@/lib/middleware";
+import { check, accessibleProjectIds } from "@/lib/grants";
 import { Project } from "@/models/project";
 import { legacyFieldSeeds } from "@/lib/legacy-fields";
 import { Task } from "@/models/task";
@@ -11,10 +12,8 @@ import { sanitizeProjectSecrets } from "@/lib/project-secrets";
 export const GET = withAuth(async (_request, { user }) => {
   await connectDB();
 
-  const filter =
-    user.role === "admin"
-      ? {}
-      : { _id: { $in: user.allowedProjects || [] } };
+  const accessibleIds = await accessibleProjectIds(user);
+  const filter = accessibleIds === null ? {} : { _id: { $in: accessibleIds } };
 
   // Manual order first; anything never dragged keeps its default 0 and falls
   // back to newest-first, which is the order this list had before CP-180
@@ -42,7 +41,7 @@ export const GET = withAuth(async (_request, { user }) => {
   const statsByProject = new Map(taskStats.map((s) => [String(s._id), s]));
   const withActiveSprint = new Set(activeSprints.map((s) => String(s.project)));
 
-  const sanitized = projects.map((p) => {
+  const sanitized = await Promise.all(projects.map(async (p) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const obj: any = sanitizeProjectSecrets(p.toObject());
     if (obj.pm) obj.pm.mcpServers = sanitizeMcpServers(obj.pm.mcpServers);
@@ -50,9 +49,9 @@ export const GET = withAuth(async (_request, { user }) => {
     const stats = statsByProject.get(String(p._id));
     obj.taskCount = stats?.taskCount ?? 0;
     obj.hasActiveSprint = withActiveSprint.has(String(p._id));
-    obj.canAdmin = canAdminProject(user, p);
+    obj.canAdmin = await check(user, String(p._id), "admin");
     return obj;
-  });
+  }));
   return NextResponse.json(sanitized);
 });
 

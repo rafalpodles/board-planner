@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
-import { isValidObjectId, Types } from "mongoose";
+import { isValidObjectId } from "mongoose";
 import { getAuthUser, RateLimitError } from "./auth";
 import { connectDB } from "./db";
+import { check } from "./grants";
 import { verifyWorkerCredential } from "./worker-service";
 import { Project } from "@/models/project";
 import { User } from "@/models/user";
 import { Task } from "@/models/task";
-import { IProject, IUser, IWorker } from "@/types";
+import { IUser, IWorker } from "@/types";
 import { PROJECT_KEY_PATTERN } from "./urls";
 import { matchRepo } from "./repo-match";
 
@@ -83,26 +84,6 @@ export function withWorker(
   };
 }
 
-function refId(ref: Types.ObjectId | IUser): string {
-  const populated = (ref as { _id?: Types.ObjectId })._id;
-  return (populated ?? ref).toString();
-}
-
-export function canAdminProject(
-  user: IUser,
-  project: Pick<IProject, "_id" | "owner" | "admins">
-): boolean {
-  if (user.role === "admin") return true;
-  if (user.tokenScoped) return false;
-  const uid = user._id.toString();
-  if (project.owner && refId(project.owner) === uid) return true;
-  const listed = (project.admins || []).some((a) => refId(a) === uid);
-  if (!listed) return false;
-  // A listed admin whose project access was later revoked loses admin rights too
-  const projectId = project._id.toString();
-  return (user.allowedProjects || []).some((p) => p.toString() === projectId);
-}
-
 // "146" or "CP-146" — the project is already pinned by the projectId segment,
 // so only the number is used and any key prefix is decoration
 const TASK_NUMBER_PATTERN = /^(?:[A-Za-z][A-Za-z0-9_-]*-)?(\d{1,9})$/;
@@ -171,7 +152,7 @@ function unresolvedProject(user: IUser) {
     : NextResponse.json({ error: "Forbidden" }, { status: 403 });
 }
 
-export function withProjectAdmin(handler: AuthenticatedHandler) {
+export function withProjectOwner(handler: AuthenticatedHandler) {
   return withAuth(async (request, context) => {
     const { user } = context;
 
@@ -181,19 +162,8 @@ export function withProjectAdmin(handler: AuthenticatedHandler) {
       return unresolvedProject(user);
     }
 
-    if (user.role !== "admin") {
-      if (user.tokenScoped) {
-        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-      }
-
-      await connectDB();
-      const project = await Project.findById(projectId).select("owner admins");
-      if (!project) {
-        return NextResponse.json({ error: "Project not found" }, { status: 404 });
-      }
-      if (!canAdminProject(user, project)) {
-        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-      }
+    if (!(await check(user, projectId, "admin"))) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     const resolved = await withResolvedIds(context, params, projectId);
@@ -268,12 +238,8 @@ export function withProjectAccess(handler: AuthenticatedHandler) {
       return unresolvedProject(user);
     }
 
-    if (user.role !== "admin") {
-      const allowedProjects = user.allowedProjects || [];
-      const hasAccess = allowedProjects.some((p) => p.toString() === projectId);
-      if (!hasAccess) {
-        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-      }
+    if (!(await check(user, projectId, "access"))) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     const resolved = await withResolvedIds(context, params, projectId);
