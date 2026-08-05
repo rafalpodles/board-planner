@@ -5,17 +5,18 @@ import { useRouter } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
 import { useDraft } from "@/hooks/use-draft";
 import { useToast } from "@/components/ui/Toast";
-import { ApiProjectMember, PROJECT_ICONS, DEFAULT_PROJECT_ICON } from "@/types";
+import { ApiProjectMember } from "@/types";
 import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
 import { Button } from "@/components/ui/Button";
-import { EmojiPicker } from "@/components/ui/EmojiPicker";
-import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { IconPicker } from "@/components/ui/IconPicker";
 import { SettingsCard, ListRow } from "@/components/settings/SettingsCard";
+import { DangerAction } from "@/components/settings/DangerAction";
+import { SettingRow } from "@/components/settings/SettingRow";
 import { useDirtyGroup } from "@/components/settings/settings-context";
 import { SectionProps } from "./types";
 
-export function GeneralSection({ projectId, project, replaceProject, isAdmin }: SectionProps) {
+export function GeneralSection({ projectId, project, replaceProject, isAdmin, stats }: SectionProps) {
   const api = useApi();
   const router = useRouter();
   const { toast } = useToast();
@@ -29,8 +30,6 @@ export function GeneralSection({ projectId, project, replaceProject, isAdmin }: 
   const [members, setMembers] = useState<ApiProjectMember[]>([]);
   const [newAdminId, setNewAdminId] = useState("");
   const [adminsSaving, setAdminsSaving] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     api
@@ -74,14 +73,11 @@ export function GeneralSection({ projectId, project, replaceProject, isAdmin }: 
   }
 
   async function handleDelete() {
-    setDeleting(true);
     try {
       await api.del(`/api/projects/${projectId}`);
       router.replace("/projects");
     } catch {
       toast("Failed to delete project", "error");
-      setDeleting(false);
-      setConfirmDelete(false);
     }
   }
 
@@ -90,38 +86,44 @@ export function GeneralSection({ projectId, project, replaceProject, isAdmin }: 
 
   return (
     <>
-      <SettingsCard title="Identity" contract="draft">
-        <div className="grid gap-4 sm:grid-cols-[1fr_140px]">
-          <Input
-            label="Name"
-            value={identity.value.name}
-            dirty={identity.isDirty("name")}
-            onChange={(e) => identity.set("name", e.target.value)}
-            required
-          />
-          <div>
-            <Input label="Key" value={project.key} disabled />
-            <p className="mt-1 text-xs text-text-muted">Task keys use it. Can&apos;t change.</p>
-          </div>
+      <SettingsCard
+        title="Identity"
+        description="How this project appears in the sidebar, search and the board header."
+      >
+        <div>
+          <SettingRow label="Name" hint="Shown everywhere the project is listed">
+            <Input
+              value={identity.value.name}
+              aria-label="Project name"
+              dirty={identity.isDirty("name")}
+              onChange={(e) => identity.set("name", e.target.value)}
+              required
+            />
+          </SettingRow>
+          <SettingRow label="Icon" hint="Sidebar, project cards, search results">
+            <IconPicker
+              label="Project icon"
+              value={identity.value.icon}
+              dirty={identity.isDirty("icon")}
+              onChange={(v) => identity.set("icon", v)}
+            />
+          </SettingRow>
+          <SettingRow label="Key" hint="Task keys are built from this and cannot change">
+            <Input value={project.key} aria-label="Project key" disabled className="max-w-[160px]" />
+          </SettingRow>
+          <SettingRow label="Description" hint="One line under the board title">
+            <Textarea
+              value={identity.value.description}
+              aria-label="Project description"
+              dirty={identity.isDirty("description")}
+              onChange={(e) => identity.set("description", e.target.value)}
+            />
+          </SettingRow>
         </div>
-        <EmojiPicker
-          label="Icon"
-          value={identity.value.icon}
-          options={PROJECT_ICONS}
-          fallback={DEFAULT_PROJECT_ICON}
-          onChange={(v) => identity.set("icon", v)}
-        />
-        <Textarea
-          label="Description"
-          value={identity.value.description}
-          dirty={identity.isDirty("description")}
-          onChange={(e) => identity.set("description", e.target.value)}
-        />
       </SettingsCard>
 
       <SettingsCard
         title="Who can change settings"
-        contract="live"
         description="Project admins can edit everything on this page except the instance settings. The owner is always an admin."
       >
         <div className="space-y-2">
@@ -181,23 +183,22 @@ export function GeneralSection({ projectId, project, replaceProject, isAdmin }: 
         <SettingsCard
           title="Delete project"
           danger
-          description={`Deletes ${project.name} and all its tasks, comments and history. This can't be undone.`}
+          description={`Removes ${project.name}, its tasks, sprints and comments. This can't be undone.`}
         >
-          <Button variant="danger" onClick={() => setConfirmDelete(true)}>
-            Delete project
-          </Button>
+          <DangerAction
+            label="Delete project..."
+            title={`Delete "${project.name}"?`}
+            message="The project, its sprints, its comments and its history go with it."
+            usage={
+              stats
+                ? `${stats.total === 1 ? "1 task" : `${stats.total} tasks`} will be deleted and cannot be restored.`
+                : undefined
+            }
+            confirmLabel="Delete project"
+            onConfirm={handleDelete}
+          />
         </SettingsCard>
       )}
-
-      <ConfirmDialog
-        open={confirmDelete}
-        onClose={() => setConfirmDelete(false)}
-        onConfirm={handleDelete}
-        title="Delete Project"
-        message={`Are you sure you want to delete "${project.name}" and all its tasks? This action cannot be undone.`}
-        confirmLabel="Delete Project"
-        loading={deleting}
-      />
     </>
   );
 }

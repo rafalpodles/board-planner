@@ -5,6 +5,7 @@ import { useApi } from "@/hooks/use-api";
 import { useDraft } from "@/hooks/use-draft";
 import { useToast } from "@/components/ui/Toast";
 import { Input } from "@/components/ui/Input";
+import { Switch } from "@/components/ui/Switch";
 import { SettingsCard } from "@/components/settings/SettingsCard";
 import { useDirtyGroup } from "@/components/settings/settings-context";
 import { PROJECT_POLICY_DEFAULTS } from "@/lib/worker-policy";
@@ -133,7 +134,6 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
       <SettingsCard
         title="Autonomous workers"
         description="A worker claims approved tasks, runs the coding agent in its own checkout, and opens a pull request. Nothing runs until you enable it here."
-        contract={contract}
         instanceScoped
       >
         {!project.repositoryUrl ? (
@@ -143,15 +143,13 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
           </p>
         ) : (
           <>
-            <label className="flex items-center gap-3 text-sm">
-              <input
-                type="checkbox"
-                checked={!!draft.value.enabled}
-                disabled={!isAdmin}
-                onChange={(e) => draft.set("enabled", e.target.checked)}
-              />
-              <span>Let workers run tasks for this project</span>
-            </label>
+            <Switch
+              checked={!!draft.value.enabled}
+              disabled={!isAdmin}
+              onChange={(v) => draft.set("enabled", v)}
+              label="Let workers run tasks for this project"
+              hint="Approved tasks are picked up by any machine offering this repository."
+            />
 
             <div className="mt-4">
               <p className="text-sm font-medium mb-2">Machines offering this repository</p>
@@ -185,7 +183,6 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
       <SettingsCard
         title="How work is done here"
         description="These describe this repository, so every machine serving it runs under the same values. A field you have not set follows the default."
-        contract={contract}
         instanceScoped
       >
         <div className="space-y-3">
@@ -195,13 +192,16 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
             const inherits = unpinned.has(field) || (!pinned.has(field) && !draft.isDirty(field));
             return (
               <div key={field} className="flex items-center gap-3">
-                <span className="w-52 text-sm">{LABELS[field] ?? field}</span>
+                {/* A boolean carries its own label, so the shared one would say it twice */}
+                {typeof value !== "boolean" && (
+                  <span className="w-52 text-sm">{LABELS[field] ?? field}</span>
+                )}
                 {typeof value === "boolean" ? (
-                  <input
-                    type="checkbox"
+                  <Switch
                     checked={value}
                     disabled={!isAdmin}
-                    onChange={(e) => editField(field, e.target.checked)}
+                    onChange={(v) => editField(field, v)}
+                    label={LABELS[field] ?? field}
                   />
                 ) : (
                   <Input

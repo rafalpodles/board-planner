@@ -3,6 +3,12 @@ import { connectDB } from "@/lib/db";
 import { withProjectAdmin } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { logProjectAudit } from "@/lib/projectAudit";
+import { maskSecretUrl, sanitizeProjectSecrets } from "@/lib/project-secrets";
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function masked(project: any) {
+  return sanitizeProjectSecrets(project.toObject()).webhooks || [];
+}
 
 export const GET = withProjectAdmin(async (_request, { params }) => {
   const { projectId } = await params;
@@ -13,7 +19,7 @@ export const GET = withProjectAdmin(async (_request, { params }) => {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
-  return NextResponse.json(project.webhooks || []);
+  return NextResponse.json(masked(project));
 });
 
 export const POST = withProjectAdmin(async (request, { params, user }) => {
@@ -45,9 +51,9 @@ export const POST = withProjectAdmin(async (request, { params, user }) => {
   project.webhooks = webhooks;
   await project.save();
 
-  logProjectAudit(projectId, user._id, "settings_updated", `Webhook added: ${url.trim()}`);
+  logProjectAudit(projectId, user._id, "settings_updated", `Webhook added: ${maskSecretUrl(url.trim())}`);
 
-  return NextResponse.json(project.webhooks, { status: 201 });
+  return NextResponse.json(masked(project), { status: 201 });
 });
 
 export const PUT = withProjectAdmin(async (request, { params }) => {
@@ -76,7 +82,7 @@ export const PUT = withProjectAdmin(async (request, { params }) => {
   if (updates.enabled !== undefined) webhook.enabled = updates.enabled;
 
   await project.save();
-  return NextResponse.json(project.webhooks);
+  return NextResponse.json(masked(project));
 });
 
 export const DELETE = withProjectAdmin(async (request, { params, user }) => {
@@ -99,7 +105,7 @@ export const DELETE = withProjectAdmin(async (request, { params, user }) => {
   );
   await project.save();
 
-  if (removed) logProjectAudit(projectId, user._id, "settings_updated", `Webhook removed: ${removed.url}`);
+  if (removed) logProjectAudit(projectId, user._id, "settings_updated", `Webhook removed: ${maskSecretUrl(removed.url)}`);
 
-  return NextResponse.json(project.webhooks);
+  return NextResponse.json(masked(project));
 });

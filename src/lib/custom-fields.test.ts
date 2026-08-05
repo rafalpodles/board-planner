@@ -10,6 +10,7 @@ import {
   matchesFieldFilter,
   matchesAllFieldFilters,
   resolveFieldsByName,
+  parseOptions,
 } from "./custom-fields";
 import { DEFAULT_OPTION_COLOR, ICustomField } from "@/types";
 
@@ -302,5 +303,30 @@ describe("resolveFieldsByName", () => {
 
   it("refuses to write to an archived field", () => {
     expect(() => resolveFieldsByName({ Gone: "x" }, definitions)).toThrow(/Unknown field/);
+  });
+});
+
+describe("parseOptions ids", () => {
+  // The editor adds a row with no id yet; "" used to survive and become the option's id
+  it("mints an id for an option that arrives without one", () => {
+    const result = parseOptions([{ id: "", value: "Apples", color: "#ef4444", order: 0 }]);
+    expect(result.error).toBeUndefined();
+    expect(result.options?.[0].id).toBeTruthy();
+    expect(result.options?.[0].id).not.toBe("");
+  });
+
+  it("accepts two new options in one save", () => {
+    const result = parseOptions([
+      { id: "", value: "Apples", color: "#ef4444", order: 0 },
+      { id: "", value: "Pears", color: "#22c55e", order: 1 },
+    ]);
+    expect(result.error).toBeUndefined();
+    expect(new Set(result.options?.map((o) => o.id)).size).toBe(2);
+  });
+
+  it("keeps the id of an option that already exists, so tasks survive a rename", () => {
+    const existing = [{ id: "ui-a1b2", value: "ui", color: "#3b82f6", order: 0 }];
+    const result = parseOptions([{ id: "ui-a1b2", value: "Interface", color: "#3b82f6", order: 0 }], existing);
+    expect(result.options?.[0].id).toBe("ui-a1b2");
   });
 });
