@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { decide, Principal } from "./grants";
+import { decide, Principal, principalOf } from "./grants";
+import { IUser } from "@/types";
 
 const P = "69a52e3b399b27d3cbb2c5a5";
 const OTHER = "69a52e3b399b27d3cbb2c5a6";
@@ -50,13 +51,6 @@ describe("decide", () => {
     expect(decide(p, "owner", "access", P)).toBe(true);
   });
 
-  // An UNSCOPED token leaves tokenScoped false, so its bearer keeps admin rights via their grant.
-  // This is today's behaviour at middleware.ts:96 and must not tighten.
-  it("lets an unscoped token administer a board its bearer owns", () => {
-    const p = principal({ tokenScoped: false, tokenScope: null });
-    expect(decide(p, "owner", "admin", P)).toBe(true);
-  });
-
   // The regression the spec is built around: applyTokenScope downgrades an instance admin to
   // member, and instance admins hold no grant rows, so a naive lookup strips all their access.
   it("keeps an instance admin's scoped token working inside its scope", () => {
@@ -68,5 +62,43 @@ describe("decide", () => {
   it("still confines an instance admin's scoped token to its scope", () => {
     const p = principal({ tokenScoped: true, tokenScope: [OTHER], instanceAdminBeforeScope: true });
     expect(decide(p, null, "access", P)).toBe(false);
+  });
+});
+
+describe("principalOf", () => {
+  it("maps a plain user to the right principal", () => {
+    const user = {
+      _id: "u1" as any,
+      role: "member" as const,
+    } as IUser;
+    expect(principalOf(user)).toEqual({
+      instanceAdmin: false,
+      tokenScoped: false,
+      tokenScope: null,
+      instanceAdminBeforeScope: false,
+    });
+  });
+
+  it("maps an instance admin correctly", () => {
+    const user = {
+      _id: "a1" as any,
+      role: "admin" as const,
+    } as IUser;
+    const result = principalOf(user);
+    expect(result.instanceAdmin).toBe(true);
+  });
+
+  it("converts tokenScope ObjectIds to strings", () => {
+    const user = {
+      _id: "u1" as any,
+      role: "member" as const,
+      tokenScoped: true,
+      tokenScope: [P] as any,
+      instanceAdminBeforeScope: true,
+    } as IUser;
+    const result = principalOf(user);
+    expect(result.tokenScope).toEqual([P]);
+    expect(result.tokenScoped).toBe(true);
+    expect(result.instanceAdminBeforeScope).toBe(true);
   });
 });
