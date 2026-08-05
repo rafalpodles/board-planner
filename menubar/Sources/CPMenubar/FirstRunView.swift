@@ -104,7 +104,7 @@ struct FirstRunView: View {
                 }
                 Text(LoginItem.statusDescription).font(.caption).foregroundStyle(.secondary)
                 HStack {
-                    Button("Start at login") { onboarding.registerLoginItem() }
+                    // Lives in AppFooter now, which renders on every screen rather than only this one
                     Button("Start again") { onboarding.startAgain() }
                 }
             }
