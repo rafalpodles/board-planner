@@ -36,7 +36,8 @@ function targetDoc(overrides: Record<string, unknown> = {}) {
   return {
     _id: "target-1",
     role: "admin",
-    allowedProjects: ["original"],
+    email: "target@example.com",
+    kind: "human",
     save: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
@@ -49,17 +50,22 @@ beforeEach(() => {
 });
 
 describe("PUT /api/users/:id", () => {
-  // Board access now lives entirely in the grants collection; a client still sending
-  // allowedProjects here (an old build, a stale bookmarklet) must not write it back onto the user
-  it("updates the role and leaves allowedProjects untouched", async () => {
+  // Board access lives entirely in the grants collection now, so this endpoint's whole job is the
+  // role. Anything else a client sends — an old build, a stale bookmarklet, a hostile caller —
+  // must not reach the document.
+  it("writes the role and nothing else the body carries", async () => {
     const target = targetDoc();
     userFindById.mockResolvedValue(target);
 
-    const res = await PUT(put({ role: "member", allowedProjects: ["p1"] }), ctx());
+    const res = await PUT(
+      put({ role: "member", email: "hijack@example.com", kind: "machine" }),
+      ctx()
+    );
 
     expect(res.status).toBe(200);
     expect(target.role).toBe("member");
-    expect(target.allowedProjects).toEqual(["original"]);
+    expect(target.email).toBe("target@example.com");
+    expect(target.kind).toBe("human");
     expect(target.save).toHaveBeenCalled();
   });
 });

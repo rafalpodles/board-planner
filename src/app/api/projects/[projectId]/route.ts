@@ -1,11 +1,9 @@
 import { NextResponse } from "next/server";
-import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { withProjectAccess, withProjectOwner, withProjectAccessOrWorker } from "@/lib/middleware";
 import { check } from "@/lib/grants";
 import { Project } from "@/models/project";
 import { parseProjectWorkerConfig } from "@/lib/project-worker-config";
-import { User } from "@/models/user";
 import { Task } from "@/models/task";
 import { Comment } from "@/models/comment";
 import { ActivityLog } from "@/models/activityLog";
@@ -26,8 +24,7 @@ export const GET = withProjectAccessOrWorker(async (_request, { params, user }) 
   const { projectId } = await params;
 
   const project = await Project.findById(projectId)
-    .populate("owner", "username fullName")
-    .populate("admins", "username fullName");
+    .populate("createdBy", "username fullName");
 
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
@@ -67,42 +64,6 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
         { status: 400 }
       );
     }
-  }
-
-  if (body.admins !== undefined) {
-    if (
-      !Array.isArray(body.admins) ||
-      body.admins.some((id: unknown) => typeof id !== "string" || !isValidObjectId(id))
-    ) {
-      return NextResponse.json(
-        { error: "admins must be an array of user ids" },
-        { status: 400 }
-      );
-    }
-    const current = await Project.findById(projectId).select("owner");
-    if (!current) {
-      return NextResponse.json({ error: "Project not found" }, { status: 404 });
-    }
-    const ownerId = current.owner.toString();
-    const ids = [...new Set(body.admins as string[])].filter((id) => id !== ownerId);
-    const candidates = await User.find({ _id: { $in: ids } }).select("role allowedProjects");
-    const eligible = new Set(
-      candidates
-        .filter(
-          (u) =>
-            u.role === "admin" ||
-            (u.allowedProjects || []).some((p) => p.toString() === projectId)
-        )
-        .map((u) => u._id.toString())
-    );
-    const rejected = ids.filter((id) => !eligible.has(id));
-    if (rejected.length > 0) {
-      return NextResponse.json(
-        { error: "Only users with access to this project can be project admins" },
-        { status: 400 }
-      );
-    }
-    updates.admins = ids;
   }
 
   if (body.worker !== undefined) {
@@ -213,9 +174,7 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
 
   const project = await Project.findByIdAndUpdate(projectId, updates, {
     returnDocument: "after",
-  })
-    .populate("owner", "username fullName")
-    .populate("admins", "username fullName");
+  }).populate("createdBy", "username fullName");
 
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });

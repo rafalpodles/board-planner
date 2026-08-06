@@ -27,7 +27,6 @@ function fakeUser(over: Partial<IUser> = {}) {
     collapseEmptyColumns: false,
     role: "member" as const,
     kind: "human" as const,
-    allowedProjects: [],
     createdAt: new Date(),
     ...over,
   } as IUser;

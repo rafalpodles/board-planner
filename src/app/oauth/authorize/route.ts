@@ -1,5 +1,6 @@
 import { connectDB } from "@/lib/db";
 import { verifyCredentials } from "@/lib/auth";
+import { accessibleProjectIds } from "@/lib/grants";
 import { User } from "@/models/user";
 import { OAuthClient } from "@/models/oauthClient";
 import { OAuthCode } from "@/models/oauthCode";
@@ -151,7 +152,8 @@ async function validateClientAndRedirect(p: AuthParams): Promise<IOAuthClient | 
 }
 
 async function accessibleProjects(user: IUser): Promise<{ _id: string; name: string; key: string }[]> {
-  const filter = user.role === "admin" ? {} : { _id: { $in: user.allowedProjects || [] } };
+  const accessible = await accessibleProjectIds(user);
+  const filter = accessible === null ? {} : { _id: { $in: accessible } };
   const projects = await Project.find(filter).select("_id name key").sort({ key: 1 }).lean();
   return projects.map((p) => ({ _id: String(p._id), name: p.name as string, key: p.key as string }));
 }

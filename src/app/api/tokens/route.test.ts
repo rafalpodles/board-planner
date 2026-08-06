@@ -27,16 +27,15 @@ function matching(filter: { _id?: { $in?: string[] } }) {
   return EVERY_PROJECT.filter((p) => (wanted ?? []).includes(p._id));
 }
 
-// A token scoped to p1, held by someone whose legacy stored list still names p2. Reading that
-// stored list instead of the grant layer is how a p1 token mints itself a p2 token.
+// A token scoped to p1. Deriving the mintable set from anything but the grant layer's
+// already-intersected answer is how a p1 token mints itself a p2 token.
 const SCOPED_TO_P1 = {
   _id: "u1",
   role: "member",
   tokenScoped: true,
   tokenScope: ["p1"],
-  allowedProjects: ["p1", "p2"],
 };
-const INSTANCE_ADMIN = { _id: "a1", role: "admin", allowedProjects: [] };
+const INSTANCE_ADMIN = { _id: "a1", role: "admin" };
 
 function request(body: unknown) {
   return new Request("http://localhost/api/tokens", {

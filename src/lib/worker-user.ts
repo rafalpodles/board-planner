@@ -42,7 +42,6 @@ export async function ensureWorkerUser(input: {
         password,
         email: "",
         role: "member",
-        allowedProjects: [],
       },
     },
     { upsert: true, returnDocument: "after" }
