@@ -3,12 +3,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const getAuthUser = vi.fn();
 const grantFind = vi.fn();
 const grantFindLean = vi.fn();
+const grantFindOne = vi.fn();
+const grantFindOneLean = vi.fn();
 const grantUpdateOne = vi.fn();
 const grantDeleteOne = vi.fn();
 const grantCountDocuments = vi.fn();
 const userFind = vi.fn();
 const userFindLean = vi.fn();
 const userFindById = vi.fn();
+const userFindByIdSelect = vi.fn();
 const check = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
@@ -23,6 +26,7 @@ vi.mock("@/lib/grants", async (importOriginal) => {
 vi.mock("@/models/grant", () => ({
   Grant: {
     find: (...a: unknown[]) => (grantFind(...a), { select: () => ({ lean: grantFindLean }) }),
+    findOne: (...a: unknown[]) => (grantFindOne(...a), { select: () => ({ lean: grantFindOneLean }) }),
     updateOne: grantUpdateOne,
     deleteOne: grantDeleteOne,
     countDocuments: grantCountDocuments,
@@ -31,7 +35,7 @@ vi.mock("@/models/grant", () => ({
 vi.mock("@/models/user", () => ({
   User: {
     find: (...a: unknown[]) => (userFind(...a), { select: () => ({ sort: () => ({ lean: userFindLean }) }) }),
-    findById: (...a: unknown[]) => (userFindById(...a), { select: () => Promise.resolve({ _id: "u1", role: "member", kind: "human" }) }),
+    findById: (...a: unknown[]) => (userFindById(...a), { select: userFindByIdSelect }),
   },
 }));
 vi.mock("@/models/project", () => ({ Project: { findOne: vi.fn() } }));
@@ -54,7 +58,9 @@ beforeEach(() => {
   getAuthUser.mockResolvedValue({ _id: "o1", role: "member" });
   check.mockResolvedValue(true);
   grantFindLean.mockResolvedValue([]);
+  grantFindOneLean.mockResolvedValue(null);
   userFindLean.mockResolvedValue([]);
+  userFindByIdSelect.mockResolvedValue({ _id: "u1", role: "member", kind: "human" });
   grantCountDocuments.mockResolvedValue(2);
 });
 
@@ -115,11 +121,51 @@ describe("PUT members", () => {
     expect(grantUpdateOne).not.toHaveBeenCalled();
   });
 
+  it("404s when the target user does not exist", async () => {
+    userFindByIdSelect.mockResolvedValue(null);
+    const res = await PUT(put({ userId: "ghost", relation: "member" }), { params });
+    expect(res.status).toBe(404);
+    expect(grantUpdateOne).not.toHaveBeenCalled();
+  });
+
+  it("404s when the target is a machine identity", async () => {
+    userFindByIdSelect.mockResolvedValue({ _id: "w1", role: "member", kind: "machine" });
+    const res = await PUT(put({ userId: "w1", relation: "member" }), { params });
+    expect(res.status).toBe(404);
+    expect(grantUpdateOne).not.toHaveBeenCalled();
+  });
+
+  it("allows granting member to someone who was never an owner, even with only one owner on the board", async () => {
+    grantFindOneLean.mockResolvedValue(null);
+    grantCountDocuments.mockResolvedValue(1);
+    const res = await PUT(put({ userId: "u2", relation: "member" }), { params });
+    expect(res.status).toBe(200);
+    expect(grantUpdateOne).toHaveBeenCalledWith(
+      { subject: "u2", objectType: "project", object: PROJECT },
+      { $set: { relation: "member" }, $setOnInsert: { createdBy: "o1" } },
+      { upsert: true }
+    );
+  });
+
   it("refuses to demote the last owner", async () => {
+    grantFindOneLean.mockResolvedValue({ relation: "owner" });
     grantCountDocuments.mockResolvedValue(1);
     const res = await PUT(put({ userId: "u1", relation: "member" }), { params });
     expect(res.status).toBe(409);
+    expect(grantFindOne).toHaveBeenCalledWith({ subject: "u1", objectType: "project", object: PROJECT });
     expect(grantUpdateOne).not.toHaveBeenCalled();
+  });
+
+  it("lets one owner demote another, leaving the board with one owner", async () => {
+    grantFindOneLean.mockResolvedValue({ relation: "owner" });
+    grantCountDocuments.mockResolvedValue(2);
+    const res = await PUT(put({ userId: "u2", relation: "member" }), { params });
+    expect(res.status).toBe(200);
+    expect(grantUpdateOne).toHaveBeenCalledWith(
+      { subject: "u2", objectType: "project", object: PROJECT },
+      { $set: { relation: "member" }, $setOnInsert: { createdBy: "o1" } },
+      { upsert: true }
+    );
   });
 
   it("survives a concurrent double submit", async () => {
