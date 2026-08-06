@@ -903,6 +903,12 @@ export interface ApiProjectMember {
   instanceAdmin: boolean;
 }
 
+export interface ApiMemberCandidate {
+  _id: string;
+  username: string;
+  fullName: string;
+}
+
 export interface ApiPmMcpServer {
   name: string;
   url: string;

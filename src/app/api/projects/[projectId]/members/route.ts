@@ -13,13 +13,18 @@ export const GET = withProjectOwner(async (_request, { params }) => {
   await connectDB();
   const { projectId } = await params;
 
-  const [users, grants] = await Promise.all([
-    User.find({ kind: { $ne: "machine" } })
-      .select("username fullName role")
-      .sort({ username: 1 })
-      .lean(),
-    Grant.find({ objectType: "project", object: projectId }).select("subject relation").lean(),
-  ]);
+  const grants = await Grant.find({ objectType: "project", object: projectId })
+    .select("subject relation")
+    .lean();
+  const grantedIds = grants.map((g) => g.subject);
+
+  const users = await User.find({
+    kind: { $ne: "machine" },
+    $or: [{ _id: { $in: grantedIds } }, { role: "admin" }],
+  })
+    .select("username fullName role")
+    .sort({ username: 1 })
+    .lean();
 
   const byUser = new Map(grants.map((g) => [String(g.subject), g.relation]));
 

@@ -87,13 +87,25 @@ describe("GET members", () => {
 
   it("never offers worker machine identities as grantable members", async () => {
     await GET(new Request("http://x"), { params });
-    expect(userFind).toHaveBeenCalledWith({ kind: { $ne: "machine" } });
+    expect(userFind).toHaveBeenCalledWith({
+      kind: { $ne: "machine" },
+      $or: [{ _id: { $in: [] } }, { role: "admin" }],
+    });
   });
 
   it("marks instance admins, who hold no grants", async () => {
     userFindLean.mockResolvedValue([{ _id: "a1", username: "root", fullName: "Root", role: "admin" }]);
     const body = await (await GET(new Request("http://x"), { params })).json();
     expect(body[0]).toMatchObject({ relation: null, instanceAdmin: true });
+  });
+
+  it("queries only granted users (plus admins), not every human account", async () => {
+    grantFindLean.mockResolvedValue([{ subject: "u1", relation: "member" }]);
+    await GET(new Request("http://x"), { params });
+    expect(userFind).toHaveBeenCalledWith({
+      kind: { $ne: "machine" },
+      $or: [{ _id: { $in: ["u1"] } }, { role: "admin" }],
+    });
   });
 });
 
