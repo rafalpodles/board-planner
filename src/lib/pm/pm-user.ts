@@ -23,7 +23,6 @@ export async function getPmUser(): Promise<IUser> {
         fullName: "PM Agent",
         email: "",
         role: "member",
-        allowedProjects: [],
       },
     },
     { upsert: true, returnDocument: "after" }

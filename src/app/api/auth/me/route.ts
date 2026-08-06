@@ -24,7 +24,6 @@ export async function GET(request: Request) {
     emailNotifications: user.emailNotifications || false,
     collapseEmptyColumns: user.collapseEmptyColumns ?? true,
     role: user.role || "member",
-    allowedProjects: user.allowedProjects || [],
     createdAt: user.createdAt,
   });
 }

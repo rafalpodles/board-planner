@@ -37,7 +37,7 @@ function isPositiveInt(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value > 0;
 }
 
-// withProjectAdmin cannot be used here — it resolves params.projectId, and this
+// The project middlewares cannot be used here — they resolve params.projectId, and this
 // route carries params.workerId.
 export const PATCH = withAuth(async (request, { params, user }) => {
   await connectDB();

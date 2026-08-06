@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { withAdmin } from "@/lib/middleware";
+import { withProjectOwner } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { PmOauthState } from "@/models/pmOauthState";
 import { encryptSecret } from "@/lib/encryption";
@@ -15,7 +15,7 @@ import {
 
 export const maxDuration = 60;
 
-export const POST = withAdmin(async (request, { params, user }) => {
+export const POST = withProjectOwner(async (request, { params, user }) => {
   await connectDB();
   const { projectId } = await params;
   const { name } = await request.json();

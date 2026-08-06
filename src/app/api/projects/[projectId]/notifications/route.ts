@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { withProjectAdmin } from "@/lib/middleware";
+import { withProjectOwner } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { logProjectAudit } from "@/lib/projectAudit";
 import { NOTIFICATION_CHANNEL_TYPES, WEBHOOK_EVENTS, NotificationChannelType } from "@/types";
@@ -11,7 +11,7 @@ function masked(project: any) {
   return sanitizeProjectSecrets(project.toObject()).notificationChannels || [];
 }
 
-export const GET = withProjectAdmin(async (_request, { params }) => {
+export const GET = withProjectOwner(async (_request, { params }) => {
   const { projectId } = await params;
   await connectDB();
 
@@ -23,7 +23,7 @@ export const GET = withProjectAdmin(async (_request, { params }) => {
   return NextResponse.json(masked(project));
 });
 
-export const POST = withProjectAdmin(async (request, { params, user }) => {
+export const POST = withProjectOwner(async (request, { params, user }) => {
   const { projectId } = await params;
   await connectDB();
 
@@ -71,7 +71,7 @@ export const POST = withProjectAdmin(async (request, { params, user }) => {
   return NextResponse.json(masked(project), { status: 201 });
 });
 
-export const PUT = withProjectAdmin(async (request, { params }) => {
+export const PUT = withProjectOwner(async (request, { params }) => {
   const { projectId } = await params;
   await connectDB();
 
@@ -101,7 +101,7 @@ export const PUT = withProjectAdmin(async (request, { params }) => {
   return NextResponse.json(masked(project));
 });
 
-export const DELETE = withProjectAdmin(async (request, { params, user }) => {
+export const DELETE = withProjectOwner(async (request, { params, user }) => {
   const { projectId } = await params;
   await connectDB();
 

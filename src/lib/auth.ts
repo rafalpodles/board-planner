@@ -60,18 +60,13 @@ export async function verifyCredentials(
   return valid ? user : null;
 }
 
-// A token scoped to specific projects downgrades its bearer to member-level
-// access limited to (scope ∩ owner's current access), enforced at every auth
-// so all existing project-access checks honor it. Empty scope = full inherit.
+// A token scoped to specific projects downgrades its bearer to member-level and records the
+// scope on the principal; the intersection with the bearer's own grants is applied by
+// decide() at every check. Empty scope = full inherit.
 function applyTokenScope(user: IUser, scope: Types.ObjectId[]): IUser {
-  const effective =
-    user.role === "admin"
-      ? scope
-      : (user.allowedProjects || []).filter((p) =>
-          scope.some((s) => s.toString() === p.toString())
-        );
+  user.instanceAdminBeforeScope = user.role === "admin";
   user.role = "member";
-  user.allowedProjects = effective;
+  user.tokenScope = scope;
   user.tokenScoped = true;
   return user;
 }

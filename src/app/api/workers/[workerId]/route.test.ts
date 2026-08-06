@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const getAuthUser = vi.fn();
+const check = vi.fn();
 const verifyWorkerCredential = vi.fn();
 const workerFindById = vi.fn();
 const projectFind = vi.fn();
@@ -12,6 +13,7 @@ vi.mock("@/lib/auth", () => ({
   getAuthUser,
   RateLimitError: class RateLimitError extends Error {},
 }));
+vi.mock("@/lib/grants", () => ({ check, accessibleProjectIds: vi.fn() }));
 vi.mock("@/models/task", () => ({ Task: {} }));
 vi.mock("@/models/project", () => ({
   Project: { find: () => ({ select: () => ({ lean: projectFind }) }) },
@@ -32,18 +34,18 @@ const { GET, PATCH } = await import("./route");
 
 const WORKER_ID = "69a52e3b399b27d3cbb2c5a5";
 
-const INSTANCE_ADMIN = { _id: "admin-1", role: "admin", allowedProjects: [] };
-const PLAIN_MEMBER = { _id: "member-1", role: "member", allowedProjects: [] };
-// A project admin used to reach the policy fields here. Those describe the work and moved to the
-// project, so this route is instance-admin only now.
-const PROJECT_ADMIN = { _id: "padmin-1", role: "member", allowedProjects: ["p1"] };
+const INSTANCE_ADMIN = { _id: "admin-1", role: "admin" };
+const PLAIN_MEMBER = { _id: "member-1", role: "member" };
+// A project owner used to reach the policy fields here. Those describe the work and moved to the
+// project, so this route is instance-admin only now. Ownership is a grant, so the test that uses
+// this one has check() answer true for it.
+const PROJECT_OWNER = { _id: "powner-1", role: "member" };
 // An API token with no project scope never passes through applyTokenScope, so tokenScoped stays
 // false and it stayed an instance admin — the credential the worker itself used to hold.
 const UNSCOPED_ADMIN_TOKEN = {
   _id: "admin-1",
   role: "admin",
   viaMachineCredential: true,
-  allowedProjects: [],
 };
 
 const WORKER = {
@@ -72,6 +74,7 @@ const ctx = () => ({ params: Promise.resolve({ workerId: WORKER_ID }) });
 
 beforeEach(() => {
   vi.clearAllMocks();
+  check.mockResolvedValue(false);
   workerFindById.mockResolvedValue(WORKER);
   workerFindByIdAndUpdate.mockResolvedValue({ ...WORKER, name: "renamed" });
   verifyWorkerCredential.mockResolvedValue(WORKER);
@@ -128,10 +131,11 @@ describe("PATCH /api/workers/:workerId", () => {
     expect(workerFindByIdAndUpdate).not.toHaveBeenCalled();
   });
 
-  // Being admin of a project no longer buys anything here: what the work looks like is set on the
+  // Owning a project no longer buys anything here: what the work looks like is set on the
   // project, and what the machine does is the instance's business.
-  it("refuses a project admin", async () => {
-    getAuthUser.mockResolvedValue(PROJECT_ADMIN);
+  it("refuses a project owner", async () => {
+    getAuthUser.mockResolvedValue(PROJECT_OWNER);
+    check.mockResolvedValue(true);
 
     expect((await PATCH(patchRequest({ pollIntervalMs: 5000 }), ctx())).status).toBe(403);
     expect(workerFindByIdAndUpdate).not.toHaveBeenCalled();

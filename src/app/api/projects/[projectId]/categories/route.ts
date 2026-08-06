@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { withProjectAccess, withProjectAdmin } from "@/lib/middleware";
+import { withProjectAccess, withProjectOwner } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { Task } from "@/models/task";
 import { logProjectAudit } from "@/lib/projectAudit";
@@ -115,7 +115,7 @@ export const PATCH = withProjectAccess(async (request, { params, user }) => {
   return NextResponse.json(project.categories);
 });
 
-export const DELETE = withProjectAdmin(async (request, { params, user }) => {
+export const DELETE = withProjectOwner(async (request, { params, user }) => {
   const { projectId } = await params;
   await connectDB();
 
