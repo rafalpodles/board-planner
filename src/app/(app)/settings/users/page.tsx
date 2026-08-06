@@ -5,7 +5,6 @@ import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { useRouter } from "next/navigation";
 import { ApiUser } from "@/types";
-import { useProjects } from "@/hooks/use-projects";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Card } from "@/components/ui/Card";
@@ -17,7 +16,6 @@ export default function UsersPage() {
   const { isAdmin, isLoading: authLoading } = useAuth();
   const router = useRouter();
   const [users, setUsers] = useState<ApiUser[]>([]);
-  const { projects } = useProjects();
   const [loading, setLoading] = useState(true);
   const [showNew, setShowNew] = useState(false);
   const [username, setUsername] = useState("");
@@ -29,7 +27,6 @@ export default function UsersPage() {
   // Edit user state
   const [editUser, setEditUser] = useState<ApiUser | null>(null);
   const [editRole, setEditRole] = useState<"admin" | "member">("member");
-  const [editProjects, setEditProjects] = useState<string[]>([]);
   const [editSaving, setEditSaving] = useState(false);
 
   // Delete state
@@ -79,7 +76,6 @@ export default function UsersPage() {
   function openEdit(user: ApiUser) {
     setEditUser(user);
     setEditRole(user.role || "member");
-    setEditProjects(user.allowedProjects || []);
   }
 
   async function handleEditSave() {
@@ -89,7 +85,6 @@ export default function UsersPage() {
     try {
       await api.put(`/api/users/${editUser._id}`, {
         role: editRole,
-        allowedProjects: editProjects,
       });
       setEditUser(null);
       const data = await api.get("/api/users");
@@ -116,14 +111,6 @@ export default function UsersPage() {
     } finally {
       setDeleting(false);
     }
-  }
-
-  function toggleProject(projectId: string) {
-    setEditProjects((prev) =>
-      prev.includes(projectId)
-        ? prev.filter((p) => p !== projectId)
-        : [...prev, projectId]
-    );
   }
 
   if (!isAdmin) return null;
@@ -255,40 +242,9 @@ export default function UsersPage() {
               </div>
             </div>
 
-            {editRole === "member" && (
-              <div>
-                <label className="block text-sm font-medium mb-2">
-                  Project Access
-                </label>
-                {projects.length === 0 ? (
-                  <p className="text-sm text-text-muted">No projects</p>
-                ) : (
-                  <div className="space-y-2 max-h-60 overflow-y-auto">
-                    {projects.map((p) => (
-                      <label
-                        key={p._id}
-                        className="flex items-center gap-2 cursor-pointer text-sm"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={editProjects.includes(p._id)}
-                          onChange={() => toggleProject(p._id)}
-                          className="rounded border-border"
-                        />
-                        <span>{p.name}</span>
-                        <span className="text-text-muted font-mono text-xs">
-                          {p.key}
-                        </span>
-                      </label>
-                    ))}
-                  </div>
-                )}
-                <p className="text-xs text-text-muted mt-2">
-                  Members can only see and work on checked projects. Admins see
-                  all.
-                </p>
-              </div>
-            )}
+            <p className="text-sm text-text-muted">
+              Board access is granted per board, under that board&apos;s Settings → General.
+            </p>
 
             <div className="flex gap-3 pt-2">
               <Button onClick={handleEditSave} disabled={editSaving}>
