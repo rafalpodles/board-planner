@@ -903,7 +903,8 @@ export interface ApiProjectMember {
   _id: string;
   username: string;
   fullName: string;
-  role?: UserRole;
+  relation: GrantRelation | null;
+  instanceAdmin: boolean;
 }
 
 export interface ApiPmMcpServer {
