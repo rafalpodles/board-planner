@@ -118,6 +118,9 @@ export function TaskForm({
       setDescription(result.description || "");
       setCategory(result.category || "user-story");
       setChecklist(parseChecklistString(result.acceptanceCriteria || ""));
+      if (result.customFieldValues) {
+        setCustomFieldValues((prev) => ({ ...prev, ...result.customFieldValues }));
+      }
       setAiInsights(result);
       toast("Fields filled by AI — review and save", "success");
     } catch {

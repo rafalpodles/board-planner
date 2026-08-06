@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  matchOptionValue,
   normalizeOptions,
   normalizeFields,
   sortedFields,
@@ -328,5 +329,35 @@ describe("parseOptions ids", () => {
     const existing = [{ id: "ui-a1b2", value: "ui", color: "#3b82f6", order: 0 }];
     const result = parseOptions([{ id: "ui-a1b2", value: "Interface", color: "#3b82f6", order: 0 }], existing);
     expect(result.options?.[0].id).toBe("ui-a1b2");
+  });
+});
+
+// The model answers with option text, and it can answer with something the project
+// does not offer. A suggestion that misses should leave the field empty, never throw.
+describe("matchOptionValue", () => {
+  const field = {
+    options: [
+      { id: "opt-s", value: "S", color: "#000", order: 0 },
+      { id: "opt-xl", value: "XL", color: "#000", order: 1 },
+    ],
+  };
+
+  it("matches an option by its value, case and spacing insensitively", () => {
+    expect(matchOptionValue(field, "xl")).toBe("opt-xl");
+    expect(matchOptionValue(field, "  S  ")).toBe("opt-s");
+  });
+
+  it("accepts an option id, so a resolved value round-trips", () => {
+    expect(matchOptionValue(field, "opt-s")).toBe("opt-s");
+  });
+
+  it("returns undefined for a value the project does not offer", () => {
+    expect(matchOptionValue(field, "XXL")).toBeUndefined();
+  });
+
+  it("returns undefined rather than throwing for a missing field or empty value", () => {
+    expect(matchOptionValue(undefined, "S")).toBeUndefined();
+    expect(matchOptionValue(field, "")).toBeUndefined();
+    expect(matchOptionValue(field, null)).toBeUndefined();
   });
 });

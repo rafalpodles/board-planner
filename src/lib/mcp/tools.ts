@@ -102,7 +102,8 @@ export function registerPlannerTools(server: McpServer): void {
         .record(z.any())
         .optional()
         .describe(
-          "Project-defined fields keyed by field name, e.g. { \"Owoce\": \"Apples\" }. "
+          "Project-defined fields keyed by field name, e.g. { \"Owoce\": \"Apples\" }. " +
+            "get_project lists this project's fields and the options each one accepts."
         ),
     },
     async ({ project, title, description, priority, category, assignee, status, acceptanceCriteria, fields }, extra) => {
@@ -149,7 +150,7 @@ export function registerPlannerTools(server: McpServer): void {
         .optional()
         .describe(
           "Project-defined fields keyed by field name. Only the named fields change; " +
-            "the task's other field values are left alone."
+            "the task's other field values are left alone. get_project lists them."
         ),
     },
     async ({ taskKey, title, description, priority, category, assignee, acceptanceCriteria, fields }, extra) => {
