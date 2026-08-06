@@ -16,7 +16,7 @@ import { SettingRow } from "@/components/settings/SettingRow";
 import { useDirtyGroup } from "@/components/settings/settings-context";
 import { SectionProps } from "./types";
 
-export function GeneralSection({ projectId, project, replaceProject, isAdmin, stats }: SectionProps) {
+export function GeneralSection({ projectId, project, replaceProject, stats }: SectionProps) {
   const api = useApi();
   const router = useRouter();
   const { toast } = useToast();
@@ -179,7 +179,7 @@ export function GeneralSection({ projectId, project, replaceProject, isAdmin, st
         </div>
       </SettingsCard>
 
-      {isAdmin && (
+      {project.canAdmin && (
         <SettingsCard
           title="Delete project"
           danger

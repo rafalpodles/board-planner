@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
-import { withProjectAccess, withProjectOwner, withAdmin, withProjectAccessOrWorker } from "@/lib/middleware";
+import { withProjectAccess, withProjectOwner, withProjectAccessOrWorker } from "@/lib/middleware";
 import { check } from "@/lib/grants";
 import { Project } from "@/models/project";
 import { parseProjectWorkerConfig } from "@/lib/project-worker-config";
