@@ -1,9 +1,6 @@
 import OpenAI from "openai";
 import type { PromptField } from "./ai-fields";
 
-/** The sizes a project gets seeded with; only used to decide whether the prompt
- * can explain what each one means */
-
 const apiKey = process.env.OPENAI_API_KEY || process.env.OPENAPI_KEY;
 
 export function isAIEnabled(): boolean {
