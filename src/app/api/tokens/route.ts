@@ -3,6 +3,7 @@ import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
 import { withAuth } from "@/lib/middleware";
+import { accessibleProjectIds } from "@/lib/grants";
 import { ApiToken } from "@/models/apiToken";
 import { Project } from "@/models/project";
 
@@ -35,11 +36,11 @@ export const POST = withAuth(async (request, { user }) => {
     scope = [...new Set(allowedProjects)];
   }
 
-  // A token can only be scoped to projects its owner can access.
+  // A token can only be scoped to projects its owner can access — and a scoped token may not
+  // mint one that reaches past its own scope, which accessibleProjectIds already intersects.
   if (scope.length > 0) {
-    const accessible = await Project.find(
-      user.role === "admin" ? {} : { _id: { $in: user.allowedProjects || [] } }
-    )
+    const ids = await accessibleProjectIds(user);
+    const accessible = await Project.find(ids === null ? {} : { _id: { $in: ids } })
       .select("_id")
       .lean();
     const accessibleIds = new Set(accessible.map((p) => p._id.toString()));

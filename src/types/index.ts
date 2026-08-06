@@ -151,9 +151,13 @@ export interface IUser {
   // working unchanged — but it is not a person, so it stays out of the lists where people are
   // invited, permissioned or picked as an assignee.
   kind: "human" | "machine";
-  allowedProjects: Types.ObjectId[];
   // Runtime-only, set for project-scoped tokens — a scoped token never gets project-admin
   tokenScoped?: boolean;
+  // Runtime-only, set for project-scoped tokens — the projects the token narrowed to
+  tokenScope?: Types.ObjectId[];
+  // Runtime-only. An instance admin's role is downgraded to member by applyTokenScope, and
+  // instance admins hold no grants — without this their scoped tokens would resolve to no access.
+  instanceAdminBeforeScope?: boolean;
   // Runtime-only, set for every API and OAuth token. Distinct from tokenScoped, which answers only
   // whether project access was narrowed: an unscoped admin token is still a machine credential, and
   // acts that need a person at a keyboard must key on this instead.
@@ -170,6 +174,20 @@ export interface IApiToken {
   allowedProjects: Types.ObjectId[];
   lastUsedAt: Date | null;
   createdAt: Date;
+}
+
+export const GRANT_RELATIONS = ["owner", "member"] as const;
+export type GrantRelation = (typeof GRANT_RELATIONS)[number];
+
+export interface IGrant {
+  _id: Types.ObjectId;
+  subject: Types.ObjectId;
+  relation: GrantRelation;
+  objectType: "project";
+  object: Types.ObjectId;
+  createdBy: Types.ObjectId | null;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface ApiApiToken {
@@ -638,8 +656,7 @@ export interface IProject {
   taskCounter: number;
   sortOrder: number;
   pm?: IPmConfig;
-  owner: Types.ObjectId | IUser;
-  admins: (Types.ObjectId | IUser)[];
+  createdBy: Types.ObjectId | IUser | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -817,7 +834,6 @@ export interface ApiUser {
   emailNotifications: boolean;
   collapseEmptyColumns?: boolean;
   role: UserRole;
-  allowedProjects: string[];
   createdAt: string;
 }
 
@@ -873,8 +889,7 @@ export interface ApiProject {
   hasActiveSprint?: boolean;
   pm?: ApiPmConfig;
   pmAvailable?: boolean;
-  owner: ApiUser | string;
-  admins?: ApiProjectMember[];
+  createdBy?: ApiUser | string;
   canAdmin?: boolean;
   createdAt: string;
   updatedAt: string;
@@ -884,7 +899,14 @@ export interface ApiProjectMember {
   _id: string;
   username: string;
   fullName: string;
-  role?: UserRole;
+  relation: GrantRelation | null;
+  instanceAdmin: boolean;
+}
+
+export interface ApiMemberCandidate {
+  _id: string;
+  username: string;
+  fullName: string;
 }
 
 export interface ApiPmMcpServer {

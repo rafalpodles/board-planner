@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { withAdmin } from "@/lib/middleware";
+import { withProjectOwner } from "@/lib/middleware";
 import { Project } from "@/models/project";
 
-export const POST = withAdmin(async (request, { params }) => {
+export const POST = withProjectOwner(async (request, { params }) => {
   await connectDB();
   const { projectId } = await params;
   const { name } = await request.json();

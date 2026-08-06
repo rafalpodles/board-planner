@@ -5,10 +5,9 @@ import { useRouter } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
 import { useDraft } from "@/hooks/use-draft";
 import { useToast } from "@/components/ui/Toast";
-import { ApiProjectMember } from "@/types";
+import { ApiMemberCandidate, ApiProjectMember, GrantRelation } from "@/types";
 import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
-import { Button } from "@/components/ui/Button";
 import { IconPicker } from "@/components/ui/IconPicker";
 import { SettingsCard, ListRow } from "@/components/settings/SettingsCard";
 import { DangerAction } from "@/components/settings/DangerAction";
@@ -16,7 +15,10 @@ import { SettingRow } from "@/components/settings/SettingRow";
 import { useDirtyGroup } from "@/components/settings/settings-context";
 import { SectionProps } from "./types";
 
-export function GeneralSection({ projectId, project, replaceProject, isAdmin, stats }: SectionProps) {
+// Matches the API, which refuses anything shorter
+const MIN_QUERY = 2;
+
+export function GeneralSection({ projectId, project, replaceProject, stats }: SectionProps) {
   const api = useApi();
   const router = useRouter();
   const { toast } = useToast();
@@ -28,8 +30,6 @@ export function GeneralSection({ projectId, project, replaceProject, isAdmin, st
   });
 
   const [members, setMembers] = useState<ApiProjectMember[]>([]);
-  const [newAdminId, setNewAdminId] = useState("");
-  const [adminsSaving, setAdminsSaving] = useState(false);
 
   useEffect(() => {
     api
@@ -38,6 +38,33 @@ export function GeneralSection({ projectId, project, replaceProject, isAdmin, st
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
+
+  const [candidateQuery, setCandidateQuery] = useState("");
+  const [candidates, setCandidates] = useState<ApiMemberCandidate[]>([]);
+  const trimmedCandidateQuery = candidateQuery.trim();
+
+  useEffect(() => {
+    if (trimmedCandidateQuery.length < MIN_QUERY) {
+      setCandidates([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const data = await api.get(
+          `/api/projects/${projectId}/members/candidates?q=${encodeURIComponent(trimmedCandidateQuery)}`
+        );
+        if (!cancelled) setCandidates(data);
+      } catch {
+        if (!cancelled) setCandidates([]);
+      }
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trimmedCandidateQuery, projectId]);
 
   useDirtyGroup(
     { id: "general-identity", section: "general", label: "General · Identity", count: identity.count },
@@ -60,16 +87,24 @@ export function GeneralSection({ projectId, project, replaceProject, isAdmin, st
     }
   );
 
-  async function saveAdmins(nextIds: string[]) {
-    setAdminsSaving(true);
+  async function setRelation(userId: string, relation: GrantRelation | "none") {
     try {
-      replaceProject(await api.put(`/api/projects/${projectId}`, { admins: nextIds }));
-      toast("Admins updated", "success");
+      if (relation === "none") {
+        await api.del(`/api/projects/${projectId}/members?userId=${userId}`);
+      } else {
+        await api.put(`/api/projects/${projectId}/members`, { userId, relation });
+      }
+      setMembers(await api.get(`/api/projects/${projectId}/members`));
+      toast("Access updated", "success");
     } catch (err) {
-      toast(err instanceof Error ? err.message : "Failed to update admins", "error");
-    } finally {
-      setAdminsSaving(false);
+      toast(err instanceof Error ? err.message : "Failed to update access", "error");
     }
+  }
+
+  async function addMember(userId: string) {
+    await setRelation(userId, "member");
+    setCandidateQuery("");
+    setCandidates([]);
   }
 
   async function handleDelete() {
@@ -80,9 +115,6 @@ export function GeneralSection({ projectId, project, replaceProject, isAdmin, st
       toast("Failed to delete project", "error");
     }
   }
-
-  const ownerName = typeof project.owner === "object" ? project.owner.username : "unknown";
-  const ownerId = typeof project.owner === "object" ? project.owner._id : project.owner;
 
   return (
     <>
@@ -123,63 +155,62 @@ export function GeneralSection({ projectId, project, replaceProject, isAdmin, st
       </SettingsCard>
 
       <SettingsCard
-        title="Who can change settings"
-        description="Project admins can edit everything on this page except the instance settings. The owner is always an admin."
+        title="Who can use this board"
+        description="Owners can change everything on this page. Members work on tasks and sprints. Instance admins always have full access and are listed for reference."
       >
-        <div className="space-y-2">
-          <ListRow>
-            <span className="text-sm font-medium">{ownerName}</span>
-            <span className="rounded bg-bg-input px-2 py-0.5 text-xs text-text-muted">owner</span>
-          </ListRow>
-          {(project.admins || []).map((admin) => (
-            <ListRow key={admin._id}>
-              <span className="flex-1 text-sm font-medium">{admin.username}</span>
-              <button
-                onClick={() =>
-                  saveAdmins((project.admins || []).filter((a) => a._id !== admin._id).map((a) => a._id))
-                }
-                disabled={adminsSaving}
-                className="px-2 py-1 text-xs text-text-muted hover:text-danger"
-              >
-                Remove
-              </button>
-            </ListRow>
-          ))}
-        </div>
-        <div className="flex gap-2">
-          <select
-            value={newAdminId}
-            onChange={(e) => setNewAdminId(e.target.value)}
-            className="min-h-[44px] flex-1 rounded-lg border border-border bg-bg-input px-3 py-2 text-sm"
-          >
-            <option value="">Add an admin...</option>
-            {members
-              .filter(
-                (m) =>
-                  m.role !== "admin" &&
-                  m._id !== ownerId &&
-                  !(project.admins || []).some((a) => a._id === m._id)
-              )
-              .map((m) => (
-                <option key={m._id} value={m._id}>
-                  {m.fullName ? `${m.fullName} (${m.username})` : m.username}
-                </option>
-              ))}
-          </select>
-          <Button
-            variant="secondary"
-            disabled={!newAdminId || adminsSaving}
-            onClick={async () => {
-              await saveAdmins([...(project.admins || []).map((a) => a._id), newAdminId]);
-              setNewAdminId("");
-            }}
-          >
-            Add
-          </Button>
+        <div className="space-y-3">
+          <div className="relative">
+            <Input
+              value={candidateQuery}
+              onChange={(e) => setCandidateQuery(e.target.value)}
+              placeholder="Add a person by username or name…"
+              aria-label="Add person"
+            />
+            {trimmedCandidateQuery.length >= MIN_QUERY && (
+              <div className="absolute z-10 mt-1 w-full overflow-hidden rounded-lg border border-border bg-bg-card shadow-lg">
+                {candidates.length === 0 ? (
+                  <p className="px-3 py-2 text-sm text-text-muted">No matches</p>
+                ) : (
+                  candidates.map((c) => (
+                    <button
+                      key={c._id}
+                      type="button"
+                      onClick={() => addMember(c._id)}
+                      className="focus-ring block w-full px-3 py-2 text-left text-sm hover:bg-bg-hover"
+                    >
+                      {c.fullName || c.username}
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            {members.map((m) => (
+              <ListRow key={m._id}>
+                <span className="flex-1 text-sm font-medium">{m.fullName || m.username}</span>
+                {m.instanceAdmin ? (
+                  <span className="text-sm text-text-muted">Instance admin</span>
+                ) : (
+                  <select
+                    value={m.relation ?? "none"}
+                    onChange={(e) => setRelation(m._id, e.target.value as GrantRelation | "none")}
+                    className="focus-ring rounded-lg border border-border bg-bg-input px-2 py-1.5 text-sm"
+                    aria-label={`Access for ${m.username}`}
+                  >
+                    <option value="none">No access</option>
+                    <option value="member">Member</option>
+                    <option value="owner">Owner</option>
+                  </select>
+                )}
+              </ListRow>
+            ))}
+          </div>
         </div>
       </SettingsCard>
 
-      {isAdmin && (
+      {project.canAdmin && (
         <SettingsCard
           title="Delete project"
           danger

@@ -257,10 +257,9 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
         <div className="mb-4 flex gap-3 rounded-xl border border-primary/40 bg-primary/10 px-4 py-3 text-sm">
           <span aria-hidden="true">ℹ</span>
           <p>
-            <strong className="font-semibold">
-              Model, turn budget and MCP connections are set by the instance admin.
-            </strong>{" "}
-            You can still change what the agent knows and when it acts.
+            <strong className="font-semibold">Model and turn budget are set by the instance admin.</strong>{" "}
+            You can still change what the agent knows, when it acts, and connect or test the MCP
+            servers the instance admin has configured.
           </p>
         </div>
       )}
@@ -391,52 +390,61 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
         />
       </SettingsCard>
 
-      {isAdmin && (
+      {project.canAdmin && (
         <SettingsCard
           title="MCP connections"
-          instanceScoped
-          description="External MCP servers the agent may read at the start of a turn. Writing is off unless you allow it per server."
+          description={
+            isAdmin
+              ? "External MCP servers the agent may read at the start of a turn. Writing is off unless you allow it per server."
+              : "External MCP servers the agent may read at the start of a turn. The instance admin manages which servers exist — you can connect, disconnect and test what's already set up."
+          }
         >
           <div className="space-y-3">
             {servers.map((server, i) => (
               <div key={i} className="space-y-2 rounded-lg border border-border p-3">
-                <div className="flex items-center gap-2">
-                  <div className="w-[180px] shrink-0">
+                {isAdmin ? (
+                  <div className="flex items-center gap-2">
+                    <div className="w-[180px] shrink-0">
+                      <Input
+                        value={server.name}
+                        onChange={(e) => updateServer(i, { name: e.target.value })}
+                        placeholder="name (slug, e.g. notion)"
+                      />
+                    </div>
                     <Input
-                      value={server.name}
-                      onChange={(e) => updateServer(i, { name: e.target.value })}
-                      placeholder="name (slug, e.g. notion)"
+                      value={server.url}
+                      onChange={(e) => updateServer(i, { url: e.target.value })}
+                      placeholder="https://mcp.example.com/mcp"
                     />
+                    <button
+                      type="button"
+                      onClick={() =>
+                        draft.set("mcpServers", servers.filter((_, idx) => idx !== i))
+                      }
+                      className="text-danger hover:opacity-80"
+                      aria-label="Remove MCP server"
+                    >
+                      ✕
+                    </button>
                   </div>
-                  <Input
-                    value={server.url}
-                    onChange={(e) => updateServer(i, { url: e.target.value })}
-                    placeholder="https://mcp.example.com/mcp"
-                  />
-                  <button
-                    type="button"
-                    onClick={() =>
-                      draft.set("mcpServers", servers.filter((_, idx) => idx !== i))
-                    }
-                    className="text-danger hover:opacity-80"
-                    aria-label="Remove MCP server"
-                  >
-                    ✕
-                  </button>
-                </div>
+                ) : (
+                  <div className="text-sm font-medium">{server.name || `Server ${i + 1}`}</div>
+                )}
                 <div className="flex flex-wrap items-center gap-2">
-                  <select
-                    value={server.authType}
-                    onChange={(e) =>
-                      updateServer(i, { authType: e.target.value as "none" | "bearer" | "oauth" })
-                    }
-                    className="rounded-lg border border-border bg-bg-input px-2 py-1.5 text-sm"
-                  >
-                    <option value="none">No auth</option>
-                    <option value="bearer">Bearer token</option>
-                    <option value="oauth">OAuth</option>
-                  </select>
-                  {server.authType === "bearer" && (
+                  {isAdmin && (
+                    <select
+                      value={server.authType}
+                      onChange={(e) =>
+                        updateServer(i, { authType: e.target.value as "none" | "bearer" | "oauth" })
+                      }
+                      className="rounded-lg border border-border bg-bg-input px-2 py-1.5 text-sm"
+                    >
+                      <option value="none">No auth</option>
+                      <option value="bearer">Bearer token</option>
+                      <option value="oauth">OAuth</option>
+                    </select>
+                  )}
+                  {isAdmin && server.authType === "bearer" && (
                     <Input
                       type="password"
                       value={server.authToken}
@@ -461,19 +469,21 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
                             ? "Needs re-auth"
                             : "Not connected"}
                       </span>
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        disabled={transient[i]?.connecting || !server.name.trim()}
-                        onClick={() => connectOauth(i)}
-                      >
-                        {transient[i]?.connecting
-                          ? "Redirecting..."
-                          : server.oauthStatus === "connected"
-                            ? "Reconnect"
-                            : "Connect"}
-                      </Button>
-                      {server.oauthStatus === "connected" && (
+                      {project.canAdmin && (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          disabled={transient[i]?.connecting || !server.name.trim()}
+                          onClick={() => connectOauth(i)}
+                        >
+                          {transient[i]?.connecting
+                            ? "Redirecting..."
+                            : server.oauthStatus === "connected"
+                              ? "Reconnect"
+                              : "Connect"}
+                        </Button>
+                      )}
+                      {project.canAdmin && server.oauthStatus === "connected" && (
                         <Button variant="secondary" size="sm" onClick={() => disconnectOauth(i)}>
                           Disconnect
                         </Button>
@@ -481,7 +491,7 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
                     </>
                   )}
                 </div>
-                {server.authType === "oauth" && (
+                {isAdmin && server.authType === "oauth" && (
                   <div className="flex gap-2">
                     <Input
                       value={server.oauthClientId}
@@ -496,30 +506,38 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
                     />
                   </div>
                 )}
-                <Input
-                  value={server.toolAllowlist}
-                  onChange={(e) => updateServer(i, { toolAllowlist: e.target.value })}
-                  placeholder="Tool allowlist, comma-separated (empty = all)"
-                />
+                {isAdmin && (
+                  <Input
+                    value={server.toolAllowlist}
+                    onChange={(e) => updateServer(i, { toolAllowlist: e.target.value })}
+                    placeholder="Tool allowlist, comma-separated (empty = all)"
+                  />
+                )}
                 <div className="flex flex-wrap items-center gap-4 text-sm">
-                  <Switch
-                    checked={server.enabled}
-                    onChange={(v) => updateServer(i, { enabled: v })}
-                    label="Enabled"
-                  />
-                  <Switch
-                    checked={server.allowWrites}
-                    onChange={(v) => updateServer(i, { allowWrites: v })}
-                    label="Allow writes"
-                  />
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    disabled={transient[i]?.testing || !server.url.trim()}
-                    onClick={() => testServer(i)}
-                  >
-                    {transient[i]?.testing ? "Testing..." : "Test connection"}
-                  </Button>
+                  {isAdmin && (
+                    <Switch
+                      checked={server.enabled}
+                      onChange={(v) => updateServer(i, { enabled: v })}
+                      label="Enabled"
+                    />
+                  )}
+                  {isAdmin && (
+                    <Switch
+                      checked={server.allowWrites}
+                      onChange={(v) => updateServer(i, { allowWrites: v })}
+                      label="Allow writes"
+                    />
+                  )}
+                  {project.canAdmin && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={transient[i]?.testing || !server.url.trim()}
+                      onClick={() => testServer(i)}
+                    >
+                      {transient[i]?.testing ? "Testing..." : "Test connection"}
+                    </Button>
+                  )}
                 </div>
                 {transient[i]?.testResult && (
                   <p className="whitespace-pre-wrap text-xs text-text-muted">{transient[i].testResult}</p>
@@ -527,33 +545,39 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
               </div>
             ))}
             {servers.length === 0 && (
-              <EmptyState>No MCP servers yet. Add one to give the agent read access to an external tool.</EmptyState>
+              <EmptyState>
+                {isAdmin
+                  ? "No MCP servers yet. Add one to give the agent read access to an external tool."
+                  : "No MCP servers configured yet."}
+              </EmptyState>
             )}
           </div>
-          <Button
-            variant="secondary"
-            size="sm"
-            disabled={servers.length >= 5}
-            onClick={() =>
-              draft.set("mcpServers", [
-                ...servers,
-                {
-                  name: "",
-                  url: "",
-                  authType: "none",
-                  authToken: "",
-                  allowWrites: false,
-                  toolAllowlist: "",
-                  enabled: true,
-                  hasAuthToken: false,
-                  oauthClientId: "",
-                  oauthClientSecret: "",
-                },
-              ])
-            }
-          >
-            Add MCP server
-          </Button>
+          {isAdmin && (
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={servers.length >= 5}
+              onClick={() =>
+                draft.set("mcpServers", [
+                  ...servers,
+                  {
+                    name: "",
+                    url: "",
+                    authType: "none",
+                    authToken: "",
+                    allowWrites: false,
+                    toolAllowlist: "",
+                    enabled: true,
+                    hasAuthToken: false,
+                    oauthClientId: "",
+                    oauthClientSecret: "",
+                  },
+                ])
+              }
+            >
+              Add MCP server
+            </Button>
+          )}
         </SettingsCard>
       )}
     </>

@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { Types } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { withAdmin } from "@/lib/middleware";
 import { User } from "@/models/user";
@@ -50,26 +49,6 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
       }
     }
     target.role = body.role;
-  }
-
-  // Update allowed projects
-  if (body.allowedProjects !== undefined) {
-    if (!Array.isArray(body.allowedProjects)) {
-      return NextResponse.json(
-        { error: "allowedProjects must be an array" },
-        { status: 400 }
-      );
-    }
-    const valid = body.allowedProjects.every(
-      (id: unknown) => typeof id === "string" && Types.ObjectId.isValid(id)
-    );
-    if (!valid) {
-      return NextResponse.json(
-        { error: "Invalid project ID in allowedProjects" },
-        { status: 400 }
-      );
-    }
-    target.allowedProjects = body.allowedProjects;
   }
 
   await target.save();

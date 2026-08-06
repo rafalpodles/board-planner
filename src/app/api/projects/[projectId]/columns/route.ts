@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { withProjectAdmin } from "@/lib/middleware";
+import { withProjectOwner } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { Task } from "@/models/task";
 import { logProjectAudit } from "@/lib/projectAudit";
@@ -18,7 +18,7 @@ function slugify(label: string): string {
     .slice(0, 32);
 }
 
-export const GET = withProjectAdmin(async (_request, { params }) => {
+export const GET = withProjectOwner(async (_request, { params }) => {
   const { projectId } = await params;
   await connectDB();
 
@@ -29,7 +29,7 @@ export const GET = withProjectAdmin(async (_request, { params }) => {
   return NextResponse.json(project.columns || []);
 });
 
-export const PUT = withProjectAdmin(async (request, { params, user }) => {
+export const PUT = withProjectOwner(async (request, { params, user }) => {
   const { projectId } = await params;
   await connectDB();
 

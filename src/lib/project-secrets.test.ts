@@ -99,6 +99,24 @@ describe("sanitizeProjectSecrets", () => {
     expect(webhook).not.toHaveProperty("url");
   });
 
+  // Every board older than CP-246 still stores owner and admins: the schema paths went away with
+  // no backfill, and Mongoose keeps unmapped keys in _doc, which toObject() clones whole. All three
+  // project serialisation paths funnel through here, so this is the one place that can stop them.
+  it("drops the legacy owner and admins keys a pre-CP-246 document still carries", () => {
+    const sanitized: Record<string, unknown> = sanitizeProjectSecrets({
+      _id: "p1",
+      name: "Legacy board",
+      key: "LEG",
+      createdBy: null,
+      owner: "507f1f77bcf86cd799439011",
+      admins: ["507f1f77bcf86cd799439012"],
+    });
+
+    expect(sanitized).not.toHaveProperty("owner");
+    expect(sanitized).not.toHaveProperty("admins");
+    expect(sanitized).toMatchObject({ _id: "p1", name: "Legacy board", key: "LEG", createdBy: null });
+  });
+
   it("leaves a project with no channels or webhooks alone", () => {
     const sanitized: Record<string, unknown> = sanitizeProjectSecrets({ name: "Bare" });
 

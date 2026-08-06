@@ -236,14 +236,10 @@ const projectSchema = new Schema<IProject>(
       type: Number,
       default: 0,
     },
-    owner: {
+    createdBy: {
       type: Schema.Types.ObjectId,
       ref: "User",
-      required: true,
-    },
-    admins: {
-      type: [{ type: Schema.Types.ObjectId, ref: "User" }],
-      default: [],
+      default: null,
     },
   },
   { timestamps: true }
