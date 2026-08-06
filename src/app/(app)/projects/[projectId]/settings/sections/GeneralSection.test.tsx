@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor, act } from "@testing-library/react";
 import { GeneralSection } from "./GeneralSection";
 import { SettingsProvider } from "@/components/settings/settings-context";
 import { ApiProject, ApiProjectMember } from "@/types";
@@ -136,7 +136,15 @@ describe("GeneralSection add person", () => {
     renderSection();
     const input = await screen.findByLabelText("Add person");
 
-    fireEvent.change(input, { target: { value: "a" } });
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      fireEvent.change(input, { target: { value: "a" } });
+      await act(async () => {
+        vi.advanceTimersByTime(300);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
 
     expect(screen.queryByText("No matches")).toBeNull();
     expect(api.get).toHaveBeenCalledTimes(1);
