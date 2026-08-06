@@ -56,7 +56,6 @@ do what, with the two marked exceptions.
 | **PM agent MCP OAuth and test** | ✓ | ✓ *(moved from admin)* | — |
 | Board columns | ✓ | ✓ | — |
 | Webhooks, notification channels, Coda sync | ✓ | ✓ | — |
-| **Seeing every human account**, in order to grant to them | ✓ | ✓ *(widened)* | — |
 | Member list, granting and revoking roles | ✓ | ✓ | — |
 | **Deleting** categories, custom fields, templates | ✓ | ✓ | — |
 
@@ -89,8 +88,9 @@ Two footnotes on the owner row, both deliberate:
   `instanceFields` (`src/app/api/projects/[projectId]/route.ts:141`), so which servers exist remains
   an instance decision while connecting the board to them is the owner's. Written down because it
   otherwise reads as an oversight.
-- **The members list widens.** It returns every human account rather than only current members —
-  you cannot grant access to somebody you cannot see. Worker machine identities stay out of it.
+- **Finding somebody to grant to is a search, not a list.** `GET .../members/candidates` is
+  reachable only by an owner, requires at least two characters, and returns at most 10 matches —
+  never every human account. Worker machine identities stay out of it.
 
 ## Data model
 
@@ -189,8 +189,11 @@ minutes. An empty collection means the app is waiting for grants, not broken.
 - `DELETE /api/projects/[projectId]` and the PM agent OAuth/MCP endpoints move from `withAdmin`
   to `withProjectOwner`.
 - `GET /api/projects` returns `canAdmin` per project (already shipped by CP-245).
-- `/api/projects/[projectId]/members` returns members with roles and gains grant/revoke.
-- `GeneralSection` replaces the admins field with a member list: role dropdown plus remove.
+- `/api/projects/[projectId]/members` returns only current grant-holders plus instance admins, not
+  every human account; `GET .../members/candidates?q=` is the search endpoint that finds someone to
+  grant to.
+- `GeneralSection` replaces the admins field with a member list plus a debounced "Add person" search
+  that grants `member` on selection; role changes (including to `owner`) stay on the row's dropdown.
 - `ProjectTree` gates the Settings link on `project.canAdmin`.
 - `settings/users` moves per-user project assignment onto grants.
 

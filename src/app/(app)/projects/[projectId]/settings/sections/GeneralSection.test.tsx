@@ -124,3 +124,76 @@ describe("GeneralSection member access", () => {
     expect(toast).not.toHaveBeenCalledWith("Failed to update access", "error");
   });
 });
+
+function mockCandidates(list: unknown[]) {
+  api.get.mockImplementation((url: string) =>
+    Promise.resolve(url.includes("/members/candidates") ? list : members)
+  );
+}
+
+describe("GeneralSection add person", () => {
+  it("shows nothing below 2 characters, not a dropdown or a query to the server", async () => {
+    renderSection();
+    const input = await screen.findByLabelText("Add person");
+
+    fireEvent.change(input, { target: { value: "a" } });
+
+    expect(screen.queryByText("No matches")).toBeNull();
+    expect(api.get).toHaveBeenCalledTimes(1);
+  });
+
+  it("queries the candidates endpoint for the trimmed query and lists results", async () => {
+    mockCandidates([{ _id: "u9", username: "dee", fullName: "Dee D" }]);
+    renderSection();
+    const input = await screen.findByLabelText("Add person");
+
+    fireEvent.change(input, { target: { value: "  dee  " } });
+
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith("/api/projects/p1/members/candidates?q=dee")
+    );
+    expect(await screen.findByText("Dee D")).toBeTruthy();
+  });
+
+  it("says no matches rather than nothing when a 2+ character query finds nobody", async () => {
+    mockCandidates([]);
+    renderSection();
+    const input = await screen.findByLabelText("Add person");
+
+    fireEvent.change(input, { target: { value: "zz" } });
+
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("No matches")).toBeTruthy();
+  });
+
+  it("choosing a candidate grants member access, refreshes the list, and clears the search", async () => {
+    mockCandidates([{ _id: "u9", username: "dee", fullName: "Dee D" }]);
+    renderSection();
+    const input = (await screen.findByLabelText("Add person")) as HTMLInputElement;
+
+    fireEvent.change(input, { target: { value: "dee" } });
+    const candidate = await screen.findByText("Dee D");
+    fireEvent.click(candidate);
+
+    await waitFor(() =>
+      expect(api.put).toHaveBeenCalledWith("/api/projects/p1/members", {
+        userId: "u9",
+        relation: "member",
+      })
+    );
+    await waitFor(() => expect(input.value).toBe(""));
+    expect(screen.queryByText("Dee D")).toBeNull();
+  });
+
+  it("grants through PUT, not DELETE, when a candidate is chosen", async () => {
+    mockCandidates([{ _id: "u9", username: "dee", fullName: "Dee D" }]);
+    renderSection();
+    const input = await screen.findByLabelText("Add person");
+
+    fireEvent.change(input, { target: { value: "dee" } });
+    fireEvent.click(await screen.findByText("Dee D"));
+
+    await waitFor(() => expect(api.put).toHaveBeenCalled());
+    expect(api.del).not.toHaveBeenCalled();
+  });
+});

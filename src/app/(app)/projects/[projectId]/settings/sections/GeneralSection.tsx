@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
 import { useDraft } from "@/hooks/use-draft";
 import { useToast } from "@/components/ui/Toast";
-import { ApiProjectMember, GrantRelation } from "@/types";
+import { ApiMemberCandidate, ApiProjectMember, GrantRelation } from "@/types";
 import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
 import { IconPicker } from "@/components/ui/IconPicker";
@@ -14,6 +14,9 @@ import { DangerAction } from "@/components/settings/DangerAction";
 import { SettingRow } from "@/components/settings/SettingRow";
 import { useDirtyGroup } from "@/components/settings/settings-context";
 import { SectionProps } from "./types";
+
+// Matches the API, which refuses anything shorter
+const MIN_QUERY = 2;
 
 export function GeneralSection({ projectId, project, replaceProject, stats }: SectionProps) {
   const api = useApi();
@@ -35,6 +38,33 @@ export function GeneralSection({ projectId, project, replaceProject, stats }: Se
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
+
+  const [candidateQuery, setCandidateQuery] = useState("");
+  const [candidates, setCandidates] = useState<ApiMemberCandidate[]>([]);
+  const trimmedCandidateQuery = candidateQuery.trim();
+
+  useEffect(() => {
+    if (trimmedCandidateQuery.length < MIN_QUERY) {
+      setCandidates([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const data = await api.get(
+          `/api/projects/${projectId}/members/candidates?q=${encodeURIComponent(trimmedCandidateQuery)}`
+        );
+        if (!cancelled) setCandidates(data);
+      } catch {
+        if (!cancelled) setCandidates([]);
+      }
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trimmedCandidateQuery, projectId]);
 
   useDirtyGroup(
     { id: "general-identity", section: "general", label: "General · Identity", count: identity.count },
@@ -69,6 +99,12 @@ export function GeneralSection({ projectId, project, replaceProject, stats }: Se
     } catch (err) {
       toast(err instanceof Error ? err.message : "Failed to update access", "error");
     }
+  }
+
+  async function addMember(userId: string) {
+    await setRelation(userId, "member");
+    setCandidateQuery("");
+    setCandidates([]);
   }
 
   async function handleDelete() {
@@ -122,26 +158,55 @@ export function GeneralSection({ projectId, project, replaceProject, stats }: Se
         title="Who can use this board"
         description="Owners can change everything on this page. Members work on tasks and sprints. Instance admins always have full access and are listed for reference."
       >
-        <div className="space-y-2">
-          {members.map((m) => (
-            <ListRow key={m._id}>
-              <span className="flex-1 text-sm font-medium">{m.fullName || m.username}</span>
-              {m.instanceAdmin ? (
-                <span className="text-sm text-text-muted">Instance admin</span>
-              ) : (
-                <select
-                  value={m.relation ?? "none"}
-                  onChange={(e) => setRelation(m._id, e.target.value as GrantRelation | "none")}
-                  className="focus-ring rounded-lg border border-border bg-bg-input px-2 py-1.5 text-sm"
-                  aria-label={`Access for ${m.username}`}
-                >
-                  <option value="none">No access</option>
-                  <option value="member">Member</option>
-                  <option value="owner">Owner</option>
-                </select>
-              )}
-            </ListRow>
-          ))}
+        <div className="space-y-3">
+          <div className="relative">
+            <Input
+              value={candidateQuery}
+              onChange={(e) => setCandidateQuery(e.target.value)}
+              placeholder="Add a person by username or name…"
+              aria-label="Add person"
+            />
+            {trimmedCandidateQuery.length >= MIN_QUERY && (
+              <div className="absolute z-10 mt-1 w-full overflow-hidden rounded-lg border border-border bg-bg-card shadow-lg">
+                {candidates.length === 0 ? (
+                  <p className="px-3 py-2 text-sm text-text-muted">No matches</p>
+                ) : (
+                  candidates.map((c) => (
+                    <button
+                      key={c._id}
+                      type="button"
+                      onClick={() => addMember(c._id)}
+                      className="focus-ring block w-full px-3 py-2 text-left text-sm hover:bg-bg-hover"
+                    >
+                      {c.fullName || c.username}
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            {members.map((m) => (
+              <ListRow key={m._id}>
+                <span className="flex-1 text-sm font-medium">{m.fullName || m.username}</span>
+                {m.instanceAdmin ? (
+                  <span className="text-sm text-text-muted">Instance admin</span>
+                ) : (
+                  <select
+                    value={m.relation ?? "none"}
+                    onChange={(e) => setRelation(m._id, e.target.value as GrantRelation | "none")}
+                    className="focus-ring rounded-lg border border-border bg-bg-input px-2 py-1.5 text-sm"
+                    aria-label={`Access for ${m.username}`}
+                  >
+                    <option value="none">No access</option>
+                    <option value="member">Member</option>
+                    <option value="owner">Owner</option>
+                  </select>
+                )}
+              </ListRow>
+            ))}
+          </div>
         </div>
       </SettingsCard>
 
