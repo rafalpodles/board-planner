@@ -44,6 +44,7 @@ describe("POST /api/projects/[projectId]/pm/mcp-oauth/disconnect", () => {
 
     expect(response.status).toBe(404);
     expect(projectFindById).toHaveBeenCalledWith(PROJECT_ID);
+    expect(check).toHaveBeenCalledWith(expect.anything(), PROJECT_ID, "admin");
   });
 
   it("denies a plain member", async () => {

@@ -40,6 +40,7 @@ describe("POST /api/projects/[projectId]/pm/mcp-test", () => {
     const response = await POST(request(), ctx());
 
     expect(response.status).toBe(400);
+    expect(check).toHaveBeenCalledWith(expect.anything(), PROJECT_ID, "admin");
   });
 
   it("denies a plain member", async () => {
