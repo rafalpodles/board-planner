@@ -5,10 +5,9 @@ import { useRouter } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
 import { useDraft } from "@/hooks/use-draft";
 import { useToast } from "@/components/ui/Toast";
-import { ApiProjectMember } from "@/types";
+import { ApiProjectMember, GrantRelation } from "@/types";
 import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
-import { Button } from "@/components/ui/Button";
 import { IconPicker } from "@/components/ui/IconPicker";
 import { SettingsCard, ListRow } from "@/components/settings/SettingsCard";
 import { DangerAction } from "@/components/settings/DangerAction";
@@ -28,8 +27,6 @@ export function GeneralSection({ projectId, project, replaceProject, stats }: Se
   });
 
   const [members, setMembers] = useState<ApiProjectMember[]>([]);
-  const [newAdminId, setNewAdminId] = useState("");
-  const [adminsSaving, setAdminsSaving] = useState(false);
 
   useEffect(() => {
     api
@@ -60,15 +57,17 @@ export function GeneralSection({ projectId, project, replaceProject, stats }: Se
     }
   );
 
-  async function saveAdmins(nextIds: string[]) {
-    setAdminsSaving(true);
+  async function setRelation(userId: string, relation: GrantRelation | "none") {
     try {
-      replaceProject(await api.put(`/api/projects/${projectId}`, { admins: nextIds }));
-      toast("Admins updated", "success");
+      if (relation === "none") {
+        await api.del(`/api/projects/${projectId}/members?userId=${userId}`);
+      } else {
+        await api.put(`/api/projects/${projectId}/members`, { userId, relation });
+      }
+      setMembers(await api.get(`/api/projects/${projectId}/members`));
+      toast("Access updated", "success");
     } catch (err) {
-      toast(err instanceof Error ? err.message : "Failed to update admins", "error");
-    } finally {
-      setAdminsSaving(false);
+      toast(err instanceof Error ? err.message : "Failed to update access", "error");
     }
   }
 
@@ -80,9 +79,6 @@ export function GeneralSection({ projectId, project, replaceProject, stats }: Se
       toast("Failed to delete project", "error");
     }
   }
-
-  const ownerName = typeof project.owner === "object" ? project.owner.username : "unknown";
-  const ownerId = typeof project.owner === "object" ? project.owner._id : project.owner;
 
   return (
     <>
@@ -123,59 +119,29 @@ export function GeneralSection({ projectId, project, replaceProject, stats }: Se
       </SettingsCard>
 
       <SettingsCard
-        title="Who can change settings"
-        description="Project admins can edit everything on this page except the instance settings. The owner is always an admin."
+        title="Who can use this board"
+        description="Owners can change everything on this page. Members work on tasks and sprints. Instance admins always have full access and are listed for reference."
       >
         <div className="space-y-2">
-          <ListRow>
-            <span className="text-sm font-medium">{ownerName}</span>
-            <span className="rounded bg-bg-input px-2 py-0.5 text-xs text-text-muted">owner</span>
-          </ListRow>
-          {(project.admins || []).map((admin) => (
-            <ListRow key={admin._id}>
-              <span className="flex-1 text-sm font-medium">{admin.username}</span>
-              <button
-                onClick={() =>
-                  saveAdmins((project.admins || []).filter((a) => a._id !== admin._id).map((a) => a._id))
-                }
-                disabled={adminsSaving}
-                className="px-2 py-1 text-xs text-text-muted hover:text-danger"
-              >
-                Remove
-              </button>
+          {members.map((m) => (
+            <ListRow key={m._id}>
+              <span className="flex-1 text-sm font-medium">{m.fullName || m.username}</span>
+              {m.instanceAdmin ? (
+                <span className="text-sm text-text-muted">Instance admin</span>
+              ) : (
+                <select
+                  value={m.relation ?? "none"}
+                  onChange={(e) => setRelation(m._id, e.target.value as GrantRelation | "none")}
+                  className="focus-ring rounded-lg border border-border bg-bg-input px-2 py-1.5 text-sm"
+                  aria-label={`Access for ${m.username}`}
+                >
+                  <option value="none">No access</option>
+                  <option value="member">Member</option>
+                  <option value="owner">Owner</option>
+                </select>
+              )}
             </ListRow>
           ))}
-        </div>
-        <div className="flex gap-2">
-          <select
-            value={newAdminId}
-            onChange={(e) => setNewAdminId(e.target.value)}
-            className="min-h-[44px] flex-1 rounded-lg border border-border bg-bg-input px-3 py-2 text-sm"
-          >
-            <option value="">Add an admin...</option>
-            {members
-              .filter(
-                (m) =>
-                  !m.instanceAdmin &&
-                  m._id !== ownerId &&
-                  !(project.admins || []).some((a) => a._id === m._id)
-              )
-              .map((m) => (
-                <option key={m._id} value={m._id}>
-                  {m.fullName ? `${m.fullName} (${m.username})` : m.username}
-                </option>
-              ))}
-          </select>
-          <Button
-            variant="secondary"
-            disabled={!newAdminId || adminsSaving}
-            onClick={async () => {
-              await saveAdmins([...(project.admins || []).map((a) => a._id), newAdminId]);
-              setNewAdminId("");
-            }}
-          >
-            Add
-          </Button>
         </div>
       </SettingsCard>
 
