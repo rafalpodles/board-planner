@@ -156,7 +156,7 @@ export function GeneralSection({ projectId, project, replaceProject, stats }: Se
             {members
               .filter(
                 (m) =>
-                  m.role !== "admin" &&
+                  !m.instanceAdmin &&
                   m._id !== ownerId &&
                   !(project.admins || []).some((a) => a._id === m._id)
               )
