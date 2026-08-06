@@ -11,12 +11,9 @@ export const POST = withProjectOwner(async (request, { params }) => {
   const { projectId } = await params;
   const body = await request.json();
 
-  const url = String(body.url ?? "").trim();
-  if (!url || !isAllowedMcpServerUrl(url)) {
-    return NextResponse.json({ error: "url must be a public https URL" }, { status: 400 });
-  }
-
+  let url = String(body.url ?? "").trim();
   let token: string | undefined;
+
   if (body.authType === "bearer" && typeof body.authToken === "string" && body.authToken) {
     token = body.authToken;
   } else if ((body.authType === "bearer" || body.authType === "oauth") && typeof body.name === "string" && body.name) {
@@ -33,6 +30,13 @@ export const POST = withProjectOwner(async (request, { params }) => {
     if (server.authType === "oauth" && !token) {
       return NextResponse.json({ error: "OAuth connection not established — click Connect first" }, { status: 400 });
     }
+    // A credential resolved from storage may only ever be sent to the url it was saved
+    // against — never a caller-supplied one, or a stored secret could be redirected anywhere.
+    url = server.url;
+  }
+
+  if (!url || !isAllowedMcpServerUrl(url)) {
+    return NextResponse.json({ error: "url must be a public https URL" }, { status: 400 });
   }
 
   try {
