@@ -151,7 +151,6 @@ export interface IUser {
   // working unchanged — but it is not a person, so it stays out of the lists where people are
   // invited, permissioned or picked as an assignee.
   kind: "human" | "machine";
-  allowedProjects: Types.ObjectId[];
   // Runtime-only, set for project-scoped tokens — a scoped token never gets project-admin
   tokenScoped?: boolean;
   // Runtime-only, set for project-scoped tokens — the projects the token narrowed to
@@ -657,8 +656,7 @@ export interface IProject {
   taskCounter: number;
   sortOrder: number;
   pm?: IPmConfig;
-  owner: Types.ObjectId | IUser;
-  admins: (Types.ObjectId | IUser)[];
+  createdBy: Types.ObjectId | IUser | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -836,7 +834,6 @@ export interface ApiUser {
   emailNotifications: boolean;
   collapseEmptyColumns?: boolean;
   role: UserRole;
-  allowedProjects: string[];
   createdAt: string;
 }
 
@@ -892,8 +889,7 @@ export interface ApiProject {
   hasActiveSprint?: boolean;
   pm?: ApiPmConfig;
   pmAvailable?: boolean;
-  owner: ApiUser | string;
-  admins?: ApiProjectMember[];
+  createdBy?: ApiUser | string;
   canAdmin?: boolean;
   createdAt: string;
   updatedAt: string;

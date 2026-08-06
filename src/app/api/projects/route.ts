@@ -3,6 +3,7 @@ import { connectDB } from "@/lib/db";
 import { withAuth, withAdmin } from "@/lib/middleware";
 import { check, accessibleProjectIds } from "@/lib/grants";
 import { Project } from "@/models/project";
+import { Grant } from "@/models/grant";
 import { legacyFieldSeeds } from "@/lib/legacy-fields";
 import { Task } from "@/models/task";
 import { Sprint } from "@/models/sprint";
@@ -18,7 +19,7 @@ export const GET = withAuth(async (_request, { user }) => {
   // Manual order first; anything never dragged keeps its default 0 and falls
   // back to newest-first, which is the order this list had before CP-180
   const projects = await Project.find(filter)
-    .populate("owner", "username fullName")
+    .populate("createdBy", "username fullName")
     .sort({ sortOrder: 1, createdAt: -1 });
 
   // The sidebar renders on every route, so its per-project badges have to come
@@ -71,12 +72,25 @@ export const POST = withAdmin(async (request, { user }) => {
     name,
     key,
     description: description || "",
-    owner: user._id,
+    createdBy: user._id,
     // A fresh project looks like a fresh project always did — the difference is
     // that all three are now editable and removable (CP-213)
     customFields: legacyFieldSeeds({}),
   });
 
-  const populated = await project.populate("owner", "username fullName");
+  try {
+    await Grant.create({
+      subject: user._id,
+      relation: "owner",
+      objectType: "project",
+      object: project._id,
+      createdBy: user._id,
+    });
+  } catch (e) {
+    await Project.deleteOne({ _id: project._id });
+    throw e;
+  }
+
+  const populated = await project.populate("createdBy", "username fullName");
   return NextResponse.json(sanitizeProjectSecrets(populated.toObject()), { status: 201 });
 });

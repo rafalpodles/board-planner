@@ -45,10 +45,6 @@ const userSchema = new Schema<IUser>({
     enum: ["human", "machine"],
     default: "human",
   },
-  allowedProjects: {
-    type: [{ type: Schema.Types.ObjectId, ref: "Project" }],
-    default: [],
-  },
   createdAt: {
     type: Date,
     default: Date.now,

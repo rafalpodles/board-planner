@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { getAuthUser, RateLimitError } from "@/lib/auth";
-import { accessibleProjectIds } from "@/lib/grants";
 
 export async function GET(request: Request) {
   let user;
@@ -25,7 +24,6 @@ export async function GET(request: Request) {
     emailNotifications: user.emailNotifications || false,
     collapseEmptyColumns: user.collapseEmptyColumns ?? true,
     role: user.role || "member",
-    allowedProjects: (await accessibleProjectIds(user)) ?? [],
     createdAt: user.createdAt,
   });
 }
