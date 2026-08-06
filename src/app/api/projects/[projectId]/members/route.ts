@@ -52,11 +52,16 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
 
-  if (relation !== "owner" && (await ownerCount(projectId)) <= 1) {
-    return NextResponse.json(
-      { error: "A board must keep at least one owner" },
-      { status: 409 }
-    );
+  if (relation !== "owner") {
+    const current = await Grant.findOne({ subject: userId, objectType: "project", object: projectId })
+      .select("relation")
+      .lean();
+    if (current?.relation === "owner" && (await ownerCount(projectId)) <= 1) {
+      return NextResponse.json(
+        { error: "A board must keep at least one owner" },
+        { status: 409 }
+      );
+    }
   }
 
   try {
