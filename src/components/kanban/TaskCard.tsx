@@ -50,7 +50,11 @@ export function TaskCard({
   // Ages are server-measured; the board repolls, so no local ticking is needed here. Shares
   // ExecutionPanel's threshold rather than a second opinion: a card claiming a run is alive
   // while the task's own panel calls it silent is worse than either verdict on its own.
-  const quietFor = run ? ageAt(run.phaseAt, run.asOf, 0) : NaN;
+  // Falls back to startedAt: phase events are fire-and-forget and may be dropped, so a worker
+  // that claimed a task and died before its first report has no phaseAt at all — silence
+  // measured from the claim still catches it, where an absent phaseAt would read as live for
+  // the whole two-hour lease.
+  const quietFor = run ? ageAt(run.phaseAt ?? run.startedAt, run.asOf, 0) : NaN;
   const quiet = Number.isFinite(quietFor) && quietFor > QUIET_MS;
   const runPhase = run?.phase ?? "starting";
   const runLabel = [run?.workerName ?? run?.workerId, runPhase].filter(Boolean).join(" · ");
@@ -82,7 +86,7 @@ export function TaskCard({
           ? "border-primary bg-primary/5"
           : tinted
             ? "cat-card"
-            : "border-border hover:border-primary/50"}`}
+            : "border-border"}`}
       onContextMenu={(e) => {
         e.preventDefault();
         onContextMenu?.(task._id, e.clientX, e.clientY);

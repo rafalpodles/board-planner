@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup, act } from "@testing-library/react";
 import { TaskCard } from "./TaskCard";
-import { ApiTask } from "@/types";
+import { ApiTask, ApiProjectCategory } from "@/types";
 
 const task = {
   _id: "t1",
@@ -299,15 +299,24 @@ describe("TaskCard execution state", () => {
     expect(screen.getByTestId("card-run-live")).toBeTruthy();
   });
 
-  // A claimed run reports no phaseAt, so the age is NaN — that must not read as silence
-  it("does not call a run quiet when it has never reported", () => {
-    renderCard({ task: withRun({ workerId: "w1", phaseAt: null }) });
+  it("treats a freshly claimed run as live before its first report", () => {
+    renderCard({ task: withRun({ workerId: "w1", phaseAt: null, startedAt: secondsAgo(30) }) });
     expect(screen.getByTestId("card-run-live")).toBeTruthy();
   });
 
-  // The run outline has to coexist with the card's own border treatments, which is where
-  // the CSS decides anything at all — happy-dom applies no stylesheet, so assert the classes
-  it("keeps the selected and category treatments alongside the run outline", () => {
+  // Phase events are fire-and-forget, so a worker can claim a task and die before reporting.
+  // Measuring silence from the claim is what stops the card lying for the whole lease.
+  it("calls a claimed run quiet when it never reported and the claim is old", () => {
+    renderCard({ task: withRun({ workerId: "w1", phaseAt: null, startedAt: secondsAgo(30 * 60) }) });
+    expect(screen.getByTestId("card-run-quiet")).toBeTruthy();
+    expect(screen.queryByTestId("card-run-live")).toBeNull();
+  });
+
+  // Asserts the class list only. The cascade — whether the run outline lets `border-primary`
+  // and `.cat-card` survive — is what actually broke once, and happy-dom loads no stylesheet,
+  // so nothing here can catch a repeat. Kept because losing a class from the list is its own
+  // regression; deliberately NOT named as if it guarded the cascade.
+  it("emits the run class alongside the selected and category classes", () => {
     const selectedCard = renderCard({ task: running, selected: true });
     expect(selectedCard.className).toContain("task-running");
     expect(selectedCard.className).toContain("border-primary");
@@ -315,7 +324,7 @@ describe("TaskCard execution state", () => {
 
     const tintedCard = renderCard({
       task: running,
-      projectCategories: [{ name: "bug", color: "#ff0000" }] as never,
+      projectCategories: [{ name: "bug", color: "#ff0000" }] as unknown as ApiProjectCategory[],
     });
     expect(tintedCard.className).toContain("task-running");
     expect(tintedCard.className).toContain("cat-card");
