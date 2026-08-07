@@ -239,38 +239,85 @@ describe("TaskCard drag", () => {
 });
 
 describe("TaskCard execution state", () => {
-  const running = { ...task, execution: { workerName: "mac-mini", phase: "implementing" } } as ApiTask;
+  // Server-measured ages: asOf is when the payload was serialised, phaseAt the last report
+  const asOf = "2026-08-01T12:00:00Z";
+  const secondsAgo = (s: number) => new Date(Date.parse(asOf) - s * 1000).toISOString();
+
+  const withRun = (execution: Record<string, unknown>) =>
+    ({ ...task, execution: { asOf, ...execution } }) as ApiTask;
+
+  const running = withRun({
+    workerName: "mac-mini",
+    phase: "agent",
+    phaseAt: secondsAgo(30),
+  });
 
   it("marks a card whose task a worker is running", () => {
     const card = renderCard({ task: running });
     expect(card.className).toContain("task-running");
     expect(screen.getByTestId("card-run-live")).toBeTruthy();
-    expect(screen.getByText("implementing")).toBeTruthy();
+    expect(screen.getByText("agent")).toBeTruthy();
   });
 
   it("names the worker and phase without opening the task", () => {
     renderCard({ task: running });
     expect(screen.getByTestId("card-run-live").getAttribute("title")).toBe(
-      "Being executed — mac-mini · implementing"
+      "Being executed — mac-mini · agent"
     );
   });
 
   // A worker that has claimed but not yet reported still holds the task
   it("shows a claimed run that has not reported a phase yet", () => {
-    const claimed = { ...task, execution: { workerId: "w1" } } as ApiTask;
-    renderCard({ task: claimed });
+    renderCard({ task: withRun({ workerId: "w1" }) });
     expect(screen.getByText("starting")).toBeTruthy();
+    expect(screen.getByTestId("card-run-live")).toBeTruthy();
   });
 
   it("says nothing when no run holds the task", () => {
     const card = renderCard();
     expect(card.className).not.toContain("task-running");
     expect(screen.queryByTestId("card-run-live")).toBeNull();
+    expect(screen.queryByTestId("card-run-quiet")).toBeNull();
   });
 
-  it("does not treat an ended run as live", () => {
-    const ended = { ...task, execution: undefined } as ApiTask;
-    const card = renderCard({ task: ended });
-    expect(card.className).not.toContain("task-running");
+  // The run holds the task for up to two hours; a worker that died mid-run keeps its runId
+  // that whole time, so elapsed silence — not the field's presence — decides "live"
+  it("stops calling a run live once the worker goes quiet", () => {
+    const card = renderCard({
+      task: withRun({ workerName: "mac-mini", phase: "agent", phaseAt: secondsAgo(20 * 60) }),
+    });
+    expect(screen.queryByTestId("card-run-live")).toBeNull();
+    expect(screen.getByTestId("card-run-quiet")).toBeTruthy();
+    expect(card.className).toContain("run-quiet");
+    expect(screen.getByTestId("card-run-quiet").getAttribute("title")).toBe(
+      "No sign of life — mac-mini · agent"
+    );
+  });
+
+  it("still calls a run live just under the quiet threshold", () => {
+    renderCard({ task: withRun({ phase: "agent", phaseAt: secondsAgo(4 * 60) }) });
+    expect(screen.getByTestId("card-run-live")).toBeTruthy();
+  });
+
+  // A claimed run reports no phaseAt, so the age is NaN — that must not read as silence
+  it("does not call a run quiet when it has never reported", () => {
+    renderCard({ task: withRun({ workerId: "w1", phaseAt: null }) });
+    expect(screen.getByTestId("card-run-live")).toBeTruthy();
+  });
+
+  // The run outline has to coexist with the card's own border treatments, which is where
+  // the CSS decides anything at all — happy-dom applies no stylesheet, so assert the classes
+  it("keeps the selected and category treatments alongside the run outline", () => {
+    const selectedCard = renderCard({ task: running, selected: true });
+    expect(selectedCard.className).toContain("task-running");
+    expect(selectedCard.className).toContain("border-primary");
+    cleanup();
+
+    const tintedCard = renderCard({
+      task: running,
+      projectCategories: [{ name: "bug", color: "#ff0000" }] as never,
+    });
+    expect(tintedCard.className).toContain("task-running");
+    expect(tintedCard.className).toContain("cat-card");
   });
 });

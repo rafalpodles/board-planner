@@ -114,35 +114,43 @@ body {
 }
 
 /* A worker holding a task is a live state, so the board says so rather than making
-   someone open the task to find out. --run-accent is the entire colour decision. */
+   someone open the task to find out. --run-accent is the entire colour decision.
+   An outline, not a box-shadow: the card's focus and hover rings are box-shadows
+   (Tailwind's `ring-*`), and an animated box-shadow here would silently replace
+   them — a card that is focusable but shows no focus. Drawn over the border at a
+   negative offset, so it reads as the card's single outline whatever the border
+   underneath is doing, without a specificity fight against `selected` or
+   `.cat-card`. */
 @keyframes run-pulse {
   0%,
   100% {
-    box-shadow:
-      0 0 0 1px var(--run-accent),
-      0 0 0 0 color-mix(in srgb, var(--run-accent) 50%, transparent);
+    outline-color: var(--run-accent);
   }
   50% {
-    box-shadow:
-      0 0 0 1px var(--run-accent),
-      0 0 0 6px color-mix(in srgb, var(--run-accent) 0%, transparent);
+    outline-color: color-mix(in srgb, var(--run-accent) 30%, transparent);
   }
 }
 
-/* The ring is the card's border while a run holds it — the category or default one
-   would otherwise sit underneath it as a second, differently coloured outline */
-.task-running,
-.task-running.cat-card {
+.task-running {
   --run-accent: var(--color-danger);
-  border-color: transparent;
+  outline: 2px solid var(--run-accent);
+  outline-offset: -1px;
   animation: run-pulse 1.8s ease-out infinite;
 }
 
-/* The pulse carries the meaning, so when motion is unwelcome the ring stays lit instead */
+/* A run that has stopped reporting is not a run in progress. Same threshold as the task's
+   own Execution panel, so the board and the detail never disagree about one run. */
+.task-running.run-quiet {
+  --run-accent: var(--color-warning);
+  animation: none;
+}
+
+/* The pulse carries the meaning, so when motion is unwelcome the outline stays lit.
+   No compound selector above, so this is not out-specified on a tinted card. */
 @media (prefers-reduced-motion: reduce) {
   .task-running {
     animation: none;
-    box-shadow: 0 0 0 2px var(--run-accent);
+    outline-color: var(--run-accent);
   }
 }
 
