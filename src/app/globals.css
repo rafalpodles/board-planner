@@ -202,13 +202,18 @@ body {
   outline-offset: -1px;
 }
 
-.card-edge:not(.task-running):hover {
-  outline-color: var(--color-primary);
-}
+/* Gated on a real pointer: on touch, :hover sticks after a tap until something else is
+   tapped, which would leave a card outlined for no reason. The Tailwind hover utilities
+   this replaced were gated the same way. */
+@media (hover: hover) {
+  .card-edge:not(.task-running):hover {
+    outline-color: var(--color-primary);
+  }
 
-/* A tinted card thickens in its own colour rather than the accent */
-.cat-card.card-edge:not(.task-running):hover {
-  outline-color: var(--cat);
+  /* A tinted card thickens in its own colour rather than the accent */
+  .cat-card.card-edge:not(.task-running):hover {
+    outline-color: var(--cat);
+  }
 }
 
 .cat-row {
