@@ -13,7 +13,7 @@ const HOUR = 60 * MINUTE;
 
 // Past this, a run that is still working has gone quiet for longer than any normal gap between
 // tool calls, so the panel stops claiming it is alive
-const QUIET_MS = 5 * MINUTE;
+export const QUIET_MS = 5 * MINUTE;
 
 export function durationLabel(ms: number): string {
   if (!Number.isFinite(ms) || ms < 0) return "";

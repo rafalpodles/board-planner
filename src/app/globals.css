@@ -113,6 +113,47 @@ body {
   animation: slide-in 0.2s ease-out;
 }
 
+/* A worker holding a task is a live state, so the board says so rather than making
+   someone open the task to find out. --run-accent is the entire colour decision.
+   An outline, not a box-shadow: the card's focus and hover rings are box-shadows
+   (Tailwind's `ring-*`), and an animated box-shadow here would silently replace
+   them — a card that is focusable but shows no focus. Drawn over the border at a
+   negative offset, so it reads as the card's single outline whatever the border
+   underneath is doing, without a specificity fight against `selected` or
+   `.cat-card`. */
+@keyframes run-pulse {
+  0%,
+  100% {
+    outline-color: var(--run-accent);
+  }
+  50% {
+    outline-color: color-mix(in srgb, var(--run-accent) 30%, transparent);
+  }
+}
+
+.task-running {
+  --run-accent: var(--color-danger);
+  outline: 2px solid var(--run-accent);
+  outline-offset: -1px;
+  animation: run-pulse 1.8s ease-out infinite;
+}
+
+/* A run that has stopped reporting is not a run in progress. Same threshold as the task's
+   own Execution panel, so the board and the detail never disagree about one run. */
+.task-running.run-quiet {
+  --run-accent: var(--color-warning);
+  animation: none;
+}
+
+/* The pulse carries the meaning, so when motion is unwelcome the outline stays lit.
+   No compound selector above, so this is not out-specified on a tinted card. */
+@media (prefers-reduced-motion: reduce) {
+  .task-running {
+    animation: none;
+    outline-color: var(--run-accent);
+  }
+}
+
 /* One keyboard-focus treatment for the shell. An outline rather than a box-shadow
    ring: the sidebar and the column bodies scroll, and a ring on an item at the
    edge is clipped by its overflow container while an outline never is. */
@@ -146,6 +187,33 @@ body {
 }
 .cat-card:hover {
   background-color: color-mix(in srgb, var(--cat) 16%, var(--color-bg));
+}
+
+/* Hover thickens the card's edge. An inset outline rather than a second border pixel,
+   which would reflow the card's contents by 1px on every hover; --cat is set only on
+   tinted cards, so the fallback covers the plain ones. Cards under a live run keep
+   their run outline — that ring already says more than a hover would. */
+/* The outline is always present and merely transparent, so hover animates colour alone.
+   Declaring it only on :hover meant transitioning from the initial outline-color —
+   currentColor, i.e. the text — which flashed dark for a frame on the way in.
+   `transition-colors` covers outline-color in Tailwind 4, and the card carries it. */
+.card-edge:not(.task-running) {
+  outline: 2px solid transparent;
+  outline-offset: -1px;
+}
+
+/* Gated on a real pointer: on touch, :hover sticks after a tap until something else is
+   tapped, which would leave a card outlined for no reason. The Tailwind hover utilities
+   this replaced were gated the same way. */
+@media (hover: hover) {
+  .card-edge:not(.task-running):hover {
+    outline-color: var(--color-primary);
+  }
+
+  /* A tinted card thickens in its own colour rather than the accent */
+  .cat-card.card-edge:not(.task-running):hover {
+    outline-color: var(--cat);
+  }
 }
 
 .cat-row {

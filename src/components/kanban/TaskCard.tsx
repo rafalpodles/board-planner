@@ -2,6 +2,7 @@
 
 import { useRef, type CSSProperties } from "react";
 import { ApiTask, ApiCustomField, ApiProjectCategory, PRIORITY_LABELS } from "@/types";
+import { ageAt, QUIET_MS } from "@/components/tasks/ExecutionPanel";
 import { Badge } from "@/components/ui/Badge";
 import { categoryColor, categoryTint } from "@/lib/category-colors";
 import { cardBadges } from "@/lib/custom-fields";
@@ -42,6 +43,21 @@ export function TaskCard({
   const catColor = categoryColor(projectCategories, task.category);
   const tinted = !selected && !!catColor;
   const dragged = useRef(false);
+  // toApiExecution returns nothing unless a runId still holds the task, so the field's
+  // presence is the whole test — a claimed run that has not reported a phase included.
+  const run = task.execution;
+  const running = !!run;
+  // Ages are server-measured; the board repolls, so no local ticking is needed here. Shares
+  // ExecutionPanel's threshold rather than a second opinion: a card claiming a run is alive
+  // while the task's own panel calls it silent is worse than either verdict on its own.
+  // Falls back to startedAt: phase events are fire-and-forget and may be dropped, so a worker
+  // that claimed a task and died before its first report has no phaseAt at all — silence
+  // measured from the claim still catches it, where an absent phaseAt would read as live for
+  // the whole two-hour lease.
+  const quietFor = run ? ageAt(run.phaseAt ?? run.startedAt, run.asOf, 0) : NaN;
+  const quiet = Number.isFinite(quietFor) && quietFor > QUIET_MS;
+  const runPhase = run?.phase ?? "starting";
+  const runLabel = [run?.workerName ?? run?.workerId, runPhase].filter(Boolean).join(" · ");
 
   function activate(intendsSelection: boolean) {
     if (onSelect && (selectionActive || intendsSelection)) onSelect(task._id);
@@ -62,14 +78,15 @@ export function TaskCard({
         e.dataTransfer.setData("text/plain", task._id);
         e.dataTransfer.effectAllowed = "move";
       }}
-      className={`block bg-bg rounded-lg border p-3 cursor-pointer
+      className={`block bg-bg rounded-lg border p-3 cursor-pointer card-edge
         transition-colors group
         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary
+        ${running ? (quiet ? "task-running run-quiet" : "task-running") : ""}
         ${selected
           ? "border-primary bg-primary/5"
           : tinted
-            ? "cat-card hover:ring-2 hover:ring-primary/40"
-            : "border-border hover:border-primary/50"}`}
+            ? "cat-card"
+            : "border-border"}`}
       onContextMenu={(e) => {
         e.preventDefault();
         onContextMenu?.(task._id, e.clientX, e.clientY);
@@ -103,6 +120,27 @@ export function TaskCard({
           )}
           {projectKey}-{task.taskNumber}
         </span>
+        {running && (
+          <span
+            data-testid={quiet ? "card-run-quiet" : "card-run-live"}
+            title={`${quiet ? "No sign of life" : "Being executed"} — ${runLabel}`}
+            className={`inline-flex items-center gap-1 text-[10px] font-medium ${
+              quiet ? "text-warning" : "text-danger"
+            }`}
+          >
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${
+                quiet ? "bg-warning" : "bg-danger animate-pulse motion-reduce:animate-none"
+              }`}
+            />
+            <span className="sr-only">
+              {quiet ? "Worker has gone quiet on this task: " : "Being executed by a worker: "}
+            </span>
+            {/* `gates:<name>` takes its name from project config, so the length is not ours to
+                assume — the card header is narrow and would wrap for the whole column */}
+            <span className="max-w-24 truncate">{runPhase}</span>
+          </span>
+        )}
         <Badge variant="priority" value={task.priority} className={COMPACT_BADGE}>
           {PRIORITY_LABELS[task.priority] ?? task.priority}
         </Badge>
