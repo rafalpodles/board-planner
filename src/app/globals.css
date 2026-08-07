@@ -189,6 +189,28 @@ body {
   background-color: color-mix(in srgb, var(--cat) 16%, var(--color-bg));
 }
 
+/* Hover thickens the card's edge. An inset outline rather than a second border pixel,
+   which would reflow the card's contents by 1px on every hover; --cat is set only on
+   tinted cards, so the fallback covers the plain ones. Cards under a live run keep
+   their run outline — that ring already says more than a hover would. */
+/* The outline is always present and merely transparent, so hover animates colour alone.
+   Declaring it only on :hover meant transitioning from the initial outline-color —
+   currentColor, i.e. the text — which flashed dark for a frame on the way in.
+   `transition-colors` covers outline-color in Tailwind 4, and the card carries it. */
+.card-edge:not(.task-running) {
+  outline: 2px solid transparent;
+  outline-offset: -1px;
+}
+
+.card-edge:not(.task-running):hover {
+  outline-color: var(--color-primary);
+}
+
+/* A tinted card thickens in its own colour rather than the accent */
+.cat-card.card-edge:not(.task-running):hover {
+  outline-color: var(--cat);
+}
+
 .cat-row {
   box-shadow: inset 3px 0 0 var(--cat);
   background-color: color-mix(in srgb, var(--cat) 5%, var(--color-bg));
