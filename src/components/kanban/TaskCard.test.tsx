@@ -237,3 +237,40 @@ describe("TaskCard drag", () => {
     expect(onClick).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("TaskCard execution state", () => {
+  const running = { ...task, execution: { workerName: "mac-mini", phase: "implementing" } } as ApiTask;
+
+  it("marks a card whose task a worker is running", () => {
+    const card = renderCard({ task: running });
+    expect(card.className).toContain("task-running");
+    expect(screen.getByTestId("card-run-live")).toBeTruthy();
+    expect(screen.getByText("implementing")).toBeTruthy();
+  });
+
+  it("names the worker and phase without opening the task", () => {
+    renderCard({ task: running });
+    expect(screen.getByTestId("card-run-live").getAttribute("title")).toBe(
+      "Being executed — mac-mini · implementing"
+    );
+  });
+
+  // A worker that has claimed but not yet reported still holds the task
+  it("shows a claimed run that has not reported a phase yet", () => {
+    const claimed = { ...task, execution: { workerId: "w1" } } as ApiTask;
+    renderCard({ task: claimed });
+    expect(screen.getByText("starting")).toBeTruthy();
+  });
+
+  it("says nothing when no run holds the task", () => {
+    const card = renderCard();
+    expect(card.className).not.toContain("task-running");
+    expect(screen.queryByTestId("card-run-live")).toBeNull();
+  });
+
+  it("does not treat an ended run as live", () => {
+    const ended = { ...task, execution: undefined } as ApiTask;
+    const card = renderCard({ task: ended });
+    expect(card.className).not.toContain("task-running");
+  });
+});

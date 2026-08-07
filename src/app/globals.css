@@ -113,6 +113,39 @@ body {
   animation: slide-in 0.2s ease-out;
 }
 
+/* A worker holding a task is a live state, so the board says so rather than making
+   someone open the task to find out. --run-accent is the entire colour decision. */
+@keyframes run-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px var(--run-accent),
+      0 0 0 0 color-mix(in srgb, var(--run-accent) 50%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px var(--run-accent),
+      0 0 0 6px color-mix(in srgb, var(--run-accent) 0%, transparent);
+  }
+}
+
+/* The ring is the card's border while a run holds it — the category or default one
+   would otherwise sit underneath it as a second, differently coloured outline */
+.task-running,
+.task-running.cat-card {
+  --run-accent: var(--color-danger);
+  border-color: transparent;
+  animation: run-pulse 1.8s ease-out infinite;
+}
+
+/* The pulse carries the meaning, so when motion is unwelcome the ring stays lit instead */
+@media (prefers-reduced-motion: reduce) {
+  .task-running {
+    animation: none;
+    box-shadow: 0 0 0 2px var(--run-accent);
+  }
+}
+
 /* One keyboard-focus treatment for the shell. An outline rather than a box-shadow
    ring: the sidebar and the column bodies scroll, and a ring on an item at the
    edge is clipped by its overflow container while an outline never is. */

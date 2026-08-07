@@ -42,6 +42,13 @@ export function TaskCard({
   const catColor = categoryColor(projectCategories, task.category);
   const tinted = !selected && !!catColor;
   const dragged = useRef(false);
+  // Same rule as ExecutionPanel: the field is unset the moment a run ends, and a worker
+  // that has claimed but not yet reported a phase still counts as holding the task
+  const run = task.execution;
+  const running = !!run && (!!run.phase || !!run.workerId);
+  const runLabel = [run?.workerName ?? run?.workerId, run?.phase ?? "starting"]
+    .filter(Boolean)
+    .join(" · ");
 
   function activate(intendsSelection: boolean) {
     if (onSelect && (selectionActive || intendsSelection)) onSelect(task._id);
@@ -65,6 +72,7 @@ export function TaskCard({
       className={`block bg-bg rounded-lg border p-3 cursor-pointer
         transition-colors group
         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary
+        ${running ? "task-running" : ""}
         ${selected
           ? "border-primary bg-primary/5"
           : tinted
@@ -103,6 +111,17 @@ export function TaskCard({
           )}
           {projectKey}-{task.taskNumber}
         </span>
+        {running && (
+          <span
+            data-testid="card-run-live"
+            title={`Being executed — ${runLabel}`}
+            className="inline-flex items-center gap-1 text-[10px] font-medium text-danger"
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-danger animate-pulse motion-reduce:animate-none" />
+            <span className="sr-only">Being executed by a worker: </span>
+            {run?.phase ?? "starting"}
+          </span>
+        )}
         <Badge variant="priority" value={task.priority} className={COMPACT_BADGE}>
           {PRIORITY_LABELS[task.priority] ?? task.priority}
         </Badge>
