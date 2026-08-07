@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup, act } from "@testing-library/react";
 import { TaskCard } from "./TaskCard";
-import { ApiTask } from "@/types";
+import { ApiTask, ApiProjectCategory } from "@/types";
 
 const task = {
   _id: "t1",
@@ -235,5 +235,98 @@ describe("TaskCard drag", () => {
     await mouseDown(card);
     await click(card);
     expect(onClick).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("TaskCard execution state", () => {
+  // Server-measured ages: asOf is when the payload was serialised, phaseAt the last report
+  const asOf = "2026-08-01T12:00:00Z";
+  const secondsAgo = (s: number) => new Date(Date.parse(asOf) - s * 1000).toISOString();
+
+  const withRun = (execution: Record<string, unknown>) =>
+    ({ ...task, execution: { asOf, ...execution } }) as ApiTask;
+
+  const running = withRun({
+    workerName: "mac-mini",
+    phase: "agent",
+    phaseAt: secondsAgo(30),
+  });
+
+  it("marks a card whose task a worker is running", () => {
+    const card = renderCard({ task: running });
+    expect(card.className).toContain("task-running");
+    expect(screen.getByTestId("card-run-live")).toBeTruthy();
+    expect(screen.getByText("agent")).toBeTruthy();
+  });
+
+  it("names the worker and phase without opening the task", () => {
+    renderCard({ task: running });
+    expect(screen.getByTestId("card-run-live").getAttribute("title")).toBe(
+      "Being executed — mac-mini · agent"
+    );
+  });
+
+  // A worker that has claimed but not yet reported still holds the task
+  it("shows a claimed run that has not reported a phase yet", () => {
+    renderCard({ task: withRun({ workerId: "w1" }) });
+    expect(screen.getByText("starting")).toBeTruthy();
+    expect(screen.getByTestId("card-run-live")).toBeTruthy();
+  });
+
+  it("says nothing when no run holds the task", () => {
+    const card = renderCard();
+    expect(card.className).not.toContain("task-running");
+    expect(screen.queryByTestId("card-run-live")).toBeNull();
+    expect(screen.queryByTestId("card-run-quiet")).toBeNull();
+  });
+
+  // The run holds the task for up to two hours; a worker that died mid-run keeps its runId
+  // that whole time, so elapsed silence — not the field's presence — decides "live"
+  it("stops calling a run live once the worker goes quiet", () => {
+    const card = renderCard({
+      task: withRun({ workerName: "mac-mini", phase: "agent", phaseAt: secondsAgo(20 * 60) }),
+    });
+    expect(screen.queryByTestId("card-run-live")).toBeNull();
+    expect(screen.getByTestId("card-run-quiet")).toBeTruthy();
+    expect(card.className).toContain("run-quiet");
+    expect(screen.getByTestId("card-run-quiet").getAttribute("title")).toBe(
+      "No sign of life — mac-mini · agent"
+    );
+  });
+
+  it("still calls a run live just under the quiet threshold", () => {
+    renderCard({ task: withRun({ phase: "agent", phaseAt: secondsAgo(4 * 60) }) });
+    expect(screen.getByTestId("card-run-live")).toBeTruthy();
+  });
+
+  it("treats a freshly claimed run as live before its first report", () => {
+    renderCard({ task: withRun({ workerId: "w1", phaseAt: null, startedAt: secondsAgo(30) }) });
+    expect(screen.getByTestId("card-run-live")).toBeTruthy();
+  });
+
+  // Phase events are fire-and-forget, so a worker can claim a task and die before reporting.
+  // Measuring silence from the claim is what stops the card lying for the whole lease.
+  it("calls a claimed run quiet when it never reported and the claim is old", () => {
+    renderCard({ task: withRun({ workerId: "w1", phaseAt: null, startedAt: secondsAgo(30 * 60) }) });
+    expect(screen.getByTestId("card-run-quiet")).toBeTruthy();
+    expect(screen.queryByTestId("card-run-live")).toBeNull();
+  });
+
+  // Asserts the class list only. The cascade — whether the run outline lets `border-primary`
+  // and `.cat-card` survive — is what actually broke once, and happy-dom loads no stylesheet,
+  // so nothing here can catch a repeat. Kept because losing a class from the list is its own
+  // regression; deliberately NOT named as if it guarded the cascade.
+  it("emits the run class alongside the selected and category classes", () => {
+    const selectedCard = renderCard({ task: running, selected: true });
+    expect(selectedCard.className).toContain("task-running");
+    expect(selectedCard.className).toContain("border-primary");
+    cleanup();
+
+    const tintedCard = renderCard({
+      task: running,
+      projectCategories: [{ name: "bug", color: "#ff0000" }] as unknown as ApiProjectCategory[],
+    });
+    expect(tintedCard.className).toContain("task-running");
+    expect(tintedCard.className).toContain("cat-card");
   });
 });
