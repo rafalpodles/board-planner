@@ -74,14 +74,14 @@ export function TaskCard({
         e.dataTransfer.setData("text/plain", task._id);
         e.dataTransfer.effectAllowed = "move";
       }}
-      className={`block bg-bg rounded-lg border p-3 cursor-pointer
+      className={`block bg-bg rounded-lg border p-3 cursor-pointer card-edge
         transition-colors group
         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary
         ${running ? (quiet ? "task-running run-quiet" : "task-running") : ""}
         ${selected
           ? "border-primary bg-primary/5"
           : tinted
-            ? "cat-card hover:ring-2 hover:ring-primary/40"
+            ? "cat-card"
             : "border-border hover:border-primary/50"}`}
       onContextMenu={(e) => {
         e.preventDefault();
