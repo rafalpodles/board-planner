@@ -128,10 +128,10 @@ export default function NotificationsPage() {
                   <span className="inline-block bg-bg-input px-1.5 py-0.5 rounded text-[10px] mr-1.5">
                     {TYPE_LABELS[n.type] || n.type}
                   </span>
-                  {typeof n.actor === "object" ? n.actor.fullName : ""}
+                  {n.actor && typeof n.actor === "object" ? n.actor.fullName : ""}
                   {" \u00b7 "}
                   {timeAgo(n.createdAt)}
-                  {typeof n.project === "object" && (
+                  {n.project && typeof n.project === "object" && (
                     <span className="ml-1.5 opacity-60">{n.project.key}</span>
                   )}
                 </p>

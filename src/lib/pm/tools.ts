@@ -146,7 +146,7 @@ export const PM_TOOLS: Record<string, PmTool> = {
           checklist: (t.checklist || []).map((c) => ({ text: c.text, done: c.done })),
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           blockedBy: (t.blockedBy || []).map((b: any) =>
-            typeof b === "object" && b.taskNumber
+            b && typeof b === "object" && b.taskNumber
               ? { key: `${ctx.projectKey}-${b.taskNumber}`, title: b.title, status: b.status }
               : null
           ).filter(Boolean),

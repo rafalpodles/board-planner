@@ -161,8 +161,9 @@ export function Comments({
         grouped[r.emoji] = { count: 0, users: [], hasOwn: false };
       }
       grouped[r.emoji].count++;
-      const username = typeof r.user === "object" ? r.user.username : r.user;
-      grouped[r.emoji].users.push(typeof r.user === "object" ? r.user.fullName : "Unknown");
+      const populated = r.user && typeof r.user === "object" ? r.user : null;
+      const username = populated ? populated.username : r.user;
+      grouped[r.emoji].users.push(populated ? populated.fullName : "Unknown");
       if (user && username === user.username) {
         grouped[r.emoji].hasOwn = true;
       }
@@ -297,7 +298,7 @@ export function Comments({
           >
             <div className="flex items-center gap-2 mb-1">
               <span className="text-sm font-medium">
-                {typeof comment.author === "object"
+                {comment.author && typeof comment.author === "object"
                   ? comment.author.fullName
                   : "Unknown"}
               </span>

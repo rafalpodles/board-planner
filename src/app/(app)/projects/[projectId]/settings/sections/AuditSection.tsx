@@ -38,7 +38,7 @@ export function AuditSection({ projectId, active }: { projectId: string; active:
                     {new Date(log.createdAt).toLocaleString()}
                   </td>
                   <td className="whitespace-nowrap py-1.5 pr-3 align-top font-medium">
-                    {typeof log.user === "object" ? log.user.username : "system"}
+                    {log.user && typeof log.user === "object" ? log.user.username : "system"}
                   </td>
                   <td className="whitespace-nowrap py-1.5 pr-3 align-top text-text-muted">
                     {log.action.replace(/_/g, " ")}
