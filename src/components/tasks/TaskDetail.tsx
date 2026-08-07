@@ -140,7 +140,8 @@ function TaskDetailView({
   const columns = effectiveColumns(project.columns);
   const taskKey = `${project.key}-${task.taskNumber}`;
   const assignee = users.find((u) => u.username === draft.assignee);
-  const reporter = typeof task.createdBy === "object" ? task.createdBy.fullName : null;
+  const reporter =
+    task.createdBy && typeof task.createdBy === "object" ? task.createdBy.fullName : null;
   const watching = !!currentUser && (task.watchers || []).includes(currentUser._id);
 
   const handleFileUpload = useCallback(
