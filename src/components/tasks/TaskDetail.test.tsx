@@ -101,6 +101,22 @@ describe("TaskDetail", () => {
     expect(screen.getByText("Description")).toBeTruthy();
   });
 
+  // typeof null === "object", so a deleted creator used to take the populated branch and throw
+  it("renders a task whose creator was deleted", async () => {
+    api.get.mockImplementation((url: string) => {
+      if (url === "/api/users") return Promise.resolve([]);
+      if (url.includes("/tasks/")) return Promise.resolve({ ...task, createdBy: null });
+      if (url.includes("/sprints")) return Promise.resolve([]);
+      return Promise.resolve(project);
+    });
+
+    renderDetail();
+    await loaded();
+
+    expect(screen.getByLabelText("Task title")).toBeTruthy();
+    expect(screen.queryByText(/Reported by/)).toBeNull();
+  });
+
   it("puts the title in an editable field rather than a heading", async () => {
     renderDetail();
     await loaded();

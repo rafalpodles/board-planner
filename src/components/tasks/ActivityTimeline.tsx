@@ -66,7 +66,7 @@ function formatValue(field: string, value: string): string {
 
 function describeAction(log: ApiActivityLog): string {
   const userName =
-    typeof log.user === "object" ? log.user.fullName : "Unknown";
+    log.user && typeof log.user === "object" ? log.user.fullName : "Unknown";
 
   switch (log.action) {
     case "created":
