@@ -2,6 +2,7 @@
 
 import { useRef, type CSSProperties } from "react";
 import { ApiTask, ApiCustomField, ApiProjectCategory, PRIORITY_LABELS } from "@/types";
+import { ageAt, QUIET_MS } from "@/components/tasks/ExecutionPanel";
 import { Badge } from "@/components/ui/Badge";
 import { categoryColor, categoryTint } from "@/lib/category-colors";
 import { cardBadges } from "@/lib/custom-fields";
@@ -42,13 +43,17 @@ export function TaskCard({
   const catColor = categoryColor(projectCategories, task.category);
   const tinted = !selected && !!catColor;
   const dragged = useRef(false);
-  // Same rule as ExecutionPanel: the field is unset the moment a run ends, and a worker
-  // that has claimed but not yet reported a phase still counts as holding the task
+  // toApiExecution returns nothing unless a runId still holds the task, so the field's
+  // presence is the whole test — a claimed run that has not reported a phase included.
   const run = task.execution;
-  const running = !!run && (!!run.phase || !!run.workerId);
-  const runLabel = [run?.workerName ?? run?.workerId, run?.phase ?? "starting"]
-    .filter(Boolean)
-    .join(" · ");
+  const running = !!run;
+  // Ages are server-measured; the board repolls, so no local ticking is needed here. Shares
+  // ExecutionPanel's threshold rather than a second opinion: a card claiming a run is alive
+  // while the task's own panel calls it silent is worse than either verdict on its own.
+  const quietFor = run ? ageAt(run.phaseAt, run.asOf, 0) : NaN;
+  const quiet = Number.isFinite(quietFor) && quietFor > QUIET_MS;
+  const runPhase = run?.phase ?? "starting";
+  const runLabel = [run?.workerName ?? run?.workerId, runPhase].filter(Boolean).join(" · ");
 
   function activate(intendsSelection: boolean) {
     if (onSelect && (selectionActive || intendsSelection)) onSelect(task._id);
@@ -72,7 +77,7 @@ export function TaskCard({
       className={`block bg-bg rounded-lg border p-3 cursor-pointer
         transition-colors group
         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary
-        ${running ? "task-running" : ""}
+        ${running ? (quiet ? "task-running run-quiet" : "task-running") : ""}
         ${selected
           ? "border-primary bg-primary/5"
           : tinted
@@ -113,13 +118,23 @@ export function TaskCard({
         </span>
         {running && (
           <span
-            data-testid="card-run-live"
-            title={`Being executed — ${runLabel}`}
-            className="inline-flex items-center gap-1 text-[10px] font-medium text-danger"
+            data-testid={quiet ? "card-run-quiet" : "card-run-live"}
+            title={`${quiet ? "No sign of life" : "Being executed"} — ${runLabel}`}
+            className={`inline-flex items-center gap-1 text-[10px] font-medium ${
+              quiet ? "text-warning" : "text-danger"
+            }`}
           >
-            <span className="w-1.5 h-1.5 rounded-full bg-danger animate-pulse motion-reduce:animate-none" />
-            <span className="sr-only">Being executed by a worker: </span>
-            {run?.phase ?? "starting"}
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${
+                quiet ? "bg-warning" : "bg-danger animate-pulse motion-reduce:animate-none"
+              }`}
+            />
+            <span className="sr-only">
+              {quiet ? "Worker has gone quiet on this task: " : "Being executed by a worker: "}
+            </span>
+            {/* `gates:<name>` takes its name from project config, so the length is not ours to
+                assume — the card header is narrow and would wrap for the whole column */}
+            <span className="max-w-24 truncate">{runPhase}</span>
           </span>
         )}
         <Badge variant="priority" value={task.priority} className={COMPACT_BADGE}>
