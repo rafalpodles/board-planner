@@ -172,7 +172,7 @@ export function Comments({
   }
 
   function isOwnComment(comment: ApiComment): boolean {
-    if (!user || typeof comment.author !== "object") return false;
+    if (!user || !comment.author || typeof comment.author !== "object") return false;
     return comment.author.username === user.username;
   }
 
