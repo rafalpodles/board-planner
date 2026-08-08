@@ -42,3 +42,8 @@ next-env.d.ts
 
 # Database snapshots taken before migrations — never commit, they hold every task
 backups/
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/

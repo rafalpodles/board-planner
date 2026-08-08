@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { usePollWhileVisible } from "@/hooks/use-poll-while-visible";
-import { ApiProject, ApiTask, ApiSprint , ApiUserSummary, BOARD_SORT_FIELDS, LIST_SORT_FIELDS, SortField, SortKey, SortDir } from "@/types";
+import { ApiProject, ApiTask, ApiSprint , ApiUserSummary, RunConflict, BOARD_SORT_FIELDS, LIST_SORT_FIELDS, SortField, SortKey, SortDir } from "@/types";
 import { effectiveColumns } from "@/lib/columns";
 import { ListColumnId } from "@/lib/list-columns";
 import { subscribeBoardRefresh } from "@/lib/board-refresh";
@@ -76,6 +76,14 @@ export default function KanbanPage() {
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ taskId: string; x: number; y: number } | null>(null);
+  // A move the server refused because a worker holds the task, parked until the person decides.
+  // Carries the retry rather than a request body: the board reaches the same refusal through two
+  // different endpoints, and both have to offer the same way out.
+  const [heldMove, setHeldMove] = useState<{
+    retry: () => Promise<unknown>;
+    conflict: RunConflict;
+    taskKey: string;
+  } | null>(null);
   const [confirmContextDelete, setConfirmContextDelete] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   // One owner for both views: the filter bar's dropdown and the list's column
@@ -240,23 +248,38 @@ export default function KanbanPage() {
   }
 
   async function handleBulkMove(status: string) {
-    try {
-      await Promise.all(
-        Array.from(selectedTasks).map((id) =>
-          api.patch(`/api/projects/${projectId}/tasks/${id}/status`, { status })
-        )
-      );
-      setTasks((prev) =>
-        prev.map((t) =>
-          selectedTasks.has(t._id)
-            ? { ...t, status: status as ApiTask["status"] }
-            : t
-        )
-      );
-      setSelectedTasks(new Set());
-      toast(`Moved ${selectedTasks.size} task${selectedTasks.size === 1 ? "" : "s"}`, "success");
-    } catch {
-      toast("Failed to move tasks", "error");
+    const ids = Array.from(selectedTasks);
+    // Settled, not all: one task held by a worker used to reject the whole batch while the others
+    // had already moved server-side, leaving the board saying nothing worked when most of it had.
+    const outcomes = await Promise.allSettled(
+      ids.map((id) => api.patch(`/api/projects/${projectId}/tasks/${id}/status`, { status }))
+    );
+
+    const movedIds = new Set(ids.filter((_, i) => outcomes[i].status === "fulfilled"));
+    const held = outcomes
+      .map((outcome, i) => ({ outcome, id: ids[i] }))
+      .filter(({ outcome }) => {
+        if (outcome.status !== "rejected") return false;
+        const failure = outcome.reason as { status?: number; body?: { runConflict?: unknown } };
+        return failure?.status === 409 && !!failure.body?.runConflict;
+      })
+      .map(({ id }) => tasks.find((t) => t._id === id)?.taskNumber)
+      .filter(Boolean);
+
+    setTasks((prev) =>
+      prev.map((t) => (movedIds.has(t._id) ? { ...t, status: status as ApiTask["status"] } : t))
+    );
+    setSelectedTasks(new Set());
+
+    if (movedIds.size === ids.length) {
+      toast(`Moved ${ids.length} task${ids.length === 1 ? "" : "s"}`, "success");
+    } else if (held.length > 0) {
+      // Names them: "some failed" leaves the person hunting for which, on a board where the only
+      // other clue is a card that looks much like its neighbours
+      const names = held.map((n) => `${project?.key}-${n}`).join(", ");
+      toast(`Moved ${movedIds.size} of ${ids.length}. ${names} being executed by a worker.`, "error");
+    } else {
+      toast(`Moved ${movedIds.size} of ${ids.length}`, "error");
     }
   }
 
@@ -329,18 +352,35 @@ export default function KanbanPage() {
     }
   }
 
+  // A refusal because a worker holds the task is not a failure to report — it is a question to
+  // ask. Returns true when it parked one, so the caller skips its own error handling.
+  function parkIfHeld(err: unknown, taskId: string, retry: () => Promise<unknown>): boolean {
+    const failure = err as { status?: number; body?: { runConflict?: RunConflict } };
+    if (failure?.status !== 409 || !failure.body?.runConflict) return false;
+    const task = tasks.find((t) => t._id === taskId);
+    setHeldMove({
+      retry,
+      conflict: failure.body.runConflict,
+      taskKey: `${project?.key}-${task?.taskNumber}`,
+    });
+    return true;
+  }
+
   async function handleStatusChange(taskId: string, status: string) {
+    const patch = (force?: boolean) =>
+      api.patch(`/api/projects/${projectId}/tasks/${taskId}/status`, {
+        status,
+        ...(force ? { force: true } : {}),
+      });
     try {
-      await api.patch(
-        `/api/projects/${projectId}/tasks/${taskId}/status`,
-        { status }
-      );
+      await patch();
       setTasks((prev) =>
         prev.map((t) =>
           t._id === taskId ? { ...t, status: status as ApiTask["status"] } : t
         )
       );
-    } catch {
+    } catch (err) {
+      if (parkIfHeld(err, taskId, () => patch(true))) return;
       toast("Failed to update status", "error");
     }
   }
@@ -373,19 +413,39 @@ export default function KanbanPage() {
       )
     );
 
-    try {
+    const moved = tasks.find((t) => t._id === taskId);
+    const body = {
+      order: newOrder,
       // Status only when it actually changes: a drop inside the same column is a
       // reorder, and sending the status it already has would stamp updatedAt and
       // release the task from any run a worker is holding it for
-      const moved = tasks.find((t) => t._id === taskId);
-      await api.put(`/api/projects/${projectId}/tasks/${taskId}`, {
-        order: newOrder,
-        ...(moved?.status === status ? {} : { status }),
-      });
-    } catch {
+      ...(moved?.status === status ? {} : { status }),
+    };
+
+    try {
+      await api.put(`/api/projects/${projectId}/tasks/${taskId}`, body);
+    } catch (err) {
+      // A worker is running this task. Ask rather than silently taking it off the machine —
+      // the optimistic move is rolled back either way, by confirming or by loadData below.
+      const retry = () =>
+        api.put(`/api/projects/${projectId}/tasks/${taskId}`, { ...body, force: true });
+      if (parkIfHeld(err, taskId, retry)) return;
       toast("Failed to move task", "error");
       loadData();
     }
+  }
+
+  async function forceHeldMove() {
+    if (!heldMove) return;
+    const pending = heldMove;
+    setHeldMove(null);
+    try {
+      await pending.retry();
+      toast(`${pending.taskKey} taken from the worker`, "success");
+    } catch {
+      toast("Failed to move task", "error");
+    }
+    loadData();
   }
 
   // The list hands back only the rows it shows, so a filtered list reindexes just
@@ -668,6 +728,24 @@ export default function KanbanPage() {
         title="Delete Task"
         message="Are you sure you want to delete this task? This action cannot be undone."
         confirmLabel="Delete"
+      />
+
+      {/* The move was refused because a worker is running the task. Taking it costs that run,
+          so it needs a deliberate click rather than a link in a toast that disappears. */}
+      <ConfirmDialog
+        open={!!heldMove}
+        onClose={() => {
+          setHeldMove(null);
+          loadData();
+        }}
+        onConfirm={forceHeldMove}
+        title="This task is being executed"
+        message={
+          heldMove
+            ? `${heldMove.taskKey} is being executed by ${heldMove.conflict.workerName || heldMove.conflict.workerId || "a worker"} (phase ${heldMove.conflict.phase}). Moving it takes the task off that worker and its work is lost.`
+            : ""
+        }
+        confirmLabel="Move anyway"
       />
 
       <Modal

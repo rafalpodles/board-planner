@@ -104,6 +104,9 @@ export function Column({
           : undefined
       }
       title={collapsed ? `${column.label} — 0 tasks. Click to expand.` : undefined}
+      // Addressable by id rather than by its heading text: an e2e test otherwise has to find the
+      // label and walk back up the tree, which breaks on any markup change
+      data-testid={`column-${column.id}`}
       className={`bg-bg-card rounded-xl border border-border
         border-t-2 flex flex-col max-h-[calc(100vh-12rem)] lg:max-h-full lg:h-full lg:min-h-0
         transition-colors ${isDragOver ? "bg-primary/5 border-primary/30" : ""}
