@@ -30,7 +30,9 @@ export interface ApiClient {
   release(projectId: string, taskId: string, options?: { refund?: boolean }): Promise<void>;
   statusIds(projectId: string): Promise<StatusIds>;
   columnIds(projectId: string): Promise<string[]>;
-  postEvent(event: PhaseEvent): Promise<void>;
+  // `applied` is the server's answer to "did this land": false when it wrote nothing, because the
+  // run no longer holds the task or a newer event got there first
+  postEvent(event: PhaseEvent): Promise<{ applied: boolean }>;
 }
 
 interface RawTask {
@@ -72,6 +74,17 @@ function statusIdsFrom(columns: BoardColumn[]): StatusIds {
 }
 
 const SEEDED = statusIdsFrom(SEEDED_BOARD);
+
+// Only an explicit `false` is a refusal. The caller ends the run on one, so a body that will not
+// parse — a proxy's error page, a server that predates the field — must not read as one.
+async function appliedFrom(response: Response): Promise<boolean> {
+  try {
+    const body = (await response.json()) as { applied?: unknown };
+    return body.applied !== false;
+  } catch {
+    return true;
+  }
+}
 
 function toColumn(value: unknown): BoardColumn | null {
   if (typeof value !== "object" || value === null) return null;
@@ -257,11 +270,12 @@ export function createApiClient(
     async postEvent(event) {
       const { workerId } = identityOrThrow();
       eventSeq += 1;
-      await request(
+      const response = await request(
         `/api/workers/${workerId}/events`,
         "POST",
         { ...event, seq: eventSeq }
       );
+      return { applied: await appliedFrom(response) };
     },
   };
 }

@@ -195,6 +195,9 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     runId: SERVER_RUN_ID,
   };
 
+  // The task the worker moves on to, so a refusal that settles late has a live run to endanger
+  const NEXT_TASK: ClaimedTask = { ...CLAIMED, taskId: "t2", taskKey: "CP-10", taskNumber: 10 };
+
   const RESULT_PAYLOAD = {
     status: "completed",
     summary: "did it",
@@ -240,11 +243,12 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     return parts;
   }
 
-  function streamingRunner(claudeCalls: string[][] = []): Runner {
+  function streamingRunner(claudeCalls: string[][] = [], onAgentStart?: (nth: number) => void): Runner {
     return {
       async run(command, args, opts) {
         if (command === "claude") {
           claudeCalls.push(args);
+          onAgentStart?.(claudeCalls.length);
           for (const part of pipeFlushes(AGENT_STREAM)) {
             opts.onStdout?.(part);
             await new Promise((resolve) => setImmediate(resolve));
@@ -268,12 +272,15 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
   // whatever it returns, which quietly settles a rejection the source left unhandled — and that is
   // exactly the failure this suite has to be able to see.
   async function runOneTask(
-    postEvent: ApiClient["postEvent"] = async () => {},
+    postEvent: ApiClient["postEvent"] = async () => ({ applied: true }),
     policy?: Record<string, unknown>,
     opts: {
       assignmentRemote?: string;
       extraAssignmentFields?: Record<string, unknown>;
       readFile?: (path: string) => string | null;
+      // Claimed in order, one per pass of the loop, then the queue runs dry
+      tasks?: ClaimedTask[];
+      onAgentStart?: (nth: number) => void;
     } = {}
   ) {
     let seenHeartbeat: HeartbeatDeps | undefined;
@@ -284,11 +291,13 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     const posted: PhaseEvent[] = [];
     const claudeCalls: string[][] = [];
     const bindingErrors: string[] = [];
+    const queue = opts.tasks ?? [CLAIMED];
+    const logError = vi.fn();
     let claims = 0;
     let localConfig: (() => LocalConfigView) | undefined;
 
     const api = {
-      claim: vi.fn<ApiClient["claim"]>(async () => (claims++ === 0 ? CLAIMED : null)),
+      claim: vi.fn<ApiClient["claim"]>(async () => queue[claims++] ?? null),
       setStatus: vi.fn<ApiClient["setStatus"]>().mockResolvedValue(undefined),
       comment: vi.fn<ApiClient["comment"]>().mockResolvedValue(undefined),
       release: vi.fn<ApiClient["release"]>().mockResolvedValue(undefined),
@@ -307,12 +316,12 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     let stop = (): void => {};
     const worker = createWorker({
       env: { ...ENV, CP_STATE_DIR: stateDir },
-      runner: streamingRunner(claudeCalls),
+      runner: streamingRunner(claudeCalls, opts.onAgentStart),
       hostname: () => "host-1",
       // the loop only sleeps once it has nothing left to claim, which is one pass after the run
       sleep: async () => stop(),
       log: vi.fn(),
-      logError: vi.fn(),
+      logError,
       uid: 501,
       realpath: (path) => path,
       stat: () => ({ uid: 501, mode: 0o40700 }),
@@ -358,6 +367,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       api,
       posted,
       bindingErrors,
+      logError,
       claimed: claudeCalls.length > 0,
       workspacePaths: claudeCalls.flat(),
       phases: posted.map((event) => event.phase),
@@ -425,7 +435,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
           release: vi.fn().mockResolvedValue(undefined),
           statusIds: vi.fn().mockResolvedValue({ approved: "todo", review: "in_review", done: "done" }),
           columnIds: vi.fn().mockResolvedValue(["todo", "in_progress", "in_review", "done"]),
-          postEvent: async () => {},
+          postEvent: async () => ({ applied: true }),
         }) as unknown as ApiClient,
       startHeartbeat: () => fakeHeartbeat(),
       connectControl: () => ({ close: vi.fn() }),
@@ -603,6 +613,71 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     expect(run.posted.length).toBeGreaterThan(0);
     // and the run still reached the board with its verdict
     expect(run.api.setStatus).toHaveBeenCalledWith("p1", "t1", "in_review");
+  });
+
+  // A task can be taken from a running worker: changeStatus refuses while a run holds it, but a
+  // person can override with force, and the server then clears the run from the task. Every phase
+  // post after that comes back applied:false — the only sign the worker gets that the rest of this
+  // run is tokens spent on work whose result will be refused.
+  describe("a task taken from the run that holds it", () => {
+    it("stops the run when the server says it no longer holds the task", async () => {
+      const run = await runOneTask(async (event) => ({ applied: event.phase !== "agent" }));
+
+      // released, not gate-rejected: the run ended where the refusal arrived
+      expect(run.api.release).toHaveBeenCalledWith("p1", "t1");
+      expect(run.api.setStatus).not.toHaveBeenCalledWith("p1", "t1", "in_review");
+      expect(run.phases.some((phase) => phase.startsWith("gates:"))).toBe(false);
+      // said once, not once per phase still in flight while the run unwinds
+      const lost = run.logError.mock.calls.filter(([message]: [string]) =>
+        message.includes("no longer has run")
+      );
+      expect(lost).toHaveLength(1);
+    });
+
+    // The server answers applied:false for an overtaken event too, and a post that settles after
+    // its own run has ended is indistinguishable from one. Ending the run in flight on it would
+    // kill the next task's run — real work, for a refusal that concerns the previous one.
+    it("leaves the run in flight alone when the refusal belongs to the run before it", async () => {
+      let deliverLate = (): void => {};
+      const late = new Promise<{ applied: boolean }>((resolve) => {
+        deliverLate = () => resolve({ applied: false });
+      });
+
+      const run = await runOneTask(
+        async (event) =>
+          event.taskId === "t1" && event.phase === "agent" ? late : { applied: true },
+        undefined,
+        {
+          tasks: [CLAIMED, NEXT_TASK],
+          // the first task's refusal lands while the second task's run is the one in flight
+          onAgentStart: (nth) => {
+            if (nth === 2) deliverLate();
+          },
+        }
+      );
+
+      expect(run.api.setStatus).toHaveBeenCalledWith("p1", "t2", "in_review");
+      expect(run.api.release).not.toHaveBeenCalled();
+      expect(run.logError).not.toHaveBeenCalledWith(expect.stringContaining("no longer has run"));
+    });
+
+    it("aborts nothing when the refusal lands with no run in flight at all", async () => {
+      let deliverLate = (): void => {};
+      const late = new Promise<{ applied: boolean }>((resolve) => {
+        deliverLate = () => resolve({ applied: false });
+      });
+
+      const run = await runOneTask(async (event) =>
+        event.phase === "agent" ? late : { applied: true }
+      );
+
+      // the loop has stopped by now, so there is no run for a refusal to be about
+      deliverLate();
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(run.api.setStatus).toHaveBeenCalledWith("p1", "t1", "in_review");
+      expect(run.logError).not.toHaveBeenCalledWith(expect.stringContaining("no longer has run"));
+    });
   });
 
   // The invariant the whole change exists to protect, and the one that had no test: an assignment

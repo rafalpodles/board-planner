@@ -358,10 +358,36 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   const isPhase = (update: TelemetryUpdate): update is Progress =>
     !isQuota(update) && !isOutcome(update);
 
-  const postPhase = dropWhenBusy((update: TelemetryUpdate) => {
+  // The run this worker has already been told it lost. The phases still in flight while that run
+  // unwinds would otherwise re-abort it and repeat the message once each.
+  let lostRun: { taskId: string; runId: string } | null = null;
+
+  const postPhase = dropWhenBusy(async (update: TelemetryUpdate) => {
     const run = currentRun;
-    if (!run || !isPhase(update)) return Promise.resolve();
-    return api.postEvent({ taskId: run.taskId, runId: run.runId, phase: update.phase });
+    if (!run || !isPhase(update)) return;
+
+    const { applied } = await api.postEvent({
+      taskId: run.taskId,
+      runId: run.runId,
+      phase: update.phase,
+    });
+    if (applied) return;
+
+    // applied:false is the server having written nothing, and recordTaskPhase writes nothing for
+    // two reasons: the run no longer holds the task — someone moved it with force, which is what
+    // this reacts to — or the event was overtaken by one carrying a higher seq. Only the first can
+    // reach a run of this worker's that is still live: api.ts stamps seq from a counter that only
+    // ever rises, dropWhenBusy keeps a single post in flight so two of ours never race, and the
+    // claim unsets phaseSeq, so nothing this run sends can land behind something newer. The
+    // refusal a healthy worker really does produce is the post that settles after its own run has
+    // ended — told apart by identity here, since by then the run in flight is different work and
+    // aborting would kill it.
+    if (currentRun !== run || lostRun === run) return;
+    lostRun = run;
+    deps.logError(
+      `task ${run.taskId}: the server no longer has run ${run.runId} holding it — stopping the run`
+    );
+    runs.abort();
   });
 
   telemetry.subscribe((update) => {
