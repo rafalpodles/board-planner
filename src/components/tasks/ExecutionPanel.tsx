@@ -11,9 +11,10 @@ interface ExecutionPanelProps {
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 
-// Past this, a run that is still working has gone quiet for longer than any normal gap between
-// tool calls, so the panel stops claiming it is alive
-export const QUIET_MS = 5 * MINUTE;
+// One definition for every view that judges a run: the card, the list row and this panel.
+// Re-exported because callers already import them from here.
+import { QUIET_MS, ageAt } from "@/lib/run-state";
+export { QUIET_MS, ageAt };
 
 export function durationLabel(ms: number): string {
   if (!Number.isFinite(ms) || ms < 0) return "";
@@ -22,15 +23,7 @@ export function durationLabel(ms: number): string {
   return `${Math.floor(ms / HOUR)}h ${Math.floor((ms % HOUR) / MINUTE)}m`;
 }
 
-// Both instants come from the server, so their difference is skew-free. Only the time elapsed
-// since the page received them is measured locally, and a local delta is safe: it is a duration,
-// not a comparison between two clocks.
-export function ageAt(from: string | null | undefined, asOf: string | undefined, sinceFetch: number): number {
-  const start = from ? Date.parse(from) : NaN;
-  const observed = asOf ? Date.parse(asOf) : NaN;
-  if (!Number.isFinite(start) || !Number.isFinite(observed)) return NaN;
-  return Math.max(0, observed - start) + sinceFetch;
-}
+
 
 export function ExecutionPanel({ execution }: ExecutionPanelProps) {
   const { phase, phaseAt, startedAt, asOf, workerId, workerName } = execution ?? {};
