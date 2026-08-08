@@ -981,3 +981,45 @@ describe("refusing to detach a live run", () => {
     expect(result.ok).toBe(true);
   });
 });
+
+// A board may define two columns with the active role. A forced move between them leaves the task
+// active while the run is already gone, and a release keyed on status alone would then pull it back
+// to the approved column and spend an attempt for a move somebody made on purpose.
+describe("releaseTask only applies to a task the run still holds", () => {
+  const twoActive = {
+    columns: [
+      { id: "ready", role: "approved", order: 1 },
+      { id: "doing", role: "active", order: 2 },
+      { id: "reviewing", role: "active", order: 3 },
+    ],
+  };
+
+  const held = { _id: "t1", project: "p1", status: "reviewing", execution: { runId: "r1", attempts: 1 } };
+  const released = { _id: "t1", project: "p1", status: "reviewing", execution: { runId: "", attempts: 1 } };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    findById.mockReturnValue({ lean: () => Promise.resolve(twoActive) });
+    findOneAndUpdate.mockResolvedValue({ _id: "t1" });
+  });
+
+  it("matches a task whose run is still on it", async () => {
+    await releaseTask("p1", "t1");
+
+    expect(matches(findOneAndUpdate.mock.calls[0][0], held)).toBe(true);
+  });
+
+  it("does not match one whose run was already taken away", async () => {
+    await releaseTask("p1", "t1");
+
+    expect(matches(findOneAndUpdate.mock.calls[0][0], released)).toBe(false);
+  });
+
+  it("holds for the no-refund path too", async () => {
+    await releaseTask("p1", "t1", { refund: false });
+
+    const filter = findOneAndUpdate.mock.calls[0][0];
+    expect(matches(filter, held)).toBe(true);
+    expect(matches(filter, released)).toBe(false);
+  });
+});
