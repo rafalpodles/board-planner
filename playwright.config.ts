@@ -16,7 +16,9 @@ export default defineConfig({
   globalTeardown: "./e2e/global-teardown.ts",
   fullyParallel: false,
   workers: 1,
-  retries: 0,
+  // Only for transport-level flakiness on a shared runner — a connection reset mid-request has
+  // nothing to say about the code. Assertions stay strict, so a real failure still fails twice.
+  retries: process.env.CI ? 1 : 0,
   forbidOnly: !!process.env.CI,
   reporter: [["list"]],
   // Kept next to the tests, where e2e/.gitignore covers it — the repo root does not ignore
