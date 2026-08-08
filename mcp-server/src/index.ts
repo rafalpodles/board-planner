@@ -152,7 +152,7 @@ server.tool(
     status: z.string().optional().describe("Initial status (default: planned)"),
     acceptanceCriteria: z.string().optional().describe("Acceptance criteria (markdown checklist, converted to structured checklist items)"),
     fields: z
-      .record(z.any())
+      .record(z.string(), z.any())
       .optional()
       .describe(
         "Project-defined fields keyed by field name, e.g. { \"Difficulty\": \"L\", \"Component\": \"ui\" }. " +
@@ -196,7 +196,7 @@ server.tool(
     assignee: z.string().optional().describe("Assignee username. Empty string to unassign."),
     acceptanceCriteria: z.string().optional().describe("Acceptance criteria (markdown checklist, converted to structured checklist items)"),
     fields: z
-      .record(z.any())
+      .record(z.string(), z.any())
       .optional()
       .describe(
         "Project-defined fields keyed by field name, e.g. { \"Difficulty\": \"L\", \"Component\": \"ui\" }. " +
