@@ -11,7 +11,7 @@ private func scratchDefaults() -> UserDefaults {
     let resolved = StateDirectory.resolve(
         defaults: scratchDefaults(), environment: [:], home: "/Users/someone")
 
-    #expect(resolved == "/Users/someone/.claudeplanner")
+    #expect(resolved == "/Users/someone/.boardplanner")
 }
 
 @Test func readsTheEnvironmentWhenLaunchedFromAShell() {
@@ -41,7 +41,7 @@ private func scratchDefaults() -> UserDefaults {
     StateDirectory.set(nil, defaults: defaults)
 
     #expect(StateDirectory.resolve(defaults: defaults, environment: [:], home: "/h")
-            == "/h/.claudeplanner")
+            == "/h/.boardplanner")
 }
 
 @Test func treatsAWhitespaceOnlySettingAsUnset() {
@@ -49,7 +49,7 @@ private func scratchDefaults() -> UserDefaults {
     defaults.set("   ", forKey: StateDirectory.defaultsKey)
 
     #expect(StateDirectory.resolve(defaults: defaults, environment: [:], home: "/h")
-            == "/h/.claudeplanner")
+            == "/h/.boardplanner")
 }
 
 @Test func theSocketAndAllowlistSitInWhicheverDirectoryResolved() {

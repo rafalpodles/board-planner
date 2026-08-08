@@ -13,7 +13,7 @@ public enum StateDirectory {
     ) -> String {
         if let stored = nonEmpty(defaults.string(forKey: defaultsKey)) { return stored }
         if let fromEnvironment = nonEmpty(environment["CP_STATE_DIR"]) { return fromEnvironment }
-        return (home as NSString).appendingPathComponent(".claudeplanner")
+        return (home as NSString).appendingPathComponent(".boardplanner")
     }
 
     public static func set(_ path: String?, defaults: UserDefaults = .standard) {

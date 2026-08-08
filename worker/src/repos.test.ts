@@ -162,7 +162,7 @@ describe("bindRepository", () => {
   it("refuses an allowlist file readable by anyone else", async () => {
     const deps = depsWith();
     deps.readAllowlist = () => {
-      throw new Error("~/.claudeplanner/repos.json is readable by group or others");
+      throw new Error("~/.boardplanner/repos.json is readable by group or others");
     };
 
     const result = await bindRepository(deps, "/repo");

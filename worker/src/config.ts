@@ -156,7 +156,7 @@ export function loadBootstrap(env: Env, readSecret: SecretReader = readSecretFil
     enrolmentToken: optionalSecret(env, "CP_ENROLMENT_TOKEN", readSecret),
     enrolmentTokenFile: env.CP_ENROLMENT_TOKEN_FILE?.trim() || "",
     workerName: required(env, "CP_WORKER_NAME"),
-    stateDir: env.CP_STATE_DIR?.trim() || join(homedir(), ".claudeplanner"),
+    stateDir: env.CP_STATE_DIR?.trim() || join(homedir(), ".boardplanner"),
   };
 }
 

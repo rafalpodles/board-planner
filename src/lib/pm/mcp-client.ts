@@ -30,7 +30,7 @@ export class McpClient {
       {
         protocolVersion: PROTOCOL_VERSION,
         capabilities: {},
-        clientInfo: { name: "claudeplanner-pm", version: "1.0" },
+        clientInfo: { name: "boardplanner-pm", version: "1.0" },
       },
       DISCOVERY_TIMEOUT_MS
     );

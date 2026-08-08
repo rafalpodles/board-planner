@@ -25,7 +25,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/CPMenubar"
 
 # The worker ships inside the app. A distributed app cannot read one out of the operator's
-# checkout — that checkout is their project, and only a ClaudePlanner clone has worker/ in it.
+# checkout — that checkout is their project, and only a Board Planner clone has worker/ in it.
 # Zero runtime dependencies, so this is about 200 KB of JavaScript and no node.
 WORKER_DIST="$ROOT/../worker/dist"
 if [ -d "$WORKER_DIST" ]; then
@@ -41,8 +41,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <plist version="1.0">
 <dict>
   <key>CFBundleExecutable</key><string>CPMenubar</string>
-  <key>CFBundleIdentifier</key><string>com.claudeplanner.menubar</string>
-  <key>CFBundleName</key><string>ClaudePlanner Worker</string>
+  <key>CFBundleIdentifier</key><string>com.boardplanner.menubar</string>
+  <key>CFBundleName</key><string>Board Planner Worker</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>1.0.0</string>
   <key>CFBundleVersion</key><string>1</string>

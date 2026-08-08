@@ -42,9 +42,9 @@ const rows: Row[] = [
   {
     // A credential in userinfo is caught by where it sits, not by matching a known token shape
     name: "a credential in a pull request url's userinfo",
-    input: "Merged https://x-access-token:ghp_0123456789abcdefghijABCDEFGHIJ012345@github.com/rafalpodles/ClaudePlanner/pull/7",
+    input: "Merged https://x-access-token:ghp_0123456789abcdefghijABCDEFGHIJ012345@github.com/rafalpodles/BoardPlanner/pull/7",
     mustNotAppear: ["x-access-token", "ghp_0123456789"],
-    mustAppear: ["https://[redacted]@github.com/rafalpodles/ClaudePlanner/pull/7", "Merged"],
+    mustAppear: ["https://[redacted]@github.com/rafalpodles/BoardPlanner/pull/7", "Merged"],
   },
   {
     // The counterexample the no-\b decision turns on. Nothing pinned it before, so the tempting
@@ -63,11 +63,11 @@ const rows: Row[] = [
   },
   {
     name: "a GitHub token embedded in a push failure",
-    input: `could not push \`cp-161/worker\`: remote: Invalid username or password for https://x-access-token:${GITHUB_PAT}@github.com/rafalpodles/ClaudePlanner.git`,
+    input: `could not push \`cp-161/worker\`: remote: Invalid username or password for https://x-access-token:${GITHUB_PAT}@github.com/rafalpodles/BoardPlanner.git`,
     mustNotAppear: [GITHUB_PAT, "0123456789abcdefghij"],
     mustAppear: [
       "remote: Invalid username or password",
-      "github.com/rafalpodles/ClaudePlanner.git",
+      "github.com/rafalpodles/BoardPlanner.git",
       "cp-161/worker",
       "[redacted]",
     ],

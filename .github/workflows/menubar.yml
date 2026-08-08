@@ -1,0 +1,28 @@
+name: Menubar
+
+# Its own workflow, path-filtered, because this is the only job that needs a macOS runner and
+# those bill at ten times the rate. The app's 81 tests were running nowhere before this.
+on:
+  push:
+    paths:
+      - "menubar/**"
+      - ".github/workflows/menubar.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: menubar-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Swift — build and test
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: menubar
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: swift build
+      - name: Tests
+        run: swift test

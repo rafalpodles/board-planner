@@ -50,7 +50,7 @@ registration mints. Nothing else is read from the environment.
 | `CP_API_URL` | yes | — |
 | `CP_ENROLMENT_TOKEN` or `CP_ENROLMENT_TOKEN_FILE` | first start only | — |
 | `CP_WORKER_NAME` | yes | — |
-| `CP_STATE_DIR` | no | `~/.claudeplanner` |
+| `CP_STATE_DIR` | no | `~/.boardplanner` |
 
 A worker holds **one** credential. An enrolment token is spent by the first registration, and
 everything after that — claiming, reporting status, commenting, releasing, and all of
@@ -107,26 +107,30 @@ npm install && npm run build && npm start
 
 As a macOS service:
 
+The plist ships with `REPO_DIR` and `HOME_DIR` placeholders rather than one developer's
+absolute paths, so substitute them as you install it:
+
 ```bash
-cp launchd/com.claudeplanner.worker.plist ~/Library/LaunchAgents/
-launchctl load ~/Library/LaunchAgents/com.claudeplanner.worker.plist
+sed -e "s|REPO_DIR|$(cd .. && pwd)|g" -e "s|HOME_DIR|$HOME|g" \
+  launchd/com.boardplanner.worker.plist > ~/Library/LaunchAgents/com.boardplanner.worker.plist
+launchctl load ~/Library/LaunchAgents/com.boardplanner.worker.plist
 ```
 
 Put the enrolment token in a file only you can read, and point `CP_ENROLMENT_TOKEN_FILE` at it —
 never in the plist, which sits at `0644` and rides along into Time Machine:
 
 ```bash
-install -m 600 /dev/null ~/.claudeplanner/token && pbpaste > ~/.claudeplanner/token
+install -m 600 /dev/null ~/.boardplanner/token && pbpaste > ~/.boardplanner/token
 ```
 
 The worker refuses to read a secret file that is readable by group or others. The inline variable
 still works for a container, where there is no file to protect.
 
 The plist carries the paths for this machine — check `ProgramArguments` and `PATH` before loading
-it anywhere else. Logs go to `/tmp/claudeplanner-worker.log` and
-`/tmp/claudeplanner-worker.error.log`.
+it anywhere else. Logs go to `/tmp/boardplanner-worker.log` and
+`/tmp/boardplanner-worker.error.log`.
 
-Stop it with `launchctl unload ~/Library/LaunchAgents/com.claudeplanner.worker.plist`. `SIGTERM`
+Stop it with `launchctl unload ~/Library/LaunchAgents/com.boardplanner.worker.plist`. `SIGTERM`
 and `SIGINT` both finish the task in flight before the loop exits.
 
 ## Safety

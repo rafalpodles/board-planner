@@ -4,7 +4,7 @@ import bcrypt from "bcryptjs";
 // Never the development database. The URI is passed to the dev server too, so a mistake here
 // would have the browser writing into whatever the developer is using at the time.
 export const E2E_MONGODB_URI =
-  process.env.E2E_MONGODB_URI ?? "mongodb://localhost:27017/claudeplanner_e2e";
+  process.env.E2E_MONGODB_URI ?? "mongodb://localhost:27017/boardplanner_e2e";
 
 export const ADMIN_USERNAME = "admin";
 export const ADMIN_PASSWORD = "test1234";

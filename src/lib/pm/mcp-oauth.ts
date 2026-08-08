@@ -57,7 +57,7 @@ async function probeResourceMetadataUrl(mcpUrl: string): Promise<string | null> 
     const res = await fetch(mcpUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 0, method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "claudeplanner-pm", version: "1.0" } } }),
+      body: JSON.stringify({ jsonrpc: "2.0", id: 0, method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "boardplanner-pm", version: "1.0" } } }),
       signal: controller.signal,
     });
     if (res.status !== 401) return null;
@@ -138,7 +138,7 @@ export async function registerClient(
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({
-        client_name: "ClaudePlanner PM Agent",
+        client_name: "BoardPlanner PM Agent",
         redirect_uris: [redirectUri],
         grant_types: ["authorization_code", "refresh_token"],
         response_types: ["code"],

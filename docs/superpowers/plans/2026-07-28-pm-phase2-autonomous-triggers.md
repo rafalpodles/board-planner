@@ -28,7 +28,7 @@ This repo has **no test framework** (`package.json` has `dev`/`build`/`lint` onl
 This plan therefore uses two verification modes, and each task states which one applies:
 
 - **Logic check** — for pure functions, a throwaway script under the session scratchpad run with `node`, printing `PASS`/`FAIL` lines. No framework, no new deps, nothing committed. Every such script is written out in full in the task.
-- **Live check** — drive the real UI/board end-to-end against a local MongoDB, per the user's global preference. Setup: `.env.local` with `MONGODB_URI=mongodb://localhost:27017/claudeplanner`, `npm run dev`, log in, click through.
+- **Live check** — drive the real UI/board end-to-end against a local MongoDB, per the user's global preference. Setup: `.env.local` with `MONGODB_URI=mongodb://localhost:27017/boardplanner`, `npm run dev`, log in, click through.
 
 **Open decision for rpo at approval time:** add `vitest` as a devDependency and write real unit tests for `src/lib/pm/autonomy.ts` and the claim logic instead of throwaway scripts. It is the right long-term call for scheduling code, but it introduces test infrastructure this repo has deliberately not had, so it is your decision, not mine. The plan below assumes **no vitest**; if you approve it, Tasks 1, 4 and 6 gain a proper test file each and lose their scratch scripts.
 
