@@ -383,11 +383,13 @@ export async function seed() {
     webhooks: [],
     notificationChannels: [],
     pm: {
-      enabled: false,
+      // On, so a turn can actually run against the stubbed model. dailyTurnCap must be positive:
+      // isOverDailyTurnCap compares used >= cap, so a zero cap refuses the very first turn.
+      enabled: true,
       lockedByInstance: false,
-      model: "",
+      model: "e2e/stub-model",
       contextNotes: "",
-      dailyTurnCap: 0,
+      dailyTurnCap: 50,
       autonomy: {
         dailyReview: false,
         reviewHour: 9,

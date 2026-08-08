@@ -481,3 +481,62 @@ test("MCP naming a multiselect option records the project's wording, not the cli
     { action: "updated", field: "Platforms", oldValue: "", newValue: "iOS, Web" },
   ]);
 });
+
+// ---------------------------------------------------------------------------
+// The PM agent, driven through a real turn against a stubbed model
+// ---------------------------------------------------------------------------
+
+/**
+ * The one writer the tests above reach only by proxy. A PM turn is the whole chain — the chat
+ * box, the SSE stream, the agent loop, tool dispatch, `updateTask` — and the model is the only
+ * part replaced (see e2e/openrouter-stub.mjs). What the agent "decides" travels inside the
+ * message, between << and >>, so this reads as a person typing and the stub does no guessing.
+ *
+ * The point is attribution: an unattended agent editing somebody's board has to leave its name
+ * on what it changed, not the name of whoever happened to be signed in.
+ */
+async function askPm(page: Page, prompt: string, call: Record<string, unknown>) {
+  await page.goto(`/projects/${PROJECT_KEY}/pm`);
+  const box = page.getByPlaceholder(/Message the PM/);
+  await box.fill(`${prompt} <<${JSON.stringify(call)}>>`);
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+}
+
+test("a PM turn records its field change under the agent's own name", async ({ page }) => {
+  await seedCustomFields({ [String(FIELDS.difficulty._id)]: "zz-small" });
+  await signIn(page);
+
+  await askPm(page, "This one looks bigger than S — please size it up.", {
+    name: "update_task",
+    arguments: {
+      taskKey: `${PROJECT_KEY}-${SIBLING_TASK_NUMBER}`,
+      fields: { Difficulty: "L" },
+    },
+  });
+
+  expect(await entriesAfterSave(1, "Difficulty")).toEqual([
+    { action: "updated", field: "Difficulty", oldValue: "S", newValue: "L" },
+  ]);
+
+  const history = await openHistory(page);
+  await expect(history.getByText("PM Agent changed Difficulty from S to L")).toBeVisible();
+  await expect(history.getByText(/E2E Admin changed Difficulty/)).toHaveCount(0);
+});
+
+test("a PM turn that changes one field stays silent about the rest", async ({ page }) => {
+  // The agent's own merge of current values, which is the shape most likely to spray noise
+  await seedCustomFields(ALL_VALUES);
+  await signIn(page);
+
+  await askPm(page, "Record what we agreed about the notes.", {
+    name: "update_task",
+    arguments: {
+      taskKey: `${PROJECT_KEY}-${SIBLING_TASK_NUMBER}`,
+      fields: { Notes: "agreed with the team" },
+    },
+  });
+
+  expect(await entriesAfterSave(1)).toEqual([
+    { action: "updated", field: "Notes", oldValue: "kept", newValue: "agreed with the team" },
+  ]);
+});
