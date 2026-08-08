@@ -1,5 +1,5 @@
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "fs";
-import { tmpdir } from "os";
+import { homedir, tmpdir } from "os";
 import { join } from "path";
 import { describe, it, expect, vi, afterAll } from "vitest";
 import { bindRepository, createAllowlistReader, RepoDeps, repoInventory } from "./repos.js";
@@ -127,7 +127,10 @@ describe("bindRepository", () => {
   // whether the rule actually under test fired — depsWith()'s default toplevel is "/repo", which
   // none of these paths equal, so without the override every case here would "pass" vacuously.
   it.each([
-    ["/Users/rpo/.ssh", /sensitive/i],
+    // Derived from homedir(), like the rule itself: hard-coding one machine's home meant this
+    // case asserted nothing anywhere else, and CI on Linux was the first thing to notice
+    [join(homedir(), ".ssh"), /sensitive/i],
+    [join(homedir(), ".claude"), /sensitive/i],
     ["/etc", /sensitive/i],
     ["/private/etc/passwd", /sensitive/i],
     ["/tmp/evil", /sensitive/i],
