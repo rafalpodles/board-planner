@@ -24,8 +24,21 @@ export const HELD_TASK_TITLE = "Held by a live worker run";
 export const DECOY_TASK_NUMBER = 2;
 export const DECOY_TASK_TITLE = "Already in review";
 
+// Shares the held task's column so a same-column drop has somewhere to land and a bulk move has
+// something it is allowed to take
+export const SIBLING_TASK_NUMBER = 3;
+export const SIBLING_TASK_KEY = `${PROJECT_KEY}-${SIBLING_TASK_NUMBER}`;
+export const SIBLING_TASK_TITLE = "Free to move";
+
+export const FINISHED_TASK_NUMBER = 4;
+export const FINISHED_TASK_KEY = `${PROJECT_KEY}-${FINISHED_TASK_NUMBER}`;
+export const FINISHED_TASK_TITLE = "Its run already finished";
+
 export const SOURCE_COLUMN = { id: "in_progress", label: "In Progress" };
 export const TARGET_COLUMN = { id: "in_review", label: "In Review" };
+// Somewhere other than the two the refusal tests use, so the finished-run task is never in the
+// way of a drag those tests make
+export const SPARE_COLUMN = { id: "todo", label: "To Do" };
 
 const id = (hex: string) => new mongoose.Types.ObjectId(hex);
 
@@ -34,6 +47,8 @@ export const PROJECT_ID = id("e2e00000000000000000c001");
 export const WORKER_ID = id("e2e00000000000000000b001");
 export const HELD_TASK_ID = id("e2e00000000000000000d001");
 export const DECOY_TASK_ID = id("e2e00000000000000000d002");
+export const SIBLING_TASK_ID = id("e2e00000000000000000d003");
+export const FINISHED_TASK_ID = id("e2e00000000000000000d004");
 
 const COLUMNS = [
   { id: "planned", label: "Planned", color: "#6b7280", role: "backlog", order: 0 },
@@ -73,6 +88,20 @@ async function empty(db: mongoose.mongo.Db) {
 export async function wipe() {
   await empty((await connect()).db!);
   await mongoose.disconnect();
+}
+
+/**
+ * The stored run subdocument, which no endpoint returns: the API publishes only what a reader may
+ * see, and a released run is invisible there by design. A test asserting on the absence of a
+ * refusal needs to know the fixture still carries the worker that could have caused one.
+ */
+export async function storedExecution(
+  taskId: mongoose.Types.ObjectId
+): Promise<Record<string, unknown> | undefined> {
+  const db = (await connect()).db!;
+  const task = await db.collection("tasks").findOne({ _id: taskId }, { projection: { execution: 1 } });
+  await mongoose.disconnect();
+  return task?.execution as Record<string, unknown> | undefined;
 }
 
 export async function seed() {
@@ -149,7 +178,7 @@ export async function seed() {
     codaDocId: "",
     codaTableId: "",
     codaToken: "",
-    taskCounter: 2,
+    taskCounter: 4,
     sortOrder: 0,
     createdBy: ADMIN_ID,
     createdAt: now,
@@ -228,6 +257,28 @@ export async function seed() {
       title: DECOY_TASK_TITLE,
       status: TARGET_COLUMN.id,
       order: 1,
+    }),
+    task({
+      _id: SIBLING_TASK_ID,
+      taskNumber: SIBLING_TASK_NUMBER,
+      title: SIBLING_TASK_TITLE,
+      status: SOURCE_COLUMN.id,
+      order: 1,
+    }),
+    task({
+      _id: FINISHED_TASK_ID,
+      taskNumber: FINISHED_TASK_NUMBER,
+      title: FINISHED_TASK_TITLE,
+      status: SPARE_COLUMN.id,
+      // Exactly what a finished run leaves behind: releasing a task $unsets runId and the phase
+      // trio, and keeps workerId and startedAt as history. Nothing here still holds the task, so
+      // it must move like any other card — no card badge, no refusal, no dialog.
+      execution: {
+        workerId: String(WORKER_ID),
+        attempts: 1,
+        startedAt: new Date(now.getTime() - 3_600_000),
+        lastError: "",
+      },
     }),
   ]);
 
