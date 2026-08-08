@@ -350,6 +350,54 @@ export function fieldCellText(
   return String(value);
 }
 
+export interface FieldChange {
+  name: string;
+  before: string;
+  after: string;
+}
+
+export type StoredFieldValues = Record<string, unknown> | Map<string, unknown> | undefined;
+
+/**
+ * Mongoose hands `customFieldValues` back as a Map on a hydrated document and as a plain
+ * object on a lean read. An update returns the first and reads the second, so a diff across
+ * the two sees every value as absent unless both are brought to the same shape.
+ */
+export function asValueRecord(values: StoredFieldValues): Record<string, unknown> {
+  return values instanceof Map ? Object.fromEntries(values) : values ?? {};
+}
+
+type DiffableField = {
+  _id: string | { toString(): string };
+  name: string;
+  fieldType: ICustomField["fieldType"];
+  options?: LegacyOption[];
+};
+
+/**
+ * One entry per field whose *displayed* value changed. Keyed on the field's name rather
+ * than its id, and on `fieldCellText` rather than the raw value, so an entry reads
+ * "Difficulty: M → L" instead of naming two ObjectIds nobody recognises. History written
+ * this way survives a later rename of the field or of its options, because it stored what
+ * the value said at the time rather than a pointer to what it says now.
+ */
+export function customFieldActivityChanges(
+  before: StoredFieldValues,
+  after: StoredFieldValues,
+  fields: DiffableField[]
+): FieldChange[] {
+  const was_ = asValueRecord(before);
+  const now_ = asValueRecord(after);
+  const changes: FieldChange[] = [];
+  for (const field of fields) {
+    const resolved = { ...field, _id: String(field._id) };
+    const was = fieldCellText(was_, resolved);
+    const now = fieldCellText(now_, resolved);
+    if (was !== now) changes.push({ name: field.name, before: was, after: now });
+  }
+  return changes;
+}
+
 /**
  * Turns `{ "Owoce": "Apples" }` into `{ <fieldId>: <optionId> }`. An MCP client
  * knows a field by the name a human gave it, never by its id, so the generic

@@ -11,6 +11,7 @@ import {
   matchesFieldFilter,
   matchesAllFieldFilters,
   resolveFieldsByName,
+  customFieldActivityChanges,
   parseOptions,
 } from "./custom-fields";
 import { DEFAULT_OPTION_COLOR, ICustomField } from "@/types";
@@ -359,5 +360,101 @@ describe("matchOptionValue", () => {
     expect(matchOptionValue(undefined, "S")).toBeUndefined();
     expect(matchOptionValue(field, "")).toBeUndefined();
     expect(matchOptionValue(field, null)).toBeUndefined();
+  });
+});
+
+describe("customFieldActivityChanges", () => {
+  const difficulty = field({
+    _id: "f-diff",
+    name: "Difficulty",
+    fieldType: "dropdown",
+    options: [
+      { id: "opt-m", value: "M", color: "#000", order: 0 },
+      { id: "opt-l", value: "L", color: "#000", order: 1 },
+    ],
+  });
+  const platforms = field({
+    _id: "f-plat",
+    name: "Platforms",
+    fieldType: "multiselect",
+    options: [
+      { id: "opt-ios", value: "iOS", color: "#000", order: 0 },
+      { id: "opt-web", value: "Web", color: "#000", order: 1 },
+    ],
+  });
+  const notes = field({ _id: "f-notes", name: "Notes", fieldType: "text" });
+
+  // The bug this exists for: an option id in history names nothing a reader recognises
+  it("reports the option's text, not its id", () => {
+    expect(
+      customFieldActivityChanges({ "f-diff": "opt-m" }, { "f-diff": "opt-l" }, [difficulty])
+    ).toEqual([{ name: "Difficulty", before: "M", after: "L" }]);
+  });
+
+  it("names the field, so a later rename cannot rewrite what history says", () => {
+    const [change] = customFieldActivityChanges({}, { "f-notes": "ping" }, [notes]);
+    expect(change.name).toBe("Notes");
+    expect(change.before).toBe("");
+    expect(change.after).toBe("ping");
+  });
+
+  it("reports a cleared field as a change to empty, not as no change", () => {
+    expect(customFieldActivityChanges({ "f-diff": "opt-m" }, {}, [difficulty])).toEqual([
+      { name: "Difficulty", before: "M", after: "" },
+    ]);
+  });
+
+  it("says nothing about a field whose value did not move", () => {
+    expect(
+      customFieldActivityChanges(
+        { "f-diff": "opt-m", "f-notes": "same" },
+        { "f-diff": "opt-l", "f-notes": "same" },
+        [difficulty, notes]
+      )
+    ).toEqual([{ name: "Difficulty", before: "M", after: "L" }]);
+  });
+
+  it("reports one entry per field when several move at once", () => {
+    expect(
+      customFieldActivityChanges(
+        { "f-diff": "opt-m" },
+        { "f-diff": "opt-l", "f-notes": "new" },
+        [difficulty, platforms, notes]
+      )
+    ).toEqual([
+      { name: "Difficulty", before: "M", after: "L" },
+      { name: "Notes", before: "", after: "new" },
+    ]);
+  });
+
+  it("lists every selection of a multiselect", () => {
+    expect(
+      customFieldActivityChanges(
+        { "f-plat": ["opt-ios"] },
+        { "f-plat": ["opt-ios", "opt-web"] },
+        [platforms]
+      )
+    ).toEqual([{ name: "Platforms", before: "iOS", after: "iOS, Web" }]);
+  });
+
+  // An update returns a hydrated document, whose customFieldValues is a Map, while the read it is
+  // compared against is lean and gives a plain object. Treating the Map as an object finds nothing
+  // in it, so every edit would read as "cleared".
+  it("reads the Map a hydrated document carries, not only a plain object", () => {
+    expect(
+      customFieldActivityChanges(
+        { "f-diff": "opt-m" },
+        new Map([["f-diff", "opt-l"]]),
+        [difficulty]
+      )
+    ).toEqual([{ name: "Difficulty", before: "M", after: "L" }]);
+  });
+
+  it("ignores a value whose field the project no longer defines", () => {
+    expect(customFieldActivityChanges({ "f-gone": "x" }, {}, [difficulty])).toEqual([]);
+  });
+
+  it("returns nothing when the project defines no fields", () => {
+    expect(customFieldActivityChanges({ "f-diff": "opt-m" }, {}, [])).toEqual([]);
   });
 });

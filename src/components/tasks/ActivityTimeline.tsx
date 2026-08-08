@@ -79,6 +79,11 @@ function describeAction(log: ApiActivityLog): string {
         const to = log.newValue || "unassigned";
         return `${userName} changed assignee from ${from} to ${to}`;
       }
+      // A field entry that carries values says what changed; one that does not still reads.
+      // Project fields are the reason this matters — "updated Difficulty" alone tells you nothing.
+      if (log.oldValue || log.newValue) {
+        return `${userName} changed ${formatFieldLabel(log.field)} from ${formatValue(log.field, log.oldValue)} to ${formatValue(log.field, log.newValue)}`;
+      }
       return `${userName} updated ${formatFieldLabel(log.field)}`;
     case "comment_added":
       return `${userName} added a comment`;
