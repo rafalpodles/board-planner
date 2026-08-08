@@ -27,12 +27,9 @@ const AUTH = {
 
 const heldCardHref = `/projects/${PROJECT_KEY}/tasks/${HELD_TASK_NUMBER}`;
 
-/** The column whose header reads `label`: h3 → header div → column root. */
-function boardColumn(page: Page, label: string): Locator {
-  return page
-    .locator("h3")
-    .filter({ hasText: new RegExp(`^${label}$`) })
-    .locator("xpath=../..");
+/** The column by its board id, which is stable across markup changes in a way its heading is not. */
+function boardColumn(page: Page, columnId: string): Locator {
+  return page.getByTestId(`column-${columnId}`);
 }
 
 /**
@@ -85,8 +82,8 @@ test("a task a worker is running cannot be dragged away without confirming", asy
     await expect(page.getByText(DECOY_TASK_TITLE)).toBeVisible();
   });
 
-  const source = boardColumn(page, SOURCE_COLUMN.label);
-  const target = boardColumn(page, TARGET_COLUMN.label);
+  const source = boardColumn(page, SOURCE_COLUMN.id);
+  const target = boardColumn(page, TARGET_COLUMN.id);
   const heldCard = source.locator(`a[href="${heldCardHref}"]`);
 
   await test.step("the card shows a live run", async () => {
