@@ -21,6 +21,10 @@ export const PROJECT_KEY = "TP";
 export const PROJECT_NAME = "E2E Run Conflict Board";
 
 export const WORKER_NAME = "e2e-macbook-pro";
+
+// A real API token, because /api/mcp only accepts a Bearer credential. The prefix is the first
+// 11 characters, which is what verifyBearerToken looks a candidate up by.
+export const API_TOKEN = "cp_e2e00001deadbeefdeadbeefdeadbeef";
 export const RUN_PHASE = "agent";
 
 export const HELD_TASK_NUMBER = 1;
@@ -190,6 +194,111 @@ export async function seedSecondHeldTask() {
  * it reads quiet rather than live — and runHolding keys on runId, not on the clock, so the server
  * must refuse the move exactly as it does for a chatty one.
  */
+/**
+ * The project fields CP-250 is about. Two properties are deliberate and load-bearing:
+ *
+ * - every option id differs from the text it stands for, so an implementation that logs the
+ *   stored value instead of the displayed one cannot pass;
+ * - the ids sort alphabetically in the *reverse* of the order the project configured, so an
+ *   implementation that sorts a multiselect by id rather than by option order cannot pass either.
+ *
+ * A fixture already shaped like the answer proves nothing, and both of these started life that
+ * way before a mutation showed the tests staying green.
+ */
+export const FIELDS = {
+  difficulty: {
+    _id: id("e2e00000000000000000f001"),
+    name: "Difficulty",
+    fieldType: "dropdown",
+    options: [
+      { id: "zz-small", value: "S", color: "#4ade80", order: 0 },
+      { id: "aa-large", value: "L", color: "#f59e0b", order: 1 },
+    ],
+  },
+  platforms: {
+    _id: id("e2e00000000000000000f002"),
+    name: "Platforms",
+    fieldType: "multiselect",
+    options: [
+      { id: "zz-ios", value: "iOS", color: "#64748b", order: 0 },
+      { id: "aa-web", value: "Web", color: "#6b7280", order: 1 },
+    ],
+  },
+  // The punctuation is the point: the task asked whether a field named oddly still reads sensibly
+  // once its name is dropped into a sentence.
+  spike: { _id: id("e2e00000000000000000f003"), name: "Spike?", fieldType: "checkbox", options: [] },
+  points: { _id: id("e2e00000000000000000f004"), name: "Points", fieldType: "number", options: [] },
+  target: { _id: id("e2e00000000000000000f005"), name: "Target", fieldType: "date", options: [] },
+  notes: { _id: id("e2e00000000000000000f006"), name: "Notes", fieldType: "text", options: [] },
+  // Archived, not deleted: its values survive on tasks and stop being policed, so an edit that
+  // moves one still has to be recorded.
+  retired: {
+    _id: id("e2e00000000000000000f007"),
+    name: "Retired",
+    fieldType: "dropdown",
+    archived: true,
+    options: [{ id: "kept-value", value: "Kept", color: "#6b7280", order: 0 }],
+  },
+} as const;
+
+const fieldDefaults = { required: false, showOnCard: false, showInList: false, filterable: false, archived: false };
+
+/**
+ * Puts the fields above on the project and, optionally, values on the task the field tests edit.
+ * Kept out of seed() so the run-conflict board stays exactly as that suite left it.
+ */
+export async function seedCustomFields(values: Record<string, unknown> = {}) {
+  const db = (await connect()).db!;
+  const customFields = Object.values(FIELDS).map((field, order) => ({
+    ...fieldDefaults,
+    ...field,
+    order,
+    options: [...field.options],
+  }));
+  await db.collection("projects").updateOne({ _id: PROJECT_ID }, { $set: { customFields } });
+  await db
+    .collection("tasks")
+    .updateOne({ _id: SIBLING_TASK_ID }, { $set: { customFieldValues: values } });
+  await mongoose.disconnect();
+}
+
+/** Every history entry on a task, newest first, as the API returns them to the timeline. */
+export async function storedActivity(
+  taskId: mongoose.Types.ObjectId
+): Promise<{ action: string; field: string; oldValue: string; newValue: string }[]> {
+  const db = (await connect()).db!;
+  const rows = await db
+    .collection("activitylogs")
+    .find({ task: taskId })
+    .sort({ createdAt: -1, _id: -1 })
+    .toArray();
+  await mongoose.disconnect();
+  return rows.map((r) => ({
+    action: String(r.action),
+    field: String(r.field ?? ""),
+    oldValue: String(r.oldValue ?? ""),
+    newValue: String(r.newValue ?? ""),
+  }));
+}
+
+/** Renames a field, or one of its options, after history has already been written about it. */
+export async function renameField(
+  fieldId: mongoose.Types.ObjectId,
+  changes: { name?: string; optionId?: string; optionValue?: string }
+) {
+  const db = (await connect()).db!;
+  const set: Record<string, unknown> = {};
+  if (changes.name) set["customFields.$[f].name"] = changes.name;
+  if (changes.optionId) set["customFields.$[f].options.$[o].value"] = changes.optionValue;
+  await db.collection("projects").updateOne({ _id: PROJECT_ID }, { $set: set }, {
+    arrayFilters: [
+      { "f._id": fieldId },
+      ...(changes.optionId ? [{ "o.id": changes.optionId }] : []),
+    ],
+  });
+  await mongoose.disconnect();
+}
+
 export async function seedQuietTask(quietForMs: number) {
   const now = new Date();
   await addTask(
@@ -320,6 +429,17 @@ export async function seed() {
     createdBy: ADMIN_ID,
     createdAt: now,
     updatedAt: now,
+  });
+
+  await db.collection("apitokens").insertOne({
+    _id: id("e2e00000000000000000a003"),
+    user: ADMIN_ID,
+    name: "e2e mcp",
+    tokenHash: bcrypt.hashSync(API_TOKEN, 10),
+    prefix: API_TOKEN.slice(0, 11),
+    allowedProjects: [],
+    lastUsedAt: null,
+    createdAt: now,
   });
 
   await db.collection("workers").insertOne({
