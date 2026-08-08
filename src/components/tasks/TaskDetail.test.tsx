@@ -219,3 +219,57 @@ describe("TaskDetail", () => {
     expect(urls.some((u: string) => u === "/api/users")).toBe(true);
   });
 });
+
+// CP-235. The board asks before taking a task off a worker; this view reaches the same refusal
+// through the same endpoint, and used to answer it with "Failed to update status" — an error
+// message for something that is not an error, and no way to proceed.
+describe("TaskDetail, moving a task a worker is running", () => {
+  const refusal = () =>
+    Object.assign(new Error("held"), {
+      status: 409,
+      body: {
+        runConflict: { workerId: "w1", workerName: "mac-mini", phase: "agent", phaseAt: null },
+      },
+    });
+
+  it("asks instead of reporting a failure", async () => {
+    api.patch.mockRejectedValueOnce(refusal());
+    renderDetail();
+    await loaded();
+
+    await act(async () => screen.getByRole("button", { name: /To Do/i }).click());
+    await act(async () => screen.getByRole("option", { name: /In Progress/i }).click());
+
+    expect(screen.getByText("This task is being executed")).toBeTruthy();
+    expect(screen.getByText(/mac-mini/)).toBeTruthy();
+    expect(screen.getByText(/phase agent/)).toBeTruthy();
+  });
+
+  it("re-issues the change with force when the person confirms", async () => {
+    api.patch.mockRejectedValueOnce(refusal());
+    api.patch.mockResolvedValueOnce({});
+    renderDetail();
+    await loaded();
+
+    await act(async () => screen.getByRole("button", { name: /To Do/i }).click());
+    await act(async () => screen.getByRole("option", { name: /In Progress/i }).click());
+    await act(async () => screen.getByRole("button", { name: "Move anyway" }).click());
+
+    expect(api.patch).toHaveBeenLastCalledWith("/api/projects/TP/tasks/t1/status", {
+      status: "in_progress",
+      force: true,
+    });
+  });
+
+  // A refusal for any other reason is still a failure, and must not be dressed up as a question
+  it("still reports an ordinary failure", async () => {
+    api.patch.mockRejectedValueOnce(Object.assign(new Error("boom"), { status: 500 }));
+    renderDetail();
+    await loaded();
+
+    await act(async () => screen.getByRole("button", { name: /To Do/i }).click());
+    await act(async () => screen.getByRole("option", { name: /In Progress/i }).click());
+
+    expect(screen.queryByText("This task is being executed")).toBeNull();
+  });
+});
