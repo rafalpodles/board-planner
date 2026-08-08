@@ -3,7 +3,8 @@ import { Task } from "@/models/task";
 import { Project } from "@/models/project";
 import { User } from "@/models/user";
 import { Comment } from "@/models/comment";
-import { ApiTaskExecution, ITask, ITaskExecution, DEFAULT_PRIORITY } from "@/types";
+import { Worker } from "@/models/worker";
+import { ApiTaskExecution, ITask, ITaskExecution, RunConflict, DEFAULT_PRIORITY } from "@/types";
 import { getColumnIds, defaultStatusFor, roleOf, getProjectColumns } from "@/lib/columns";
 import { escalationColumnId } from "@/lib/escalation";
 import { logActivity } from "@/lib/activity";
@@ -60,7 +61,41 @@ export const taskPopulateFields = [
 
 export type TaskServiceResult<T = ITask> =
   | { ok: true; data: T }
-  | { ok: false; error: string; status: number };
+  | { ok: false; error: string; status: number; runConflict?: RunConflict };
+
+/**
+ * A run still holding this task, or null. Keyed on runId: every exit from the active column
+ * clears it, while workerId and startedAt are left behind as history.
+ *
+ * Deliberately not judged by silence. `agent` reports on tool use rather than on a clock, so a
+ * worker thinking hard for several minutes looks identical to a dead one — and guessing wrong
+ * throws away real work. Staleness is the lease's job (EXECUTION_LEASE_MS); taking a task from a
+ * machine early is a person's decision, made through `force`.
+ */
+export function runHolding(task: {
+  execution?: { runId?: string; workerId?: string; phase?: string; phaseAt?: Date | null };
+}): RunConflict | null {
+  const execution = task.execution;
+  if (!execution?.runId) return null;
+  return {
+    workerId: execution.workerId || "",
+    phase: execution.phase || "starting",
+    phaseAt: execution.phaseAt ? new Date(execution.phaseAt).toISOString() : null,
+  };
+}
+
+async function refuseHeldRun(conflict: RunConflict, taskKey: string): Promise<TaskServiceResult> {
+  const worker = conflict.workerId
+    ? await Worker.findById(conflict.workerId, "name").lean()
+    : null;
+  const name = (worker?.name as string) || conflict.workerId || "a worker";
+  return {
+    ok: false,
+    error: `${taskKey} is being executed by ${name} (phase ${conflict.phase}). Stop the worker, or move it anyway to take the task from it.`,
+    status: 409,
+    runConflict: { ...conflict, ...(worker?.name ? { workerName: worker.name as string } : {}) },
+  };
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Body = Record<string, any>;
@@ -167,11 +202,12 @@ export async function changeStatus(
   projectId: string,
   taskId: string,
   status: string,
-  actorId: string
+  actorId: string,
+  force = false
 ): Promise<TaskServiceResult> {
   await connectDB();
 
-  const projectColumns = await Project.findById(projectId, "columns").lean();
+  const projectColumns = await Project.findById(projectId, "columns key").lean();
   const columnIds = getColumnIds(projectColumns);
   if (!columnIds.includes(status)) {
     return {
@@ -184,6 +220,16 @@ export async function changeStatus(
   const oldTask = await Task.findOne({ _id: taskId, project: projectId }).lean();
   if (!oldTask) {
     return { ok: false, error: "Task not found", status: 404 };
+  }
+
+  // Leaving the column is what releases the run, so that is what has to be refused. Staying put
+  // — a reorder, or resending the status already held — never touches the worker.
+  if (!force && oldTask.status !== status) {
+    const conflict = runHolding(oldTask);
+    if (conflict) {
+      const key = projectColumns?.key ? `${projectColumns.key}-${oldTask.taskNumber}` : `#${oldTask.taskNumber}`;
+      return refuseHeldRun(conflict, key);
+    }
   }
 
   const task = await Task.findOneAndUpdate(
@@ -249,7 +295,8 @@ export async function updateTask(
   projectId: string,
   taskId: string,
   body: Body,
-  actorId: string
+  actorId: string,
+  force = false
 ): Promise<TaskServiceResult> {
   await connectDB();
 
@@ -334,6 +381,17 @@ export async function updateTask(
   // already had, and unsetting the run there would detach a worker mid-execution.
   const leavesColumn =
     updates.status !== undefined && String(updates.status) !== String(oldTask.status);
+
+  // Same rule as changeStatus: the edit form and the board both reach this path, and a status
+  // that genuinely moves is what takes the task off the worker
+  if (!force && leavesColumn) {
+    const conflict = runHolding(oldTask);
+    if (conflict) {
+      const keyed = await Project.findById(projectId, "key").lean();
+      const key = keyed?.key ? `${keyed.key}-${oldTask.taskNumber}` : `#${oldTask.taskNumber}`;
+      return refuseHeldRun(conflict, key);
+    }
+  }
 
   // A pure reorder is not an edit. Without this every card dragged inside a column
   // reads as "updated just now", which is the same lie the list's reorder endpoint

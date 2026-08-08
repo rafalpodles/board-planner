@@ -64,8 +64,10 @@ const findOne = vi.fn();
 const findByIdAndUpdate = vi.fn();
 const findById = vi.fn();
 const userFindOne = vi.fn();
+const workerFindById = vi.fn();
 
 vi.mock("./db", () => ({ connectDB: vi.fn() }));
+vi.mock("@/models/worker", () => ({ Worker: { findById: workerFindById } }));
 vi.mock("@/models/task", () => ({
   Task: { findOneAndUpdate, updateMany, updateOne, findOne, findByIdAndUpdate },
 }));
@@ -864,5 +866,118 @@ describe("what the clearing expression actually evaluates to", () => {
     const doc = { assignee: "USER-A", execution: { workerId: "" } };
 
     expect(evaluateExpr(naive, doc)).toBeNull();
+  });
+});
+
+// CP-235. A worker claims a task and works on it for minutes; anyone moving that card — by drag,
+// by the edit form, through MCP, or the PM agent — used to detach the run silently and leave the
+// machine working on a task it no longer held.
+describe("refusing to detach a live run", () => {
+  const board = {
+    key: "TP",
+    columns: [
+      { id: "ready", role: "approved", order: 1 },
+      { id: "doing", role: "active", order: 2 },
+      { id: "checking", role: "review", order: 3 },
+    ],
+  };
+
+  const held = {
+    _id: "t1",
+    taskNumber: 7,
+    status: "doing",
+    title: "x",
+    execution: { runId: "r1", workerId: "w1", phase: "agent", phaseAt: new Date() },
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    findById.mockReturnValue({ lean: () => Promise.resolve(board) });
+    findOne.mockReturnValue({
+      lean: () => Promise.resolve(held),
+      populate: () => ({ lean: () => Promise.resolve(held) }),
+    });
+    findOneAndUpdate.mockReturnValue({
+      populate: () => Promise.resolve({ _id: "t1", taskNumber: 7, status: "checking", title: "x" }),
+    });
+    updateMany.mockResolvedValue({ modifiedCount: 0 });
+    workerFindById.mockReturnValue({ lean: () => Promise.resolve({ name: "mac-mini" }) });
+  });
+
+  it("refuses a status change that would take the task from its worker", async () => {
+    const result = await changeStatus("p1", "t1", "checking", "actor");
+
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.status).toBe(409);
+    // The refusal has to happen before the write, not be undone after it
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("names the worker and the phase, so the caller can say who holds it", async () => {
+    const result = await changeStatus("p1", "t1", "checking", "actor");
+
+    expect(result.ok === false && result.error).toContain("TP-7");
+    expect(result.ok === false && result.error).toContain("mac-mini");
+    expect(result.ok === false && result.error).toContain("agent");
+    expect(result.ok === false && result.runConflict).toMatchObject({
+      workerId: "w1",
+      workerName: "mac-mini",
+      phase: "agent",
+    });
+  });
+
+  it("falls back to the worker id when the fleet no longer knows the name", async () => {
+    workerFindById.mockReturnValue({ lean: () => Promise.resolve(null) });
+
+    const result = await changeStatus("p1", "t1", "checking", "actor");
+
+    expect(result.ok === false && result.error).toContain("w1");
+  });
+
+  it("goes through when the move is forced", async () => {
+    const result = await changeStatus("p1", "t1", "checking", "actor", true);
+
+    expect(result.ok).toBe(true);
+    expect(unsetKeys(findOneAndUpdate.mock.calls[0][1])).toEqual(RUN_KEYS);
+  });
+
+  // A reorder inside the column resends the status the task already has — that never released
+  // the run, and must not start refusing either
+  it("does not refuse a status that is not actually changing", async () => {
+    const result = await changeStatus("p1", "t1", "doing", "actor");
+
+    expect(result.ok).toBe(true);
+    expect(findOneAndUpdate).toHaveBeenCalled();
+  });
+
+  it("refuses the same move made through the edit form", async () => {
+    const result = await updateTask("p1", "t1", { status: "checking" }, "actor");
+
+    expect(result.ok === false && result.status).toBe(409);
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("forces through the edit form too", async () => {
+    const result = await updateTask("p1", "t1", { status: "checking" }, "actor", true);
+
+    expect(result.ok).toBe(true);
+  });
+
+  it("lets an edit that leaves the column alone through untouched", async () => {
+    const result = await updateTask("p1", "t1", { title: "renamed" }, "actor");
+
+    expect(result.ok).toBe(true);
+    expect(findOneAndUpdate).toHaveBeenCalled();
+  });
+
+  it("does not refuse a task no run is holding", async () => {
+    findOne.mockReturnValue({
+      lean: () => Promise.resolve({ _id: "t1", taskNumber: 7, status: "doing", title: "x" }),
+      populate: () => ({ lean: () => Promise.resolve({ _id: "t1", taskNumber: 7, status: "doing" }) }),
+    });
+
+    const result = await changeStatus("p1", "t1", "checking", "actor");
+
+    expect(result.ok).toBe(true);
   });
 });

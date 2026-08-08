@@ -7,7 +7,7 @@ import { subscribeBoardRefresh } from "@/lib/board-refresh";
 import { taskPath } from "@/lib/urls";
 import { timeAgo } from "@/lib/time";
 import { useAuth } from "@/hooks/use-auth";
-import { ApiProject, ApiSprint, ApiTask, ApiUser } from "@/types";
+import { ApiProject, ApiSprint, ApiTask, ApiUser, RunConflict } from "@/types";
 import { effectiveColumns } from "@/lib/columns";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Modal } from "@/components/ui/Modal";
@@ -130,6 +130,11 @@ function TaskDetailView({
   const { toast } = useToast();
 
   const [detailsOpen, setDetailsOpen] = useState(false);
+  // A status change the server refused because a worker holds this task, parked for the dialog
+  const [heldStatus, setHeldStatus] = useState<{
+    conflict: RunConflict;
+    retry: () => Promise<unknown>;
+  } | null>(null);
   const [addingChild, setAddingChild] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -155,15 +160,41 @@ function TaskDetailView({
   );
 
   async function handleStatusChange(status: string) {
+    const patch = (force?: boolean) =>
+      api.patch(`/api/projects/${projectId}/tasks/${task._id}/status`, {
+        status,
+        ...(force ? { force: true } : {}),
+      });
     try {
-      await api.patch(`/api/projects/${projectId}/tasks/${task._id}/status`, { status });
+      await patch();
       // A status change ends any run the task was under, and the server clears the execution phase
       // in the same write — so patching status alone would leave the panel asserting a live run the
       // user just stopped, counting up from a snapshot that is no longer true
       onReload();
+    } catch (err) {
+      // The board asks before taking a task off a worker; the detail view reaches the same refusal
+      // through the same endpoint and has to offer the same way out, or the only answer here is an
+      // error message for something that is not an error.
+      const failure = err as { status?: number; body?: { runConflict?: RunConflict } };
+      if (failure?.status === 409 && failure.body?.runConflict) {
+        setHeldStatus({ conflict: failure.body.runConflict, retry: () => patch(true) });
+        return;
+      }
+      toast("Failed to update status", "error");
+    }
+  }
+
+  async function forceHeldStatus() {
+    if (!heldStatus) return;
+    const pending = heldStatus;
+    setHeldStatus(null);
+    try {
+      await pending.retry();
+      toast(`${taskKey} taken from the worker`, "success");
     } catch {
       toast("Failed to update status", "error");
     }
+    onReload();
   }
 
   async function handleToggleWatch() {
@@ -386,6 +417,19 @@ function TaskDetailView({
         title="Delete Task"
         message={`Are you sure you want to delete ${taskKey} "${task.title}"? This action cannot be undone.`}
         loading={deleting}
+      />
+
+      <ConfirmDialog
+        open={!!heldStatus}
+        onClose={() => setHeldStatus(null)}
+        onConfirm={forceHeldStatus}
+        title="This task is being executed"
+        message={
+          heldStatus
+            ? `${taskKey} is being executed by ${heldStatus.conflict.workerName || heldStatus.conflict.workerId || "a worker"} (phase ${heldStatus.conflict.phase}). Moving it takes the task off that worker and its work is lost.`
+            : ""
+        }
+        confirmLabel="Move anyway"
       />
     </div>
   );

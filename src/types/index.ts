@@ -1021,6 +1021,15 @@ export interface ApiTask {
 // Only what a reader needs. lastError is deliberately absent — task-service writes it as "" and
 // never anything else — and so is attempts, which is decremented on refund and therefore counts
 // remaining budget, not the attempt number.
+// Returned with a 409 when a status change would take a task off the worker running it, so the
+// caller can name who holds it and offer to take it anyway
+export interface RunConflict {
+  workerId: string;
+  workerName?: string;
+  phase: string;
+  phaseAt: string | null;
+}
+
 export interface ApiTaskExecution {
   workerId?: string;
   workerName?: string;

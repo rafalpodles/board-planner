@@ -166,6 +166,15 @@ mcp-server/           # Standalone MCP server (stdio transport)
   stays a local decision. Work policy (`autoMerge`, `baseBranch`, diff limits, models) lives on the
   project; only `pollIntervalMs` and the kill switch live on the worker. `autoMerge` defaults off,
   so an unconfigured project gets a pull request and nothing merged. See `worker/README.md`.
+- **A held task refuses to move**: while a run holds a task (`execution.runId` set), a status change
+  that would leave the column is refused with **409**, naming the worker and its phase — through
+  every writer: the board, the edit form, MCP `update_task`, and the PM agent. `force: true` on the
+  request is the way past it, and the board asks for it with a confirm dialog rather than a toast.
+  The PM agent is deliberately given no way to force: an unattended agent must not take work off a
+  machine. Staying in the column — a reorder, or resending the status already held — never touches
+  the run. Staleness is **not** judged by silence: `agent` reports on tool use rather than on a
+  clock, so a worker thinking for minutes is indistinguishable from a dead one. A genuinely
+  abandoned run is reclaimed after `EXECUTION_LEASE_MS` (2 h) with attempt accounting.
 - **PM autonomy**: Opt-in per project (Settings → PM Agent → Autonomy). Board reviews run from `pm.autonomy.reviewHour` every `pm.autonomy.reviewIntervalHours` in the project's own timezone; each slot is claimed atomically via `pm.autonomy.lastReviewSlot` (`YYYY-MM-DDTHH`) so it runs at most once. A review gets a server-computed digest (missing acceptance criteria, tasks stuck in a column, duplicate titles — `src/lib/pm/board-review.ts`) and runs with `change_status`/`create_task` withheld. Tasks entering `needs_human_review` are queued in `pmtriggers` and reviewed automatically. Autonomous turns count against `pm.dailyTurnCap` and are attributed to the `pm` user. See `docs/superpowers/specs/2026-07-28-pm-phase2-autonomous-triggers.md`.
 
 ## Environment variables

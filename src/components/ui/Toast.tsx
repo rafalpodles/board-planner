@@ -66,6 +66,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
           {toasts.map((t) => (
             <div
               key={t.id}
+              data-testid="toast"
               className={`px-4 py-3 rounded-lg shadow-lg text-sm font-medium
                 animate-slide-in cursor-pointer
                 ${

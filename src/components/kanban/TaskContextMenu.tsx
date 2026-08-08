@@ -78,6 +78,8 @@ export function TaskContextMenu({
   return (
     <div
       ref={ref}
+      role="menu"
+      data-testid="task-context-menu"
       style={style}
       className="bg-bg-card border border-border rounded-lg shadow-lg py-1 min-w-[160px] text-sm"
     >
