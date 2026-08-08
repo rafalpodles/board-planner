@@ -7,6 +7,7 @@ import Image from "next/image";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { useAuth } from "@/hooks/use-auth";
+import { APP_NAME } from "@/lib/brand";
 
 export default function LoginPage() {
   const [username, setUsername] = useState("");
@@ -54,8 +55,8 @@ export default function LoginPage() {
     <div className="flex items-center justify-center min-h-screen px-4">
       <div className="w-full max-w-sm">
         <div className="flex flex-col items-center mb-8">
-          <Image src="/logo.svg" alt="ClaudePlanner" width={48} height={48} className="mb-3" />
-          <h1 className="text-2xl font-bold">ClaudePlanner</h1>
+          <Image src="/logo.svg" alt={APP_NAME} width={48} height={48} className="mb-3" />
+          <h1 className="text-2xl font-bold">{APP_NAME}</h1>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">

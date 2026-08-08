@@ -3,21 +3,30 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { ApiClient } from "./api-client.js";
 
-const CLAUDEPLANNER_URL = process.env.CLAUDEPLANNER_URL || "http://localhost:3000";
-const CLAUDEPLANNER_TOKEN = process.env.CLAUDEPLANNER_TOKEN;
-const CLAUDEPLANNER_USERNAME = process.env.CLAUDEPLANNER_USERNAME;
-const CLAUDEPLANNER_PASSWORD = process.env.CLAUDEPLANNER_PASSWORD;
+const APP_NAME = "Board Planner";
 
-if (!CLAUDEPLANNER_TOKEN && (!CLAUDEPLANNER_USERNAME || !CLAUDEPLANNER_PASSWORD)) {
-  console.error("CLAUDEPLANNER_TOKEN or CLAUDEPLANNER_USERNAME+CLAUDEPLANNER_PASSWORD environment variables are required");
+/**
+ * The BOARDPLANNER_ names are the ones to use. CLAUDEPLANNER_ still works because every client
+ * config written before the rename uses it, and a rename that silently stops an editor's MCP
+ * server from starting is worse than carrying two names.
+ */
+function setting(name: string): string | undefined {
+  return process.env[`BOARDPLANNER_${name}`] ?? process.env[`CLAUDEPLANNER_${name}`];
+}
+
+const APP_URL = setting("URL") || "http://localhost:3000";
+const TOKEN = setting("TOKEN");
+const USERNAME = setting("USERNAME");
+const PASSWORD = setting("PASSWORD");
+
+if (!TOKEN && (!USERNAME || !PASSWORD)) {
+  console.error("BOARDPLANNER_TOKEN or BOARDPLANNER_USERNAME+BOARDPLANNER_PASSWORD environment variables are required");
   process.exit(1);
 }
 
 const client = new ApiClient(
-  CLAUDEPLANNER_URL,
-  CLAUDEPLANNER_TOKEN
-    ? { token: CLAUDEPLANNER_TOKEN }
-    : { username: CLAUDEPLANNER_USERNAME!, password: CLAUDEPLANNER_PASSWORD! }
+  APP_URL,
+  TOKEN ? { token: TOKEN } : { username: USERNAME!, password: PASSWORD! }
 );
 
 const server = new McpServer({
@@ -29,7 +38,7 @@ const server = new McpServer({
 
 server.tool(
   "list_projects",
-  "List all projects in ClaudePlanner",
+  `List all projects in ${APP_NAME}`,
   {},
   async () => {
     const projects = await client.listProjects();
@@ -352,7 +361,7 @@ async function resolveTaskKey(taskKey: string): Promise<{ projectId: string; tas
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("ClaudePlanner MCP Server running on stdio");
+  console.error(`${APP_NAME} MCP Server running on stdio`);
 }
 
 main().catch((error) => {

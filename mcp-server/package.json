@@ -1,5 +1,5 @@
 {
-  "name": "claudeplanner-mcp-server",
+  "name": "board-planner-mcp-server",
   "version": "1.0.0",
   "private": true,
   "type": "module",

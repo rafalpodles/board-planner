@@ -1,4 +1,4 @@
-# ClaudePlanner execution worker
+# Board Planner execution worker
 
 Claims approved tasks, runs Claude Code headless in an isolated git worktree, enforces the merge
 gates and carries a task through to `done` — with nobody at the keyboard.

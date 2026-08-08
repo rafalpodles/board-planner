@@ -8,6 +8,7 @@ import { OAuthConsent } from "@/models/oauthConsent";
 import { Project } from "@/models/project";
 import { randomToken, sha256, AUTH_CODE_TTL_SECONDS } from "@/lib/oauth";
 import { IOAuthClient, IUser } from "@/types";
+import { APP_NAME } from "@/lib/brand";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -59,7 +60,7 @@ function readParamsFromForm(form: FormData): AuthParams {
 
 function htmlPage(body: string, status = 200): Response {
   return new Response(
-    `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ClaudePlanner — Authorize</title><style>
+    `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${APP_NAME} — Authorize</title><style>
       body{font-family:system-ui,-apple-system,sans-serif;background:#0f1115;color:#e6e6e6;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;padding:16px;box-sizing:border-box}
       .card{background:#1a1d24;border:1px solid #2a2e37;border-radius:12px;padding:32px;width:100%;max-width:380px}
       h1{font-size:18px;margin:0 0 4px}.sub{color:#9aa0aa;font-size:13px;margin:0 0 20px;line-height:1.5}
@@ -101,8 +102,8 @@ function hiddenFields(p: AuthParams): string {
 function loginForm(p: AuthParams, clientName: string, error?: string): Response {
   const label = clientName ? escapeHtml(clientName) : "An application";
   return htmlPage(`
-    <h1>Sign in to ClaudePlanner</h1>
-    <p class="sub"><span class="app">${label}</span> wants to access your ClaudePlanner account.</p>
+    <h1>Sign in to ${APP_NAME}</h1>
+    <p class="sub"><span class="app">${label}</span> wants to access your ${APP_NAME} account.</p>
     ${error ? `<div class="err">${escapeHtml(error)}</div>` : ""}
     <form method="post" action="/oauth/authorize">
       <input type="hidden" name="phase" value="login">

@@ -13,6 +13,7 @@ import { useMediaQuery } from "@/hooks/use-media-query";
 import { isNavItemActive } from "@/lib/nav-active";
 import { useProjects } from "@/hooks/use-projects";
 import { ProjectTree } from "./ProjectTree";
+import { APP_NAME } from "@/lib/brand";
 
 const ICONS = {
   myTasks:
@@ -231,7 +232,7 @@ export function Sidebar({
             className="focus-ring flex min-h-[44px] min-w-0 items-center gap-2 rounded md:min-h-0"
           >
             <Image src="/logo.svg" alt="" width={24} height={24} />
-            <span className="truncate text-[15px] font-bold">ClaudePlanner</span>
+            <span className="truncate text-[15px] font-bold">{APP_NAME}</span>
           </Link>
         )}
         <button

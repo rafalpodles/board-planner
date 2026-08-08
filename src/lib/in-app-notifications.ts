@@ -3,6 +3,7 @@ import { User } from "@/models/user";
 import { NotificationType } from "@/types";
 import { Types } from "mongoose";
 import { sendEmail, isEmailConfigured } from "@/lib/email";
+import { APP_NAME } from "@/lib/brand";
 
 interface NotifyParams {
   type: NotificationType;
@@ -74,7 +75,7 @@ async function sendEmailNotifications(
   for (const user of users) {
     sendEmail({
       to: user.email,
-      subject: `[ClaudePlanner] ${subject}`,
+      subject: `[${APP_NAME}] ${subject}`,
       text: body ? `${subject}\n\n${body}` : subject,
       html: `<p><strong>${escapeHtml(subject)}</strong></p>${body ? `<p>${escapeHtml(body)}</p>` : ""}`,
     }).catch(() => {});

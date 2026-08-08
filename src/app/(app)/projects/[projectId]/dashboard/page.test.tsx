@@ -51,7 +51,7 @@ async function renderDashboard(stats: Partial<Stats> = {}) {
   api.get.mockImplementation((url: string) =>
     url.endsWith("/stats")
       ? Promise.resolve({ ...emptyStats, ...stats })
-      : Promise.resolve({ name: "ClaudePlanner" })
+      : Promise.resolve({ name: "Board Planner" })
   );
   const view = render(<DashboardPage />);
   await screen.findByRole("heading", { name: /Dashboard/ });
