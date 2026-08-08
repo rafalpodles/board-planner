@@ -3,11 +3,11 @@ import { describe, it, expect, afterEach } from "vitest";
 import { render, screen, cleanup, act } from "@testing-library/react";
 import { Board } from "./Board";
 import { ApiTask, ApiProjectCategory } from "@/types";
-import { AnyColumn } from "@/lib/columns";
+import { ApiProjectColumn } from "@/types";
 
-const columns = [
-  { id: "todo", label: "To Do", color: "#0ea5e9", role: "approved", order: 0 },
-] as AnyColumn[];
+const columns: ApiProjectColumn[] = [
+  { _id: "c1", id: "todo", label: "To Do", color: "#0ea5e9", role: "approved", order: 0, triggersPmReview: false },
+];
 
 const tasks = [
   {
@@ -71,10 +71,10 @@ describe("Board category tinting", () => {
 });
 
 describe("Board empty-column rail", () => {
-  const twoColumns = [
-    { id: "todo", label: "To Do", color: "#0ea5e9", role: "approved", order: 0 },
-    { id: "done", label: "Done", color: "#22c55e", role: "done", order: 1 },
-  ] as AnyColumn[];
+  const twoColumns: ApiProjectColumn[] = [
+    { _id: "c1", id: "todo", label: "To Do", color: "#0ea5e9", role: "approved", order: 0, triggersPmReview: false },
+    { _id: "c2", id: "done", label: "Done", color: "#22c55e", role: "done", order: 1, triggersPmReview: false },
+  ];
 
   function renderTwoColumnBoard(collapseEmptyColumns?: boolean) {
     return render(
