@@ -8,6 +8,7 @@ import { useToast } from "@/components/ui/Toast";
 import { AuthGuard } from "@/components/AuthGuard";
 import { Button } from "@/components/ui/Button";
 import { WorkerPreset } from "@/types";
+import { APP_NAME } from "@/lib/brand";
 
 interface EnrolProject {
   _id: string;
@@ -56,7 +57,7 @@ function ConsentScreen({ children }: { children: React.ReactNode }) {
       <div className="w-full max-w-lg">
         <div className="mb-8 flex flex-col items-center">
           <Image src="/logo.svg" alt="" width={40} height={40} className="mb-3" />
-          <span className="text-sm font-medium text-text-muted">ClaudePlanner</span>
+          <span className="text-sm font-medium text-text-muted">{APP_NAME}</span>
         </div>
         {children}
       </div>

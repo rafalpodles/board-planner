@@ -24,6 +24,7 @@ import { useCanonicalUrl } from "@/hooks/use-canonical-url";
 import { projectPath, taskPath } from "@/lib/urls";
 import { BoardHeader } from "@/components/kanban/BoardHeader";
 import { sprintDefaultForNewTask, sprintScopeFromParam, sprintScopeToQuery } from "@/lib/sprint-scope";
+import { APP_NAME } from "@/lib/brand";
 
 // "relates" is symmetric and "duplicates" has a readable inverse, so a card should
 // show a relation regardless of which side created it. Every task is already loaded,
@@ -169,8 +170,8 @@ export default function KanbanPage() {
     if (inProgressCount > 0) parts.push(`${inProgressCount} in progress`);
     if (todoCount > 0) parts.push(`${todoCount} todo`);
     const suffix = parts.length > 0 ? ` (${parts.join(", ")})` : "";
-    document.title = `${project.name}${suffix} — ClaudePlanner`;
-    return () => { document.title = "ClaudePlanner"; };
+    document.title = `${project.name}${suffix} — ${APP_NAME}`;
+    return () => { document.title = APP_NAME; };
   }, [project, tasks]);
 
   useEffect(() => {

@@ -12,6 +12,7 @@ import { discoverMcpTools, callMcpTool, McpRuntime, MAX_MCP_CALLS_PER_TURN } fro
 import { replayHistory, stripSpoofedLabels, HISTORY_AUTHOR_PREFIX } from "./history";
 import { pmThreadFilter } from "./thread";
 import { getProjectColumns, defaultStatusFor } from "@/lib/columns";
+import { APP_NAME } from "@/lib/brand";
 
 const MAX_STEPS = 15;
 const MAX_WRITE_ACTIONS = 10;
@@ -60,7 +61,7 @@ function buildSystemPrompt(
   actor: PmActor | null
 ): string {
   const lines = [
-    `You are the PM (project manager) agent for the project "${project.name}" (key: ${project.key}) in ClaudePlanner.`,
+    `You are the PM (project manager) agent for the project "${project.name}" (key: ${project.key}) in ${APP_NAME}.`,
     `You manage the task board through tools: break features into tasks, refine descriptions and acceptance criteria, change statuses, assign people, answer questions about project state.`,
   ];
 

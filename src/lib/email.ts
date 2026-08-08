@@ -1,10 +1,11 @@
 import nodemailer from "nodemailer";
+import { APP_NAME, APP_DOMAIN } from "@/lib/brand";
 
 const SMTP_HOST = process.env.SMTP_HOST;
 const SMTP_PORT = parseInt(process.env.SMTP_PORT || "587", 10);
 const SMTP_USER = process.env.SMTP_USER;
 const SMTP_PASS = process.env.SMTP_PASS;
-const SMTP_FROM = process.env.SMTP_FROM || "ClaudePlanner <noreply@claudeplanner.app>";
+const SMTP_FROM = process.env.SMTP_FROM || `${APP_NAME} <noreply@${APP_DOMAIN}>`;
 
 let transporter: nodemailer.Transporter | null = null;
 

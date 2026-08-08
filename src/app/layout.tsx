@@ -2,9 +2,10 @@ import type { Metadata } from "next";
 import { AuthProvider } from "@/components/AuthProvider";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import "./globals.css";
+import { APP_NAME } from "@/lib/brand";
 
 export const metadata: Metadata = {
-  title: "ClaudePlanner",
+  title: APP_NAME,
   description: "Task management with Kanban board",
 };
 

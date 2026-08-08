@@ -8,6 +8,7 @@ import { SearchIconButton } from "@/components/search/SearchTrigger";
 import { PmChatWidget } from "@/components/pm/PmChatWidget";
 import { ProjectsProvider } from "@/components/shell/ProjectsProvider";
 import { Sidebar } from "@/components/shell/Sidebar";
+import { APP_NAME } from "@/lib/brand";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [navOpen, setNavOpen] = useState(false);
@@ -64,7 +65,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 </svg>
               </button>
               <Image src="/logo.svg" alt="" width={20} height={20} />
-              <span className="text-sm font-bold">ClaudePlanner</span>
+              <span className="text-sm font-bold">{APP_NAME}</span>
               <div className="ml-auto">
                 <SearchIconButton onOpen={openSearch} />
               </div>

@@ -1,4 +1,4 @@
-# ClaudePlanner
+# Board Planner
 
 ## Documentation — Notion
 
@@ -16,7 +16,7 @@ Search Notion first to check if a relevant page already exists before creating a
 
 ---
 
-## ClaudePlanner integration
+## Board Planner integration
 claudeplanner_project_key: CP
 
 ### Workflow
@@ -202,4 +202,4 @@ cd mcp-server && npm run build   # MCP server
 
 ## Deploy
 Railway auto-deploys from `main` branch.
-App: https://claude-planner-production.up.railway.app
+App: https://board-planner.com

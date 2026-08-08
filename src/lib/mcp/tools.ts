@@ -3,6 +3,7 @@ import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { z } from "zod";
 import { PlannerClient } from "./planner-client";
 import { resolveFieldsByName } from "@/lib/custom-fields";
+import { APP_NAME } from "@/lib/brand";
 
 type ToolExtra = { authInfo?: AuthInfo };
 
@@ -23,7 +24,7 @@ function json(value: unknown) {
 export function registerPlannerTools(server: McpServer): void {
   // --- Projects ---
 
-  server.tool("list_projects", "List all projects in ClaudePlanner", {}, async (_args, extra) => {
+  server.tool("list_projects", `List all projects in ${APP_NAME}`, {}, async (_args, extra) => {
     return json(await clientFrom(extra).listProjects());
   });
 
