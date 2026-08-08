@@ -62,6 +62,29 @@ function pickerRow(page: Page, name: string): Locator {
   return page.locator('button[aria-haspopup="dialog"]').filter({ hasText: name });
 }
 
+/** The row itself, whichever shape it has — the picker button, or the checkbox's own container. */
+function fieldRow(page: Page, name: string): Locator {
+  return page
+    .getByText(name, { exact: true })
+    .locator("xpath=ancestor::*[self::button or self::div][1]");
+}
+
+/**
+ * Waits for the rail to show what was just saved before the next step touches it. Without this
+ * the next edit can read a draft the server response has not caught up with yet, and a second
+ * selection lands on top of a value that has been rolled back — which is how "iOS, Web" became
+ * "iOS" on a CI runner while passing on a faster laptop every time.
+ */
+async function expectRailShows(page: Page, name: string, text: string) {
+  const row = fieldRow(page, name);
+  // Compared piece by piece: a multiselect draws one chip per option, so the row reads "iOSWeb"
+  // where the history entry reads "iOS, Web". Same value, two renderings — the ordering guarantee
+  // is asserted on the entry itself.
+  for (const piece of text ? text.split(", ") : ["Empty"]) {
+    await expect(row).toContainText(piece);
+  }
+}
+
 async function openPicker(page: Page, name: string): Promise<Locator> {
   await pickerRow(page, name).click();
   return page.getByLabel(name, { exact: true });
@@ -204,6 +227,7 @@ for (const { type, name, steps } of LIFECYCLES) {
         oldValue: step.from,
         newValue: step.to,
       });
+      await expectRailShows(page, name, step.to);
     }
 
     // Nothing else moved: a field no lifecycle touches must stay silent throughout
