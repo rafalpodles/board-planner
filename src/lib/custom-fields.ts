@@ -386,16 +386,44 @@ export function customFieldActivityChanges(
   after: StoredFieldValues,
   fields: DiffableField[]
 ): FieldChange[] {
-  const was_ = asValueRecord(before);
-  const now_ = asValueRecord(after);
+  const from = asValueRecord(before);
+  const to = asValueRecord(after);
   const changes: FieldChange[] = [];
   for (const field of fields) {
     const resolved = { ...field, _id: String(field._id) };
-    const was = fieldCellText(was_, resolved);
-    const now = fieldCellText(now_, resolved);
+    const was = displayedValue(from, resolved);
+    const now = displayedValue(to, resolved);
     if (was !== now) changes.push({ name: field.name, before: was, after: now });
   }
   return changes;
+}
+
+/**
+ * What the task actually shows for one field. A multiselect is stored in the order the options
+ * were picked but rendered in the project's own order, so un-picking and re-picking one option
+ * rewrites the array without changing anything a reader can see — and comparing the stored order
+ * would log that as a change.
+ */
+function displayedValue(
+  values: Record<string, unknown>,
+  field: DiffableField & { _id: string }
+): string {
+  const stored = values[field._id];
+
+  // A checkbox nobody has touched renders as "No", exactly like one that was ticked and
+  // unticked, so reading the untouched one as blank would log a change to the state it is
+  // already showing.
+  if (field.fieldType === "checkbox") {
+    return fieldCellText({ [field._id]: stored === true }, field);
+  }
+
+  if (!Array.isArray(stored)) return fieldCellText(values, field);
+
+  const rank = new Map(orderedOptions(field).map((option, index) => [option.id, index]));
+  const inOptionOrder = [...stored].sort(
+    (a, b) => (rank.get(String(a)) ?? 0) - (rank.get(String(b)) ?? 0)
+  );
+  return fieldCellText({ [field._id]: inOptionOrder }, field);
 }
 
 /**

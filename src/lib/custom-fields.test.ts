@@ -378,11 +378,14 @@ describe("customFieldActivityChanges", () => {
     name: "Platforms",
     fieldType: "multiselect",
     options: [
-      { id: "opt-ios", value: "iOS", color: "#000", order: 0 },
-      { id: "opt-web", value: "Web", color: "#000", order: 1 },
+      { id: "p2-ios", value: "iOS", color: "#000", order: 0 },
+      { id: "p1-web", value: "Web", color: "#000", order: 1 },
     ],
   });
   const notes = field({ _id: "f-notes", name: "Notes", fieldType: "text" });
+  const spike = field({ _id: "f-spike", name: "Spike?", fieldType: "checkbox" });
+  const points = field({ _id: "f-pts", name: "Points", fieldType: "number" });
+  const target = field({ _id: "f-date", name: "Target", fieldType: "date" });
 
   // The bug this exists for: an option id in history names nothing a reader recognises
   it("reports the option's text, not its id", () => {
@@ -430,8 +433,8 @@ describe("customFieldActivityChanges", () => {
   it("lists every selection of a multiselect", () => {
     expect(
       customFieldActivityChanges(
-        { "f-plat": ["opt-ios"] },
-        { "f-plat": ["opt-ios", "opt-web"] },
+        { "f-plat": ["p2-ios"] },
+        { "f-plat": ["p2-ios", "p1-web"] },
         [platforms]
       )
     ).toEqual([{ name: "Platforms", before: "iOS", after: "iOS, Web" }]);
@@ -448,6 +451,53 @@ describe("customFieldActivityChanges", () => {
         [difficulty]
       )
     ).toEqual([{ name: "Difficulty", before: "M", after: "L" }]);
+  });
+
+  // The rail renders a multiselect in the project's own option order, and its toggle appends, so
+  // un-picking and re-picking one option rewrites the stored array while the screen never changes.
+  it("says nothing when a multiselect is reordered but still holds the same options", () => {
+    expect(
+      customFieldActivityChanges(
+        { "f-plat": ["p2-ios", "p1-web"] },
+        { "f-plat": ["p1-web", "p2-ios"] },
+        [platforms]
+      )
+    ).toEqual([]);
+  });
+
+  it("reports a reordered multiselect that also gained an option, in the project's order", () => {
+    expect(
+      customFieldActivityChanges({ "f-plat": ["p1-web"] }, { "f-plat": ["p1-web", "p2-ios"] }, [
+        platforms,
+      ])
+    ).toEqual([{ name: "Platforms", before: "Web", after: "iOS, Web" }]);
+  });
+
+  // The rail draws an untouched checkbox and an unticked one identically ("No"), so reading the
+  // untouched one as blank would log a change to the state already on screen.
+  it("says nothing when a checkbox goes from never-set to explicitly false", () => {
+    expect(customFieldActivityChanges({}, { "f-spike": false }, [spike])).toEqual([]);
+  });
+
+  it("reports a ticked checkbox in the words the task shows", () => {
+    expect(customFieldActivityChanges({}, { "f-spike": true }, [spike])).toEqual([
+      { name: "Spike?", before: "No", after: "Yes" },
+    ]);
+    expect(customFieldActivityChanges({ "f-spike": true }, { "f-spike": false }, [spike])).toEqual([
+      { name: "Spike?", before: "Yes", after: "No" },
+    ]);
+  });
+
+  it("reports a number, including a change to zero", () => {
+    expect(customFieldActivityChanges({ "f-pts": 3 }, { "f-pts": 0 }, [points])).toEqual([
+      { name: "Points", before: "3", after: "0" },
+    ]);
+  });
+
+  it("reports a date", () => {
+    expect(
+      customFieldActivityChanges({}, { "f-date": "2026-08-08" }, [target])
+    ).toEqual([{ name: "Target", before: "", after: "2026-08-08" }]);
   });
 
   it("ignores a value whose field the project no longer defines", () => {
