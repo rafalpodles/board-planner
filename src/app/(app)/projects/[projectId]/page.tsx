@@ -76,10 +76,11 @@ export default function KanbanPage() {
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ taskId: string; x: number; y: number } | null>(null);
-  // A move the server refused because a worker holds the task, parked until the person decides
+  // A move the server refused because a worker holds the task, parked until the person decides.
+  // Carries the retry rather than a request body: the board reaches the same refusal through two
+  // different endpoints, and both have to offer the same way out.
   const [heldMove, setHeldMove] = useState<{
-    taskId: string;
-    body: Record<string, unknown>;
+    retry: () => Promise<unknown>;
     conflict: RunConflict;
     taskKey: string;
   } | null>(null);
@@ -336,18 +337,35 @@ export default function KanbanPage() {
     }
   }
 
+  // A refusal because a worker holds the task is not a failure to report — it is a question to
+  // ask. Returns true when it parked one, so the caller skips its own error handling.
+  function parkIfHeld(err: unknown, taskId: string, retry: () => Promise<unknown>): boolean {
+    const failure = err as { status?: number; body?: { runConflict?: RunConflict } };
+    if (failure?.status !== 409 || !failure.body?.runConflict) return false;
+    const task = tasks.find((t) => t._id === taskId);
+    setHeldMove({
+      retry,
+      conflict: failure.body.runConflict,
+      taskKey: `${project?.key}-${task?.taskNumber}`,
+    });
+    return true;
+  }
+
   async function handleStatusChange(taskId: string, status: string) {
+    const patch = (force?: boolean) =>
+      api.patch(`/api/projects/${projectId}/tasks/${taskId}/status`, {
+        status,
+        ...(force ? { force: true } : {}),
+      });
     try {
-      await api.patch(
-        `/api/projects/${projectId}/tasks/${taskId}/status`,
-        { status }
-      );
+      await patch();
       setTasks((prev) =>
         prev.map((t) =>
           t._id === taskId ? { ...t, status: status as ApiTask["status"] } : t
         )
       );
-    } catch {
+    } catch (err) {
+      if (parkIfHeld(err, taskId, () => patch(true))) return;
       toast("Failed to update status", "error");
     }
   }
@@ -394,13 +412,9 @@ export default function KanbanPage() {
     } catch (err) {
       // A worker is running this task. Ask rather than silently taking it off the machine —
       // the optimistic move is rolled back either way, by confirming or by loadData below.
-      const conflict = (err as { status?: number; body?: { runConflict?: RunConflict } })?.status === 409
-        ? (err as { body?: { runConflict?: RunConflict } }).body?.runConflict
-        : undefined;
-      if (conflict) {
-        setHeldMove({ taskId, body, conflict, taskKey: `${project?.key}-${moved?.taskNumber}` });
-        return;
-      }
+      const retry = () =>
+        api.put(`/api/projects/${projectId}/tasks/${taskId}`, { ...body, force: true });
+      if (parkIfHeld(err, taskId, retry)) return;
       toast("Failed to move task", "error");
       loadData();
     }
@@ -411,10 +425,7 @@ export default function KanbanPage() {
     const pending = heldMove;
     setHeldMove(null);
     try {
-      await api.put(`/api/projects/${projectId}/tasks/${pending.taskId}`, {
-        ...pending.body,
-        force: true,
-      });
+      await pending.retry();
       toast(`${pending.taskKey} taken from the worker`, "success");
     } catch {
       toast("Failed to move task", "error");
