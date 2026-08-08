@@ -4,7 +4,7 @@ import { Project } from "@/models/project";
 import { User } from "@/models/user";
 import { Comment } from "@/models/comment";
 import { Worker } from "@/models/worker";
-import { ApiTaskExecution, ITask, ITaskExecution, RunConflict, DEFAULT_PRIORITY } from "@/types";
+import { ApiTaskExecution, ICustomField, ITask, ITaskExecution, RunConflict, DEFAULT_PRIORITY } from "@/types";
 import { getColumnIds, defaultStatusFor, roleOf, getProjectColumns } from "@/lib/columns";
 import { escalationColumnId } from "@/lib/escalation";
 import { logActivity } from "@/lib/activity";
@@ -12,7 +12,11 @@ import { dispatchWebhooks } from "@/lib/webhooks";
 import { dispatchNotifications } from "@/lib/notifications";
 import { createNotifications, collectRecipients, resolveMentions } from "@/lib/in-app-notifications";
 import { parseChecklistString } from "@/lib/checklist";
-import { validateCustomFieldValues, sanitizeCustomFieldValues } from "@/lib/custom-fields";
+import {
+  validateCustomFieldValues,
+  sanitizeCustomFieldValues,
+  customFieldActivityChanges,
+} from "@/lib/custom-fields";
 import { onTaskStatusChanged } from "@/lib/pm/triggers";
 
 export const MAX_EXECUTION_ATTEMPTS = 3;
@@ -350,15 +354,17 @@ export async function updateTask(
     updates.checklist = parseChecklistString(acText);
   }
 
+  // Kept in scope past validation: the same definitions name the fields in the history entries
+  let fieldDefs: ICustomField[] = [];
   if (updates.customFieldValues !== undefined) {
     const raw = updates.customFieldValues;
+    const project = await Project.findById(projectId, "customFields").lean();
+    fieldDefs = project?.customFields || [];
     if (typeof raw !== "object" || Array.isArray(raw) || raw === null) {
       updates.customFieldValues = {};
     } else {
-      const project = await Project.findById(projectId, "customFields").lean();
-      const defs = project?.customFields || [];
-      const sanitized = sanitizeCustomFieldValues(raw as Record<string, unknown>, defs);
-      const result = validateCustomFieldValues(sanitized, defs);
+      const sanitized = sanitizeCustomFieldValues(raw as Record<string, unknown>, fieldDefs);
+      const result = validateCustomFieldValues(sanitized, fieldDefs);
       if (!result.valid) {
         return { ok: false, error: result.error ?? "Invalid custom field values", status: 400 };
       }
@@ -430,6 +436,18 @@ export async function updateTask(
       const action = field === "status" ? "status_changed" as const : "updated" as const;
       activities.push(logActivity(taskId, actorId, action, field, oldVal, newVal));
     }
+  }
+
+  // Since CP-213 the fields a project defines are most of what people actually edit, so a
+  // fixed trackFields list leaves the bulk of every change unrecorded.
+  for (const change of customFieldActivityChanges(
+    oldTask.customFieldValues,
+    task.customFieldValues,
+    fieldDefs
+  )) {
+    activities.push(
+      logActivity(taskId, actorId, "updated", change.name, change.before, change.after)
+    );
   }
 
   if (updates.assignee !== undefined) {

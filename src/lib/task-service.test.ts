@@ -98,6 +98,8 @@ const {
   EXECUTION_LEASE_MS,
 } = await import("./task-service");
 
+const { logActivity } = await import("@/lib/activity");
+
 function matches(filter: unknown, doc: unknown): boolean {
   return sift(filter as Record<string, unknown>)(doc);
 }
@@ -1021,5 +1023,78 @@ describe("releaseTask only applies to a task the run still holds", () => {
     const filter = findOneAndUpdate.mock.calls[0][0];
     expect(matches(filter, held)).toBe(true);
     expect(matches(filter, released)).toBe(false);
+  });
+});
+
+// Before CP-250 only a fixed list of columns reached the history, so every project-defined field
+// — which since CP-213 is most of what people edit — changed in silence.
+describe("updateTask writing project fields to the history", () => {
+  const difficulty = {
+    _id: "f-diff",
+    name: "Difficulty",
+    fieldType: "dropdown",
+    options: [
+      { id: "opt-m", value: "M", color: "#000", order: 0 },
+      { id: "opt-l", value: "L", color: "#000", order: 1 },
+    ],
+  };
+  const board = { ...customBoard, customFields: [difficulty] };
+
+  function stored(values: Record<string, unknown> | Map<string, unknown>) {
+    return { _id: "t1", taskNumber: 7, status: "doing", title: "x", customFieldValues: values };
+  }
+
+  function fieldEntries() {
+    return (logActivity as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (call) => call[3] === "Difficulty"
+    );
+  }
+
+  // The two sides genuinely differ in production: the read before the write is lean and gives a
+  // plain object, while the update returns a hydrated document whose values are a Map. Feeding
+  // both sides the same shape here would hide exactly that.
+  function setup(before: Record<string, unknown>, after: Record<string, unknown>) {
+    vi.clearAllMocks();
+    findById.mockReturnValue({ lean: () => Promise.resolve(board) });
+    findOne.mockReturnValue({
+      lean: () => Promise.resolve(stored(before)),
+      populate: () => ({ lean: () => Promise.resolve(stored(before)) }),
+    });
+    findOneAndUpdate.mockReturnValue({
+      populate: () => Promise.resolve(stored(new Map(Object.entries(after)))),
+    });
+  }
+
+  it("logs the change under the field's name, in the values a reader recognises", async () => {
+    setup({ "f-diff": "opt-m" }, { "f-diff": "opt-l" });
+
+    const result = await updateTask("p1", "t1", { customFieldValues: { "f-diff": "opt-l" } }, "actor");
+
+    expect(result.ok).toBe(true);
+    expect(logActivity).toHaveBeenCalledWith("t1", "actor", "updated", "Difficulty", "M", "L");
+  });
+
+  it("logs a cleared field rather than passing over it", async () => {
+    setup({ "f-diff": "opt-m" }, {});
+
+    await updateTask("p1", "t1", { customFieldValues: {} }, "actor");
+
+    expect(logActivity).toHaveBeenCalledWith("t1", "actor", "updated", "Difficulty", "M", "");
+  });
+
+  it("writes one entry per field, never two", async () => {
+    setup({ "f-diff": "opt-m" }, { "f-diff": "opt-l" });
+
+    await updateTask("p1", "t1", { customFieldValues: { "f-diff": "opt-l" } }, "actor");
+
+    expect(fieldEntries()).toHaveLength(1);
+  });
+
+  it("says nothing when an edit leaves the fields alone", async () => {
+    setup({ "f-diff": "opt-m" }, { "f-diff": "opt-m" });
+
+    await updateTask("p1", "t1", { title: "renamed" }, "actor");
+
+    expect(fieldEntries()).toHaveLength(0);
   });
 });

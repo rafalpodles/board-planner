@@ -38,4 +38,32 @@ describe("ActivityTimeline", () => {
     render(<ActivityTimeline projectId="TP" taskId="t1" />);
     await waitFor(() => expect(screen.getByText(/Unknown created this task/)).toBeTruthy());
   });
+
+  // "updated Difficulty" is not history — a reader wants to know what it became
+  it("says what a field changed from and to", async () => {
+    api.get.mockResolvedValue([
+      { ...log, action: "updated", field: "Difficulty", oldValue: "M", newValue: "L" },
+    ]);
+    render(<ActivityTimeline projectId="TP" taskId="t1" />);
+    await waitFor(() =>
+      expect(screen.getByText(/changed Difficulty from M to L/)).toBeTruthy()
+    );
+  });
+
+  it("marks a cleared value as empty rather than trailing off", async () => {
+    api.get.mockResolvedValue([
+      { ...log, action: "updated", field: "Difficulty", oldValue: "M", newValue: "" },
+    ]);
+    render(<ActivityTimeline projectId="TP" taskId="t1" />);
+    await waitFor(() =>
+      expect(screen.getByText(/changed Difficulty from M to \(empty\)/)).toBeTruthy()
+    );
+  });
+
+  // Entries written before CP-250 carry no values at all
+  it("keeps the plain wording for an entry that recorded no values", async () => {
+    api.get.mockResolvedValue([{ ...log, action: "updated", field: "checklist" }]);
+    render(<ActivityTimeline projectId="TP" taskId="t1" />);
+    await waitFor(() => expect(screen.getByText(/updated checklist/)).toBeTruthy());
+  });
 });
