@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { usePollWhileVisible } from "@/hooks/use-poll-while-visible";
-import { ApiProject, ApiTask, ApiSprint , ApiUserSummary, BOARD_SORT_FIELDS, LIST_SORT_FIELDS, SortField, SortKey, SortDir } from "@/types";
+import { ApiProject, ApiTask, ApiSprint , ApiUserSummary, RunConflict, BOARD_SORT_FIELDS, LIST_SORT_FIELDS, SortField, SortKey, SortDir } from "@/types";
 import { effectiveColumns } from "@/lib/columns";
 import { ListColumnId } from "@/lib/list-columns";
 import { subscribeBoardRefresh } from "@/lib/board-refresh";
@@ -76,6 +76,13 @@ export default function KanbanPage() {
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ taskId: string; x: number; y: number } | null>(null);
+  // A move the server refused because a worker holds the task, parked until the person decides
+  const [heldMove, setHeldMove] = useState<{
+    taskId: string;
+    body: Record<string, unknown>;
+    conflict: RunConflict;
+    taskKey: string;
+  } | null>(null);
   const [confirmContextDelete, setConfirmContextDelete] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   // One owner for both views: the filter bar's dropdown and the list's column
@@ -373,19 +380,46 @@ export default function KanbanPage() {
       )
     );
 
-    try {
+    const moved = tasks.find((t) => t._id === taskId);
+    const body = {
+      order: newOrder,
       // Status only when it actually changes: a drop inside the same column is a
       // reorder, and sending the status it already has would stamp updatedAt and
       // release the task from any run a worker is holding it for
-      const moved = tasks.find((t) => t._id === taskId);
-      await api.put(`/api/projects/${projectId}/tasks/${taskId}`, {
-        order: newOrder,
-        ...(moved?.status === status ? {} : { status }),
-      });
-    } catch {
+      ...(moved?.status === status ? {} : { status }),
+    };
+
+    try {
+      await api.put(`/api/projects/${projectId}/tasks/${taskId}`, body);
+    } catch (err) {
+      // A worker is running this task. Ask rather than silently taking it off the machine —
+      // the optimistic move is rolled back either way, by confirming or by loadData below.
+      const conflict = (err as { status?: number; body?: { runConflict?: RunConflict } })?.status === 409
+        ? (err as { body?: { runConflict?: RunConflict } }).body?.runConflict
+        : undefined;
+      if (conflict) {
+        setHeldMove({ taskId, body, conflict, taskKey: `${project?.key}-${moved?.taskNumber}` });
+        return;
+      }
       toast("Failed to move task", "error");
       loadData();
     }
+  }
+
+  async function forceHeldMove() {
+    if (!heldMove) return;
+    const pending = heldMove;
+    setHeldMove(null);
+    try {
+      await api.put(`/api/projects/${projectId}/tasks/${pending.taskId}`, {
+        ...pending.body,
+        force: true,
+      });
+      toast(`${pending.taskKey} taken from the worker`, "success");
+    } catch {
+      toast("Failed to move task", "error");
+    }
+    loadData();
   }
 
   // The list hands back only the rows it shows, so a filtered list reindexes just
@@ -668,6 +702,24 @@ export default function KanbanPage() {
         title="Delete Task"
         message="Are you sure you want to delete this task? This action cannot be undone."
         confirmLabel="Delete"
+      />
+
+      {/* The move was refused because a worker is running the task. Taking it costs that run,
+          so it needs a deliberate click rather than a link in a toast that disappears. */}
+      <ConfirmDialog
+        open={!!heldMove}
+        onClose={() => {
+          setHeldMove(null);
+          loadData();
+        }}
+        onConfirm={forceHeldMove}
+        title="This task is being executed"
+        message={
+          heldMove
+            ? `${heldMove.taskKey} is being executed by ${heldMove.conflict.workerName || heldMove.conflict.workerId || "a worker"} (phase ${heldMove.conflict.phase}). Moving it takes the task off that worker and its work is lost.`
+            : ""
+        }
+        confirmLabel="Move anyway"
       />
 
       <Modal

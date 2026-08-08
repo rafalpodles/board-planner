@@ -76,9 +76,15 @@ export const PUT = withProjectAccess(async (request, { params, user }) => {
 
   const body = await request.json();
 
-  const result = await updateTask(projectId, taskId, body, String(user._id));
+  // Kept out of the update itself: `force` is a instruction about the write, not a field on the task
+  const { force, ...updates } = body ?? {};
+
+  const result = await updateTask(projectId, taskId, updates, String(user._id), force === true);
   if (!result.ok) {
-    return NextResponse.json({ error: result.error }, { status: result.status });
+    return NextResponse.json(
+      { error: result.error, ...(result.runConflict ? { runConflict: result.runConflict } : {}) },
+      { status: result.status }
+    );
   }
 
   return NextResponse.json(result.data);

@@ -31,7 +31,12 @@ export function useApi() {
 
       if (!res.ok) {
         const error = await res.json().catch(() => ({ error: res.statusText }));
-        throw new Error(error.error || res.statusText);
+        // Message stays the whole error for every existing caller; status and body ride along
+        // for the few that need to tell one refusal from another rather than just report it
+        throw Object.assign(new Error(error.error || res.statusText), {
+          status: res.status,
+          body: error,
+        });
       }
 
       return res.json();
@@ -55,7 +60,12 @@ export function useApi() {
 
       if (!res.ok) {
         const error = await res.json().catch(() => ({ error: res.statusText }));
-        throw new Error(error.error || res.statusText);
+        // Message stays the whole error for every existing caller; status and body ride along
+        // for the few that need to tell one refusal from another rather than just report it
+        throw Object.assign(new Error(error.error || res.statusText), {
+          status: res.status,
+          body: error,
+        });
       }
 
       return res.json();
