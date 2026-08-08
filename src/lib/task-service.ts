@@ -48,6 +48,12 @@ const CLEAR_WORKER_ASSIGNEE = {
   },
 };
 
+// A release only applies to a task the run still holds. Status alone is not enough: a board may
+// define two columns with the active role, and a forced move between them leaves the task active
+// while the run is already gone — the release would then pull it back to the approved column and
+// spend an attempt for a move somebody made deliberately.
+const STILL_HELD = { "execution.runId": { $nin: ["", null] } };
+
 // Four times the worker's default task timeout. A worker killed mid-run leaves its task in the
 // active column, where claimNextTask can never see it again — nothing else reclaims it.
 export const EXECUTION_LEASE_MS = 2 * 60 * 60 * 1000;
@@ -731,7 +737,7 @@ export async function releaseTask(
     const exhausted = escalationColumnId(columns) ?? approved;
 
     return Task.findOneAndUpdate(
-      { _id: taskId, project: projectId, status: { $in: active } },
+      { _id: taskId, project: projectId, status: { $in: active }, ...STILL_HELD },
       [
         {
           $set: {
@@ -757,6 +763,7 @@ export async function releaseTask(
       project: projectId,
       status: { $in: active },
       "execution.attempts": { $gt: 0 },
+      ...STILL_HELD,
     },
     [
       {
