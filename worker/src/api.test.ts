@@ -450,6 +450,38 @@ describe("createApiClient", () => {
     expect(init.headers["X-CP-Protocol"]).toBe("1");
   });
 
+  // The one thing the run can learn from a phase post: the server wrote nothing, because the task
+  // is no longer this run's. Discarding the answer is what let a detached run keep working.
+  it("returns what the server did with the event", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ applied: false }),
+    });
+    const api = createApiClient(config, fetchMock as never, identityStore);
+
+    expect(await api.postEvent({ taskId: "t1", runId: "run-1", phase: "agent" })).toEqual({
+      applied: false,
+    });
+  });
+
+  // The caller ends the run on a refusal, so anything short of an explicit false — a proxy's error
+  // page, a server with no such field — has to read as applied
+  it("treats a body it cannot read as applied rather than as a refusal", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => {
+        throw new SyntaxError("Unexpected token < in JSON at position 0");
+      },
+    });
+    const api = createApiClient(config, fetchMock as never, identityStore);
+
+    expect(await api.postEvent({ taskId: "t1", runId: "run-1", phase: "agent" })).toEqual({
+      applied: true,
+    });
+  });
+
   // The server keeps the highest seq it has seen and drops the rest, so the order events were
   // reported in has to survive a network that reorders them
   it("stamps each event with a seq that only goes up", async () => {
