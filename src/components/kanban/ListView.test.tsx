@@ -446,3 +446,38 @@ describe("ListView custom field picker", () => {
     expect(badge?.getAttribute("style")).toContain("#ff0000");
   });
 });
+
+// CP-235 follow-up. The list showed nothing at all: the only way to learn a worker held a task
+// was to try to move it and be refused.
+describe("ListView, a task a worker is running", () => {
+  const asOf = "2026-08-01T12:00:00Z";
+  const secondsAgo = (s: number) => new Date(Date.parse(asOf) - s * 1000).toISOString();
+
+  const withRun = (execution: Record<string, unknown>) => [
+    { ...tasks[0], execution: { asOf, ...execution } },
+    ...tasks.slice(1),
+  ];
+
+  it("marks the row a run holds", () => {
+    renderList({
+      tasks: withRun({ workerName: "mac-mini", phase: "agent", phaseAt: secondsAgo(30) }) as never,
+    });
+    const dot = screen.getByTestId("row-run-live");
+    expect(dot).toBeTruthy();
+    expect(dot.getAttribute("title")).toBe("Being executed — mac-mini · agent");
+  });
+
+  it("stops calling it live once the worker goes quiet", () => {
+    renderList({
+      tasks: withRun({ workerName: "mac-mini", phase: "agent", phaseAt: secondsAgo(20 * 60) }) as never,
+    });
+    expect(screen.getByTestId("row-run-quiet")).toBeTruthy();
+    expect(screen.queryByTestId("row-run-live")).toBeNull();
+  });
+
+  it("says nothing when no run holds the task", () => {
+    renderList();
+    expect(screen.queryByTestId("row-run-live")).toBeNull();
+    expect(screen.queryByTestId("row-run-quiet")).toBeNull();
+  });
+});

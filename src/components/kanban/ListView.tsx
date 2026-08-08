@@ -40,6 +40,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Combobox, ComboboxOption } from "@/components/ui/Combobox";
 import { categoryColor, categoryTint } from "@/lib/category-colors";
 import { timeAgo } from "@/lib/time";
+import { RunDot } from "@/components/kanban/RunDot";
 
 interface ListViewProps {
   tasks: ApiTask[];
@@ -517,7 +518,10 @@ export function ListView({
                     className="px-2 py-2 font-mono text-xs text-text-muted max-w-24"
                     title={taskKey}
                   >
-                    <span className="truncate">{taskKey}</span>
+                    <span className="flex items-center gap-1.5">
+                      <span className="truncate">{taskKey}</span>
+                      <RunDot execution={task.execution} />
+                    </span>
                   </td>
                   <td
                     // overflow-hidden on the cell too: the column can be squeezed
