@@ -248,23 +248,38 @@ export default function KanbanPage() {
   }
 
   async function handleBulkMove(status: string) {
-    try {
-      await Promise.all(
-        Array.from(selectedTasks).map((id) =>
-          api.patch(`/api/projects/${projectId}/tasks/${id}/status`, { status })
-        )
-      );
-      setTasks((prev) =>
-        prev.map((t) =>
-          selectedTasks.has(t._id)
-            ? { ...t, status: status as ApiTask["status"] }
-            : t
-        )
-      );
-      setSelectedTasks(new Set());
-      toast(`Moved ${selectedTasks.size} task${selectedTasks.size === 1 ? "" : "s"}`, "success");
-    } catch {
-      toast("Failed to move tasks", "error");
+    const ids = Array.from(selectedTasks);
+    // Settled, not all: one task held by a worker used to reject the whole batch while the others
+    // had already moved server-side, leaving the board saying nothing worked when most of it had.
+    const outcomes = await Promise.allSettled(
+      ids.map((id) => api.patch(`/api/projects/${projectId}/tasks/${id}/status`, { status }))
+    );
+
+    const movedIds = new Set(ids.filter((_, i) => outcomes[i].status === "fulfilled"));
+    const held = outcomes
+      .map((outcome, i) => ({ outcome, id: ids[i] }))
+      .filter(({ outcome }) => {
+        if (outcome.status !== "rejected") return false;
+        const failure = outcome.reason as { status?: number; body?: { runConflict?: unknown } };
+        return failure?.status === 409 && !!failure.body?.runConflict;
+      })
+      .map(({ id }) => tasks.find((t) => t._id === id)?.taskNumber)
+      .filter(Boolean);
+
+    setTasks((prev) =>
+      prev.map((t) => (movedIds.has(t._id) ? { ...t, status: status as ApiTask["status"] } : t))
+    );
+    setSelectedTasks(new Set());
+
+    if (movedIds.size === ids.length) {
+      toast(`Moved ${ids.length} task${ids.length === 1 ? "" : "s"}`, "success");
+    } else if (held.length > 0) {
+      // Names them: "some failed" leaves the person hunting for which, on a board where the only
+      // other clue is a card that looks much like its neighbours
+      const names = held.map((n) => `${project?.key}-${n}`).join(", ");
+      toast(`Moved ${movedIds.size} of ${ids.length}. ${names} being executed by a worker.`, "error");
+    } else {
+      toast(`Moved ${movedIds.size} of ${ids.length}`, "error");
     }
   }
 
