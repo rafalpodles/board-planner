@@ -1,0 +1,121 @@
+name: CI
+
+on:
+  push:
+  workflow_dispatch:
+
+# A branch that gets several commits in a row only needs the newest one checked
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  app:
+    name: App — types, unit tests, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: Types
+        run: npx tsc --noEmit
+
+      - name: Unit tests
+        run: npm test
+
+      # Proven not to touch the database: the build succeeds against an unreachable URI, so this
+      # value only exists to keep the step from depending on whatever the runner happens to have
+      - name: Build
+        run: npm run build
+        env:
+          MONGODB_URI: mongodb://127.0.0.1:1/build-does-not-connect
+
+  worker:
+    name: Worker — the package npm test never reaches
+    runs-on: ubuntu-latest
+    # The root vitest config includes src/** only, so these 680-odd tests run nowhere else
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: worker/package-lock.json
+      - run: npm ci
+      - name: Tests
+        run: npm test
+      - name: Build
+        run: npm run build
+
+  mcp-server:
+    name: MCP server — build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mcp-server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mcp-server/package-lock.json
+      - run: npm ci
+      - run: npm run build
+
+  e2e:
+    name: End to end — Playwright
+    runs-on: ubuntu-latest
+    services:
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ ping: 1 })'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      # Keyed on the resolved Playwright version: a browser cache from an older one is not
+      # merely stale, it fails to launch
+      - name: Playwright version
+        id: pw
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        id: browser-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+        if: steps.browser-cache.outputs.cache-hit != 'true'
+      - name: Install Chromium system dependencies
+        run: npx playwright install-deps chromium
+        if: steps.browser-cache.outputs.cache-hit == 'true'
+
+      - name: Tests
+        run: npm run test:e2e
+
+      # The trace is the only way to see what the page looked like when a run fails on a machine
+      # nobody can open
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-artifacts
+          path: e2e/.artifacts
+          retention-days: 7
