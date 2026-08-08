@@ -60,6 +60,37 @@ describe("ActivityTimeline", () => {
     );
   });
 
+  // createNextRecurrence stores a sentence in newValue, not a value the field was set to
+  it("renders the recurrence note as a note, not as a value the field changed to", async () => {
+    api.get.mockResolvedValue([
+      {
+        ...log,
+        action: "updated",
+        field: "recurrence",
+        oldValue: "",
+        newValue: "Next occurrence created: CP-251",
+      },
+    ]);
+    render(<ActivityTimeline projectId="TP" taskId="t1" />);
+    await waitFor(() =>
+      expect(screen.getByText(/Next occurrence created: CP-251/)).toBeTruthy()
+    );
+    expect(screen.queryByText(/changed recurrence from/)).toBeNull();
+  });
+
+  // This branch newly routes free text through formatValue: on main only status values, which are
+  // short, ever reached it. A title has no length limit.
+  it("truncates a value too long to sit in a timeline row", async () => {
+    const long = "x".repeat(200);
+    api.get.mockResolvedValue([
+      { ...log, action: "updated", field: "title", oldValue: "short", newValue: long },
+    ]);
+    render(<ActivityTimeline projectId="TP" taskId="t1" />);
+    await waitFor(() => expect(screen.getByText(/changed title from short to/)).toBeTruthy());
+    expect(screen.queryByText(new RegExp(long))).toBeNull();
+    expect(screen.getByText(/x{60}…/)).toBeTruthy();
+  });
+
   // Entries written before CP-250 carry no values at all
   it("keeps the plain wording for an entry that recorded no values", async () => {
     api.get.mockResolvedValue([{ ...log, action: "updated", field: "checklist" }]);

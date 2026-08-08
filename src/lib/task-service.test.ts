@@ -1090,10 +1090,21 @@ describe("updateTask writing project fields to the history", () => {
     expect(fieldEntries()).toHaveLength(1);
   });
 
-  it("says nothing when an edit leaves the fields alone", async () => {
+  it("loads no definitions for an edit that carries no fields at all", async () => {
     setup({ "f-diff": "opt-m" }, { "f-diff": "opt-m" });
 
     await updateTask("p1", "t1", { title: "renamed" }, "actor");
+
+    expect(fieldEntries()).toHaveLength(0);
+  });
+
+  // The shape every real writer sends: the board's inline edit, MCP and the PM agent all merge
+  // the task's current values with the one they are changing, so all the other fields arrive
+  // unchanged on every single save. Logging those would bury the real change in noise.
+  it("says nothing about the untouched fields a full map carries along", async () => {
+    setup({ "f-diff": "opt-m" }, { "f-diff": "opt-m" });
+
+    await updateTask("p1", "t1", { customFieldValues: { "f-diff": "opt-m" } }, "actor");
 
     expect(fieldEntries()).toHaveLength(0);
   });
