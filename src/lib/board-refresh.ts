@@ -1,5 +1,5 @@
-const EVENT = "claudeplanner:board-refresh";
-const CHANNEL = "claudeplanner:board";
+const EVENT = "boardplanner:board-refresh";
+const CHANNEL = "boardplanner:board";
 
 // A window CustomEvent only reaches listeners in the tab that dispatched it, so a board
 // sitting beside the PM page in another tab would still wait for the 10s poll.

@@ -22,7 +22,7 @@ and the SwiftUI layer is a thin renderer over a single observable state.
 
 The spec's preferences window has four tabs: Connection (URL + **credential in Keychain**),
 Repositories, Policy (**per project, inherited vs overridden**), Advanced. Two of those need the app
-to hold a ClaudePlanner credential and call the REST API.
+to hold a Board Planner credential and call the REST API.
 
 **This plan does not give the app a credential.** Reasons, in order of weight:
 
@@ -54,7 +54,7 @@ access as a follow-up — the transport, the state model and the window all alre
 - **No third-party Swift dependencies.** `Network.framework` and `UserNotifications` are in the OS.
 - **The app never opens a TCP socket and never resolves a hostname.** Its only I/O is the unix
   socket and `repos.json`.
-- Socket path: `${CP_STATE_DIR}/worker.sock`, default `~/.claudeplanner/worker.sock`
+- Socket path: `${CP_STATE_DIR}/worker.sock`, default `~/.boardplanner/worker.sock`
   (`worker/src/config.ts:117`, `:125`).
 - **`CP_CONCURRENCY` is not exposed** anywhere in the UI — the loop is sequential.
 - Comments follow the repo rule: none by default; only a one-liner for a genuine workaround.
@@ -972,7 +972,7 @@ public struct SocketClient: Sendable {
 
     public static func defaultSocketPath() -> String {
         let stateDir = ProcessInfo.processInfo.environment["CP_STATE_DIR"]
-            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claudeplanner").path
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".boardplanner").path
         return (stateDir as NSString).appendingPathComponent("worker.sock")
     }
 
@@ -1353,7 +1353,7 @@ final class AppModel {
 }
 ```
 
-The reconnect loop is what makes "Can't reach ClaudePlanner · retrying" true rather than decorative:
+The reconnect loop is what makes "Can't reach Board Planner · retrying" true rather than decorative:
 a worker restart drops the socket and the panel recovers on its own.
 
 - [ ] **Step 2: Write `CPMenubarApp.swift`**
@@ -1738,7 +1738,7 @@ public struct ReposFile: Sendable {
 
     public static func defaultPath() -> String {
         let stateDir = ProcessInfo.processInfo.environment["CP_STATE_DIR"]
-            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claudeplanner").path
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".boardplanner").path
         return (stateDir as NSString).appendingPathComponent("repos.json")
     }
 
@@ -1949,7 +1949,7 @@ git commit -m "feat(menubar): preferences window with the repository allowlist e
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key><string>CPMenubar</string>
-    <key>CFBundleIdentifier</key><string>com.claudeplanner.menubar</string>
+    <key>CFBundleIdentifier</key><string>com.boardplanner.menubar</string>
     <key>CFBundleExecutable</key><string>CPMenubar</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>0.1.0</string>
@@ -2059,7 +2059,7 @@ Not part C, and not to be folded into it. Listed so the next session does not re
 
 Both follow from it holding no credential, and neither is a defect to be fixed later by accident:
 
-- **"Can't reach ClaudePlanner · retrying in 12s"** becomes *"Can't reach the worker · retrying"*.
+- **"Can't reach Board Planner · retrying in 12s"** becomes *"Can't reach the worker · retrying"*.
   The app's only I/O is a unix socket, so it cannot tell a dead network from a healthy one — only
   whether the worker is answering. Claiming to distinguish them would be a lie in the UI.
 - **The first-launch wizard** (URL and credential → discover projects → point at a repository) is

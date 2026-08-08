@@ -47,11 +47,11 @@ public enum WorkerLauncher {
 
     // The worker the app ships with, and the reason the app can be handed to somebody else at all.
     // A distributed app cannot read the worker out of the operator's checkout: that checkout is
-    // *their* project, and has no worker/ in it. Only a ClaudePlanner checkout does, which is why
+    // *their* project, and has no worker/ in it. Only a Board Planner checkout does, which is why
     // this looked fine right up until the app left the machine that built it.
     public static func entryPoint(bundledAt bundled: String?, checkout: String) -> String? {
         if let bundled, FileManager.default.fileExists(atPath: bundled) { return bundled }
-        // Falls back to the checkout so a developer running from a ClaudePlanner clone still works
+        // Falls back to the checkout so a developer running from a Board Planner clone still works
         let inCheckout = (checkout as NSString).appendingPathComponent("worker/dist/main.js")
         return FileManager.default.fileExists(atPath: inCheckout) ? inCheckout : nil
     }

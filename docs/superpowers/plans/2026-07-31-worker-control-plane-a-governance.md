@@ -998,7 +998,7 @@ describe("bindRepository", () => {
   it("refuses an allowlist file readable by anyone else", async () => {
     const deps = depsWith();
     deps.readAllowlist = () => {
-      throw new Error("~/.claudeplanner/repos.json is readable by group or others");
+      throw new Error("~/.boardplanner/repos.json is readable by group or others");
     };
 
     const result = await bindRepository(deps, "/repo");
@@ -1055,7 +1055,7 @@ This task ends the breaking window opened by Task 4.
 
 **Files:**
 - Create: `worker/src/registration.ts`, `worker/src/registration.test.ts`
-- Modify: `worker/src/api.ts`, `worker/README.md`, `worker/launchd/com.claudeplanner.worker.plist`
+- Modify: `worker/src/api.ts`, `worker/README.md`, `worker/launchd/com.boardplanner.worker.plist`
 
 **Interfaces:**
 - Produces:

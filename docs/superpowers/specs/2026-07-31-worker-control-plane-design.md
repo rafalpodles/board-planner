@@ -23,7 +23,7 @@ and today the only way to know what it is doing is to read a log file on your ow
 session, so it lives on a laptop while the app lives on Railway, behind NAT. The app cannot open a
 connection to it.
 
-**The app cannot host WebSockets.** ClaudePlanner runs on plain `next start` with no custom server.
+**The app cannot host WebSockets.** Board Planner runs on plain `next start` with no custom server.
 SSE is already in production here — `src/app/api/projects/[projectId]/pm/chat/route.ts` streams
 `text/event-stream`. An outbound SSE connection opened *by the worker* makes NAT irrelevant and
 lets the server push instantly.
@@ -119,7 +119,7 @@ than it costs.
 ## The repository binding
 
 The server stores a **proposed** path; the worker executes only against paths in a local allowlist
-at `~/.claudeplanner/repos.json` (mode `0600`), written by the menubar app's folder picker or by
+at `~/.boardplanner/repos.json` (mode `0600`), written by the menubar app's folder picker or by
 the operator's editor. A pushed path that is not in the allowlist puts the worker into a visible
 "needs approval on this machine" state — the panel already has that shape for *needs a human*.
 
@@ -186,7 +186,7 @@ laptop should require an interactive admin session.
 |---|---|
 | `registration.ts` | Registers, holds the credential, heartbeats, handles a 403 as abort |
 | `control.ts` | SSE client: commands, config, `wake`; reconnect with jittered backoff |
-| `local-server.ts` | Unix domain socket at `~/.claudeplanner/worker.sock` (`0600`) |
+| `local-server.ts` | Unix domain socket at `~/.boardplanner/worker.sock` (`0600`) |
 | `telemetry.ts` | One `emit`, fanned out at two fidelities |
 | `repos.ts` | The local allowlist, canonicalisation and the refusal rules above |
 
@@ -266,7 +266,7 @@ controls, today's tally. The stepper is the substance — it makes an eight-minu
 and answers the only question asked mid-run: *stuck or working?*
 
 Three states decide how it feels: **idle** ("Waiting for work · CP · 6 merged today"),
-**disconnected** ("Can't reach ClaudePlanner · retrying in 12s" — distinguishing a dead worker from
+**disconnected** ("Can't reach Board Planner · retrying in 12s" — distinguishing a dead worker from
 a dead network), and **needs a human**.
 
 Preferences: Connection (URL, credential in Keychain), Repositories (the local allowlist, with the

@@ -29,7 +29,7 @@ describe("loadBootstrap", () => {
   });
 
   it("defaults the state dir under the home directory", () => {
-    expect(loadBootstrap(base).stateDir).toBe(join(homedir(), ".claudeplanner"));
+    expect(loadBootstrap(base).stateDir).toBe(join(homedir(), ".boardplanner"));
   });
 
   it("honours an explicit state dir", () => {
@@ -46,7 +46,7 @@ describe("loadBootstrap", () => {
 
   it("puts the local control socket under the home directory by default", () => {
     expect(localSocketPath(loadBootstrap(base).stateDir)).toBe(
-      join(homedir(), ".claudeplanner", "worker.sock")
+      join(homedir(), ".boardplanner", "worker.sock")
     );
   });
 

@@ -14,7 +14,7 @@
 
     com.apple.security.app-sandbox
       Not sandboxed. A sandboxed app could not spawn an arbitrary node, could not read the
-      operator's checkout, and could not write ~/.claudeplanner. Sandboxing this would mean
+      operator's checkout, and could not write ~/.boardplanner. Sandboxing this would mean
       redesigning what the app is for.
 
     com.apple.security.cs.disable-library-validation

@@ -17,7 +17,7 @@ Search Notion first to check if a relevant page already exists before creating a
 ---
 
 ## Board Planner integration
-claudeplanner_project_key: CP
+boardplanner_project_key: CP
 
 ### Workflow
 - On session start: run `list_tasks` for this project to see current work.

@@ -73,7 +73,7 @@ public protocol Transport: Sendable {
 // `using: .tcp` stands up an IP stack that returns ENETDOWN against a unix endpoint — found against
 // a running worker, not in a test.
 public struct POSIXTransport: Transport {
-    private let queue = DispatchQueue(label: "com.claudeplanner.menubar.socket", qos: .utility)
+    private let queue = DispatchQueue(label: "com.boardplanner.menubar.socket", qos: .utility)
 
     public init() {}
 

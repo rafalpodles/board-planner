@@ -1,14 +1,14 @@
 # CPMenubar
 
-The operator's cockpit for the ClaudePlanner execution worker: a menu bar app that shows whether a
+The operator's cockpit for the Board Planner execution worker: a menu bar app that shows whether a
 run is stuck or working, raises a notification when one ends, and manages the repository allowlist.
 
 ## What it talks to, and what it does not
 
 Its only I/O is the worker's unix socket at `${CP_STATE_DIR}/worker.sock` (default
-`~/.claudeplanner/worker.sock`) and the allowlist at `${CP_STATE_DIR}/repos.json`.
+`~/.boardplanner/worker.sock`) and the allowlist at `${CP_STATE_DIR}/repos.json`.
 
-**It holds no ClaudePlanner credential and never opens a network connection.** Registration and
+**It holds no Board Planner credential and never opens a network connection.** Registration and
 policy live on the worker and in the web console; the Connection and Policy tabs are read-only
 views of what the worker reports over `GET /config`. This follows from worker registration still
 being `withAdmin` — a credential minted for this machine is an instance-admin credential, and there

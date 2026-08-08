@@ -3,28 +3,28 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.claudeplanner.worker</string>
+  <string>com.boardplanner.worker</string>
   <key>ProgramArguments</key>
   <array>
     <string>/opt/homebrew/bin/node</string>
-    <string>/Users/rpo/Documents/Projects/ClaudePlanner/worker/dist/main.js</string>
+    <string>REPO_DIR/worker/dist/main.js</string>
   </array>
   <key>WorkingDirectory</key>
-  <string>/Users/rpo/Documents/Projects/ClaudePlanner/worker</string>
+  <string>REPO_DIR/worker</string>
   <key>EnvironmentVariables</key>
   <dict>
     <key>CP_API_URL</key>
-    <string>https://claude-planner-production.up.railway.app</string>
+    <string>https://board-planner.com</string>
     <key>CP_API_TOKEN_FILE</key>
-    <string>/Users/rpo/.claudeplanner/token</string>
+    <string>HOME_DIR/.boardplanner/token</string>
     <key>CP_WORKER_NAME</key>
     <string>rpo-laptop</string>
     <key>CP_STATE_DIR</key>
-    <string>/Users/rpo/.claudeplanner</string>
+    <string>HOME_DIR/.boardplanner</string>
     <key>HOME</key>
-    <string>/Users/rpo</string>
+    <string>HOME_DIR</string>
     <key>PATH</key>
-    <string>/Users/rpo/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <string>HOME_DIR/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
   </dict>
   <key>RunAtLoad</key>
   <true/>
@@ -33,8 +33,8 @@
   <key>ThrottleInterval</key>
   <integer>30</integer>
   <key>StandardOutPath</key>
-  <string>/tmp/claudeplanner-worker.log</string>
+  <string>/tmp/boardplanner-worker.log</string>
   <key>StandardErrorPath</key>
-  <string>/tmp/claudeplanner-worker.error.log</string>
+  <string>/tmp/boardplanner-worker.error.log</string>
 </dict>
 </plist>

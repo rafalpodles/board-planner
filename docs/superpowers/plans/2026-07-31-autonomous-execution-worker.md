@@ -53,7 +53,7 @@ Task: CP-158
 | `worker/src/reporter.ts` | Status transitions and comments |
 | `worker/src/loop.ts` | Run loop, concurrency, shutdown |
 | `worker/src/main.ts` | Entry point |
-| `worker/launchd/com.claudeplanner.worker.plist` | macOS service definition |
+| `worker/launchd/com.boardplanner.worker.plist` | macOS service definition |
 
 ---
 
@@ -471,7 +471,7 @@ git commit -m "feat(api): claim endpoint for the execution worker (CP-158)"
 
 ```json
 {
-  "name": "claudeplanner-worker",
+  "name": "boardplanner-worker",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -2671,7 +2671,7 @@ git commit -m "feat(worker): task pipeline from claim to merge (CP-158)"
 
 **Files:**
 - Create: `worker/src/loop.ts`, `worker/src/loop.test.ts`, `worker/src/main.ts`
-- Create: `worker/launchd/com.claudeplanner.worker.plist`
+- Create: `worker/launchd/com.boardplanner.worker.plist`
 - Create: `worker/README.md`
 
 **Interfaces:**
@@ -2882,7 +2882,7 @@ Expected: succeeds, `dist/main.js` exists
 
 - [ ] **Step 7: Write the launchd service**
 
-`worker/launchd/com.claudeplanner.worker.plist`:
+`worker/launchd/com.boardplanner.worker.plist`:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -2890,20 +2890,20 @@ Expected: succeeds, `dist/main.js` exists
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.claudeplanner.worker</string>
+  <string>com.boardplanner.worker</string>
   <key>ProgramArguments</key>
   <array>
     <string>/usr/local/bin/node</string>
-    <string>/Users/rpo/Documents/Projects/ClaudePlanner/worker/dist/main.js</string>
+    <string>/Users/rpo/Documents/Projects/BoardPlanner/worker/dist/main.js</string>
   </array>
   <key>EnvironmentVariables</key>
   <dict>
     <key>CP_API_URL</key>
-    <string>https://claude-planner-production.up.railway.app</string>
+    <string>https://board-planner-production.up.railway.app</string>
     <key>CP_PROJECT_ID</key>
     <string>CP</string>
     <key>CP_REPO_PATH</key>
-    <string>/Users/rpo/Documents/Projects/ClaudePlanner</string>
+    <string>/Users/rpo/Documents/Projects/Board Planner</string>
     <key>PATH</key>
     <string>/usr/local/bin:/usr/bin:/bin:/Users/rpo/.local/bin</string>
   </dict>
@@ -2912,9 +2912,9 @@ Expected: succeeds, `dist/main.js` exists
   <key>KeepAlive</key>
   <true/>
   <key>StandardOutPath</key>
-  <string>/tmp/claudeplanner-worker.log</string>
+  <string>/tmp/boardplanner-worker.log</string>
   <key>StandardErrorPath</key>
-  <string>/tmp/claudeplanner-worker.error.log</string>
+  <string>/tmp/boardplanner-worker.error.log</string>
 </dict>
 </plist>
 ```
@@ -2924,7 +2924,7 @@ Expected: succeeds, `dist/main.js` exists
 `worker/README.md`:
 
 ````markdown
-# ClaudePlanner execution worker
+# Board Planner execution worker
 
 Claims `todo` tasks, runs Claude Code headless in an isolated git worktree, enforces merge
 gates and carries the task to `done`.
@@ -2946,7 +2946,7 @@ gates and carries the task to `done`.
 | `CP_MAX_DIFF_FILES` | no | `10` |
 | `CP_WORKER_ID` | no | `worker-<hostname>` |
 
-`CP_API_TOKEN` is a ClaudePlanner API token scoped to the project. Claude Code runs on the
+`CP_API_TOKEN` is a Board Planner API token scoped to the project. Claude Code runs on the
 logged-in CLI session — never set `ANTHROPIC_API_KEY`, or runs bill per token instead of
 drawing on the subscription.
 
@@ -2959,12 +2959,12 @@ npm install && npm run build && npm start
 As a macOS service:
 
 ```bash
-cp launchd/com.claudeplanner.worker.plist ~/Library/LaunchAgents/
-launchctl load ~/Library/LaunchAgents/com.claudeplanner.worker.plist
+cp launchd/com.boardplanner.worker.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.boardplanner.worker.plist
 ```
 
 Set `CP_API_TOKEN` in the keychain or the plist before loading. Logs go to
-`/tmp/claudeplanner-worker.log`.
+`/tmp/boardplanner-worker.log`.
 ````
 
 - [ ] **Step 9: Run the full worker suite**

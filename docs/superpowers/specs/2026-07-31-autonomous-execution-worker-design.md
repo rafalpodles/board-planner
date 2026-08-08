@@ -107,7 +107,7 @@ claude -p "<task title, description, acceptance criteria, project context>"
   --json-schema '{status, summary, filesChanged, testsAdded, blockedReason}'
   --permission-mode bypassPermissions
   --allowedTools "Read Edit Write Grep Glob Bash(git *) Bash(npm *)"
-  --mcp-config <claudeplanner mcp>
+  --mcp-config <boardplanner mcp>
   --append-system-prompt <pipeline rules>
   --model opus --fallback-model sonnet
 ```

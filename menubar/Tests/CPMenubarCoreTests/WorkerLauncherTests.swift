@@ -23,7 +23,7 @@ final class WorkerLauncherTests: XCTestCase {
             nodePath: "/Users/rpo/.nvm/versions/node/v22/bin/node",
             workerEntry: "/checkout/worker/dist/main.js",
             state: state(),
-            stateDirectory: "/Users/rpo/.claudeplanner",
+            stateDirectory: "/Users/rpo/.boardplanner",
             baseEnvironment: finderEnvironment)
 
         XCTAssertEqual(plan.environment["PATH"], state().toolPath)
@@ -58,11 +58,11 @@ final class WorkerLauncherTests: XCTestCase {
     func testItSetsTheSameVariablesThePlistDoes() {
         let plan = WorkerLauncher.plan(
             nodePath: "/n", workerEntry: "/e", state: state(),
-            stateDirectory: "/Users/rpo/.claudeplanner", baseEnvironment: finderEnvironment)
+            stateDirectory: "/Users/rpo/.boardplanner", baseEnvironment: finderEnvironment)
 
         XCTAssertEqual(plan.environment["CP_API_URL"], "https://app.example.com")
         XCTAssertEqual(plan.environment["CP_WORKER_NAME"], "rpo-MacBook")
-        XCTAssertEqual(plan.environment["CP_STATE_DIR"], "/Users/rpo/.claudeplanner")
+        XCTAssertEqual(plan.environment["CP_STATE_DIR"], "/Users/rpo/.boardplanner")
     }
 
     // Shipped once. The worker registered, cloned, started and then never reported, and the fleet
@@ -121,7 +121,7 @@ final class WorkerLauncherTests: XCTestCase {
     }
 
     // The app has to carry its own worker. A distributed app cannot read one out of the operator's
-    // checkout, because that checkout is *their* project — only a ClaudePlanner clone has worker/.
+    // checkout, because that checkout is *their* project — only a Board Planner clone has worker/.
     // This looked fine right up until the app would have left the machine that built it.
     func testItPrefersTheWorkerShippedInsideTheApp() throws {
         let bundled = try temporaryFile(named: "main.js")

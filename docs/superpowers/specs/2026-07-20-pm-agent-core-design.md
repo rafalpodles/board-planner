@@ -4,7 +4,7 @@ Status: approved 2026-07-20 (design review: 2 independent reviewers, findings in
 
 ## Goal
 
-A per-project PM agent the user chats with inside ClaudePlanner (Cowork-like UX). The PM
+A per-project PM agent the user chats with inside Board Planner (Cowork-like UX). The PM
 manages the board through tools: breaks features into tasks, refines existing ones, changes
 statuses/assignees, answers questions about project state. Runs on a cheap model via
 OpenRouter. Implementation agents (Claude Code) are out of scope for v1, as are sub-agents,

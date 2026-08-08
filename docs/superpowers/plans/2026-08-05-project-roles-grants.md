@@ -1220,7 +1220,7 @@ npx tsx scripts/dump-collections.ts users grants projects
 
 - [ ] **Step 2: Bring the app up**
 
-`.env.local` exists and Mongo listens on 27017. Use `preview_start {name: "claudeplanner-dev"}` (port 3456). Never start a dev server through Bash.
+`.env.local` exists and Mongo listens on 27017. Use `preview_start {name: "boardplanner-dev"}` (port 3456). Never start a dev server through Bash.
 
 - [ ] **Step 3: Confirm the empty-collection state**
 
@@ -1251,7 +1251,7 @@ As `boardadmin`, attempt to set yourself to Member and to remove yourself while 
 
 - [ ] **Step 8: Verify the index is real**
 
-Mocked Mongoose cannot prove this. From a scratchpad script against `mongodb://localhost:27017/claudeplanner`, read `db.grants.getIndexes()` and confirm `{subject: 1, objectType: 1, object: 1}` is present **and unique**. Then attempt a duplicate `insertOne` and confirm error 11000.
+Mocked Mongoose cannot prove this. From a scratchpad script against `mongodb://localhost:27017/boardplanner`, read `db.grants.getIndexes()` and confirm `{subject: 1, objectType: 1, object: 1}` is present **and unique**. Then attempt a duplicate `insertOne` and confirm error 11000.
 
 - [ ] **Step 9: Verify token minting and scoped-token behaviour**
 

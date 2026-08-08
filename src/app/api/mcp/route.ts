@@ -11,7 +11,7 @@ const baseHandler = createMcpHandler(
   (server) => {
     registerPlannerTools(server);
   },
-  { serverInfo: { name: "claudeplanner", version: "1.0.0" } },
+  { serverInfo: { name: "boardplanner", version: "1.0.0" } },
   { basePath: "/api", disableSse: true }
 );
 

@@ -32,7 +32,7 @@ the identity:
   `Starts at login`, `--unregister-login-item` puts it back.
 
 The app is **not sandboxed**, deliberately. A sandboxed build could not spawn an arbitrary `node`,
-could not read the operator's checkout, and could not write `~/.claudeplanner`.
+could not read the operator's checkout, and could not write `~/.boardplanner`.
 
 ## One-time, and only you can do these
 
@@ -58,7 +58,7 @@ could not read the operator's checkout, and could not write `~/.claudeplanner`.
 3. **Store notarisation credentials once**, using an app-specific password from appleid.apple.com:
 
    ```bash
-   xcrun notarytool store-credentials "claudeplanner" \
+   xcrun notarytool store-credentials "boardplanner" \
      --apple-id "you@example.com" --team-id "7RSD626AHC" --password "app-specific-password"
    ```
 
@@ -67,7 +67,7 @@ could not read the operator's checkout, and could not write `~/.claudeplanner`.
 ```bash
 cd worker && npm ci && npm run build && cd ..          # the 200 KB the app carries
 CP_SIGN_IDENTITY="Developer ID Application: … (7RSD626AHC)" \
-CP_NOTARY_PROFILE="claudeplanner" \
+CP_NOTARY_PROFILE="boardplanner" \
   menubar/bundle.sh release
 ```
 

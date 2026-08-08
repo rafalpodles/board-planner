@@ -5,19 +5,10 @@ import { ApiClient } from "./api-client.js";
 
 const APP_NAME = "Board Planner";
 
-/**
- * The BOARDPLANNER_ names are the ones to use. CLAUDEPLANNER_ still works because every client
- * config written before the rename uses it, and a rename that silently stops an editor's MCP
- * server from starting is worse than carrying two names.
- */
-function setting(name: string): string | undefined {
-  return process.env[`BOARDPLANNER_${name}`] ?? process.env[`CLAUDEPLANNER_${name}`];
-}
-
-const APP_URL = setting("URL") || "http://localhost:3000";
-const TOKEN = setting("TOKEN");
-const USERNAME = setting("USERNAME");
-const PASSWORD = setting("PASSWORD");
+const APP_URL = process.env.BOARDPLANNER_URL || "http://localhost:3000";
+const TOKEN = process.env.BOARDPLANNER_TOKEN;
+const USERNAME = process.env.BOARDPLANNER_USERNAME;
+const PASSWORD = process.env.BOARDPLANNER_PASSWORD;
 
 if (!TOKEN && (!USERNAME || !PASSWORD)) {
   console.error("BOARDPLANNER_TOKEN or BOARDPLANNER_USERNAME+BOARDPLANNER_PASSWORD environment variables are required");
@@ -30,7 +21,7 @@ const client = new ApiClient(
 );
 
 const server = new McpServer({
-  name: "claudeplanner",
+  name: "boardplanner",
   version: "1.0.0",
 });
 
