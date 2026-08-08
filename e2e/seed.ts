@@ -9,6 +9,12 @@ export const E2E_MONGODB_URI =
 export const ADMIN_USERNAME = "admin";
 export const ADMIN_PASSWORD = "test1234";
 
+// A plain project member, reaching the board through a grant rather than through role "admin".
+// withProjectAccess short-circuits on the instance-admin check, so nothing an admin does can
+// tell whether the grants path still works.
+export const MEMBER_USERNAME = "member";
+export const MEMBER_PASSWORD = "test1234";
+
 export const PROJECT_KEY = "TP";
 // Deliberately not "Test Project": a project keyed TP also exists in the development database,
 // so the name is what proves which one the server is actually reading.
@@ -34,6 +40,17 @@ export const FINISHED_TASK_NUMBER = 4;
 export const FINISHED_TASK_KEY = `${PROJECT_KEY}-${FINISHED_TASK_NUMBER}`;
 export const FINISHED_TASK_TITLE = "Its run already finished";
 
+// The two below are seeded on request rather than by seed(), and both for the same reason: a
+// board-wide "no run badges left" is how several tests prove a run was released, and a second
+// badge standing on the board would let that assertion pass without anything being released.
+export const SECOND_HELD_TASK_NUMBER = 5;
+export const SECOND_HELD_TASK_KEY = `${PROJECT_KEY}-${SECOND_HELD_TASK_NUMBER}`;
+export const SECOND_HELD_TASK_TITLE = "Held by a second live worker run";
+
+export const QUIET_TASK_NUMBER = 6;
+export const QUIET_TASK_KEY = `${PROJECT_KEY}-${QUIET_TASK_NUMBER}`;
+export const QUIET_TASK_TITLE = "Held by a run that has gone quiet";
+
 export const SOURCE_COLUMN = { id: "in_progress", label: "In Progress" };
 export const TARGET_COLUMN = { id: "in_review", label: "In Review" };
 // Somewhere other than the two the refusal tests use, so the finished-run task is never in the
@@ -43,12 +60,16 @@ export const SPARE_COLUMN = { id: "todo", label: "To Do" };
 const id = (hex: string) => new mongoose.Types.ObjectId(hex);
 
 export const ADMIN_ID = id("e2e00000000000000000a001");
+export const MEMBER_ID = id("e2e00000000000000000a002");
 export const PROJECT_ID = id("e2e00000000000000000c001");
 export const WORKER_ID = id("e2e00000000000000000b001");
+export const GRANT_ID = id("e2e00000000000000000e001");
 export const HELD_TASK_ID = id("e2e00000000000000000d001");
 export const DECOY_TASK_ID = id("e2e00000000000000000d002");
 export const SIBLING_TASK_ID = id("e2e00000000000000000d003");
 export const FINISHED_TASK_ID = id("e2e00000000000000000d004");
+export const SECOND_HELD_TASK_ID = id("e2e00000000000000000d005");
+export const QUIET_TASK_ID = id("e2e00000000000000000d006");
 
 const COLUMNS = [
   { id: "planned", label: "Planned", color: "#6b7280", role: "backlog", order: 0 },
@@ -104,24 +125,140 @@ export async function storedExecution(
   return task?.execution as Record<string, unknown> | undefined;
 }
 
+const taskFactory = (now: Date) => (over: Record<string, unknown>) => ({
+  project: PROJECT_ID,
+  description: "",
+  priority: "medium",
+  category: "user-story",
+  assignee: null,
+  dueDate: null,
+  checklist: [],
+  linkedPRs: [],
+  blockedBy: [],
+  relations: [],
+  watchers: [],
+  sprint: null,
+  customFieldValues: {},
+  recurrence: null,
+  recurringParentId: null,
+  order: 0,
+  createdBy: ADMIN_ID,
+  createdAt: now,
+  updatedAt: now,
+  ...over,
+});
+
+/**
+ * Adds a card to the board seed() already laid down, and keeps taskCounter ahead of it so the
+ * project could still mint the next number.
+ */
+async function addTask(over: Record<string, unknown>, taskNumber: number) {
+  const db = (await connect()).db!;
+  await db.collection("tasks").insertOne(taskFactory(new Date())({ taskNumber, ...over }));
+  await db
+    .collection("projects")
+    .updateOne({ _id: PROJECT_ID }, { $max: { taskCounter: taskNumber } });
+  await mongoose.disconnect();
+}
+
+/** A second task under a live run, for the bulk move that has to name more than one refusal. */
+export async function seedSecondHeldTask() {
+  const now = new Date();
+  await addTask(
+    {
+      _id: SECOND_HELD_TASK_ID,
+      title: SECOND_HELD_TASK_TITLE,
+      status: SOURCE_COLUMN.id,
+      order: 2,
+      execution: {
+        runId: "e2e-run-0002",
+        workerId: String(WORKER_ID),
+        attempts: 1,
+        startedAt: new Date(now.getTime() - 60_000),
+        lastError: "",
+        phase: RUN_PHASE,
+        phaseAt: now,
+        phaseSeq: 3,
+      },
+    },
+    SECOND_HELD_TASK_NUMBER
+  );
+}
+
+/**
+ * A run that still holds its task but has not reported in `quietForMs`. Past the card's threshold
+ * it reads quiet rather than live — and runHolding keys on runId, not on the clock, so the server
+ * must refuse the move exactly as it does for a chatty one.
+ */
+export async function seedQuietTask(quietForMs: number) {
+  const now = new Date();
+  await addTask(
+    {
+      _id: QUIET_TASK_ID,
+      title: QUIET_TASK_TITLE,
+      status: SOURCE_COLUMN.id,
+      order: 3,
+      execution: {
+        runId: "e2e-run-0003",
+        workerId: String(WORKER_ID),
+        attempts: 1,
+        // Older than the silence, so the card cannot read as live off either timestamp: it
+        // falls back to startedAt when phaseAt is missing
+        startedAt: new Date(now.getTime() - quietForMs - 60_000),
+        lastError: "",
+        phase: RUN_PHASE,
+        phaseAt: new Date(now.getTime() - quietForMs),
+        phaseSeq: 2,
+      },
+    },
+    QUIET_TASK_NUMBER
+  );
+}
+
 export async function seed() {
   const db = (await connect()).db!;
   await empty(db);
 
   const now = new Date();
 
-  await db.collection("users").insertOne({
-    _id: ADMIN_ID,
-    username: ADMIN_USERNAME,
-    password: bcrypt.hashSync(ADMIN_PASSWORD, 10),
-    fullName: "E2E Admin",
+  const person = (over: Record<string, unknown>) => ({
     email: "",
     emailNotifications: false,
     // Off, so every column stays a real drop target instead of collapsing to a rail
     collapseEmptyColumns: false,
-    role: "admin",
     kind: "human",
     createdAt: now,
+    ...over,
+  });
+
+  await db.collection("users").insertMany([
+    person({
+      _id: ADMIN_ID,
+      username: ADMIN_USERNAME,
+      password: bcrypt.hashSync(ADMIN_PASSWORD, 10),
+      fullName: "E2E Admin",
+      role: "admin",
+    }),
+    person({
+      _id: MEMBER_ID,
+      username: MEMBER_USERNAME,
+      password: bcrypt.hashSync(MEMBER_PASSWORD, 10),
+      fullName: "E2E Member",
+      // Not "admin": this account has no standing on the instance at all, and everything it can
+      // reach on this project it reaches through the grant below
+      role: "member",
+    }),
+  ]);
+
+  await db.collection("grants").insertOne({
+    _id: GRANT_ID,
+    subject: MEMBER_ID,
+    relation: "member",
+    objectType: "project",
+    object: PROJECT_ID,
+    createdBy: ADMIN_ID,
+    createdAt: now,
+    updatedAt: now,
   });
 
   await db.collection("projects").insertOne({
@@ -209,28 +346,7 @@ export async function seed() {
     updatedAt: now,
   });
 
-  const task = (over: Record<string, unknown>) => ({
-    project: PROJECT_ID,
-    description: "",
-    priority: "medium",
-    category: "user-story",
-    assignee: null,
-    dueDate: null,
-    checklist: [],
-    linkedPRs: [],
-    blockedBy: [],
-    relations: [],
-    watchers: [],
-    sprint: null,
-    customFieldValues: {},
-    recurrence: null,
-    recurringParentId: null,
-    order: 0,
-    createdBy: ADMIN_ID,
-    createdAt: now,
-    updatedAt: now,
-    ...over,
-  });
+  const task = taskFactory(now);
 
   await db.collection("tasks").insertMany([
     task({

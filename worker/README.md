@@ -166,6 +166,11 @@ npm test
 Every subprocess call — `claude`, `git`, `gh`, `npm` — sits behind the `Runner` interface, so the
 suite runs without spawning a model, touching GitHub or creating a worktree.
 
+`wiring.integration.test.ts` goes one layer further than the rest: the api client, the identity on
+disk, the telemetry bus, the heartbeat, the local socket and the abort plumbing are all the real
+ones, driven against a stub board served over loopback HTTP. The `Runner` is still the only thing
+replaced. Nothing leaves the machine.
+
 ## Credentials
 
 Two, and neither of them can lift this worker's kill switch. That is the point: the worker runs the

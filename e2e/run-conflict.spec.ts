@@ -1,4 +1,7 @@
 import { test, expect, type APIRequestContext, type Locator, type Page } from "@playwright/test";
+// The board's own threshold, so the quiet fixture below cannot drift away from the rule it is
+// meant to cross — a hard-coded five minutes here would keep passing if the source changed
+import { QUIET_MS } from "@/components/tasks/ExecutionPanel";
 import {
   ADMIN_PASSWORD,
   ADMIN_USERNAME,
@@ -9,10 +12,18 @@ import {
   HELD_TASK_KEY,
   HELD_TASK_NUMBER,
   HELD_TASK_TITLE,
+  MEMBER_PASSWORD,
+  MEMBER_USERNAME,
   PROJECT_ID,
   PROJECT_KEY,
   PROJECT_NAME,
+  QUIET_TASK_ID,
+  QUIET_TASK_KEY,
+  QUIET_TASK_NUMBER,
   RUN_PHASE,
+  SECOND_HELD_TASK_ID,
+  SECOND_HELD_TASK_KEY,
+  SECOND_HELD_TASK_NUMBER,
   SIBLING_TASK_ID,
   SIBLING_TASK_KEY,
   SIBLING_TASK_NUMBER,
@@ -21,6 +32,8 @@ import {
   TARGET_COLUMN,
   WORKER_NAME,
   seed,
+  seedQuietTask,
+  seedSecondHeldTask,
   storedExecution,
 } from "./seed";
 
@@ -28,9 +41,12 @@ import {
 // iteration would otherwise start from a task no worker is holding
 test.beforeEach(seed);
 
-const AUTH = {
-  Authorization: `Basic ${Buffer.from(`${ADMIN_USERNAME}:${ADMIN_PASSWORD}`).toString("base64")}`,
-};
+const basicAuth = (username: string, password: string) => ({
+  Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`,
+});
+
+const AUTH = basicAuth(ADMIN_USERNAME, ADMIN_PASSWORD);
+const MEMBER_AUTH = basicAuth(MEMBER_USERNAME, MEMBER_PASSWORD);
 
 const cardHref = (taskNumber: number) => `/projects/${PROJECT_KEY}/tasks/${taskNumber}`;
 const heldCardHref = cardHref(HELD_TASK_NUMBER);
@@ -51,6 +67,21 @@ function moveMenu(page: Page): Locator {
 /** The badge a card shows while a run holds it, live or gone quiet. */
 function runBadge(scope: Locator | Page): Locator {
   return scope.locator('[data-testid="card-run-live"], [data-testid="card-run-quiet"]');
+}
+
+/**
+ * The list's status picker for one row. Named after the row rather than located by position:
+ * every row has one, and they are identical but for this label.
+ */
+function listStatus(page: Page, taskKey: string, title: string): Locator {
+  return page.getByRole("combobox", { name: `Status for ${taskKey}: ${title}` });
+}
+
+/** Swaps the board for the list. The same page owns both, so nothing reloads. */
+async function showList(page: Page) {
+  const tab = page.getByRole("button", { name: "List", exact: true });
+  await tab.click();
+  await expect(tab).toHaveAttribute("aria-current", "true");
 }
 
 /**
@@ -84,10 +115,10 @@ function expectToast(page: Page, message: string) {
     .toContain(message);
 }
 
-async function signIn(page: Page) {
+async function signIn(page: Page, username = ADMIN_USERNAME, password = ADMIN_PASSWORD) {
   await page.goto(`/projects/${PROJECT_KEY}`);
-  await page.getByLabel("Username").fill(ADMIN_USERNAME);
-  await page.getByLabel("Password").fill(ADMIN_PASSWORD);
+  await page.getByLabel("Username").fill(username);
+  await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: "Sign In" }).click();
 
   await expect(page.getByRole("heading", { name: PROJECT_NAME })).toBeVisible();
@@ -95,10 +126,12 @@ async function signIn(page: Page) {
   await recordToasts(page);
 }
 
-async function readTask(request: APIRequestContext, taskNumber: number) {
-  const res = await request.get(`/api/projects/${PROJECT_KEY}/tasks/${taskNumber}`, {
-    headers: AUTH,
-  });
+async function readTask(
+  request: APIRequestContext,
+  taskNumber: number,
+  headers: Record<string, string> = AUTH
+) {
+  const res = await request.get(`/api/projects/${PROJECT_KEY}/tasks/${taskNumber}`, { headers });
   expect(res.status()).toBe(200);
   return res.json();
 }
@@ -386,4 +419,229 @@ test("a task whose run has already finished moves without being questioned", asy
   const task = await readTask(request, FINISHED_TASK_NUMBER);
   expect(task.status).toBe(TARGET_COLUMN.id);
   expect(task.execution).toBeUndefined();
+});
+
+test("a project member, holding a grant and nothing else, meets the same refusal", async ({
+  page,
+  request,
+}) => {
+  await test.step("the account is a member of this project and nothing on the instance", async () => {
+    // Every other test here signs in as an instance admin, and withProjectAccess answers on
+    // that check before it ever looks for a grant. Without this step the test would re-run the
+    // admin path under a second username and call it coverage.
+    const me = await request.get("/api/auth/me", { headers: MEMBER_AUTH });
+    expect(me.status()).toBe(200);
+    expect((await me.json()).role).toBe("member");
+
+    // An instance-admin route turns them away...
+    expect((await request.get("/api/users", { headers: MEMBER_AUTH })).status()).toBe(403);
+    // ...while the project does not, which for a non-admin only the grant explains
+    expect(
+      (await request.get(`/api/projects/${PROJECT_KEY}`, { headers: MEMBER_AUTH })).status()
+    ).toBe(200);
+  });
+
+  await signIn(page, MEMBER_USERNAME, MEMBER_PASSWORD);
+
+  const source = boardColumn(page, SOURCE_COLUMN.id);
+  const target = boardColumn(page, TARGET_COLUMN.id);
+  const heldCard = source.locator(`a[href="${heldCardHref}"]`);
+
+  await expect(runBadge(heldCard)).toContainText(RUN_PHASE);
+
+  await test.step("their drag is refused by the server, and they get the same dialog", async () => {
+    // The refusal has to come back over the wire: a member who was quietly filtered out of the
+    // move somewhere in the client would produce the same dialog with nothing behind it
+    const refusal = page.waitForResponse(
+      (res) =>
+        res.url().endsWith(`/tasks/${HELD_TASK_ID}`) &&
+        res.request().method() === "PUT" &&
+        res.status() === 409
+    );
+
+    await dragCardToColumn(page, heldCard, target);
+    await refusal;
+
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByRole("heading", { name: "This task is being executed" })).toBeVisible();
+    await expect(dialog).toContainText(
+      `${HELD_TASK_KEY} is being executed by ${WORKER_NAME} (phase ${RUN_PHASE})`
+    );
+    await expect(dialog.getByRole("button", { name: "Move anyway" })).toBeVisible();
+  });
+
+  await test.step("and Move anyway is theirs to click", async () => {
+    await page.getByRole("dialog").getByRole("button", { name: "Move anyway" }).click();
+
+    await expectToast(page, `${HELD_TASK_KEY} taken from the worker`);
+    await expect(target.locator(`a[href="${heldCardHref}"]`)).toBeVisible();
+    await expect(source.locator(`a[href="${heldCardHref}"]`)).toHaveCount(0);
+    await expect(runBadge(page)).toHaveCount(0);
+
+    // Read back on the member's own credentials, so the grant answers once more
+    const task = await readTask(request, HELD_TASK_NUMBER, MEMBER_AUTH);
+    expect(task._id).toBe(String(HELD_TASK_ID));
+    expect(task.status).toBe(TARGET_COLUMN.id);
+    expect(task.execution).toBeUndefined();
+  });
+});
+
+test("the list view refuses the same move, and confirming there releases the run", async ({
+  page,
+  request,
+}) => {
+  await signIn(page);
+  await showList(page);
+
+  const status = listStatus(page, HELD_TASK_KEY, HELD_TASK_TITLE);
+  await expect(status).toContainText(SOURCE_COLUMN.label);
+
+  await test.step("picking another status from the row is refused", async () => {
+    const refusal = page.waitForResponse(
+      (res) =>
+        res.url().endsWith(`/tasks/${HELD_TASK_ID}/status`) &&
+        res.request().method() === "PATCH" &&
+        res.status() === 409
+    );
+
+    await status.click();
+    await page.getByRole("option", { name: TARGET_COLUMN.label, exact: true }).click();
+    await refusal;
+
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByRole("heading", { name: "This task is being executed" })).toBeVisible();
+    await expect(dialog).toContainText(
+      `${HELD_TASK_KEY} is being executed by ${WORKER_NAME} (phase ${RUN_PHASE})`
+    );
+
+    // The row still reads In Progress: this path applies nothing before the server agrees
+    await expect(status).toContainText(SOURCE_COLUMN.label);
+  });
+
+  await test.step("confirming moves it and releases the run", async () => {
+    await page.getByRole("dialog").getByRole("button", { name: "Move anyway" }).click();
+
+    await expectToast(page, `${HELD_TASK_KEY} taken from the worker`);
+    await expect(status).toContainText(TARGET_COLUMN.label);
+
+    const task = await readTask(request, HELD_TASK_NUMBER);
+    expect(task.status).toBe(TARGET_COLUMN.id);
+    expect(task.execution).toBeUndefined();
+  });
+});
+
+test("a bulk move names every task it had to leave behind", async ({ page, request }) => {
+  await seedSecondHeldTask();
+  await signIn(page);
+
+  const source = boardColumn(page, SOURCE_COLUMN.id);
+  const target = boardColumn(page, TARGET_COLUMN.id);
+  const secondHeldHref = cardHref(SECOND_HELD_TASK_NUMBER);
+  const siblingHref = cardHref(SIBLING_TASK_NUMBER);
+
+  await test.step("two of the three are under a live run", async () => {
+    await expect(runBadge(source.locator(`a[href="${heldCardHref}"]`))).toContainText(RUN_PHASE);
+    await expect(runBadge(source.locator(`a[href="${secondHeldHref}"]`))).toContainText(RUN_PHASE);
+    await expect(runBadge(source.locator(`a[href="${siblingHref}"]`))).toHaveCount(0);
+  });
+
+  await test.step("select all three", async () => {
+    await page.getByRole("button", { name: "Select", exact: true }).click();
+    // This order is the order the toast reports them in: the selection is a Set, and the board
+    // reads it back the way it was filled
+    await page.getByRole("button", { name: `Select ${HELD_TASK_KEY}`, exact: true }).click();
+    await page.getByRole("button", { name: `Select ${SECOND_HELD_TASK_KEY}`, exact: true }).click();
+    await page.getByRole("button", { name: `Select ${SIBLING_TASK_KEY}`, exact: true }).click();
+    await expect(page.getByRole("button", { name: "Select (3)", exact: true })).toBeVisible();
+  });
+
+  await test.step("the free one moves and the toast names both held ones", async () => {
+    await source.locator(`a[href="${heldCardHref}"]`).click({ button: "right" });
+    await expect(moveMenu(page)).toContainText("3 tasks selected");
+    await moveMenu(page).getByRole("button", { name: TARGET_COLUMN.label, exact: true }).click();
+
+    // Both keys, joined by ", ": one refusal is a sentence and two is a list, and the list is
+    // what tells the person which cards to go back to
+    await expectToast(
+      page,
+      `Moved 1 of 3. ${HELD_TASK_KEY}, ${SECOND_HELD_TASK_KEY} being executed by a worker.`
+    );
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+  });
+
+  await test.step("only the free task moved, and both runs are intact", async () => {
+    await expect(target.locator(`a[href="${siblingHref}"]`)).toBeVisible();
+    await expect(source.locator(`a[href="${siblingHref}"]`)).toHaveCount(0);
+
+    for (const href of [heldCardHref, secondHeldHref]) {
+      await expect(source.locator(`a[href="${href}"]`)).toBeVisible();
+      await expect(target.locator(`a[href="${href}"]`)).toHaveCount(0);
+      await expect(runBadge(source.locator(`a[href="${href}"]`))).toContainText(RUN_PHASE);
+    }
+
+    for (const [taskNumber, taskId] of [
+      [HELD_TASK_NUMBER, HELD_TASK_ID],
+      [SECOND_HELD_TASK_NUMBER, SECOND_HELD_TASK_ID],
+    ] as const) {
+      const held = await readTask(request, taskNumber);
+      expect(held._id).toBe(String(taskId));
+      expect(held.status).toBe(SOURCE_COLUMN.id);
+      expect(held.execution?.phase).toBe(RUN_PHASE);
+    }
+
+    const sibling = await readTask(request, SIBLING_TASK_NUMBER);
+    expect(sibling._id).toBe(String(SIBLING_TASK_ID));
+    expect(sibling.status).toBe(TARGET_COLUMN.id);
+  });
+});
+
+test("a run that has gone quiet still holds its task", async ({ page, request }) => {
+  // Twice the threshold, so the card cannot be reading it as live because the margin was thin
+  await seedQuietTask(2 * QUIET_MS);
+  await signIn(page);
+
+  const source = boardColumn(page, SOURCE_COLUMN.id);
+  const target = boardColumn(page, TARGET_COLUMN.id);
+  const quietHref = cardHref(QUIET_TASK_NUMBER);
+  const quietCard = source.locator(`a[href="${quietHref}"]`);
+
+  await test.step("the card calls the run quiet, not live", async () => {
+    await expect(quietCard).toBeVisible();
+    await expect(quietCard.getByTestId("card-run-quiet")).toContainText(RUN_PHASE);
+    await expect(quietCard.getByTestId("card-run-live")).toHaveCount(0);
+    // The live one is still on the board, so the assertion above is about this card rather
+    // than about a board that stopped rendering badges altogether
+    await expect(source.locator(`a[href="${heldCardHref}"]`).getByTestId("card-run-live")).toBeVisible();
+  });
+
+  await test.step("moving it is refused all the same — silence is not permission", async () => {
+    const refusal = page.waitForResponse(
+      (res) =>
+        res.url().endsWith(`/tasks/${QUIET_TASK_ID}`) &&
+        res.request().method() === "PUT" &&
+        res.status() === 409
+    );
+
+    await dragCardToColumn(page, quietCard, target);
+    await refusal;
+
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByRole("heading", { name: "This task is being executed" })).toBeVisible();
+    await expect(dialog).toContainText(
+      `${QUIET_TASK_KEY} is being executed by ${WORKER_NAME} (phase ${RUN_PHASE})`
+    );
+  });
+
+  await test.step("cancelling leaves the run holding it", async () => {
+    await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+
+    await expect(source.locator(`a[href="${quietHref}"]`)).toBeVisible();
+    await expect(target.locator(`a[href="${quietHref}"]`)).toHaveCount(0);
+
+    const task = await readTask(request, QUIET_TASK_NUMBER);
+    expect(task._id).toBe(String(QUIET_TASK_ID));
+    expect(task.status).toBe(SOURCE_COLUMN.id);
+    expect(task.execution?.phase).toBe(RUN_PHASE);
+  });
 });
