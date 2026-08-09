@@ -31,8 +31,17 @@ interface Rewrite {
 function referenceRewriter(from: string, to: string) {
   // Uppercase and not followed by a slash: a task reference. The lowercase, slash-suffixed
   // form is how every branch in this repository is named, and those are not ours to rename.
-  const pattern = new RegExp(`\\b${from}-(\\d+)\\b(?!/)`, "g");
-  return (text: string) => text.replace(pattern, `${to}-$1`);
+  const reference = new RegExp(`\\b${from}-(\\d+)\\b(?!/)`, "g");
+
+  // A placeholder rather than a number — "cp-<n>/<slug>" is documentation of the branch
+  // convention, and the convention follows the key. "cp-213/generic-field-activity" is a
+  // branch that exists under exactly that name and stays.
+  const convention = new RegExp(`\\b${from}(-<(?:n|number)>)`, "gi");
+
+  return (text: string) =>
+    text
+      .replace(reference, `${to}-$1`)
+      .replace(convention, (_m, tail: string) => `${to.toLowerCase()}${tail}`);
 }
 
 function walk(value: unknown, path: string, rewrite: (t: string) => string,
@@ -68,13 +77,21 @@ async function main() {
   console.log(`connection : ${source}`);
   console.log(`database   : ${db.databaseName}`);
 
-  const project = await db.collection("projects").findOne({ key: from });
+  // Accept a project that has already moved to the new key: the key write and the text
+  // repointing are separate passes, and text can be left behind by an earlier run
+  let project = await db.collection("projects").findOne({ key: from });
+  const alreadyMoved = !project;
+  if (!project) project = await db.collection("projects").findOne({ key: to, formerKeys: from });
   if (!project) {
     const keys = (await db.collection("projects").find({}, { projection: { key: 1 } }).toArray())
       .map((p) => p.key)
       .join(", ");
-    throw new Error(`No project has key "${from}". This database holds: ${keys || "no projects"}`);
+    throw new Error(
+      `No project has key "${from}", and none has "${to}" with "${from}" among its former keys. ` +
+        `This database holds: ${keys || "no projects"}`
+    );
   }
+  if (alreadyMoved) console.log(`note       : key is already ${to} — repointing leftover text only`);
 
   const taskCount = await db.collection("tasks").countDocuments({ project: project._id });
   console.log(`project    : ${project.name} (${from} → ${to}), ${taskCount} task(s) renamed with it`);
@@ -114,10 +131,12 @@ async function main() {
 
   // The key and its history move together: a key changed without its predecessor recorded
   // is the one state from which the pull-request links cannot be recovered
-  await db.collection("projects").updateOne(
-    { _id: project._id },
-    { $set: { key: to }, $addToSet: { formerKeys: from } }
-  );
+  if (!alreadyMoved) {
+    await db.collection("projects").updateOne(
+      { _id: project._id },
+      { $set: { key: to }, $addToSet: { formerKeys: from } }
+    );
+  }
 
   const perDoc = new Map<string, { collection: string; id: unknown; sets: Record<string, string> }>();
   for (const r of rewrites) {
