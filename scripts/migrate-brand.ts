@@ -64,6 +64,9 @@ const PATH_LIKE = /^(\/|~\/|[A-Za-z]:\\)/;
  */
 const EXTERNAL_IDENTIFIER = /(^|\.)(githubRepo|gitlabRepo|repositoryUrl|redirectUri)$/;
 
+/** The subset of those that a repository rename does make stale. */
+const REPOSITORY_FIELD = /(^|\.)(githubRepo|gitlabRepo|repositoryUrl)$/;
+
 interface Change {
   collection: string;
   id: unknown;
@@ -76,10 +79,13 @@ function walk(
   value: unknown,
   path: string,
   includePaths: boolean,
+  includeRepo: boolean,
   emit: (path: string, before: string, after: string) => void
 ): void {
   if (typeof value === "string") {
-    if (EXTERNAL_IDENTIFIER.test(path)) return;
+    const external = EXTERNAL_IDENTIFIER.test(path);
+    const repoField = REPOSITORY_FIELD.test(path);
+    if (external && !(repoField && includeRepo)) return;
     if (!includePaths && PATH_LIKE.test(value)) return;
     // Host first: the generic rename would turn "claude-planner-production…" into
     // "board-planner-production…", a hostname that resolves to nothing, and the host
@@ -89,14 +95,14 @@ function walk(
     return;
   }
   if (Array.isArray(value)) {
-    value.forEach((item, i) => walk(item, `${path}.${i}`, includePaths, emit));
+    value.forEach((item, i) => walk(item, `${path}.${i}`, includePaths, includeRepo, emit));
     return;
   }
   // Only plain objects: an ObjectId or a Date has no strings of ours inside it, and
   // descending into one would produce a path that $set cannot address
   if (value && typeof value === "object" && value.constructor === Object) {
     for (const [key, child] of Object.entries(value)) {
-      walk(child, path ? `${path}.${key}` : key, includePaths, emit);
+      walk(child, path ? `${path}.${key}` : key, includePaths, includeRepo, emit);
     }
   }
 }
@@ -111,6 +117,9 @@ async function main() {
   const args = process.argv.slice(2);
   const mode = args.find((a) => !a.startsWith("--")) ?? "scan";
   const includePaths = args.includes("--include-paths");
+  // The repository fields are excluded because they name a repository that did not get
+  // renamed with the product. Once it has been, this is how they catch up.
+  const includeRepo = args.includes("--include-repo");
   if (mode !== "scan" && mode !== "apply") {
     throw new Error(`Unknown mode "${mode}" — expected scan or apply`);
   }
@@ -136,7 +145,7 @@ async function main() {
   for (const name of collections) {
     for (const doc of await db.collection(name).find({}).toArray()) {
       scanned++;
-      walk(doc, "", includePaths, (path, before, after) => {
+      walk(doc, "", includePaths, includeRepo, (path, before, after) => {
         changes.push({ collection: name, id: doc._id, path, before, after });
       });
     }
@@ -168,7 +177,10 @@ async function main() {
     if (!includePaths) {
       console.log(`Filesystem paths were skipped; pass --include-paths once the checkout directory is renamed.`);
     }
-    console.log(`Repository and OAuth redirect fields were skipped — they name things outside this database.`);
+    if (!includeRepo) {
+      console.log(`Repository fields were skipped — pass --include-repo once the repository itself is renamed.`);
+    }
+    console.log(`OAuth redirect fields were skipped — those are registered on the other side.`);
     await client.close();
     return;
   }
