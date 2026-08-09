@@ -55,6 +55,15 @@ const NEW_HOST = "app.board-planner.com";
 /** A value that is a path on somebody's disk, not prose about the product. */
 const PATH_LIKE = /^(\/|~\/|[A-Za-z]:\\)/;
 
+/**
+ * Fields naming something that lives outside this database and did not get renamed with it.
+ * A repository is the sharpest case: the project points at `rafalpodles/claude-planner`,
+ * that is still the repository's name on GitHub, and rewriting it makes every pull-request
+ * sync ask about a repository that does not exist. A redirect URI is registered with the
+ * remote OAuth server, so changing this copy only makes the two disagree.
+ */
+const EXTERNAL_IDENTIFIER = /(^|\.)(githubRepo|gitlabRepo|repositoryUrl|redirectUri)$/;
+
 interface Change {
   collection: string;
   id: unknown;
@@ -70,6 +79,7 @@ function walk(
   emit: (path: string, before: string, after: string) => void
 ): void {
   if (typeof value === "string") {
+    if (EXTERNAL_IDENTIFIER.test(path)) return;
     if (!includePaths && PATH_LIKE.test(value)) return;
     // Host first: the generic rename would turn "claude-planner-production…" into
     // "board-planner-production…", a hostname that resolves to nothing, and the host
@@ -158,6 +168,7 @@ async function main() {
     if (!includePaths) {
       console.log(`Filesystem paths were skipped; pass --include-paths once the checkout directory is renamed.`);
     }
+    console.log(`Repository and OAuth redirect fields were skipped — they name things outside this database.`);
     await client.close();
     return;
   }
