@@ -57,18 +57,21 @@ function main() {
 
   console.log(apply ? "Rebranding stored data — snapshot, migrate, verify." : "Dry run — a snapshot is still taken.");
 
-  const steps = keyArg ? 5 : 4;
+  // A dry run stops after the reports, so it must not number its steps out of a plan it
+  // will not carry out — "1/5" that ends at 2 reads as a script that gave up
+  const steps = apply ? (keyArg ? 6 : 4) : keyArg ? 3 : 2;
   run(`1/${steps}  Snapshot every collection`, ["scripts/dump-collections.ts", "dump", BACKUP_ROOT, "all"]);
   const backup = newestBackup();
   console.log(`\nSnapshot: ${backup}`);
 
   const scan = run(`2/${steps}  What would change`, ["scripts/migrate-brand.ts", "scan"]);
-  if (keyArg) run(`2b/${steps}  What the key change would touch`, ["scripts/migrate-project-key.ts", fromKey, toKey]);
+  if (keyArg) run(`3/${steps}  What the key change would touch`, ["scripts/migrate-project-key.ts", fromKey, toKey]);
 
   if (!apply) {
     console.log(
-      `\nNothing was written. The snapshot above is real — re-run with --apply to migrate,\n` +
-        `or throw the snapshot away if you are not going ahead.`
+      `\nThat is the whole dry run — it reports and stops, by design.\n` +
+        `The snapshot above is real. Re-run with --apply to carry it out, which adds\n` +
+        `${keyArg ? "the migration, a verifying re-scan and the key change" : "the migration and a verifying re-scan"}.`
     );
     return;
   }
@@ -78,9 +81,10 @@ function main() {
     return;
   }
 
-  run(`3/${steps}  Migrate`, ["scripts/migrate-brand.ts", "apply"]);
+  const offset = keyArg ? 1 : 0;
+  run(`${3 + offset}/${steps}  Migrate`, ["scripts/migrate-brand.ts", "apply"]);
 
-  const after = run(`4/${steps}  Verify`, ["scripts/migrate-brand.ts", "scan"]);
+  const after = run(`${4 + offset}/${steps}  Verify`, ["scripts/migrate-brand.ts", "scan"]);
   if (!after.includes("Nothing left to rename")) {
     throw new Error(
       "The migration ran but a second scan still finds occurrences. Do not treat this as done — " +
@@ -90,7 +94,7 @@ function main() {
 
   // Last, and only once the name migration has verified: the key change renames every task
   // in the project, and doing that on top of a half-finished rename would be hard to read
-  if (keyArg) run(`5/${steps}  Change the project key`, ["scripts/migrate-project-key.ts", fromKey, toKey, "--apply"]);
+  if (keyArg) run(`6/${steps}  Change the project key`, ["scripts/migrate-project-key.ts", fromKey, toKey, "--apply"]);
 
   console.log(`\n${"─".repeat(72)}`);
   console.log("Done. A second scan found nothing left.");
