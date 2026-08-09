@@ -1,12 +1,15 @@
 /**
  * Snapshot collections to disk before a migration, and put them back if needed.
  *
- *   MONGODB_URI=... npx tsx scripts/dump-collections.ts dump ./backups
+ *   MONGODB_URI=... npx tsx scripts/dump-collections.ts dump ./backups all
  *   MONGODB_URI=... npx tsx scripts/dump-collections.ts verify ./backups/<dir>
  *   MONGODB_URI=... npx tsx scripts/dump-collections.ts restore ./backups/<dir>
  *
  * Defaults to `projects` and `tasks` — where the migrations in this directory write.
- * Pass a comma-separated list as the third argument for anything else.
+ * Pass a comma-separated list as the third argument for anything else, or `all` to
+ * snapshot every collection in the database. Use `all` ahead of any migration that
+ * walks the whole database: a dump that misses a collection reads as a safety net and
+ * is not one.
  *
  * `restore` replaces the listed collections wholesale with the snapshot, so it also
  * undoes anything else written since the dump. Run `verify` first to see the drift.
@@ -127,7 +130,14 @@ async function main() {
   const db = client.db(dbName());
   console.log(`Database: ${db.databaseName} (from ${source})`);
 
-  if (mode === "dump") await dump(db, target, (collectionArg || DEFAULT_COLLECTIONS.join(",")).split(","));
+  if (mode === "dump") {
+    const requested =
+      collectionArg === "all"
+        ? (await db.listCollections().toArray()).map((c) => c.name).sort()
+        : (collectionArg || DEFAULT_COLLECTIONS.join(",")).split(",");
+    console.log(`Collections: ${requested.length} (${requested.join(", ")})`);
+    await dump(db, target, requested);
+  }
   if (mode === "verify") await verify(db, target);
   if (mode === "restore") await restore(db, target);
 
