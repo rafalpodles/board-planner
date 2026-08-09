@@ -60,6 +60,13 @@ const projectSchema = new Schema<IProject>(
       uppercase: true,
       trim: true,
     },
+    // Every key this project has answered to. A task key is built from the current one, so
+    // renaming it renames all of them at once — while the branches and pull requests that
+    // already exist keep the old prefix forever. Matching those needs the old key kept.
+    formerKeys: {
+      type: [String],
+      default: [],
+    },
     description: {
       type: String,
       default: "",

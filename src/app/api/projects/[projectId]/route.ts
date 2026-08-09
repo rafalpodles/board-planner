@@ -172,6 +172,17 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
     updates.codaToken = encryptSecret(updates.codaToken);
   }
 
+  // Read before the write: a renamed key must be remembered or every pull request opened
+  // under the old one silently stops matching its task, and after the update the document
+  // already carries the new key to compare against
+  if (typeof updates.key === "string") {
+    const before = await Project.findById(projectId, "key formerKeys").lean();
+    const nextKey = updates.key.trim().toUpperCase();
+    if (before && nextKey && nextKey !== before.key) {
+      updates.formerKeys = [...new Set([...(before.formerKeys || []), before.key])];
+    }
+  }
+
   const project = await Project.findByIdAndUpdate(projectId, updates, {
     returnDocument: "after",
   }).populate("createdBy", "username fullName");

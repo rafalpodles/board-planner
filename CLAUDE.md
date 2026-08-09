@@ -17,7 +17,7 @@ Search Notion first to check if a relevant page already exists before creating a
 ---
 
 ## Board Planner integration
-boardplanner_project_key: CP
+boardplanner_project_key: BP
 
 ### Workflow
 - On session start: run `list_tasks` for this project to see current work.
@@ -48,7 +48,7 @@ Size comes from the project's **Difficulty** field — an ordinary project-defin
 **1. todo → in_progress (Start work)**
 - Pick the task, assign to `claude`, change status to `in_progress`.
 - Add a comment: what approach will be taken (for S/M: brief, for L/XL: detailed plan — wait for approval).
-- Create a feature branch from `main`: `cp-<number>/<short-slug>` (e.g. `cp-5/remove-in-testing`).
+- Create a feature branch from `main`: `bp-<number>/<short-slug>` (e.g. `bp-5/remove-in-testing`).
 - Implement the task on that branch.
 
 **1.1. needs_human_review**
@@ -79,10 +79,10 @@ Size comes from the project's **Difficulty** field — an ordinary project-defin
 - Do not brute-force or guess. Wait for user input.
 
 ### Conventions
-- Task keys: `CP-1`, `CP-2` — use these when referencing tasks.
+- Task keys: `BP-1`, `BP-2` — use these when referencing tasks. Pull requests opened under the old `CP-` prefix still link, because the project keeps its former keys.
 - **Project-defined fields go through the generic `fields` parameter**, keyed by field name: `fields: { "Difficulty": "L", "Component": "ui" }`. CP-214 removed the `difficulty` and `component` parameters that used to exist alongside it — a client still passing them gets nothing set. `get_project` lists the field names a project actually has.
 - Assignees use **usernames** (not IDs). `claude` = Claude Code, `rpo` = you.
-- Branch naming: `cp-<number>/<short-slug>` (e.g. `cp-3/dropdown-menu`)
+- Branch naming: `bp-<number>/<short-slug>` (e.g. `bp-3/dropdown-menu`)
 
 ### GitHub — always the `rafalpodles` account
 
@@ -158,7 +158,7 @@ mcp-server/           # Standalone MCP server (stdio transport)
 - **Activity logging**: Fire-and-forget, doesn't block the main request
 - **Notifications**: In-app + optional Slack/Discord webhooks + optional email
 - **Recurrence**: When task → done with recurrence config, auto-creates next task
-- **GitHub PR linking**: Matches PRs by branch/title pattern `CP-5` (case-insensitive)
+- **GitHub PR linking**: Matches PRs by branch/title pattern `BP-5`, and by any key the project used to have (case-insensitive)
 - **Autonomous workers**: Opt-in per project (Settings → Workers, instance admin). A worker reports
   the checkouts it has — resolved from `repos.json` on its own machine — and the server matches
   those remotes against the project's `githubRepo`/`gitlabRepo`. **The server never sends a path**:

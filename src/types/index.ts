@@ -632,6 +632,8 @@ export interface IProject {
   _id: Types.ObjectId;
   name: string;
   key: string;
+  /** Keys this project used to have, so a rename does not orphan its pull requests */
+  formerKeys: string[];
   description: string;
   icon: string;
   categories: IProjectCategory[];

@@ -4,6 +4,10 @@
  *   npx tsx scripts/rebrand-data.ts            # dumps and reports, writes nothing
  *   npx tsx scripts/rebrand-data.ts --apply
  *
+ * Add --key CP=BP to change a project's key in the same run. That renames every one of
+ * its tasks at once, since a task key is built from it and never stored — see
+ * migrate-project-key.ts for what it does to keep the old references working.
+ *
  * Against production, from a laptop — the app service's URI is on Railway's private
  * network, so this has to go through the database service:
  *
@@ -47,14 +51,19 @@ function newestBackup(): string {
 
 function main() {
   const apply = process.argv.includes("--apply");
+  const keyArg = process.argv.find((a) => a.startsWith("--key="))?.slice("--key=".length);
+  const [fromKey, toKey] = keyArg ? keyArg.split("=") : [];
+  if (keyArg && (!fromKey || !toKey)) throw new Error("--key takes FROM=TO, e.g. --key=CP=BP");
 
   console.log(apply ? "Rebranding stored data — snapshot, migrate, verify." : "Dry run — a snapshot is still taken.");
 
-  run("1/4  Snapshot every collection", ["scripts/dump-collections.ts", "dump", BACKUP_ROOT, "all"]);
+  const steps = keyArg ? 5 : 4;
+  run(`1/${steps}  Snapshot every collection`, ["scripts/dump-collections.ts", "dump", BACKUP_ROOT, "all"]);
   const backup = newestBackup();
   console.log(`\nSnapshot: ${backup}`);
 
-  const scan = run("2/4  What would change", ["scripts/migrate-brand.ts", "scan"]);
+  const scan = run(`2/${steps}  What would change`, ["scripts/migrate-brand.ts", "scan"]);
+  if (keyArg) run(`2b/${steps}  What the key change would touch`, ["scripts/migrate-project-key.ts", fromKey, toKey]);
 
   if (!apply) {
     console.log(
@@ -69,15 +78,19 @@ function main() {
     return;
   }
 
-  run("3/4  Migrate", ["scripts/migrate-brand.ts", "apply"]);
+  run(`3/${steps}  Migrate`, ["scripts/migrate-brand.ts", "apply"]);
 
-  const after = run("4/4  Verify", ["scripts/migrate-brand.ts", "scan"]);
+  const after = run(`4/${steps}  Verify`, ["scripts/migrate-brand.ts", "scan"]);
   if (!after.includes("Nothing left to rename")) {
     throw new Error(
       "The migration ran but a second scan still finds occurrences. Do not treat this as done — " +
         `restore with:\n  npx tsx scripts/dump-collections.ts restore ${backup}`
     );
   }
+
+  // Last, and only once the name migration has verified: the key change renames every task
+  // in the project, and doing that on top of a half-finished rename would be hard to read
+  if (keyArg) run(`5/${steps}  Change the project key`, ["scripts/migrate-project-key.ts", fromKey, toKey, "--apply"]);
 
   console.log(`\n${"─".repeat(72)}`);
   console.log("Done. A second scan found nothing left.");
