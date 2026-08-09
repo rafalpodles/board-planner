@@ -29,9 +29,10 @@ interface Rewrite {
 }
 
 function referenceRewriter(from: string, to: string) {
-  // Uppercase and not followed by a slash: a task reference. The lowercase, slash-suffixed
-  // form is how every branch in this repository is named, and those are not ours to rename.
-  const reference = new RegExp(`\\b${from}-(\\d+)\\b(?!/)`, "g");
+  // Uppercase only: that alone separates a task reference from a branch name, since every
+  // branch here is lowercase. An earlier version also refused a following slash, which read
+  // "CP-213/CP-214" — two task references — as a branch and left the first one behind.
+  const reference = new RegExp(`\\b${from}-(\\d+)\\b`, "g");
 
   // A placeholder rather than a number — "cp-<n>/<slug>" is documentation of the branch
   // convention, and the convention follows the key. "cp-213/generic-field-activity" is a
