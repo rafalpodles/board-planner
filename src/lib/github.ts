@@ -59,9 +59,14 @@ async function fetchPage(url: string, headers: Record<string, string>): Promise<
  */
 export function matchPRsToTasks(
   prs: GitHubPR[],
-  projectKey: string
+  projectKey: string,
+  formerKeys: string[] = []
 ): ParsedPR[] {
-  const pattern = new RegExp(`${escapeRegex(projectKey)}[- ](\\d+)`, "i");
+  // Former keys count: a task key is built from the project's current key, so renaming it
+  // renames every task at once — while the branches and PR titles already on GitHub keep
+  // the prefix they were created with, and would otherwise all stop matching.
+  const keys = [projectKey, ...formerKeys].filter(Boolean);
+  const pattern = new RegExp(`(?:${keys.map(escapeRegex).join("|")})[- ](\\d+)`, "i");
 
   const results: ParsedPR[] = [];
 

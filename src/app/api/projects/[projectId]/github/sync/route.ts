@@ -43,7 +43,7 @@ export const POST = withProjectAccess(async (_request, { params, user }) => {
 
   // Fetch PRs from GitHub (token is encrypted at rest)
   const rawPRs = await fetchPullRequests(parsed.owner, parsed.repo, decryptSecret(project.githubToken));
-  const matchedPRs = matchPRsToTasks(rawPRs, project.key);
+  const matchedPRs = matchPRsToTasks(rawPRs, project.key, project.formerKeys || []);
 
   // Group by task number
   const prsByTask = new Map<number, typeof matchedPRs>();
