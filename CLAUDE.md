@@ -202,4 +202,4 @@ cd mcp-server && npm run build   # MCP server
 
 ## Deploy
 Railway auto-deploys from `main` branch.
-App: https://board-planner.com
+App: https://app.board-planner.com
