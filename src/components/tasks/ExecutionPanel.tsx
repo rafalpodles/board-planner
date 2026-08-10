@@ -13,7 +13,7 @@ const HOUR = 60 * MINUTE;
 
 // One definition for every view that judges a run: the card, the list row and this panel.
 // Re-exported because callers already import them from here.
-import { QUIET_MS, ageAt } from "@/lib/run-state";
+import { QUIET_MS, ageAt, runLook } from "@/lib/run-state";
 export { QUIET_MS, ageAt };
 
 export function durationLabel(ms: number): string {
@@ -49,6 +49,7 @@ export function ExecutionPanel({ execution }: ExecutionPanelProps) {
   const quietFor = ageAt(phaseAt, asOf, sinceFetch);
   const runningFor = ageAt(startedAt, asOf, sinceFetch);
   const quiet = Number.isFinite(quietFor) && quietFor > QUIET_MS;
+  const look = runLook(quiet ? "quiet" : "live");
   const running = durationLabel(runningFor);
   const silent = durationLabel(quietFor);
 
@@ -57,9 +58,7 @@ export function ExecutionPanel({ execution }: ExecutionPanelProps) {
       <SectionLabel>Execution</SectionLabel>
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <span
-          className={`inline-block w-2 h-2 rounded-full ${
-            quiet ? "bg-warning" : "bg-success animate-pulse"
-          }`}
+          className={`inline-block w-2 h-2 rounded-full ${look.dot}`}
           data-testid={quiet ? "run-quiet" : "run-live"}
           aria-hidden="true"
         />
