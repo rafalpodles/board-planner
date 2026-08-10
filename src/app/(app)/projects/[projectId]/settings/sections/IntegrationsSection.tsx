@@ -225,6 +225,8 @@ export function IntegrationsSection({
               channelId,
             });
           }
+          patchProject({ notificationChannels: saved });
+          channels.commit({ channels: saved });
           toast("Channels saved", "success");
         } catch (err) {
           fail(err, "Failed to save channels");
@@ -269,6 +271,12 @@ export function IntegrationsSection({
               webhookId,
             });
           }
+          // commit, not rebase: on success the server's answer is the whole truth, and the rows
+          // it just created carry ids the draft has never seen. Moving the baseline alone would
+          // leave those as a difference, so the counter would stay dirty and the next Save would
+          // re-issue a diff that had already been applied.
+          patchProject({ webhooks: saved });
+          webhooks.commit({ webhooks: saved });
           toast("Webhooks saved", "success");
         } catch (err) {
           fail(err, "Failed to save webhooks");
