@@ -18,9 +18,13 @@ export type AutoSaveState = "idle" | "saving" | "saved" | "error";
 export type ChecklistDraftItem = { _id?: string; text: string; done: boolean };
 
 /**
- * Everything the detail view edits in place. `status` is deliberately absent: it
- * goes through the status endpoint, which is the only path that runs the
- * transition side effects (recurrence, notifications).
+ * Everything the detail view edits in place. `status` is absent because moving a task is its own
+ * act with its own endpoint, not a field edit that autosaves under you.
+ *
+ * It used to be absent for a second reason — the status endpoint was the only path that ran the
+ * transition side effects, so PUTting a status here would have silently skipped recurrence,
+ * webhooks and notifications. BP-253 moved those behind one helper both paths call, so that is
+ * no longer true and this omission is no longer load-bearing.
  */
 export interface TaskDraft {
   title: string;

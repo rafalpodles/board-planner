@@ -257,48 +257,77 @@ export async function changeStatus(
 
   if (oldTask.status !== status) {
     await logActivity(taskId, actorId, "status_changed", "status", oldTask.status, status);
-
-    const eventPayload = {
-      project: { key: "", name: "" },
-      task: {
-        taskKey: `${oldTask.taskNumber}`,
-        title: task.title,
-        status,
-      },
-      data: { oldStatus: oldTask.status, newStatus: status },
-    };
-    dispatchWebhooks(projectId, "status_changed", eventPayload);
-    dispatchNotifications(projectId, "status_changed", eventPayload);
-
-    const project = await Project.findById(projectId, "key name").lean();
-    const taskKey = project ? `${project.key}-${task.taskNumber}` : `#${task.taskNumber}`;
-    const recipients = collectRecipients(task);
-    createNotifications({
-      type: "status_changed",
-      taskId,
+    await announceStatusChange({
       projectId,
+      taskId,
+      oldTask,
+      task,
       actorId,
-      title: `${taskKey} → ${status}`,
-      body: task.title,
-      recipientIds: recipients,
+      project: projectColumns,
     });
-
-    if (roleOf(projectColumns, status) === "done" && oldTask.recurrence) {
-      createNextRecurrence(oldTask, projectId, actorId).catch((err) =>
-        console.error("Failed to create recurring task:", err)
-      );
-    }
-
-    onTaskStatusChanged({
-      projectId,
-      taskId,
-      oldStatus: oldTask.status,
-      newStatus: status,
-      actorId,
-    }).catch((err) => console.error("PM status trigger failed:", err));
   }
 
   return { ok: true, data: task as ITask };
+}
+
+interface StatusChangeAnnouncement {
+  projectId: string;
+  taskId: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  oldTask: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  task: any;
+  actorId: string;
+  // The project document, not its columns array: roleOf reads `.columns` itself
+  project: Parameters<typeof roleOf>[0];
+}
+
+/**
+ * Everything a status change sets off, in one place because it has two callers. The board, the
+ * right-click menu and the list dropdown all PATCH the status and go through changeStatus; the
+ * edit form PUTs the whole task and goes through updateTask. Only the PM trigger was ever copied
+ * to the second one, so the same act had two different outcomes with nothing to tell them apart:
+ * closing a recurring task from the detail view silently stopped it recurring, and no webhook,
+ * no Slack or Discord message and no in-app notification fired for a move made there.
+ *
+ * Activity logging stays with each caller. changeStatus writes one entry deliberately, and
+ * updateTask already writes one through its own field tracking, so logging here would double it.
+ */
+async function announceStatusChange(a: StatusChangeAnnouncement): Promise<void> {
+  const status = String(a.task.status);
+  const eventPayload = {
+    project: { key: "", name: "" },
+    task: { taskKey: `${a.oldTask.taskNumber}`, title: a.task.title, status },
+    data: { oldStatus: a.oldTask.status, newStatus: status },
+  };
+  dispatchWebhooks(a.projectId, "status_changed", eventPayload);
+  dispatchNotifications(a.projectId, "status_changed", eventPayload);
+
+  const project = await Project.findById(a.projectId, "key name").lean();
+  const taskKey = project ? `${project.key}-${a.task.taskNumber}` : `#${a.task.taskNumber}`;
+  createNotifications({
+    type: "status_changed",
+    taskId: a.taskId,
+    projectId: a.projectId,
+    actorId: a.actorId,
+    title: `${taskKey} → ${status}`,
+    body: a.task.title,
+    recipientIds: collectRecipients(a.task),
+  });
+
+  if (roleOf(a.project, status) === "done" && a.oldTask.recurrence) {
+    createNextRecurrence(a.oldTask, a.projectId, a.actorId).catch((err) =>
+      console.error("Failed to create recurring task:", err)
+    );
+  }
+
+  onTaskStatusChanged({
+    projectId: a.projectId,
+    taskId: a.taskId,
+    oldStatus: a.oldTask.status,
+    newStatus: status,
+    actorId: a.actorId,
+  }).catch((err) => console.error("PM status trigger failed:", err));
 }
 
 export async function updateTask(
@@ -476,15 +505,17 @@ export async function updateTask(
 
   await Promise.all(activities);
 
-  // The edit form sends status inside the PUT body, so this path needs the hook too
+  // The edit form sends status inside the PUT body, so this path sets off the same things a
+  // board move does. It used to fire the PM trigger alone, which is the whole of BP-253.
   if (updates.status !== undefined && oldTask.status !== task.status) {
-    onTaskStatusChanged({
+    await announceStatusChange({
       projectId,
       taskId,
-      oldStatus: oldTask.status,
-      newStatus: task.status,
+      oldTask,
+      task,
       actorId,
-    }).catch((err) => console.error("PM status trigger failed:", err));
+      project: await Project.findById(projectId, "columns").lean(),
+    });
   }
 
   // In-app notification: assignee changed

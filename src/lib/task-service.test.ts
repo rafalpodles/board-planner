@@ -58,6 +58,8 @@ function unsetKeys(update: unknown): string[] {
 
 
 const findOneAndUpdate = vi.fn();
+const taskCreate = vi.fn();
+const projectFindOneAndUpdate = vi.fn();
 const updateMany = vi.fn();
 const updateOne = vi.fn();
 const findOne = vi.fn();
@@ -69,9 +71,9 @@ const workerFindById = vi.fn();
 vi.mock("./db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/worker", () => ({ Worker: { findById: workerFindById } }));
 vi.mock("@/models/task", () => ({
-  Task: { findOneAndUpdate, updateMany, updateOne, findOne, findByIdAndUpdate },
+  Task: { findOneAndUpdate, updateMany, updateOne, findOne, findByIdAndUpdate, create: taskCreate },
 }));
-vi.mock("@/models/project", () => ({ Project: { findById } }));
+vi.mock("@/models/project", () => ({ Project: { findById, findOneAndUpdate: projectFindOneAndUpdate } }));
 vi.mock("@/models/user", () => ({ User: { findOne: userFindOne } }));
 vi.mock("@/models/comment", () => ({ Comment: {} }));
 vi.mock("@/lib/activity", () => ({ logActivity: vi.fn() }));
@@ -99,6 +101,8 @@ const {
 } = await import("./task-service");
 
 const { logActivity } = await import("@/lib/activity");
+const { dispatchWebhooks } = await import("@/lib/webhooks");
+const { dispatchNotifications } = await import("@/lib/notifications");
 
 function matches(filter: unknown, doc: unknown): boolean {
   return sift(filter as Record<string, unknown>)(doc);
@@ -1107,5 +1111,94 @@ describe("updateTask writing project fields to the history", () => {
     await updateTask("p1", "t1", { customFieldValues: { "f-diff": "opt-m" } }, "actor");
 
     expect(fieldEntries()).toHaveLength(0);
+  });
+});
+
+
+/**
+ * Moving a task to another column sets off webhooks, notifications and — for a recurring task
+ * reaching a done column — the next occurrence. The board PATCHes the status; the edit form PUTs
+ * the whole task. Only the second path was missing all of it, and every test here passed anyway
+ * because none of them asked what a status change announces.
+ */
+describe("a status change announces the same things whichever path made it", () => {
+  const board = {
+    key: "TP",
+    columns: [
+      { id: "doing", label: "Doing", role: "active", order: 1 },
+      { id: "shipped", label: "Shipped", role: "done", order: 2 },
+    ],
+  };
+
+  function setup(over: Record<string, unknown> = {}) {
+    vi.clearAllMocks();
+    const before = { _id: "t1", taskNumber: 7, status: "doing", title: "x", ...over };
+    findById.mockReturnValue({ lean: () => Promise.resolve(board) });
+    findOne.mockReturnValue({
+      lean: () => Promise.resolve(before),
+      populate: () => ({ lean: () => Promise.resolve(before) }),
+    });
+    findOneAndUpdate.mockReturnValue({
+      populate: () => Promise.resolve({ ...before, status: "shipped" }),
+    });
+    updateMany.mockResolvedValue({ modifiedCount: 0 });
+    projectFindOneAndUpdate.mockResolvedValue({ _id: "p1", key: "TP", taskCounter: 8 });
+    taskCreate.mockResolvedValue({ _id: "t2", taskNumber: 8 });
+  }
+
+  const webhookPayloads = () =>
+    (dispatchWebhooks as ReturnType<typeof vi.fn>).mock.calls.map((c) => [c[1], c[2]]);
+
+  it("dispatches a webhook from the board path", async () => {
+    setup();
+    await changeStatus("p1", "t1", "shipped", "actor");
+    expect(webhookPayloads()).toHaveLength(1);
+    expect(webhookPayloads()[0][0]).toBe("status_changed");
+  });
+
+  it("dispatches the identical webhook from the edit form", async () => {
+    setup();
+    await changeStatus("p1", "t1", "shipped", "actor");
+    const fromBoard = webhookPayloads();
+
+    setup();
+    await updateTask("p1", "t1", { status: "shipped" }, "actor");
+
+    expect(webhookPayloads()).toEqual(fromBoard);
+  });
+
+  it("sends the outbound notification from the edit form too", async () => {
+    setup();
+    await updateTask("p1", "t1", { status: "shipped" }, "actor");
+    expect(dispatchNotifications).toHaveBeenCalledTimes(1);
+  });
+
+  // The reported bug: a weekly task closed from the detail view simply stopped recurring
+  it("creates the next occurrence when the edit form closes a recurring task", async () => {
+    setup({ recurrence: { frequency: "weekly", interval: 1 } });
+    await updateTask("p1", "t1", { status: "shipped" }, "actor");
+
+    expect(taskCreate, "no next occurrence was created").toHaveBeenCalled();
+  });
+
+  // Asserting only on Task.create is too weak: without the recurrence guard the helper still
+  // throws on destructuring an absent config, so create is never reached and the test passes on
+  // the mutation. It burns a task number on the way, though — the counter is incremented first —
+  // so that is what proves the guard is doing its job.
+  it("creates none, and burns no task number, when the task does not recur", async () => {
+    setup();
+    await updateTask("p1", "t1", { status: "shipped" }, "actor");
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(taskCreate).not.toHaveBeenCalled();
+    expect(projectFindOneAndUpdate, "the recurrence counter was incremented anyway").not.toHaveBeenCalled();
+  });
+
+  // A reorder inside the same column is not a status change and must announce nothing
+  it("announces nothing when the status does not actually move", async () => {
+    setup();
+    await updateTask("p1", "t1", { title: "renamed" }, "actor");
+    expect(dispatchWebhooks).not.toHaveBeenCalled();
+    expect(taskCreate).not.toHaveBeenCalled();
   });
 });
