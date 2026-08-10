@@ -4,6 +4,8 @@ const getAuthUser = vi.fn();
 const check = vi.fn();
 const mintEnrolmentToken = vi.fn();
 
+const logInstanceAudit = vi.fn();
+vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({
   getAuthUser,
@@ -49,6 +51,32 @@ describe("POST /api/workers/enrolment", () => {
     expect(response.status).toBe(201);
     expect((await response.json()).token).toBe("cpe_secret");
     expect(mintEnrolmentToken).toHaveBeenCalledWith("admin-1", "rig laptop");
+  });
+
+  // BP-233: handing out the credential that lets a new machine join is exactly the kind of thing
+  // an instance log exists for
+  it("records the minting, and never the token itself", async () => {
+    getAuthUser.mockResolvedValue(SESSION_ADMIN);
+
+    await POST(request({ label: "rig laptop" }), { params: Promise.resolve({}) });
+
+    expect(logInstanceAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "enrolment_token_minted",
+        target: "rig laptop",
+        user: "admin-1",
+      })
+    );
+    // Returned once and only its hash stored — an audit row is the wrong place to undo that
+    expect(JSON.stringify(logInstanceAudit.mock.calls[0][0])).not.toContain("cpe_secret");
+  });
+
+  it("records nothing when the mint is refused", async () => {
+    getAuthUser.mockResolvedValue(UNSCOPED_ADMIN_TOKEN);
+
+    await POST(request(), { params: Promise.resolve({}) });
+
+    expect(logInstanceAudit).not.toHaveBeenCalled();
   });
 
   // Otherwise the fix is circular: a token readable off the worker's disk could mint the credential

@@ -4,6 +4,8 @@ import { withProjectAccess, withProjectOwner, withProjectAccessOrWorker } from "
 import { check } from "@/lib/grants";
 import { Project } from "@/models/project";
 import { parseProjectWorkerConfig } from "@/lib/project-worker-config";
+import { logInstanceAudit } from "@/lib/instanceAudit";
+import { InstanceAuditAction } from "@/types";
 import { Task } from "@/models/task";
 import { Comment } from "@/models/comment";
 import { ActivityLog } from "@/models/activityLog";
@@ -50,6 +52,7 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
 
   const allowed = ["name", "description", "key", "icon", "repositoryUrl", "githubToken", "gitlabHost", "gitlabToken", "codaHost", "codaDocId", "codaTableId", "codaToken"];
   const updates: Record<string, unknown> = {};
+  let workerAudit: PendingWorkerAudit[] = [];
   for (const field of allowed) {
     if (body[field] !== undefined) {
       updates[field] = body[field];
@@ -75,7 +78,7 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
         { status: 403 }
       );
     }
-    const existing = await Project.findById(projectId).select("worker");
+    const existing = await Project.findById(projectId).select("worker key");
     if (!existing) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
@@ -89,6 +92,16 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
       return NextResponse.json({ error: parsed.error }, { status: 400 });
     }
     Object.assign(updates, parsed.update);
+
+    // Decided here, where the old values are in hand, and written after the update lands. Firing
+    // it here would record decisions that never happened: five later branches still return 400,
+    // and this handler is one request — a rejected gitlabHost would leave a row saying a project
+    // had been committed to workers.
+    workerAudit = pendingWorkerAudit(
+      existing as never,
+      updates,
+      existing.key || String(projectId)
+    );
   }
 
   if (body.pm !== undefined) {
@@ -191,6 +204,10 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
+  for (const entry of workerAudit) {
+    void logInstanceAudit({ ...entry, user: String(user._id) });
+  }
+
   const changedFields = Object.keys(updates)
     .filter((f) => f !== "githubToken" && f !== "gitlabToken")
     .join(", ");
@@ -240,3 +257,48 @@ export const DELETE = withProjectOwner(async (_request, { params }) => {
 
   return NextResponse.json({ message: "Project deleted" });
 });
+
+type PendingWorkerAudit = { action: InstanceAuditAction; target: string; detail?: string };
+
+// Decided from the values already stored, because the update is a dotted patch: a field the request
+// never mentioned is not a change, and one carrying the value it already had is not either.
+//
+// A single verb with a detail for the policy pair, unlike the fleet verbs: "who stopped this
+// machine" wants an answer in the action column, while "what did this project's rules become"
+// is a question about the values, and they belong together on one row.
+function pendingWorkerAudit(
+  existing: { worker?: { enabled?: boolean; policy?: { autoMerge?: boolean; reviewGate?: boolean } } },
+  updates: Record<string, unknown>,
+  target: string
+): PendingWorkerAudit[] {
+  const entries: PendingWorkerAudit[] = [];
+
+  const nowEnabled = updates["worker.enabled"];
+  if (typeof nowEnabled === "boolean" && nowEnabled !== !!existing.worker?.enabled) {
+    // Instance-level, not project-level: this commits somebody's machine to running agent-written
+    // code, and the project audit log is read by project admins who cannot make that decision.
+    entries.push({
+      action: nowEnabled ? "project_workers_enabled" : "project_workers_disabled",
+      target,
+    });
+  }
+
+  // Only the safety pair. The rest of the policy describes how work is done and stays in the
+  // project's own log; these two decide whether anything reaches a base branch unreviewed.
+  const changed: string[] = [];
+  for (const field of ["autoMerge", "reviewGate"] as const) {
+    const next = updates[`worker.policy.${field}`];
+    if (typeof next === "boolean" && next !== !!existing.worker?.policy?.[field]) {
+      changed.push(`${field} ${next ? "on" : "off"}`);
+    }
+  }
+  if (changed.length > 0) {
+    entries.push({
+      action: "project_worker_policy_changed",
+      target,
+      detail: changed.join(", "),
+    });
+  }
+
+  return entries;
+}
