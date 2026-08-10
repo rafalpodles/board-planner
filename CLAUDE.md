@@ -36,7 +36,11 @@ Since CP-128, statuses are project-defined **board columns** mapped to semantic 
 - `done` — merged to `main`, task complete.
 
 ### Autonomous task processing
-Claude automatically picks up tasks in `todo` status (assigned to `claude` or unassigned) and processes them through the pipeline. No user confirmation needed for `todo` tasks.
+Claude automatically picks up tasks in `todo` status and processes them through the pipeline. No user confirmation needed for `todo` tasks.
+
+Which of them an autonomous worker may take is the project's `claimScope` (Settings → Workers), because enabling a project should not by itself offer a machine the whole To Do list. The hand-over is an ordinary assignment to the user the project nominates there — `claude` on this board:
+- `assigned` (default) — only tasks assigned to that user. An enabled project claims nothing until somebody hands a task over, and nominating nobody means nothing qualifies.
+- `any` — unassigned tasks as well. A task parked for anyone else is never taken under either scope.
 
 #### Size-based approach
 Size comes from the project's **Difficulty** field — an ordinary project-defined field since CP-213, not a column on the task. Read it from `customFieldValues`; a project that renamed or removed it has no size, and those tasks are treated as S/M.

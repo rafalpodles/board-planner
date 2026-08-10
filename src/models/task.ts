@@ -109,6 +109,9 @@ const taskSchema = new Schema<ITask>(
       runId: { type: String, default: "" },
       workerId: { type: String, default: "" },
       attempts: { type: Number, default: 0 },
+      // No default: absent means the claim set the assignee, which is what every task claimed
+      // before this field existed did — see CLEAR_WORKER_ASSIGNEE in task-service.ts
+      assignedByRun: { type: Boolean },
       startedAt: { type: Date, default: null },
       lastError: { type: String, default: "" },
       // No defaults: the phase trio is written by a live run and unset when it ends, so a task
