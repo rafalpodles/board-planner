@@ -29,6 +29,7 @@ const GROUPS: SettingsGroup[] = [
       { id: "users", label: "Users" },
       { id: "agents", label: "PM Agents" },
       { id: "workers", label: "Workers" },
+      { id: "audit", label: "Audit log" },
     ],
   },
 ];

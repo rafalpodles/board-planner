@@ -13,6 +13,8 @@ const notificationDeleteMany = vi.fn();
 const pmMessageDeleteMany = vi.fn();
 const projectAuditLogDeleteMany = vi.fn();
 
+const logInstanceAudit = vi.fn();
+vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({
   getAuthUser,

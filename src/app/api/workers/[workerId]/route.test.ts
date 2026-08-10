@@ -7,8 +7,10 @@ const workerFindById = vi.fn();
 const projectFind = vi.fn();
 const workerFindOthers = vi.fn();
 const workerFindByIdAndUpdate = vi.fn();
+const logInstanceAudit = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
+vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 vi.mock("@/lib/auth", () => ({
   getAuthUser,
   RateLimitError: class RateLimitError extends Error {},
@@ -244,5 +246,123 @@ describe("GET and a contested checkout", () => {
     await GET(getRequest(), ctx());
 
     expect(workerFindOthers).toHaveBeenCalled();
+  });
+});
+
+// BP-233. BP-232 removed stored worker assignments and the audit call that hung off them went with
+// it, so stopping a machine became a thing nobody could prove had happened.
+describe("what the fleet audit log records", () => {
+  const entries = () => logInstanceAudit.mock.calls.map((c) => c[0]);
+
+  beforeEach(() => {
+    getAuthUser.mockResolvedValue(INSTANCE_ADMIN);
+    workerFindById.mockResolvedValue({ ...WORKER });
+    workerFindByIdAndUpdate.mockResolvedValue({ ...WORKER });
+  });
+
+  it("records the kill switch as its own action, not as an update", async () => {
+    await PATCH(patchRequest({ lockedByInstance: true }), ctx());
+
+    expect(entries()).toEqual([
+      expect.objectContaining({
+        action: "worker_locked",
+        target: "rig-laptop",
+        user: "admin-1",
+      }),
+    ]);
+  });
+
+  it("distinguishes clearing the kill switch from setting it", async () => {
+    workerFindById.mockResolvedValue({ ...WORKER, lockedByInstance: true });
+
+    await PATCH(patchRequest({ lockedByInstance: false }), ctx());
+
+    expect(entries()[0].action).toBe("worker_unlocked");
+  });
+
+  it("separates disabling a worker from stopping it", async () => {
+    await PATCH(patchRequest({ enabled: false }), ctx());
+
+    expect(entries()[0].action).toBe("worker_disabled");
+  });
+
+  // The old name, because that is what earlier rows call this machine and a reader following its
+  // history backwards has nothing else to match on
+  it("names a rename by where it came from as well as where it went", async () => {
+    await PATCH(patchRequest({ name: "studio-mini" }), ctx());
+
+    expect(entries()[0]).toMatchObject({
+      action: "worker_renamed",
+      target: "rig-laptop",
+      detail: expect.stringContaining("studio-mini"),
+    });
+  });
+
+  it("records the poll interval it moved from", async () => {
+    // Pinned in the fixture: the stored 30000 on an unpinned worker is inert, so the interval it
+    // moved from is the default, not that number
+    workerFindById.mockResolvedValue({ ...WORKER, policyOverrides: ["pollIntervalMs"] });
+
+    await PATCH(patchRequest({ pollIntervalMs: 60_000 }), ctx());
+
+    expect(entries()[0]).toMatchObject({
+      action: "worker_poll_interval_changed",
+      detail: expect.stringContaining("30000"),
+    });
+  });
+
+  // One request, two changes, two rows — a reader scanning actions should not have to unpack a
+  // detail column to find the one that stopped the machine
+  it("writes one entry per field that actually changed", async () => {
+    await PATCH(patchRequest({ lockedByInstance: true, enabled: false }), ctx());
+
+    expect(entries().map((e) => e.action)).toEqual(["worker_locked", "worker_disabled"]);
+  });
+
+  it("records nothing for a field resent with the value it already had", async () => {
+    await PATCH(patchRequest({ enabled: true, name: "rig-laptop" }), ctx());
+
+    expect(logInstanceAudit).not.toHaveBeenCalled();
+  });
+
+  // The stored copy is inert until somebody pins it: the schema materialises pollIntervalMs into
+  // every worker, but the machine resolves against its own default unless the field is in
+  // policyOverrides. So resending the default is a real change — it pins it — and comparing
+  // against the stored value read that as no change at all.
+  it("records pinning the default, which is a change the stored value cannot show", async () => {
+    workerFindById.mockResolvedValue({ ...WORKER, policyOverrides: [] });
+
+    await PATCH(patchRequest({ pollIntervalMs: 30_000 }), ctx());
+
+    expect(entries()[0]).toMatchObject({
+      action: "worker_poll_interval_changed",
+      detail: expect.stringContaining("default"),
+    });
+  });
+
+  it("records nothing when a pinned interval is resent unchanged", async () => {
+    workerFindById.mockResolvedValue({ ...WORKER, policyOverrides: ["pollIntervalMs"] });
+
+    await PATCH(patchRequest({ pollIntervalMs: 30_000 }), ctx());
+
+    expect(logInstanceAudit).not.toHaveBeenCalled();
+  });
+
+  // Otherwise the log asserts a kill switch that never landed, right before the handler throws
+  it("records nothing when the document is gone by the time it is written", async () => {
+    workerFindByIdAndUpdate.mockResolvedValue(null);
+
+    const response = await PATCH(patchRequest({ lockedByInstance: true }), ctx());
+
+    expect(response.status).toBe(404);
+    expect(logInstanceAudit).not.toHaveBeenCalled();
+  });
+
+  it("records nothing when the request is refused", async () => {
+    getAuthUser.mockResolvedValue(PLAIN_MEMBER);
+
+    await PATCH(patchRequest({ lockedByInstance: true }), ctx());
+
+    expect(logInstanceAudit).not.toHaveBeenCalled();
   });
 });

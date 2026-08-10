@@ -3,6 +3,7 @@ import { connectDB } from "@/lib/db";
 import { protocolOf } from "@/lib/middleware";
 import { PROTOCOL_VERSION, WORKER_HEARTBEAT_MS, overriddenWorkerPolicy, registerWorker } from "@/lib/worker-service";
 import { attachWorkerToEnrolment, consumeEnrolmentToken, enrolmentTokenOwner } from "@/lib/enrolment";
+import { logInstanceAudit } from "@/lib/instanceAudit";
 
 // Authenticated by a single-use enrolment token, NOT by an admin session or an admin API token.
 //
@@ -23,8 +24,10 @@ export async function POST(request: Request) {
   // it on a missing field would mean minting another. Nothing here discloses anything a caller
   // without a token could not already read in the error text.
   const body = await request.json().catch(() => ({}));
-  const name = typeof body.name === "string" ? body.name.trim() : "";
-  const host = typeof body.host === "string" ? body.host.trim() : "";
+  // Capped like the device flow does: whoever holds a valid enrolment token chooses these, and
+  // they now land in an audit list an operator reads when something is already wrong
+  const name = typeof body.name === "string" ? body.name.trim().slice(0, 120) : "";
+  const host = typeof body.host === "string" ? body.host.trim().slice(0, 200) : "";
   if (!name || !host) {
     return NextResponse.json({ error: "name and host are required" }, { status: 400 });
   }
@@ -52,6 +55,15 @@ export async function POST(request: Request) {
   });
 
   await attachWorkerToEnrolment(consumed.tokenId, String(worker._id));
+
+  // No user: the caller here is the machine, holding a token and no session. Which is the fact
+  // worth recording — a token minted for one person and spent on an unexpected host is the shape
+  // of a leaked enrolment.
+  void logInstanceAudit({
+    action: "enrolment_token_spent",
+    target: worker.name,
+    detail: `Registered ${host}`,
+  });
 
   return NextResponse.json({
     workerId: String(worker._id),

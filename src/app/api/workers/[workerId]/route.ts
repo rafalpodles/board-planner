@@ -5,6 +5,8 @@ import { withAuth, withWorker } from "@/lib/middleware";
 import { Worker } from "@/models/worker";
 import { Project } from "@/models/project";
 import { assignmentsFor, overriddenWorkerPolicy, toApiWorker, usableRepos } from "@/lib/worker-service";
+import { logInstanceAudit } from "@/lib/instanceAudit";
+import { InstanceAuditAction } from "@/types";
 
 // Everything a worker document still carries is fleet management: what this machine is called,
 // whether it may run, and how often it asks. What the work looks like moved to the project, so
@@ -105,5 +107,70 @@ export const PATCH = withAuth(async (request, { params, user }) => {
   }
 
   const updated = await Worker.findByIdAndUpdate(workerId, { $set: update }, { new: true });
-  return NextResponse.json(toApiWorker(updated!));
+  if (!updated) {
+    return NextResponse.json({ error: "Worker not found" }, { status: 404 });
+  }
+
+  // Read off the pre-update document, which is still in hand: the entry describes a transition,
+  // and "renamed to X" without the old name answers half the question somebody is asking.
+  for (const entry of auditEntries(body, worker)) {
+    void logInstanceAudit({ ...entry, user: String(user._id) });
+  }
+
+  return NextResponse.json(toApiWorker(updated));
 });
+
+interface WorkerBefore {
+  name: string;
+  enabled: boolean;
+  lockedByInstance: boolean;
+  policy?: { pollIntervalMs?: number };
+  policyOverrides?: string[];
+}
+
+// One entry per thing that actually changed, so a request setting two fields is two rows rather
+// than one row a reader has to unpack. A field sent with the value it already had is not a change
+// and says nothing worth keeping.
+function auditEntries(
+  body: Record<string, unknown>,
+  before: WorkerBefore
+): { action: InstanceAuditAction; target: string; detail?: string }[] {
+  const target = before.name;
+  const entries: { action: InstanceAuditAction; target: string; detail?: string }[] = [];
+
+  if (typeof body.lockedByInstance === "boolean" && body.lockedByInstance !== before.lockedByInstance) {
+    entries.push({
+      action: body.lockedByInstance ? "worker_locked" : "worker_unlocked",
+      target,
+      detail: body.lockedByInstance
+        ? "Kill switch on — this machine takes no work until it is cleared"
+        : "Kill switch cleared",
+    });
+  }
+
+  if (typeof body.enabled === "boolean" && body.enabled !== before.enabled) {
+    entries.push({ action: body.enabled ? "worker_enabled" : "worker_disabled", target });
+  }
+
+  if (typeof body.name === "string" && body.name.trim() && body.name.trim() !== before.name) {
+    // Targets the old name: that is what earlier rows in this log call the machine, and a reader
+    // following its history backwards has nothing else to match on
+    entries.push({ action: "worker_renamed", target, detail: `Renamed to ${body.name.trim()}` });
+  }
+
+  const pollIntervalMs = body.pollIntervalMs;
+  // What the worker actually runs under, which is the stored value only once somebody pinned it —
+  // otherwise the machine resolves against its own default and the stored copy is inert
+  const effective = (before.policyOverrides ?? []).includes("pollIntervalMs")
+    ? before.policy?.pollIntervalMs
+    : undefined;
+  if (typeof pollIntervalMs === "number" && pollIntervalMs !== effective) {
+    entries.push({
+      action: "worker_poll_interval_changed",
+      target,
+      detail: `${effective ?? "default"} → ${pollIntervalMs} ms`,
+    });
+  }
+
+  return entries;
+}
