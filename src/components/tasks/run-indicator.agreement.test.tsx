@@ -92,3 +92,45 @@ describe("the run indicator, across every view that draws one", () => {
     expect(colourOf(dotClasses(quiet.container))).not.toBe(liveColour);
   });
 });
+
+/**
+ * Reduced motion drops `animate-pulse`, so anything that only distinguishes the two states while
+ * it is running is not a distinction at all for the people who asked motion to stop. The colours
+ * left over — danger red and warning amber — are the pair the most common colour-vision
+ * deficiency separates worst, on a target six pixels across.
+ */
+describe("telling a live run from a quiet one without motion or colour", () => {
+  const still = (classes: string) =>
+    classes
+      .split(/\s+/)
+      .filter((c) => !c.startsWith("animate-") && !c.startsWith("motion-reduce:"))
+      .join(" ");
+
+  it("differs by more than colour once every animated class is removed", () => {
+    const live = render(<RunDot execution={execution(1_000)} />);
+    const liveStill = still(dotClasses(live.container));
+    cleanup();
+    const quiet = render(<RunDot execution={execution(QUIET_MS + 60_000)} />);
+    const quietStill = still(dotClasses(quiet.container));
+
+    // Anything whose value names a palette entry is colour, whatever property carries it —
+    // `ring-danger/40` is as much a colour as `bg-danger`, while `ring-2` is a width. An earlier
+    // version stripped only `bg-`, so putting a differently-coloured ring on both states read as
+    // a structural difference and the test passed on exactly the bug it exists for.
+    const structural = (c: string) => !/^(bg|text|ring|border|outline|shadow)-[a-z]/.test(c);
+    const shapeOf = (c: string) => c.split(/\s+/).filter(structural).sort().join(" ");
+    expect(shapeOf(liveStill), "the two states differ only by colour").not.toBe(shapeOf(quietStill));
+  });
+
+  // A cue hidden behind motion-reduce: would be absent for everyone else, and a cue behind a
+  // motion query at all would be absent for exactly the people who need it
+  it("carries the distinguishing cue unconditionally, not behind a motion variant", () => {
+    const live = render(<RunDot execution={execution(1_000)} />);
+    const ring = dotClasses(live.container)
+      .split(/\s+/)
+      .filter((c) => c.includes("ring"));
+
+    expect(ring.length, "no ring on a live run").toBeGreaterThan(0);
+    expect(ring.every((c) => !c.startsWith("motion-reduce:")), `${ring} is behind a motion variant`).toBe(true);
+  });
+});

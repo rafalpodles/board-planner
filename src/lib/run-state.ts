@@ -59,5 +59,15 @@ export interface RunLook {
 export function runLook(state: RunState): RunLook {
   return state === "quiet"
     ? { dot: "bg-warning", text: "text-warning" }
-    : { dot: "bg-danger animate-pulse motion-reduce:animate-none", text: "text-danger" };
+    : {
+        // The halo, not the pulse, is what separates the two states. `animate-pulse` is dropped
+        // under prefers-reduced-motion, and the colours left behind — danger red against warning
+        // amber, on a 6px target — are the pair red/green colour blindness separates worst. So a
+        // reduced-motion reader with CVD had no way to tell a working agent from a dead one.
+        //
+        // The ring carries no `motion-reduce:` prefix on purpose: it is there for everyone, which
+        // is what makes the distinction survive both. Reduced motion should mean gentler, not less.
+        dot: "bg-danger ring-2 ring-danger/40 animate-pulse motion-reduce:animate-none",
+        text: "text-danger",
+      };
 }
