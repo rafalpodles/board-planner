@@ -5,7 +5,8 @@ import Link from "next/link";
 import { useApi } from "@/hooks/use-api";
 import { useToast } from "@/components/ui/Toast";
 import { Badge } from "@/components/ui/Badge";
-import { STATUS_LABELS, PRIORITY_LABELS, DEFAULT_PROJECT_ICON, Priority, TaskStatus } from "@/types";
+import { PRIORITY_LABELS, DEFAULT_PROJECT_ICON, ColumnRole, Priority, TaskStatus } from "@/types";
+import { ROLE_ORDER } from "@/lib/columns";
 import { projectPath, taskPath } from "@/lib/urls";
 import { PageHeader } from "@/components/shell/PageHeader";
 
@@ -18,17 +19,17 @@ interface MyTask {
   category: string;
   updatedAt: string;
   project: { _id: string; name: string; key: string; icon?: string };
+  // Resolved by the server from each task's own project, because this list spans boards that agree
+  // on roles and on nothing else. Null when the task sits in a column that no longer exists.
+  statusRole: ColumnRole | null;
+  statusLabel: string;
+  statusColor: string | null;
 }
 
-const statusOrder: Record<string, number> = {
-  in_progress: 0,
-  needs_human_review: 1,
-  in_review: 2,
-  todo: 3,
-  ready_to_test: 4,
-  planned: 5,
-  done: 6,
-};
+// By what a column means, not by what it is called. Keyed on ids this ordered seven names and put
+// every custom column last, so a renamed board sorted arbitrarily against its own workflow.
+const orderOf = (task: MyTask) =>
+  task.statusRole ? ROLE_ORDER[task.statusRole] : Object.keys(ROLE_ORDER).length;
 
 export default function MyTasksPage() {
   const [tasks, setTasks] = useState<MyTask[]>([]);
@@ -46,10 +47,8 @@ export default function MyTasksPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const filtered = hideDone ? tasks.filter((t) => t.status !== "done") : tasks;
-  const sorted = [...filtered].sort(
-    (a, b) => (statusOrder[a.status] ?? 9) - (statusOrder[b.status] ?? 9)
-  );
+  const filtered = hideDone ? tasks.filter((t) => t.statusRole !== "done") : tasks;
+  const sorted = [...filtered].sort((a, b) => orderOf(a) - orderOf(b));
 
   // Group by project
   const grouped: Record<string, { project: MyTask["project"]; tasks: MyTask[] }> = {};
@@ -118,9 +117,9 @@ export default function MyTasksPage() {
                     </span>
                     <span
                       className="chip text-xs px-2 py-0.5 rounded-full flex-shrink-0"
-                      style={{ "--chip": statusAccent(task.status) } as CSSProperties}
+                      style={{ "--chip": statusAccent(task) } as CSSProperties}
                     >
-                      {STATUS_LABELS[task.status]}
+                      {task.statusLabel}
                     </span>
                     <span className="text-sm flex-1 truncate">{task.title}</span>
                     <div className="flex gap-1 flex-shrink-0">
@@ -139,21 +138,9 @@ export default function MyTasksPage() {
   );
 }
 
-function statusAccent(status: string): string {
-  switch (status) {
-    case "in_progress":
-      return "var(--color-status-in-progress)";
-    case "in_review":
-      return "var(--color-status-in-review)";
-    case "needs_human_review":
-      return "var(--color-status-needs-human-review)";
-    case "todo":
-      return "var(--color-status-todo)";
-    case "ready_to_test":
-      return "var(--color-status-ready-to-test)";
-    case "done":
-      return "var(--color-status-done)";
-    default:
-      return "var(--color-status-planned)";
-  }
+// The project's own colour, not a guess from a fixed list of ids. The switch this replaces had a
+// branch per seeded column and a fallback for everything else, so every custom column on every
+// board rendered as "planned" grey.
+function statusAccent(task: MyTask): string {
+  return task.statusColor || "var(--color-status-planned)";
 }

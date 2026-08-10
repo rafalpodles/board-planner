@@ -6,7 +6,7 @@ import { Task } from "@/models/task";
 import { fetchMergeRequests, matchMRsToTasks, parseGitlabRepo } from "@/lib/gitlab";
 import { logActivity } from "@/lib/activity";
 import { decryptSecret } from "@/lib/encryption";
-import { getProjectColumns } from "@/lib/columns";
+import { columnIdsWithRole, getProjectColumns } from "@/lib/columns";
 import { projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
 
 export const POST = withProjectAccess(async (_request, { params, user }) => {
@@ -82,13 +82,15 @@ export const POST = withProjectAccess(async (_request, { params, user }) => {
     task.linkedPRs = [...others, ...mrDocs] as typeof task.linkedPRs;
     linked += mrs.length;
 
-    // Auto-transition: merged MR + task in_review → ready_to_test.
-    // Keyed to the seeded column ids; projects that removed either column opt out.
+    // Auto-transition: a merged MR moves a task out of the first review column into the next one.
+    // Keyed on the role, not on the seeded ids — those matched nothing on a renamed board, so this
+    // opted out silently and looked like a sync that simply had nothing to do.
     const hasMerged = mrs.some((mr) => mr.state === "merged");
-    const columnIds = new Set(getProjectColumns(project).map((c) => c.id));
-    if (hasMerged && task.status === "in_review" && columnIds.has("ready_to_test")) {
+    const reviewIds = columnIdsWithRole(project, "review");
+    const nextReview = reviewIds[reviewIds.indexOf(task.status) + 1];
+    if (hasMerged && reviewIds.includes(task.status) && nextReview) {
       const oldStatus = task.status;
-      task.status = "ready_to_test";
+      task.status = nextReview as typeof task.status;
       autoTransitioned++;
       await logActivity(
         String(task._id),

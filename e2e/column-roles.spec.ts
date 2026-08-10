@@ -1,0 +1,215 @@
+import { test, expect } from "@playwright/test";
+import mongoose from "mongoose";
+import { ADMIN_ID, ADMIN_PASSWORD, ADMIN_USERNAME, E2E_MONGODB_URI, PROJECT_ID, PROJECT_KEY, seed } from "./seed";
+
+/**
+ * BP-227. Columns have been project-defined since BP-128, and automation is meant to key on a
+ * column's semantic role. Eight places still compared against literal ids, so a board that was
+ * renamed or rebuilt behaved as if its columns meant nothing.
+ *
+ * Everything here runs against a board with **no seeded ids at all**. That is the point: with
+ * `todo`/`in_progress`/`done` present, an implementation that still hardcodes them passes every
+ * assertion, which is how this survived long enough to be found by an audit rather than by a test.
+ *
+ * The sprint close gets the sharpest one because it is the only case that moves somebody's work:
+ * finished tasks looked unfinished and were dragged into the next sprint.
+ */
+
+// Deliberately nothing a hardcoded id could match
+const COLUMNS = [
+  { id: "icebox", label: "Icebox", color: "#6b7280", role: "backlog", order: 0 },
+  { id: "ready", label: "Ready", color: "#3b82f6", role: "approved", order: 1 },
+  { id: "building", label: "Building", color: "#f59e0b", role: "active", order: 2 },
+  { id: "checking", label: "Checking", color: "#a855f7", role: "review", order: 3 },
+  { id: "shipped", label: "Shipped", color: "#22c55e", role: "done", order: 4 },
+];
+
+const SPRINT_ID = new mongoose.Types.ObjectId();
+const NEXT_SPRINT_ID = new mongoose.Types.ObjectId();
+
+const auth = {
+  Authorization: `Basic ${Buffer.from(`${ADMIN_USERNAME}:${ADMIN_PASSWORD}`).toString("base64")}`,
+};
+
+async function db() {
+  if (mongoose.connection.readyState === 0) await mongoose.connect(E2E_MONGODB_URI);
+  const handle = mongoose.connection.db;
+  if (!handle) throw new Error("no database handle");
+  return handle;
+}
+
+let nextNumber = 700;
+
+async function addTask(status: string, over: Record<string, unknown> = {}) {
+  const handle = await db();
+  const _id = new mongoose.Types.ObjectId();
+  await handle.collection("tasks").insertOne({
+    _id,
+    project: PROJECT_ID,
+    taskNumber: nextNumber++,
+    title: `role fixture ${nextNumber}`,
+    description: "",
+    priority: "medium",
+    category: "user-story",
+    status,
+    assignee: null,
+    checklist: [],
+    linkedPRs: [],
+    blockedBy: [],
+    relations: [],
+    watchers: [],
+    customFieldValues: {},
+    order: 0,
+    createdBy: ADMIN_ID,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    ...over,
+  });
+  return _id;
+}
+
+test.beforeEach(async () => {
+  await seed();
+  const handle = await db();
+
+  await handle.collection("projects").updateOne({ _id: PROJECT_ID }, { $set: { columns: COLUMNS } });
+  // Every seeded task sits in a column this board no longer has, which would muddy the counts
+  await handle.collection("tasks").deleteMany({ project: PROJECT_ID });
+
+  await handle.collection("sprints").insertMany([
+    {
+      _id: SPRINT_ID,
+      project: PROJECT_ID,
+      name: "Sprint one",
+      status: "active",
+      startDate: new Date("2026-08-01"),
+      endDate: new Date("2026-08-14"),
+      goal: "",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    },
+    {
+      _id: NEXT_SPRINT_ID,
+      project: PROJECT_ID,
+      name: "Sprint two",
+      status: "planned",
+      startDate: new Date("2026-08-15"),
+      endDate: new Date("2026-08-28"),
+      goal: "",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    },
+  ]);
+});
+
+test.afterEach(async () => {
+  const handle = await db();
+  await handle.collection("sprints").deleteMany({ project: PROJECT_ID });
+  if (mongoose.connection.readyState !== 0) await mongoose.disconnect();
+});
+
+test.describe("closing a sprint on a board with no column called done", () => {
+  test("leaves finished work behind instead of dragging it into the next sprint", async ({
+    request,
+  }) => {
+    const finished = await addTask("shipped", { sprint: SPRINT_ID });
+    const unfinished = await addTask("building", { sprint: SPRINT_ID });
+
+    const response = await request.put(
+      `/api/projects/${PROJECT_KEY}/sprints/${SPRINT_ID}`,
+      {
+        headers: auth,
+        data: { status: "completed", moveIncompleteToSprint: String(NEXT_SPRINT_ID) },
+      }
+    );
+    expect(response.status()).toBe(200);
+
+    const handle = await db();
+    const after = async (id: mongoose.Types.ObjectId) =>
+      (await handle.collection("tasks").findOne({ _id: id }))?.sprint;
+
+    // The whole defect: "shipped" is not literally "done", so this task looked unfinished
+    expect(String(await after(finished))).toBe(String(SPRINT_ID));
+    expect(String(await after(unfinished))).toBe(String(NEXT_SPRINT_ID));
+  });
+
+  test("sends unfinished work to the backlog and keeps the rest", async ({ request }) => {
+    const finished = await addTask("shipped", { sprint: SPRINT_ID });
+    const unfinished = await addTask("checking", { sprint: SPRINT_ID });
+
+    await request.put(`/api/projects/${PROJECT_KEY}/sprints/${SPRINT_ID}`, {
+      headers: auth,
+      data: { status: "completed", moveIncompleteToBacklog: true },
+    });
+
+    const handle = await db();
+    const after = async (id: mongoose.Types.ObjectId) =>
+      (await handle.collection("tasks").findOne({ _id: id }))?.sprint;
+
+    expect(String(await after(finished))).toBe(String(SPRINT_ID));
+    expect(await after(unfinished)).toBeNull();
+  });
+
+  test("counts progress by role, on the sprint itself and in the list", async ({ request }) => {
+    await addTask("shipped", { sprint: SPRINT_ID });
+    await addTask("shipped", { sprint: SPRINT_ID });
+    await addTask("building", { sprint: SPRINT_ID });
+
+    const one = await request.get(`/api/projects/${PROJECT_KEY}/sprints/${SPRINT_ID}`, {
+      headers: auth,
+    });
+    expect(await one.json()).toMatchObject({ taskCount: 3, doneCount: 2 });
+
+    // The same number computed a second way, in an aggregation rather than a count
+    const list = await request.get(`/api/projects/${PROJECT_KEY}/sprints`, { headers: auth });
+    const sprint = (await list.json()).find(
+      (s: { _id: string }) => s._id === String(SPRINT_ID)
+    );
+    expect(sprint).toMatchObject({ taskCount: 3, doneCount: 2 });
+  });
+});
+
+test.describe("My Tasks across boards that agree on roles and nothing else", () => {
+  test("hides finished work, and labels the rest the way its own board does", async ({
+    request,
+  }) => {
+    await addTask("shipped", { assignee: ADMIN_ID });
+    await addTask("building", { assignee: ADMIN_ID });
+
+    const response = await request.get("/api/tasks/mine", { headers: auth });
+    const tasks = await response.json();
+
+    const done = tasks.find((t: { status: string }) => t.status === "shipped");
+    const active = tasks.find((t: { status: string }) => t.status === "building");
+
+    // Resolved by the server, because this list spans projects and the page has no board to
+    // consult. Without it "hide done" kept showing finished work on any renamed board.
+    expect(done).toMatchObject({ statusRole: "done", statusLabel: "Shipped", statusColor: "#22c55e" });
+    expect(active).toMatchObject({ statusRole: "active", statusLabel: "Building" });
+  });
+
+  // Work left behind by a deleted column: named rather than hidden, and it must not read as done
+  test("a task whose column is gone keeps its raw status and no role", async ({ request }) => {
+    await addTask("a_column_that_was_deleted", { assignee: ADMIN_ID });
+
+    const tasks = await (await request.get("/api/tasks/mine", { headers: auth })).json();
+    const orphan = tasks.find((t: { status: string }) => t.status === "a_column_that_was_deleted");
+
+    expect(orphan).toMatchObject({
+      statusRole: null,
+      statusLabel: "a_column_that_was_deleted",
+      statusColor: null,
+    });
+  });
+
+  // The board was loaded to answer one question per task; shipping it per row would be the same
+  // waste pointed the other way
+  test("does not ship a copy of every board alongside the tasks", async ({ request }) => {
+    await addTask("building", { assignee: ADMIN_ID });
+
+    const tasks = await (await request.get("/api/tasks/mine", { headers: auth })).json();
+
+    expect(tasks[0].project).not.toHaveProperty("columns");
+    expect(tasks[0].project).toHaveProperty("key", PROJECT_KEY);
+  });
+});
