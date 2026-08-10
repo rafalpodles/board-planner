@@ -4,6 +4,15 @@ import { withProjectAccess } from "@/lib/middleware";
 import { Sprint } from "@/models/sprint";
 import { Task } from "@/models/task";
 import { SprintStatus, SPRINT_STATUSES } from "@/types";
+import { Project } from "@/models/project";
+import { columnIdsWithRole } from "@/lib/columns";
+
+// A board may define more than one done column, and a project that renamed its board has none
+// called "done" at all. Resolved per request from the project's own columns.
+async function doneColumnIds(projectId: string): Promise<string[]> {
+  const project = await Project.findById(projectId, "columns").lean();
+  return columnIdsWithRole(project, "done");
+}
 
 export const GET = withProjectAccess(async (_request, { params }) => {
   const { projectId, sprintId } = await params;
@@ -15,7 +24,10 @@ export const GET = withProjectAccess(async (_request, { params }) => {
   }
 
   const taskCount = await Task.countDocuments({ sprint: sprintId });
-  const doneCount = await Task.countDocuments({ sprint: sprintId, status: "done" });
+  const doneCount = await Task.countDocuments({
+    sprint: sprintId,
+    status: { $in: await doneColumnIds(projectId) },
+  });
 
   return NextResponse.json({ ...sprint, taskCount, doneCount });
 });
@@ -48,20 +60,18 @@ export const PUT = withProjectAccess(async (request, { params }) => {
     );
   }
 
-  // If completing, optionally move incomplete tasks to backlog
-  if (updates.status === "completed" && body.moveIncompleteToBacklog) {
-    await Task.updateMany(
-      { sprint: sprintId, status: { $ne: "done" } },
-      { $set: { sprint: null } }
-    );
-  }
+  // Unfinished means "not in a done-role column", not "not literally called done". Keyed on the
+  // id, a project whose board was renamed had every finished task look unfinished and get dragged
+  // into the next sprint — the one case in this ticket that moves somebody's work without asking.
+  if (updates.status === "completed" && (body.moveIncompleteToBacklog || body.moveIncompleteToSprint)) {
+    const unfinished = { sprint: sprintId, status: { $nin: await doneColumnIds(projectId) } };
 
-  // If completing, optionally move incomplete tasks to next sprint
-  if (updates.status === "completed" && body.moveIncompleteToSprint) {
-    await Task.updateMany(
-      { sprint: sprintId, status: { $ne: "done" } },
-      { $set: { sprint: body.moveIncompleteToSprint } }
-    );
+    if (body.moveIncompleteToBacklog) {
+      await Task.updateMany(unfinished, { $set: { sprint: null } });
+    }
+    if (body.moveIncompleteToSprint) {
+      await Task.updateMany(unfinished, { $set: { sprint: body.moveIncompleteToSprint } });
+    }
   }
 
   const sprint = await Sprint.findOneAndUpdate(
