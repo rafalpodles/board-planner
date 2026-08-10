@@ -7,7 +7,7 @@ import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { usePollWhileVisible } from "@/hooks/use-poll-while-visible";
 import { ApiProject, ApiTask, ApiSprint , ApiUserSummary, RunConflict, BOARD_SORT_FIELDS, LIST_SORT_FIELDS, SortField, SortKey, SortDir } from "@/types";
-import { effectiveColumns } from "@/lib/columns";
+import { columnIdsWithRole, effectiveColumns } from "@/lib/columns";
 import { ListColumnId } from "@/lib/list-columns";
 import { subscribeBoardRefresh } from "@/lib/board-refresh";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -164,8 +164,11 @@ export default function KanbanPage() {
   // Update browser tab title with task counts
   useEffect(() => {
     if (!project) return;
-    const todoCount = tasks.filter((t) => t.status === "todo").length;
-    const inProgressCount = tasks.filter((t) => t.status === "in_progress").length;
+    // By role: a board that renamed these columns counted nothing and showed a bare project name
+    const approved = new Set(columnIdsWithRole(project, "approved"));
+    const active = new Set(columnIdsWithRole(project, "active"));
+    const todoCount = tasks.filter((t) => approved.has(t.status)).length;
+    const inProgressCount = tasks.filter((t) => active.has(t.status)).length;
     const parts: string[] = [];
     if (inProgressCount > 0) parts.push(`${inProgressCount} in progress`);
     if (todoCount > 0) parts.push(`${todoCount} todo`);

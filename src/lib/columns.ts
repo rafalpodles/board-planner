@@ -40,3 +40,40 @@ export function defaultStatusFor(project: HasColumns | null | undefined): string
   const columns = getProjectColumns(project);
   return columns.find((c) => c.role === "backlog")?.id ?? columns[0].id;
 }
+
+// Which column ids carry a role, for the queries that used to compare against a literal id.
+// A project that renamed or rebuilt its board has ids nothing hardcoded can match — and the query
+// that mattered most, carrying unfinished tasks out of a closing sprint, then dragged finished
+// work into the next one because its column was not literally called "done".
+// Structural, so the board page and the API can share it: the client's columns carry no _id and
+// the two types are otherwise the same shape.
+type HasAnyColumns = { columns?: AnyColumn[] | null };
+
+export function columnIdsWithRole(
+  project: HasAnyColumns | null | undefined,
+  role: ColumnRole
+): string[] {
+  return effectiveColumns(project?.columns)
+    .filter((c) => c.role === role)
+    .map((c) => c.id);
+}
+
+// The column a task is sitting in, or undefined if its status names no column the project has —
+// which happens to a task left behind by a column somebody deleted.
+export function columnFor(
+  project: HasAnyColumns | null | undefined,
+  statusId: string
+): AnyColumn | undefined {
+  return effectiveColumns(project?.columns).find((c) => c.id === statusId);
+}
+
+// What a board means, rather than what its columns are called. Anything ordering work across
+// projects has to compare these: two boards agree on roles and on nothing else.
+export const ROLE_ORDER: Record<ColumnRole, number> = {
+  active: 0,
+  blocked: 1,
+  review: 2,
+  approved: 3,
+  backlog: 4,
+  done: 5,
+};

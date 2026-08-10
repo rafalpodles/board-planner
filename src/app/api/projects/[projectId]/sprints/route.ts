@@ -4,6 +4,8 @@ import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
 import { Sprint } from "@/models/sprint";
 import { Task } from "@/models/task";
+import { Project } from "@/models/project";
+import { columnIdsWithRole } from "@/lib/columns";
 
 export const GET = withProjectAccess(async (_request, { params }) => {
   const { projectId } = await params;
@@ -17,13 +19,18 @@ export const GET = withProjectAccess(async (_request, { params }) => {
   const sprintIds = sprints.map((s) => s._id);
   if (sprintIds.length === 0) return NextResponse.json([]);
 
+  // Resolved once for the whole list rather than per sprint: every sprint here belongs to the same
+  // project, so they share a board
+  const project = await Project.findById(projectId, "columns").lean();
+  const doneIds = columnIdsWithRole(project, "done");
+
   const counts = await Task.aggregate([
     { $match: { project: new mongoose.Types.ObjectId(projectId), sprint: { $in: sprintIds } } },
     {
       $group: {
         _id: "$sprint",
         total: { $sum: 1 },
-        done: { $sum: { $cond: [{ $eq: ["$status", "done"] }, 1, 0] } },
+        done: { $sum: { $cond: [{ $in: ["$status", doneIds] }, 1, 0] } },
       },
     },
   ]);
