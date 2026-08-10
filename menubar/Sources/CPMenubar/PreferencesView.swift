@@ -138,9 +138,27 @@ private struct AdvancedTab: View {
     let model: AppModel
 
     @State private var stateDirectory = StateDirectory.resolve()
+    @State private var startsAtLogin = LoginItem.isRegistered
+    @State private var loginItemNote = ""
 
     var body: some View {
         Form {
+            // Here rather than in the panel footer, where it cost attention every time somebody
+            // opened the panel to buy nothing after the first day. Preferences works as a home only
+            // because it is reachable at any time — this control began life in the first-run view,
+            // which is shown until setup finishes and never again, so it was offered exactly once,
+            // before anything worked. Any transient location reintroduces that.
+            //
+            // On this pane specifically because the state directory below explains what a login-item
+            // launch does to the environment, which is the same fact from the other side.
+            // Swift 6.3.3 quirk: passing `setLoginItem` here as a method reference crashes IRGen
+            // emitting the actor-hopping thunk. The closure is not style.
+            Toggle("Start at login", isOn: Binding(get: { startsAtLogin }, set: { setLoginItem($0) }))
+                .help("Opens this app when you log in, which starts the worker with it.")
+            if !loginItemNote.isEmpty {
+                Text(loginItemNote).font(.caption).foregroundStyle(.secondary)
+            }
+
             LabeledContent("Task timeout",
                            value: model.config?.projects.first.map { "\($0.taskTimeoutMs / 1000)s" } ?? "—")
 
@@ -160,6 +178,24 @@ private struct AdvancedTab: View {
         }
         .formStyle(.grouped)
         .padding()
+        // Re-read rather than trust the last value: this can also be changed in System Settings
+        .onAppear { startsAtLogin = LoginItem.isRegistered }
+    }
+
+    private func setLoginItem(_ wanted: Bool) {
+        do {
+            if wanted {
+                try LoginItem.register()
+            } else {
+                try LoginItem.unregister()
+            }
+            loginItemNote = LoginItem.statusDescription
+        } catch {
+            loginItemNote = error.localizedDescription
+        }
+        // From the system, not from what was asked for — registering can land on "requires approval",
+        // and the toggle then has to go back rather than claim something that did not happen
+        startsAtLogin = LoginItem.isRegistered
     }
 
     private func choose() {
