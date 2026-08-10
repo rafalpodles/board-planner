@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withAdmin } from "@/lib/middleware";
 import { mintEnrolmentToken } from "@/lib/enrolment";
+import { logInstanceAudit } from "@/lib/instanceAudit";
 
 // Minting requires an interactive admin session, never an API token. An API token can be read off a
 // disk the agent can also read, and one that could mint enrolment tokens would hand back the very
@@ -17,6 +18,15 @@ export const POST = withAdmin(async (request, { user }) => {
   const label = typeof body.label === "string" ? body.label.trim().slice(0, 200) : "";
 
   const { token, expiresAt } = await mintEnrolmentToken(String(user._id), label);
+
+  // The token itself never goes near this log — it is returned once and only its hash is stored,
+  // and an audit row is exactly the wrong place to undo that
+  void logInstanceAudit({
+    action: "enrolment_token_minted",
+    target: label || "unlabelled",
+    user: String(user._id),
+    detail: `Expires ${expiresAt.toISOString()}`,
+  });
 
   // Returned once and never retrievable again — only its hash is stored
   return NextResponse.json({ token, expiresAt: expiresAt.toISOString() }, { status: 201 });

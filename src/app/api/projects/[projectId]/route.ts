@@ -4,6 +4,7 @@ import { withProjectAccess, withProjectOwner, withProjectAccessOrWorker } from "
 import { check } from "@/lib/grants";
 import { Project } from "@/models/project";
 import { parseProjectWorkerConfig } from "@/lib/project-worker-config";
+import { logInstanceAudit } from "@/lib/instanceAudit";
 import { Task } from "@/models/task";
 import { Comment } from "@/models/comment";
 import { ActivityLog } from "@/models/activityLog";
@@ -75,7 +76,7 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
         { status: 403 }
       );
     }
-    const existing = await Project.findById(projectId).select("worker");
+    const existing = await Project.findById(projectId).select("worker key");
     if (!existing) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
@@ -89,6 +90,18 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
       return NextResponse.json({ error: parsed.error }, { status: 400 });
     }
     Object.assign(updates, parsed.update);
+
+    // Instance-level, not project-level: this commits somebody's machine to running agent-written
+    // code, and the project audit log is read by project admins who cannot make that decision.
+    const wasEnabled = !!existing.worker?.enabled;
+    const nowEnabled = updates["worker.enabled"];
+    if (typeof nowEnabled === "boolean" && nowEnabled !== wasEnabled) {
+      void logInstanceAudit({
+        action: nowEnabled ? "project_workers_enabled" : "project_workers_disabled",
+        target: existing.key || String(projectId),
+        user: String(user._id),
+      });
+    }
   }
 
   if (body.pm !== undefined) {

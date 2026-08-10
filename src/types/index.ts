@@ -1169,6 +1169,43 @@ export type ProjectAuditAction =
   | "bulk_move"
   | "worker_updated";
 
+// The kill switch first, because "who stopped this machine" is the question this log exists to
+// answer. Separate verbs rather than one worker_updated with a detail column: an operator scanning
+// the list should not have to read the next column to find out what happened.
+export const INSTANCE_AUDIT_ACTIONS = [
+  "worker_locked",
+  "worker_unlocked",
+  "worker_enabled",
+  "worker_disabled",
+  "worker_renamed",
+  "worker_poll_interval_changed",
+  "enrolment_token_minted",
+  "enrolment_token_spent",
+  "project_workers_enabled",
+  "project_workers_disabled",
+] as const;
+
+export type InstanceAuditAction = (typeof INSTANCE_AUDIT_ACTIONS)[number];
+
+export interface IInstanceAuditLog {
+  _id: Types.ObjectId;
+  // Absent when a machine did it: a worker spends its enrolment token with no session behind it
+  user: Types.ObjectId | IUser | null;
+  action: InstanceAuditAction;
+  target: string;
+  detail: string;
+  createdAt: Date;
+}
+
+export interface ApiInstanceAuditLog {
+  _id: string;
+  user: { _id: string; username: string; fullName: string } | null;
+  action: InstanceAuditAction;
+  target: string;
+  detail: string;
+  createdAt: string;
+}
+
 export interface IProjectAuditLog {
   _id: Types.ObjectId;
   project: Types.ObjectId;

@@ -6,6 +6,8 @@ const attachWorkerToEnrolment = vi.fn();
 const enrolmentTokenOwner = vi.fn().mockResolvedValue("Rafal");
 const registerWorker = vi.fn();
 
+const logInstanceAudit = vi.fn();
+vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({
   getAuthUser,
@@ -21,6 +23,7 @@ const { POST } = await import("./route");
 
 const WORKER = {
   _id: "w1",
+  name: "rig-laptop",
   policy: { pollIntervalMs: 5000 },
   policyOverrides: ["pollIntervalMs"],
   repos: [],
@@ -63,6 +66,29 @@ describe("POST /api/workers/register", () => {
     await POST(request(VALID, "cpe_good"));
 
     expect(attachWorkerToEnrolment).toHaveBeenCalledWith("e1", "w1");
+  });
+
+  // BP-233. No user on this one: the caller is a machine holding a token and no session, which is
+  // the fact worth recording — a token minted for one person and spent on an unexpected host is
+  // the shape of a leaked enrolment.
+  it("records the spend against the machine, with no user to attribute it to", async () => {
+    await POST(request(VALID, "cpe_good"));
+
+    const entry = logInstanceAudit.mock.calls[0][0];
+    expect(entry).toMatchObject({
+      action: "enrolment_token_spent",
+      target: "rig-laptop",
+      detail: expect.stringContaining("mac.home"),
+    });
+    expect(entry.user).toBeUndefined();
+  });
+
+  it("records nothing when the token is refused", async () => {
+    consumeEnrolmentToken.mockResolvedValue({ ok: false });
+
+    await POST(request(VALID, "cpe_bad"));
+
+    expect(logInstanceAudit).not.toHaveBeenCalled();
   });
 
   // The property this whole credential exists for: no admin session, no admin API token, nothing
