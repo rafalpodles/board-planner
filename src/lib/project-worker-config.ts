@@ -1,3 +1,4 @@
+import { isValidObjectId } from "mongoose";
 import {
   CLAIM_SCOPES,
   PROJECT_POLICY_DEFAULTS,
@@ -43,6 +44,19 @@ export function parseProjectWorkerConfig(
       return { ok: false, error: "worker.enabled must be a boolean" };
     }
     update["worker.enabled"] = body.enabled;
+  }
+
+  // Not a policy field: policy fields are scalars that fall back to a shared default, and there is
+  // no sensible default user. Null is how a project says it has nominated nobody.
+  if ("claimAssignee" in body) {
+    const nominee = body.claimAssignee;
+    if (nominee !== null && typeof nominee !== "string") {
+      return { ok: false, error: "worker.claimAssignee must be a user id or null" };
+    }
+    if (typeof nominee === "string" && !isValidObjectId(nominee)) {
+      return { ok: false, error: "worker.claimAssignee must be a user id or null" };
+    }
+    update["worker.claimAssignee"] = nominee || null;
   }
 
   // Un-pinning, the other half of policyOverrides. Without it a field touched once could never

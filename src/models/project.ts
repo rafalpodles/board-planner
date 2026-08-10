@@ -183,6 +183,10 @@ const projectSchema = new Schema<IProject>(
         fallbackModel: { type: String, default: "sonnet" },
         reviewModel: { type: String, default: "opus" },
       },
+      // Who a task must be assigned to before a worker may take it under claimScope "assigned".
+      // A person picks this, so it is an ordinary user — a worker's own identity is a machine
+      // account, excluded from every list the product offers and unselectable by design.
+      claimAssignee: { type: Schema.Types.ObjectId, ref: "User", default: null },
       policyOverrides: { type: [String], default: [] },
     },
     // The one place a project names its repository, whoever hosts it. The provider is derived from

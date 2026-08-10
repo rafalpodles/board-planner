@@ -10,7 +10,7 @@ import { SettingsCard } from "@/components/settings/SettingsCard";
 import { useDirtyGroup } from "@/components/settings/settings-context";
 import { CLAIM_SCOPES, ClaimScope, PROJECT_POLICY_DEFAULTS } from "@/lib/worker-policy";
 import { projectRemotes, sameRepo } from "@/lib/repo-match";
-import { ApiProject, ApiWorker } from "@/types";
+import { ApiProject, ApiUserSummary, ApiWorker } from "@/types";
 import { SectionProps } from "./types";
 
 const NUMBER_FIELDS = new Set(["taskTimeoutMs", "maxDiffLines", "maxDiffFiles"]);
@@ -43,7 +43,10 @@ const DEFAULTS = PROJECT_POLICY_DEFAULTS as unknown as Record<string, PolicyValu
 function draftFrom(project: ApiProject): Draft {
   const stored = (project.worker?.policy ?? {}) as unknown as Record<string, PolicyValue>;
   const pinned = new Set(project.worker?.policyOverrides ?? []);
-  const draft: Draft = { enabled: !!project.worker?.enabled };
+  const draft: Draft = {
+    enabled: !!project.worker?.enabled,
+    claimAssignee: project.worker?.claimAssignee ?? "",
+  };
   for (const field of FIELDS) draft[field] = pinned.has(field) ? stored[field] : DEFAULTS[field];
   return draft;
 }
@@ -53,6 +56,7 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
   const { toast } = useToast();
 
   const [workers, setWorkers] = useState<ApiWorker[] | null>(null);
+  const [people, setPeople] = useState<ApiUserSummary[]>([]);
   const draft = useDraft<Draft>(draftFrom(project));
   // Un-pinning is intent, not a value, so it cannot live in the draft's diff: a field reset to the
   // default is byte-identical to one that was already inheriting it.
@@ -67,6 +71,10 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
       .get("/api/admin/workers")
       .then(setWorkers)
       .catch(() => setWorkers([]));
+    api
+      .get("/api/users/list")
+      .then(setPeople)
+      .catch(() => setPeople([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdmin]);
 
@@ -74,12 +82,13 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
     const policy: Record<string, PolicyValue> = {};
     for (const field of draft.dirtyKeys) {
       const name = String(field);
-      if (name === "enabled" || unpinned.has(name)) continue;
+      if (name === "enabled" || name === "claimAssignee" || unpinned.has(name)) continue;
       policy[name] = draft.value[name];
     }
 
     const patch: Record<string, unknown> = {};
     if (draft.isDirty("enabled")) patch.enabled = draft.value.enabled;
+    if (draft.isDirty("claimAssignee")) patch.claimAssignee = draft.value.claimAssignee || null;
     if (Object.keys(policy).length > 0) patch.policy = policy;
     if (unpinned.size > 0) patch.reset = [...unpinned];
     if (Object.keys(patch).length === 0) return;
@@ -159,9 +168,33 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
               hint={
                 draft.value.claimScope === "any"
                   ? "Any unassigned task in an approved column is picked up by a machine offering this repository."
-                  : "Nothing is picked up until you assign a task to the worker. Widen that below."
+                  : "Only tasks handed over below are picked up. Nothing else is touched."
               }
             />
+
+            <div className="mt-4">
+              <p className="text-sm font-medium mb-2">Hand tasks over to</p>
+              <select
+                value={String(draft.value.claimAssignee ?? "")}
+                disabled={!isAdmin}
+                onChange={(e) => draft.set("claimAssignee", e.target.value)}
+                className="w-full rounded-lg border border-border bg-bg-input px-2 py-1.5 text-sm"
+              >
+                <option value="">Nobody yet</option>
+                {people.map((p) => (
+                  <option key={p._id} value={p._id}>
+                    {p.fullName ? `${p.fullName} (${p.username})` : p.username}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-text-muted">
+                {draft.value.claimScope === "any"
+                  ? "Assigning a task to this person offers it to a worker. Unassigned tasks are offered too."
+                  : !draft.value.claimAssignee
+                    ? "Until you pick somebody, nothing qualifies and no work is picked up."
+                    : "A worker takes only tasks assigned to this person. Assigning one is how you hand work over."}
+              </p>
+            </div>
 
             <div className="mt-4">
               <p className="text-sm font-medium mb-2">Machines offering this repository</p>

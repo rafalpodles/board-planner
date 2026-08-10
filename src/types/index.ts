@@ -1,4 +1,5 @@
 import { Types } from "mongoose";
+import type { ClaimScope } from "@/lib/worker-policy";
 
 // Difficulty levels
 export type Difficulty = "S" | "M" | "L" | "XL";
@@ -475,6 +476,9 @@ export interface ProjectWorkerPolicy {
   // The second model that reads the diff with no memory of writing it. Turning it off is what
   // separates "write code" from "write and review"; autoMerge may not outlive it.
   reviewGate: boolean;
+  // Which tasks in an approved column a worker may take: "assigned" only those handed to the
+  // project's claimAssignee, "any" unassigned ones too.
+  claimScope: ClaimScope;
   baseBranch: string;
   taskTimeoutMs: number;
   maxDiffLines: number;
@@ -488,6 +492,9 @@ export interface ProjectWorkerConfig {
   enabled: boolean;
   policy: ProjectWorkerPolicy;
   policyOverrides: string[];
+  // The user a task must be assigned to before a worker claims it under claimScope "assigned".
+  // Null means nothing qualifies, which is what a project that has nominated nobody should offer.
+  claimAssignee?: string | null;
 }
 
 // What a worker says it has on disk. Reported upward only — the server never sends a path back.

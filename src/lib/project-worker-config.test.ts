@@ -80,6 +80,25 @@ describe("parseProjectWorkerConfig", () => {
       }
     });
 
+    it("refuses a claimAssignee that is not a user id", () => {
+      for (const bad of ["claude", "", 1, true, {}, "not-an-objectid"]) {
+        expect(parseProjectWorkerConfig({ claimAssignee: bad })).toMatchObject({ ok: false });
+      }
+    });
+
+    // Null is how a project says it has nominated nobody, which under claimScope "assigned" means
+    // nothing qualifies — a state the settings screen names rather than leaving to be discovered
+    it("accepts a user id, and null for nobody", () => {
+      expect(parseProjectWorkerConfig({ claimAssignee: "6a70afff45d39cd9bc8bb600" })).toEqual({
+        ok: true,
+        update: { "worker.claimAssignee": "6a70afff45d39cd9bc8bb600" },
+      });
+      expect(parseProjectWorkerConfig({ claimAssignee: null })).toEqual({
+        ok: true,
+        update: { "worker.claimAssignee": null },
+      });
+    });
+
     it("refuses a non-boolean enabled", () => {
       expect(parseProjectWorkerConfig({ enabled: "yes" })).toMatchObject({ ok: false });
     });

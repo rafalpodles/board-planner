@@ -1,3 +1,4 @@
+import { Types } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { Task } from "@/models/task";
 import { Project } from "@/models/project";
@@ -58,7 +59,7 @@ const UNSET_RUN = Object.fromEntries(RUN_FIELDS.map((field) => [field, ""]));
 // an empty string is TRUTHY in MongoDB's `$cond` — unlike in JavaScript. So every ordinary status
 // change cleared the assignee of every task that had ever been near the execution subdocument.
 // Compare explicitly; do not lean on truthiness across that boundary.
-const CLEAR_WORKER_ASSIGNEE = {
+export const CLEAR_WORKER_ASSIGNEE = {
   assignee: {
     $cond: [
       {
@@ -463,7 +464,13 @@ export async function updateTask(
   // Same rule as changeStatus, decided in JS rather than with a pipeline because this update needs
   // runValidators, which a pipeline update does not run. An explicit assignee in the edit still
   // wins — it is spread last.
-  const releasesWorker = leavesColumn && !!oldTask.execution?.workerId;
+  // The same two conditions as CLEAR_WORKER_ASSIGNEE, in JS because this update needs
+  // runValidators and a pipeline does not run them. workerId is the wrong one: it outlives the run
+  // as history, so keying on it cleared the assignee of any task a worker had ever touched — and
+  // this is the path a dragged card takes, so "assign it, then drag it" undid the assignment.
+  const heldByRun = !!oldTask.execution?.runId;
+  const claimAssigned = oldTask.execution?.assignedByRun !== false;
+  const releasesWorker = leavesColumn && heldByRun && claimAssigned;
   const setFields = releasesWorker ? { assignee: null, ...updates } : updates;
 
   const task = await Task.findOneAndUpdate(
@@ -751,31 +758,54 @@ export async function claimNextTask(
 ): Promise<ITask | null> {
   await connectDB();
 
-  const project = await Project.findById(projectId, "columns worker.policy.claimScope").lean();
+  const project = await Project.findById(
+    projectId,
+    "columns worker.policy.claimScope worker.claimAssignee"
+  ).lean();
   const columns = getProjectColumns(project);
   const approved = columns.filter((c) => c.role === "approved").map((c) => c.id);
   const activeStatus = columns.find((c) => c.role === "active")?.id;
   if (approved.length === 0 || !activeStatus) return null;
 
-  const stored = (project as { worker?: { policy?: { claimScope?: unknown } } } | null)?.worker
-    ?.policy?.claimScope;
-  const scope = isClaimScope(stored) ? stored : PROJECT_POLICY_DEFAULTS.claimScope;
+  // Cast here, not in the pipeline. Mongoose casts a plain $set against the schema and does not
+  // cast an update pipeline at all, so the raw string would be stored in an ObjectId ref field —
+  // populate still renders it, and every query that casts its side (My Tasks, the board's assignee
+  // filter, this very claim filter) silently stops matching the task.
+  // A worker's identity is an ObjectId ref, so one that cannot be parsed means a corrupt worker
+  // record. Claim nothing: throwing would 500 the poll loop, and claiming while assigning nobody
+  // would hand work to a machine that no later query can associate with it.
+  if (identity && !Types.ObjectId.isValid(identity)) return null;
+  const assignTo = identity ? new Types.ObjectId(identity) : null;
 
-  // What "enabled" is allowed to mean. Under "assigned" a worker only takes what somebody handed
-  // it, so connecting one to a project full of To Do does nothing until a task is offered — the
-  // task is the unit of consent, not the project. Under "any" an unassigned task is fair game too.
+  const worker = (
+    project as {
+      worker?: { policy?: { claimScope?: unknown }; claimAssignee?: unknown };
+    } | null
+  )?.worker;
+  const scope = isClaimScope(worker?.policy?.claimScope)
+    ? worker.policy.claimScope
+    : PROJECT_POLICY_DEFAULTS.claimScope;
+  const nominee = worker?.claimAssignee ? String(worker.claimAssignee) : null;
+
+  // What "enabled" is allowed to mean. Under "assigned" a worker only takes tasks handed to the
+  // user this project nominates, so connecting one to a project full of To Do does nothing until
+  // somebody offers it work — the task is the unit of consent, not the project. Under "any" an
+  // unassigned task is fair game too.
   //
-  // A worker with no identity user can be handed nothing, so under "assigned" it claims nothing
-  // rather than everything. Failing closed is the point of the setting.
-  const claimable =
-    scope === "assigned"
-      ? identity
-        ? [{ assignee: identity }]
-        : null
-      : // An assigned task belongs to whoever it is assigned to — another machine that got there
-        // first, or a person it was parked for — unless that is this worker's own identity
-        [{ assignee: null }, ...(identity ? [{ assignee: identity }] : [])];
-  if (!claimable) return null;
+  // The nominee is an ordinary user a person picks, deliberately not the worker's own identity:
+  // that is an auto-created `worker-<id>` account with kind "machine", excluded from every list
+  // the product offers, so keying on it would make the hand-over impossible to perform.
+  //
+  // A task the run is resuming is already assigned to the worker's identity, so that matches too;
+  // without it a release would hand back a task no scope could pick up again.
+  const handed = [
+    ...(nominee ? [{ assignee: nominee }] : []),
+    ...(identity ? [{ assignee: identity }] : []),
+  ];
+  const claimable = scope === "assigned" ? handed : [{ assignee: null }, ...handed];
+  // Nominating nobody under "assigned" means nothing qualifies. Failing closed is the point of the
+  // setting, and the settings screen says so rather than leaving it to be discovered.
+  if (claimable.length === 0) return null;
 
   return Task.findOneAndUpdate(
     {
@@ -800,7 +830,7 @@ export async function claimNextTask(
           status: activeStatus,
           // Kept, not overwritten: under "assigned" the assignee is the hand-over itself, and
           // whether the claim is what set it decides whether releasing may clear it again
-          ...(identity ? { assignee: { $ifNull: ["$assignee", identity] } } : {}),
+          ...(assignTo ? { assignee: { $ifNull: ["$assignee", assignTo] } } : {}),
           "execution.assignedByRun": { $eq: [{ $ifNull: ["$assignee", null] }, null] },
           "execution.workerId": workerId,
           "execution.runId": runId,

@@ -13,9 +13,17 @@
  * to the default, because a value that merely happens to match a default is indistinguishable from
  * one nobody chose. Pinning records the choice.
  *
- * Run this BEFORE the deploy, or immediately after: a project migrated late spends the gap claiming
- * only assigned tasks, which is a pause, not damage. Safe to re-run — a project that already pins
- * claimScope is left alone, whichever value it pins.
+ * Timing. No ordering closes both windows, so pick the one that fails safe. Run it BEFORE the
+ * deploy: a project enabled in the gap keeps claiming under the old code and then narrows to
+ * "assigned" — a pause somebody notices, not work taken without consent. Running it after does the
+ * opposite: a project enabled in the gap took the safe default deliberately, and the script would
+ * widen it back without being asked. Device enrolment sets worker.enabled, so that gap is the
+ * common onboarding path, not a corner case.
+ *
+ * Re-running is safe in the sense that matters — it never widens a project twice — but it is not
+ * a no-op. The skip test is the stored value rather than the pin, because un-pinning through
+ * Settings writes the default back and drops the field from policyOverrides: keying on the pin
+ * would silently re-widen a project somebody had deliberately narrowed.
  */
 
 import mongoose from "mongoose";
@@ -58,9 +66,12 @@ async function main() {
       continue;
     }
 
-    if ((worker.policyOverrides ?? []).includes("claimScope")) {
+    // The stored value, not policyOverrides. Un-pinning writes "assigned" into policy and removes
+    // the field from the overrides, so a pin check would read that as "never migrated" and widen
+    // a project back to "any" behind the operator's back.
+    if (worker.policy?.claimScope) {
       alreadyPinned++;
-      console.log(`${name}: already pins claimScope = ${worker.policy?.claimScope ?? "?"}`);
+      console.log(`${name}: already set to ${worker.policy.claimScope}, left alone`);
       continue;
     }
 
