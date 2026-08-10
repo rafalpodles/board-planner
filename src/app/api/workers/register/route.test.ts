@@ -83,6 +83,17 @@ describe("POST /api/workers/register", () => {
     expect(entry.user).toBeUndefined();
   });
 
+  // Whoever holds a valid enrolment token chooses these, and they now reach an admin-facing list.
+  // The device flow already capped them; this path did not, and the audit row is what made an
+  // oversized host somebody else's problem.
+  it("caps the name and host a registering machine chooses for itself", async () => {
+    await POST(request({ ...VALID, name: "n".repeat(500), host: "h".repeat(900) }, "cpe_good"));
+
+    const registered = registerWorker.mock.calls[0][0];
+    expect(registered.name).toHaveLength(120);
+    expect(registered.host).toHaveLength(200);
+  });
+
   it("records nothing when the token is refused", async () => {
     consumeEnrolmentToken.mockResolvedValue({ ok: false });
 

@@ -1183,6 +1183,8 @@ export const INSTANCE_AUDIT_ACTIONS = [
   "enrolment_token_spent",
   "project_workers_enabled",
   "project_workers_disabled",
+  "project_worker_policy_changed",
+  "worker_command_sent",
 ] as const;
 
 export type InstanceAuditAction = (typeof INSTANCE_AUDIT_ACTIONS)[number];

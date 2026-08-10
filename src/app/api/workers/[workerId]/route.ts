@@ -107,6 +107,9 @@ export const PATCH = withAuth(async (request, { params, user }) => {
   }
 
   const updated = await Worker.findByIdAndUpdate(workerId, { $set: update }, { new: true });
+  if (!updated) {
+    return NextResponse.json({ error: "Worker not found" }, { status: 404 });
+  }
 
   // Read off the pre-update document, which is still in hand: the entry describes a transition,
   // and "renamed to X" without the old name answers half the question somebody is asking.
@@ -114,7 +117,7 @@ export const PATCH = withAuth(async (request, { params, user }) => {
     void logInstanceAudit({ ...entry, user: String(user._id) });
   }
 
-  return NextResponse.json(toApiWorker(updated!));
+  return NextResponse.json(toApiWorker(updated));
 });
 
 interface WorkerBefore {
@@ -122,6 +125,7 @@ interface WorkerBefore {
   enabled: boolean;
   lockedByInstance: boolean;
   policy?: { pollIntervalMs?: number };
+  policyOverrides?: string[];
 }
 
 // One entry per thing that actually changed, so a request setting two fields is two rows rather
@@ -155,11 +159,16 @@ function auditEntries(
   }
 
   const pollIntervalMs = body.pollIntervalMs;
-  if (typeof pollIntervalMs === "number" && pollIntervalMs !== before.policy?.pollIntervalMs) {
+  // What the worker actually runs under, which is the stored value only once somebody pinned it —
+  // otherwise the machine resolves against its own default and the stored copy is inert
+  const effective = (before.policyOverrides ?? []).includes("pollIntervalMs")
+    ? before.policy?.pollIntervalMs
+    : undefined;
+  if (typeof pollIntervalMs === "number" && pollIntervalMs !== effective) {
     entries.push({
       action: "worker_poll_interval_changed",
       target,
-      detail: `${before.policy?.pollIntervalMs ?? "default"} → ${pollIntervalMs} ms`,
+      detail: `${effective ?? "default"} → ${pollIntervalMs} ms`,
     });
   }
 

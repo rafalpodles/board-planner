@@ -139,6 +139,30 @@ test("changing worker policy without changing whether they run records nothing",
   expect(await auditRows()).toHaveLength(0);
 });
 
+// The write used to fire before the update and before five later refusals, all in one handler. A
+// request carrying a worker toggle and one bad field returns 400, changes nothing, and used to
+// leave a row saying a project had been committed to workers.
+//
+// Through the API, not the browser: the settings screen saves one section at a time, so no
+// gesture produces a request carrying both. Intercepting the response in the page would be worse
+// than no test — the handler under examination would never run at all.
+test("a refused save leaves no record of a decision that never happened", async ({ request }) => {
+  const response = await request.put(`/api/projects/${PROJECT_KEY}`, {
+    headers: {
+      Authorization: `Basic ${Buffer.from(`${ADMIN_USERNAME}:${ADMIN_PASSWORD}`).toString("base64")}`,
+    },
+    data: { worker: { enabled: false }, gitlabHost: "http://gitlab.internal" },
+  });
+
+  expect(response.status()).toBe(400);
+  expect(await auditRows()).toHaveLength(0);
+
+  // And the decision itself did not land either, so the absent row is telling the truth
+  const handle = await db();
+  const project = await handle.collection("projects").findOne({ _id: PROJECT_ID });
+  expect(project?.worker?.enabled).toBe(true);
+});
+
 test("the log is not readable by someone who could not have written to it", async ({ request }) => {
   const handle = await db();
   await handle.collection("users").updateOne({ username: ADMIN_USERNAME }, { $set: { role: "member" } });

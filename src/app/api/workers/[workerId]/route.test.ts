@@ -299,6 +299,10 @@ describe("what the fleet audit log records", () => {
   });
 
   it("records the poll interval it moved from", async () => {
+    // Pinned in the fixture: the stored 30000 on an unpinned worker is inert, so the interval it
+    // moved from is the default, not that number
+    workerFindById.mockResolvedValue({ ...WORKER, policyOverrides: ["pollIntervalMs"] });
+
     await PATCH(patchRequest({ pollIntervalMs: 60_000 }), ctx());
 
     expect(entries()[0]).toMatchObject({
@@ -318,6 +322,39 @@ describe("what the fleet audit log records", () => {
   it("records nothing for a field resent with the value it already had", async () => {
     await PATCH(patchRequest({ enabled: true, name: "rig-laptop" }), ctx());
 
+    expect(logInstanceAudit).not.toHaveBeenCalled();
+  });
+
+  // The stored copy is inert until somebody pins it: the schema materialises pollIntervalMs into
+  // every worker, but the machine resolves against its own default unless the field is in
+  // policyOverrides. So resending the default is a real change — it pins it — and comparing
+  // against the stored value read that as no change at all.
+  it("records pinning the default, which is a change the stored value cannot show", async () => {
+    workerFindById.mockResolvedValue({ ...WORKER, policyOverrides: [] });
+
+    await PATCH(patchRequest({ pollIntervalMs: 30_000 }), ctx());
+
+    expect(entries()[0]).toMatchObject({
+      action: "worker_poll_interval_changed",
+      detail: expect.stringContaining("default"),
+    });
+  });
+
+  it("records nothing when a pinned interval is resent unchanged", async () => {
+    workerFindById.mockResolvedValue({ ...WORKER, policyOverrides: ["pollIntervalMs"] });
+
+    await PATCH(patchRequest({ pollIntervalMs: 30_000 }), ctx());
+
+    expect(logInstanceAudit).not.toHaveBeenCalled();
+  });
+
+  // Otherwise the log asserts a kill switch that never landed, right before the handler throws
+  it("records nothing when the document is gone by the time it is written", async () => {
+    workerFindByIdAndUpdate.mockResolvedValue(null);
+
+    const response = await PATCH(patchRequest({ lockedByInstance: true }), ctx());
+
+    expect(response.status).toBe(404);
     expect(logInstanceAudit).not.toHaveBeenCalled();
   });
 
