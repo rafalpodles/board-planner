@@ -121,7 +121,15 @@ const customBoard = {
     { id: "ready", label: "Ready", role: "approved", order: 1 },
     { id: "doing", label: "Doing", role: "active", order: 2 },
   ],
+  // The permissive scope on purpose: these cover columns, ordering and stamping, and under the
+  // "assigned" default a worker passed no identity would claim nothing and prove none of it.
+  // What each scope actually selects is e2e/claim-scope.spec.ts, against a real database.
+  worker: { policy: { claimScope: "any" } },
 };
+
+// The claim is an update pipeline, so $set and $unset arrive as stages rather than operators
+const claimStages = (call: unknown[]) => call[1] as Record<string, never>[];
+const claimSet = (call: unknown[]) => claimStages(call)[0].$set as unknown as Record<string, unknown>;
 
 describe("claimNextTask", () => {
   beforeEach(() => {
@@ -145,7 +153,7 @@ describe("claimNextTask", () => {
 
     await claimNextTask("p1", "worker-a", "run-1");
 
-    expect(findOneAndUpdate.mock.calls[0][1].$set.status).toBe("doing");
+    expect(claimSet(findOneAndUpdate.mock.calls[0]).status).toBe("doing");
   });
 
   it("returns null when the board has no active column to claim into", async () => {
@@ -182,10 +190,12 @@ describe("claimNextTask", () => {
     await claimNextTask("p1", "worker-a", "run-1");
 
     const filter = findOneAndUpdate.mock.calls[0][0];
-    expect(filter.$or).toEqual([
-      { "execution.attempts": { $exists: false } },
-      { "execution.attempts": { $lt: MAX_EXECUTION_ATTEMPTS } },
-    ]);
+    expect(filter.$and).toContainEqual({
+      $or: [
+        { "execution.attempts": { $exists: false } },
+        { "execution.attempts": { $lt: MAX_EXECUTION_ATTEMPTS } },
+      ],
+    });
   });
 
   it("stamps worker identity and increments attempts", async () => {
@@ -193,10 +203,14 @@ describe("claimNextTask", () => {
 
     await claimNextTask("p1", "worker-a", "run-1");
 
-    const update = findOneAndUpdate.mock.calls[0][1];
-    expect(update.$set["execution.workerId"]).toBe("worker-a");
-    expect(update.$set["execution.runId"]).toBe("run-1");
-    expect(update.$inc["execution.attempts"]).toBe(1);
+    const set = claimSet(findOneAndUpdate.mock.calls[0]);
+    expect(set["execution.workerId"]).toBe("worker-a");
+    expect(set["execution.runId"]).toBe("run-1");
+    // Incremented inside the pipeline, where the missing field has to be read as zero first: $inc
+    // creates it, but a pipeline $set computing on it does not
+    expect(set["execution.attempts"]).toEqual({
+      $add: [{ $ifNull: ["$execution.attempts", 0] }, 1],
+    });
   });
 
   // Each run counts its phases from one, so a phaseSeq left behind by an earlier run would make
@@ -206,7 +220,7 @@ describe("claimNextTask", () => {
 
     await claimNextTask("p1", "worker-a", "run-1");
 
-    expect(Object.keys(findOneAndUpdate.mock.calls[0][1].$unset)).toEqual(PHASE_KEYS);
+    expect(claimStages(findOneAndUpdate.mock.calls[0])[1].$unset).toEqual(PHASE_KEYS);
   });
 
   it("returns null when nothing is claimable", async () => {
@@ -698,6 +712,7 @@ describe("claiming by assignment", () => {
       { id: "doing", role: "active", order: 2 },
       { id: "checking", role: "review", order: 3, triggersPmReview: true },
     ],
+    worker: { policy: { claimScope: "any" } },
   };
 
   beforeEach(() => {
@@ -710,20 +725,26 @@ describe("claiming by assignment", () => {
   it("assigns the task to the worker's own identity", async () => {
     await claimNextTask("p1", "w1", "run-1", "u-worker");
 
-    expect(findOneAndUpdate.mock.calls[0][1].$set.assignee).toBe("u-worker");
+    // Kept rather than overwritten: under claimScope "assigned" the assignee already names this
+    // worker, and whether the claim is what put it there is what decides if a release may clear it
+    expect(claimSet(findOneAndUpdate.mock.calls[0]).assignee).toEqual({
+      $ifNull: ["$assignee", "u-worker"],
+    });
   });
 
-  it("takes nothing that already has an assignee", async () => {
+  it("takes nothing assigned to anybody but itself", async () => {
     await claimNextTask("p1", "w1", "run-1", "u-worker");
 
-    expect(findOneAndUpdate.mock.calls[0][0].assignee).toBeNull();
+    expect(findOneAndUpdate.mock.calls[0][0].$and).toContainEqual({
+      $or: [{ assignee: null }, { assignee: "u-worker" }],
+    });
   });
 
   it("claims without assigning when the worker has no identity yet", async () => {
     await claimNextTask("p1", "w1", "run-1", null);
 
-    expect(findOneAndUpdate.mock.calls[0][1].$set).not.toHaveProperty("assignee");
-    expect(findOneAndUpdate.mock.calls[0][1].$set.status).toBe("doing");
+    expect(claimSet(findOneAndUpdate.mock.calls[0])).not.toHaveProperty("assignee");
+    expect(claimSet(findOneAndUpdate.mock.calls[0]).status).toBe("doing");
   });
 });
 
@@ -736,10 +757,24 @@ describe("every way back to the board clears the assignment", () => {
     ],
   };
 
-  // Cleared only for a task a worker was running: these same updates are what a person dragging a
-  // card goes through, and clearing their assignment would be a bug of its own
+  // Cleared only for a task a run still holds, and only when the claim is what assigned it: these
+  // same updates are what a person dragging a card goes through, and clearing their assignment
+  // would be a bug of its own.
+  //
+  // Compared by shape, which proves every exit path applies the same rule and nothing about what
+  // the rule means — a shape assertion is how the `""`-is-truthy bug shipped. The meaning is
+  // e2e/claim-scope.spec.ts, which runs these updates against a real MongoDB.
   const CLEARED = {
-    $cond: [{ $ne: [{ $ifNull: ["$execution.workerId", ""] }, ""] }, null, "$assignee"],
+    $cond: [
+      {
+        $and: [
+          { $ne: [{ $ifNull: ["$execution.runId", ""] }, ""] },
+          { $eq: [{ $ifNull: ["$execution.assignedByRun", true] }, true] },
+        ],
+      },
+      null,
+      "$assignee",
+    ],
   };
 
   beforeEach(() => {

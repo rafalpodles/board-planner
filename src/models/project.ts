@@ -1,5 +1,6 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { IProject, DEFAULT_PROJECT_CATEGORIES, DEFAULT_PROJECT_COLUMNS, COLUMN_ROLES, WEBHOOK_EVENTS, NOTIFICATION_CHANNEL_TYPES, CUSTOM_FIELD_TYPES } from "@/types";
+import { CLAIM_SCOPES } from "@/lib/worker-policy";
 
 const categorySchema = new Schema(
   {
@@ -173,6 +174,7 @@ const projectSchema = new Schema<IProject>(
       policy: {
         autoMerge: { type: Boolean, default: false },
         reviewGate: { type: Boolean, default: true },
+        claimScope: { type: String, enum: CLAIM_SCOPES, default: "assigned" },
         baseBranch: { type: String, default: "main" },
         taskTimeoutMs: { type: Number, default: 1_800_000 },
         maxDiffLines: { type: Number, default: 400 },

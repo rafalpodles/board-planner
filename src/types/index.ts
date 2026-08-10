@@ -621,6 +621,9 @@ export interface ITaskExecution {
   attempts: number;
   startedAt: Date | null;
   lastError: string;
+  // Whether the claim is what assigned the task, which decides whether releasing it may clear the
+  // assignee again. Absent on anything claimed before the field existed, where it means true.
+  assignedByRun?: boolean;
   // Absent until the run that holds the task reports one, and unset again the moment it leaves
   // the active column — so "no phase" is a missing field, never a stale one
   phase?: string;

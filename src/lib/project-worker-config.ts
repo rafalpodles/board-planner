@@ -1,4 +1,9 @@
-import { PROJECT_POLICY_DEFAULTS, isProjectPolicyField } from "@/lib/worker-policy";
+import {
+  CLAIM_SCOPES,
+  PROJECT_POLICY_DEFAULTS,
+  isClaimScope,
+  isProjectPolicyField,
+} from "@/lib/worker-policy";
 
 const BOOLEAN_FIELDS: ReadonlySet<string> = new Set(["autoMerge", "reviewGate"]);
 const STRING_FIELDS: ReadonlySet<string> = new Set([
@@ -69,6 +74,13 @@ export function parseProjectWorkerConfig(
       if (BOOLEAN_FIELDS.has(field)) {
         if (typeof value !== "boolean") {
           return { ok: false, error: `${field} must be a boolean` };
+        }
+        // Ahead of STRING_FIELDS, which asks only for a non-empty string: a typo would otherwise
+        // store a scope that claimNextTask matches against nothing, and a worker that claims
+        // nothing looks exactly like a worker with no work
+      } else if (field === "claimScope") {
+        if (!isClaimScope(value)) {
+          return { ok: false, error: `claimScope must be one of ${CLAIM_SCOPES.join(", ")}` };
         }
       } else if (STRING_FIELDS.has(field)) {
         if (typeof value !== "string" || !value.trim()) {

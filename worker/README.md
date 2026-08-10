@@ -135,6 +135,11 @@ and `SIGINT` both finish the task in flight before the loop exits.
 
 ## Safety
 
+- **Nothing is claimed that was not offered.** A project's `claimScope` decides what the approved
+  column actually hands over. On `assigned`, the default, a worker takes only tasks assigned to its
+  own identity user — so enabling a project claims nothing until somebody hands a task over, one at
+  a time. `any` adds unassigned tasks, which is the whole column. A task assigned to a person is
+  never taken under either scope.
 - **Nothing merges unreviewed.** The review gate is a separate Claude with no memory of writing
   the code, and it sees only the diff.
 - **Nothing executes before the static gates have read the diff.** `protected-paths` refuses

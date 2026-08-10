@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { parseProjectWorkerConfig } from "./project-worker-config";
+import { CLAIM_SCOPES } from "@/lib/worker-policy";
 
 describe("parseProjectWorkerConfig", () => {
   it("enables workers for the project", () => {
@@ -53,6 +54,28 @@ describe("parseProjectWorkerConfig", () => {
       for (const bad of ["true", "false", 1, 0, null]) {
         expect(parseProjectWorkerConfig({ policy: { autoMerge: bad } })).toMatchObject({
           ok: false,
+        });
+      }
+    });
+
+    // A closed set, so anything else stores a scope claimNextTask matches against nothing — and a
+    // worker that claims nothing is indistinguishable from a project with no approved work
+    it("refuses a claimScope outside the enumerated set", () => {
+      for (const bad of ["Assigned", "all", "", "none", true, 1, null]) {
+        expect(parseProjectWorkerConfig({ policy: { claimScope: bad } })).toMatchObject({
+          ok: false,
+        });
+      }
+    });
+
+    it("accepts each scope the claim can actually read", () => {
+      for (const scope of CLAIM_SCOPES) {
+        expect(parseProjectWorkerConfig({ policy: { claimScope: scope } })).toEqual({
+          ok: true,
+          update: {
+            "worker.policy.claimScope": scope,
+            "worker.policyOverrides": ["claimScope"],
+          },
         });
       }
     });

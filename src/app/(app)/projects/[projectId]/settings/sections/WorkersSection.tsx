@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/Input";
 import { Switch } from "@/components/ui/Switch";
 import { SettingsCard } from "@/components/settings/SettingsCard";
 import { useDirtyGroup } from "@/components/settings/settings-context";
-import { PROJECT_POLICY_DEFAULTS } from "@/lib/worker-policy";
+import { CLAIM_SCOPES, ClaimScope, PROJECT_POLICY_DEFAULTS } from "@/lib/worker-policy";
 import { projectRemotes, sameRepo } from "@/lib/repo-match";
 import { ApiProject, ApiWorker } from "@/types";
 import { SectionProps } from "./types";
@@ -17,6 +17,7 @@ const NUMBER_FIELDS = new Set(["taskTimeoutMs", "maxDiffLines", "maxDiffFiles"])
 const LABELS: Record<string, string> = {
   autoMerge: "Merge automatically",
   reviewGate: "Review the diff before delivering",
+  claimScope: "Tasks a worker may take",
   baseBranch: "Base branch",
   taskTimeoutMs: "Task timeout (ms)",
   maxDiffLines: "Largest diff (lines)",
@@ -24,6 +25,11 @@ const LABELS: Record<string, string> = {
   model: "Model",
   fallbackModel: "Fallback model",
   reviewModel: "Review model",
+};
+
+const CLAIM_SCOPE_LABELS: Record<ClaimScope, string> = {
+  assigned: "Only tasks assigned to the worker",
+  any: "Any unassigned task in the column",
 };
 
 type PolicyValue = string | number | boolean;
@@ -148,7 +154,13 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
               disabled={!isAdmin}
               onChange={(v) => draft.set("enabled", v)}
               label="Let workers run tasks for this project"
-              hint="Approved tasks are picked up by any machine offering this repository."
+              // Reads the scope in the draft, not the stored one: the sentence has to describe what
+              // saving would do, or enabling and narrowing in one visit is described backwards
+              hint={
+                draft.value.claimScope === "any"
+                  ? "Any unassigned task in an approved column is picked up by a machine offering this repository."
+                  : "Nothing is picked up until you assign a task to the worker. Widen that below."
+              }
             />
 
             <div className="mt-4">
@@ -203,6 +215,21 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
                     onChange={(v) => editField(field, v)}
                     label={LABELS[field] ?? field}
                   />
+                ) : field === "claimScope" ? (
+                  // A closed set, so a text box would only offer new ways to be wrong — and a
+                  // rejected typo here reads as a worker that has stopped picking work up
+                  <select
+                    value={String(value)}
+                    disabled={!isAdmin}
+                    onChange={(e) => editField(field, e.target.value)}
+                    className="flex-1 rounded-lg border border-border bg-bg-input px-2 py-1.5 text-sm"
+                  >
+                    {CLAIM_SCOPES.map((scope) => (
+                      <option key={scope} value={scope}>
+                        {CLAIM_SCOPE_LABELS[scope]}
+                      </option>
+                    ))}
+                  </select>
                 ) : (
                   <Input
                     // Controlled: an uncontrolled input keeps showing the old number after a reset

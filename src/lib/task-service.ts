@@ -18,6 +18,7 @@ import {
   customFieldActivityChanges,
 } from "@/lib/custom-fields";
 import { onTaskStatusChanged } from "@/lib/pm/triggers";
+import { PROJECT_POLICY_DEFAULTS, isClaimScope } from "@/lib/worker-policy";
 
 export const MAX_EXECUTION_ATTEMPTS = 3;
 
@@ -30,25 +31,45 @@ const PHASE_FIELDS = ["execution.phase", "execution.phaseAt", "execution.phaseSe
 // behind on a released task lets that worker replay its own old run onto a task it no longer holds
 // — and the release unsets phaseSeq, so the $exists branch would accept any seq, stale ones too.
 const RUN_FIELDS = [...PHASE_FIELDS, "execution.runId"];
-const UNSET_PHASE = Object.fromEntries(PHASE_FIELDS.map((field) => [field, ""]));
 const UNSET_RUN = Object.fromEntries(RUN_FIELDS.map((field) => [field, ""]));
 
-// A worker claims by assigning the task to itself, so the assignment has to die with the run —
-// every way back to the board, or the task is left assigned to a machine that is not running it
-// and no worker will ever claim it again.
+// A worker that claimed an unassigned task assigns it to itself, and that assignment has to die
+// with the run — every way back to the board, or the task is left assigned to a machine that is not
+// running it and no worker will ever claim it again.
 //
 // Conditional, not unconditional: these same updates are what a person dragging a card goes
-// through, and clearing their assignment would be a bug of its own. The claim filter refuses any
-// task that already has an assignee, so execution.workerId being set means the assignee is the
-// worker.
+// through, and clearing their assignment would be a bug of its own.
 //
-// `$ifNull` alone was wrong and shipped once: `execution.workerId` defaults to the empty string,
-// and an empty string is TRUTHY in MongoDB's `$cond` — unlike in JavaScript. So every ordinary
-// status change cleared the assignee of every task that had ever been near the execution
-// subdocument. Compare against "" explicitly; do not lean on truthiness across that boundary.
+// Two conditions, and both got here by being wrong first.
+//
+// `runId`, not `workerId`: workerId is deliberately left behind when a run ends — every reader
+// pairs it with runId to tell a live run from a memory of one. Keying on it here meant an ordinary
+// status change on a long-finished task still cleared its assignee, so "assign it to claude, then
+// drag it to To Do" quietly undid the assignment. Under claimScope "assigned" that is the whole
+// hand-over, and the worker would simply never pick the task up.
+//
+// `assignedByRun` says the claim is what put the assignee there. A claim may now land on a task a
+// person assigned, and releasing it must give the task back to that person rather than blank the
+// field — a released task with no assignee drops out of what the worker may claim and is never
+// retried. Missing means true: tasks claimed before this field existed went through a filter that
+// refused any assignee, so back then the run really did set it.
+//
+// `$ifNull` alone was wrong and shipped once: `execution.runId` defaults to the empty string, and
+// an empty string is TRUTHY in MongoDB's `$cond` — unlike in JavaScript. So every ordinary status
+// change cleared the assignee of every task that had ever been near the execution subdocument.
+// Compare explicitly; do not lean on truthiness across that boundary.
 const CLEAR_WORKER_ASSIGNEE = {
   assignee: {
-    $cond: [{ $ne: [{ $ifNull: ["$execution.workerId", ""] }, ""] }, null, "$assignee"],
+    $cond: [
+      {
+        $and: [
+          { $ne: [{ $ifNull: ["$execution.runId", ""] }, ""] },
+          { $eq: [{ $ifNull: ["$execution.assignedByRun", true] }, true] },
+        ],
+      },
+      null,
+      "$assignee",
+    ],
   },
 };
 
@@ -730,42 +751,69 @@ export async function claimNextTask(
 ): Promise<ITask | null> {
   await connectDB();
 
-  const project = await Project.findById(projectId, "columns").lean();
+  const project = await Project.findById(projectId, "columns worker.policy.claimScope").lean();
   const columns = getProjectColumns(project);
   const approved = columns.filter((c) => c.role === "approved").map((c) => c.id);
   const activeStatus = columns.find((c) => c.role === "active")?.id;
   if (approved.length === 0 || !activeStatus) return null;
 
+  const stored = (project as { worker?: { policy?: { claimScope?: unknown } } } | null)?.worker
+    ?.policy?.claimScope;
+  const scope = isClaimScope(stored) ? stored : PROJECT_POLICY_DEFAULTS.claimScope;
+
+  // What "enabled" is allowed to mean. Under "assigned" a worker only takes what somebody handed
+  // it, so connecting one to a project full of To Do does nothing until a task is offered — the
+  // task is the unit of consent, not the project. Under "any" an unassigned task is fair game too.
+  //
+  // A worker with no identity user can be handed nothing, so under "assigned" it claims nothing
+  // rather than everything. Failing closed is the point of the setting.
+  const claimable =
+    scope === "assigned"
+      ? identity
+        ? [{ assignee: identity }]
+        : null
+      : // An assigned task belongs to whoever it is assigned to — another machine that got there
+        // first, or a person it was parked for — unless that is this worker's own identity
+        [{ assignee: null }, ...(identity ? [{ assignee: identity }] : [])];
+  if (!claimable) return null;
+
   return Task.findOneAndUpdate(
     {
       project: projectId,
       status: { $in: approved },
-      // An assigned task belongs to whoever it is assigned to — another machine that got there
-      // first, or a person it was parked for. Either way this worker leaves it alone.
-      assignee: null,
-      // Mongoose applies defaults at hydration, so tasks created before the
-      // execution subdocument existed have no such field — and $lt never
-      // matches a missing one
-      $or: [
-        { "execution.attempts": { $exists: false } },
-        { "execution.attempts": { $lt: MAX_EXECUTION_ATTEMPTS } },
+      $and: [
+        { $or: claimable },
+        // Mongoose applies defaults at hydration, so tasks created before the
+        // execution subdocument existed have no such field — and $lt never
+        // matches a missing one
+        {
+          $or: [
+            { "execution.attempts": { $exists: false } },
+            { "execution.attempts": { $lt: MAX_EXECUTION_ATTEMPTS } },
+          ],
+        },
       ],
     },
-    {
-      $set: {
-        status: activeStatus,
-        ...(identity ? { assignee: identity } : {}),
-        "execution.workerId": workerId,
-        "execution.runId": runId,
-        "execution.startedAt": new Date(),
-        "execution.lastError": "",
+    [
+      {
+        $set: {
+          status: activeStatus,
+          // Kept, not overwritten: under "assigned" the assignee is the hand-over itself, and
+          // whether the claim is what set it decides whether releasing may clear it again
+          ...(identity ? { assignee: { $ifNull: ["$assignee", identity] } } : {}),
+          "execution.assignedByRun": { $eq: [{ $ifNull: ["$assignee", null] }, null] },
+          "execution.workerId": workerId,
+          "execution.runId": runId,
+          "execution.startedAt": new Date(),
+          "execution.lastError": "",
+          "execution.attempts": { $add: [{ $ifNull: ["$execution.attempts", 0] }, 1] },
+        },
       },
       // A run counts its own phases from one, so a phaseSeq left by an earlier run would swallow
       // the first events of this one
-      $unset: UNSET_PHASE,
-      $inc: { "execution.attempts": 1 },
-    },
-    { returnDocument: "after", sort: { order: 1, createdAt: 1 } }
+      { $unset: PHASE_FIELDS },
+    ],
+    { returnDocument: "after", sort: { order: 1, createdAt: 1 }, updatePipeline: true }
   );
 }
 
