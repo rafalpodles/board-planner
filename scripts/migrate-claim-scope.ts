@@ -5,6 +5,10 @@
  *   MONGODB_URI=... npx tsx scripts/migrate-claim-scope.ts --dry-run
  *   MONGODB_URI=... npx tsx scripts/migrate-claim-scope.ts
  *
+ * Against production, through the database service — the app service's URI is on Railway's
+ * private network and does not resolve from a laptop:
+ *   railway run --service MongoDB -- npx tsx scripts/migrate-claim-scope.ts --dry-run
+ *
  * The new default is "assigned": enabling a project no longer, by itself, offers a worker the whole
  * approved column. That is the right default for a project being enabled today and the wrong change
  * to make under one already running — its worker would stop claiming and nothing would say why.
@@ -27,6 +31,7 @@
  */
 
 import mongoose from "mongoose";
+import { dbName, resolveUri } from "./mongo-uri";
 
 const dryRun = process.argv.includes("--dry-run");
 
@@ -41,17 +46,26 @@ interface WorkerProject {
 }
 
 async function main() {
-  const uri = process.env.MONGODB_URI;
-  if (!uri) throw new Error("MONGODB_URI is required");
-
-  await mongoose.connect(uri);
+  const { uri, source } = resolveUri();
+  await mongoose.connect(uri, { dbName: dbName() });
   const db = mongoose.connection.db;
   if (!db) throw new Error("No database handle");
 
   const projects = (await db
     .collection("projects")
-    .find({})
+    .find({}, { projection: { key: 1, worker: 1 } })
     .toArray()) as unknown as WorkerProject[];
+
+  // Printed before the verdict, and an empty read is a hard error. A public Railway URL carries no
+  // database in its path, so the driver quietly hands back an empty default — and "0 projects,
+  // nothing to pin" then reads exactly like a finished migration.
+  console.log(`${source} -> database "${db.databaseName}", ${projects.length} project(s)\n`);
+  if (projects.length === 0) {
+    throw new Error(
+      `No projects in "${db.databaseName}". That is an empty database, not a migrated one — ` +
+        `set MONGODB_DB if the URL carries no database in its path.`
+    );
+  }
 
   let pinned = 0;
   let alreadyPinned = 0;
