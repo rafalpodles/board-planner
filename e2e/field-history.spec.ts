@@ -564,3 +564,70 @@ test("a PM turn that changes one field stays silent about the rest", async ({ pa
     { action: "updated", field: "Notes", oldValue: "kept", newValue: "agreed with the team" },
   ]);
 });
+
+// ---------------------------------------------------------------------------
+// A status change sets off the same things whichever way it was made
+// ---------------------------------------------------------------------------
+
+/**
+ * BP-253. The board PATCHes a status; the task edit form PUTs the whole task with the status
+ * inside it. Only the first path created the next occurrence of a recurring task, so a weekly
+ * task closed from the detail view quietly stopped recurring — same act, same destination
+ * column, two outcomes, and nothing on screen to say which one you had just performed.
+ *
+ * The scenario above deliberately uses the status endpoint. This one uses the form's, which is
+ * the path that was broken, and the reason the earlier test could not cover it.
+ */
+async function tasksInProject(request: APIRequestContext): Promise<{ taskNumber: number; title: string }[]> {
+  const response = await request.get(`/api/projects/${PROJECT_ID}/tasks`, { headers: AUTH });
+  expect(response.status()).toBe(200);
+  return response.json();
+}
+
+test("closing a recurring task from the edit form creates its next occurrence", async ({
+  page,
+  request,
+}) => {
+  await seedCustomFields();
+  await signIn(page);
+
+  const before = await tasksInProject(request);
+
+  await request.put(`/api/projects/${PROJECT_ID}/tasks/${SIBLING_TASK_ID}`, {
+    headers: AUTH,
+    data: { recurrence: { frequency: "weekly", interval: 1, endDate: null } },
+  });
+
+  // The form's own endpoint, carrying the status in the body — not PATCH /status
+  const closed = await request.put(`/api/projects/${PROJECT_ID}/tasks/${SIBLING_TASK_ID}`, {
+    headers: AUTH,
+    data: { status: "done" },
+  });
+  expect(closed.status(), await closed.text()).toBe(200);
+
+  await expect
+    .poll(async () => (await tasksInProject(request)).length, { timeout: 15_000 })
+    .toBe(before.length + 1);
+
+  const after = await tasksInProject(request);
+  const created = after.find((t) => !before.some((b) => b.taskNumber === t.taskNumber));
+  expect(created?.title, "the new occurrence does not carry the original's title").toBe(
+    before.find((b) => b.taskNumber === SIBLING_TASK_NUMBER)?.title
+  );
+});
+
+test("closing a task that does not recur creates nothing", async ({ page, request }) => {
+  await seedCustomFields();
+  await signIn(page);
+
+  const before = await tasksInProject(request);
+  const closed = await request.put(`/api/projects/${PROJECT_ID}/tasks/${SIBLING_TASK_ID}`, {
+    headers: AUTH,
+    data: { status: "done" },
+  });
+  expect(closed.status()).toBe(200);
+
+  // Poll for a while so a late arrival still fails this rather than slipping in afterwards
+  await new Promise((resolve) => setTimeout(resolve, 3_000));
+  expect((await tasksInProject(request)).length).toBe(before.length);
+});
