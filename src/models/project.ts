@@ -1,5 +1,6 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { IProject, DEFAULT_PROJECT_CATEGORIES, DEFAULT_PROJECT_COLUMNS, COLUMN_ROLES, WEBHOOK_EVENTS, NOTIFICATION_CHANNEL_TYPES, CUSTOM_FIELD_TYPES } from "@/types";
+import { CLAIM_SCOPES } from "@/lib/worker-policy";
 
 const categorySchema = new Schema(
   {
@@ -173,6 +174,7 @@ const projectSchema = new Schema<IProject>(
       policy: {
         autoMerge: { type: Boolean, default: false },
         reviewGate: { type: Boolean, default: true },
+        claimScope: { type: String, enum: CLAIM_SCOPES, default: "assigned" },
         baseBranch: { type: String, default: "main" },
         taskTimeoutMs: { type: Number, default: 1_800_000 },
         maxDiffLines: { type: Number, default: 400 },
@@ -181,6 +183,10 @@ const projectSchema = new Schema<IProject>(
         fallbackModel: { type: String, default: "sonnet" },
         reviewModel: { type: String, default: "opus" },
       },
+      // Who a task must be assigned to before a worker may take it under claimScope "assigned".
+      // A person picks this, so it is an ordinary user — a worker's own identity is a machine
+      // account, excluded from every list the product offers and unselectable by design.
+      claimAssignee: { type: Schema.Types.ObjectId, ref: "User", default: null },
       policyOverrides: { type: [String], default: [] },
     },
     // The one place a project names its repository, whoever hosts it. The provider is derived from

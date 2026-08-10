@@ -1,4 +1,10 @@
-import { PROJECT_POLICY_DEFAULTS, isProjectPolicyField } from "@/lib/worker-policy";
+import { isValidObjectId } from "mongoose";
+import {
+  CLAIM_SCOPES,
+  PROJECT_POLICY_DEFAULTS,
+  isClaimScope,
+  isProjectPolicyField,
+} from "@/lib/worker-policy";
 
 const BOOLEAN_FIELDS: ReadonlySet<string> = new Set(["autoMerge", "reviewGate"]);
 const STRING_FIELDS: ReadonlySet<string> = new Set([
@@ -40,6 +46,19 @@ export function parseProjectWorkerConfig(
     update["worker.enabled"] = body.enabled;
   }
 
+  // Not a policy field: policy fields are scalars that fall back to a shared default, and there is
+  // no sensible default user. Null is how a project says it has nominated nobody.
+  if ("claimAssignee" in body) {
+    const nominee = body.claimAssignee;
+    if (nominee !== null && typeof nominee !== "string") {
+      return { ok: false, error: "worker.claimAssignee must be a user id or null" };
+    }
+    if (typeof nominee === "string" && !isValidObjectId(nominee)) {
+      return { ok: false, error: "worker.claimAssignee must be a user id or null" };
+    }
+    update["worker.claimAssignee"] = nominee || null;
+  }
+
   // Un-pinning, the other half of policyOverrides. Without it a field touched once could never
   // follow the default again, and the UI would show "set" with no route back.
   const reset = body.reset;
@@ -69,6 +88,13 @@ export function parseProjectWorkerConfig(
       if (BOOLEAN_FIELDS.has(field)) {
         if (typeof value !== "boolean") {
           return { ok: false, error: `${field} must be a boolean` };
+        }
+        // Ahead of STRING_FIELDS, which asks only for a non-empty string: a typo would otherwise
+        // store a scope that claimNextTask matches against nothing, and a worker that claims
+        // nothing looks exactly like a worker with no work
+      } else if (field === "claimScope") {
+        if (!isClaimScope(value)) {
+          return { ok: false, error: `claimScope must be one of ${CLAIM_SCOPES.join(", ")}` };
         }
       } else if (STRING_FIELDS.has(field)) {
         if (typeof value !== "string" || !value.trim()) {

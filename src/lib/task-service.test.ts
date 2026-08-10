@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // mongoose's own query matcher, so the filters below are judged by MongoDB semantics rather than
 // by a hand-rolled reading of them
 import sift from "sift";
+import { Types } from "mongoose";
 
 // MongoDB's $cond treats only false, null, 0 and missing as false. An **empty string is true** —
 // the opposite of JavaScript. `execution.workerId` defaults to "", so an expression that leaned on
@@ -28,6 +29,7 @@ function evaluateExpr(expr: unknown, doc: Record<string, unknown>): unknown {
   if (op === "$ifNull") return list[0] === undefined || list[0] === null ? list[1] : list[0];
   if (op === "$ne") return list[0] !== list[1];
   if (op === "$eq") return list[0] === list[1];
+  if (op === "$and") return list.every(mongoTruthy);
   throw new Error(`the evaluator does not know ${op}`);
 }
 
@@ -87,6 +89,7 @@ vi.mock("@/lib/in-app-notifications", () => ({
 vi.mock("@/lib/pm/triggers", () => ({ onTaskStatusChanged: vi.fn().mockResolvedValue(undefined) }));
 
 const {
+  CLEAR_WORKER_ASSIGNEE,
   claimNextTask,
   releaseTask,
   releaseExpiredTasks,
@@ -121,7 +124,15 @@ const customBoard = {
     { id: "ready", label: "Ready", role: "approved", order: 1 },
     { id: "doing", label: "Doing", role: "active", order: 2 },
   ],
+  // The permissive scope on purpose: these cover columns, ordering and stamping, and under the
+  // "assigned" default a worker passed no identity would claim nothing and prove none of it.
+  // What each scope actually selects is e2e/claim-scope.spec.ts, against a real database.
+  worker: { policy: { claimScope: "any" } },
 };
+
+// The claim is an update pipeline, so $set and $unset arrive as stages rather than operators
+const claimStages = (call: unknown[]) => call[1] as Record<string, never>[];
+const claimSet = (call: unknown[]) => claimStages(call)[0].$set as unknown as Record<string, unknown>;
 
 describe("claimNextTask", () => {
   beforeEach(() => {
@@ -145,7 +156,7 @@ describe("claimNextTask", () => {
 
     await claimNextTask("p1", "worker-a", "run-1");
 
-    expect(findOneAndUpdate.mock.calls[0][1].$set.status).toBe("doing");
+    expect(claimSet(findOneAndUpdate.mock.calls[0]).status).toBe("doing");
   });
 
   it("returns null when the board has no active column to claim into", async () => {
@@ -182,10 +193,12 @@ describe("claimNextTask", () => {
     await claimNextTask("p1", "worker-a", "run-1");
 
     const filter = findOneAndUpdate.mock.calls[0][0];
-    expect(filter.$or).toEqual([
-      { "execution.attempts": { $exists: false } },
-      { "execution.attempts": { $lt: MAX_EXECUTION_ATTEMPTS } },
-    ]);
+    expect(filter.$and).toContainEqual({
+      $or: [
+        { "execution.attempts": { $exists: false } },
+        { "execution.attempts": { $lt: MAX_EXECUTION_ATTEMPTS } },
+      ],
+    });
   });
 
   it("stamps worker identity and increments attempts", async () => {
@@ -193,10 +206,14 @@ describe("claimNextTask", () => {
 
     await claimNextTask("p1", "worker-a", "run-1");
 
-    const update = findOneAndUpdate.mock.calls[0][1];
-    expect(update.$set["execution.workerId"]).toBe("worker-a");
-    expect(update.$set["execution.runId"]).toBe("run-1");
-    expect(update.$inc["execution.attempts"]).toBe(1);
+    const set = claimSet(findOneAndUpdate.mock.calls[0]);
+    expect(set["execution.workerId"]).toBe("worker-a");
+    expect(set["execution.runId"]).toBe("run-1");
+    // Incremented inside the pipeline, where the missing field has to be read as zero first: $inc
+    // creates it, but a pipeline $set computing on it does not
+    expect(set["execution.attempts"]).toEqual({
+      $add: [{ $ifNull: ["$execution.attempts", 0] }, 1],
+    });
   });
 
   // Each run counts its phases from one, so a phaseSeq left behind by an earlier run would make
@@ -206,7 +223,7 @@ describe("claimNextTask", () => {
 
     await claimNextTask("p1", "worker-a", "run-1");
 
-    expect(Object.keys(findOneAndUpdate.mock.calls[0][1].$unset)).toEqual(PHASE_KEYS);
+    expect(claimStages(findOneAndUpdate.mock.calls[0])[1].$unset).toEqual(PHASE_KEYS);
   });
 
   it("returns null when nothing is claimable", async () => {
@@ -691,6 +708,12 @@ describe("toApiExecution", () => {
 // machines on one project, and it makes a task parked for a colleague untouchable — but it opens a
 // trap: a task left assigned to a machine that is no longer running it is a task nobody will ever
 // claim again, and nothing says why. Both halves live or die together.
+// A parseable ObjectId, because the claim casts it before writing — Mongoose does not cast an
+// update pipeline, so this is the only thing standing between a ref field and a raw string
+const IDENTITY = "6a70afff45d39cd9bc8bb600";
+
+const NOMINEE = "6a70afff45d39cd9bc8bb5ff";
+
 describe("claiming by assignment", () => {
   const board = {
     columns: [
@@ -698,6 +721,7 @@ describe("claiming by assignment", () => {
       { id: "doing", role: "active", order: 2 },
       { id: "checking", role: "review", order: 3, triggersPmReview: true },
     ],
+    worker: { policy: { claimScope: "any" }, claimAssignee: NOMINEE },
   };
 
   beforeEach(() => {
@@ -708,22 +732,60 @@ describe("claiming by assignment", () => {
   });
 
   it("assigns the task to the worker's own identity", async () => {
-    await claimNextTask("p1", "w1", "run-1", "u-worker");
+    await claimNextTask("p1", "w1", "run-1", IDENTITY);
 
-    expect(findOneAndUpdate.mock.calls[0][1].$set.assignee).toBe("u-worker");
+    // Kept rather than overwritten: under claimScope "assigned" the assignee already names this
+    // worker, and whether the claim is what put it there is what decides if a release may clear it
+    expect(claimSet(findOneAndUpdate.mock.calls[0]).assignee).toEqual({
+      $ifNull: ["$assignee", new Types.ObjectId(IDENTITY)],
+    });
   });
 
-  it("takes nothing that already has an assignee", async () => {
-    await claimNextTask("p1", "w1", "run-1", "u-worker");
+  it("takes nothing assigned to anybody but itself", async () => {
+    await claimNextTask("p1", "w1", "run-1", IDENTITY);
 
-    expect(findOneAndUpdate.mock.calls[0][0].assignee).toBeNull();
+    expect(findOneAndUpdate.mock.calls[0][0].$and).toContainEqual({
+      $or: [{ assignee: null }, { assignee: NOMINEE }, { assignee: IDENTITY }],
+    });
+  });
+
+  // The nominee is an ordinary user somebody picked. The worker's own identity is a machine
+  // account excluded from every list the product offers, so a predicate keying only on it would
+  // describe a hand-over nobody could perform.
+  it("takes only what the project nominated when the scope is assigned", async () => {
+    findById.mockReturnValue({
+      lean: () =>
+        Promise.resolve({ ...board, worker: { policy: { claimScope: "assigned" }, claimAssignee: NOMINEE } }),
+    });
+
+    await claimNextTask("p1", "w1", "run-1", IDENTITY);
+
+    expect(findOneAndUpdate.mock.calls[0][0].$and).toContainEqual({
+      $or: [{ assignee: NOMINEE }, { assignee: IDENTITY }],
+    });
+  });
+
+  it("claims nothing when the scope is assigned and nobody is nominated", async () => {
+    findById.mockReturnValue({
+      lean: () => Promise.resolve({ ...board, worker: { policy: { claimScope: "assigned" } } }),
+    });
+
+    expect(await claimNextTask("p1", "w1", "run-1", null)).toBeNull();
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  // String(worker.identity) always yields 24 hex, but a corrupt worker record must not 500 the
+  // poll loop — nor claim a task while assigning nobody to it
+  it("claims nothing rather than throwing on an identity that is not an id", async () => {
+    expect(await claimNextTask("p1", "w1", "run-1", "u-worker")).toBeNull();
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it("claims without assigning when the worker has no identity yet", async () => {
     await claimNextTask("p1", "w1", "run-1", null);
 
-    expect(findOneAndUpdate.mock.calls[0][1].$set).not.toHaveProperty("assignee");
-    expect(findOneAndUpdate.mock.calls[0][1].$set.status).toBe("doing");
+    expect(claimSet(findOneAndUpdate.mock.calls[0])).not.toHaveProperty("assignee");
+    expect(claimSet(findOneAndUpdate.mock.calls[0]).status).toBe("doing");
   });
 });
 
@@ -736,11 +798,14 @@ describe("every way back to the board clears the assignment", () => {
     ],
   };
 
-  // Cleared only for a task a worker was running: these same updates are what a person dragging a
-  // card goes through, and clearing their assignment would be a bug of its own
-  const CLEARED = {
-    $cond: [{ $ne: [{ $ifNull: ["$execution.workerId", ""] }, ""] }, null, "$assignee"],
-  };
+  // Cleared only for a task a run still holds, and only when the claim is what assigned it: these
+  // same updates are what a person dragging a card goes through, and clearing their assignment
+  // would be a bug of its own.
+  //
+  // Compared by shape, which proves every exit path applies the same rule and nothing about what
+  // the rule means — a shape assertion is how the `""`-is-truthy bug shipped. The meaning is
+  // e2e/claim-scope.spec.ts, which runs these updates against a real MongoDB.
+  const CLEARED = CLEAR_WORKER_ASSIGNEE.assignee;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -825,7 +890,7 @@ describe("every way back to the board clears the assignment", () => {
           taskNumber: 1,
           status: "doing",
           title: "x",
-          execution: { workerId: "w1" },
+          execution: { runId: "r1", workerId: "w1" },
         }),
       populate: () => ({
         lean: () =>
@@ -834,21 +899,19 @@ describe("every way back to the board clears the assignment", () => {
             taskNumber: 1,
             status: "doing",
             title: "x",
-            execution: { workerId: "w1" },
+            execution: { runId: "r1", workerId: "w1" },
           }),
       }),
     });
 
-    await updateTask("p1", "t1", { status: "checking" }, "actor");
+    await updateTask("p1", "t1", { status: "checking" }, "actor", true);
 
     expect(findOneAndUpdate.mock.calls[0][1].$set.assignee).toBeNull();
   });
 });
 
 describe("what the clearing expression actually evaluates to", () => {
-  const CLEARING = {
-    $cond: [{ $ne: [{ $ifNull: ["$execution.workerId", ""] }, ""] }, null, "$assignee"],
-  };
+  const CLEARING = CLEAR_WORKER_ASSIGNEE.assignee;
 
   it("keeps a person's assignment on a task no worker has ever run", () => {
     const doc = { assignee: "USER-A", execution: { workerId: "" } };
@@ -860,8 +923,35 @@ describe("what the clearing expression actually evaluates to", () => {
     expect(evaluateExpr(CLEARING, { assignee: "USER-A" })).toBe("USER-A");
   });
 
-  it("clears it on a task a worker is running", () => {
-    const doc = { assignee: "u-worker", execution: { workerId: "w1" } };
+  it("clears it on a task a run still holds, when the claim is what assigned it", () => {
+    const doc = { assignee: IDENTITY, execution: { runId: "r1", workerId: "w1" } };
+
+    expect(evaluateExpr(CLEARING, doc)).toBeNull();
+  });
+
+  // workerId outlives the run as history, so keying on it cleared the assignee of any task a
+  // worker had ever touched — "assign it to the worker, then drag it" undid the hand-over
+  it("keeps it on a task a worker finished long ago", () => {
+    const doc = { assignee: "USER-A", execution: { runId: "", workerId: "w1" } };
+
+    expect(evaluateExpr(CLEARING, doc)).toBe("USER-A");
+  });
+
+  // A released task with no assignee drops out of what a worker may claim under scope "assigned",
+  // so blanking a person's hand-over here loses the work silently rather than failing
+  it("keeps a hand-over the claim did not make, even mid-run", () => {
+    const doc = {
+      assignee: "USER-A",
+      execution: { runId: "r1", workerId: "w1", assignedByRun: false },
+    };
+
+    expect(evaluateExpr(CLEARING, doc)).toBe("USER-A");
+  });
+
+  // Absent means the claim assigned it: everything claimed before the field existed went through
+  // a filter that refused any assignee
+  it("treats a missing assignedByRun as the claim's own assignment", () => {
+    const doc = { assignee: IDENTITY, execution: { runId: "r1", workerId: "w1" } };
 
     expect(evaluateExpr(CLEARING, doc)).toBeNull();
   });
