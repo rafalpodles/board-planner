@@ -2,7 +2,7 @@
 
 import { useRef, type CSSProperties } from "react";
 import { ApiTask, ApiCustomField, ApiProjectCategory, PRIORITY_LABELS } from "@/types";
-import { ageAt, QUIET_MS } from "@/components/tasks/ExecutionPanel";
+import { ageAt, QUIET_MS, runLook } from "@/lib/run-state";
 import { Badge } from "@/components/ui/Badge";
 import { categoryColor, categoryTint } from "@/lib/category-colors";
 import { cardBadges } from "@/lib/custom-fields";
@@ -56,6 +56,7 @@ export function TaskCard({
   // the whole two-hour lease.
   const quietFor = run ? ageAt(run.phaseAt ?? run.startedAt, run.asOf, 0) : NaN;
   const quiet = Number.isFinite(quietFor) && quietFor > QUIET_MS;
+  const look = runLook(quiet ? "quiet" : "live");
   const runPhase = run?.phase ?? "starting";
   const runLabel = [run?.workerName ?? run?.workerId, runPhase].filter(Boolean).join(" · ");
 
@@ -124,14 +125,10 @@ export function TaskCard({
           <span
             data-testid={quiet ? "card-run-quiet" : "card-run-live"}
             title={`${quiet ? "No sign of life" : "Being executed"} — ${runLabel}`}
-            className={`inline-flex items-center gap-1 text-[10px] font-medium ${
-              quiet ? "text-warning" : "text-danger"
-            }`}
+            className={`inline-flex items-center gap-1 text-[10px] font-medium ${look.text}`}
           >
             <span
-              className={`w-1.5 h-1.5 rounded-full ${
-                quiet ? "bg-warning" : "bg-danger animate-pulse motion-reduce:animate-none"
-              }`}
+              className={`w-1.5 h-1.5 rounded-full ${look.dot}`}
             />
             <span className="sr-only">
               {quiet ? "Worker has gone quiet on this task: " : "Being executed by a worker: "}

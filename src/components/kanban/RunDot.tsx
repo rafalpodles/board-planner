@@ -1,7 +1,7 @@
 "use client";
 
 import { ApiTaskExecution } from "@/types";
-import { runStateOf } from "@/lib/run-state";
+import { runLook, runStateOf } from "@/lib/run-state";
 
 /**
  * A worker holds this task — the compact form, for rows where a card's phase label would not fit.
@@ -26,9 +26,7 @@ export function RunDot({ execution }: { execution?: ApiTaskExecution }) {
       className="inline-flex shrink-0 items-center"
     >
       <span
-        className={`h-1.5 w-1.5 rounded-full ${
-          state === "quiet" ? "bg-warning" : "bg-danger animate-pulse motion-reduce:animate-none"
-        }`}
+        className={`h-1.5 w-1.5 rounded-full ${runLook(state).dot}`}
       />
       <span className="sr-only">
         {state === "quiet"

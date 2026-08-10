@@ -39,3 +39,25 @@ export function runStateOf(
   const silentFor = ageAt(execution.phaseAt ?? execution.startedAt, execution.asOf, sinceFetch);
   return Number.isFinite(silentFor) && silentFor > QUIET_MS ? "quiet" : "live";
 }
+
+export interface RunLook {
+  /** Classes for the small round indicator every view draws. */
+  dot: string;
+  /** Text colour for a label sitting beside it. */
+  text: string;
+}
+
+/**
+ * What each state looks like, in one place. The three views drew this themselves and drifted:
+ * the card and the list row painted a live run `bg-danger` while the execution panel painted the
+ * same run `bg-success`, so opening a task changed its colour from red to green.
+ *
+ * Red for a live run is deliberate and was asked for — it is the board's "a machine is touching
+ * this right now" signal, not an error. `bg-danger` is reserved for failure everywhere else, so
+ * this is the one place that reads it differently, and that is why it is written down once.
+ */
+export function runLook(state: RunState): RunLook {
+  return state === "quiet"
+    ? { dot: "bg-warning", text: "text-warning" }
+    : { dot: "bg-danger animate-pulse motion-reduce:animate-none", text: "text-danger" };
+}
