@@ -95,8 +95,9 @@ export function TaskCard({
             ? "cat-card"
             : "border-border"}`}
       onContextMenu={(e) => {
+        if (!onContextMenu) return;
         e.preventDefault();
-        onContextMenu?.(task._id, e.clientX, e.clientY);
+        onContextMenu(task._id, e.clientX, e.clientY);
       }}
       onClick={(e) => {
         // A browser can still fire a click after a drop; the next press clears the flag

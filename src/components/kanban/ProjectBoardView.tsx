@@ -320,7 +320,10 @@ export function ProjectBoardView({
       </div>
       )}
 
-      {contextMenu && (() => {
+      {/* readOnly can flip true while this menu is already open; contextMenu state does
+          not reset itself, so withholding the menu here — not just the handler that opens
+          it — is what actually closes the window. The two dialogs below need it too. */}
+      {!readOnly && contextMenu && (() => {
         const task = tasks.find((t) => t._id === contextMenu.taskId);
         if (!task) return null;
         // Right-clicking inside the selection acts on all of it; outside it acts on that task alone
@@ -367,7 +370,7 @@ export function ProjectBoardView({
       })()}
 
       <ConfirmDialog
-        open={!!confirmContextDelete}
+        open={!readOnly && !!confirmContextDelete}
         onClose={() => setConfirmContextDelete(null)}
         onConfirm={() => confirmContextDelete && handleContextDelete(confirmContextDelete)}
         title="Delete Task"
@@ -425,7 +428,7 @@ export function ProjectBoardView({
       />
 
       <ConfirmDialog
-        open={confirmBulkDelete}
+        open={!readOnly && confirmBulkDelete}
         onClose={() => setConfirmBulkDelete(false)}
         onConfirm={handleBulkDelete}
         title="Delete Selected Tasks"

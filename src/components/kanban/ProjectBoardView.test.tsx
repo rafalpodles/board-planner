@@ -157,6 +157,42 @@ describe("A read-only ProjectBoardView's other write paths", () => {
     fireEvent.contextMenu(card);
     expect(screen.getByText("Duplicate")).toBeTruthy();
   });
+
+  // A sprint can complete while the menu from an earlier, still-open right-click is on
+  // screen; onTaskContextMenu being withheld only stops a NEW menu from opening.
+  it("closes an already-open context menu once readOnly turns on", () => {
+    const { rerender } = render(<ProjectBoardView board={makeBoard({ tasks })} />);
+    const card = screen.getByRole("link", { name: /A bug/i });
+    fireEvent.contextMenu(card);
+    expect(screen.getByText("Duplicate")).toBeTruthy();
+
+    rerender(<ProjectBoardView board={makeBoard({ tasks })} readOnly />);
+    expect(screen.queryByText("Duplicate")).toBeNull();
+  });
+
+  it("closes an already-open delete confirmation once readOnly turns on", () => {
+    const { rerender } = render(
+      <ProjectBoardView board={makeBoard({ tasks, confirmContextDelete: "t1" })} />
+    );
+    expect(screen.getByRole("heading", { name: "Delete Task" })).toBeTruthy();
+
+    rerender(
+      <ProjectBoardView board={makeBoard({ tasks, confirmContextDelete: "t1" })} readOnly />
+    );
+    expect(screen.queryByRole("heading", { name: "Delete Task" })).toBeNull();
+  });
+
+  it("closes an already-open bulk-delete confirmation once readOnly turns on", () => {
+    const { rerender } = render(
+      <ProjectBoardView board={makeBoard({ tasks, confirmBulkDelete: true })} />
+    );
+    expect(screen.getByRole("heading", { name: "Delete Selected Tasks" })).toBeTruthy();
+
+    rerender(
+      <ProjectBoardView board={makeBoard({ tasks, confirmBulkDelete: true })} readOnly />
+    );
+    expect(screen.queryByRole("heading", { name: "Delete Selected Tasks" })).toBeNull();
+  });
 });
 
 describe("ProjectBoardView's pinViewMode prop", () => {

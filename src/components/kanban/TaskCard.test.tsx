@@ -330,3 +330,28 @@ describe("TaskCard execution state", () => {
     expect(tintedCard.className).toContain("cat-card");
   });
 });
+
+describe("TaskCard context menu", () => {
+  it("opens the app menu and suppresses the browser's own", async () => {
+    const onContextMenu = vi.fn();
+    const card = renderCard({ onContextMenu });
+    const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 5, clientY: 9 });
+    await act(async () => {
+      card.dispatchEvent(event);
+    });
+    expect(onContextMenu).toHaveBeenCalledWith("t1", 5, 9);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  // A read-only board withholds onContextMenu entirely (rather than passing a no-op), so a
+  // card offers no app menu — but it must not also swallow the browser's own (open in new
+  // tab, copy link) by preventing default with nothing to show in its place.
+  it("leaves the browser's own menu alone when no handler is given", async () => {
+    const card = renderCard();
+    const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+    await act(async () => {
+      card.dispatchEvent(event);
+    });
+    expect(event.defaultPrevented).toBe(false);
+  });
+});
