@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState, type KeyboardEvent, type RefObject } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 
 export interface Suggestion {
   id: string;
@@ -49,6 +49,10 @@ export function useTriggerAutocomplete(
   const [index, setIndex] = useState(0);
   // Answers can arrive out of order once a trigger asks the server; only the newest may land
   const request = useRef(0);
+  // What the last detection was looking at, so a trigger whose data arrives later can be asked
+  // again. The people list is fetched on mount: type an `@` before it lands and the list came back
+  // empty with nothing to make it look again.
+  const last = useRef<{ value: string; caret: number } | null>(null);
 
   const close = useCallback(() => {
     setOpen(null);
@@ -59,6 +63,7 @@ export function useTriggerAutocomplete(
 
   const detect = useCallback(
     (value: string, caret: number) => {
+      last.current = { value, caret };
       const before = value.slice(0, caret);
 
       for (const trigger of triggers) {
@@ -84,6 +89,13 @@ export function useTriggerAutocomplete(
     },
     [triggers, close]
   );
+
+  // Triggers change identity when their data does — the people list arriving, the board key
+  // resolving. Anything already typed is re-offered against it.
+  useEffect(() => {
+    if (last.current) detect(last.current.value, last.current.caret);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [triggers]);
 
   const choose = useCallback(
     (suggestion: Suggestion) => {

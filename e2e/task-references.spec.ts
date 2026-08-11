@@ -8,7 +8,9 @@ import {
   HELD_TASK_ID,
   PROJECT_ID,
   PROJECT_KEY,
+  HELD_TASK_TITLE,
   SIBLING_TASK_NUMBER,
+  SIBLING_TASK_TITLE,
   seed,
 } from "./seed";
 
@@ -78,9 +80,51 @@ test("a key written in a description links to that task, and reaches it", async 
   const link = page.getByRole("link", { name: `${PROJECT_KEY}-${SIBLING_TASK_NUMBER}` });
   await expect(link).toBeVisible();
 
-  // The link has to actually arrive, not merely look like one
+  // The link has to actually arrive, not merely look like one. Asserting the URL alone was not
+  // enough: the address changed while a modal drew the linked task on top of the page still
+  // showing the old one, and the test passed.
   await link.click();
   await expect(page).toHaveURL(new RegExp(`${TASK_URL}$`));
+
+  await expect(page.getByText(SIBLING_TASK_TITLE).first()).toBeVisible();
+  // One task on screen, not the destination stacked over where the reader came from
+  await expect(page.getByText(HELD_TASK_TITLE)).toHaveCount(0);
+});
+
+// The path the report came from: the task opened as a modal over the board, which is what the
+// board's own cards do. Clicking a reference there soft-navigates, and the interceptor draws the
+// destination as another modal over the one already open — two tasks stacked.
+test("a reference clicked inside the task modal does not stack another one", async ({ page }) => {
+  const handle = await db();
+  await handle
+    .collection("tasks")
+    .updateOne(
+      { _id: HELD_TASK_ID },
+      { $set: { description: `Duplicate of ${PROJECT_KEY}-${SIBLING_TASK_NUMBER}.` } }
+    );
+
+  await signIn(page);
+  await page.goto(`/projects/${PROJECT_KEY}`);
+
+  // Open it the way a person does, so the modal route is the one rendering
+  await page.getByText(HELD_TASK_TITLE).first().click();
+  await expect(page).toHaveURL(/\/tasks\/1$/);
+  await expect(page.getByText(HELD_TASK_TITLE).first()).toBeVisible();
+
+  // Wait for the description to be on screen before reaching into it: the modal is still settling
+  // right after it opens, and the link is present in the DOM before it is stable enough to click
+  // Scoped to the modal: the board underneath has its own card for that task, so an unscoped
+  // locator finds two — which is itself the shape of the bug being tested
+  const modal = page.getByRole("dialog");
+  await expect(modal.getByText("Duplicate of")).toBeVisible();
+  const reference = modal.getByRole("link", { name: `${PROJECT_KEY}-${SIBLING_TASK_NUMBER}` });
+  await expect(reference).toBeVisible();
+  await reference.click();
+
+  await expect(page).toHaveURL(new RegExp(`${TASK_URL}$`));
+  await expect(page.getByText(SIBLING_TASK_TITLE).first()).toBeVisible();
+  // The task the reader came from must not still be underneath
+  await expect(page.getByText(HELD_TASK_TITLE)).toHaveCount(0);
 });
 
 test("a key from before the board was renamed still reaches the task", async ({ page }) => {
@@ -171,4 +215,51 @@ test("a key typed into a new comment is a link once posted", async ({ page }) =>
   await expect(
     page.getByRole("link", { name: `${PROJECT_KEY}-${SIBLING_TASK_NUMBER}` })
   ).toBeVisible();
+});
+
+
+// A phone comments through a bar pinned to the bottom of the task and never sees the wide
+// composer, so wiring the autocomplete only there left the feature — and the @mention that
+// predates it — missing from mobile entirely. Reported from a phone, not caught by any test here.
+test.describe("on a phone", () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test("the bottom bar offers tasks too", async ({ page }) => {
+    await signIn(page);
+    await page.goto(`/projects/${PROJECT_KEY}/tasks/1`);
+
+    const bar = page.getByLabel("Add a comment");
+    await expect(bar).toBeVisible();
+    await bar.fill(`blocked by ${PROJECT_KEY}-`);
+
+    const list = page.getByRole("listbox");
+    await expect(list).toBeVisible();
+
+    const first = (await list.getByRole("option").first().innerText()).split("\n")[0].trim();
+    await bar.press("Enter");
+
+    await expect(bar).toHaveValue(`blocked by ${first} `);
+  });
+
+  test("the bottom bar offers people too", async ({ page }) => {
+    await signIn(page);
+    await page.goto(`/projects/${PROJECT_KEY}/tasks/1`);
+
+    await page.getByLabel("Add a comment").fill(`thanks @${ADMIN_USERNAME.slice(0, 3)}`);
+
+    await expect(page.getByRole("listbox")).toBeVisible();
+  });
+
+  // Enter picks a suggestion while the list is open; it must not also send the comment
+  test("picking a suggestion does not post the comment", async ({ page }) => {
+    await signIn(page);
+    await page.goto(`/projects/${PROJECT_KEY}/tasks/1`);
+
+    const bar = page.getByLabel("Add a comment");
+    await bar.fill(`see ${PROJECT_KEY}-`);
+    await expect(page.getByRole("listbox")).toBeVisible();
+    await bar.press("Enter");
+
+    await expect(bar).not.toHaveValue("");
+  });
 });
