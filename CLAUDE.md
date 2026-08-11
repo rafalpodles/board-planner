@@ -205,7 +205,8 @@ npm run build                    # Next.js app
 cd mcp-server && npm run build   # MCP server
 docker compose up -d --build     # app + MongoDB 4.4, no local Node or Mongo needed
 ```
-`next.config.ts` sets `output: "standalone"` for the Docker image; `next start` is unaffected.
+`next.config.ts` emits `output: "standalone"` only when `BUILD_STANDALONE` is set, which the Dockerfile
+does — `next start` refuses standalone output, and Railway deploys with `next start`.
 `NEXT_PUBLIC_APP_URL` is baked in at build time — the compose file passes it as a build arg. See
 [README.md](README.md).
 
