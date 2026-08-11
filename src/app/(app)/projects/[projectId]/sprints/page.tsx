@@ -19,7 +19,7 @@ import { PageHeader } from "@/components/shell/PageHeader";
 
 function Spinner() {
   return (
-    <div className="flex justify-center py-12">
+    <div className="flex justify-center py-12" role="status" aria-label="Loading sprint">
       <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary border-t-transparent" />
     </div>
   );

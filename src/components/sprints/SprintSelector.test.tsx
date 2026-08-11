@@ -72,6 +72,29 @@ describe("SprintSelector", () => {
     expect(screen.queryByRole("button", { name: "Show 2 older" })).toBeNull();
   });
 
+  it("names the toggle's state for a screen reader", () => {
+    render(<SprintSelector sprints={many} selectedId="f" onSelect={() => {}} />);
+    expect(
+      screen.getByRole("button", { name: "Show 2 older" }).getAttribute("aria-expanded")
+    ).toBe("false");
+  });
+
+  // The toggle unmounts itself on activation; without a focus target that drops
+  // keyboard focus to <body>, silently, for anyone tabbing through the list
+  it("sends focus to the newly revealed row instead of dropping it", async () => {
+    render(<SprintSelector sprints={many} selectedId="f" onSelect={() => {}} />);
+
+    await click(screen.getByRole("button", { name: "Show 2 older" }));
+
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: /Sprint 2/ }));
+  });
+
+  it("groups each section for a screen reader", () => {
+    render(<SprintSelector sprints={many} selectedId="f" onSelect={() => {}} />);
+    expect(screen.getByRole("group", { name: "Active" })).toBeTruthy();
+    expect(screen.getByRole("group", { name: "Completed" })).toBeTruthy();
+  });
+
   it("reports the sprint that was picked", async () => {
     const onSelect = vi.fn();
     render(<SprintSelector sprints={many} selectedId="f" onSelect={onSelect} />);

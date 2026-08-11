@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ApiSprint } from "@/types";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { groupSprints } from "@/lib/sprint-selection";
@@ -20,6 +20,13 @@ export function SprintSelector({ sprints, selectedId, onSelect }: SprintSelector
   const isWide = useMediaQuery("(min-width: 1024px)");
   const [showOlder, setShowOlder] = useState(false);
   const { active, planned, recentCompleted, olderCompleted } = groupSprints(sprints);
+  const firstOlderRef = useRef<HTMLButtonElement | null>(null);
+
+  // The disclosure button unmounts the moment it is activated, which would otherwise
+  // drop focus to <body>; send it to the row it just revealed instead.
+  useEffect(() => {
+    if (showOlder) firstOlderRef.current?.focus();
+  }, [showOlder]);
 
   if (!isWide) {
     return (
@@ -49,10 +56,18 @@ export function SprintSelector({ sprints, selectedId, onSelect }: SprintSelector
     >
       <Group title="Active" sprints={active} selectedId={selectedId} onSelect={onSelect} />
       <Group title="Planned" sprints={planned} selectedId={selectedId} onSelect={onSelect} />
-      <Group title="Completed" sprints={completed} selectedId={selectedId} onSelect={onSelect}>
+      <Group
+        title="Completed"
+        sprints={completed}
+        selectedId={selectedId}
+        onSelect={onSelect}
+        focusId={olderCompleted[0]?._id}
+        focusRef={firstOlderRef}
+      >
         {olderCompleted.length > 0 && !showOlder && (
           <button
             type="button"
+            aria-expanded={showOlder}
             onClick={() => setShowOlder(true)}
             className="focus-ring w-full rounded-lg px-2 py-1.5 text-left text-xs text-text-muted underline decoration-dotted underline-offset-2 transition-colors hover:text-text"
           >
@@ -69,24 +84,29 @@ function Group({
   sprints,
   selectedId,
   onSelect,
+  focusId,
+  focusRef,
   children,
 }: {
   title: string;
   sprints: ApiSprint[];
   selectedId: string | null;
   onSelect: (sprintId: string) => void;
+  focusId?: string;
+  focusRef?: React.RefObject<HTMLButtonElement | null>;
   children?: React.ReactNode;
 }) {
   if (sprints.length === 0 && !children) return null;
 
   return (
-    <div className="mb-4">
+    <div role="group" aria-label={title} className="mb-4">
       <div className="mb-1 px-2 text-[10.5px] font-bold uppercase tracking-wider text-text-muted">
         {title}
       </div>
       {sprints.map((sprint) => (
         <button
           key={sprint._id}
+          ref={sprint._id === focusId ? focusRef : undefined}
           type="button"
           onClick={() => onSelect(sprint._id)}
           aria-current={sprint._id === selectedId ? "true" : undefined}

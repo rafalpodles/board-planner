@@ -330,6 +330,9 @@ describe("Sprints tab", () => {
     await screen.findByRole("heading", { name: "Sprint 13" });
     expect(screen.queryByText("TP-1")).toBeNull();
     expect(screen.getByTestId("sprint-progress").textContent).toBe("0/0");
+    // Sprint 13's tasks are still in flight, so this is the spinner a screen reader
+    // must be able to name — otherwise the switch is silent
+    expect(screen.getByRole("status", { name: "Loading sprint" })).toBeTruthy();
   });
 });
 
