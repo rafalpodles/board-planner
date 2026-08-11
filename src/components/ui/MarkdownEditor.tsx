@@ -239,6 +239,7 @@ export function MarkdownEditor({
           <SuggestionList
             items={autocomplete.items}
             index={autocomplete.index}
+            at={autocomplete.at}
             onPick={autocomplete.choose}
             onHover={autocomplete.setIndex}
           />

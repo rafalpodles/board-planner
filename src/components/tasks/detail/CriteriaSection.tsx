@@ -3,13 +3,20 @@
 import { useState } from "react";
 import { GrowingTextarea, ProgressBar, SectionLabel } from "./atoms";
 import type { ChecklistDraftItem } from "./useTaskEditor";
+import type { Trigger } from "@/hooks/use-trigger-autocomplete";
+import { AutocompleteTextarea } from "@/components/ui/AutocompleteTextarea";
 
 interface CriteriaSectionProps {
   items: ChecklistDraftItem[];
   onChange: (items: ChecklistDraftItem[]) => void;
+  /** Same autocomplete the description and comments have; criteria refer to other tasks too */
+  triggers?: Trigger[];
 }
 
-export function CriteriaSection({ items, onChange }: CriteriaSectionProps) {
+// Stable identity, so a criteria list without triggers does not rebuild them every render
+const EMPTY: Trigger[] = [];
+
+export function CriteriaSection({ items, onChange, triggers }: CriteriaSectionProps) {
   const [draft, setDraft] = useState("");
   const done = items.filter((i) => i.done).length;
 
@@ -56,8 +63,9 @@ export function CriteriaSection({ items, onChange }: CriteriaSectionProps) {
             >
               {item.done ? "✓" : ""}
             </button>
-            <GrowingTextarea
+            <AutocompleteTextarea
               value={item.text}
+              triggers={triggers ?? EMPTY}
               aria-label={`Criterion ${i + 1}`}
               onChange={(text) =>
                 onChange(items.map((it, idx) => (idx === i ? { ...it, text } : it)))
@@ -84,8 +92,9 @@ export function CriteriaSection({ items, onChange }: CriteriaSectionProps) {
           <span aria-hidden className="w-4 text-center text-text-muted">
             +
           </span>
-          <GrowingTextarea
+          <AutocompleteTextarea
             value={draft}
+            triggers={triggers ?? EMPTY}
             onChange={setDraft}
             onBlur={add}
             onKeyDown={(e) => {

@@ -221,6 +221,49 @@ test("a key typed into a new comment is a link once posted", async ({ page }) =>
 // A phone comments through a bar pinned to the bottom of the task and never sees the wide
 // composer, so wiring the autocomplete only there left the feature — and the @mention that
 // predates it — missing from mobile entirely. Reported from a phone, not caught by any test here.
+// Reported from the product: on a 400px description the list hung at the top of the screen while
+// the caret was at the bottom. It is measured from the caret now, not pinned to the field's edge.
+test.describe("where the list appears", () => {
+  test("follows the caret down a tall description", async ({ page }) => {
+    const handle = await db();
+    // Long enough that the caret ends up well below the top of the box
+    await handle
+      .collection("tasks")
+      .updateOne({ _id: HELD_TASK_ID }, { $set: { description: "line\n".repeat(20) } });
+
+    await signIn(page);
+    await page.goto(`/projects/${PROJECT_KEY}/tasks/1`);
+    await page.getByRole("button", { name: "Edit" }).first().click();
+
+    const editor = page.getByPlaceholder(/Markdown supported/);
+    await expect(editor).toBeVisible();
+    // fill leaves the caret at the end; Control+End dropped it mid-text, and the key then glued
+    // itself to the previous word — where the trigger correctly refuses to fire
+    await editor.fill("line\n".repeat(20));
+    // Key by key, so React sees each change and the trigger fires the way it does for a person
+    await editor.pressSequentially(`${PROJECT_KEY}-`);
+
+    const list = page.getByRole("listbox");
+    await expect(list).toBeVisible();
+
+    const box = (await editor.boundingBox())!;
+    const where = (await list.boundingBox())!;
+    // Below where the typing is, not floating above the whole field
+    expect(where.y).toBeGreaterThan(box.y + box.height / 2);
+  });
+
+  test("acceptance criteria offer tasks too", async ({ page }) => {
+    await signIn(page);
+    await page.goto(`/projects/${PROJECT_KEY}/tasks/1`);
+
+    const criterion = page.getByLabel("Add criterion");
+    await expect(criterion).toBeVisible();
+    await criterion.fill(`depends on ${PROJECT_KEY}-`);
+
+    await expect(page.getByRole("listbox")).toBeVisible();
+  });
+});
+
 test.describe("on a phone", () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
