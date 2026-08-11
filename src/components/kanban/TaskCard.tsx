@@ -24,6 +24,7 @@ interface TaskCardProps {
   onSelect?: (taskId: string) => void;
   onClick: () => void;
   onContextMenu?: (taskId: string, x: number, y: number) => void;
+  readOnly?: boolean;
 }
 
 export function TaskCard({
@@ -36,6 +37,7 @@ export function TaskCard({
   onSelect,
   onClick,
   onContextMenu,
+  readOnly = false,
 }: TaskCardProps) {
   const badges = cardBadges(task.customFieldValues, customFields);
   const shownBadges = badges.slice(0, MAX_CARD_BADGES);
@@ -69,16 +71,20 @@ export function TaskCard({
     <div className="relative">
     <a
       href={taskPath(projectKey, task.taskNumber)}
-      draggable
+      draggable={!readOnly}
       style={tinted ? categoryTint(catColor) : undefined}
       onMouseDown={() => {
         dragged.current = false;
       }}
-      onDragStart={(e) => {
-        dragged.current = true;
-        e.dataTransfer.setData("text/plain", task._id);
-        e.dataTransfer.effectAllowed = "move";
-      }}
+      onDragStart={
+        readOnly
+          ? undefined
+          : (e) => {
+              dragged.current = true;
+              e.dataTransfer.setData("text/plain", task._id);
+              e.dataTransfer.effectAllowed = "move";
+            }
+      }
       className={`block bg-bg rounded-lg border p-3 cursor-pointer card-edge
         transition-colors group
         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary
@@ -282,7 +288,7 @@ export function TaskCard({
       </div>
     </a>
 
-    {(selectionActive || selected) && (
+    {!readOnly && (selectionActive || selected) && (
       <button
         type="button"
         aria-label={`Select ${projectKey}-${task.taskNumber}`}

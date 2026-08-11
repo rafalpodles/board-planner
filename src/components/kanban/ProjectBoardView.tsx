@@ -27,7 +27,7 @@ interface ProjectBoardViewProps {
   emptyState?: ReactNode;
 }
 
-export function ProjectBoardView({ board, emptyState }: ProjectBoardViewProps) {
+export function ProjectBoardView({ board, readOnly = false, emptyState }: ProjectBoardViewProps) {
   const { projectId } = useParams<{ projectId: string }>();
   const router = useRouter();
   const api = useApi();
@@ -106,7 +106,7 @@ export function ProjectBoardView({ board, emptyState }: ProjectBoardViewProps) {
 
       const noMod = !e.metaKey && !e.ctrlKey && !e.altKey;
 
-      if (e.key === "n" && noMod) {
+      if (e.key === "n" && noMod && !readOnly) {
         e.preventDefault();
         setShowNewTask(true);
         return;
@@ -166,6 +166,7 @@ export function ProjectBoardView({ board, emptyState }: ProjectBoardViewProps) {
     setShowNewTask,
     setSelectedTasks,
     setSelectionMode,
+    readOnly,
   ]);
 
   function handleTaskSelect(taskId: string) {
@@ -204,20 +205,22 @@ export function ProjectBoardView({ board, emptyState }: ProjectBoardViewProps) {
         onHiddenColumnsChange={setHiddenColumns}
         showColumnPicker={viewMode === "list"}
         extraControls={
-          <button
-            onClick={() => {
-              setSelectionMode((on) => !on);
-              setSelectedTasks(new Set());
-            }}
-            className={`focus-ring text-xs px-3 py-1.5 rounded-lg border transition-colors
-              ${selectionMode
-                ? "border-primary bg-primary/10 text-primary"
-                : "border-border text-text-muted hover:text-text hover:border-border"
-              }`}
-            title="Select multiple tasks, then right-click one of them"
-          >
-            {selectedTasks.size > 0 ? `Select (${selectedTasks.size})` : "Select"}
-          </button>
+          readOnly ? undefined : (
+            <button
+              onClick={() => {
+                setSelectionMode((on) => !on);
+                setSelectedTasks(new Set());
+              }}
+              className={`focus-ring text-xs px-3 py-1.5 rounded-lg border transition-colors
+                ${selectionMode
+                  ? "border-primary bg-primary/10 text-primary"
+                  : "border-border text-text-muted hover:text-text hover:border-border"
+                }`}
+              title="Select multiple tasks, then right-click one of them"
+            >
+              {selectedTasks.size > 0 ? `Select (${selectedTasks.size})` : "Select"}
+            </button>
+          )
         }
         onFilter={setFilteredTasks}
       />
@@ -250,10 +253,11 @@ export function ProjectBoardView({ board, emptyState }: ProjectBoardViewProps) {
           selectionMode={selectionMode}
           collapseEmptyColumns={user?.collapseEmptyColumns ?? true}
           onStatusChange={handleStatusChange}
-          onTaskDrop={handleTaskDrop}
+          onTaskDrop={readOnly ? undefined : handleTaskDrop}
           onTaskClick={openTask}
-          onTaskSelect={handleTaskSelect}
-          onTaskContextMenu={(taskId, x, y) => setContextMenu({ taskId, x, y })}
+          onTaskSelect={readOnly ? undefined : handleTaskSelect}
+          onTaskContextMenu={readOnly ? undefined : (taskId, x, y) => setContextMenu({ taskId, x, y })}
+          readOnly={readOnly}
         />
       ) : (
         <ListView
@@ -276,19 +280,23 @@ export function ProjectBoardView({ board, emptyState }: ProjectBoardViewProps) {
           hiddenColumns={hiddenColumns}
           assignableUsers={assignableUsers}
           onTaskClick={openTask}
-          onStatusChange={handleStatusChange}
-          onAssigneeChange={handleAssigneeChange}
-          onTaskSelect={handleTaskSelect}
-          onTaskContextMenu={(taskId, x, y) => setContextMenu({ taskId, x, y })}
-          onReorder={handleReorder}
-          onPriorityChange={(taskId, priority) =>
-            patchTask(taskId, { priority }, "priority")
+          onStatusChange={readOnly ? undefined : handleStatusChange}
+          onAssigneeChange={readOnly ? undefined : handleAssigneeChange}
+          onTaskSelect={readOnly ? undefined : handleTaskSelect}
+          onTaskContextMenu={readOnly ? undefined : (taskId, x, y) => setContextMenu({ taskId, x, y })}
+          onReorder={readOnly ? undefined : handleReorder}
+          onPriorityChange={
+            readOnly
+              ? undefined
+              : (taskId, priority) => patchTask(taskId, { priority }, "priority")
           }
-          onCategoryChange={(taskId, category) =>
-            patchTask(taskId, { category }, "category")
+          onCategoryChange={
+            readOnly
+              ? undefined
+              : (taskId, category) => patchTask(taskId, { category }, "category")
           }
-          onSprintChange={handleRowSprintChange}
-          onFieldChange={handleFieldValueChange}
+          onSprintChange={readOnly ? undefined : handleRowSprintChange}
+          onFieldChange={readOnly ? undefined : handleFieldValueChange}
         />
       )}
       </div>
@@ -367,28 +375,30 @@ export function ProjectBoardView({ board, emptyState }: ProjectBoardViewProps) {
         confirmLabel="Move anyway"
       />
 
-      <Modal
-        open={showNewTask}
-        onClose={() => setShowNewTask(false)}
-        title="New Task"
-        size="lg"
-      >
-        <TaskForm
-          projectId={projectId}
-          projectKey={project.key}
-            categories={(project.categories || []).map((c) => c.name)}
-          columns={project.columns || []}
-          taskTemplates={project.taskTemplates || []}
-          sprints={sprints}
-          defaultSprint={sprintDefaultForNewTask(scope ?? ALL_TASKS)}
-          customFields={project.customFields || []}
-          onSaved={() => {
-            setShowNewTask(false);
-            reload();
-          }}
-          onCancel={() => setShowNewTask(false)}
-        />
-      </Modal>
+      {!readOnly && (
+        <Modal
+          open={showNewTask}
+          onClose={() => setShowNewTask(false)}
+          title="New Task"
+          size="lg"
+        >
+          <TaskForm
+            projectId={projectId}
+            projectKey={project.key}
+              categories={(project.categories || []).map((c) => c.name)}
+            columns={project.columns || []}
+            taskTemplates={project.taskTemplates || []}
+            sprints={sprints}
+            defaultSprint={sprintDefaultForNewTask(scope ?? ALL_TASKS)}
+            customFields={project.customFields || []}
+            onSaved={() => {
+              setShowNewTask(false);
+              reload();
+            }}
+            onCancel={() => setShowNewTask(false)}
+          />
+        </Modal>
+      )}
 
 
       <ShortcutHelp

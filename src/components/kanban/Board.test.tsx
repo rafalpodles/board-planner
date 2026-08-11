@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, afterEach } from "vitest";
-import { render, screen, cleanup, act } from "@testing-library/react";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { render, screen, cleanup, act, fireEvent } from "@testing-library/react";
 import { Board } from "./Board";
 import { ApiTask, ApiProjectCategory } from "@/types";
 import { ApiProjectColumn } from "@/types";
@@ -134,5 +134,56 @@ describe("Board empty-column rail", () => {
       rail(container)!.click();
     });
     expect(Object.keys(localStorage)).toHaveLength(0);
+  });
+});
+
+describe("A read-only board", () => {
+  const columnsWithInProgress: ApiProjectColumn[] = [
+    { _id: "c1", id: "todo", label: "To Do", color: "#0ea5e9", role: "approved", order: 0, triggersPmReview: false },
+    { _id: "c2", id: "in_progress", label: "In Progress", color: "#f59e0b", role: "active", order: 1, triggersPmReview: false },
+  ];
+
+  function renderReadOnlyBoard(overrides: {
+    onTaskDrop?: (taskId: string, status: string, dropIndex: number) => void;
+    onStatusChange?: (taskId: string, status: string) => void;
+  } = {}) {
+    return render(
+      <Board
+        tasks={tasks}
+        projectKey="TP"
+        columns={columnsWithInProgress}
+        readOnly
+        onStatusChange={overrides.onStatusChange ?? (() => {})}
+        onTaskDrop={overrides.onTaskDrop}
+        onTaskClick={() => {}}
+      />
+    );
+  }
+
+  it("does not offer a card as a drag source", () => {
+    renderReadOnlyBoard();
+    const el = screen.getByRole("link", { name: /A bug/i });
+    expect(el.getAttribute("draggable")).toBe("false");
+  });
+
+  it("still lets a card be opened", () => {
+    renderReadOnlyBoard();
+    const el = screen.getByRole("link", { name: /A bug/i });
+    expect(el.getAttribute("href")).toContain("/TP/tasks/");
+  });
+
+  it("drops nothing when a task is dragged onto a column", () => {
+    const onTaskDrop = vi.fn();
+    const onStatusChange = vi.fn();
+    renderReadOnlyBoard({ onTaskDrop, onStatusChange });
+    const column = screen.getByTestId("column-in_progress");
+    fireEvent.drop(column, { dataTransfer: { getData: () => "t1" } });
+    expect(onTaskDrop).not.toHaveBeenCalled();
+    expect(onStatusChange).not.toHaveBeenCalled();
+  });
+
+  it("does not invite a drop into an empty column", () => {
+    renderReadOnlyBoard();
+    expect(screen.queryByText("Drop tasks here")).toBeNull();
   });
 });
