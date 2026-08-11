@@ -41,12 +41,16 @@ const components = {
 export function MarkdownContent({
   children,
   mentions = false,
+  // One line inside a row of other things — an acceptance criterion next to its checkbox — where a
+  // block-level paragraph would break the row onto its own line
+  inline = false,
   // The board this content belongs to. Without it a key stays plain text rather than becoming a
   // link to whichever project happens to share the prefix.
   scope,
 }: {
   children: string;
   mentions?: boolean;
+  inline?: boolean;
   scope?: ReferenceScope | null;
 }) {
   // Keyed on the values, not on the object: a parent building the scope inline would otherwise
@@ -66,7 +70,10 @@ export function MarkdownContent({
     : children;
 
   return (
-    <Markdown remarkPlugins={plugins} components={components}>
+    <Markdown
+      remarkPlugins={plugins}
+      components={inline ? { ...components, p: ({ children: c }) => <>{c}</> } : components}
+    >
       {processed}
     </Markdown>
   );
