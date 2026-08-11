@@ -50,6 +50,7 @@ function makeBoard(overrides: Partial<ProjectBoard> = {}): ProjectBoard {
     loading: false,
     reload: vi.fn(),
     viewMode: "board",
+    loadedScope: undefined,
     setViewMode: vi.fn(),
     showNewTask: false,
     setShowNewTask: vi.fn(),
