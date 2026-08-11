@@ -374,6 +374,7 @@ function TaskDetailView({
 
       <MobileCommentBar
         projectId={projectId}
+        projectKey={project.key}
         taskId={task._id}
         onPosted={() => setCommentRefreshKey((k) => k + 1)}
       />
