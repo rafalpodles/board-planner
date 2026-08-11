@@ -13,6 +13,10 @@ export interface ProjectBoard {
   sprints: ApiSprint[];
   assignableUsers: ApiUserSummary[];
   loading: boolean;
+  // True after the most recent load attempt failed; cleared by the next attempt that
+  // succeeds. The page only acts on this when there is nothing else to show — a poll
+  // failing once the board is already up leaves the last good state on screen instead.
+  loadError: boolean;
   reload: () => Promise<void>;
   viewMode: "board" | "list";
   setViewMode: (mode: "board" | "list") => void;
@@ -83,6 +87,7 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
   const [project, setProject] = useState<ApiProject | null>(null);
   const [tasks, setTasks] = useState<ApiTask[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [showNewTask, setShowNewTask] = useState(false);
   const loadSeq = useRef(0);
   const [selectedTasks, setSelectedTasks] = useState<Set<string>>(new Set());
@@ -136,7 +141,9 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
         setTasks([]);
       }
       setSprints(sprintList);
+      setLoadError(false);
     } catch {
+      setLoadError(true);
       toast("Failed to load board data", "error");
     } finally {
       setLoading(false);
@@ -454,6 +461,7 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
     sprints,
     assignableUsers,
     loading,
+    loadError,
     reload: loadData,
     viewMode,
     setViewMode,

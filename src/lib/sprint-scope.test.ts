@@ -4,12 +4,16 @@ import {
   sprintScopeToQuery,
   sprintScopeLabel,
   sprintDefaultForNewTask,
+  isSprintScopeShape,
 } from "./sprint-scope";
 import { ApiSprint } from "@/types";
 
+const S1 = "507f1f77bcf86cd799439011";
+const S2 = "69a52e3b399b27d3cbb2c5a5";
+
 const sprints = [
-  { _id: "s1", name: "Sprint 12", status: "active" },
-  { _id: "s2", name: "Sprint 13", status: "planned" },
+  { _id: S1, name: "Sprint 12", status: "active" },
+  { _id: S2, name: "Sprint 13", status: "planned" },
 ] as ApiSprint[];
 
 describe("sprintScopeFromParam", () => {
@@ -24,8 +28,28 @@ describe("sprintScopeFromParam", () => {
   });
 
   it("passes through a sprint id and the backlog sentinel", () => {
-    expect(sprintScopeFromParam("s1")).toBe("s1");
+    expect(sprintScopeFromParam(S1)).toBe(S1);
     expect(sprintScopeFromParam("backlog")).toBe("backlog");
+  });
+
+  // A stale bookmark or a link to a sprint somebody deleted must not reach the tasks
+  // endpoint as a raw string — it would cast into a Mongoose CastError and 500
+  it("falls back to all for a value that cannot be a scope", () => {
+    expect(sprintScopeFromParam("not-an-id")).toBe("all");
+    expect(sprintScopeFromParam("deleted-sprint")).toBe("all");
+  });
+});
+
+describe("isSprintScopeShape", () => {
+  it("accepts the two modes and an ObjectId-shaped id", () => {
+    expect(isSprintScopeShape("all")).toBe(true);
+    expect(isSprintScopeShape("backlog")).toBe(true);
+    expect(isSprintScopeShape(S1)).toBe(true);
+  });
+
+  it("rejects anything else", () => {
+    expect(isSprintScopeShape("not-an-id")).toBe(false);
+    expect(isSprintScopeShape("")).toBe(false);
   });
 });
 
@@ -36,12 +60,12 @@ describe("sprintScopeToQuery", () => {
   });
 
   it("serialises a scope", () => {
-    expect(sprintScopeToQuery("s1")).toBe("?sprint=s1");
+    expect(sprintScopeToQuery(S1)).toBe(`?sprint=${S1}`);
     expect(sprintScopeToQuery("backlog")).toBe("?sprint=backlog");
   });
 
   it("round-trips through the parser", () => {
-    for (const scope of ["all", "backlog", "s1"]) {
+    for (const scope of ["all", "backlog", S1]) {
       const query = sprintScopeToQuery(scope);
       const param = query ? new URLSearchParams(query).get("sprint") : null;
       expect(sprintScopeFromParam(param)).toBe(scope);
@@ -59,15 +83,15 @@ describe("sprintScopeLabel", () => {
   });
 
   it("resolves a sprint id to its name", () => {
-    expect(sprintScopeLabel("s1", sprints)).toBe("Sprint 12");
-    expect(sprintScopeLabel("s2", sprints)).toBe("Sprint 13");
+    expect(sprintScopeLabel(S1, sprints)).toBe("Sprint 12");
+    expect(sprintScopeLabel(S2, sprints)).toBe("Sprint 13");
   });
 
   // A shared link can outlive the sprint it points at; a raw ObjectId in the
   // subtitle would be worse than showing nothing
   it("has no label for a sprint that no longer exists", () => {
     expect(sprintScopeLabel("deleted-id", sprints)).toBeNull();
-    expect(sprintScopeLabel("s1", [])).toBeNull();
+    expect(sprintScopeLabel(S1, [])).toBeNull();
   });
 });
 
@@ -75,7 +99,7 @@ describe("sprintDefaultForNewTask", () => {
   // CP-176: without this the task saves with sprint null and the server filter
   // hides it from the very board that created it
   it("adopts the scoped sprint", () => {
-    expect(sprintDefaultForNewTask("s1")).toBe("s1");
+    expect(sprintDefaultForNewTask(S1)).toBe(S1);
   });
 
   it("means no sprint for the unscoped board", () => {

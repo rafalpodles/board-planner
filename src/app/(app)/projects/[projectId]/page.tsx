@@ -9,8 +9,9 @@ import { ProjectBoardView } from "@/components/kanban/ProjectBoardView";
 import { useCanonicalUrl } from "@/hooks/use-canonical-url";
 import { projectPath } from "@/lib/urls";
 import { BoardHeader } from "@/components/kanban/BoardHeader";
-import { sprintScopeFromParam, sprintScopeToQuery } from "@/lib/sprint-scope";
+import { sprintScopeFromParam, sprintScopeToQuery, isSprintScopeShape } from "@/lib/sprint-scope";
 import { APP_NAME } from "@/lib/brand";
+import { Button } from "@/components/ui/Button";
 
 function useBoardDocumentTitle(project: ApiProject | null, tasks: ApiTask[]) {
   useEffect(() => {
@@ -36,16 +37,42 @@ export default function KanbanPage() {
 
   // Scope lives in the URL so it survives a reload and can be shared;
   // filters stay in localStorage
-  const scope = sprintScopeFromParam(searchParams.get("sprint"));
+  const rawScope = searchParams.get("sprint");
+  const scope = sprintScopeFromParam(rawScope);
   const board = useProjectBoard(projectId, scope);
+
+  useEffect(() => {
+    // A stale bookmark or a link to a deleted sprint falls back to the unscoped board;
+    // leaving the bad value in the URL would just re-trigger the fallback every reload.
+    // Native, not router.replace: this page sits under an @modal parallel route, and a
+    // soft navigation risks waking it the way useCanonicalUrl already found out.
+    const trimmed = rawScope?.trim();
+    if (trimmed && !isSprintScopeShape(trimmed)) {
+      window.history.replaceState(null, "", projectPath(projectId) + window.location.hash);
+    }
+  }, [rawScope, projectId]);
 
   useCanonicalUrl(board.project?.key);
   useBoardDocumentTitle(board.project, board.tasks);
 
-  if (board.loading || !board.project) {
+  if (board.loading) {
     return (
       <div className="flex justify-center py-12">
         <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary border-t-transparent" />
+      </div>
+    );
+  }
+
+  // Nothing loaded and nothing to retry automatically: the poll already tried and
+  // toasted once, so re-showing a spinner here would spin forever without ever
+  // telling the person there is a problem to act on
+  if (!board.project) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
+        <p className="text-sm text-text-muted">Failed to load this board.</p>
+        <Button size="sm" onClick={board.reload}>
+          Retry
+        </Button>
       </div>
     );
   }
