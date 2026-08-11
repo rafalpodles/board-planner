@@ -18,6 +18,7 @@ vi.mock("@/lib/session", async (importOriginal) => {
 
 const { POST } = await import("./route");
 const { clearAttempts, lockoutKey } = await import("@/lib/rate-limit");
+const { SESSION_IDLE_TTL_MS, SESSION_ABSOLUTE_TTL_MS } = await import("@/lib/session");
 
 const USER = {
   _id: "u1",
@@ -63,7 +64,8 @@ beforeEach(() => {
   createSession.mockResolvedValue({
     token: "cps_deadbeef",
     sessionId: "s1",
-    expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+    expiresAt: new Date(Date.now() + SESSION_IDLE_TTL_MS),
+    absoluteExpiresAt: new Date(Date.now() + SESSION_ABSOLUTE_TTL_MS),
   });
 });
 

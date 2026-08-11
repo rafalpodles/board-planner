@@ -45,11 +45,13 @@ export function assertSessionConfig(): void {
   }
 
   // The compose stack ships the flag on so a localhost deployment works out of the box, which makes
-  // "still insecure once it moved behind TLS" the likely mistake rather than an exotic one
-  const secureOrigins = origins.filter((origin) => origin.startsWith("https://"));
-  if (secureOrigins.length > 0) {
+  // "still insecure once it moved behind TLS" the likely mistake rather than an exotic one.
+  // Allowlisted, not blocklisted: a schemeless APP_ORIGIN is a plausible typo and would slip past a
+  // startsWith("https://") test, waving the flag through on exactly the deployment it guards.
+  const notPlainHttp = origins.filter((origin) => !origin.startsWith("http://"));
+  if (notPlainHttp.length > 0) {
     throw new Error(
-      `COOKIE_ALLOW_INSECURE=1 with an https APP_ORIGIN (${secureOrigins.join(", ")}): the session cookie would be issued without Secure and without the __Host- prefix on a TLS deployment, leaving it injectable from any sibling subdomain. Unset COOKIE_ALLOW_INSECURE.`
+      `COOKIE_ALLOW_INSECURE=1 requires every APP_ORIGIN to be an http:// origin; got ${notPlainHttp.join(", ")}. The session cookie is issued without Secure and without the __Host- prefix in this mode, so on anything else it is injectable from a sibling subdomain. Unset COOKIE_ALLOW_INSECURE, or fix APP_ORIGIN.`
     );
   }
 
@@ -74,8 +76,12 @@ function cookieHeader(name: string, value: string, maxAgeSeconds: number): strin
   return attributes.join("; ");
 }
 
-export function buildSessionCookie(token: string, expiresAt: Date): string {
-  const maxAge = Math.max(0, Math.floor((expiresAt.getTime() - Date.now()) / 1000));
+// Max-Age tracks the ABSOLUTE cap, not the idle window. The idle window slides server-side on every
+// use, but nothing re-sends Set-Cookie, so pinning the cookie to it would have the browser discard a
+// live session 30 days after login however often it was used — the very logout this work removes.
+// A cookie outliving its row is harmless: the server is the authority and answers 401.
+export function buildSessionCookie(token: string, absoluteExpiresAt: Date): string {
+  const maxAge = Math.max(0, Math.floor((absoluteExpiresAt.getTime() - Date.now()) / 1000));
   return cookieHeader(sessionCookieName(), token, maxAge);
 }
 
@@ -148,7 +154,12 @@ export async function createSession(params: {
   userId: Types.ObjectId | string;
   userAgent?: string | null;
   ip?: string | null;
-}): Promise<{ token: string; sessionId: Types.ObjectId; expiresAt: Date }> {
+}): Promise<{
+  token: string;
+  sessionId: Types.ObjectId;
+  expiresAt: Date;
+  absoluteExpiresAt: Date;
+}> {
   await connectDB();
 
   const token = randomToken(SESSION_TOKEN_PREFIX);
@@ -166,7 +177,7 @@ export async function createSession(params: {
     ip: (params.ip ?? "").slice(0, 128),
   });
 
-  return { token, sessionId: row._id, expiresAt };
+  return { token, sessionId: row._id, expiresAt, absoluteExpiresAt };
 }
 
 export async function resolveSession(

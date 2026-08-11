@@ -119,7 +119,9 @@ export async function getAuthUser(
 ): Promise<IUser | null> {
   const authHeader = request.headers.get("authorization");
 
-  if (authHeader?.startsWith("Bearer ")) {
+  // Case-insensitive to match mcp-handler, which lowercases the scheme before comparing: a
+  // `bearer …` header would otherwise set its bearerToken while falling through to the cookie here
+  if (authHeader && /^bearer /i.test(authHeader)) {
     const token = authHeader.slice(7);
     if (token.startsWith("cpat_")) {
       return verifyOAuthAccessToken(token);

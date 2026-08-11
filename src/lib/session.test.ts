@@ -26,6 +26,7 @@ const {
   revokeUserSessions,
   sessionCookieName,
   SESSION_IDLE_TTL_MS,
+  SESSION_ABSOLUTE_TTL_MS,
   SESSION_SLIDE_THROTTLE_MS,
 } = await import("./session");
 
@@ -385,7 +386,7 @@ describe("assertSessionConfig — insecure mode against an https origin", () => 
     process.env.COOKIE_ALLOW_INSECURE = "1";
     process.env.APP_ORIGIN = "https://board.example.com";
 
-    expect(() => assertSessionConfig()).toThrow(/https APP_ORIGIN/);
+    expect(() => assertSessionConfig()).toThrow(/https:\/\/board\.example\.com/);
   });
 
   it("allows the flag alongside a plain-http origin, which is what compose ships", () => {
@@ -399,6 +400,33 @@ describe("assertSessionConfig — insecure mode against an https origin", () => 
     process.env.COOKIE_ALLOW_INSECURE = "1";
     process.env.APP_ORIGIN = "http://localhost:3000,https://board.example.com";
 
-    expect(() => assertSessionConfig()).toThrow(/https APP_ORIGIN/);
+    expect(() => assertSessionConfig()).toThrow(/https:\/\/board\.example\.com/);
+  });
+});
+
+describe("assertSessionConfig — APP_ORIGIN must be plain http in insecure mode", () => {
+  it("refuses a schemeless origin, which a blocklist on https would have waved through", () => {
+    process.env.COOKIE_ALLOW_INSECURE = "1";
+    process.env.APP_ORIGIN = "app.example.com";
+
+    expect(() => assertSessionConfig()).toThrow(/http:\/\/ origin/);
+  });
+
+  it("refuses any non-http scheme", () => {
+    process.env.COOKIE_ALLOW_INSECURE = "1";
+    process.env.APP_ORIGIN = "ws://app.example.com";
+
+    expect(() => assertSessionConfig()).toThrow(/http:\/\/ origin/);
+  });
+});
+
+describe("buildSessionCookie — Max-Age follows the absolute cap", () => {
+  it("outlives the idle window, so daily use cannot be evicted by the browser at day 30", () => {
+    const absolute = new Date(Date.now() + SESSION_ABSOLUTE_TTL_MS);
+    const cookie = buildSessionCookie("cps_abc", absolute);
+    const maxAge = Number(/Max-Age=(\d+)/.exec(cookie)![1]);
+
+    expect(maxAge).toBeGreaterThan(SESSION_IDLE_TTL_MS / 1000);
+    expect(maxAge).toBeLessThanOrEqual(SESSION_ABSOLUTE_TTL_MS / 1000);
   });
 });

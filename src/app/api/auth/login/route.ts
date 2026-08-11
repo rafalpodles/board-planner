@@ -44,7 +44,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
   }
 
-  const { token, expiresAt } = await createSession({
+  const { token, absoluteExpiresAt } = await createSession({
     userId: user._id,
     userAgent: request.headers.get("user-agent"),
     ip: clientIp,
@@ -61,7 +61,7 @@ export async function POST(request: Request) {
     createdAt: user.createdAt,
   });
 
-  response.headers.append("Set-Cookie", buildSessionCookie(token, expiresAt));
+  response.headers.append("Set-Cookie", buildSessionCookie(token, absoluteExpiresAt));
   for (const cookie of legacySessionCookies()) {
     response.headers.append("Set-Cookie", cookie);
   }
