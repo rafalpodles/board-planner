@@ -1,8 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Additive: `next start` still works; the Docker image runs .next/standalone/server.js
-  output: "standalone",
+  // Next refuses to support `next start` against standalone output, and Railway deploys that way.
+  // Only the Docker build asks for the minimal server, and it runs it directly.
+  output: process.env.BUILD_STANDALONE ? "standalone" : undefined,
 
   // CP-160 moved these under /settings; the old paths are in bookmarks and browser history
   async redirects() {
