@@ -20,6 +20,9 @@ export interface ProjectBoard {
   setShowNewTask: (open: boolean) => void;
   // Passed straight back: null is "no sprint resolved yet", never the unscoped board
   scope: string | null;
+  // The scope `tasks` were loaded for. undefined, never null, until a task list has arrived:
+  // null is itself a scope, and matching it would read as "loaded" before anything was asked for
+  loadedScope: string | undefined;
   selectedTasks: Set<string>;
   setSelectedTasks: Dispatch<SetStateAction<Set<string>>>;
   selectionMode: boolean;
@@ -97,6 +100,7 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
     return localStorage.getItem(`view-mode:${projectId}`) === "list" ? "list" : "board";
   });
   const [sprints, setSprints] = useState<ApiSprint[]>([]);
+  const [loadedScope, setLoadedScope] = useState<string | undefined>(undefined);
   const [assignableUsers, setAssignableUsers] = useState<ApiUserSummary[]>([]);
 
   const setViewMode = useCallback(
@@ -109,11 +113,15 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
 
   const loadData = useCallback(async () => {
     const seq = ++loadSeq.current;
+    // The scope this request was issued for, so what lands is never labelled with a scope
+    // chosen after it left
+    const requestScope = scope;
     try {
-      const sprintParam = scope && scope !== "all" ? `?sprint=${scope}` : "";
+      const sprintParam =
+        requestScope && requestScope !== "all" ? `?sprint=${requestScope}` : "";
       const [proj, taskList, sprintList] = await Promise.all([
         api.get(`/api/projects/${projectId}`),
-        scope === null
+        requestScope === null
           ? Promise.resolve(null)
           : api.get(`/api/projects/${projectId}/tasks${sprintParam}`),
         api.get(`/api/projects/${projectId}/sprints`),
@@ -121,7 +129,12 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
       // A slower earlier request must not overwrite what a later one already applied
       if (seq !== loadSeq.current) return;
       setProject(proj);
-      setTasks(scope === null ? [] : withIncomingRelations(taskList));
+      if (requestScope !== null) {
+        setTasks(withIncomingRelations(taskList));
+        setLoadedScope(requestScope);
+      } else {
+        setTasks([]);
+      }
       setSprints(sprintList);
     } catch {
       toast("Failed to load board data", "error");
@@ -447,6 +460,7 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
     showNewTask,
     setShowNewTask,
     scope,
+    loadedScope,
     selectedTasks,
     setSelectedTasks,
     selectionMode,
