@@ -1,16 +1,18 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, fireEvent } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { PlanningView } from "./PlanningView";
 import { ProjectBoard } from "@/hooks/use-project-board";
 import { ApiProject, ApiSprint, ApiTask } from "@/types";
 
-const { api } = vi.hoisted(() => ({
+const { api, toast } = vi.hoisted(() => ({
   api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), del: vi.fn() },
+  toast: vi.fn(),
 }));
 
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast }) }));
 
 const project = {
   _id: "p1",
@@ -155,6 +157,7 @@ async function renderPlanning(overrides: Partial<ProjectBoard> = {}) {
 
 beforeEach(() => {
   for (const fn of Object.values(api)) fn.mockReset();
+  toast.mockReset();
 });
 afterEach(cleanup);
 
@@ -186,5 +189,91 @@ describe("PlanningView", () => {
       target: { value: "shipped" },
     });
     expect(screen.getByText("Already shipped")).toBeTruthy();
+  });
+
+  it("sets the sprint when a task is added", async () => {
+    await renderPlanning();
+    fireEvent.click(screen.getByRole("button", { name: "Add Fix the login redirect to the sprint" }));
+    expect(api.put).toHaveBeenCalledWith("/api/projects/p1/tasks/t1", { sprint: "s1" });
+  });
+
+  it("clears the sprint when a task is removed", async () => {
+    await renderPlanning();
+    fireEvent.click(screen.getByRole("button", { name: "Remove Ship the header from the sprint" }));
+    expect(api.put).toHaveBeenCalledWith("/api/projects/p1/tasks/t9", { sprint: null });
+  });
+
+  it("moves the row across before the server answers", async () => {
+    let settle: (v: unknown) => void = () => {};
+    api.put.mockImplementation(() => new Promise((r) => { settle = r; }));
+    await renderPlanning();
+    fireEvent.click(screen.getByRole("button", { name: /Add Fix the login redirect/ }));
+    expect(screen.getByText("Backlog (1)")).toBeTruthy();
+    settle({});
+  });
+
+  it("returns the task to the pane it came from when adding fails", async () => {
+    api.put.mockRejectedValue(new Error("nope"));
+    await renderPlanning();
+    fireEvent.click(screen.getByRole("button", { name: /Add Fix the login redirect/ }));
+    await waitFor(() => expect(screen.getByText("Backlog (2)")).toBeTruthy());
+    expect(toast).toHaveBeenCalledWith("Failed to move task", "error");
+  });
+
+  it("returns the task to the pane it came from when removing fails", async () => {
+    api.put.mockRejectedValue(new Error("nope"));
+    await renderPlanning();
+    fireEvent.click(screen.getByRole("button", { name: /Remove Ship the header/ }));
+    await waitFor(() => expect(screen.getByText("Sprint 12 (1)")).toBeTruthy());
+    expect(screen.getByText("Ship the header")).toBeTruthy();
+    expect(toast).toHaveBeenCalledWith("Failed to move task", "error");
+  });
+
+  it("drops a dragged task into the sprint pane", async () => {
+    await renderPlanning();
+    fireEvent.drop(screen.getByTestId("planning-pane-sprint"), {
+      dataTransfer: { getData: () => "t1" },
+    });
+    expect(api.put).toHaveBeenCalledWith("/api/projects/p1/tasks/t1", { sprint: "s1" });
+  });
+
+  it("drops a dragged task into the backlog pane", async () => {
+    await renderPlanning();
+    fireEvent.drop(screen.getByTestId("planning-pane-backlog"), {
+      dataTransfer: { getData: () => "t9" },
+    });
+    expect(api.put).toHaveBeenCalledWith("/api/projects/p1/tasks/t9", { sprint: null });
+  });
+
+  it("does not show the previous sprint's tasks under the new sprint's name mid-switch", async () => {
+    const { rerender } = await renderPlanning();
+    expect(screen.getByText("Sprint 12 (1)")).toBeTruthy();
+
+    const otherSprints = [
+      ...sprints,
+      {
+        _id: "s2",
+        name: "Sprint 13",
+        startDate: "2026-08-04T00:00:00Z",
+        endDate: "2026-08-17T00:00:00Z",
+        goal: "",
+        status: "planned",
+        taskCount: 0,
+        doneCount: 0,
+      },
+    ] as ApiSprint[];
+
+    // loadedScope still says "s1": board.tasks has not caught up with the new sprint yet
+    rerender(
+      <PlanningView
+        projectId="p1"
+        board={makeBoard({ sprints: otherSprints, loadedScope: "s1" })}
+        sprintId="s2"
+      />
+    );
+
+    expect(screen.queryByText("Ship the header")).toBeNull();
+    expect(screen.getByText("Sprint 13")).toBeTruthy();
+    expect(screen.queryByText("Sprint 13 (1)")).toBeNull();
   });
 });
