@@ -179,6 +179,7 @@ export default function SprintsPage() {
                   onComplete={() => setCompleting(selected)}
                   onEdit={() => openForm(selected)}
                   onDelete={() => setConfirmDelete(selected)}
+                  onNewTask={() => board.setShowNewTask(true)}
                 />
                 {tasksLoaded ? (
                   <ProjectBoardView
@@ -190,11 +191,6 @@ export default function SprintsPage() {
                         <h2 className="text-lg font-medium text-text-muted mb-2">
                           No tasks in this sprint
                         </h2>
-                        {!sprintIsReadOnly && (
-                          <Button size="sm" onClick={() => board.setShowNewTask(true)}>
-                            Create Task
-                          </Button>
-                        )}
                       </div>
                     }
                   />

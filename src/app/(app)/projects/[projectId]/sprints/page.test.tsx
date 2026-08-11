@@ -286,6 +286,19 @@ describe("Sprints tab", () => {
     expect(screen.queryByRole("button", { name: "Create Task" })).toBeNull();
   });
 
+  // Previously the only Create Task control lived inside the zero-task empty state, so a
+  // sprint that already had cards offered no visible way to add another
+  it("offers a Create Task action in the header even when the sprint already has cards", async () => {
+    await renderSprints();
+    await click(screen.getByRole("button", { name: "Create Task" }));
+    expect(screen.getByRole("heading", { name: "New Task" })).toBeTruthy();
+  });
+
+  it("offers no Create Task action in the header on a completed sprint with cards", async () => {
+    await renderSprints(completedOnly);
+    expect(screen.queryByRole("button", { name: "Create Task" })).toBeNull();
+  });
+
   it("shows 0/0 for a sprint with no tasks", async () => {
     await renderSprints(sprints, { tasks: [] });
     expect(screen.getByTestId("sprint-progress").textContent).toBe("0/0");

@@ -13,6 +13,7 @@ interface SprintHeaderProps {
   onComplete: () => void;
   onEdit: () => void;
   onDelete: () => void;
+  onNewTask: () => void;
 }
 
 function statusBadge(status: SprintStatus) {
@@ -66,6 +67,7 @@ export function SprintHeader({
   onComplete,
   onEdit,
   onDelete,
+  onNewTask,
 }: SprintHeaderProps) {
   const progress = totalCount > 0 ? (doneCount / totalCount) * 100 : 0;
   const closed = readOnly;
@@ -85,6 +87,9 @@ export function SprintHeader({
 
         {!closed && (
           <div className="flex shrink-0 gap-1">
+            <Button size="sm" onClick={onNewTask}>
+              Create Task
+            </Button>
             {sprint.status === "planned" && (
               <Button size="sm" variant="secondary" onClick={onActivate}>
                 Activate
