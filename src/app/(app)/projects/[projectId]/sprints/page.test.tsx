@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, within, act, fireEvent } from "@testing-library/react";
+import { render, screen, cleanup, within, act, fireEvent, waitFor } from "@testing-library/react";
 import SprintsPage from "./page";
 import { ApiProject, ApiSprint, ApiTask } from "@/types";
 
@@ -328,11 +328,51 @@ describe("Sprints tab", () => {
     rerender(<SprintsPage />);
 
     await screen.findByRole("heading", { name: "Sprint 13" });
+    // The page's own chrome survives the switch — a naive "spin the whole page whenever
+    // tasks are loading" fix would take the title and selector off screen too
+    expect(screen.getByRole("heading", { name: "Sprints" })).toBeTruthy();
+    expect(screen.getByRole("navigation", { name: "Sprint list" })).toBeTruthy();
     expect(screen.queryByText("TP-1")).toBeNull();
     expect(screen.getByTestId("sprint-progress").textContent).toBe("0/0");
     // Sprint 13's tasks are still in flight, so this is the spinner a screen reader
-    // must be able to name — otherwise the switch is silent
-    expect(screen.getByRole("status", { name: "Loading sprint" })).toBeTruthy();
+    // must be able to name — it is ProjectBoardView's own, scoped to the task area,
+    // not the page-level one
+    expect(screen.getByRole("status", { name: "Loading tasks" })).toBeTruthy();
+    expect(screen.queryByRole("status", { name: "Loading sprint" })).toBeNull();
+  });
+
+  it("renders nothing — not the title, not the selector, not the header — until the first sprint's tasks have arrived", async () => {
+    let resolveTasks: (tasks: ApiTask[]) => void = () => {};
+    const pendingTasks = new Promise<ApiTask[]>((resolve) => {
+      resolveTasks = resolve;
+    });
+    api.get.mockImplementation((url: string) => {
+      if (url === "/api/projects/p1") return Promise.resolve(project);
+      if (url.startsWith("/api/projects/p1/tasks")) return pendingTasks;
+      if (url === "/api/projects/p1/sprints") return Promise.resolve(sprints);
+      if (url === "/api/users/list") return Promise.resolve([]);
+      return Promise.reject(new Error(`unexpected GET ${url}`));
+    });
+
+    render(<SprintsPage />);
+
+    // The sprint has resolved to s1 and its tasks are in flight — the window this test targets
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith("/api/projects/p1/tasks?sprint=s1")
+    );
+
+    expect(screen.queryByRole("heading", { name: "Sprints" })).toBeNull();
+    expect(screen.queryByRole("navigation", { name: "Sprint list" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Sprint 12" })).toBeNull();
+
+    await act(async () => {
+      resolveTasks(sprintTasks.map((t) => ({ ...t })));
+    });
+
+    expect(await screen.findByRole("heading", { name: "Sprints" })).toBeTruthy();
+    expect(screen.getByRole("navigation", { name: "Sprint list" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Sprint 12" })).toBeTruthy();
+    expect(screen.getByText("TP-1")).toBeTruthy();
   });
 });
 

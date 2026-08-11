@@ -46,6 +46,7 @@ export default function SprintsPage() {
   const [saving, setSaving] = useState(false);
   const [completing, setCompleting] = useState<ApiSprint | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<ApiSprint | null>(null);
+  const [initialLoadDone, setInitialLoadDone] = useState(false);
 
   useEffect(() => {
     if (board.loading) return;
@@ -135,7 +136,27 @@ export default function SprintsPage() {
     : selected?.doneCount ?? 0;
   const totalCount = tasksLoaded ? board.tasks.length : selected?.taskCount ?? 0;
 
-  if (board.loading || !board.project) return <Spinner />;
+  // Latches once, on the first render where there is nothing left to wait for, and never
+  // resets — a later sprint switch is ProjectBoardView's own loadedScope/scope gate, not this
+  useEffect(() => {
+    if (initialLoadDone || !board.project) return;
+    if (board.sprints.length === 0 || tasksLoaded) setInitialLoadDone(true);
+  }, [initialLoadDone, board.project, board.sprints.length, tasksLoaded]);
+
+  if (board.loading || (!board.project && !board.loadError)) return <Spinner />;
+
+  if (!board.project) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
+        <p className="text-sm text-text-muted">Failed to load this board.</p>
+        <Button size="sm" onClick={board.reload}>
+          Retry
+        </Button>
+      </div>
+    );
+  }
+
+  if (!initialLoadDone) return <Spinner />;
 
   return (
     <div className="lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:overflow-hidden">
@@ -166,8 +187,6 @@ export default function SprintsPage() {
             onSelect={(id) => router.push(`/projects/${projectId}/sprints?sprint=${id}`)}
           />
           <div className="min-w-0 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:overflow-hidden">
-            {/* The hook reports loading:false while the sprint is still being resolved and
-                again while its tasks are in flight, so the board waits for its own scope */}
             {selected ? (
               <>
                 <SprintHeader
@@ -181,22 +200,18 @@ export default function SprintsPage() {
                   onDelete={() => setConfirmDelete(selected)}
                   onNewTask={() => board.setShowNewTask(true)}
                 />
-                {tasksLoaded ? (
-                  <ProjectBoardView
-                    board={board}
-                    readOnly={sprintIsReadOnly}
-                    pinViewMode="board"
-                    emptyState={
-                      <div className="flex flex-col items-center justify-center py-16 text-center">
-                        <h2 className="text-lg font-medium text-text-muted mb-2">
-                          No tasks in this sprint
-                        </h2>
-                      </div>
-                    }
-                  />
-                ) : (
-                  <Spinner />
-                )}
+                <ProjectBoardView
+                  board={board}
+                  readOnly={sprintIsReadOnly}
+                  pinViewMode="board"
+                  emptyState={
+                    <div className="flex flex-col items-center justify-center py-16 text-center">
+                      <h2 className="text-lg font-medium text-text-muted mb-2">
+                        No tasks in this sprint
+                      </h2>
+                    </div>
+                  }
+                />
               </>
             ) : (
               <Spinner />
