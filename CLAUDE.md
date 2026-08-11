@@ -195,7 +195,8 @@ SMTP_PORT=587
 SMTP_USER=
 SMTP_PASS=
 SMTP_FROM=
-NEXT_PUBLIC_APP_URL=      # Frontend URL for links
+ENCRYPTION_KEY=           # Optional — 32 bytes (hex or base64), encrypts stored GitHub/GitLab tokens
+NEXT_PUBLIC_APP_URL=      # Frontend URL for links — read at BUILD time, not runtime
 ```
 
 ## Build
