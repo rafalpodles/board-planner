@@ -129,7 +129,7 @@ export function SprintHeader({
             style={{ width: `${progress}%` }}
           />
         </div>
-        <span className="tabular-nums">
+        <span data-testid="sprint-progress" className="tabular-nums">
           {doneCount}/{totalCount}
         </span>
       </div>

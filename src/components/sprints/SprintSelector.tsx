@@ -26,6 +26,9 @@ export function SprintSelector({ sprints, selectedId, onSelect }: SprintSelector
       <div className="mb-4 lg:hidden">
         <Select
           aria-label="Sprint"
+          // Without it an unresolved selection paints the first sprint's name above a
+          // board that is still a spinner — a name and a body that disagree
+          placeholder={selectedId ? undefined : "Choose a sprint"}
           value={selectedId ?? ""}
           onChange={(e) => onSelect(e.target.value)}
           options={[...active, ...planned, ...recentCompleted, ...olderCompleted].map((s) => ({

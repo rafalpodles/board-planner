@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, within } from "@testing-library/react";
+import { render, screen, cleanup, within, act, fireEvent } from "@testing-library/react";
 import SprintsPage from "./page";
 import { ApiProject, ApiSprint, ApiTask } from "@/types";
 
@@ -134,6 +134,12 @@ async function renderSprints(
   return view;
 }
 
+async function click(el: Element) {
+  await act(async () => {
+    (el as HTMLElement).click();
+  });
+}
+
 beforeEach(() => {
   for (const fn of Object.values(api)) fn.mockReset();
   toast.mockReset();
@@ -187,6 +193,17 @@ describe("Sprints tab", () => {
     expect(router.push).not.toHaveBeenCalled();
   });
 
+  // GET /tasks?sprint=<x> assigns straight into a Mongoose filter, so an id the project
+  // does not have is a 500 and not a fallback. It must never leave the page.
+  it("never asks for a sprint the URL named but the project does not have", async () => {
+    query.current = "sprint=deadbeef";
+    await renderSprints();
+
+    expect(api.get.mock.calls.some(([url]) => String(url).includes("deadbeef"))).toBe(false);
+    expect(screen.getByRole("heading", { name: "Sprint 12" })).toBeTruthy();
+    expect(router.replace).toHaveBeenCalledWith("/projects/p1/sprints?sprint=s1");
+  });
+
   it("reads the sprint list once, from the board", async () => {
     await renderSprints();
     // Both come from the hook's one batch, so a page-side /sprints fetch breaks the tie
@@ -203,9 +220,19 @@ describe("Sprints tab", () => {
     expect(screen.queryByRole("button", { name: /Delete sprint/ })).toBeNull();
   });
 
-  it("shows the sprint's progress from every task in it, not the filtered subset", async () => {
+  it("keeps the sprint's progress on every task in it while the board is filtered", async () => {
     await renderSprints();
-    expect(screen.getByText("4/8")).toBeTruthy();
+    expect(screen.getByTestId("sprint-progress").textContent).toBe("4/8");
+
+    await act(async () => {
+      fireEvent.change(screen.getByPlaceholderText("Search tasks, or TP-128…"), {
+        target: { value: "Task 1" },
+      });
+    });
+
+    expect(screen.getByText("TP-1")).toBeTruthy();
+    expect(screen.queryByText("TP-2")).toBeNull();
+    expect(screen.getByTestId("sprint-progress").textContent).toBe("4/8");
   });
 
   // The window this pins is a request long: without it the tab shows Sprint 12's cards and
@@ -229,6 +256,57 @@ describe("Sprints tab", () => {
 
     await screen.findByRole("heading", { name: "Sprint 13" });
     expect(screen.queryByText("TP-1")).toBeNull();
-    expect(screen.queryByText("4/8")).toBeNull();
+    expect(screen.getByTestId("sprint-progress").textContent).toBe("0/0");
+  });
+});
+
+// The wiring from each header button to its endpoint is new code, and swapping any two of
+// them leaves every other test in this file green
+describe("Sprint lifecycle from the header", () => {
+  it("activates a planned sprint", async () => {
+    api.put.mockResolvedValue({});
+    await renderSprints(sprintsWithNoActive);
+
+    await click(screen.getByRole("button", { name: "Activate" }));
+
+    expect(api.put).toHaveBeenCalledWith("/api/projects/p1/sprints/s2", { status: "active" });
+    expect(toast).toHaveBeenCalledWith("Sprint activated", "success");
+  });
+
+  it("completes the active sprint through the dialog, carrying the backlog choice", async () => {
+    api.put.mockResolvedValue({});
+    await renderSprints();
+
+    await click(screen.getByRole("button", { name: "Complete" }));
+    expect(screen.getByRole("heading", { name: "Complete Sprint" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Keep in Sprint" })).toBeTruthy();
+
+    await click(screen.getByRole("button", { name: "Move to Backlog" }));
+
+    expect(api.put).toHaveBeenCalledWith("/api/projects/p1/sprints/s1", {
+      status: "completed",
+      moveIncompleteToBacklog: true,
+    });
+  });
+
+  it("deletes the selected sprint once the confirmation is answered", async () => {
+    api.del.mockResolvedValue({});
+    await renderSprints();
+
+    await click(screen.getByRole("button", { name: "Delete sprint Sprint 12" }));
+    expect(api.del).not.toHaveBeenCalled();
+
+    await click(screen.getByRole("button", { name: "Delete" }));
+
+    expect(api.del).toHaveBeenCalledWith("/api/projects/p1/sprints/s1");
+  });
+
+  it("opens the edit form on the selected sprint", async () => {
+    await renderSprints();
+
+    await click(screen.getByRole("button", { name: "Edit" }));
+
+    expect(screen.getByRole("heading", { name: "Edit Sprint" })).toBeTruthy();
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Sprint 12");
   });
 });
