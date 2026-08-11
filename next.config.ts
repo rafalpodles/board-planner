@@ -1,6 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Additive: `next start` still works; the Docker image runs .next/standalone/server.js
+  output: "standalone",
+
   // CP-160 moved these under /settings; the old paths are in bookmarks and browser history
   async redirects() {
     return [

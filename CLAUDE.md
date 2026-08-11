@@ -195,14 +195,19 @@ SMTP_PORT=587
 SMTP_USER=
 SMTP_PASS=
 SMTP_FROM=
-NEXT_PUBLIC_APP_URL=      # Frontend URL for links
+ENCRYPTION_KEY=           # Optional — 32 bytes (hex or base64), encrypts stored GitHub/GitLab tokens
+NEXT_PUBLIC_APP_URL=      # Frontend URL for links — read at BUILD time, not runtime
 ```
 
 ## Build
 ```bash
 npm run build                    # Next.js app
 cd mcp-server && npm run build   # MCP server
+docker compose up -d --build     # app + MongoDB 4.4, no local Node or Mongo needed
 ```
+`next.config.ts` sets `output: "standalone"` for the Docker image; `next start` is unaffected.
+`NEXT_PUBLIC_APP_URL` is baked in at build time — the compose file passes it as a build arg. See
+[README.md](README.md).
 
 ## Deploy
 Railway auto-deploys from `main` branch.

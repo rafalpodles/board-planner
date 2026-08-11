@@ -1,0 +1,43 @@
+services:
+  mongo:
+    # 4.4 on purpose: the aggregations avoid 5.0-only operators and this keeps that honest
+    image: mongo:4.4
+    restart: unless-stopped
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongo", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  app:
+    build:
+      context: .
+      args:
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:${APP_PORT:-3000}}
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    environment:
+      MONGODB_URI: ${MONGODB_URI:-mongodb://mongo:27017/boardplanner}
+      # Everything below is optional — leave it empty and the feature stays off
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      PM_MODEL: ${PM_MODEL:-}
+      PM_MAX_TOKENS: ${PM_MAX_TOKENS:-}
+      PM_DAILY_TURN_CAP: ${PM_DAILY_TURN_CAP:-}
+      PM_SCHEDULER_TICK_MS: ${PM_SCHEDULER_TICK_MS:-}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+
+volumes:
+  mongo-data:
