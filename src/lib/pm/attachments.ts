@@ -23,7 +23,12 @@ export function estimateImageTokens(a: PmAttachment): number {
   return Math.round((a.width * a.height) / 750);
 }
 
-export async function loadAttachmentDataUri(a: PmAttachment): Promise<string | null> {
+// projectId is required, not optional: this is the second way to read a file out of GridFS, and
+// leaving it ungated made the ownership check on GET /api/uploads/[fileId] bypassable outright.
+export async function loadAttachmentDataUri(
+  a: PmAttachment,
+  projectId: string
+): Promise<string | null> {
   await connectDB();
   const db = mongoose.connection.db;
   if (!db) return null;
@@ -48,6 +53,8 @@ export async function loadAttachmentDataUri(a: PmAttachment): Promise<string | n
     return null;
   }
 
+  if (String(found[0].metadata?.project || "") !== String(projectId)) return null;
+
   const mime = (found[0].metadata?.contentType as string) || a.mimeType;
   if (!IMAGE_MIME_TYPES.has(mime)) return null;
 
@@ -58,13 +65,14 @@ export async function loadAttachmentDataUri(a: PmAttachment): Promise<string | n
 // turns keep exactly the shape they had before
 export async function buildUserContent(
   text: string,
-  attachments: PmAttachment[] | undefined
+  attachments: PmAttachment[] | undefined,
+  projectId: string
 ): Promise<string | Record<string, unknown>[]> {
   if (!attachments?.length) return text;
 
   const blocks: Record<string, unknown>[] = [{ type: "text", text }];
   for (const a of attachments) {
-    const url = await loadAttachmentDataUri(a);
+    const url = await loadAttachmentDataUri(a, projectId);
     if (url) blocks.push({ type: "image_url", image_url: { url } });
   }
   return blocks.length > 1 ? blocks : text;

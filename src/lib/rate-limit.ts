@@ -1,17 +1,18 @@
 /**
  * In-memory throttle for the endpoints that verify a password.
  *
- * Two dimensions, answered differently. A caller identified by IP is refused before its credential
- * is looked at — it is the one guessing, and refusing it costs nobody else.
+ * Two dimensions. The account key — caller identity plus username — is refused *before* the
+ * credential is read, which is what bounds the work an attacker can make the server do. The source
+ * key counts failures from one address across *all* usernames, so spraying one password at fifty
+ * accounts is caught even though no account counter ever climbs.
  *
- * The account dimension is never consulted before verification, only after a failure. Guessing is
- * still throttled, but a correct password always wins, so the counter cannot be used to shut a real
- * user out of their own account. That mattered because the account key is the one an attacker can
- * aim at somebody else, and on a deployment with no proxy every caller shares one identity, which
- * made a targeted lockout trivial.
+ * Two rules the obvious implementation gets wrong, both found in review:
  *
- * Delaying the response instead was considered and rejected: holding a request open is a throttle
- * an attacker can turn around, opening many at once to exhaust the server.
+ * - A success clears only the account key, never the source. Clearing the source would let anyone
+ *   holding one valid login reset the budget and guess forever, fifty tries per own login.
+ * - With no client identity available the account key still applies, at a higher threshold. Skipping
+ *   the check there leaves login entirely unthrottled, which is the shape the documented
+ *   docker-compose deployment runs in.
  */
 const attempts = new Map<string, { count: number; resetAt: number }>();
 
@@ -23,6 +24,10 @@ const MAX_ATTEMPTS = 10;
 // is not, so it can be refused as tightly as the account dimension without hitting a bystander.
 export const SHARED_SOURCE_ATTEMPTS = 50;
 export const EXCLUSIVE_SOURCE_ATTEMPTS = MAX_ATTEMPTS;
+// Without a client identity every caller shares the account key, so a refusal there can be aimed at
+// somebody else. Bounding the work still matters more than the denial: the threshold is raised so
+// aiming it costs five times what it did, and it lapses with the window.
+export const ANONYMOUS_ACCOUNT_ATTEMPTS = 50;
 const WINDOW_MS = 15 * 60 * 1000; // 15 minutes
 
 setInterval(() => {
@@ -88,19 +93,23 @@ export async function withLockout<T>(
   source?: string,
   sourceThreshold: number = SHARED_SOURCE_ATTEMPTS
 ): Promise<{ lockedOut: boolean; result: T | null }> {
+  const accountThreshold = source ? MAX_ATTEMPTS : ANONYMOUS_ACCOUNT_ATTEMPTS;
+
+  if (isRateLimited(key, accountThreshold)) return { lockedOut: true, result: null };
   if (source && isRateLimited(source, sourceThreshold)) {
     return { lockedOut: true, result: null };
   }
 
   const result = await verify();
   if (result) {
+    // Only this account's counter. Clearing the source here would hand anyone with one valid
+    // credential an unlimited guessing budget against every other account.
     clearAttempts(key);
-    if (source) clearAttempts(source);
     return { lockedOut: false, result };
   }
 
   recordFailedAttempt(key);
   if (source) recordFailedAttempt(source);
 
-  return { lockedOut: isRateLimited(key), result: null };
+  return { lockedOut: isRateLimited(key, accountThreshold), result: null };
 }

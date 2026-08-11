@@ -20,7 +20,7 @@ vi.mock("@/models/project", () => ({
 }));
 
 const { POST } = await import("./route");
-const { resetRateLimits } = await import("@/lib/rate-limit");
+const { resetRateLimits, ANONYMOUS_ACCOUNT_ATTEMPTS } = await import("@/lib/rate-limit");
 
 const REDIRECT_URI = "https://client.example/callback";
 const USER = { _id: "u1", username: "victim", role: "member" };
@@ -62,13 +62,26 @@ beforeEach(() => {
 });
 
 describe("POST /oauth/authorize login phase", () => {
-  it("throttles guessing without ever shutting the real owner out", async () => {
-    for (let i = 0; i < 12; i++) await attempt("locked");
+  it("bounds guessing when no client identity is available", async () => {
+    // Without a proxy header every caller shares the account key, so a refusal there can be aimed
+    // at somebody else — but leaving it unchecked left login entirely unthrottled, which is worse.
+    // The threshold is raised rather than removed: aiming it costs five times what it did.
+    for (let i = 0; i < ANONYMOUS_ACCOUNT_ATTEMPTS; i++) await attempt("locked");
 
-    // No proxy header here, so every caller shares one identity: refusing this account would hand
-    // anyone a way to deny it. The correct password is checked before the counter is consulted.
+    verifyCredentials.mockClear();
     verifyCredentials.mockResolvedValue(USER);
-    expect(await attempt("locked")).toContain("Grant access");
+    const body = await attempt("locked");
+
+    expect(body).toContain("Too many failed attempts.");
+    // The point of refusing before verification: the server stops doing bcrypt work
+    expect(verifyCredentials).not.toHaveBeenCalled();
+  });
+
+  it("leaves a different account alone", async () => {
+    for (let i = 0; i < ANONYMOUS_ACCOUNT_ATTEMPTS; i++) await attempt("locked");
+
+    verifyCredentials.mockResolvedValue(USER);
+    expect(await attempt("bystander")).toContain("Grant access");
   });
 
   it("locks out one username at a time", async () => {

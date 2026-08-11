@@ -32,7 +32,7 @@ export const GET = withAuth(async (_request, { params, user }) => {
 
   // 404 rather than 403 throughout: a file id is a bare ObjectId, so distinguishing "exists but not
   // yours" from "no such file" would confirm the existence of other boards' attachments.
-  const project = await projectForUpload(file, fileId);
+  const project = projectForUpload(file);
   if (!project) {
     return new Response("File not found", { status: 404 });
   }

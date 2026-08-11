@@ -17,7 +17,7 @@ vi.mock("@/lib/session", async (importOriginal) => {
 });
 
 const { POST } = await import("./route");
-const { resetRateLimits } = await import("@/lib/rate-limit");
+const { resetRateLimits, ANONYMOUS_ACCOUNT_ATTEMPTS } = await import("@/lib/rate-limit");
 const { SESSION_IDLE_TTL_MS, SESSION_ABSOLUTE_TTL_MS } = await import("@/lib/session");
 
 const USER = {
@@ -139,22 +139,46 @@ describe("POST /api/auth/login — credentials", () => {
     expect(setCookies(response)).toEqual([]);
   });
 
-  it("never denies the real owner, however many failures preceded them", async () => {
-    // No proxy header means every caller shares one identity, so a refusal keyed on the account
-    // would let anyone shut a named user out. Guessing is still throttled; the owner is not.
+  it("bounds guessing even with no client identity, and a success does not reopen the budget", async () => {
     verifyCredentials.mockResolvedValue(null);
-    let sawRefusal = false;
-    for (let attempt = 0; attempt < 15; attempt++) {
-      const status = (await POST(request())).status;
-      if (status === 429) sawRefusal = true;
+    for (let attempt = 0; attempt < ANONYMOUS_ACCOUNT_ATTEMPTS; attempt++) {
+      await POST(request());
     }
 
-    expect(sawRefusal).toBe(true);
-
+    verifyCredentials.mockClear();
     verifyCredentials.mockResolvedValue(USER);
-    const response = await POST(request());
+    const refused = await POST(request());
 
-    expect(response.status).toBe(200);
+    expect(refused.status).toBe(429);
+    expect(verifyCredentials).not.toHaveBeenCalled();
+  });
+
+  it("a valid login never clears the source budget, so one account cannot fund guessing others", async () => {
+    const from = (username: string) =>
+      request({ "sec-fetch-site": "same-origin", "x-forwarded-for": "203.0.113.9" }, {
+        username,
+        password: "guess",
+      });
+
+    verifyCredentials.mockResolvedValue(null);
+    for (let attempt = 0; attempt < 40; attempt++) await POST(from(`victim-${attempt}`));
+
+    // A real login of the attacker's own account, from the same address
+    verifyCredentials.mockResolvedValue(USER);
+    expect((await POST(from("mine"))).status).toBe(200);
+
+    // If success had cleared the source counter the budget would be back to zero and this would
+    // keep answering 401 forever
+    verifyCredentials.mockResolvedValue(null);
+    let refusedAt = -1;
+    for (let attempt = 0; attempt < 30; attempt++) {
+      if ((await POST(from(`later-${attempt}`))).status === 429) {
+        refusedAt = attempt;
+        break;
+      }
+    }
+
+    expect(refusedAt).toBeGreaterThanOrEqual(0);
   });
 
   it("refuses an address spraying many usernames, which no per-account counter would catch", async () => {
