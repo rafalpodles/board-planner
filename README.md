@@ -26,10 +26,25 @@ Everything is optional. Put overrides in a `.env` file next to `docker-compose.y
 | `APP_PORT` | `3000` | Host port the app is published on |
 | `NEXT_PUBLIC_APP_URL` | `http://localhost:${APP_PORT}` | Public URL used in notification and webhook links |
 | `MONGODB_URI` | `mongodb://mongo:27017/boardplanner` | Point the app at your own MongoDB instead of the bundled one |
+| `COOKIE_ALLOW_INSECURE` | `1` (compose only) | Set to `1` to issue the session cookie without `Secure` and without the `__Host-` prefix, for an instance served over plain HTTP |
+| `APP_ORIGIN` | `http://localhost:${APP_PORT}` | Comma-separated list of origins the app is served from, used to reject cross-site writes |
 | `OPENAI_API_KEY` | — | AI task generation |
 | `OPENROUTER_API_KEY`, `PM_MODEL`, `PM_MAX_TOKENS`, `PM_DAILY_TURN_CAP`, `PM_SCHEDULER_TICK_MS` | — | PM agent |
 | `ENCRYPTION_KEY` | — | 32 bytes (hex or base64) encrypting stored GitHub/GitLab tokens at rest |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | — | Email notifications |
+
+`COOKIE_ALLOW_INSECURE` and `APP_ORIGIN` are **runtime** values, read on every request. The compose
+file turns `COOKIE_ALLOW_INSECURE` on because it publishes the app on `http://localhost`, where a
+browser silently discards a `Secure` cookie and every request after login fails with a 401. **Remove
+it once the instance is behind TLS** — the app's own default is the secure, `__Host-`-prefixed cookie,
+and nothing but this variable turns that off.
+
+`APP_ORIGIN` is **required whenever `COOKIE_ALLOW_INSECURE=1`**, and the app refuses to start
+otherwise. Writes are rejected unless the browser proves the request came from the app's own origin,
+and over plain HTTP at anything other than `localhost` the browser sends no `Sec-Fetch-Site` header,
+so the only remaining proof is `Origin` matching this list. Set it to the URL users actually open —
+`https://board.example.com`, or `http://192.168.1.10:3000` for a LAN self-host — with no trailing
+path.
 
 `NEXT_PUBLIC_APP_URL` is a **build-time** value: Next.js inlines `NEXT_PUBLIC_*` into the bundle, so
 it is passed as a build argument and baked into the image. Changing it means rebuilding —

@@ -13,7 +13,6 @@ import { downscaleImage, estimateImageTokens } from "@/lib/image-resize";
 import { isPmLockedByInstance, isPmRunnable, pmDisabledReason } from "@/lib/pm/gate";
 import { taskPath } from "@/lib/urls";
 import { Modal } from "@/components/ui/Modal";
-import { AuthedImage } from "@/components/ui/AuthedImage";
 
 const MAX_ATTACHMENTS = 4;
 const MAX_INPUT_HEIGHT = 200;
@@ -423,7 +422,8 @@ export function PmChat({
                       aria-label="Expand image"
                       className="cursor-pointer"
                     >
-                      <AuthedImage
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
                         src={`/api/uploads/${a.fileId}`}
                         alt="Attached screenshot"
                         className="h-24 w-24 rounded border border-border object-cover"
@@ -593,7 +593,8 @@ export function PmChat({
         title="Attachment"
       >
         {expandedImage && (
-          <AuthedImage
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img
             src={expandedImage}
             alt="Attached screenshot"
             className="max-h-[70vh] w-auto mx-auto"

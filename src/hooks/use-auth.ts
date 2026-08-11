@@ -16,17 +16,19 @@ interface AuthState {
   isLoading: boolean;
   error: string | null;
   login: (username: string, password: string) => Promise<boolean>;
-  logout: () => void;
+  logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
-  getAuthHeader: () => string | null;
+  onUnauthorized: () => void;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
 
 export { AuthContext };
 
-function encodeCredentials(username: string, password: string): string {
-  return btoa(`${username}:${password}`);
+function dropStoredCredentials() {
+  if (typeof window === "undefined") return;
+  sessionStorage.removeItem("auth_credentials");
+  localStorage.removeItem("auth_credentials");
 }
 
 export function useAuthProvider(): AuthState {
@@ -34,17 +36,9 @@ export function useAuthProvider(): AuthState {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const getAuthHeader = useCallback((): string | null => {
-    if (typeof window === "undefined") return null;
-    const creds = sessionStorage.getItem("auth_credentials");
-    return creds ? `Basic ${creds}` : null;
-  }, []);
-
-  const fetchUser = useCallback(async (authHeader: string) => {
+  const fetchUser = useCallback(async (): Promise<boolean> => {
     try {
-      const res = await fetch("/api/auth/me", {
-        headers: { Authorization: authHeader },
-      });
+      const res = await fetch("/api/auth/me");
       if (res.ok) {
         const data = await res.json();
         setUser(data);
@@ -57,26 +51,21 @@ export function useAuthProvider(): AuthState {
   }, []);
 
   useEffect(() => {
-    const header = getAuthHeader();
-    if (header) {
-      fetchUser(header).finally(() => setIsLoading(false));
-    } else {
-      setIsLoading(false);
-    }
-  }, [fetchUser, getAuthHeader]);
+    dropStoredCredentials();
+    fetchUser().finally(() => setIsLoading(false));
+  }, [fetchUser]);
 
   const login = useCallback(
     async (username: string, password: string): Promise<boolean> => {
       setError(null);
-      const encoded = encodeCredentials(username, password);
-      const header = `Basic ${encoded}`;
 
-      const res = await fetch("/api/auth/me", {
-        headers: { Authorization: header },
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
       });
 
       if (res.ok) {
-        sessionStorage.setItem("auth_credentials", encoded);
         const data = await res.json();
         setUser(data);
         return true;
@@ -88,23 +77,24 @@ export function useAuthProvider(): AuthState {
     []
   );
 
-  const logout = useCallback(() => {
-    sessionStorage.removeItem("auth_credentials");
+  const logout = useCallback(async () => {
+    await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
     setUser(null);
   }, []);
+
+  const onUnauthorized = useCallback(() => setUser(null), []);
 
   // Preferences saved elsewhere in the app have to reach the cached user, or a
   // client-side navigation keeps rendering the value from page load
   const refreshUser = useCallback(async () => {
-    const header = getAuthHeader();
-    if (header) await fetchUser(header);
-  }, [fetchUser, getAuthHeader]);
+    await fetchUser();
+  }, [fetchUser]);
 
   const isAdmin = user?.role === "admin";
 
   return useMemo(
-    () => ({ user, isAdmin, isLoading, error, login, logout, refreshUser, getAuthHeader }),
-    [user, isAdmin, isLoading, error, login, logout, refreshUser, getAuthHeader]
+    () => ({ user, isAdmin, isLoading, error, login, logout, refreshUser, onUnauthorized }),
+    [user, isAdmin, isLoading, error, login, logout, refreshUser, onUnauthorized]
   );
 }
 

@@ -113,7 +113,7 @@ branch, `gh pr reopen <n>`, merge.
 - Next.js 16 (App Router) + TypeScript
 - MongoDB 4.4+ (Railway) + Mongoose ODM — aggregations must avoid 5.0-only operators (`$dateTrunc`, `$dateAdd`/`$dateDiff`, `$setWindowFields`, `$lookup` mixing `localField`/`foreignField` with an inline `pipeline`)
 - Tailwind CSS 4
-- Basic Auth + Bearer token (API tokens)
+- Session cookie (browser) + Bearer token (API tokens, OAuth)
 - MCP Server (separate package in `mcp-server/`)
 
 ## Project structure
@@ -136,7 +136,8 @@ src/
     use-api.ts        # HTTP client with auth headers
     use-auth.ts       # Auth state management
   lib/
-    auth.ts           # Basic Auth + Bearer token verification
+    auth.ts           # Bearer token + session cookie verification
+    session.ts        # session cookie: issue, resolve, revoke, provenance check
     db.ts             # MongoDB connection (cached)
     middleware.ts     # withAuth, withAdmin, withProjectAccess
     ai.ts             # OpenAI task generation
@@ -155,7 +156,7 @@ mcp-server/           # Standalone MCP server (stdio transport)
 ```
 
 ## Key patterns
-- **Auth**: `getAuthUser(req)` tries Bearer token first, then Basic Auth
+- **Auth**: `getAuthUser(req)` tries Bearer token first (`cpat_` OAuth, `cp_` API token), then the session cookie. A presented Bearer that resolves to nothing returns null rather than falling back to the cookie. Basic Auth was removed in BP-293; the browser holds an opaque `cps_` session token in an httpOnly cookie, never a password. Only the cookie path yields `viaMachineCredential = false`.
 - **Middleware**: `withAuth` → `withAdmin` → `withProjectAccess` (composable)
 - **Task numbers**: Auto-increment per project via atomic `$inc` on `Project.taskCounter`
 - **Task keys**: `PROJECT_KEY-NUMBER` (e.g., `CP-5`), used in MCP and GitHub matching

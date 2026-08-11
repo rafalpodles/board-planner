@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server";
-import { getAuthUser, RateLimitError } from "@/lib/auth";
+import { getAuthUser } from "@/lib/auth";
+import { ProvenanceError } from "@/lib/session";
 
 export async function GET(request: Request) {
   let user;
   try {
     user = await getAuthUser(request);
   } catch (e) {
-    if (e instanceof RateLimitError) {
-      return NextResponse.json({ error: e.message }, { status: 429 });
+    if (e instanceof ProvenanceError) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
     throw e;
   }

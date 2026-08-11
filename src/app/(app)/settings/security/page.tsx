@@ -2,7 +2,6 @@
 
 import { useState, FormEvent } from "react";
 import { useApi } from "@/hooks/use-api";
-import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { useToast } from "@/components/ui/Toast";
@@ -11,7 +10,6 @@ const MIN_PASSWORD_LENGTH = 8;
 
 export default function SecurityPage() {
   const api = useApi();
-  const { user, login } = useAuth();
   const { toast } = useToast();
 
   const [currentPassword, setCurrentPassword] = useState("");
@@ -36,9 +34,6 @@ export default function SecurityPage() {
     setSaving(true);
     try {
       await api.put("/api/users/me/password", { currentPassword, newPassword });
-      // Requests authenticate with the stored Basic credentials, so without this the
-      // session would 401 on its very next call
-      if (user) await login(user.username, newPassword);
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");

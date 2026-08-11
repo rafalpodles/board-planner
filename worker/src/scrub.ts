@@ -16,12 +16,19 @@ const URL_USERINFO = /(https?:\/\/)[^\s/@]+@/g;
 const SECRET = new RegExp(
   [
     "[Bb]earer\\s+[A-Za-z0-9._~+/-]{20,}",
-    // This system accepts Basic auth as well as Bearer, and base64 hides every other pattern here
+    // Kept although the app no longer accepts Basic: base64 hides every other pattern here, and
+    // older logs and third-party output still carry it
     "[Bb]asic\\s+[A-Za-z0-9+/=]{16,}",
     "github_pat_[A-Za-z0-9_]{50,}",
     // gho_ is what `gh auth login` stores and delivery.ts forwards GH_TOKEN into gh
     "gh[pousr]_[A-Za-z0-9]{36,}",
-    "cpw?_[a-fA-F0-9]{32,}",
+    // The cookie name and its value, so the header name stays as the diagnostic part. Redacted by
+    // position, so a session value that is not a cps_ shape (truncated, legacy) still goes.
+    "(?:__Host-)?bp_session=[^;\\s]+",
+    // The group is OPTIONAL and keeps its w branch on purpose: making it mandatory, or dropping w,
+    // stops scrubbing cp_ (api tokens) and cpw_ (worker credentials). cpe_ is this worker's own
+    // enrolment token, which it can read off its own disk and quote into a summary.
+    "cp(?:w|s|e|d|at|rt|ac|ct|c)?_[a-fA-F0-9]{32,}",
     "sk-or-v1-[a-fA-F0-9]{32,}",
     "sk-ant-(?=[\\w-]*\\d)(?=[\\w-]*[A-Z])[\\w-]{20,}",
   ].join("|"),

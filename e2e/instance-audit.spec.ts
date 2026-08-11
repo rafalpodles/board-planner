@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import mongoose from "mongoose";
+import { ADMIN_AUTH, signInApi } from "./api";
 import { ADMIN_PASSWORD, ADMIN_USERNAME, E2E_MONGODB_URI, PROJECT_ID, PROJECT_KEY, seed } from "./seed";
 
 /**
@@ -148,9 +149,7 @@ test("changing worker policy without changing whether they run records nothing",
 // than no test — the handler under examination would never run at all.
 test("a refused save leaves no record of a decision that never happened", async ({ request }) => {
   const response = await request.put(`/api/projects/${PROJECT_KEY}`, {
-    headers: {
-      Authorization: `Basic ${Buffer.from(`${ADMIN_USERNAME}:${ADMIN_PASSWORD}`).toString("base64")}`,
-    },
+    headers: ADMIN_AUTH,
     data: { worker: { enabled: false }, gitlabHost: "http://gitlab.internal" },
   });
 
@@ -167,13 +166,11 @@ test("the log is not readable by someone who could not have written to it", asyn
   const handle = await db();
   await handle.collection("users").updateOne({ username: ADMIN_USERNAME }, { $set: { role: "member" } });
 
-  // Credentials on the request, not the browser session: this app authenticates with a header the
-  // page's own client attaches, so an unauthenticated fetch would 401 and prove nothing about role
-  const response = await request.get("/api/admin/audit", {
-    headers: {
-      Authorization: `Basic ${Buffer.from(`${ADMIN_USERNAME}:${ADMIN_PASSWORD}`).toString("base64")}`,
-    },
-  });
+  // A browser session, not the API token every other call here carries: this route turns away a
+  // machine credential before it ever reads the caller's role, so a token would answer 403 while
+  // saying nothing at all about the demotion under test
+  await signInApi(request, ADMIN_USERNAME, ADMIN_PASSWORD);
+  const response = await request.get("/api/admin/audit");
 
   expect(response.status()).toBe(403);
 });

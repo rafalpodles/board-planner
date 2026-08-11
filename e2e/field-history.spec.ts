@@ -1,8 +1,8 @@
 import { test, expect, type APIRequestContext, type Locator, type Page } from "@playwright/test";
+import { ADMIN_AUTH } from "./api";
 import {
   ADMIN_PASSWORD,
   ADMIN_USERNAME,
-  API_TOKEN,
   FIELDS,
   PROJECT_ID,
   PROJECT_KEY,
@@ -26,9 +26,6 @@ import {
  */
 
 const TASK_URL = `/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`;
-const AUTH = {
-  Authorization: `Basic ${Buffer.from(`${ADMIN_USERNAME}:${ADMIN_PASSWORD}`).toString("base64")}`,
-};
 
 type Entry = { action: string; field: string; oldValue: string; newValue: string };
 
@@ -132,7 +129,7 @@ async function openHistory(page: Page): Promise<Locator> {
 async function putFields(request: APIRequestContext, values: Record<string, unknown>) {
   const response = await request.put(
     `/api/projects/${PROJECT_ID}/tasks/${SIBLING_TASK_ID}`,
-    { headers: AUTH, data: { customFieldValues: values } }
+    { headers: ADMIN_AUTH, data: { customFieldValues: values } }
   );
   expect(response.status()).toBe(200);
 }
@@ -317,7 +314,7 @@ test("reordering a card on the board records nothing at all", async ({ page, req
 
   const response = await request.put(
     `/api/projects/${PROJECT_ID}/tasks/${SIBLING_TASK_ID}`,
-    { headers: AUTH, data: { order: 7 } }
+    { headers: ADMIN_AUTH, data: { order: 7 } }
   );
   expect(response.status()).toBe(200);
 
@@ -392,7 +389,7 @@ test("a long value is cut short instead of filling the row", async ({ page, requ
   const long = "x".repeat(200);
   const response = await request.put(
     `/api/projects/${PROJECT_ID}/tasks/${SIBLING_TASK_ID}`,
-    { headers: AUTH, data: { title: long } }
+    { headers: ADMIN_AUTH, data: { title: long } }
   );
   expect(response.status(), await response.text()).toBe(200);
 
@@ -412,12 +409,12 @@ test("the note left by a recurrence reads as a note, not as a field somebody edi
   // A real recurrence: the task is given one, then moved to the done column, which is what makes
   // createNextRecurrence write its note
   await request.put(`/api/projects/${PROJECT_ID}/tasks/${SIBLING_TASK_ID}`, {
-    headers: AUTH,
+    headers: ADMIN_AUTH,
     data: { recurrence: { frequency: "weekly", interval: 1, endDate: null } },
   });
   const moved = await request.patch(
     `/api/projects/${PROJECT_ID}/tasks/${SIBLING_TASK_ID}/status`,
-    { headers: AUTH, data: { status: "done" } }
+    { headers: ADMIN_AUTH, data: { status: "done" } }
   );
   expect(moved.status(), await moved.text()).toBe(200);
   await expect
@@ -442,10 +439,7 @@ test("the note left by a recurrence reads as a note, not as a field somebody edi
  */
 async function callMcp(request: APIRequestContext, name: string, args: Record<string, unknown>) {
   const response = await request.post("/api/mcp", {
-    headers: {
-      Authorization: `Bearer ${API_TOKEN}`,
-      Accept: "application/json, text/event-stream",
-    },
+    headers: { ...ADMIN_AUTH, Accept: "application/json, text/event-stream" },
     data: { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } },
   });
   expect(response.status(), await response.text()).toBe(200);
@@ -579,7 +573,7 @@ test("a PM turn that changes one field stays silent about the rest", async ({ pa
  * the path that was broken, and the reason the earlier test could not cover it.
  */
 async function tasksInProject(request: APIRequestContext): Promise<{ taskNumber: number; title: string }[]> {
-  const response = await request.get(`/api/projects/${PROJECT_ID}/tasks`, { headers: AUTH });
+  const response = await request.get(`/api/projects/${PROJECT_ID}/tasks`, { headers: ADMIN_AUTH });
   expect(response.status()).toBe(200);
   return response.json();
 }
@@ -594,13 +588,13 @@ test("closing a recurring task from the edit form creates its next occurrence", 
   const before = await tasksInProject(request);
 
   await request.put(`/api/projects/${PROJECT_ID}/tasks/${SIBLING_TASK_ID}`, {
-    headers: AUTH,
+    headers: ADMIN_AUTH,
     data: { recurrence: { frequency: "weekly", interval: 1, endDate: null } },
   });
 
   // The form's own endpoint, carrying the status in the body — not PATCH /status
   const closed = await request.put(`/api/projects/${PROJECT_ID}/tasks/${SIBLING_TASK_ID}`, {
-    headers: AUTH,
+    headers: ADMIN_AUTH,
     data: { status: "done" },
   });
   expect(closed.status(), await closed.text()).toBe(200);
@@ -622,7 +616,7 @@ test("closing a task that does not recur creates nothing", async ({ page, reques
 
   const before = await tasksInProject(request);
   const closed = await request.put(`/api/projects/${PROJECT_ID}/tasks/${SIBLING_TASK_ID}`, {
-    headers: AUTH,
+    headers: ADMIN_AUTH,
     data: { status: "done" },
   });
   expect(closed.status()).toBe(200);
