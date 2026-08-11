@@ -43,7 +43,7 @@ export function nextSprintDates(
   today: Date
 ): { startDate: string; endDate: string } {
   const latest = latestSprint(sprints);
-  if (!latest) {
+  if (!latest || !latest.startDate || !latest.endDate) {
     const start = toDateInput(today);
     return { startDate: start, endDate: addDays(start, FALLBACK_DURATION_DAYS) };
   }
@@ -65,6 +65,7 @@ export function overlappingSprint(
   return (
     sprints.find((sprint) => {
       if (sprint._id === excludeId) return false;
+      if (!sprint.startDate || !sprint.endDate) return false;
       const otherStart = sprint.startDate.substring(0, 10);
       const otherEnd = sprint.endDate.substring(0, 10);
       // Touching endpoints are intentional chaining, not an overlap

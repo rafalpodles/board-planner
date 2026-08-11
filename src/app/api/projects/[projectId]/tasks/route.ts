@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
 import { Task } from "@/models/task";
@@ -53,6 +54,11 @@ export const GET = withProjectAccess(async (request, { params }) => {
   if (sprint === "backlog") {
     filter.sprint = null;
   } else if (sprint) {
+    // Every caller reaches this filter — REST API, API tokens, MCP — so a malformed
+    // value must be refused here rather than reaching Mongoose as a cast crash
+    if (!isValidObjectId(sprint)) {
+      return NextResponse.json({ error: "Invalid sprint id" }, { status: 400 });
+    }
     filter.sprint = sprint;
   }
 

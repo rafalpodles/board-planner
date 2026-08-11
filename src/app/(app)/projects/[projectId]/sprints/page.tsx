@@ -1,118 +1,84 @@
 "use client";
 
-import { useEffect, useState, FormEvent, type CSSProperties } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
-import { ApiSprint, SprintStatus, SPRINT_STATUS_LABELS } from "@/types";
+import { ApiSprint } from "@/types";
+import { columnIdsWithRole } from "@/lib/columns";
+import { useProjectBoard } from "@/hooks/use-project-board";
+import { ProjectBoardView } from "@/components/kanban/ProjectBoardView";
+import { resolveSelectedSprint } from "@/lib/sprint-selection";
+import { SprintSelector } from "@/components/sprints/SprintSelector";
+import { SprintHeader } from "@/components/sprints/SprintHeader";
+import { SprintFormModal, SprintFormValues } from "@/components/sprints/SprintFormModal";
+import { CompleteSprintDialog } from "@/components/sprints/CompleteSprintDialog";
 import { Button } from "@/components/ui/Button";
-import { Input } from "@/components/ui/Input";
-import { Modal } from "@/components/ui/Modal";
-import { Select } from "@/components/ui/Select";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useToast } from "@/components/ui/Toast";
 import { PageHeader } from "@/components/shell/PageHeader";
-import {
-  addDays,
-  daysBetween,
-  nextSprintDates,
-  nextSprintName,
-  overlappingSprint,
-} from "@/lib/sprint-defaults";
 
-const DURATION_OPTIONS = [
-  { value: "7", label: "1 week" },
-  { value: "14", label: "2 weeks" },
-  { value: "21", label: "3 weeks" },
-];
+function Spinner() {
+  return (
+    <div className="flex justify-center py-12" role="status" aria-label="Loading sprint">
+      <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary border-t-transparent" />
+    </div>
+  );
+}
 
 export default function SprintsPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const api = useApi();
   const { toast } = useToast();
 
-  const [sprints, setSprints] = useState<ApiSprint[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
+  const requested = searchParams.get("sprint");
+
+  // Starts null on purpose: passing `requested` straight through would fire
+  // /tasks?sprint=<unvalidated>, and that endpoint casts the value into a Mongoose filter
+  // with no validation, so a stale bookmark is a 500 rather than a fallback.
+  const [scope, setScope] = useState<string | null>(null);
+  const board = useProjectBoard(projectId, scope);
+
   const [editing, setEditing] = useState<ApiSprint | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
-  const [completeSprint, setCompleteSprint] = useState<ApiSprint | null>(null);
-
-  // Form state
-  const [name, setName] = useState("");
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
-  const [goal, setGoal] = useState("");
+  const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
-
-  async function loadSprints() {
-    try {
-      const data = await api.get(`/api/projects/${projectId}/sprints`);
-      setSprints(data);
-    } catch {
-      toast("Failed to load sprints", "error");
-    } finally {
-      setLoading(false);
-    }
-  }
+  const [completing, setCompleting] = useState<ApiSprint | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<ApiSprint | null>(null);
+  const [initialLoadDone, setInitialLoadDone] = useState(false);
 
   useEffect(() => {
-    loadSprints();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  function openForm(sprint?: ApiSprint) {
-    if (sprint) {
-      setEditing(sprint);
-      setName(sprint.name);
-      setStartDate(sprint.startDate.substring(0, 10));
-      setEndDate(sprint.endDate.substring(0, 10));
-      setGoal(sprint.goal);
-    } else {
-      setEditing(null);
-      const dates = nextSprintDates(sprints, new Date());
-      setName(nextSprintName(sprints));
-      setStartDate(dates.startDate);
-      setEndDate(dates.endDate);
-      setGoal("");
+    if (board.loading) return;
+    // A route transition away from this tab lands here too, one commit before the page
+    // unmounts: the destination's URL (no ?sprint=) is already visible through `requested`,
+    // which would otherwise read as "the sprint fell out of the URL" and replace it right
+    // back. This guard is the only thing telling the two apart.
+    if (pathname !== `/projects/${projectId}/sprints`) return;
+    const next = resolveSelectedSprint(board.sprints, requested);
+    if (next !== scope) setScope(next);
+    if (next && next !== requested) {
+      router.replace(`/projects/${projectId}/sprints?sprint=${next}`);
     }
+  }, [board.loading, board.sprints, requested, scope, projectId, router, pathname]);
+
+  function openForm(sprint: ApiSprint | null) {
+    setEditing(sprint);
     setShowForm(true);
   }
 
-  function handleStartDateChange(value: string) {
-    const duration = daysBetween(startDate, endDate);
-    setStartDate(value);
-    if (value && duration > 0) setEndDate(addDays(value, duration));
-  }
-
-  function handleDurationChange(days: string) {
-    if (!days || !startDate) return;
-    setEndDate(addDays(startDate, Number(days)));
-  }
-
-  const duration = startDate && endDate ? daysBetween(startDate, endDate) : 0;
-  const durationValue = DURATION_OPTIONS.some((o) => o.value === String(duration))
-    ? String(duration)
-    : "";
-  const overlap =
-    startDate && endDate
-      ? overlappingSprint(sprints, startDate, endDate, editing?._id)
-      : null;
-
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
+  async function handleSubmit(values: SprintFormValues) {
     setSaving(true);
     try {
-      const body = { name, startDate, endDate, goal };
       if (editing) {
-        await api.put(`/api/projects/${projectId}/sprints/${editing._id}`, body);
+        await api.put(`/api/projects/${projectId}/sprints/${editing._id}`, values);
         toast("Sprint updated", "success");
       } else {
-        await api.post(`/api/projects/${projectId}/sprints`, body);
+        await api.post(`/api/projects/${projectId}/sprints`, values);
         toast("Sprint created", "success");
       }
       setShowForm(false);
-      loadSprints();
+      board.reload();
     } catch {
       toast("Failed to save sprint", "error");
     } finally {
@@ -122,11 +88,9 @@ export default function SprintsPage() {
 
   async function handleActivate(sprintId: string) {
     try {
-      await api.put(`/api/projects/${projectId}/sprints/${sprintId}`, {
-        status: "active",
-      });
+      await api.put(`/api/projects/${projectId}/sprints/${sprintId}`, { status: "active" });
       toast("Sprint activated", "success");
-      loadSprints();
+      board.reload();
     } catch {
       toast("Failed to activate sprint", "error");
     }
@@ -139,8 +103,8 @@ export default function SprintsPage() {
         moveIncompleteToBacklog: moveToBacklog,
       });
       toast("Sprint completed", "success");
-      setCompleteSprint(null);
-      loadSprints();
+      setCompleting(null);
+      board.reload();
     } catch {
       toast("Failed to complete sprint", "error");
     }
@@ -151,259 +115,143 @@ export default function SprintsPage() {
       await api.del(`/api/projects/${projectId}/sprints/${sprintId}`);
       toast("Sprint deleted", "success");
       setConfirmDelete(null);
-      loadSprints();
+      board.reload();
     } catch {
       toast("Failed to delete sprint", "error");
     }
   }
 
-  function statusBadge(status: SprintStatus) {
-    const accents: Record<SprintStatus, string | undefined> = {
-      planned: undefined,
-      active: "var(--color-primary)",
-      completed: "var(--color-status-done)",
-    };
-    const accent = accents[status];
-    return (
-      <span
-        className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-          accent ? "chip" : "bg-bg-input text-text-muted"
-        }`}
-        style={accent ? ({ "--chip": accent } as CSSProperties) : undefined}
-      >
-        {SPRINT_STATUS_LABELS[status]}
-      </span>
-    );
-  }
+  const selected = scope ? board.sprints.find((s) => s._id === scope) ?? null : null;
+  // The one place this page decides a sprint is locked; passed down to every read-only
+  // gate on this page (SprintHeader included) so they can't drift apart
+  const sprintIsReadOnly = selected?.status === "completed";
+  // Until this sprint's own tasks are in, `board.tasks` still holds the sprint we came from,
+  // and showing them under this name would be the page stating something untrue
+  const tasksLoaded = scope !== null && board.loadedScope === scope;
+  const doneIds = new Set(columnIdsWithRole(board.project, "done"));
+  // The sprint list's own counts stand in meanwhile; after that the tasks are the truth, so
+  // a filter on the board cannot move the sprint's progress
+  const doneCount = tasksLoaded
+    ? board.tasks.filter((t) => doneIds.has(t.status)).length
+    : selected?.doneCount ?? 0;
+  const totalCount = tasksLoaded ? board.tasks.length : selected?.taskCount ?? 0;
 
-  if (loading) {
+  // Latches once, on the first render where there is nothing left to wait for, and never
+  // resets — a later sprint switch is ProjectBoardView's own loadedScope/scope gate, not this
+  useEffect(() => {
+    if (initialLoadDone || !board.project) return;
+    if (board.sprints.length === 0 || tasksLoaded) setInitialLoadDone(true);
+  }, [initialLoadDone, board.project, board.sprints.length, tasksLoaded]);
+
+  if (board.loading || (!board.project && !board.loadError)) return <Spinner />;
+
+  if (!board.project) {
     return (
-      <div className="flex justify-center py-12">
-        <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary border-t-transparent" />
+      <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
+        <p className="text-sm text-text-muted">Failed to load this board.</p>
+        <Button size="sm" onClick={board.reload}>
+          Retry
+        </Button>
       </div>
     );
   }
 
+  if (!initialLoadDone) return <Spinner />;
+
   return (
-    <div className="max-w-7xl mx-auto w-full">
+    <div className="lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:overflow-hidden">
       <PageHeader
         title="Sprints"
-        subtitle={sprints.length === 1 ? "1 sprint" : `${sprints.length} sprints`}
+        subtitle={
+          board.sprints.length === 1 ? "1 sprint" : `${board.sprints.length} sprints`
+        }
         actions={
-          <Button size="sm" onClick={() => openForm()}>
-            New Sprint
-          </Button>
+          <div className="flex gap-2">
+            {selected && !sprintIsReadOnly && (
+              <Button size="sm" variant="secondary" onClick={() => board.setShowNewTask(true)}>
+                Create Task
+              </Button>
+            )}
+            <Button size="sm" onClick={() => openForm(null)}>
+              New Sprint
+            </Button>
+          </div>
         }
       />
 
-      {sprints.length === 0 ? (
-        <div className="text-center py-16">
-          <p className="text-text-muted mb-4">No sprints yet</p>
-          <Button size="sm" onClick={() => openForm()}>Create your first sprint</Button>
+      {board.sprints.length === 0 ? (
+        <div className="py-16 text-center">
+          <p className="mb-4 text-text-muted">No sprints yet</p>
+          <Button size="sm" onClick={() => openForm(null)}>
+            Create your first sprint
+          </Button>
         </div>
       ) : (
-        <div className="grid gap-3 xl:grid-cols-2">
-          {sprints.map((sprint) => {
-            const start = new Date(sprint.startDate);
-            const end = new Date(sprint.endDate);
-            const now = new Date();
-            const totalDays = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / 86400000));
-            const elapsed = Math.max(0, Math.ceil((now.getTime() - start.getTime()) / 86400000));
-            const timeProgress = Math.min(100, (elapsed / totalDays) * 100);
-            const taskProgress = sprint.taskCount ? (sprint.doneCount! / sprint.taskCount) * 100 : 0;
-
-            return (
-              <div
-                key={sprint._id}
-                className="border border-border rounded-lg p-4 bg-bg-card"
-              >
-                <div className="flex items-start justify-between gap-3 mb-2">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <h3 className="font-semibold">{sprint.name}</h3>
-                      {statusBadge(sprint.status)}
+        <div className="lg:flex lg:min-h-0 lg:flex-1 lg:gap-5 lg:overflow-hidden">
+          <SprintSelector
+            sprints={board.sprints}
+            selectedId={scope}
+            onSelect={(id) => router.push(`/projects/${projectId}/sprints?sprint=${id}`)}
+          />
+          <div className="min-w-0 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:overflow-hidden">
+            {selected ? (
+              <>
+                <SprintHeader
+                  sprint={selected}
+                  sprints={board.sprints}
+                  doneCount={doneCount}
+                  totalCount={totalCount}
+                  readOnly={sprintIsReadOnly}
+                  onActivate={() => handleActivate(selected._id)}
+                  onComplete={() => setCompleting(selected)}
+                  onEdit={() => openForm(selected)}
+                  onDelete={() => setConfirmDelete(selected)}
+                  onSelectSprint={(id) =>
+                    router.push(`/projects/${projectId}/sprints?sprint=${id}`)
+                  }
+                />
+                <ProjectBoardView
+                  board={board}
+                  readOnly={sprintIsReadOnly}
+                  pinViewMode="board"
+                  emptyState={
+                    <div className="flex flex-col items-center justify-center py-16 text-center">
+                      <h2 className="text-lg font-medium text-text-muted mb-2">
+                        No tasks in this sprint
+                      </h2>
                     </div>
-                    {sprint.goal && (
-                      <p className="text-sm text-text-muted">{sprint.goal}</p>
-                    )}
-                  </div>
-                  <div className="flex gap-1 shrink-0">
-                    {sprint.status === "planned" && (
-                      <Button size="sm" variant="secondary" onClick={() => handleActivate(sprint._id)}>
-                        Activate
-                      </Button>
-                    )}
-                    {sprint.status === "active" && (
-                      <Button size="sm" variant="secondary" onClick={() => setCompleteSprint(sprint)}>
-                        Complete
-                      </Button>
-                    )}
-                    <Button size="sm" variant="ghost" onClick={() => openForm(sprint)}>
-                      Edit
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      aria-label={`Delete sprint ${sprint.name}`}
-                      onClick={() => setConfirmDelete(sprint._id)}
-                    >
-                      <svg className="w-4 h-4 text-danger" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                      </svg>
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-4 text-xs text-text-muted mb-2">
-                  <span>
-                    {start.toLocaleDateString(undefined, { month: "short", day: "numeric" })}
-                    {" — "}
-                    {end.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
-                  </span>
-                  <span>{totalDays} days</span>
-                  <span>{sprint.doneCount}/{sprint.taskCount} tasks done</span>
-                </div>
-
-                {sprint.status === "active" && (
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] text-text-muted w-12">Time</span>
-                      <div className="flex-1 h-1.5 bg-bg-input rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-text-muted/30 rounded-full transition-all"
-                          style={{ width: `${timeProgress}%` }}
-                        />
-                      </div>
-                      <span className="text-[10px] text-text-muted w-8 text-right">
-                        {Math.round(timeProgress)}%
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] text-text-muted w-12">Tasks</span>
-                      <div className="flex-1 h-1.5 bg-bg-input rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-primary rounded-full transition-all"
-                          style={{ width: `${taskProgress}%` }}
-                        />
-                      </div>
-                      <span className="text-[10px] text-text-muted w-8 text-right">
-                        {Math.round(taskProgress)}%
-                      </span>
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
+                  }
+                />
+              </>
+            ) : (
+              <Spinner />
+            )}
+          </div>
         </div>
       )}
 
-      <Modal
-        open={showForm}
-        onClose={() => setShowForm(false)}
-        title={editing ? "Edit Sprint" : "New Sprint"}
-      >
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <Input
-            label="Name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Sprint 1"
-            required
-          />
-          <div className="grid grid-cols-3 gap-4">
-            <div>
-              <label className="block text-sm font-medium mb-1">Start Date</label>
-              <input
-                type="date"
-                value={startDate}
-                onChange={(e) => handleStartDateChange(e.target.value)}
-                required
-                className="w-full bg-bg-input border border-border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
-              />
-            </div>
-            <div>
-              <Select
-                label="Duration"
-                value={durationValue}
-                onChange={(e) => handleDurationChange(e.target.value)}
-                options={DURATION_OPTIONS}
-                placeholder="Custom"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">End Date</label>
-              <input
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                required
-                className="w-full bg-bg-input border border-border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
-              />
-            </div>
-          </div>
-          {duration > 0 && (
-            <p className="text-xs text-text-muted -mt-2">
-              {duration} {duration === 1 ? "day" : "days"}
-            </p>
-          )}
-          {overlap && (
-            <p className="text-xs text-warning">
-              Overlaps &quot;{overlap.name}&quot; ({overlap.startDate.substring(0, 10)} &ndash;{" "}
-              {overlap.endDate.substring(0, 10)}). You can still save.
-            </p>
-          )}
-          <Input
-            label="Goal (optional)"
-            value={goal}
-            onChange={(e) => setGoal(e.target.value)}
-            placeholder="What do we want to achieve?"
-          />
-          <div className="flex gap-3">
-            <Button type="submit" disabled={saving}>
-              {saving ? "Saving..." : editing ? "Update" : "Create"}
-            </Button>
-            <Button type="button" variant="secondary" onClick={() => setShowForm(false)}>
-              Cancel
-            </Button>
-          </div>
-        </form>
-      </Modal>
+      {showForm && (
+        <SprintFormModal
+          sprints={board.sprints}
+          editing={editing}
+          saving={saving}
+          onSubmit={handleSubmit}
+          onClose={() => setShowForm(false)}
+        />
+      )}
 
-      {completeSprint && (
-        <Modal
-          open={!!completeSprint}
-          onClose={() => setCompleteSprint(null)}
-          title="Complete Sprint"
-        >
-          <div className="space-y-4">
-            <p className="text-sm">
-              Completing <strong>{completeSprint.name}</strong>.
-              {(completeSprint.taskCount! - completeSprint.doneCount!) > 0 && (
-                <> There {completeSprint.taskCount! - completeSprint.doneCount! === 1 ? "is" : "are"}{" "}
-                <strong>{completeSprint.taskCount! - completeSprint.doneCount!}</strong> incomplete
-                task{completeSprint.taskCount! - completeSprint.doneCount! === 1 ? "" : "s"}.</>
-              )}
-            </p>
-            <div className="flex gap-3">
-              <Button onClick={() => handleComplete(completeSprint._id, true)}>
-                Move to Backlog
-              </Button>
-              <Button variant="secondary" onClick={() => handleComplete(completeSprint._id, false)}>
-                Keep in Sprint
-              </Button>
-              <Button variant="ghost" onClick={() => setCompleteSprint(null)}>
-                Cancel
-              </Button>
-            </div>
-          </div>
-        </Modal>
+      {completing && (
+        <CompleteSprintDialog
+          sprint={completing}
+          onComplete={(moveToBacklog) => handleComplete(completing._id, moveToBacklog)}
+          onClose={() => setCompleting(null)}
+        />
       )}
 
       <ConfirmDialog
         open={!!confirmDelete}
         onClose={() => setConfirmDelete(null)}
-        onConfirm={() => confirmDelete && handleDelete(confirmDelete)}
+        onConfirm={() => confirmDelete && handleDelete(confirmDelete._id)}
         title="Delete Sprint"
         message="Are you sure? Tasks in this sprint will be moved to backlog."
         confirmLabel="Delete"
