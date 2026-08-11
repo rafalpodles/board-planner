@@ -55,7 +55,7 @@ export default function KanbanPage() {
   useCanonicalUrl(board.project?.key);
   useBoardDocumentTitle(board.project, board.tasks);
 
-  if (board.loading) {
+  if (board.loading || (!board.project && !board.loadError)) {
     return (
       <div className="flex justify-center py-12">
         <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary border-t-transparent" />

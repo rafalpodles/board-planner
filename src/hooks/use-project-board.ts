@@ -131,7 +131,8 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
           : api.get(`/api/projects/${projectId}/tasks${sprintParam}`),
         api.get(`/api/projects/${projectId}/sprints`),
       ]);
-      // A slower earlier request must not overwrite what a later one already applied
+      // A slower earlier request must not overwrite what a later one already applied,
+      // nor report that loading finished — it never applied anything, it was overtaken
       if (seq !== loadSeq.current) return;
       setProject(proj);
       if (requestScope !== null) {
@@ -143,10 +144,11 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
       setSprints(sprintList);
       setLoadError(false);
     } catch {
+      if (seq !== loadSeq.current) return;
       setLoadError(true);
       toast("Failed to load board data", "error");
     } finally {
-      setLoading(false);
+      if (seq === loadSeq.current) setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, scope]);
