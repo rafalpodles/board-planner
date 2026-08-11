@@ -6,7 +6,8 @@
  *   MONGODB_URI=... npx tsx scripts/migrate-upload-projects.ts
  *
  * Against production, through the database service — the app service's URI is on Railway's
- * private network and does not resolve from a laptop:
+ * private network and does not resolve from a laptop. The connection name differs per service,
+ * so resolveUri() finds the reachable one rather than requiring MONGODB_URI by name:
  *   railway run --service MongoDB -- npx tsx scripts/migrate-upload-projects.ts --dry-run
  *
  * Uploads recorded no owner, so the read path had nothing to check and served any file to any
@@ -23,6 +24,7 @@
  * which checks nothing; files left unstamped after the deploy return 404 to their own owners.
  */
 import mongoose from "mongoose";
+import { dbName, resolveUri } from "./mongo-uri";
 import { Comment } from "../src/models/comment";
 import { PmMessage } from "../src/models/pmMessage";
 import { Task } from "../src/models/task";
@@ -56,12 +58,12 @@ async function projectsReferencing(fileId: string): Promise<Set<string>> {
 }
 
 async function main() {
-  const uri = process.env.MONGODB_URI;
-  if (!uri) throw new Error("MONGODB_URI is required");
-
-  await mongoose.connect(uri);
+  const { uri, source } = resolveUri();
+  await mongoose.connect(uri, { dbName: dbName() });
   const db = mongoose.connection.db;
-  if (!db) throw new Error("no database handle");
+  if (!db) throw new Error("No database handle");
+
+  console.log(`connected via ${source}${DRY_RUN ? " (dry run)" : ""}`);
 
   const files = await db.collection("uploads.files").find({}).toArray();
   const unstamped = files.filter((f) => !f.metadata?.project);
