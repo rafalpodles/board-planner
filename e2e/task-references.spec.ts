@@ -252,6 +252,105 @@ test.describe("where the list appears", () => {
     expect(where.y).toBeGreaterThan(box.y + box.height / 2);
   });
 
+  // Wrapping a field to hold the list moved its `flex-1 min-w-0` off the flex row's direct child,
+  // and the criteria collapsed to a column a few characters wide. Every test here passed: they
+  // asked whether the list appears, never how wide anything is.
+  test("wrapping the field for the list does not narrow it", async ({ page }) => {
+    const handle = await db();
+    await handle.collection("tasks").updateOne(
+      { _id: HELD_TASK_ID },
+      {
+        $set: {
+          checklist: [
+            { text: "A criterion long enough that a narrow column would wrap it many times", done: false },
+          ],
+        },
+      }
+    );
+
+    await signIn(page);
+    await page.goto(`/projects/${PROJECT_KEY}/tasks/1`);
+
+    const criterion = page.getByLabel("Criterion 1").first();
+    await expect(criterion).toBeVisible();
+    const field = (await criterion.boundingBox())!;
+    // Against the comment box, which sits in the same column and always fills it. The first version
+    // of this compared against the words "Acceptance criteria" — a 140px label — so the collapsed
+    // 147px field cleared the bar and the mutation passed.
+    const reference = (await page.getByPlaceholder(/@mention someone/).boundingBox())!;
+
+    expect(field.width).toBeGreaterThan(reference.width * 0.8);
+  });
+
+  // A criterion was a textarea, and a textarea can only ever show a key as text — which is what
+  // made this the one place the reference did not work. It renders until somebody asks to edit it.
+  test("a key in a criterion is a link, and reaches the task", async ({ page }) => {
+    const handle = await db();
+    await handle.collection("tasks").updateOne(
+      { _id: HELD_TASK_ID },
+      {
+        $set: {
+          checklist: [
+            { text: `Depends on ${PROJECT_KEY}-${SIBLING_TASK_NUMBER} landing first`, done: false },
+          ],
+        },
+      }
+    );
+
+    await signIn(page);
+    await page.goto(`/projects/${PROJECT_KEY}/tasks/1`);
+
+    const link = page.getByRole("link", { name: `${PROJECT_KEY}-${SIBLING_TASK_NUMBER}` });
+    await expect(link).toBeVisible();
+    await link.click();
+
+    await expect(page).toHaveURL(new RegExp(`${TASK_URL}$`));
+  });
+
+  test("clicking the words edits the criterion, clicking the link does not", async ({ page }) => {
+    const handle = await db();
+    await handle.collection("tasks").updateOne(
+      { _id: HELD_TASK_ID },
+      { $set: { checklist: [{ text: `Depends on ${PROJECT_KEY}-3 landing first`, done: false }] } }
+    );
+
+    await signIn(page);
+    await page.goto(`/projects/${PROJECT_KEY}/tasks/1`);
+
+    // The words, not the link: this is the reader asking to change the text
+    await page.getByText("landing first").click();
+    await expect(page.getByRole("textbox", { name: "Criterion 1" })).toBeFocused();
+
+    // Blur returns it to the rendered view, links and all
+    await page.keyboard.press("Tab");
+    await expect(page.getByRole("link", { name: `${PROJECT_KEY}-3` })).toBeVisible();
+  });
+
+  // The source guards the click so a link does not also open the editor. There is deliberately no
+  // test for it: the click navigates away either way, so whether the editor opened first is not
+  // observable, and an assertion here passed with the guard deleted. The guard stays because
+  // mutating the page on the way out is wrong, not because a test can see it.
+
+  // Editing an existing criterion is a different field from adding one, and the rendered view now
+  // stands between them — so it needs its own check that the trigger survived the round trip
+  test("editing an existing criterion still offers tasks", async ({ page }) => {
+    const handle = await db();
+    await handle.collection("tasks").updateOne(
+      { _id: HELD_TASK_ID },
+      { $set: { checklist: [{ text: "Something to change", done: false }] } }
+    );
+
+    await signIn(page);
+    await page.goto(`/projects/${PROJECT_KEY}/tasks/1`);
+    await page.getByText("Something to change").click();
+
+    const field = page.getByRole("textbox", { name: "Criterion 1" });
+    await expect(field).toBeFocused();
+    await field.pressSequentially(` ${PROJECT_KEY}-`);
+
+    await expect(page.getByRole("listbox")).toBeVisible();
+  });
+
   test("acceptance criteria offer tasks too", async ({ page }) => {
     await signIn(page);
     await page.goto(`/projects/${PROJECT_KEY}/tasks/1`);

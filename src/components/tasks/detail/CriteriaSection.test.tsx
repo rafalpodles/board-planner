@@ -59,6 +59,10 @@ describe("CriteriaSection", () => {
 
   it("edits a criterion in place", async () => {
     const onChange = renderSection();
+    // A criterion renders until somebody asks to change it, so the field it can be typed into
+    // appears on the click rather than being there all along — that is what lets a task key inside
+    // it be a link instead of characters in a textarea
+    await act(async () => screen.getByLabelText("Criterion 1").click());
     const field = screen.getByLabelText("Criterion 1") as HTMLTextAreaElement;
     await act(async () => type(field, "First, reworded"));
     expect(onChange).toHaveBeenCalledWith([
@@ -69,10 +73,16 @@ describe("CriteriaSection", () => {
 
   // A criterion runs to two lines in the design; an input would scroll the tail
   // out of sight instead of wrapping
-  it("gives each criterion a field that wraps", () => {
+  it("gives each criterion a field that wraps", async () => {
     renderSection();
+    await act(async () => screen.getByLabelText("Criterion 1").click());
     expect(screen.getByLabelText("Criterion 1").tagName).toBe("TEXTAREA");
     expect(addField().tagName).toBe("TEXTAREA");
+  });
+
+  it("shows a criterion as text until it is asked to be changed", () => {
+    renderSection();
+    expect(screen.getByLabelText("Criterion 1").tagName).not.toBe("TEXTAREA");
   });
 
   it("removes a criterion", async () => {

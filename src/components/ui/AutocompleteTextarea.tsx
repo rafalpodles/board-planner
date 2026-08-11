@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, type KeyboardEvent } from "react";
+import { useEffect, useRef, type KeyboardEvent } from "react";
 import { useTriggerAutocomplete, type Trigger } from "@/hooks/use-trigger-autocomplete";
 import { SuggestionList } from "@/components/ui/SuggestionList";
 import { GrowingTextarea } from "@/components/tasks/detail/atoms";
@@ -21,6 +21,7 @@ export function AutocompleteTextarea({
   onBlur,
   className,
   placeholder,
+  autoFocus = false,
   "aria-label": ariaLabel,
 }: {
   value: string;
@@ -30,13 +31,28 @@ export function AutocompleteTextarea({
   onBlur?: () => void;
   className?: string;
   placeholder?: string;
+  /** For a field that appears because somebody asked to edit — the caret goes where they clicked */
+  autoFocus?: boolean;
   "aria-label"?: string;
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const autocomplete = useTriggerAutocomplete(triggers, ref, onChange);
 
+  useEffect(() => {
+    if (!autoFocus) return;
+    const textarea = ref.current;
+    if (!textarea) return;
+    textarea.focus();
+    // At the end, so clicking a criterion to change it does not drop the caret at character zero
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+  }, [autoFocus]);
+
   return (
-    <div className="relative flex-1">
+    // The wrapper stands where the field used to, so it has to carry the field's sizing: callers
+    // put `flex-1 min-w-0` on the textarea because it was a direct child of a flex row, and once
+    // this div came between them that class did nothing — the acceptance criteria collapsed to a
+    // column a few characters wide. The field fills the wrapper instead.
+    <div className="relative min-w-0 flex-1">
       <SuggestionList
         items={autocomplete.items}
         index={autocomplete.index}
@@ -62,7 +78,7 @@ export function AutocompleteTextarea({
           setTimeout(autocomplete.close, 150);
           onBlur?.();
         }}
-        className={className}
+        className={`w-full ${className ?? ""}`}
         placeholder={placeholder}
         aria-label={ariaLabel}
       />
