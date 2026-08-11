@@ -184,6 +184,7 @@ export default function SprintsPage() {
                   <ProjectBoardView
                     board={board}
                     readOnly={sprintIsReadOnly}
+                    pinViewMode="board"
                     emptyState={
                       <div className="flex flex-col items-center justify-center py-16 text-center">
                         <h2 className="text-lg font-medium text-text-muted mb-2">

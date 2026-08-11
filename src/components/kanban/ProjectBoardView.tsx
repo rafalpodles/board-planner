@@ -26,9 +26,18 @@ interface ProjectBoardViewProps {
   readOnly?: boolean;
   // Omit for the project's own default; pass null to render nothing instead
   emptyState?: ReactNode;
+  // Overrides board.viewMode for this render and disables the "v" toggle. For a host
+  // page that renders no view switcher of its own, so a stored "list" preference from
+  // elsewhere can't strand it with no way back.
+  pinViewMode?: "board" | "list";
 }
 
-export function ProjectBoardView({ board, readOnly = false, emptyState }: ProjectBoardViewProps) {
+export function ProjectBoardView({
+  board,
+  readOnly = false,
+  emptyState,
+  pinViewMode,
+}: ProjectBoardViewProps) {
   const { projectId } = useParams<{ projectId: string }>();
   const router = useRouter();
   const api = useApi();
@@ -41,7 +50,7 @@ export function ProjectBoardView({ board, readOnly = false, emptyState }: Projec
     sprints,
     assignableUsers,
     scope,
-    viewMode,
+    viewMode: boardViewMode,
     setViewMode,
     showNewTask,
     setShowNewTask,
@@ -72,6 +81,8 @@ export function ProjectBoardView({ board, readOnly = false, emptyState }: Projec
     handleContextDuplicate,
     handleContextDelete,
   } = board;
+
+  const viewMode = pinViewMode ?? boardViewMode;
 
   const [filteredTasks, setFilteredTasks] = useState<ApiTask[]>([]);
   const [contextMenu, setContextMenu] = useState<{ taskId: string; x: number; y: number } | null>(null);
@@ -123,7 +134,7 @@ export function ProjectBoardView({ board, readOnly = false, emptyState }: Projec
         setShowShortcutHelp((v) => !v);
         return;
       }
-      if (e.key === "v" && noMod) {
+      if (e.key === "v" && noMod && !pinViewMode) {
         e.preventDefault();
         setViewMode(viewMode === "board" ? "list" : "board");
         return;
@@ -168,6 +179,7 @@ export function ProjectBoardView({ board, readOnly = false, emptyState }: Projec
     setSelectedTasks,
     setSelectionMode,
     readOnly,
+    pinViewMode,
   ]);
 
   function handleTaskSelect(taskId: string) {

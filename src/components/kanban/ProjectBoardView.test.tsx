@@ -115,6 +115,22 @@ describe("A read-only ProjectBoardView", () => {
   });
 });
 
+describe("ProjectBoardView's pinViewMode prop", () => {
+  it("renders the board even when the stored preference is list", () => {
+    const { container } = render(
+      <ProjectBoardView board={makeBoard({ tasks, viewMode: "list" })} pinViewMode="board" />
+    );
+    expect(screen.getByTestId("column-todo")).toBeTruthy();
+    expect(container.querySelector("table")).toBeNull();
+  });
+
+  it("renders list view when the stored preference is list and nothing is pinned", () => {
+    const { container } = render(<ProjectBoardView board={makeBoard({ tasks, viewMode: "list" })} />);
+    expect(container.querySelector("table")).toBeTruthy();
+    expect(screen.queryByTestId("column-todo")).toBeNull();
+  });
+});
+
 describe("ProjectBoardView's emptyState prop", () => {
   it("renders nothing when emptyState is explicitly null", () => {
     render(<ProjectBoardView board={makeBoard({ tasks: [] })} emptyState={null} />);
