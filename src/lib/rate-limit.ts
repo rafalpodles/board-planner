@@ -1,13 +1,30 @@
 /**
- * Simple in-memory rate limiter for auth endpoints.
- * Tracks failed attempts per IP and blocks after threshold.
+ * In-memory throttle for the endpoints that verify a password.
+ *
+ * Two dimensions, answered differently. A caller identified by IP is refused before its credential
+ * is looked at — it is the one guessing, and refusing it costs nobody else.
+ *
+ * The account dimension is never consulted before verification, only after a failure. Guessing is
+ * still throttled, but a correct password always wins, so the counter cannot be used to shut a real
+ * user out of their own account. That mattered because the account key is the one an attacker can
+ * aim at somebody else, and on a deployment with no proxy every caller shares one identity, which
+ * made a targeted lockout trivial.
+ *
+ * Delaying the response instead was considered and rejected: holding a request open is a throttle
+ * an attacker can turn around, opening many at once to exhaust the server.
  */
 const attempts = new Map<string, { count: number; resetAt: number }>();
 
 const MAX_ATTEMPTS = 10;
+// A source key aggregates every account tried from one address, and addresses are shared — office
+// NAT, mobile carrier. At the per-account threshold one colleague's ten typos would refuse the
+// whole building, so the source dimension needs room for honest traffic before it bites.
+// Two thresholds because two kinds of source identity. An IP is shared; an authenticated account
+// is not, so it can be refused as tightly as the account dimension without hitting a bystander.
+export const SHARED_SOURCE_ATTEMPTS = 50;
+export const EXCLUSIVE_SOURCE_ATTEMPTS = MAX_ATTEMPTS;
 const WINDOW_MS = 15 * 60 * 1000; // 15 minutes
 
-// Cleanup old entries periodically
 setInterval(() => {
   const now = Date.now();
   for (const [key, val] of attempts) {
@@ -15,27 +32,37 @@ setInterval(() => {
   }
 }, 60_000);
 
-export function isRateLimited(ip: string): boolean {
-  const now = Date.now();
-  const entry = attempts.get(ip);
-
-  if (!entry || entry.resetAt <= now) return false;
-  return entry.count >= MAX_ATTEMPTS;
+function countFor(key: string): number {
+  const entry = attempts.get(key);
+  if (!entry || entry.resetAt <= Date.now()) return 0;
+  return entry.count;
 }
 
-export function recordFailedAttempt(ip: string): void {
+export function isRateLimited(key: string, threshold = MAX_ATTEMPTS): boolean {
+  return countFor(key) >= threshold;
+}
+
+export function recordFailedAttempt(key: string): void {
   const now = Date.now();
-  const entry = attempts.get(ip);
+  const entry = attempts.get(key);
 
   if (!entry || entry.resetAt <= now) {
-    attempts.set(ip, { count: 1, resetAt: now + WINDOW_MS });
+    attempts.set(key, { count: 1, resetAt: now + WINDOW_MS });
   } else {
     entry.count++;
   }
 }
 
-export function clearAttempts(ip: string): void {
-  attempts.delete(ip);
+export function clearAttempts(key: string): void {
+  attempts.delete(key);
+}
+
+/**
+ * Drops every counter. For tests: clearing individual keys means spelling out the key shape, which
+ * silently stops matching the moment that shape changes and leaks a counter into an unrelated case.
+ */
+export function resetRateLimits(): void {
+  attempts.clear();
 }
 
 // Scoped so that fumbling your current password in the profile form cannot lock you out of logging
@@ -44,17 +71,36 @@ export function lockoutKey(clientIp: string, username: string, scope = "login"):
   return `${scope}:${clientIp}:${username.toLowerCase()}`;
 }
 
+/** The source dimension: one key per caller, regardless of which account it is guessing at. */
+export function sourceKey(clientIp: string, scope = "login"): string {
+  return `${scope}:source:${clientIp}`;
+}
+
+/**
+ * `key` is the account dimension, `source` the caller. A correct credential always wins: the
+ * account counter is consulted only after a *failed* verification, so it can throttle guessing
+ * without ever denying the real owner their login — which is what an account-keyed refusal becomes
+ * the moment an attacker can aim it, and on a proxy-less deployment every caller can.
+ */
 export async function withLockout<T>(
   key: string,
-  verify: () => Promise<T | null>
+  verify: () => Promise<T | null>,
+  source?: string,
+  sourceThreshold: number = SHARED_SOURCE_ATTEMPTS
 ): Promise<{ lockedOut: boolean; result: T | null }> {
-  if (isRateLimited(key)) return { lockedOut: true, result: null };
+  if (source && isRateLimited(source, sourceThreshold)) {
+    return { lockedOut: true, result: null };
+  }
 
   const result = await verify();
   if (result) {
     clearAttempts(key);
-  } else {
-    recordFailedAttempt(key);
+    if (source) clearAttempts(source);
+    return { lockedOut: false, result };
   }
-  return { lockedOut: false, result };
+
+  recordFailedAttempt(key);
+  if (source) recordFailedAttempt(source);
+
+  return { lockedOut: isRateLimited(key), result: null };
 }

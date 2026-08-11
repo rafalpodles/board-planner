@@ -3,7 +3,12 @@ import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
 import { getClientIp } from "@/lib/auth";
 import { withAuth } from "@/lib/middleware";
-import { lockoutKey, withLockout } from "@/lib/rate-limit";
+import {
+  EXCLUSIVE_SOURCE_ATTEMPTS,
+  lockoutKey,
+  sourceKey,
+  withLockout,
+} from "@/lib/rate-limit";
 import { revokeUserSessions } from "@/lib/session";
 import { User } from "@/models/user";
 
@@ -46,8 +51,10 @@ export const PUT = withAuth(async (request, { user }) => {
   }
 
   const { lockedOut, result: passwordMatches } = await withLockout(
-    lockoutKey(getClientIp(request), user.username, "password-change"),
-    async () => ((await bcrypt.compare(currentPassword, record.password)) ? true : null)
+    lockoutKey(getClientIp(request) ?? "-", user.username, "password-change"),
+    async () => ((await bcrypt.compare(currentPassword, record.password)) ? true : null),
+    sourceKey(String(user._id), "password-change"),
+    EXCLUSIVE_SOURCE_ATTEMPTS
   );
   if (lockedOut) {
     return NextResponse.json(

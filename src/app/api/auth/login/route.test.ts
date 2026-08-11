@@ -17,7 +17,7 @@ vi.mock("@/lib/session", async (importOriginal) => {
 });
 
 const { POST } = await import("./route");
-const { clearAttempts, lockoutKey } = await import("@/lib/rate-limit");
+const { resetRateLimits } = await import("@/lib/rate-limit");
 const { SESSION_IDLE_TTL_MS, SESSION_ABSOLUTE_TTL_MS } = await import("@/lib/session");
 
 const USER = {
@@ -54,12 +54,9 @@ function sessionCookie(response: Response): string | undefined {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  resetRateLimits();
   delete process.env.COOKIE_ALLOW_INSECURE;
   delete process.env.APP_ORIGIN;
-  // Built with lockoutKey rather than hand-spelled: a literal here silently stops matching the
-  // moment the key shape changes, and the leaked counter then fails a different test
-  clearAttempts(lockoutKey("unknown", "rpo"));
-  clearAttempts(lockoutKey("203.0.113.9", "rpo"));
   verifyCredentials.mockResolvedValue(USER);
   createSession.mockResolvedValue({
     token: "cps_deadbeef",
@@ -142,32 +139,63 @@ describe("POST /api/auth/login — credentials", () => {
     expect(setCookies(response)).toEqual([]);
   });
 
-  it("locks out after the existing threshold, without reaching the password check", async () => {
+  it("never denies the real owner, however many failures preceded them", async () => {
+    // No proxy header means every caller shares one identity, so a refusal keyed on the account
+    // would let anyone shut a named user out. Guessing is still throttled; the owner is not.
     verifyCredentials.mockResolvedValue(null);
-    for (let attempt = 0; attempt < 10; attempt++) {
-      expect((await POST(request())).status).toBe(401);
+    let sawRefusal = false;
+    for (let attempt = 0; attempt < 15; attempt++) {
+      const status = (await POST(request())).status;
+      if (status === 429) sawRefusal = true;
     }
 
-    verifyCredentials.mockClear();
-    const response = await POST(request());
-
-    expect(response.status).toBe(429);
-    expect(verifyCredentials).not.toHaveBeenCalled();
-  });
-
-  it("keys the lockout on the client ip as well as the username", async () => {
-    verifyCredentials.mockResolvedValue(null);
-    for (let attempt = 0; attempt < 10; attempt++) {
-      await POST(request());
-    }
+    expect(sawRefusal).toBe(true);
 
     verifyCredentials.mockResolvedValue(USER);
-    const response = await POST(
-      request({ "sec-fetch-site": "same-origin", "x-forwarded-for": "203.0.113.9" })
-    );
+    const response = await POST(request());
 
     expect(response.status).toBe(200);
   });
+
+  it("refuses an address spraying many usernames, which no per-account counter would catch", async () => {
+    const from = (username: string) =>
+      request({ "sec-fetch-site": "same-origin", "x-forwarded-for": "203.0.113.9" }, {
+        username,
+        password: "guess",
+      });
+
+    verifyCredentials.mockResolvedValue(null);
+    let refusedAt = -1;
+    for (let attempt = 0; attempt < 60; attempt++) {
+      // One try per account, so every account counter stays at 1 and only the source accumulates
+      if ((await POST(from(`victim-${attempt}`))).status === 429) {
+        refusedAt = attempt;
+        break;
+      }
+    }
+
+    expect(refusedAt).toBeGreaterThan(10);
+
+    verifyCredentials.mockClear();
+    verifyCredentials.mockResolvedValue(USER);
+    expect((await POST(from("someone-else"))).status).toBe(429);
+    expect(verifyCredentials).not.toHaveBeenCalled();
+  });
+
+  it("refusing one address leaves another address alone", async () => {
+    verifyCredentials.mockResolvedValue(null);
+    for (let attempt = 0; attempt < 55; attempt++) {
+      await POST(request({ "sec-fetch-site": "same-origin", "x-forwarded-for": "203.0.113.9" }));
+    }
+
+    verifyCredentials.mockResolvedValue(USER);
+    const elsewhere = await POST(
+      request({ "sec-fetch-site": "same-origin", "x-forwarded-for": "198.51.100.4" })
+    );
+
+    expect(elsewhere.status).toBe(200);
+  });
+
 
   it("rejects a malformed body before touching the password check", async () => {
     expect((await POST(request({ "sec-fetch-site": "same-origin" }, "{"))).status).toBe(400);

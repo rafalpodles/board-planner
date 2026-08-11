@@ -1,11 +1,13 @@
 import mongoose from "mongoose";
 import { connectDB } from "@/lib/db";
 import { withAuth } from "@/lib/middleware";
+import { check } from "@/lib/grants";
+import { projectForUpload, uploadsBucket } from "@/lib/upload-ownership";
 
 // SVG excluded: served as attachment so scripts never run in the app's origin
 const INLINE_SAFE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 
-export const GET = withAuth(async (_request, { params }) => {
+export const GET = withAuth(async (_request, { params, user }) => {
   const { fileId } = await params;
   await connectDB();
 
@@ -16,22 +18,28 @@ export const GET = withAuth(async (_request, { params }) => {
     return new Response("Invalid file ID", { status: 400 });
   }
 
-  const db = mongoose.connection.db;
-  if (!db) {
+  const bucket = uploadsBucket();
+  if (!bucket) {
     return new Response("Database not connected", { status: 500 });
   }
 
-  const bucket = new mongoose.mongo.GridFSBucket(db, {
-    bucketName: "uploads",
-  });
-
-  // Check file exists
   const files = await bucket.find({ _id: objectId }).toArray();
   if (files.length === 0) {
     return new Response("File not found", { status: 404 });
   }
 
   const file = files[0];
+
+  // 404 rather than 403 throughout: a file id is a bare ObjectId, so distinguishing "exists but not
+  // yours" from "no such file" would confirm the existence of other boards' attachments.
+  const project = await projectForUpload(file, fileId);
+  if (!project) {
+    return new Response("File not found", { status: 404 });
+  }
+  if (!(await check(user, project, "access"))) {
+    return new Response("File not found", { status: 404 });
+  }
+
   const contentType =
     (file.metadata?.contentType as string) || "application/octet-stream";
 

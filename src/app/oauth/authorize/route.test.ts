@@ -20,6 +20,7 @@ vi.mock("@/models/project", () => ({
 }));
 
 const { POST } = await import("./route");
+const { resetRateLimits } = await import("@/lib/rate-limit");
 
 const REDIRECT_URI = "https://client.example/callback";
 const USER = { _id: "u1", username: "victim", role: "member" };
@@ -51,6 +52,7 @@ async function attempt(username: string): Promise<string> {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  resetRateLimits();
   oauthClientFindOne.mockResolvedValue({
     clientId: "c1",
     clientName: "Some App",
@@ -60,18 +62,13 @@ beforeEach(() => {
 });
 
 describe("POST /oauth/authorize login phase", () => {
-  it("locks the account out after the failure threshold, before the password is checked", async () => {
-    for (let i = 0; i < 10; i++) {
-      expect(await attempt("locked")).toContain("Invalid username or password.");
-    }
-    expect(verifyCredentials).toHaveBeenCalledTimes(10);
+  it("throttles guessing without ever shutting the real owner out", async () => {
+    for (let i = 0; i < 12; i++) await attempt("locked");
 
+    // No proxy header here, so every caller shares one identity: refusing this account would hand
+    // anyone a way to deny it. The correct password is checked before the counter is consulted.
     verifyCredentials.mockResolvedValue(USER);
-    const body = await attempt("locked");
-
-    expect(body).toContain("Too many failed attempts.");
-    expect(body).not.toContain("Grant access");
-    expect(verifyCredentials).toHaveBeenCalledTimes(10);
+    expect(await attempt("locked")).toContain("Grant access");
   });
 
   it("locks out one username at a time", async () => {
