@@ -300,9 +300,34 @@ describe("resolveSession", () => {
   });
 
   it("does not write at exactly the throttle boundary", async () => {
-    found(row({ expiresAt: new Date(Date.now() + SESSION_IDLE_TTL_MS - SESSION_SLIDE_THROTTLE_MS) }));
-    await resolveSession("cps_abc");
-    expect(updateOne).not.toHaveBeenCalled();
+    // Frozen: the row is built from one Date.now() and the boundary is evaluated from another, and
+    // the comparison is a strict >. Any real time passing between the two puts the row past the
+    // boundary and it slides — which passed locally and failed on slower CI.
+    vi.useFakeTimers();
+    try {
+      found(
+        row({ expiresAt: new Date(Date.now() + SESSION_IDLE_TTL_MS - SESSION_SLIDE_THROTTLE_MS) })
+      );
+      await resolveSession("cps_abc");
+      expect(updateOne).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("slides one millisecond past the boundary", async () => {
+    vi.useFakeTimers();
+    try {
+      found(
+        row({
+          expiresAt: new Date(Date.now() + SESSION_IDLE_TTL_MS - SESSION_SLIDE_THROTTLE_MS - 1),
+        })
+      );
+      await resolveSession("cps_abc");
+      expect(updateOne).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("slides once the window is more than the throttle from full", async () => {
