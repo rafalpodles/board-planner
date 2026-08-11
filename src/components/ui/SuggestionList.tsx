@@ -1,6 +1,7 @@
 "use client";
 
 import type { Suggestion } from "@/hooks/use-trigger-autocomplete";
+import type { CaretPoint } from "@/lib/caret";
 
 /**
  * The list an autocomplete trigger drops above the caret. Extracted from Comments along with the
@@ -12,18 +13,25 @@ export function SuggestionList({
   index,
   onPick,
   onHover,
+  at,
 }: {
   items: Suggestion[];
   index: number;
   onPick: (suggestion: Suggestion) => void;
   onHover?: (index: number) => void;
+  /** Where the caret is inside the field. Without it the list sits above the whole box, which is
+      fine on a two-line composer and useless on a 400px description. */
+  at?: CaretPoint | null;
 }) {
   if (items.length === 0) return null;
 
   return (
     <div
       role="listbox"
-      className="absolute bottom-full left-0 z-20 mb-1 max-h-[160px] min-w-[200px] overflow-y-auto rounded-lg border border-border bg-bg-card py-1 shadow-lg"
+      style={at ? { top: at.top + at.lineHeight, left: at.left } : undefined}
+      className={`absolute z-20 max-h-[160px] min-w-[200px] overflow-y-auto rounded-lg border border-border bg-bg-card py-1 shadow-lg ${
+        at ? "" : "bottom-full left-0 mb-1"
+      }`}
     >
       {items.map((item, i) => (
         <button

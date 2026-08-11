@@ -332,6 +332,7 @@ function TaskDetailView({
 
           <CriteriaSection
             items={draft.checklist}
+            triggers={triggers}
             onChange={(items) => set("checklist", items)}
           />
 

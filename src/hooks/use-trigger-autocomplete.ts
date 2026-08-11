@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
+import { caretCoordinates, type CaretPoint } from "@/lib/caret";
 
 export interface Suggestion {
   id: string;
@@ -47,6 +48,9 @@ export function useTriggerAutocomplete(
   const [open, setOpen] = useState<Open | null>(null);
   const [items, setItems] = useState<Suggestion[]>([]);
   const [index, setIndex] = useState(0);
+  // Measured when the trigger fires, not on every render: the list stays where the caret was when
+  // it opened, which is where the person is looking
+  const [at, setAt] = useState<CaretPoint | null>(null);
   // Answers can arrive out of order once a trigger asks the server; only the newest may land
   const request = useRef(0);
   // What the last detection was looking at, so a trigger whose data arrives later can be asked
@@ -58,6 +62,7 @@ export function useTriggerAutocomplete(
     setOpen(null);
     setItems([]);
     setIndex(0);
+    setAt(null);
     request.current++;
   }, []);
 
@@ -73,6 +78,7 @@ export function useTriggerAutocomplete(
         const ticket = ++request.current;
         setOpen({ trigger: trigger.name, start: caret - match[0].length, caret });
         setIndex(0);
+        if (textareaRef.current) setAt(caretCoordinates(textareaRef.current));
 
         Promise.resolve(trigger.suggest(match[1] ?? ""))
           .then((found) => {
@@ -87,7 +93,7 @@ export function useTriggerAutocomplete(
 
       close();
     },
-    [triggers, close]
+    [triggers, close, textareaRef]
   );
 
   // Triggers change identity when their data does — the people list arriving, the board key
@@ -143,6 +149,7 @@ export function useTriggerAutocomplete(
   return {
     /** Null unless a trigger matched; carries which one, so a caller can style per trigger. */
     trigger: open?.trigger ?? null,
+    at,
     items,
     index,
     setIndex,
