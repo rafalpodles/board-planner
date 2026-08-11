@@ -74,12 +74,19 @@ async function main() {
   const orphans: string[] = [];
   const ambiguous: string[] = [];
 
+  const describe = (f: (typeof files)[number]) => {
+    const kb = (Number(f.length) / 1024).toFixed(1);
+    const when = new Date(f.uploadDate).toISOString().slice(0, 10);
+    return `${f.filename} · ${f.metadata?.contentType ?? "?"} · ${kb} KB · ${when}`;
+  };
+
   for (const file of unstamped) {
     const id = String(file._id);
     const projects = await projectsReferencing(id);
 
     if (projects.size === 0) {
-      orphans.push(id);
+      // Named, not just listed: an id alone cannot tell you whether losing it matters
+      orphans.push(`${id}  ${describe(file)}`);
       continue;
     }
     if (projects.size > 1) {
@@ -98,7 +105,9 @@ async function main() {
   }
 
   console.log(`${DRY_RUN ? "would stamp" : "stamped"}: ${stamped}`);
-  console.log(`unreferenced (will 404, nothing links to them): ${orphans.length}`);
+  console.log(
+    `unreferenced (nothing links to them, so they have no owner to check and will 404): ${orphans.length}`
+  );
   orphans.forEach((id) => console.log(`  ${id}`));
   console.log(`ambiguous (resolve by hand): ${ambiguous.length}`);
   ambiguous.forEach((line) => console.log(`  ${line}`));
