@@ -74,7 +74,7 @@ export function PlanningView({ projectId, board, sprintId }: PlanningViewProps) 
   function dropInto(targetSprintId: string | null) {
     return (taskId: string) => {
       const task = findTask(taskId);
-      if (task) move(task, targetSprintId);
+      if (task && (task.sprint ?? null) !== targetSprintId) move(task, targetSprintId);
     };
   }
 

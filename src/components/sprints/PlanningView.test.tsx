@@ -51,6 +51,7 @@ const sprintTasks = [
     priority: "medium",
     category: "bug",
     order: 0,
+    sprint: "s1",
     createdAt: "2026-08-01T00:00:00Z",
     updatedAt: "2026-08-01T00:00:00Z",
   },
@@ -67,6 +68,7 @@ const backlogTasks = [
     priority: "medium",
     category: "bug",
     order: 0,
+    sprint: null,
     createdAt: "2026-08-01T00:00:00Z",
     updatedAt: "2026-08-01T00:00:00Z",
   },
@@ -78,6 +80,7 @@ const backlogTasks = [
     priority: "medium",
     category: "bug",
     order: 1,
+    sprint: null,
     createdAt: "2026-08-01T00:00:00Z",
     updatedAt: "2026-08-01T00:00:00Z",
   },
@@ -89,6 +92,7 @@ const backlogTasks = [
     priority: "medium",
     category: "bug",
     order: 2,
+    sprint: null,
     createdAt: "2026-08-01T00:00:00Z",
     updatedAt: "2026-08-01T00:00:00Z",
   },
@@ -217,6 +221,7 @@ describe("PlanningView", () => {
     await renderPlanning();
     fireEvent.click(screen.getByRole("button", { name: /Add Fix the login redirect/ }));
     await waitFor(() => expect(screen.getByText("Backlog (2)")).toBeTruthy());
+    expect(screen.getByText("Fix the login redirect")).toBeTruthy();
     expect(toast).toHaveBeenCalledWith("Failed to move task", "error");
   });
 
@@ -243,6 +248,17 @@ describe("PlanningView", () => {
       dataTransfer: { getData: () => "t9" },
     });
     expect(api.put).toHaveBeenCalledWith("/api/projects/p1/tasks/t9", { sprint: null });
+  });
+
+  it("writes nothing when a task is dropped back onto the pane it is already in", async () => {
+    await renderPlanning();
+    fireEvent.drop(screen.getByTestId("planning-pane-backlog"), {
+      dataTransfer: { getData: () => "t1" },
+    });
+    fireEvent.drop(screen.getByTestId("planning-pane-sprint"), {
+      dataTransfer: { getData: () => "t9" },
+    });
+    expect(api.put).not.toHaveBeenCalled();
   });
 
   it("does not show the previous sprint's tasks under the new sprint's name mid-switch", async () => {
