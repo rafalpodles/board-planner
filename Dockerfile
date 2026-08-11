@@ -14,6 +14,8 @@ COPY . .
 ARG NEXT_PUBLIC_APP_URL=http://localhost:3000
 ENV NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL
 ENV NEXT_TELEMETRY_DISABLED=1
+# Emits .next/standalone — see next.config.ts. Only this build wants it
+ENV BUILD_STANDALONE=1
 # The build reads the variable but never opens a connection
 ENV MONGODB_URI=mongodb://127.0.0.1:1/build-does-not-connect
 RUN npm run build
