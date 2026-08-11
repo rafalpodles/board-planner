@@ -1,12 +1,21 @@
 import { ApiSprint } from "@/types";
+import { isObjectIdSegment } from "@/lib/urls";
 
 export const ALL_TASKS = "all";
 export const BACKLOG = "backlog";
 
-// Absent, empty or whitespace all mean the unscoped board
+// A scope this shallow check accepts is not guaranteed to name a sprint that exists —
+// an id belonging to another project just returns no tasks — but it is guaranteed to
+// never reach the tasks endpoint's Mongoose filter as something it can't cast
+export function isSprintScopeShape(value: string): boolean {
+  return value === ALL_TASKS || value === BACKLOG || isObjectIdSegment(value);
+}
+
+// Absent, empty, whitespace, or anything that cannot be a scope all mean the unscoped board
 export function sprintScopeFromParam(param: string | null | undefined): string {
   const trimmed = param?.trim();
-  return trimmed ? trimmed : ALL_TASKS;
+  if (!trimmed) return ALL_TASKS;
+  return isSprintScopeShape(trimmed) ? trimmed : ALL_TASKS;
 }
 
 export function sprintScopeToQuery(scope: string): string {

@@ -16,11 +16,12 @@ interface ColumnProps {
   collapsed?: boolean;
   onToggleCollapsed?: () => void;
   onDragOverColumn?: (over: boolean) => void;
-  onStatusChange: (taskId: string, status: string) => void;
+  onStatusChange?: (taskId: string, status: string) => void;
   onTaskDrop?: (taskId: string, status: string, dropIndex: number) => void;
   onTaskClick: (taskId: string) => void;
   onTaskSelect?: (taskId: string) => void;
   onTaskContextMenu?: (taskId: string, x: number, y: number) => void;
+  readOnly?: boolean;
 }
 
 export function Column({
@@ -39,6 +40,7 @@ export function Column({
   onTaskClick,
   onTaskSelect,
   onTaskContextMenu,
+  readOnly = false,
 }: ColumnProps) {
   const [isDragOver, setIsDragOver] = useState(false);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
@@ -53,40 +55,56 @@ export function Column({
 
   return (
     <div
-      onDragOver={(e) => {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = "move";
-        // If dragging over empty area (not a card), drop at end
-        if (e.target === e.currentTarget || (e.target as HTMLElement).closest("[data-column-body]") === e.target) {
-          setDropIndex(tasks.length);
-        }
-      }}
-      onDragEnter={(e) => {
-        e.preventDefault();
-        setIsDragOver(true);
-        onDragOverColumn?.(true);
-      }}
-      onDragLeave={(e) => {
-        if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-          setIsDragOver(false);
-          setDropIndex(null);
-          onDragOverColumn?.(false);
-        }
-      }}
-      onDrop={(e) => {
-        e.preventDefault();
-        setIsDragOver(false);
-        onDragOverColumn?.(false);
-        const taskId = e.dataTransfer.getData("text/plain");
-        if (taskId) {
-          if (onTaskDrop && dropIndex !== null) {
-            onTaskDrop(taskId, column.id, dropIndex);
-          } else {
-            onStatusChange(taskId, column.id);
-          }
-        }
-        setDropIndex(null);
-      }}
+      onDragOver={
+        readOnly
+          ? undefined
+          : (e) => {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "move";
+              // If dragging over empty area (not a card), drop at end
+              if (e.target === e.currentTarget || (e.target as HTMLElement).closest("[data-column-body]") === e.target) {
+                setDropIndex(tasks.length);
+              }
+            }
+      }
+      onDragEnter={
+        readOnly
+          ? undefined
+          : (e) => {
+              e.preventDefault();
+              setIsDragOver(true);
+              onDragOverColumn?.(true);
+            }
+      }
+      onDragLeave={
+        readOnly
+          ? undefined
+          : (e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                setIsDragOver(false);
+                setDropIndex(null);
+                onDragOverColumn?.(false);
+              }
+            }
+      }
+      onDrop={
+        readOnly
+          ? undefined
+          : (e) => {
+              e.preventDefault();
+              setIsDragOver(false);
+              onDragOverColumn?.(false);
+              const taskId = e.dataTransfer.getData("text/plain");
+              if (taskId) {
+                if (onTaskDrop && dropIndex !== null) {
+                  onTaskDrop(taskId, column.id, dropIndex);
+                } else {
+                  onStatusChange?.(taskId, column.id);
+                }
+              }
+              setDropIndex(null);
+            }
+      }
       onClick={collapsed ? onToggleCollapsed : undefined}
       // The rail has to stay a div — it is also the drop target — so it borrows
       // a button's keyboard contract rather than becoming one
@@ -168,7 +186,7 @@ export function Column({
             {dropIndex === i && (
               <div className="h-0.5 bg-primary rounded-full mx-1 -mt-1 mb-1" />
             )}
-            <div onDragOver={(e) => handleCardDragOver(e, i)}>
+            <div onDragOver={readOnly ? undefined : (e) => handleCardDragOver(e, i)}>
               <TaskCard
                 task={task}
                 projectKey={projectKey}
@@ -179,6 +197,7 @@ export function Column({
                 onSelect={onTaskSelect}
                 onClick={() => onTaskClick(task._id)}
                 onContextMenu={onTaskContextMenu}
+                readOnly={readOnly}
               />
             </div>
           </div>
@@ -186,7 +205,7 @@ export function Column({
         {dropIndex === tasks.length && tasks.length > 0 && (
           <div className="h-0.5 bg-primary rounded-full mx-1 -mt-1" />
         )}
-        {tasks.length === 0 && (
+        {tasks.length === 0 && !readOnly && (
           <p className="text-xs text-text-muted text-center py-6">
             Drop tasks here
           </p>

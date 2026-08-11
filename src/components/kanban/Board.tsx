@@ -15,11 +15,12 @@ interface BoardProps {
   selectedTasks?: Set<string>;
   selectionMode?: boolean;
   collapseEmptyColumns?: boolean;
-  onStatusChange: (taskId: string, status: string) => void;
+  onStatusChange?: (taskId: string, status: string) => void;
   onTaskDrop?: (taskId: string, status: string, dropIndex: number) => void;
   onTaskClick: (taskId: string) => void;
   onTaskSelect?: (taskId: string) => void;
   onTaskContextMenu?: (taskId: string, x: number, y: number) => void;
+  readOnly?: boolean;
 }
 
 export function Board({
@@ -36,6 +37,7 @@ export function Board({
   onTaskClick,
   onTaskSelect,
   onTaskContextMenu,
+  readOnly = false,
 }: BoardProps) {
   const boardColumns = useMemo(() => effectiveColumns(columns), [columns]);
   const grouped = useMemo(
@@ -104,16 +106,20 @@ export function Board({
                       })
                   : undefined
               }
-              onDragOverColumn={(over) =>
-                setDragOverColumn((prev) =>
-                  over ? column.id : prev === column.id ? null : prev
-                )
+              onDragOverColumn={
+                readOnly
+                  ? undefined
+                  : (over) =>
+                      setDragOverColumn((prev) =>
+                        over ? column.id : prev === column.id ? null : prev
+                      )
               }
-              onStatusChange={onStatusChange}
+              onStatusChange={readOnly ? undefined : onStatusChange}
               onTaskDrop={onTaskDrop}
               onTaskClick={onTaskClick}
               onTaskSelect={onTaskSelect}
               onTaskContextMenu={onTaskContextMenu}
+              readOnly={readOnly}
             />
           ))}
         </div>
