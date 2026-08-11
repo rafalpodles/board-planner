@@ -16,12 +16,12 @@ function sprint(over: Partial<ApiSprint> & { _id: string }): ApiSprint {
 }
 
 describe("defaultSprintId", () => {
-  it("picks the active sprint", () => {
+  it("picks the active sprint with newest start date when multiple exist", () => {
     const sprints = [
-      sprint({ _id: "p1", status: "planned" }),
-      sprint({ _id: "a1", status: "active" }),
+      sprint({ _id: "a1", status: "active", startDate: "2026-08-01T00:00:00Z" }),
+      sprint({ _id: "a2", status: "active", startDate: "2026-08-10T00:00:00Z" }),
     ];
-    expect(defaultSprintId(sprints)).toBe("a1");
+    expect(defaultSprintId(sprints)).toBe("a2");
   });
 
   it("picks the planned sprint that starts soonest when none is active", () => {
@@ -42,6 +42,22 @@ describe("defaultSprintId", () => {
 
   it("has no answer for a project with no sprints", () => {
     expect(defaultSprintId([])).toBeNull();
+  });
+
+  it("breaks ties on startDate using _id as secondary sort key", () => {
+    const sprints = [
+      sprint({ _id: "z", status: "planned", startDate: "2026-08-20T00:00:00Z" }),
+      sprint({ _id: "a", status: "planned", startDate: "2026-08-20T00:00:00Z" }),
+    ];
+    expect(defaultSprintId(sprints)).toBe("a");
+  });
+
+  it("tolerates null startDate and sorts it last", () => {
+    const sprints = [
+      sprint({ _id: "valid", status: "planned", startDate: "2026-08-20T00:00:00Z" }),
+      sprint({ _id: "broken", status: "planned", startDate: null as any }),
+    ];
+    expect(defaultSprintId(sprints)).toBe("valid");
   });
 });
 
@@ -70,5 +86,15 @@ describe("groupSprints", () => {
     const grouped = groupSprints(completed);
     expect(grouped.recentCompleted.map((s) => s._id)).toEqual(["c4", "c3", "c2"]);
     expect(grouped.olderCompleted.map((s) => s._id)).toEqual(["c1"]);
+  });
+
+  it("does not mutate the input array", () => {
+    const sprints = [
+      sprint({ _id: "c1", status: "completed", endDate: "2026-02-01T00:00:00Z" }),
+      sprint({ _id: "p1", status: "planned", startDate: "2026-09-01T00:00:00Z" }),
+    ];
+    const original = JSON.stringify(sprints);
+    groupSprints(sprints);
+    expect(JSON.stringify(sprints)).toBe(original);
   });
 });

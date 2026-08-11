@@ -2,8 +2,27 @@ import { ApiSprint } from "@/types";
 
 export const OLDER_COMPLETED_THRESHOLD = 3;
 
-const byStart = (a: ApiSprint, b: ApiSprint) => a.startDate.localeCompare(b.startDate);
-const byEndDesc = (a: ApiSprint, b: ApiSprint) => b.endDate.localeCompare(a.endDate);
+const byStart = (a: ApiSprint, b: ApiSprint) => {
+  if (!a.startDate && !b.startDate) return a._id.localeCompare(b._id);
+  if (!a.startDate) return 1;
+  if (!b.startDate) return -1;
+  const dateCompare = a.startDate.localeCompare(b.startDate);
+  return dateCompare || a._id.localeCompare(b._id);
+};
+const byEndDesc = (a: ApiSprint, b: ApiSprint) => {
+  if (!a.endDate && !b.endDate) return b._id.localeCompare(a._id);
+  if (!a.endDate) return 1;
+  if (!b.endDate) return -1;
+  const dateCompare = b.endDate.localeCompare(a.endDate);
+  return dateCompare || b._id.localeCompare(a._id);
+};
+const byStartDesc = (a: ApiSprint, b: ApiSprint) => {
+  if (!a.startDate && !b.startDate) return b._id.localeCompare(a._id);
+  if (!a.startDate) return 1;
+  if (!b.startDate) return -1;
+  const dateCompare = b.startDate.localeCompare(a.startDate);
+  return dateCompare || b._id.localeCompare(a._id);
+};
 
 export interface GroupedSprints {
   active: ApiSprint[];
@@ -14,7 +33,7 @@ export interface GroupedSprints {
 }
 
 export function groupSprints(sprints: ApiSprint[]): GroupedSprints {
-  const active = sprints.filter((s) => s.status === "active");
+  const active = sprints.filter((s) => s.status === "active").sort(byStartDesc);
   const planned = sprints.filter((s) => s.status === "planned").sort(byStart);
   const completed = sprints.filter((s) => s.status === "completed").sort(byEndDesc);
   return {
