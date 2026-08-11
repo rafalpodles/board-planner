@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
+import { provenanceRefusal } from "@/lib/session";
 import { OAuthClient } from "@/models/oauthClient";
 import { newClientId } from "@/lib/oauth";
 
@@ -23,6 +24,9 @@ function isValidRedirectUri(value: unknown): value is string {
 }
 
 export async function POST(req: Request) {
+  const refusal = provenanceRefusal(req);
+  if (refusal) return refusal;
+
   await connectDB();
 
   const body = await req.json().catch(() => null);

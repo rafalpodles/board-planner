@@ -50,7 +50,7 @@ export const GET = withAuth(async (_request, { params }) => {
     headers: {
       "Content-Type": contentType,
       "Content-Length": buffer.length.toString(),
-      "Cache-Control": "public, max-age=31536000, immutable",
+      "Cache-Control": "private, no-store",
       "X-Content-Type-Options": "nosniff",
       "Content-Disposition": INLINE_SAFE_TYPES.has(contentType) ? "inline" : "attachment",
     },

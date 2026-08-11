@@ -163,6 +163,21 @@ export interface IUser {
   // whether project access was narrowed: an unscoped admin token is still a machine credential, and
   // acts that need a person at a keyboard must key on this instead.
   viaMachineCredential?: boolean;
+  // Runtime-only, set for browser sessions — the Session row this request authenticated with, so a
+  // handler can spare the calling session when it revokes the rest.
+  sessionId?: Types.ObjectId;
+  createdAt: Date;
+}
+
+export interface ISession {
+  _id: Types.ObjectId;
+  tokenHash: string;
+  user: Types.ObjectId | IUser;
+  expiresAt: Date;
+  absoluteExpiresAt: Date;
+  lastUsedAt: Date;
+  userAgent: string;
+  ip: string;
   createdAt: Date;
 }
 

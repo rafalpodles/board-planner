@@ -9,19 +9,14 @@ interface ApiOptions {
 }
 
 export function useApi() {
-  const { getAuthHeader } = useAuth();
+  const { onUnauthorized } = useAuth();
 
   const request = useCallback(
     async (method: string, url: string, opts?: ApiOptions) => {
-      const authHeader = getAuthHeader();
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
         ...opts?.headers,
       };
-
-      if (authHeader) {
-        headers["Authorization"] = authHeader;
-      }
 
       const res = await fetch(url, {
         method,
@@ -30,6 +25,7 @@ export function useApi() {
       });
 
       if (!res.ok) {
+        if (res.status === 401) onUnauthorized();
         const error = await res.json().catch(() => ({ error: res.statusText }));
         // Message stays the whole error for every existing caller; status and body ride along
         // for the few that need to tell one refusal from another rather than just report it
@@ -41,24 +37,18 @@ export function useApi() {
 
       return res.json();
     },
-    [getAuthHeader]
+    [onUnauthorized]
   );
 
   const upload = useCallback(
     async (url: string, formData: FormData) => {
-      const authHeader = getAuthHeader();
-      const headers: Record<string, string> = {};
-      if (authHeader) {
-        headers["Authorization"] = authHeader;
-      }
-
       const res = await fetch(url, {
         method: "POST",
-        headers,
         body: formData,
       });
 
       if (!res.ok) {
+        if (res.status === 401) onUnauthorized();
         const error = await res.json().catch(() => ({ error: res.statusText }));
         // Message stays the whole error for every existing caller; status and body ride along
         // for the few that need to tell one refusal from another rather than just report it
@@ -70,20 +60,21 @@ export function useApi() {
 
       return res.json();
     },
-    [getAuthHeader]
+    [onUnauthorized]
   );
 
   // Raw streaming POST (SSE): returns the Response so callers can read the body
   const stream = useCallback(
     async (url: string, body: unknown): Promise<Response> => {
-      const authHeader = getAuthHeader();
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (authHeader) {
-        headers["Authorization"] = authHeader;
-      }
-      return fetch(url, { method: "POST", headers, body: JSON.stringify(body) });
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (res.status === 401) onUnauthorized();
+      return res;
     },
-    [getAuthHeader]
+    [onUnauthorized]
   );
 
   const get = useCallback((url: string) => request("GET", url), [request]);

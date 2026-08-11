@@ -8,6 +8,10 @@ const WORKER_CREDENTIAL = `cpw_${"9f3c".repeat(16)}`;
 const API_TOKEN = `cp_${"a1b2".repeat(10)}`;
 const ANTHROPIC_KEY = "sk-ant-api03-7Vd2mQx_pLr8Kt3NwZa5Yb1Ce6Hg9Jk4Ml0Op2Qs";
 const BEARER = "Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ3b3JrZXIifQ.7sVn-_1qO0aP";
+const SESSION_TOKEN = `cps_${"7d1e".repeat(16)}`;
+
+// randomToken() mints every one of these as its prefix plus 32 random bytes as hex
+const PREFIXES = ["cp_", "cpw_", "cps_", "cpat_", "cprt_", "cpac_", "cpct_", "cpc_"];
 
 interface Row {
   name: string;
@@ -60,6 +64,28 @@ const rows: Row[] = [
     input: `${"x".repeat(40)}cpw_9f3c9f3c9f3c9f3c9f3c9f3c9f3c9f3c9f3c9f3c9f3c9f3c9f3c9f3c9f3c9f3c`,
     mustNotAppear: ["cpw_9f3c"],
     mustAppear: ["[redacted]"],
+  },
+  {
+    name: "a session cookie in a Set-Cookie header, whose attributes stay readable",
+    input: `< HTTP/1.1 200 OK\n< Set-Cookie: __Host-bp_session=${SESSION_TOKEN}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`,
+    mustNotAppear: [SESSION_TOKEN, "7d1e7d1e", "__Host-bp_session="],
+    mustAppear: [
+      "Set-Cookie: [redacted]; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000",
+      "HTTP/1.1 200 OK",
+    ],
+  },
+  {
+    name: "a session cookie sent back in a Cookie header, alongside cookies that are not secrets",
+    input: `> GET /api/auth/me\n> Cookie: theme=dark; __Host-bp_session=${SESSION_TOKEN}; sidebar=open\n< 401`,
+    mustNotAppear: [SESSION_TOKEN, "__Host-bp_session="],
+    mustAppear: ["Cookie: theme=dark; [redacted]; sidebar=open", "GET /api/auth/me", "< 401"],
+  },
+  {
+    // COOKIE_ALLOW_INSECURE drops the prefix, and the value need not be a cps_ shape to be a session
+    name: "an unprefixed session cookie whose value is not a recognisable token shape",
+    input: "session rejected: Cookie: bp_session=Zm9vYmFy.trunc4ted; other=1",
+    mustNotAppear: ["Zm9vYmFy", "bp_session="],
+    mustAppear: ["session rejected: Cookie: [redacted]; other=1"],
   },
   {
     name: "a GitHub token embedded in a push failure",
@@ -139,6 +165,14 @@ describe("scrub", () => {
 
     for (const secret of mustNotAppear) expect(output).not.toContain(secret);
     for (const kept of mustAppear) expect(output).toContain(kept);
+  });
+
+  // Making the prefix group mandatory, or dropping its w branch, stops scrubbing cp_ and cpw_ —
+  // the only two shapes the pattern caught before sessions and OAuth tokens were added to it
+  it.each(PREFIXES)("redacts a %s credential", (prefix) => {
+    const token = `${prefix}${"4e7a".repeat(16)}`;
+
+    expect(scrub(`credential ${token} was rejected`)).toBe("credential [redacted] was rejected");
   });
 
   it("leaves a realistic gate rejection byte-for-byte identical", () => {

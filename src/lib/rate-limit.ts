@@ -37,3 +37,22 @@ export function recordFailedAttempt(ip: string): void {
 export function clearAttempts(ip: string): void {
   attempts.delete(ip);
 }
+
+export function lockoutKey(clientIp: string, username: string): string {
+  return `${clientIp}:${username.toLowerCase()}`;
+}
+
+export async function withLockout<T>(
+  key: string,
+  verify: () => Promise<T | null>
+): Promise<{ lockedOut: boolean; result: T | null }> {
+  if (isRateLimited(key)) return { lockedOut: true, result: null };
+
+  const result = await verify();
+  if (result) {
+    clearAttempts(key);
+  } else {
+    recordFailedAttempt(key);
+  }
+  return { lockedOut: false, result };
+}

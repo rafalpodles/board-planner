@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
 import { getAuthUser } from "@/lib/auth";
+import { ProvenanceError, provenanceRefusal } from "@/lib/session";
 import { withAdmin } from "@/lib/middleware";
 import { User } from "@/models/user";
 
@@ -30,8 +31,19 @@ export async function POST(request: Request) {
   const userCount = await User.countDocuments();
   const isBootstrap = userCount === 0;
 
-  if (!isBootstrap) {
-    const authUser = await getAuthUser(request);
+  if (isBootstrap) {
+    const refusal = provenanceRefusal(request);
+    if (refusal) return refusal;
+  } else {
+    let authUser;
+    try {
+      authUser = await getAuthUser(request);
+    } catch (e) {
+      if (e instanceof ProvenanceError) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
+      throw e;
+    }
     if (!authUser || authUser.role !== "admin") {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }

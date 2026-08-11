@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import mongoose from "mongoose";
-import { ADMIN_ID, ADMIN_PASSWORD, ADMIN_USERNAME, E2E_MONGODB_URI, PROJECT_ID, PROJECT_KEY, seed } from "./seed";
+import { ADMIN_AUTH } from "./api";
+import { ADMIN_ID, E2E_MONGODB_URI, PROJECT_ID, PROJECT_KEY, seed } from "./seed";
 
 /**
  * BP-227. Columns have been project-defined since BP-128, and automation is meant to key on a
@@ -26,10 +27,6 @@ const COLUMNS = [
 
 const SPRINT_ID = new mongoose.Types.ObjectId();
 const NEXT_SPRINT_ID = new mongoose.Types.ObjectId();
-
-const auth = {
-  Authorization: `Basic ${Buffer.from(`${ADMIN_USERNAME}:${ADMIN_PASSWORD}`).toString("base64")}`,
-};
 
 async function db() {
   if (mongoose.connection.readyState === 0) await mongoose.connect(E2E_MONGODB_URI);
@@ -118,7 +115,7 @@ test.describe("closing a sprint on a board with no column called done", () => {
     const response = await request.put(
       `/api/projects/${PROJECT_KEY}/sprints/${SPRINT_ID}`,
       {
-        headers: auth,
+        headers: ADMIN_AUTH,
         data: { status: "completed", moveIncompleteToSprint: String(NEXT_SPRINT_ID) },
       }
     );
@@ -138,7 +135,7 @@ test.describe("closing a sprint on a board with no column called done", () => {
     const unfinished = await addTask("checking", { sprint: SPRINT_ID });
 
     await request.put(`/api/projects/${PROJECT_KEY}/sprints/${SPRINT_ID}`, {
-      headers: auth,
+      headers: ADMIN_AUTH,
       data: { status: "completed", moveIncompleteToBacklog: true },
     });
 
@@ -156,12 +153,12 @@ test.describe("closing a sprint on a board with no column called done", () => {
     await addTask("building", { sprint: SPRINT_ID });
 
     const one = await request.get(`/api/projects/${PROJECT_KEY}/sprints/${SPRINT_ID}`, {
-      headers: auth,
+      headers: ADMIN_AUTH,
     });
     expect(await one.json()).toMatchObject({ taskCount: 3, doneCount: 2 });
 
     // The same number computed a second way, in an aggregation rather than a count
-    const list = await request.get(`/api/projects/${PROJECT_KEY}/sprints`, { headers: auth });
+    const list = await request.get(`/api/projects/${PROJECT_KEY}/sprints`, { headers: ADMIN_AUTH });
     const sprint = (await list.json()).find(
       (s: { _id: string }) => s._id === String(SPRINT_ID)
     );
@@ -176,7 +173,7 @@ test.describe("My Tasks across boards that agree on roles and nothing else", () 
     await addTask("shipped", { assignee: ADMIN_ID });
     await addTask("building", { assignee: ADMIN_ID });
 
-    const response = await request.get("/api/tasks/mine", { headers: auth });
+    const response = await request.get("/api/tasks/mine", { headers: ADMIN_AUTH });
     const tasks = await response.json();
 
     const done = tasks.find((t: { status: string }) => t.status === "shipped");
@@ -192,7 +189,7 @@ test.describe("My Tasks across boards that agree on roles and nothing else", () 
   test("a task whose column is gone keeps its raw status and no role", async ({ request }) => {
     await addTask("a_column_that_was_deleted", { assignee: ADMIN_ID });
 
-    const tasks = await (await request.get("/api/tasks/mine", { headers: auth })).json();
+    const tasks = await (await request.get("/api/tasks/mine", { headers: ADMIN_AUTH })).json();
     const orphan = tasks.find((t: { status: string }) => t.status === "a_column_that_was_deleted");
 
     expect(orphan).toMatchObject({
@@ -207,7 +204,7 @@ test.describe("My Tasks across boards that agree on roles and nothing else", () 
   test("does not ship a copy of every board alongside the tasks", async ({ request }) => {
     await addTask("building", { assignee: ADMIN_ID });
 
-    const tasks = await (await request.get("/api/tasks/mine", { headers: auth })).json();
+    const tasks = await (await request.get("/api/tasks/mine", { headers: ADMIN_AUTH })).json();
 
     expect(tasks[0].project).not.toHaveProperty("columns");
     expect(tasks[0].project).toHaveProperty("key", PROJECT_KEY);

@@ -7,18 +7,13 @@ const APP_NAME = "Board Planner";
 
 const APP_URL = process.env.BOARDPLANNER_URL || "http://localhost:3000";
 const TOKEN = process.env.BOARDPLANNER_TOKEN;
-const USERNAME = process.env.BOARDPLANNER_USERNAME;
-const PASSWORD = process.env.BOARDPLANNER_PASSWORD;
 
-if (!TOKEN && (!USERNAME || !PASSWORD)) {
-  console.error("BOARDPLANNER_TOKEN or BOARDPLANNER_USERNAME+BOARDPLANNER_PASSWORD environment variables are required");
+if (!TOKEN) {
+  console.error("BOARDPLANNER_TOKEN environment variable is required");
   process.exit(1);
 }
 
-const client = new ApiClient(
-  APP_URL,
-  TOKEN ? { token: TOKEN } : { username: USERNAME!, password: PASSWORD! }
-);
+const client = new ApiClient(APP_URL, { token: TOKEN });
 
 const server = new McpServer({
   name: "boardplanner",

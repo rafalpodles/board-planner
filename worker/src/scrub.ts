@@ -21,7 +21,12 @@ const SECRET = new RegExp(
     "github_pat_[A-Za-z0-9_]{50,}",
     // gho_ is what `gh auth login` stores and delivery.ts forwards GH_TOKEN into gh
     "gh[pousr]_[A-Za-z0-9]{36,}",
-    "cpw?_[a-fA-F0-9]{32,}",
+    // The cookie name and its value, so the header name stays as the diagnostic part. Redacted by
+    // position, so a session value that is not a cps_ shape (truncated, legacy) still goes.
+    "(?:__Host-)?bp_session=[^;\\s]+",
+    // The group is OPTIONAL and keeps its w branch on purpose: making it mandatory, or dropping w,
+    // stops scrubbing cp_ (api tokens) and cpw_ (worker credentials).
+    "cp(?:w|s|at|rt|ac|ct|c)?_[a-fA-F0-9]{32,}",
     "sk-or-v1-[a-fA-F0-9]{32,}",
     "sk-ant-(?=[\\w-]*\\d)(?=[\\w-]*[A-Z])[\\w-]{20,}",
   ].join("|"),

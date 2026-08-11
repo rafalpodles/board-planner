@@ -22,9 +22,11 @@ export const PROJECT_NAME = "E2E Run Conflict Board";
 
 export const WORKER_NAME = "e2e-macbook-pro";
 
-// A real API token, because /api/mcp only accepts a Bearer credential. The prefix is the first
-// 11 characters, which is what verifyBearerToken looks a candidate up by.
+// Real API tokens: the browser authenticates with a session cookie no APIRequestContext can be
+// handed, so every setup call the suite makes over the API carries one of these instead. The
+// prefix is the first 11 characters, which is what verifyBearerToken looks a candidate up by.
 export const API_TOKEN = "cp_e2e00001deadbeefdeadbeefdeadbeef";
+export const MEMBER_API_TOKEN = "cp_e2e00002deadbeefdeadbeefdeadbeef";
 export const RUN_PHASE = "agent";
 
 export const HELD_TASK_NUMBER = 1;
@@ -433,16 +435,28 @@ export async function seed() {
     updatedAt: now,
   });
 
-  await db.collection("apitokens").insertOne({
-    _id: id("e2e00000000000000000a003"),
-    user: ADMIN_ID,
-    name: "e2e mcp",
-    tokenHash: bcrypt.hashSync(API_TOKEN, 10),
-    prefix: API_TOKEN.slice(0, 11),
-    allowedProjects: [],
-    lastUsedAt: null,
-    createdAt: now,
-  });
+  await db.collection("apitokens").insertMany([
+    {
+      _id: id("e2e00000000000000000a003"),
+      user: ADMIN_ID,
+      name: "e2e mcp",
+      tokenHash: bcrypt.hashSync(API_TOKEN, 10),
+      prefix: API_TOKEN.slice(0, 11),
+      allowedProjects: [],
+      lastUsedAt: null,
+      createdAt: now,
+    },
+    {
+      _id: id("e2e00000000000000000a004"),
+      user: MEMBER_ID,
+      name: "e2e member",
+      tokenHash: bcrypt.hashSync(MEMBER_API_TOKEN, 10),
+      prefix: MEMBER_API_TOKEN.slice(0, 11),
+      allowedProjects: [],
+      lastUsedAt: null,
+      createdAt: now,
+    },
+  ]);
 
   await db.collection("workers").insertOne({
     _id: WORKER_ID,

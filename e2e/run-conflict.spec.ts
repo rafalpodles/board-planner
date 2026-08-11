@@ -2,6 +2,7 @@ import { test, expect, type APIRequestContext, type Locator, type Page } from "@
 // The board's own threshold, so the quiet fixture below cannot drift away from the rule it is
 // meant to cross — a hard-coded five minutes here would keep passing if the source changed
 import { QUIET_MS } from "@/components/tasks/ExecutionPanel";
+import { ADMIN_AUTH, MEMBER_AUTH } from "./api";
 import {
   ADMIN_PASSWORD,
   ADMIN_USERNAME,
@@ -40,13 +41,6 @@ import {
 // Per test, not once per run: the flow ends with the run released, so a retry or a second
 // iteration would otherwise start from a task no worker is holding
 test.beforeEach(seed);
-
-const basicAuth = (username: string, password: string) => ({
-  Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`,
-});
-
-const AUTH = basicAuth(ADMIN_USERNAME, ADMIN_PASSWORD);
-const MEMBER_AUTH = basicAuth(MEMBER_USERNAME, MEMBER_PASSWORD);
 
 const cardHref = (taskNumber: number) => `/projects/${PROJECT_KEY}/tasks/${taskNumber}`;
 const heldCardHref = cardHref(HELD_TASK_NUMBER);
@@ -129,7 +123,7 @@ async function signIn(page: Page, username = ADMIN_USERNAME, password = ADMIN_PA
 async function readTask(
   request: APIRequestContext,
   taskNumber: number,
-  headers: Record<string, string> = AUTH
+  headers: Record<string, string> = ADMIN_AUTH
 ) {
   const res = await request.get(`/api/projects/${PROJECT_KEY}/tasks/${taskNumber}`, { headers });
   expect(res.status()).toBe(200);
@@ -168,7 +162,7 @@ test("a task a worker is running cannot be dragged away without confirming", asy
     // A project keyed TP exists in the development database too. This runs before the browser
     // touches anything, so a dev server that ignored MONGODB_URI fails here rather than writing
     // into whatever the developer is using.
-    const res = await request.get(`/api/projects/${PROJECT_KEY}`, { headers: AUTH });
+    const res = await request.get(`/api/projects/${PROJECT_KEY}`, { headers: ADMIN_AUTH });
     expect(res.status()).toBe(200);
     const project = await res.json();
     expect(project._id).toBe(String(PROJECT_ID));
