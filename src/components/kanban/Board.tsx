@@ -15,7 +15,7 @@ interface BoardProps {
   selectedTasks?: Set<string>;
   selectionMode?: boolean;
   collapseEmptyColumns?: boolean;
-  onStatusChange: (taskId: string, status: string) => void;
+  onStatusChange?: (taskId: string, status: string) => void;
   onTaskDrop?: (taskId: string, status: string, dropIndex: number) => void;
   onTaskClick: (taskId: string) => void;
   onTaskSelect?: (taskId: string) => void;
@@ -114,7 +114,7 @@ export function Board({
                         over ? column.id : prev === column.id ? null : prev
                       )
               }
-              onStatusChange={onStatusChange}
+              onStatusChange={readOnly ? undefined : onStatusChange}
               onTaskDrop={onTaskDrop}
               onTaskClick={onTaskClick}
               onTaskSelect={onTaskSelect}

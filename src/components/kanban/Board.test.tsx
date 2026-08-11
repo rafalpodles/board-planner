@@ -200,4 +200,23 @@ describe("A read-only board", () => {
     const notPrevented = fireEvent.dragOver(cardDragTarget);
     expect(notPrevented).toBe(true);
   });
+
+  // onStatusChange is the one write prop that stays live on a completed sprint's board:
+  // everything else is withheld through readOnly, so this is the prop that must be
+  // withholdable too rather than papered over with a no-op callback
+  it("renders and ignores a drop with no onStatusChange at all", () => {
+    const { container } = render(
+      <Board
+        tasks={tasks}
+        projectKey="TP"
+        columns={columnsWithInProgress}
+        readOnly
+        onTaskClick={() => {}}
+      />
+    );
+    const column = screen.getByTestId("column-in_progress");
+    expect(() =>
+      fireEvent.drop(column, { dataTransfer: { getData: () => "t1" } })
+    ).not.toThrow();
+  });
 });

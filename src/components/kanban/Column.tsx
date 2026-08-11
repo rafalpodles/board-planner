@@ -16,7 +16,7 @@ interface ColumnProps {
   collapsed?: boolean;
   onToggleCollapsed?: () => void;
   onDragOverColumn?: (over: boolean) => void;
-  onStatusChange: (taskId: string, status: string) => void;
+  onStatusChange?: (taskId: string, status: string) => void;
   onTaskDrop?: (taskId: string, status: string, dropIndex: number) => void;
   onTaskClick: (taskId: string) => void;
   onTaskSelect?: (taskId: string) => void;
@@ -99,7 +99,7 @@ export function Column({
                 if (onTaskDrop && dropIndex !== null) {
                   onTaskDrop(taskId, column.id, dropIndex);
                 } else {
-                  onStatusChange(taskId, column.id);
+                  onStatusChange?.(taskId, column.id);
                 }
               }
               setDropIndex(null);

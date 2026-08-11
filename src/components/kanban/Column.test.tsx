@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, cleanup, act } from "@testing-library/react";
+import { render, screen, cleanup, act, fireEvent } from "@testing-library/react";
 import { Column } from "./Column";
 import { ApiTask } from "@/types";
 import { AnyColumn } from "@/lib/columns";
@@ -152,5 +152,15 @@ describe("Column, collapsed to a rail", () => {
     renderColumn({ tasks: oneTask });
     expect(screen.getByText("1")).toBeTruthy();
     expect(screen.queryByText("Drop tasks here")).toBeNull();
+  });
+});
+
+describe("Column without onStatusChange", () => {
+  it("drops a card without calling anything", () => {
+    const { container } = renderColumn({ onStatusChange: undefined, collapsed: false });
+    const root = container.firstElementChild as HTMLElement;
+    expect(() =>
+      fireEvent.drop(root, { dataTransfer: { getData: () => "t1" } })
+    ).not.toThrow();
   });
 });
