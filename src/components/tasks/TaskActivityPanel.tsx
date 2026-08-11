@@ -3,9 +3,11 @@
 import { useRef, useState, KeyboardEvent } from "react";
 import { Comments } from "./Comments";
 import { ActivityTimeline } from "./ActivityTimeline";
+import type { ReferenceScope } from "@/lib/task-references";
 
 interface TaskActivityPanelProps {
   projectId: string;
+  scope?: ReferenceScope | null;
   taskId: string;
   /** Bumped when a comment is posted from the phone's bottom bar */
   commentRefreshKey?: number;
@@ -15,6 +17,7 @@ type Tab = "comments" | "history";
 
 export function TaskActivityPanel({
   projectId,
+  scope,
   taskId,
   commentRefreshKey = 0,
 }: TaskActivityPanelProps) {
@@ -91,6 +94,7 @@ export function TaskActivityPanel({
         <Comments
           projectId={projectId}
           taskId={taskId}
+          scope={scope}
           refreshKey={commentRefreshKey}
           hideHeading
           onCountChange={setCommentCount}
