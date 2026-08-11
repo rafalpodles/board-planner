@@ -8,6 +8,7 @@ interface SprintHeaderProps {
   sprint: ApiSprint;
   doneCount: number;
   totalCount: number;
+  readOnly: boolean;
   onActivate: () => void;
   onComplete: () => void;
   onEdit: () => void;
@@ -60,13 +61,14 @@ export function SprintHeader({
   sprint,
   doneCount,
   totalCount,
+  readOnly,
   onActivate,
   onComplete,
   onEdit,
   onDelete,
 }: SprintHeaderProps) {
   const progress = totalCount > 0 ? (doneCount / totalCount) * 100 : 0;
-  const closed = sprint.status === "completed";
+  const closed = readOnly;
   const range = dateRange(sprint);
   const remaining = daysLeft(sprint, closed);
 

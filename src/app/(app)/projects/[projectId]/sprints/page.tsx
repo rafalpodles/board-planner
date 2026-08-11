@@ -121,8 +121,8 @@ export default function SprintsPage() {
   }
 
   const selected = scope ? board.sprints.find((s) => s._id === scope) ?? null : null;
-  // The one place this page decides a sprint is locked; every read-only gate on this page
-  // goes through it so they can't drift apart
+  // The one place this page decides a sprint is locked; passed down to every read-only
+  // gate on this page (SprintHeader included) so they can't drift apart
   const sprintIsReadOnly = selected?.status === "completed";
   // Until this sprint's own tasks are in, `board.tasks` still holds the sprint we came from,
   // and showing them under this name would be the page stating something untrue
@@ -174,6 +174,7 @@ export default function SprintsPage() {
                   sprint={selected}
                   doneCount={doneCount}
                   totalCount={totalCount}
+                  readOnly={sprintIsReadOnly}
                   onActivate={() => handleActivate(selected._id)}
                   onComplete={() => setCompleting(selected)}
                   onEdit={() => openForm(selected)}
