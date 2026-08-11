@@ -129,7 +129,11 @@ async function renderSprints(
   if (data.length > 0) {
     await screen.findByRole("navigation", { name: "Sprint list" });
     // The scoped task list is a second round trip after the sprint is resolved
-    if (tasks.length > 0) await screen.findByText("TP-1");
+    if (tasks.length > 0) {
+      await screen.findByText("TP-1");
+    } else {
+      await screen.findByText("No tasks in this sprint");
+    }
   }
   return view;
 }
@@ -237,6 +241,22 @@ describe("Sprints tab", () => {
 
   // The window this pins is a request long: without it the tab shows Sprint 12's cards and
   // Sprint 12's done/total under Sprint 13's name, which is the page stating something untrue
+  it("says the sprint is empty rather than offering to start the project", async () => {
+    await renderSprints(sprints, { tasks: [] });
+    expect(screen.getByText("No tasks in this sprint")).toBeTruthy();
+    expect(screen.queryByText("Create your first task")).toBeNull();
+  });
+
+  it("offers no create button on an empty completed sprint", async () => {
+    await renderSprints(completedOnly, { tasks: [] });
+    expect(screen.queryByRole("button", { name: "Create Task" })).toBeNull();
+  });
+
+  it("shows 0/0 for a sprint with no tasks", async () => {
+    await renderSprints(sprints, { tasks: [] });
+    expect(screen.getByTestId("sprint-progress").textContent).toBe("0/0");
+  });
+
   it("never shows the previous sprint's tasks under the sprint just selected", async () => {
     const { rerender } = await renderSprints();
     expect(screen.getByText("TP-1")).toBeTruthy();

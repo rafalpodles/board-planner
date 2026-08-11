@@ -24,6 +24,7 @@ import { ALL_TASKS, sprintDefaultForNewTask } from "@/lib/sprint-scope";
 interface ProjectBoardViewProps {
   board: ProjectBoard;
   readOnly?: boolean;
+  // Omit for the project's own default; pass null to render nothing instead
   emptyState?: ReactNode;
 }
 
@@ -225,20 +226,23 @@ export function ProjectBoardView({ board, readOnly = false, emptyState }: Projec
         onFilter={setFilteredTasks}
       />
 
-      {tasks.length === 0 && (emptyState ?? (
-        <div className="flex flex-col items-center justify-center py-16 text-center">
-          <svg className="w-16 h-16 text-text-muted/30 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-          </svg>
-          <h2 className="text-lg font-medium text-text-muted mb-2">No tasks yet</h2>
-          <p className="text-sm text-text-muted mb-4">Create your first task to get started</p>
-          {!readOnly && (
-            <Button size="sm" onClick={() => setShowNewTask(true)}>
-              Create Task
-            </Button>
-          )}
-        </div>
-      ))}
+      {tasks.length === 0 &&
+        (emptyState !== undefined ? (
+          emptyState
+        ) : (
+          <div className="flex flex-col items-center justify-center py-16 text-center">
+            <svg className="w-16 h-16 text-text-muted/30 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+            </svg>
+            <h2 className="text-lg font-medium text-text-muted mb-2">No tasks yet</h2>
+            <p className="text-sm text-text-muted mb-4">Create your first task to get started</p>
+            {!readOnly && (
+              <Button size="sm" onClick={() => setShowNewTask(true)}>
+                Create Task
+              </Button>
+            )}
+          </div>
+        ))}
 
       {/* Without this the empty state sits above a strip of zero-count columns.
           ListView already returns null when it has no tasks; Board did not. */}

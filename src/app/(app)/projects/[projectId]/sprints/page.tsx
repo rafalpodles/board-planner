@@ -171,7 +171,22 @@ export default function SprintsPage() {
                   onDelete={() => setConfirmDelete(selected)}
                 />
                 {tasksLoaded ? (
-                  <ProjectBoardView board={board} readOnly={selected.status === "completed"} />
+                  <ProjectBoardView
+                    board={board}
+                    readOnly={selected.status === "completed"}
+                    emptyState={
+                      <div className="flex flex-col items-center justify-center py-16 text-center">
+                        <h2 className="text-lg font-medium text-text-muted mb-2">
+                          No tasks in this sprint
+                        </h2>
+                        {selected.status !== "completed" && (
+                          <Button size="sm" onClick={() => board.setShowNewTask(true)}>
+                            Create Task
+                          </Button>
+                        )}
+                      </div>
+                    }
+                  />
                 ) : (
                   <Spinner />
                 )}
