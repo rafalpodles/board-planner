@@ -5,18 +5,24 @@ import { GrowingTextarea, ProgressBar, SectionLabel } from "./atoms";
 import type { ChecklistDraftItem } from "./useTaskEditor";
 import type { Trigger } from "@/hooks/use-trigger-autocomplete";
 import { AutocompleteTextarea } from "@/components/ui/AutocompleteTextarea";
+import type { ReferenceScope } from "@/lib/task-references";
+import { MarkdownContent } from "@/components/ui/MarkdownContent";
 
 interface CriteriaSectionProps {
   items: ChecklistDraftItem[];
   onChange: (items: ChecklistDraftItem[]) => void;
   /** Same autocomplete the description and comments have; criteria refer to other tasks too */
   triggers?: Trigger[];
+  /** The board, so a key written in a criterion renders as a link to that task */
+  scope?: ReferenceScope | null;
 }
 
 // Stable identity, so a criteria list without triggers does not rebuild them every render
 const EMPTY: Trigger[] = [];
 
-export function CriteriaSection({ items, onChange, triggers }: CriteriaSectionProps) {
+export function CriteriaSection({ items, onChange, triggers, scope }: CriteriaSectionProps) {
+  // One at a time: a criterion shows its rendered text until somebody asks to change it
+  const [editing, setEditing] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
   const done = items.filter((i) => i.done).length;
 
@@ -63,20 +69,51 @@ export function CriteriaSection({ items, onChange, triggers }: CriteriaSectionPr
             >
               {item.done ? "✓" : ""}
             </button>
-            <AutocompleteTextarea
-              value={item.text}
-              triggers={triggers ?? EMPTY}
-              aria-label={`Criterion ${i + 1}`}
-              onChange={(text) =>
-                onChange(items.map((it, idx) => (idx === i ? { ...it, text } : it)))
-              }
-              onKeyDown={(e) => {
-                if (e.key === "Enter") e.preventDefault();
-              }}
-              className={`focus-ring min-w-0 flex-1 rounded bg-transparent text-sm leading-snug ${
-                item.done ? "text-text-muted line-through" : "text-text"
-              }`}
-            />
+            {editing === i ? (
+              <AutocompleteTextarea
+                value={item.text}
+                triggers={triggers ?? EMPTY}
+                autoFocus
+                aria-label={`Criterion ${i + 1}`}
+                onChange={(text) =>
+                  onChange(items.map((it, idx) => (idx === i ? { ...it, text } : it)))
+                }
+                onBlur={() => setEditing(null)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") e.preventDefault();
+                }}
+                className={`focus-ring min-w-0 flex-1 rounded bg-transparent text-sm leading-snug ${
+                  item.done ? "text-text-muted line-through" : "text-text"
+                }`}
+              />
+            ) : (
+              // Rendered, so a task key written here is a link like it is everywhere else. A
+              // textarea can only ever show it as text, which is what made this the one place the
+              // reference did not work.
+              <div
+                role="button"
+                tabIndex={0}
+                aria-label={`Criterion ${i + 1}`}
+                onClick={(e) => {
+                  // A link is the reader going somewhere, not asking to edit
+                  if ((e.target as HTMLElement).closest("a")) return;
+                  setEditing(i);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setEditing(i);
+                  }
+                }}
+                className={`focus-ring min-w-0 flex-1 cursor-text whitespace-pre-wrap rounded text-sm leading-snug ${
+                  item.done ? "text-text-muted line-through" : "text-text"
+                }`}
+              >
+                <MarkdownContent inline scope={scope}>
+                  {item.text}
+                </MarkdownContent>
+              </div>
+            )}
             <button
               type="button"
               aria-label={`Remove criterion ${i + 1}`}
