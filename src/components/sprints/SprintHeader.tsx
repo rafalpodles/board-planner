@@ -15,7 +15,6 @@ interface SprintHeaderProps {
   onComplete: () => void;
   onEdit: () => void;
   onDelete: () => void;
-  onNewTask: () => void;
   onSelectSprint: (sprintId: string) => void;
 }
 
@@ -71,7 +70,6 @@ export function SprintHeader({
   onComplete,
   onEdit,
   onDelete,
-  onNewTask,
   onSelectSprint,
 }: SprintHeaderProps) {
   const progress = totalCount > 0 ? (doneCount / totalCount) * 100 : 0;
@@ -154,9 +152,6 @@ export function SprintHeader({
         <div className="flex shrink-0 gap-1">
           {!closed && (
             <>
-              <Button size="sm" onClick={onNewTask}>
-                Create Task
-              </Button>
               {sprint.status === "planned" && (
                 <Button size="sm" variant="secondary" onClick={onActivate}>
                   Activate

@@ -38,7 +38,6 @@ function renderHeader(overrides: Partial<React.ComponentProps<typeof SprintHeade
       onComplete={noop}
       onEdit={noop}
       onDelete={noop}
-      onNewTask={noop}
       onSelectSprint={noop}
       {...overrides}
     />

@@ -166,9 +166,16 @@ export default function SprintsPage() {
           board.sprints.length === 1 ? "1 sprint" : `${board.sprints.length} sprints`
         }
         actions={
-          <Button size="sm" onClick={() => openForm(null)}>
-            New Sprint
-          </Button>
+          <div className="flex gap-2">
+            {selected && !sprintIsReadOnly && (
+              <Button size="sm" variant="secondary" onClick={() => board.setShowNewTask(true)}>
+                Create Task
+              </Button>
+            )}
+            <Button size="sm" onClick={() => openForm(null)}>
+              New Sprint
+            </Button>
+          </div>
         }
       />
 
@@ -199,7 +206,6 @@ export default function SprintsPage() {
                   onComplete={() => setCompleting(selected)}
                   onEdit={() => openForm(selected)}
                   onDelete={() => setConfirmDelete(selected)}
-                  onNewTask={() => board.setShowNewTask(true)}
                   onSelectSprint={(id) =>
                     router.push(`/projects/${projectId}/sprints?sprint=${id}`)
                   }
