@@ -97,4 +97,22 @@ describe("groupSprints", () => {
     groupSprints(sprints);
     expect(JSON.stringify(sprints)).toBe(original);
   });
+
+  it("tolerates a null startDate among active sprints and sorts it last", () => {
+    const sprints = [
+      sprint({ _id: "valid", status: "active", startDate: "2026-08-20T00:00:00Z" }),
+      sprint({ _id: "broken", status: "active", startDate: null as any }),
+    ];
+    const grouped = groupSprints(sprints);
+    expect(grouped.active.map((s) => s._id)).toEqual(["valid", "broken"]);
+  });
+
+  it("tolerates a null endDate among completed sprints and sorts it last", () => {
+    const sprints = [
+      sprint({ _id: "valid", status: "completed", endDate: "2026-07-01T00:00:00Z" }),
+      sprint({ _id: "broken", status: "completed", endDate: null as any }),
+    ];
+    const grouped = groupSprints(sprints);
+    expect(grouped.completed.map((s) => s._id)).toEqual(["valid", "broken"]);
+  });
 });

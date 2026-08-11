@@ -135,8 +135,8 @@ export function SprintFormModal({
         )}
         {overlap && (
           <p className="text-xs text-warning">
-            Overlaps &quot;{overlap.name}&quot; ({overlap.startDate.substring(0, 10)} &ndash;{" "}
-            {overlap.endDate.substring(0, 10)}). You can still save.
+            Overlaps &quot;{overlap.name}&quot; ({overlap.startDate?.substring(0, 10) ?? "?"} &ndash;{" "}
+            {overlap.endDate?.substring(0, 10) ?? "?"}). You can still save.
           </p>
         )}
         <Input
