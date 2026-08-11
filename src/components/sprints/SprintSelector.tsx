@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import { ApiSprint } from "@/types";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { groupSprints } from "@/lib/sprint-selection";
-import { Select } from "@/components/ui/Select";
 
 interface SprintSelectorProps {
   sprints: ApiSprint[];
@@ -28,24 +27,8 @@ export function SprintSelector({ sprints, selectedId, onSelect }: SprintSelector
     if (showOlder) firstOlderRef.current?.focus();
   }, [showOlder]);
 
-  if (!isWide) {
-    return (
-      <div className="mb-4 lg:hidden">
-        <Select
-          aria-label="Sprint"
-          // Without it an unresolved selection paints the first sprint's name above a
-          // board that is still a spinner — a name and a body that disagree
-          placeholder={selectedId ? undefined : "Choose a sprint"}
-          value={selectedId ?? ""}
-          onChange={(e) => onSelect(e.target.value)}
-          options={[...active, ...planned, ...recentCompleted, ...olderCompleted].map((s) => ({
-            value: s._id,
-            label: `${s.name} · ${counts(s)}`,
-          }))}
-        />
-      </div>
-    );
-  }
+  // Below lg the sprint name in SprintHeader is the picker; this column has nothing to add.
+  if (!isWide) return null;
 
   const completed = showOlder ? [...recentCompleted, ...olderCompleted] : recentCompleted;
 

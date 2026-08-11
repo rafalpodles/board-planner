@@ -191,6 +191,7 @@ export default function SprintsPage() {
               <>
                 <SprintHeader
                   sprint={selected}
+                  sprints={board.sprints}
                   doneCount={doneCount}
                   totalCount={totalCount}
                   readOnly={sprintIsReadOnly}
@@ -199,6 +200,9 @@ export default function SprintsPage() {
                   onEdit={() => openForm(selected)}
                   onDelete={() => setConfirmDelete(selected)}
                   onNewTask={() => board.setShowNewTask(true)}
+                  onSelectSprint={(id) =>
+                    router.push(`/projects/${projectId}/sprints?sprint=${id}`)
+                  }
                 />
                 <ProjectBoardView
                   board={board}

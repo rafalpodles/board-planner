@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, cleanup, act, within } from "@testing-library/react";
+import { render, screen, cleanup, act } from "@testing-library/react";
 import { SprintSelector } from "./SprintSelector";
 import { ApiSprint } from "@/types";
 
@@ -105,24 +105,15 @@ describe("SprintSelector", () => {
   });
 
   describe("below lg", () => {
-    it("offers a placeholder rather than a name it has not selected", () => {
+    it("renders nothing — the sprint name in SprintHeader is the picker there", () => {
       narrowViewport();
-      render(<SprintSelector sprints={many} selectedId={null} onSelect={() => {}} />);
+      const { container } = render(
+        <SprintSelector sprints={many} selectedId="f" onSelect={() => {}} />
+      );
 
-      const select = screen.getByRole("combobox", { name: "Sprint" }) as HTMLSelectElement;
-      expect(select.value).toBe("");
-      expect(within(select).getByRole("option", { name: "Choose a sprint" })).toBeTruthy();
-    });
-
-    it("shows the selected sprint and drops the placeholder once there is one", () => {
-      narrowViewport();
-      render(<SprintSelector sprints={many} selectedId="f" onSelect={() => {}} />);
-
-      const select = screen.getByRole("combobox", { name: "Sprint" }) as HTMLSelectElement;
-      expect(select.value).toBe("f");
-      expect(within(select).queryByRole("option", { name: "Choose a sprint" })).toBeNull();
-      expect(within(select).getByRole("option", { name: "Sprint 6 · 4/8" })).toBeTruthy();
+      expect(container.innerHTML).toBe("");
       expect(screen.queryByRole("navigation", { name: "Sprint list" })).toBeNull();
+      expect(screen.queryByRole("combobox", { name: "Sprint" })).toBeNull();
     });
   });
 });

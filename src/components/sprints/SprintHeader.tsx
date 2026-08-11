@@ -3,9 +3,11 @@
 import { type CSSProperties } from "react";
 import { ApiSprint, SprintStatus, SPRINT_STATUS_LABELS } from "@/types";
 import { Button } from "@/components/ui/Button";
+import { groupSprints, sprintOptionLabel } from "@/lib/sprint-selection";
 
 interface SprintHeaderProps {
   sprint: ApiSprint;
+  sprints: ApiSprint[];
   doneCount: number;
   totalCount: number;
   readOnly: boolean;
@@ -14,6 +16,7 @@ interface SprintHeaderProps {
   onEdit: () => void;
   onDelete: () => void;
   onNewTask: () => void;
+  onSelectSprint: (sprintId: string) => void;
 }
 
 function statusBadge(status: SprintStatus) {
@@ -60,6 +63,7 @@ function daysLeft(sprint: ApiSprint, closed: boolean): string | null {
 
 export function SprintHeader({
   sprint,
+  sprints,
   doneCount,
   totalCount,
   readOnly,
@@ -68,18 +72,76 @@ export function SprintHeader({
   onEdit,
   onDelete,
   onNewTask,
+  onSelectSprint,
 }: SprintHeaderProps) {
   const progress = totalCount > 0 ? (doneCount / totalCount) * 100 : 0;
   const closed = readOnly;
   const range = dateRange(sprint);
   const remaining = daysLeft(sprint, closed);
+  const canPickSprint = sprints.length > 1;
+  const { active, planned, completed } = groupSprints(sprints);
 
   return (
     <div className="mb-4 shrink-0">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 basis-full sm:basis-auto">
           <div className="flex items-center gap-2">
-            <h2 className="truncate text-lg font-semibold">{sprint.name}</h2>
+            <div className="relative inline-flex min-w-0 items-center gap-1">
+              <h2 className="truncate text-lg font-semibold">{sprint.name}</h2>
+              {canPickSprint && (
+                <svg
+                  aria-hidden="true"
+                  data-testid="sprint-picker-chevron"
+                  className="h-4 w-4 shrink-0 text-text-muted lg:hidden"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M19 9l-7 7-7-7"
+                  />
+                </svg>
+              )}
+              {canPickSprint && (
+                <select
+                  aria-label="Sprint"
+                  value={sprint._id}
+                  onChange={(e) => onSelectSprint(e.target.value)}
+                  className="focus-ring absolute inset-0 h-full w-full cursor-pointer appearance-none border-0 bg-transparent text-transparent lg:hidden"
+                >
+                  {active.length > 0 && (
+                    <optgroup label="Active">
+                      {active.map((s) => (
+                        <option key={s._id} value={s._id}>
+                          {sprintOptionLabel(s)}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {planned.length > 0 && (
+                    <optgroup label="Planned">
+                      {planned.map((s) => (
+                        <option key={s._id} value={s._id}>
+                          {sprintOptionLabel(s)}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {completed.length > 0 && (
+                    <optgroup label="Completed">
+                      {completed.map((s) => (
+                        <option key={s._id} value={s._id}>
+                          {sprintOptionLabel(s)}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                </select>
+              )}
+            </div>
             {statusBadge(sprint.status)}
           </div>
           {sprint.goal && <p className="mt-0.5 text-sm text-text-muted">{sprint.goal}</p>}

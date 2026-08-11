@@ -24,6 +24,10 @@ const byStartDesc = (a: ApiSprint, b: ApiSprint) => {
   return dateCompare || b._id.localeCompare(a._id);
 };
 
+export function sprintOptionLabel(sprint: ApiSprint): string {
+  return `${sprint.name} · ${sprint.doneCount ?? 0}/${sprint.taskCount ?? 0}`;
+}
+
 export interface GroupedSprints {
   active: ApiSprint[];
   planned: ApiSprint[];
