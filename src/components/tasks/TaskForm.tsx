@@ -100,10 +100,11 @@ export function TaskForm({
     async (file: File): Promise<string> => {
       const formData = new FormData();
       formData.append("file", file);
+      formData.append("projectId", projectId);
       const result = await api.upload("/api/uploads", formData);
       return result.markdown;
     },
-    [api]
+    [api, projectId]
   );
 
   async function handleAiGenerate() {

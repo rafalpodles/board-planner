@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import crypto from "crypto";
+import { isValidObjectId } from "mongoose";
 import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
 import { withAuth } from "@/lib/middleware";
@@ -34,6 +35,14 @@ export const POST = withAuth(async (request, { user }) => {
       );
     }
     scope = [...new Set(allowedProjects)];
+  }
+
+  // A minted token is never wider than the credential minting it. Omitting allowedProjects used to
+  // mean "unscoped", so a token scoped to one project could mint itself the owner's whole account
+  // in a single call — including instance admin, since an unscoped token keeps its role.
+  const minterScope = (user.tokenScope || []).map(String);
+  if (minterScope.length > 0 && scope.length === 0) {
+    scope = minterScope;
   }
 
   // A token can only be scoped to projects its owner can access — and a scoped token may not
@@ -81,7 +90,9 @@ export const DELETE = withAuth(async (request, { user }) => {
   await connectDB();
 
   const { id } = await request.json();
-  if (!id) {
+  // Typed, not merely truthy: a JSON body can carry an operator object, and {"$ne": null} would
+  // delete an arbitrary token of the caller's own rather than the one named
+  if (typeof id !== "string" || !isValidObjectId(id)) {
     return NextResponse.json({ error: "Token id is required" }, { status: 400 });
   }
 

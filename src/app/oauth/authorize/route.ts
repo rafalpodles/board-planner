@@ -1,6 +1,6 @@
 import { connectDB } from "@/lib/db";
 import { getClientIp, verifyCredentials } from "@/lib/auth";
-import { lockoutKey, withLockout } from "@/lib/rate-limit";
+import { lockoutKey, sourceKey, withLockout } from "@/lib/rate-limit";
 import { accessibleProjectIds } from "@/lib/grants";
 import { User } from "@/models/user";
 import { OAuthClient } from "@/models/oauthClient";
@@ -193,9 +193,11 @@ export async function POST(req: Request) {
 
   const username = String(form.get("username") || "");
   const password = String(form.get("password") || "");
+  const clientIp = getClientIp(req);
   const { lockedOut, result: user } = await withLockout(
-    lockoutKey(getClientIp(req), username),
-    () => verifyCredentials(username, password)
+    lockoutKey(clientIp ?? "-", username),
+    () => verifyCredentials(username, password),
+    clientIp ? sourceKey(clientIp) : undefined
   );
   if (lockedOut) {
     return loginForm(p, client.clientName, "Too many failed attempts. Try again later.");

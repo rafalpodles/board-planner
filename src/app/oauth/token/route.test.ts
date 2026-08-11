@@ -1,0 +1,91 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+const findOneAndDelete = vi.fn();
+const create = vi.fn();
+
+vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
+vi.mock("@/models/oauthCode", () => ({ OAuthCode: { findOne: vi.fn() } }));
+vi.mock("@/models/oauthToken", () => ({ OAuthToken: { findOneAndDelete, create } }));
+
+const { POST } = await import("./route");
+const { sha256 } = await import("@/lib/oauth");
+
+const REFRESH = "cprt_" + "a".repeat(64);
+
+function refreshRequest(token = REFRESH) {
+  const form = new URLSearchParams({ grant_type: "refresh_token", refresh_token: token });
+  return new Request("https://app.example.com/oauth/token", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: form.toString(),
+  });
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  create.mockResolvedValue({});
+});
+
+describe("POST /oauth/token — refresh rotation", () => {
+  it("consumes the token in one atomic operation, not find-then-delete", async () => {
+    findOneAndDelete.mockResolvedValue({
+      clientId: "c1",
+      user: "u1",
+      scope: "mcp",
+      allowedProjects: [],
+    });
+
+    const res = await POST(refreshRequest());
+
+    expect(res.status).toBe(200);
+    const filter = findOneAndDelete.mock.calls[0][0];
+    expect(filter.refreshTokenHash).toBe(sha256(REFRESH));
+    // The checks the old find-then-validate path made must survive inside the atomic filter
+    expect(filter.refreshExpiresAt).toEqual({ $gt: expect.any(Date) });
+  });
+
+  it("lets exactly one of two concurrent refreshes win", async () => {
+    // Mongo hands the row to one caller; the loser matches nothing
+    let remaining = 1;
+    findOneAndDelete.mockImplementation(async () => {
+      if (remaining === 0) return null;
+      remaining -= 1;
+      return { clientId: "c1", user: "u1", scope: "mcp", allowedProjects: [] };
+    });
+
+    const [a, b] = await Promise.all([POST(refreshRequest()), POST(refreshRequest())]);
+    const statuses = [a.status, b.status].sort();
+
+    expect(statuses).toEqual([200, 400]);
+    // One pair issued, never two — the defect was that both callers were served
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a token that matched nothing", async () => {
+    findOneAndDelete.mockResolvedValue(null);
+
+    const res = await POST(refreshRequest());
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "invalid_grant" });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("scopes the filter to the client when one is supplied", async () => {
+    findOneAndDelete.mockResolvedValue(null);
+    const form = new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: REFRESH,
+      client_id: "c9",
+    });
+    await POST(
+      new Request("https://app.example.com/oauth/token", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: form.toString(),
+      })
+    );
+
+    expect(findOneAndDelete.mock.calls[0][0].clientId).toBe("c9");
+  });
+});

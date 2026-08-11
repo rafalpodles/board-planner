@@ -69,3 +69,30 @@ describe("PUT /api/users/:id", () => {
     expect(target.save).toHaveBeenCalled();
   });
 });
+
+describe("PUT /api/users/:id — machine credentials cannot promote", () => {
+  // Creating an account and raising it is how a machine credential escapes the five endpoints that
+  // refuse it: make the user, promote it, sign in as it. The gate is only coherent if it also
+  // covers the manufacture of the identity.
+  it("refuses a role change from an admin API token", async () => {
+    const target = targetDoc({ role: "member" });
+    userFindById.mockResolvedValue(target);
+    getAuthUser.mockResolvedValue({ ...ADMIN, viaMachineCredential: true });
+
+    const res = await PUT(put({ role: "admin" }), ctx());
+
+    expect(res.status).toBe(403);
+    expect(target.save).not.toHaveBeenCalled();
+  });
+
+  it("still lets an interactive admin change a role", async () => {
+    const target = targetDoc({ role: "member" });
+    userFindById.mockResolvedValue(target);
+    getAuthUser.mockResolvedValue({ ...ADMIN, viaMachineCredential: false });
+
+    const res = await PUT(put({ role: "admin" }), ctx());
+
+    expect(res.status).toBe(200);
+    expect(target.save).toHaveBeenCalled();
+  });
+});

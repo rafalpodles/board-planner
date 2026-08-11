@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getClientIp, verifyCredentials } from "@/lib/auth";
-import { lockoutKey, withLockout } from "@/lib/rate-limit";
+import { lockoutKey, sourceKey, withLockout } from "@/lib/rate-limit";
 import {
   buildSessionCookie,
   createSession,
@@ -29,8 +29,9 @@ export async function POST(request: Request) {
 
   const clientIp = getClientIp(request);
   const { lockedOut, result: user } = await withLockout(
-    lockoutKey(clientIp, username),
-    () => verifyCredentials(username, password)
+    lockoutKey(clientIp ?? "-", username),
+    () => verifyCredentials(username, password),
+    clientIp ? sourceKey(clientIp) : undefined
   );
 
   if (lockedOut) {
