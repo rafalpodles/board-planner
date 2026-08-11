@@ -1,8 +1,17 @@
 import { NextResponse } from "next/server";
 import { getAuthUser } from "@/lib/auth";
+import { ProvenanceError } from "@/lib/session";
 
 export async function GET(request: Request) {
-  const user = await getAuthUser(request);
+  let user;
+  try {
+    user = await getAuthUser(request);
+  } catch (e) {
+    if (e instanceof ProvenanceError) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    throw e;
+  }
 
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

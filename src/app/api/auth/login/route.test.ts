@@ -17,7 +17,7 @@ vi.mock("@/lib/session", async (importOriginal) => {
 });
 
 const { POST } = await import("./route");
-const { clearAttempts } = await import("@/lib/rate-limit");
+const { clearAttempts, lockoutKey } = await import("@/lib/rate-limit");
 
 const USER = {
   _id: "u1",
@@ -55,8 +55,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   delete process.env.COOKIE_ALLOW_INSECURE;
   delete process.env.APP_ORIGIN;
-  clearAttempts("unknown:rpo");
-  clearAttempts("203.0.113.9:rpo");
+  // Built with lockoutKey rather than hand-spelled: a literal here silently stops matching the
+  // moment the key shape changes, and the leaked counter then fails a different test
+  clearAttempts(lockoutKey("unknown", "rpo"));
+  clearAttempts(lockoutKey("203.0.113.9", "rpo"));
   verifyCredentials.mockResolvedValue(USER);
   createSession.mockResolvedValue({
     token: "cps_deadbeef",

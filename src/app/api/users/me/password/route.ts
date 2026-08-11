@@ -46,7 +46,7 @@ export const PUT = withAuth(async (request, { user }) => {
   }
 
   const { lockedOut, result: passwordMatches } = await withLockout(
-    lockoutKey(getClientIp(request), user.username),
+    lockoutKey(getClientIp(request), user.username, "password-change"),
     async () => ((await bcrypt.compare(currentPassword, record.password)) ? true : null)
   );
   if (lockedOut) {

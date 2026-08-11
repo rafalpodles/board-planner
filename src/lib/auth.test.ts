@@ -164,6 +164,25 @@ describe("getAuthUser — machine token planted in the session cookie", () => {
 
     expect(result).toBeNull();
     expect(oauthTokenFindOne).not.toHaveBeenCalled();
+    // Without this the assertion above is satisfied by the default empty Session collection and
+    // would pass against code that has no cookie support at all
+    expect(sessionFindOne).toHaveBeenCalledWith({ tokenHash: sha256(MACHINE_TOKEN) });
+  });
+
+  it("refuses a cpat_ in the cookie even when a session row happens to carry that hash", async () => {
+    sessionFound(sessionRow());
+    oauthTokenFindOne.mockResolvedValue({
+      user: "u1",
+      accessExpiresAt: new Date(Date.now() + DAY_MS),
+      allowedProjects: [],
+    });
+
+    const result = await getAuthUser(withCookie(MACHINE_TOKEN));
+
+    // A row keyed on sha256(cpat_) can only exist if someone put it there; it is still a session,
+    // so it must not carry machine authority
+    expect(result?.viaMachineCredential).toBe(false);
+    expect(oauthTokenFindOne).not.toHaveBeenCalled();
   });
 
   it("refuses a cp_ carried in the cookie without consulting the API tokens", async () => {
@@ -253,5 +272,63 @@ describe("getAuthUser — forwarded headers do not decide anything", () => {
         withCookie(SESSION_TOKEN, { "x-forwarded-host": "app.example.com" }, "POST")
       )
     ).rejects.toBeInstanceOf(ProvenanceError);
+  });
+});
+
+describe("getAuthUser — a presented Bearer never falls back to the cookie", () => {
+  it("returns null for an unrecognised Bearer prefix even with a live session cookie", async () => {
+    sessionFound(sessionRow());
+
+    const result = await getAuthUser(
+      request({
+        authorization: "Bearer not-a-recognised-prefix",
+        cookie: `__Host-bp_session=${SESSION_TOKEN}`,
+      })
+    );
+
+    // /api/mcp gates on the header merely being present, so falling through here would hand it an
+    // AuthInfo for a token nothing validated, authenticated by a cookie that rode along
+    expect(result).toBeNull();
+    expect(sessionFindOne).not.toHaveBeenCalled();
+  });
+
+  it("still resolves the cookie when no Authorization header is sent", async () => {
+    sessionFound(sessionRow());
+
+    const result = await getAuthUser(withCookie(SESSION_TOKEN));
+
+    expect(result?.viaMachineCredential).toBe(false);
+  });
+});
+
+describe("getAuthUser — the five machine-gated endpoints", () => {
+  // Each gate is `if (user.viaMachineCredential) return 403`, so a cookie principal must carry a
+  // strict false rather than an absent property
+  it("gives a cookie session a strict false, which is what the gates test", async () => {
+    sessionFound(sessionRow());
+
+    const result = await getAuthUser(withCookie(SESSION_TOKEN));
+
+    expect(result).not.toBeNull();
+    expect(result!.viaMachineCredential).toBe(false);
+    expect(Object.is(result!.viaMachineCredential, undefined)).toBe(false);
+  });
+
+  it("keeps a strict true on both machine paths", async () => {
+    oauthTokenFindOne.mockResolvedValue({
+      user: "u1",
+      accessExpiresAt: new Date(Date.now() + DAY_MS),
+      allowedProjects: [],
+    });
+    const viaOauth = await getAuthUser(request({ authorization: `Bearer ${MACHINE_TOKEN}` }));
+    expect(viaOauth?.viaMachineCredential).toBe(true);
+
+    bcryptCompare.mockResolvedValue(true);
+    apiTokenFind.mockReturnValue({
+      lean: () =>
+        Promise.resolve([{ _id: "t1", user: "u1", tokenHash: "hashed", allowedProjects: [] }]),
+    });
+    const viaToken = await getAuthUser(request({ authorization: `Bearer cp_${"c".repeat(64)}` }));
+    expect(viaToken?.viaMachineCredential).toBe(true);
   });
 });

@@ -36,13 +36,25 @@ export function appOrigins(): string[] {
 
 export function assertSessionConfig(): void {
   if (!allowsInsecureCookie()) return;
-  if (appOrigins().length === 0) {
+
+  const origins = appOrigins();
+  if (origins.length === 0) {
     throw new Error(
       "APP_ORIGIN is required when COOKIE_ALLOW_INSECURE=1: without it every mutating request, including login, is refused"
     );
   }
+
+  // The compose stack ships the flag on so a localhost deployment works out of the box, which makes
+  // "still insecure once it moved behind TLS" the likely mistake rather than an exotic one
+  const secureOrigins = origins.filter((origin) => origin.startsWith("https://"));
+  if (secureOrigins.length > 0) {
+    throw new Error(
+      `COOKIE_ALLOW_INSECURE=1 with an https APP_ORIGIN (${secureOrigins.join(", ")}): the session cookie would be issued without Secure and without the __Host- prefix on a TLS deployment, leaving it injectable from any sibling subdomain. Unset COOKIE_ALLOW_INSECURE.`
+    );
+  }
+
   console.warn(
-    "COOKIE_ALLOW_INSECURE=1 — session cookies are issued without Secure and without the __Host- prefix"
+    "COOKIE_ALLOW_INSECURE=1 — session cookies are issued without Secure and without the __Host- prefix. Unset it once this instance is behind TLS."
   );
 }
 
@@ -81,16 +93,20 @@ export function legacySessionCookies(): string[] {
 export function readSessionCookie(header: string | null): string | null {
   if (!header) return null;
   const name = sessionCookieName();
+  const values: string[] = [];
 
   for (const part of header.split(";")) {
     const separator = part.indexOf("=");
     if (separator === -1) continue;
     if (part.slice(0, separator).trim() !== name) continue;
-    const value = part.slice(separator + 1).trim();
-    return value.length > 0 ? value : null;
+    values.push(part.slice(separator + 1).trim());
   }
 
-  return null;
+  // Two cookies of one name mean one was set for a parent domain — the shadowing the __Host- prefix
+  // exists to prevent, and which the unprefixed name cannot. Taking either is a coin flip on whose
+  // session wins, so take neither.
+  if (values.length !== 1) return null;
+  return values[0].length > 0 ? values[0] : null;
 }
 
 export type ProvenanceRefusal = "cross-site" | "origin-mismatch" | "no-provenance";

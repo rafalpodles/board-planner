@@ -226,3 +226,18 @@ describe("scrub", () => {
     );
   });
 });
+
+describe("scrub — every credential prefix this system mints", () => {
+  const HEX = "a1b2".repeat(8);
+
+  // cpe_ is the worker's own enrolment token, read off its own disk; cpd_ is a device code. Both
+  // reach agent-authored summaries that get posted as board comments.
+  const PREFIXES = ["cp_", "cpw_", "cps_", "cpe_", "cpd_", "cpat_", "cprt_", "cpac_", "cpct_", "cpc_"];
+
+  for (const prefix of PREFIXES) {
+    it(`redacts a bare ${prefix} token`, () => {
+      const secret = `${prefix}${HEX}`;
+      expect(scrub(`the token is ${secret} ok`)).not.toContain(secret);
+    });
+  }
+});

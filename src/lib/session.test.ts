@@ -365,3 +365,40 @@ describe("revocation", () => {
     expect(deleteMany).toHaveBeenCalledWith({ user: "user-1" });
   });
 });
+
+describe("readSessionCookie — duplicate names", () => {
+  it("takes neither when the header carries two cookies of the active name", () => {
+    // Two of one name means one was set for a parent domain — the shadowing __Host- prevents and
+    // the unprefixed name cannot. Which one wins is browser ordering, so trusting either is a
+    // coin flip on whose session the request runs as.
+    const header = `__Host-bp_session=attacker; __Host-bp_session=victim`;
+    expect(readSessionCookie(header)).toBeNull();
+  });
+
+  it("still reads a single cookie sitting among others", () => {
+    expect(readSessionCookie("theme=dark; __Host-bp_session=live; other=1")).toBe("live");
+  });
+});
+
+describe("assertSessionConfig — insecure mode against an https origin", () => {
+  it("refuses to start rather than downgrade the cookie on a TLS deployment", () => {
+    process.env.COOKIE_ALLOW_INSECURE = "1";
+    process.env.APP_ORIGIN = "https://board.example.com";
+
+    expect(() => assertSessionConfig()).toThrow(/https APP_ORIGIN/);
+  });
+
+  it("allows the flag alongside a plain-http origin, which is what compose ships", () => {
+    process.env.COOKIE_ALLOW_INSECURE = "1";
+    process.env.APP_ORIGIN = "http://localhost:3000";
+
+    expect(() => assertSessionConfig()).not.toThrow();
+  });
+
+  it("refuses a mixed list containing an https origin", () => {
+    process.env.COOKIE_ALLOW_INSECURE = "1";
+    process.env.APP_ORIGIN = "http://localhost:3000,https://board.example.com";
+
+    expect(() => assertSessionConfig()).toThrow(/https APP_ORIGIN/);
+  });
+});

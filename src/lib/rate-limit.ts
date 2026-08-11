@@ -38,8 +38,10 @@ export function clearAttempts(ip: string): void {
   attempts.delete(ip);
 }
 
-export function lockoutKey(clientIp: string, username: string): string {
-  return `${clientIp}:${username.toLowerCase()}`;
+// Scoped so that fumbling your current password in the profile form cannot lock you out of logging
+// in — different doors, different counters
+export function lockoutKey(clientIp: string, username: string, scope = "login"): string {
+  return `${scope}:${clientIp}:${username.toLowerCase()}`;
 }
 
 export async function withLockout<T>(

@@ -1,6 +1,7 @@
 import { createMcpHandler, withMcpAuth, getPublicOrigin } from "mcp-handler";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { getAuthUser } from "@/lib/auth";
+import { ProvenanceError } from "@/lib/session";
 import { registerPlannerTools } from "@/lib/mcp/tools";
 
 export const runtime = "nodejs";
@@ -18,7 +19,13 @@ const baseHandler = createMcpHandler(
 async function verifyToken(req: Request, bearerToken?: string): Promise<AuthInfo | undefined> {
   if (!bearerToken) return undefined;
 
-  const user = await getAuthUser(req);
+  let user;
+  try {
+    user = await getAuthUser(req);
+  } catch (e) {
+    if (e instanceof ProvenanceError) return undefined;
+    throw e;
+  }
   if (!user) return undefined;
 
   return {

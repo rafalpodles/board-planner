@@ -13,12 +13,6 @@ import {
 } from "./session";
 import { IUser } from "@/types";
 
-export class RateLimitError extends Error {
-  constructor() {
-    super("Too many failed attempts. Try again later.");
-  }
-}
-
 export function getClientIp(request: Request): string {
   const xff = request.headers.get("x-forwarded-for");
   if (!xff) return "unknown";
@@ -133,6 +127,10 @@ export async function getAuthUser(
     if (token.startsWith("cp_")) {
       return verifyBearerToken(token);
     }
+    // A presented Bearer that resolves to nothing must fail, not quietly fall back to the cookie:
+    // /api/mcp gates on the header being present and would otherwise issue an AuthInfo for a token
+    // it never validated, authenticated by a cookie that happened to ride along
+    return null;
   }
 
   return verifySessionCookie(request);
