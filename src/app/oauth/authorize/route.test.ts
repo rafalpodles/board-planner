@@ -20,6 +20,7 @@ vi.mock("@/models/project", () => ({
 }));
 
 const { POST } = await import("./route");
+const { resetRateLimits, ANONYMOUS_ACCOUNT_ATTEMPTS } = await import("@/lib/rate-limit");
 
 const REDIRECT_URI = "https://client.example/callback";
 const USER = { _id: "u1", username: "victim", role: "member" };
@@ -51,6 +52,7 @@ async function attempt(username: string): Promise<string> {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  resetRateLimits();
   oauthClientFindOne.mockResolvedValue({
     clientId: "c1",
     clientName: "Some App",
@@ -60,18 +62,26 @@ beforeEach(() => {
 });
 
 describe("POST /oauth/authorize login phase", () => {
-  it("locks the account out after the failure threshold, before the password is checked", async () => {
-    for (let i = 0; i < 10; i++) {
-      expect(await attempt("locked")).toContain("Invalid username or password.");
-    }
-    expect(verifyCredentials).toHaveBeenCalledTimes(10);
+  it("bounds guessing when no client identity is available", async () => {
+    // Without a proxy header every caller shares the account key, so a refusal there can be aimed
+    // at somebody else — but leaving it unchecked left login entirely unthrottled, which is worse.
+    // The threshold is raised rather than removed: aiming it costs five times what it did.
+    for (let i = 0; i < ANONYMOUS_ACCOUNT_ATTEMPTS; i++) await attempt("locked");
 
+    verifyCredentials.mockClear();
     verifyCredentials.mockResolvedValue(USER);
     const body = await attempt("locked");
 
     expect(body).toContain("Too many failed attempts.");
-    expect(body).not.toContain("Grant access");
-    expect(verifyCredentials).toHaveBeenCalledTimes(10);
+    // The point of refusing before verification: the server stops doing bcrypt work
+    expect(verifyCredentials).not.toHaveBeenCalled();
+  });
+
+  it("leaves a different account alone", async () => {
+    for (let i = 0; i < ANONYMOUS_ACCOUNT_ATTEMPTS; i++) await attempt("locked");
+
+    verifyCredentials.mockResolvedValue(USER);
+    expect(await attempt("bystander")).toContain("Grant access");
   });
 
   it("locks out one username at a time", async () => {

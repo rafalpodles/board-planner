@@ -163,6 +163,7 @@ export function PmChat({
         const resized = await downscaleImage(original);
         const form = new FormData();
         form.append("file", resized.file);
+        form.append("projectId", projectId);
         const res = await api.upload("/api/uploads", form);
         setPending((prev) => [
           ...prev,

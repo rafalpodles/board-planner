@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { withAuth } from "@/lib/middleware";
 import { OAuthToken } from "@/models/oauthToken";
@@ -35,7 +36,9 @@ export const DELETE = withAuth(async (request, { user }) => {
   await connectDB();
 
   const { id } = await request.json();
-  if (!id) {
+  // Typed, not merely truthy: a JSON body can carry an operator object, and {"$ne": null} would
+  // delete an arbitrary row of the caller's own instead of the one named
+  if (typeof id !== "string" || !isValidObjectId(id)) {
     return NextResponse.json({ error: "Connection id is required" }, { status: 400 });
   }
 

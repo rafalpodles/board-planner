@@ -13,12 +13,15 @@ import {
 } from "./session";
 import { IUser } from "@/types";
 
-export function getClientIp(request: Request): string {
+// null, not a sentinel: a literal "unknown" collapses every caller on a proxy-less deployment into
+// one identity, and a per-source refusal keyed on it becomes a way to lock a named user out.
+// Callers must decide what to do with "no identity" rather than be handed a fake one.
+export function getClientIp(request: Request): string | null {
   const xff = request.headers.get("x-forwarded-for");
-  if (!xff) return "unknown";
+  if (!xff) return null;
   // Rightmost entry is appended by the closest proxy; leftmost is client-controlled
   const parts = xff.split(",");
-  return parts[parts.length - 1].trim() || "unknown";
+  return parts[parts.length - 1].trim() || null;
 }
 
 export async function verifyCredentials(

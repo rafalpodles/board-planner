@@ -33,7 +33,8 @@ export function stripSpoofedLabels(content: string): string {
 // content. Anything sitting in the assistant channel is a style example the model imitates,
 // and it learned to emit "[Actions taken: ...]" as prose without ever calling a tool.
 export async function replayHistory(
-  history: PmHistoryEntry[]
+  history: PmHistoryEntry[],
+  projectId: string
 ): Promise<Record<string, unknown>[]> {
   const messages: Record<string, unknown>[] = [];
 
@@ -54,7 +55,7 @@ export async function replayHistory(
       messages.push({
         role: entry.role,
         content: replayable.has(entry)
-          ? await buildUserContent(labelled, entry.attachments)
+          ? await buildUserContent(labelled, entry.attachments, projectId)
           : labelled,
       });
     }

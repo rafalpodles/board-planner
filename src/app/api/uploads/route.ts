@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import mongoose from "mongoose";
 import { Readable } from "stream";
 import { connectDB } from "@/lib/db";
-import { withAuth } from "@/lib/middleware";
+import { withAuth, resolveProjectId } from "@/lib/middleware";
+import { check } from "@/lib/grants";
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 
@@ -23,14 +24,29 @@ const ALLOWED_MIME_TYPES = new Set([
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 ]);
 
-export const POST = withAuth(async (request) => {
+export const POST = withAuth(async (request, { user }) => {
   await connectDB();
 
   const formData = await request.formData();
   const file = formData.get("file") as File | null;
+  const projectId = String(formData.get("projectId") || "");
 
   if (!file) {
     return NextResponse.json({ error: "No file provided" }, { status: 400 });
+  }
+
+  // Recorded so the read side has an owner to check. Without it a file id is a bearer token for
+  // anyone who guesses it.
+  if (!projectId) {
+    return NextResponse.json({ error: "projectId is required" }, { status: 400 });
+  }
+  // Callers hold a project key; grants are keyed on the id
+  const project = await resolveProjectId(projectId);
+  if (!project) {
+    return NextResponse.json({ error: "Project not found" }, { status: 404 });
+  }
+  if (!(await check(user, project, "access"))) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   if (!ALLOWED_MIME_TYPES.has(file.type)) {
@@ -65,6 +81,8 @@ export const POST = withAuth(async (request) => {
       contentType: file.type,
       originalName: file.name,
       size: file.size,
+      project: project,
+      uploadedBy: String(user._id),
     },
   });
 

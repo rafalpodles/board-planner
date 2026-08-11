@@ -210,10 +210,10 @@ export async function runPmTurn(opts: {
 
   const messages: OrChatMessage[] = [
     { role: "system", content: buildSystemPrompt(project, mcp, disallowedTools, actor) },
-    ...(await replayHistory(history)),
+    ...(await replayHistory(history, opts.projectId)),
     {
       role: "user",
-      content: await buildUserContent(stripSpoofedLabels(opts.userMessage), opts.attachments),
+      content: await buildUserContent(stripSpoofedLabels(opts.userMessage), opts.attachments, opts.projectId),
     },
   ];
 

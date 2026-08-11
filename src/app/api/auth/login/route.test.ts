@@ -17,7 +17,7 @@ vi.mock("@/lib/session", async (importOriginal) => {
 });
 
 const { POST } = await import("./route");
-const { clearAttempts, lockoutKey } = await import("@/lib/rate-limit");
+const { resetRateLimits, ANONYMOUS_ACCOUNT_ATTEMPTS } = await import("@/lib/rate-limit");
 const { SESSION_IDLE_TTL_MS, SESSION_ABSOLUTE_TTL_MS } = await import("@/lib/session");
 
 const USER = {
@@ -54,12 +54,9 @@ function sessionCookie(response: Response): string | undefined {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  resetRateLimits();
   delete process.env.COOKIE_ALLOW_INSECURE;
   delete process.env.APP_ORIGIN;
-  // Built with lockoutKey rather than hand-spelled: a literal here silently stops matching the
-  // moment the key shape changes, and the leaked counter then fails a different test
-  clearAttempts(lockoutKey("unknown", "rpo"));
-  clearAttempts(lockoutKey("203.0.113.9", "rpo"));
   verifyCredentials.mockResolvedValue(USER);
   createSession.mockResolvedValue({
     token: "cps_deadbeef",
@@ -142,32 +139,87 @@ describe("POST /api/auth/login — credentials", () => {
     expect(setCookies(response)).toEqual([]);
   });
 
-  it("locks out after the existing threshold, without reaching the password check", async () => {
+  it("bounds guessing even with no client identity, and a success does not reopen the budget", async () => {
     verifyCredentials.mockResolvedValue(null);
-    for (let attempt = 0; attempt < 10; attempt++) {
-      expect((await POST(request())).status).toBe(401);
-    }
-
-    verifyCredentials.mockClear();
-    const response = await POST(request());
-
-    expect(response.status).toBe(429);
-    expect(verifyCredentials).not.toHaveBeenCalled();
-  });
-
-  it("keys the lockout on the client ip as well as the username", async () => {
-    verifyCredentials.mockResolvedValue(null);
-    for (let attempt = 0; attempt < 10; attempt++) {
+    for (let attempt = 0; attempt < ANONYMOUS_ACCOUNT_ATTEMPTS; attempt++) {
       await POST(request());
     }
 
+    verifyCredentials.mockClear();
     verifyCredentials.mockResolvedValue(USER);
-    const response = await POST(
-      request({ "sec-fetch-site": "same-origin", "x-forwarded-for": "203.0.113.9" })
+    const refused = await POST(request());
+
+    expect(refused.status).toBe(429);
+    expect(verifyCredentials).not.toHaveBeenCalled();
+  });
+
+  it("a valid login never clears the source budget, so one account cannot fund guessing others", async () => {
+    const from = (username: string) =>
+      request({ "sec-fetch-site": "same-origin", "x-forwarded-for": "203.0.113.9" }, {
+        username,
+        password: "guess",
+      });
+
+    verifyCredentials.mockResolvedValue(null);
+    for (let attempt = 0; attempt < 40; attempt++) await POST(from(`victim-${attempt}`));
+
+    // A real login of the attacker's own account, from the same address
+    verifyCredentials.mockResolvedValue(USER);
+    expect((await POST(from("mine"))).status).toBe(200);
+
+    // If success had cleared the source counter the budget would be back to zero and this would
+    // keep answering 401 forever
+    verifyCredentials.mockResolvedValue(null);
+    let refusedAt = -1;
+    for (let attempt = 0; attempt < 30; attempt++) {
+      if ((await POST(from(`later-${attempt}`))).status === 429) {
+        refusedAt = attempt;
+        break;
+      }
+    }
+
+    expect(refusedAt).toBeGreaterThanOrEqual(0);
+  });
+
+  it("refuses an address spraying many usernames, which no per-account counter would catch", async () => {
+    const from = (username: string) =>
+      request({ "sec-fetch-site": "same-origin", "x-forwarded-for": "203.0.113.9" }, {
+        username,
+        password: "guess",
+      });
+
+    verifyCredentials.mockResolvedValue(null);
+    let refusedAt = -1;
+    for (let attempt = 0; attempt < 60; attempt++) {
+      // One try per account, so every account counter stays at 1 and only the source accumulates
+      if ((await POST(from(`victim-${attempt}`))).status === 429) {
+        refusedAt = attempt;
+        break;
+      }
+    }
+
+    expect(refusedAt).toBeGreaterThan(10);
+
+    verifyCredentials.mockClear();
+    verifyCredentials.mockResolvedValue(USER);
+    expect((await POST(from("someone-else"))).status).toBe(429);
+    expect(verifyCredentials).not.toHaveBeenCalled();
+  });
+
+  it("refusing one address leaves another address alone", async () => {
+    verifyCredentials.mockResolvedValue(null);
+    for (let attempt = 0; attempt < 55; attempt++) {
+      await POST(request({ "sec-fetch-site": "same-origin", "x-forwarded-for": "203.0.113.9" }));
+    }
+
+    verifyCredentials.mockResolvedValue(USER);
+    const elsewhere = await POST(
+      request({ "sec-fetch-site": "same-origin", "x-forwarded-for": "198.51.100.4" })
     );
 
-    expect(response.status).toBe(200);
+    expect(elsewhere.status).toBe(200);
   });
+
 
   it("rejects a malformed body before touching the password check", async () => {
     expect((await POST(request({ "sec-fetch-site": "same-origin" }, "{"))).status).toBe(400);

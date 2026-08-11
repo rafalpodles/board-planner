@@ -100,17 +100,21 @@ export async function POST(req: Request) {
       return tokenError("invalid_request", "refresh_token is required");
     }
 
-    const rec = await OAuthToken.findOne({ refreshTokenHash: sha256(refreshToken) });
-    if (!rec || rec.refreshExpiresAt.getTime() < Date.now()) {
+    // Consumed atomically. find-then-delete let two concurrent requests both pass validation and
+    // both be issued a pair, so rotation did not rotate and a replayed token was indistinguishable
+    // from ordinary concurrency. findOneAndDelete has exactly one winner.
+    const rec = await OAuthToken.findOneAndDelete({
+      refreshTokenHash: sha256(refreshToken),
+      refreshExpiresAt: { $gt: new Date() },
+      ...(clientId ? { clientId } : {}),
+    });
+    if (!rec) {
       return tokenError("invalid_grant", "refresh token is invalid or expired");
     }
-    if (clientId && rec.clientId !== clientId) {
-      return tokenError("invalid_grant", "client_id mismatch");
-    }
 
-    // Rotate: revoke the old token, issue a fresh pair.
-    await OAuthToken.deleteOne({ _id: rec._id });
-
+    // Issued only after the old row is gone, so a failure here cannot leave two live pairs. The
+    // cost is that a lost response strands this client, which is the safe direction: re-authorising
+    // is recoverable, a silently duplicated grant is not.
     return issueTokens(rec.clientId, rec.user as Types.ObjectId, rec.scope, rec.allowedProjects);
   }
 

@@ -16,15 +16,18 @@ vi.mock("bcryptjs", () => ({ default: { compare, hash: vi.fn().mockResolvedValue
 vi.mock("@/models/user", () => ({ User: { findById: userFindById } }));
 
 const { PUT } = await import("./route");
+const { resetRateLimits } = await import("@/lib/rate-limit");
 
 const SESSION_ID = "sess-1";
 
+// Distinct ids: these stand for different people, and the throttle is now keyed on the account, so
+// one shared _id made every case in this file share one counter.
 function browserUser(username: string) {
-  return { _id: "u1", username, role: "member", sessionId: SESSION_ID };
+  return { _id: `u1-${username}`, username, role: "member", sessionId: SESSION_ID };
 }
 
 function machineUser(username: string) {
-  return { _id: "u1", username, role: "member", viaMachineCredential: true };
+  return { _id: `u1-${username}`, username, role: "member", viaMachineCredential: true };
 }
 
 function put(currentPassword = "current-pass") {
@@ -41,6 +44,7 @@ let record: { password: string; save: ReturnType<typeof vi.fn> };
 
 beforeEach(() => {
   vi.clearAllMocks();
+  resetRateLimits();
   record = { password: "old-hash", save: vi.fn().mockResolvedValue(undefined) };
   userFindById.mockReturnValue({ select: () => Promise.resolve(record) });
   getAuthUser.mockResolvedValue(browserUser("changer"));
@@ -54,7 +58,7 @@ describe("PUT /api/users/me/password", () => {
 
     expect(res.status).toBe(200);
     expect(record.save).toHaveBeenCalled();
-    expect(revokeUserSessions).toHaveBeenCalledWith("u1", SESSION_ID);
+    expect(revokeUserSessions).toHaveBeenCalledWith("u1-changer", SESSION_ID);
   });
 
   it("revokes every session when the caller holds a machine token and has none", async () => {
@@ -63,7 +67,7 @@ describe("PUT /api/users/me/password", () => {
     const res = await PUT(put(), ctx());
 
     expect(res.status).toBe(200);
-    expect(revokeUserSessions).toHaveBeenCalledWith("u1", undefined);
+    expect(revokeUserSessions).toHaveBeenCalledWith("u1-machine-caller", undefined);
   });
 
   it("revokes nothing when the current password is wrong", async () => {
@@ -77,20 +81,26 @@ describe("PUT /api/users/me/password", () => {
     expect(revokeUserSessions).not.toHaveBeenCalled();
   });
 
-  it("locks out after the failure threshold, before the password is compared", async () => {
+  it("stops comparing once the caller's own account has failed enough times", async () => {
     getAuthUser.mockResolvedValue(browserUser("locked-out"));
     compare.mockResolvedValue(false);
 
+    // The threshold is crossed by the failure that reaches it, so that attempt already answers 429
+    let refusals = 0;
     for (let i = 0; i < 10; i++) {
-      expect((await PUT(put(), ctx())).status).toBe(400);
+      if ((await PUT(put(), ctx())).status === 429) refusals++;
     }
+    expect(refusals).toBeGreaterThan(0);
     expect(compare).toHaveBeenCalledTimes(10);
 
+    // Refusal here is safe and stays a refusal: the request already proves possession of this
+    // account's session, so nobody else can aim it
+    compare.mockClear();
     compare.mockResolvedValue(true);
     const res = await PUT(put(), ctx());
 
     expect(res.status).toBe(429);
-    expect(compare).toHaveBeenCalledTimes(10);
+    expect(compare).not.toHaveBeenCalled();
     expect(record.save).not.toHaveBeenCalled();
     expect(revokeUserSessions).not.toHaveBeenCalled();
   });

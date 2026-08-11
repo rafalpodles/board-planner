@@ -29,6 +29,14 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
 
   // Update role
   if (body.role !== undefined) {
+    // Promotion is the second half of the machine-credential escape: create an account, raise it,
+    // then sign in as it. Gated exactly like account creation and the five interactive endpoints.
+    if (admin.viaMachineCredential) {
+      return NextResponse.json(
+        { error: "This action requires an interactive session" },
+        { status: 403 }
+      );
+    }
     if (!["admin", "member"].includes(body.role)) {
       return NextResponse.json({ error: "Invalid role" }, { status: 400 });
     }

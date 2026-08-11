@@ -47,6 +47,15 @@ export async function POST(request: Request) {
     if (!authUser || authUser.role !== "admin") {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
+    // Creating an account with a chosen password is how a machine credential escapes the
+    // viaMachineCredential gates: make the user, promote it, sign in as it. Same refusal the five
+    // gated endpoints make, for the same reason.
+    if (authUser.viaMachineCredential) {
+      return NextResponse.json(
+        { error: "This action requires an interactive session" },
+        { status: 403 }
+      );
+    }
   }
 
   const hashedPassword = await bcrypt.hash(password, 10);
