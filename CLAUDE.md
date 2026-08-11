@@ -202,7 +202,11 @@ NEXT_PUBLIC_APP_URL=      # Frontend URL for links
 ```bash
 npm run build                    # Next.js app
 cd mcp-server && npm run build   # MCP server
+docker compose up -d --build     # app + MongoDB 4.4, no local Node or Mongo needed
 ```
+`next.config.ts` sets `output: "standalone"` for the Docker image; `next start` is unaffected.
+`NEXT_PUBLIC_APP_URL` is baked in at build time — the compose file passes it as a build arg. See
+[README.md](README.md).
 
 ## Deploy
 Railway auto-deploys from `main` branch.
