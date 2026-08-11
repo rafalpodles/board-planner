@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
 import { ApiSprint } from "@/types";
 import { columnIdsWithRole } from "@/lib/columns";
@@ -28,6 +28,7 @@ function Spinner() {
 export default function SprintsPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const api = useApi();
   const { toast } = useToast();
@@ -48,12 +49,17 @@ export default function SprintsPage() {
 
   useEffect(() => {
     if (board.loading) return;
+    // A route transition away from this tab lands here too, one commit before the page
+    // unmounts: the destination's URL (no ?sprint=) is already visible through `requested`,
+    // which would otherwise read as "the sprint fell out of the URL" and replace it right
+    // back. This guard is the only thing telling the two apart.
+    if (pathname !== `/projects/${projectId}/sprints`) return;
     const next = resolveSelectedSprint(board.sprints, requested);
     if (next !== scope) setScope(next);
     if (next && next !== requested) {
       router.replace(`/projects/${projectId}/sprints?sprint=${next}`);
     }
-  }, [board.loading, board.sprints, requested, scope, projectId, router]);
+  }, [board.loading, board.sprints, requested, scope, projectId, router, pathname]);
 
   function openForm(sprint: ApiSprint | null) {
     setEditing(sprint);

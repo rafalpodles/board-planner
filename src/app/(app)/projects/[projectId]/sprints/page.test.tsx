@@ -4,12 +4,13 @@ import { render, screen, cleanup, within, act, fireEvent } from "@testing-librar
 import SprintsPage from "./page";
 import { ApiProject, ApiSprint, ApiTask } from "@/types";
 
-const { api, toast, router, query } = vi.hoisted(() => ({
+const { api, toast, router, query, pathname } = vi.hoisted(() => ({
   api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), del: vi.fn() },
   toast: vi.fn(),
   router: { push: vi.fn(), replace: vi.fn() },
   // Stands in for the address bar: a test writes it and rerenders, as a navigation would
   query: { current: "" },
+  pathname: { current: "/projects/p1/sprints" },
 }));
 
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
@@ -22,7 +23,7 @@ vi.mock("@/hooks/use-auth", () => ({
 vi.mock("next/navigation", () => ({
   useParams: () => ({ projectId: "p1" }),
   useRouter: () => router,
-  usePathname: () => "/projects/p1/sprints",
+  usePathname: () => pathname.current,
   useSearchParams: () => new URLSearchParams(query.current),
 }));
 vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast }) }));
@@ -150,6 +151,7 @@ beforeEach(() => {
   router.push.mockReset();
   router.replace.mockReset();
   query.current = "";
+  pathname.current = "/projects/p1/sprints";
   localStorage.clear();
 });
 afterEach(cleanup);
@@ -195,6 +197,31 @@ describe("Sprints tab", () => {
     await renderSprints();
     expect(router.replace).toHaveBeenCalledWith("/projects/p1/sprints?sprint=s1");
     expect(router.push).not.toHaveBeenCalled();
+  });
+
+  // Opening a task pushes to /tasks/7 and unmounts this page, but React Testing Library's
+  // rerender simulates the transition render that happens first: the route has already
+  // moved, but this component (and its effect) is still on screen for one more commit.
+  // Without a pathname guard, the effect sees `requested` as null (the task route carries
+  // no ?sprint=) and replaces the address bar right back to the sprints tab.
+  it("does not pull the user back to the sprints tab once a task navigation is underway", async () => {
+    const { rerender } = await renderSprints();
+
+    // Commit a render with the address bar as it actually reads after the earlier
+    // replace landed — `requested` has to actually transition through "s1" for the
+    // effect's dependency array to notice it later moving to null.
+    query.current = "sprint=s1";
+    rerender(<SprintsPage />);
+    router.replace.mockReset();
+
+    // A card click pushes to the task route first; both hooks report the new location
+    // before this component unmounts, same as during a real App Router transition — the
+    // destination carries no ?sprint=, so `requested` goes back to null.
+    pathname.current = "/projects/p1/tasks/7";
+    query.current = "";
+    rerender(<SprintsPage />);
+
+    expect(router.replace).not.toHaveBeenCalled();
   });
 
   // GET /tasks?sprint=<x> assigns straight into a Mongoose filter, so an id the project

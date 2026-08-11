@@ -47,8 +47,8 @@ function dateRange(sprint: ApiSprint): string | null {
   })}`;
 }
 
-function daysLeft(sprint: ApiSprint): string | null {
-  if (sprint.status === "completed" || !sprint.endDate) return null;
+function daysLeft(sprint: ApiSprint, closed: boolean): string | null {
+  if (closed || !sprint.endDate) return null;
   const days = Math.ceil((new Date(sprint.endDate).getTime() - Date.now()) / 86400000);
   if (Number.isNaN(days)) return null;
   if (days < 0) return `${-days} ${-days === 1 ? "day" : "days"} over`;
@@ -66,9 +66,9 @@ export function SprintHeader({
   onDelete,
 }: SprintHeaderProps) {
   const progress = totalCount > 0 ? (doneCount / totalCount) * 100 : 0;
-  const range = dateRange(sprint);
-  const remaining = daysLeft(sprint);
   const closed = sprint.status === "completed";
+  const range = dateRange(sprint);
+  const remaining = daysLeft(sprint, closed);
 
   return (
     <div className="mb-4 shrink-0">
