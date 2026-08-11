@@ -2,20 +2,25 @@
 
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import Link from "next/link";
 import { useMemo } from "react";
 import { remarkTaskReferences, type ReferenceScope } from "@/lib/task-references";
 
 const components = {
   // Internal task references route through the client without a full page load; anything else a
   // person pasted stays an ordinary anchor and opens where they expect
+  // A plain anchor even for an internal address, so this is a real navigation rather than a soft
+  // one. `/projects/x/tasks/n` is an intercepted route: soft-navigating to it from a task page
+  // wakes the modal interceptor, which draws the task on top of the page the reader is already on
+  // — two tasks stacked, the one underneath still the old one. The reader asked to go to a task,
+  // not to open it over the one they were reading.
+  //
   // `node` is react-markdown's mdast node and must not be spread onto an element; the rest is
-  // dropped with it because nothing else here needs forwarding
+  // dropped with it because nothing else here needs forwarding.
   a: ({ href, children }: React.AnchorHTMLAttributes<HTMLAnchorElement>) =>
     href?.startsWith("/") ? (
-      <Link href={href} className="text-primary hover:underline">
+      <a href={href} className="text-primary hover:underline">
         {children}
-      </Link>
+      </a>
     ) : (
       <a href={href} target="_blank" rel="noopener noreferrer">
         {children}

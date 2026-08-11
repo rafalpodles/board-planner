@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup, act, waitFor } from "@testing-library/react";
 import { MobileCommentBar } from "./MobileCommentBar";
 
-const { api } = vi.hoisted(() => ({ api: { post: vi.fn() } }));
+const { api } = vi.hoisted(() => ({ api: { get: vi.fn(), post: vi.fn() } }));
 
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
 vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast: vi.fn() }) }));
@@ -11,6 +11,8 @@ vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast: vi.fn() }) }
 beforeEach(() => {
   api.post.mockReset();
   api.post.mockResolvedValue({});
+  api.get.mockReset();
+  api.get.mockResolvedValue([]);
 });
 
 afterEach(cleanup);

@@ -40,6 +40,7 @@ export function GrowingTextarea({
   onKeyDown,
   onBlur,
   className = "",
+  textareaRef,
   ...rest
 }: {
   value: string;
@@ -49,8 +50,11 @@ export function GrowingTextarea({
   className?: string;
   placeholder?: string;
   "aria-label"?: string;
+  /** Lets a caller reach the element too — the autocomplete needs it to move the caret. */
+  textareaRef?: React.RefObject<HTMLTextAreaElement | null>;
 }) {
-  const ref = useRef<HTMLTextAreaElement>(null);
+  const own = useRef<HTMLTextAreaElement>(null);
+  const ref = textareaRef ?? own;
   useAutoGrow(ref, value);
 
   return (
