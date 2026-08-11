@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { ProjectBoardView } from "./ProjectBoardView";
 import { ProjectBoard } from "@/hooks/use-project-board";
 import { ApiProject, ApiTask } from "@/types";
@@ -112,6 +112,50 @@ describe("A read-only ProjectBoardView", () => {
     render(<ProjectBoardView board={makeBoard({ tasks, selectedTasks: new Set(["t1"]) })} />);
     const card = screen.getByRole("link", { name: /A bug/i });
     expect(card.className).toContain("border-primary");
+  });
+});
+
+describe("A read-only ProjectBoardView's other write paths", () => {
+  it("does not offer the Select control", () => {
+    render(<ProjectBoardView board={makeBoard({ tasks })} readOnly />);
+    expect(screen.queryByRole("button", { name: /^Select/ })).toBeNull();
+  });
+
+  it("still offers the Select control when not read-only", () => {
+    render(<ProjectBoardView board={makeBoard({ tasks })} />);
+    expect(screen.getByRole("button", { name: /^Select/ })).toBeTruthy();
+  });
+
+  it("does not open the new-task modal on the n shortcut", () => {
+    render(<ProjectBoardView board={makeBoard({ tasks })} readOnly />);
+    fireEvent.keyDown(document, { key: "n" });
+    expect(screen.queryByRole("heading", { name: "New Task" })).toBeNull();
+  });
+
+  it("opens the new-task modal on the n shortcut when not read-only", () => {
+    const setShowNewTask = vi.fn();
+    render(<ProjectBoardView board={makeBoard({ tasks, setShowNewTask })} />);
+    fireEvent.keyDown(document, { key: "n" });
+    expect(setShowNewTask).toHaveBeenCalledWith(true);
+  });
+
+  it("never mounts the new-task modal, even if showNewTask is already true", () => {
+    render(<ProjectBoardView board={makeBoard({ tasks, showNewTask: true })} readOnly />);
+    expect(screen.queryByRole("heading", { name: "New Task" })).toBeNull();
+  });
+
+  it("does not open the context menu on right-click", () => {
+    render(<ProjectBoardView board={makeBoard({ tasks })} readOnly />);
+    const card = screen.getByRole("link", { name: /A bug/i });
+    fireEvent.contextMenu(card);
+    expect(screen.queryByText("Duplicate")).toBeNull();
+  });
+
+  it("still opens the context menu on right-click when not read-only", () => {
+    render(<ProjectBoardView board={makeBoard({ tasks })} />);
+    const card = screen.getByRole("link", { name: /A bug/i });
+    fireEvent.contextMenu(card);
+    expect(screen.getByText("Duplicate")).toBeTruthy();
   });
 });
 

@@ -243,6 +243,15 @@ describe("Sprints tab", () => {
     expect(count("/api/projects/p1/sprints")).toBe(count("/api/projects/p1"));
   });
 
+  // Board.test.tsx and ProjectBoardView.test.tsx pin readOnly's effect once it is passed
+  // through; this pins that the page actually passes it, not merely that the components
+  // honour it when told to.
+  it("keeps a completed sprint's board undraggable, not just its header", async () => {
+    await renderSprints(completedOnly);
+    const card = screen.getByRole("link", { name: /Task 1/i });
+    expect(card.getAttribute("draggable")).toBe("false");
+  });
+
   it("offers no lifecycle buttons on a completed sprint", async () => {
     await renderSprints(completedOnly);
     expect(screen.queryByRole("button", { name: "Activate" })).toBeNull();

@@ -172,6 +172,27 @@ describe("A read-only board", () => {
     expect(el.getAttribute("href")).toContain("/TP/tasks/");
   });
 
+  // The href assertion above passes even if the click itself is swallowed — an
+  // <a> still carries its href either way. Only a real click proves the card opens.
+  it("still opens on a real click", async () => {
+    const onTaskClick = vi.fn();
+    render(
+      <Board
+        tasks={tasks}
+        projectKey="TP"
+        columns={columnsWithInProgress}
+        readOnly
+        onStatusChange={() => {}}
+        onTaskClick={onTaskClick}
+      />
+    );
+    const el = screen.getByRole("link", { name: /A bug/i });
+    await act(async () => {
+      fireEvent.click(el);
+    });
+    expect(onTaskClick).toHaveBeenCalledWith("t1");
+  });
+
   it("drops nothing when a task is dragged onto a column", () => {
     const onTaskDrop = vi.fn();
     const onStatusChange = vi.fn();
