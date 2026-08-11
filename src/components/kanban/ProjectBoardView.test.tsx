@@ -113,3 +113,16 @@ describe("A read-only ProjectBoardView", () => {
     expect(card.className).toContain("border-primary");
   });
 });
+
+describe("ProjectBoardView's emptyState prop", () => {
+  it("renders nothing when emptyState is explicitly null", () => {
+    render(<ProjectBoardView board={makeBoard({ tasks: [] })} emptyState={null} />);
+    expect(screen.queryByText("No tasks yet")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Create Task" })).toBeNull();
+  });
+
+  it("renders the project's own default when emptyState is omitted", () => {
+    render(<ProjectBoardView board={makeBoard({ tasks: [] })} />);
+    expect(screen.getByText("No tasks yet")).toBeTruthy();
+  });
+});

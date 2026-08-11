@@ -115,6 +115,9 @@ export default function SprintsPage() {
   }
 
   const selected = scope ? board.sprints.find((s) => s._id === scope) ?? null : null;
+  // The one place this page decides a sprint is locked; every read-only gate on this page
+  // goes through it so they can't drift apart
+  const sprintIsReadOnly = selected?.status === "completed";
   // Until this sprint's own tasks are in, `board.tasks` still holds the sprint we came from,
   // and showing them under this name would be the page stating something untrue
   const tasksLoaded = scope !== null && board.loadedScope === scope;
@@ -173,13 +176,13 @@ export default function SprintsPage() {
                 {tasksLoaded ? (
                   <ProjectBoardView
                     board={board}
-                    readOnly={selected.status === "completed"}
+                    readOnly={sprintIsReadOnly}
                     emptyState={
                       <div className="flex flex-col items-center justify-center py-16 text-center">
                         <h2 className="text-lg font-medium text-text-muted mb-2">
                           No tasks in this sprint
                         </h2>
-                        {selected.status !== "completed" && (
+                        {!sprintIsReadOnly && (
                           <Button size="sm" onClick={() => board.setShowNewTask(true)}>
                             Create Task
                           </Button>

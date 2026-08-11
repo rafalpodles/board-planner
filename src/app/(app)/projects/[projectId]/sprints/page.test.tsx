@@ -239,8 +239,6 @@ describe("Sprints tab", () => {
     expect(screen.getByTestId("sprint-progress").textContent).toBe("4/8");
   });
 
-  // The window this pins is a request long: without it the tab shows Sprint 12's cards and
-  // Sprint 12's done/total under Sprint 13's name, which is the page stating something untrue
   it("says the sprint is empty rather than offering to start the project", async () => {
     await renderSprints(sprints, { tasks: [] });
     expect(screen.getByText("No tasks in this sprint")).toBeTruthy();
@@ -257,6 +255,8 @@ describe("Sprints tab", () => {
     expect(screen.getByTestId("sprint-progress").textContent).toBe("0/0");
   });
 
+  // The window this pins is a request long: without it the tab shows Sprint 12's cards and
+  // Sprint 12's done/total under Sprint 13's name, which is the page stating something untrue
   it("never shows the previous sprint's tasks under the sprint just selected", async () => {
     const { rerender } = await renderSprints();
     expect(screen.getByText("TP-1")).toBeTruthy();
