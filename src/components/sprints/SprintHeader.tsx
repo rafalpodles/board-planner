@@ -85,46 +85,52 @@ export function SprintHeader({
           {sprint.goal && <p className="mt-0.5 text-sm text-text-muted">{sprint.goal}</p>}
         </div>
 
-        {!closed && (
-          <div className="flex shrink-0 gap-1">
-            <Button size="sm" onClick={onNewTask}>
-              Create Task
-            </Button>
-            {sprint.status === "planned" && (
-              <Button size="sm" variant="secondary" onClick={onActivate}>
-                Activate
+        {/* readOnly means "don't fumble a finished sprint", not an integrity boundary — the
+            server enforces nothing about completed sprints. Reopening one is a separate
+            question nobody has decided, so Activate/Complete stay withheld; Edit and Delete
+            are ordinary sprint metadata edits and stay available regardless. */}
+        <div className="flex shrink-0 gap-1">
+          {!closed && (
+            <>
+              <Button size="sm" onClick={onNewTask}>
+                Create Task
               </Button>
-            )}
-            {sprint.status === "active" && (
-              <Button size="sm" variant="secondary" onClick={onComplete}>
-                Complete
-              </Button>
-            )}
-            <Button size="sm" variant="ghost" onClick={onEdit}>
-              Edit
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              aria-label={`Delete sprint ${sprint.name}`}
-              onClick={onDelete}
+              {sprint.status === "planned" && (
+                <Button size="sm" variant="secondary" onClick={onActivate}>
+                  Activate
+                </Button>
+              )}
+              {sprint.status === "active" && (
+                <Button size="sm" variant="secondary" onClick={onComplete}>
+                  Complete
+                </Button>
+              )}
+            </>
+          )}
+          <Button size="sm" variant="ghost" onClick={onEdit}>
+            Edit
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            aria-label={`Delete sprint ${sprint.name}`}
+            onClick={onDelete}
+          >
+            <svg
+              className="h-4 w-4 text-danger"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
             >
-              <svg
-                className="h-4 w-4 text-danger"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                />
-              </svg>
-            </Button>
-          </div>
-        )}
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+              />
+            </svg>
+          </Button>
+        </div>
       </div>
 
       <div className="mt-2 flex items-center gap-3 text-xs text-text-muted">

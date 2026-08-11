@@ -252,12 +252,16 @@ describe("Sprints tab", () => {
     expect(card.getAttribute("draggable")).toBe("false");
   });
 
-  it("offers no lifecycle buttons on a completed sprint", async () => {
+  // readOnly is about not fumbling a finished sprint, not an integrity boundary — the
+  // server enforces nothing about completed sprints either. Reopening one (Activate) stays
+  // undecided and withheld, along with Complete; Edit and Delete are ordinary metadata
+  // edits and stay offered.
+  it("withholds Activate and Complete on a completed sprint, but not Edit and Delete", async () => {
     await renderSprints(completedOnly);
     expect(screen.queryByRole("button", { name: "Activate" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Complete" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
-    expect(screen.queryByRole("button", { name: /Delete sprint/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "Edit" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Delete sprint/ })).toBeTruthy();
   });
 
   it("keeps the sprint's progress on every task in it while the board is filtered", async () => {
@@ -377,5 +381,19 @@ describe("Sprint lifecycle from the header", () => {
 
     expect(screen.getByRole("heading", { name: "Edit Sprint" })).toBeTruthy();
     expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Sprint 12");
+  });
+
+  it("still edits and deletes a completed sprint, since only its board is read-only", async () => {
+    api.del.mockResolvedValue({});
+    await renderSprints(completedOnly);
+
+    await click(screen.getByRole("button", { name: "Edit" }));
+    expect(screen.getByRole("heading", { name: "Edit Sprint" })).toBeTruthy();
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Sprint 11");
+    await click(screen.getByRole("button", { name: "Cancel" }));
+
+    await click(screen.getByRole("button", { name: "Delete sprint Sprint 11" }));
+    await click(screen.getByRole("button", { name: "Delete" }));
+    expect(api.del).toHaveBeenCalledWith("/api/projects/p1/sprints/s3");
   });
 });
