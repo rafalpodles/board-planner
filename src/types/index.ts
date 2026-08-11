@@ -876,6 +876,10 @@ export interface ApiProject {
   _id: string;
   name: string;
   key: string;
+  // Every key this board has answered to. Renaming a project renames all its task keys at once
+  // while the text people already wrote keeps the old prefix, so recognising a written reference
+  // needs both — see remarkTaskReferences.
+  formerKeys?: string[];
   description: string;
   icon: string;
   categories?: ApiProjectCategory[];

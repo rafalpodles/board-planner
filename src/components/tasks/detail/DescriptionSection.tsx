@@ -4,6 +4,7 @@ import { useState } from "react";
 import { MarkdownContent } from "@/components/ui/MarkdownContent";
 import { MarkdownEditor } from "@/components/ui/MarkdownEditor";
 import { SectionLabel } from "./atoms";
+import type { ReferenceScope } from "@/lib/task-references";
 
 interface DescriptionSectionProps {
   value: string;
@@ -11,6 +12,8 @@ interface DescriptionSectionProps {
   onFileUpload: (file: File) => Promise<string>;
   /** Narrow screens show three lines behind a Show more, so the criteria stay in reach */
   collapsible?: boolean;
+  /** The board this text belongs to, so a written task key becomes a link to that task */
+  scope?: ReferenceScope | null;
 }
 
 export function DescriptionSection({
@@ -18,6 +21,7 @@ export function DescriptionSection({
   onChange,
   onFileUpload,
   collapsible = false,
+  scope,
 }: DescriptionSectionProps) {
   const [editing, setEditing] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -49,7 +53,7 @@ export function DescriptionSection({
       ) : value.trim() ? (
         <>
           <div className={`prose prose-sm max-w-none text-sm leading-relaxed ${clamped}`}>
-            <MarkdownContent>{value}</MarkdownContent>
+            <MarkdownContent scope={scope}>{value}</MarkdownContent>
           </div>
           {collapsible && (
             <button

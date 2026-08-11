@@ -143,6 +143,9 @@ function TaskDetailView({
   const { draft, set, autoSaveState, retry } = useTaskEditor(projectId, task);
 
   const columns = effectiveColumns(project.columns);
+  // What a written task key is measured against. Former keys included, because this board renamed
+  // itself once and everything written before that still says the old prefix.
+  const scope = { key: project.key, formerKeys: project.formerKeys };
   const taskKey = `${project.key}-${task.taskNumber}`;
   const assignee = users.find((u) => u.username === draft.assignee);
   const reporter =
@@ -319,6 +322,7 @@ function TaskDetailView({
             value={draft.description}
             onChange={(value) => set("description", value)}
             onFileUpload={handleFileUpload}
+            scope={scope}
             collapsible
           />
 
@@ -344,6 +348,7 @@ function TaskDetailView({
             <TaskActivityPanel
               projectId={projectId}
               taskId={task._id}
+              scope={scope}
               commentRefreshKey={commentRefreshKey}
             />
           </section>

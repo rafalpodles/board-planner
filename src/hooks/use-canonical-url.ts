@@ -16,7 +16,11 @@ export function useCanonicalUrl(projectKey?: string, taskNumber?: number) {
     if (projectKey && isObjectIdSegment(projectId)) {
       canonical = canonical.replace(`/projects/${projectId}`, `/projects/${projectKey}`);
     }
-    if (taskNumber !== undefined && taskId && taskId !== String(taskNumber)) {
+    // Only an ObjectId is swapped, matching what the project segment above already checks. Keyed
+    // on "the number differs" it also fired mid-navigation, when the address had moved to the next
+    // task and the loaded one had not — rewriting the URL back and stranding the click. Nothing
+    // linked one task to another until BP-254, so nobody could reach it.
+    if (taskNumber !== undefined && taskId && isObjectIdSegment(taskId)) {
       canonical = canonical.replace(`/tasks/${taskId}`, `/tasks/${taskNumber}`);
     }
     if (canonical === pathname) return;

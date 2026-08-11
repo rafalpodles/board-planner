@@ -10,6 +10,7 @@ import { useToast } from "@/components/ui/Toast";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { MarkdownContent } from "@/components/ui/MarkdownContent";
 import { Avatar } from "@/components/tasks/detail/atoms";
+import type { ReferenceScope } from "@/lib/task-references";
 
 interface MentionUser {
   _id: string;
@@ -26,6 +27,8 @@ interface CommentsProps {
   refreshKey?: number;
   // Adding, editing and deleting a comment each write an activity entry; reacting does not
   onMutated?: () => void;
+  /** The board these comments belong to, so a written task key becomes a link to that task */
+  scope?: ReferenceScope | null;
 }
 
 export function Comments({
@@ -35,6 +38,7 @@ export function Comments({
   onCountChange,
   onMutated,
   refreshKey = 0,
+  scope,
 }: CommentsProps) {
   const [comments, setComments] = useState<ApiComment[]>([]);
   const [body, setBody] = useState("");
@@ -371,7 +375,7 @@ export function Comments({
               </div>
             ) : (
               <div className="text-sm prose prose-sm max-w-none overflow-x-auto">
-                <MarkdownContent mentions>{comment.body}</MarkdownContent>
+                <MarkdownContent mentions scope={scope}>{comment.body}</MarkdownContent>
               </div>
             )}
 
