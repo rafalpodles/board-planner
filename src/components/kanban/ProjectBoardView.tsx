@@ -232,9 +232,11 @@ export function ProjectBoardView({ board, readOnly = false, emptyState }: Projec
           </svg>
           <h2 className="text-lg font-medium text-text-muted mb-2">No tasks yet</h2>
           <p className="text-sm text-text-muted mb-4">Create your first task to get started</p>
-          <Button size="sm" onClick={() => setShowNewTask(true)}>
-            Create Task
-          </Button>
+          {!readOnly && (
+            <Button size="sm" onClick={() => setShowNewTask(true)}>
+              Create Task
+            </Button>
+          )}
         </div>
       ))}
 
@@ -249,8 +251,8 @@ export function ProjectBoardView({ board, readOnly = false, emptyState }: Projec
           customFields={project.customFields || []}
           projectCategories={project.categories || []}
           columns={project.columns || []}
-          selectedTasks={selectedTasks}
-          selectionMode={selectionMode}
+          selectedTasks={readOnly ? undefined : selectedTasks}
+          selectionMode={readOnly ? undefined : selectionMode}
           collapseEmptyColumns={user?.collapseEmptyColumns ?? true}
           onStatusChange={handleStatusChange}
           onTaskDrop={readOnly ? undefined : handleTaskDrop}
@@ -269,8 +271,8 @@ export function ProjectBoardView({ board, readOnly = false, emptyState }: Projec
           categories={project.categories || []}
           columns={project.columns || []}
           focusedIndex={focusedTaskIndex}
-          selectedTasks={selectedTasks}
-          selectionMode={selectionMode}
+          selectedTasks={readOnly ? undefined : selectedTasks}
+          selectionMode={readOnly ? undefined : selectionMode}
           sortField={sortField}
           sortDir={sortDir}
           onSortChange={(field, dir) => {

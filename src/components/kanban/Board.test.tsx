@@ -186,4 +186,18 @@ describe("A read-only board", () => {
     renderReadOnlyBoard();
     expect(screen.queryByText("Drop tasks here")).toBeNull();
   });
+
+  // handleCardDragOver calls preventDefault unconditionally; under the native HTML5
+  // DnD contract that is what permits a drop at that position — of anything, not just
+  // an app card. With the column's own onDrop withheld, nothing downstream cancels the
+  // browser's default handling, so a drag started outside the app (a file, a link) could
+  // still be dropped over a card on a read-only board unless this per-card handler is
+  // withheld too.
+  it("does not preempt a native drag over a card, so an outside drop is not implicitly permitted", () => {
+    renderReadOnlyBoard();
+    const link = screen.getByRole("link", { name: /A bug/i });
+    const cardDragTarget = link.closest(".relative")!.parentElement!;
+    const notPrevented = fireEvent.dragOver(cardDragTarget);
+    expect(notPrevented).toBe(true);
+  });
 });

@@ -186,7 +186,7 @@ export function Column({
             {dropIndex === i && (
               <div className="h-0.5 bg-primary rounded-full mx-1 -mt-1 mb-1" />
             )}
-            <div onDragOver={(e) => handleCardDragOver(e, i)}>
+            <div onDragOver={readOnly ? undefined : (e) => handleCardDragOver(e, i)}>
               <TaskCard
                 task={task}
                 projectKey={projectKey}
