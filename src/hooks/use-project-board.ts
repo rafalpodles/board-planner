@@ -6,7 +6,6 @@ import { usePollWhileVisible } from "@/hooks/use-poll-while-visible";
 import { ApiProject, ApiSprint, ApiTask, ApiUserSummary, RunConflict } from "@/types";
 import { subscribeBoardRefresh } from "@/lib/board-refresh";
 import { useToast } from "@/components/ui/Toast";
-import { ALL_TASKS } from "@/lib/sprint-scope";
 
 export interface ProjectBoard {
   project: ApiProject | null;
@@ -19,7 +18,8 @@ export interface ProjectBoard {
   setViewMode: (mode: "board" | "list") => void;
   showNewTask: boolean;
   setShowNewTask: (open: boolean) => void;
-  scope: string;
+  // Passed straight back: null is "no sprint resolved yet", never the unscoped board
+  scope: string | null;
   selectedTasks: Set<string>;
   setSelectedTasks: Dispatch<SetStateAction<Set<string>>>;
   selectionMode: boolean;
@@ -446,7 +446,7 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
     setViewMode,
     showNewTask,
     setShowNewTask,
-    scope: scope ?? ALL_TASKS,
+    scope,
     selectedTasks,
     setSelectedTasks,
     selectionMode,

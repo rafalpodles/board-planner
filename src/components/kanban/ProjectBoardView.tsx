@@ -19,7 +19,7 @@ import { Modal } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
 import { ShortcutHelp } from "@/components/ui/ShortcutHelp";
 import { taskPath } from "@/lib/urls";
-import { sprintDefaultForNewTask } from "@/lib/sprint-scope";
+import { ALL_TASKS, sprintDefaultForNewTask } from "@/lib/sprint-scope";
 
 interface ProjectBoardViewProps {
   board: ProjectBoard;
@@ -380,7 +380,7 @@ export function ProjectBoardView({ board, emptyState }: ProjectBoardViewProps) {
           columns={project.columns || []}
           taskTemplates={project.taskTemplates || []}
           sprints={sprints}
-          defaultSprint={sprintDefaultForNewTask(scope)}
+          defaultSprint={sprintDefaultForNewTask(scope ?? ALL_TASKS)}
           customFields={project.customFields || []}
           onSaved={() => {
             setShowNewTask(false);
