@@ -25,6 +25,9 @@ services:
       - "${APP_PORT:-3000}:3000"
     environment:
       MONGODB_URI: ${MONGODB_URI:-mongodb://mongo:27017/boardplanner}
+      # Compose binds localhost over plain HTTP, where a Secure cookie is discarded — drop this once the instance is behind TLS
+      COOKIE_ALLOW_INSECURE: ${COOKIE_ALLOW_INSECURE:-1}
+      APP_ORIGIN: ${APP_ORIGIN:-http://localhost:${APP_PORT:-3000}}
       # Everything below is optional — leave it empty and the feature stays off
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}

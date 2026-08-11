@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
+import { getClientIp } from "@/lib/auth";
 import { withAuth } from "@/lib/middleware";
+import { lockoutKey, withLockout } from "@/lib/rate-limit";
+import { revokeUserSessions } from "@/lib/session";
 import { User } from "@/models/user";
 
 const MIN_PASSWORD_LENGTH = 8;
@@ -42,12 +45,24 @@ export const PUT = withAuth(async (request, { user }) => {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
 
-  if (!(await bcrypt.compare(currentPassword, record.password))) {
+  const { lockedOut, result: passwordMatches } = await withLockout(
+    lockoutKey(getClientIp(request), user.username, "password-change"),
+    async () => ((await bcrypt.compare(currentPassword, record.password)) ? true : null)
+  );
+  if (lockedOut) {
+    return NextResponse.json(
+      { error: "Too many failed attempts. Try again later." },
+      { status: 429 }
+    );
+  }
+  if (!passwordMatches) {
     return NextResponse.json({ error: "Current password is incorrect" }, { status: 400 });
   }
 
   record.password = await bcrypt.hash(newPassword, 10);
   await record.save();
+
+  await revokeUserSessions(user._id, user.sessionId);
 
   return NextResponse.json({ ok: true });
 });

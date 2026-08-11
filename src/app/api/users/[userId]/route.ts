@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withAdmin } from "@/lib/middleware";
+import { revokeUserSessions } from "@/lib/session";
 import { User } from "@/models/user";
 
 export const GET = withAdmin(async (_request, { params }) => {
@@ -71,6 +72,8 @@ export const DELETE = withAdmin(async (_request, { params, user: admin }) => {
   if (!user) {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
+
+  await revokeUserSessions(userId);
 
   return NextResponse.json({ message: "User deleted" });
 });

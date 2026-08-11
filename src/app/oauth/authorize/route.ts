@@ -1,5 +1,6 @@
 import { connectDB } from "@/lib/db";
-import { verifyCredentials } from "@/lib/auth";
+import { getClientIp, verifyCredentials } from "@/lib/auth";
+import { lockoutKey, withLockout } from "@/lib/rate-limit";
 import { accessibleProjectIds } from "@/lib/grants";
 import { User } from "@/models/user";
 import { OAuthClient } from "@/models/oauthClient";
@@ -190,7 +191,15 @@ export async function POST(req: Request) {
     return errorPage("PKCE required: code_challenge with code_challenge_method=S256.");
   }
 
-  const user = await verifyCredentials(String(form.get("username") || ""), String(form.get("password") || ""));
+  const username = String(form.get("username") || "");
+  const password = String(form.get("password") || "");
+  const { lockedOut, result: user } = await withLockout(
+    lockoutKey(getClientIp(req), username),
+    () => verifyCredentials(username, password)
+  );
+  if (lockedOut) {
+    return loginForm(p, client.clientName, "Too many failed attempts. Try again later.");
+  }
   if (!user) return loginForm(p, client.clientName, "Invalid username or password.");
 
   const ticket = randomToken("cpct_");

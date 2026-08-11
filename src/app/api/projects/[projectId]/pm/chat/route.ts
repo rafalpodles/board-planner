@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { getAuthUser, RateLimitError } from "@/lib/auth";
+import { getAuthUser } from "@/lib/auth";
+import { ProvenanceError } from "@/lib/session";
 import { Project } from "@/models/project";
 import { runPmTurn } from "@/lib/pm/agent";
 import { isPmAvailable } from "@/lib/pm/config";
@@ -28,8 +29,8 @@ export async function POST(
   try {
     user = await getAuthUser(request);
   } catch (e) {
-    if (e instanceof RateLimitError) {
-      return NextResponse.json({ error: e.message }, { status: 429 });
+    if (e instanceof ProvenanceError) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
     throw e;
   }

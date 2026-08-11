@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { isValidObjectId } from "mongoose";
-import { getAuthUser, RateLimitError } from "./auth";
+import { getAuthUser } from "./auth";
+import { ProvenanceError } from "./session";
 import { connectDB } from "./db";
 import { check } from "./grants";
 import { verifyWorkerCredential } from "./worker-service";
@@ -25,8 +26,8 @@ export function withAuth(handler: AuthenticatedHandler) {
     try {
       user = await getAuthUser(request);
     } catch (e) {
-      if (e instanceof RateLimitError) {
-        return NextResponse.json({ error: e.message }, { status: 429 });
+      if (e instanceof ProvenanceError) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
       throw e;
     }

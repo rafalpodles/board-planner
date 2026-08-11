@@ -22,6 +22,10 @@ function isValidRedirectUri(value: unknown): value is string {
   }
 }
 
+// No provenance check: RFC 7591 registration is meant to be called cross-origin and by non-browser
+// clients, which send neither Sec-Fetch-Site nor a matching Origin. Refusing them breaks MCP
+// onboarding, and the guard buys nothing — the endpoint is unauthenticated, takes no cookie, and
+// answers Access-Control-Allow-Origin: *, so a forged call gains what curl already would.
 export async function POST(req: Request) {
   await connectDB();
 

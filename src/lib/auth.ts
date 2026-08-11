@@ -5,14 +5,13 @@ import { User } from "@/models/user";
 import { ApiToken } from "@/models/apiToken";
 import { OAuthToken } from "@/models/oauthToken";
 import { sha256 } from "./oauth";
-import { isRateLimited, recordFailedAttempt, clearAttempts } from "./rate-limit";
+import {
+  ProvenanceError,
+  checkProvenance,
+  readSessionCookie,
+  resolveSession,
+} from "./session";
 import { IUser } from "@/types";
-
-export class RateLimitError extends Error {
-  constructor() {
-    super("Too many failed attempts. Try again later.");
-  }
-}
 
 export function getClientIp(request: Request): string {
   const xff = request.headers.get("x-forwarded-for");
@@ -20,27 +19,6 @@ export function getClientIp(request: Request): string {
   // Rightmost entry is appended by the closest proxy; leftmost is client-controlled
   const parts = xff.split(",");
   return parts[parts.length - 1].trim() || "unknown";
-}
-
-export function parseBasicAuth(
-  header: string | null
-): { username: string; password: string } | null {
-  if (!header || !header.startsWith("Basic ")) {
-    return null;
-  }
-
-  const base64 = header.slice(6);
-  const decoded = Buffer.from(base64, "base64").toString("utf-8");
-  const separatorIndex = decoded.indexOf(":");
-
-  if (separatorIndex === -1) {
-    return null;
-  }
-
-  return {
-    username: decoded.slice(0, separatorIndex),
-    password: decoded.slice(separatorIndex + 1),
-  };
 }
 
 export async function verifyCredentials(
@@ -117,13 +95,33 @@ async function verifyOAuthAccessToken(token: string): Promise<IUser | null> {
   return scope.length > 0 ? applyTokenScope(user, scope) : user;
 }
 
+async function verifySessionCookie(request: Request): Promise<IUser | null> {
+  const token = readSessionCookie(request.headers.get("cookie"));
+  if (!token) return null;
+
+  const provenance = checkProvenance(request);
+  if (!provenance.ok) throw new ProvenanceError(provenance.reason);
+
+  const session = await resolveSession(token);
+  if (!session) return null;
+
+  await connectDB();
+  const user = await User.findById(session.userId);
+  if (!user) return null;
+
+  user.viaMachineCredential = false;
+  user.sessionId = session.sessionId;
+  return user;
+}
+
 export async function getAuthUser(
   request: Request
 ): Promise<IUser | null> {
   const authHeader = request.headers.get("authorization");
 
-  // Try Bearer token first
-  if (authHeader?.startsWith("Bearer ")) {
+  // Case-insensitive to match mcp-handler, which lowercases the scheme before comparing: a
+  // `bearer …` header would otherwise set its bearerToken while falling through to the cookie here
+  if (authHeader && /^bearer /i.test(authHeader)) {
     const token = authHeader.slice(7);
     if (token.startsWith("cpat_")) {
       return verifyOAuthAccessToken(token);
@@ -131,24 +129,11 @@ export async function getAuthUser(
     if (token.startsWith("cp_")) {
       return verifyBearerToken(token);
     }
-  }
-
-  // Fall back to Basic Auth
-  const creds = parseBasicAuth(authHeader);
-  if (!creds) {
+    // A presented Bearer that resolves to nothing must fail, not quietly fall back to the cookie:
+    // /api/mcp gates on the header being present and would otherwise issue an AuthInfo for a token
+    // it never validated, authenticated by a cookie that happened to ride along
     return null;
   }
 
-  const rateKey = `${getClientIp(request)}:${creds.username.toLowerCase()}`;
-  if (isRateLimited(rateKey)) {
-    throw new RateLimitError();
-  }
-
-  const user = await verifyCredentials(creds.username, creds.password);
-  if (user) {
-    clearAttempts(rateKey);
-  } else {
-    recordFailedAttempt(rateKey);
-  }
-  return user;
+  return verifySessionCookie(request);
 }

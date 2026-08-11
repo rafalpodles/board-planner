@@ -277,7 +277,11 @@ test.describe("where the list appears", () => {
     // Against the comment box, which sits in the same column and always fills it. The first version
     // of this compared against the words "Acceptance criteria" — a 140px label — so the collapsed
     // 147px field cleared the bar and the mutation passed.
-    const reference = (await page.getByPlaceholder(/@mention someone/).boundingBox())!;
+    const composer = page.getByPlaceholder(/@mention someone/);
+    // Measured only once it is on screen. Without the wait this raced the comments load and read a
+    // null box — latent since it was written, and surfaced by /api/* going no-store.
+    await expect(composer).toBeVisible();
+    const reference = (await composer.boundingBox())!;
 
     expect(field.width).toBeGreaterThan(reference.width * 0.8);
   });
