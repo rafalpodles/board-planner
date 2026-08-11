@@ -11,6 +11,8 @@ interface SprintHeaderProps {
   doneCount: number;
   totalCount: number;
   readOnly: boolean;
+  view: "board" | "planning";
+  onViewChange: (view: "board" | "planning") => void;
   onActivate: () => void;
   onComplete: () => void;
   onEdit: () => void;
@@ -66,6 +68,8 @@ export function SprintHeader({
   doneCount,
   totalCount,
   readOnly,
+  view,
+  onViewChange,
   onActivate,
   onComplete,
   onEdit,
@@ -149,9 +153,26 @@ export function SprintHeader({
             server enforces nothing about completed sprints. Reopening one is a separate
             question nobody has decided, so Activate/Complete stay withheld; Edit and Delete
             are ordinary sprint metadata edits and stay available regardless. */}
-        <div className="flex shrink-0 gap-1">
+        <div className="flex shrink-0 items-center gap-1">
           {!closed && (
             <>
+              <div className="mr-1 flex items-center rounded-lg border border-border bg-bg-card p-0.5">
+                {(["board", "planning"] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => onViewChange(mode)}
+                    aria-current={view === mode ? "true" : undefined}
+                    className={`focus-ring rounded-md px-2.5 py-1.5 text-[13px] transition-colors ${
+                      view === mode
+                        ? "bg-bg-input font-medium text-text"
+                        : "text-text-muted hover:text-text"
+                    }`}
+                  >
+                    {mode === "board" ? "Board" : "Planning"}
+                  </button>
+                ))}
+              </div>
               {sprint.status === "planned" && (
                 <Button size="sm" variant="secondary" onClick={onActivate}>
                   Activate

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { ApiTask } from "@/types";
 import { ProjectBoard } from "@/hooks/use-project-board";
@@ -12,9 +12,12 @@ interface PlanningViewProps {
   projectId: string;
   board: ProjectBoard;
   sprintId: string;
+  // The sprint header's counts have nowhere else to read a task added from the backlog:
+  // board.tasks never gains it (see the sprintOverlay note below), so this is the true list.
+  onTasksChange?: (tasks: ApiTask[]) => void;
 }
 
-export function PlanningView({ projectId, board, sprintId }: PlanningViewProps) {
+export function PlanningView({ projectId, board, sprintId, onTasksChange }: PlanningViewProps) {
   const api = useApi();
   const { toast } = useToast();
   const [backlog, setBacklog] = useState<ApiTask[]>([]);
@@ -41,9 +44,17 @@ export function PlanningView({ projectId, board, sprintId }: PlanningViewProps) 
   // board.tasks lags a scope change by one round trip (Task 6's forward note); rendering it
   // under the new sprint's name in the meantime is the bug Phase A already fixed once
   const tasksLoaded = board.loadedScope === sprintId;
-  const sprintTasks = tasksLoaded
-    ? [...board.tasks, ...sprintOverlay.filter((t) => !board.tasks.some((bt) => bt._id === t._id))]
-    : [];
+  const sprintTasks = useMemo(
+    () =>
+      tasksLoaded
+        ? [...board.tasks, ...sprintOverlay.filter((t) => !board.tasks.some((bt) => bt._id === t._id))]
+        : [],
+    [tasksLoaded, board.tasks, sprintOverlay]
+  );
+
+  useEffect(() => {
+    onTasksChange?.(sprintTasks);
+  }, [sprintTasks, onTasksChange]);
 
   function applyLocally(task: ApiTask, targetSprintId: string | null) {
     const moved = { ...task, sprint: targetSprintId };

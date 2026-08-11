@@ -440,3 +440,92 @@ describe("Sprint lifecycle from the header", () => {
     expect(api.del).toHaveBeenCalledWith("/api/projects/p1/sprints/s3");
   });
 });
+
+describe("Board / Planning toggle", () => {
+  it("offers the Planning toggle on an active sprint", async () => {
+    await renderSprints();
+    expect(screen.getByRole("button", { name: "Planning" })).toBeTruthy();
+  });
+
+  it("offers no Planning toggle on a completed sprint", async () => {
+    await renderSprints(completedOnly);
+    expect(screen.queryByRole("button", { name: "Planning" })).toBeNull();
+  });
+
+  it("keeps the chosen view in the URL", async () => {
+    await renderSprints();
+    await click(screen.getByRole("button", { name: "Planning" }));
+    expect(router.push).toHaveBeenCalledWith("/projects/p1/sprints?sprint=s1&view=planning");
+  });
+
+  // The URL has two writers now: the sprint-scope normalizer (BP-200) and this toggle.
+  // Order 1 — a view already in the address bar must survive the normalizer's own replace.
+  it("keeps a view already chosen in the URL when the sprint scope gets normalized into it", async () => {
+    query.current = "view=planning";
+    await renderSprints();
+    expect(router.replace).toHaveBeenCalledWith("/projects/p1/sprints?sprint=s1&view=planning");
+  });
+
+  // Order 2 — the toggle must push the sprint the page actually settled on, not the stale
+  // or invalid one still sitting in `requested` at the moment of the click.
+  it("switches to Planning using the sprint the page already settled on, not a stale URL value", async () => {
+    query.current = "sprint=deadbeef";
+    await renderSprints();
+    router.push.mockReset();
+
+    await click(screen.getByRole("button", { name: "Planning" }));
+
+    expect(router.push).toHaveBeenCalledWith("/projects/p1/sprints?sprint=s1&view=planning");
+  });
+
+  // board.applySprintChange only ever drops a task out of board.tasks, never adds one in,
+  // so the header must be fed from something else once a backlog task is pulled into the
+  // sprint — this is the one place a planner is actually looking at the number.
+  it("moves the header's counts when a planning move happens, not just the panes'", async () => {
+    const backlogTasks = [
+      {
+        _id: "b1",
+        taskNumber: 20,
+        title: "Backlog task",
+        status: "todo",
+        priority: "medium",
+        category: "bug",
+        order: 0,
+        sprint: null,
+        createdAt: "2026-08-01T00:00:00Z",
+        updatedAt: "2026-08-01T00:00:00Z",
+      },
+    ] as ApiTask[];
+
+    api.get.mockImplementation((url: string) => {
+      if (url === "/api/projects/p1") return Promise.resolve(project);
+      if (url === "/api/projects/p1/tasks?sprint=s1") {
+        return Promise.resolve(sprintTasks.map((t) => ({ ...t })));
+      }
+      if (url === "/api/projects/p1/tasks?sprint=backlog") {
+        return Promise.resolve(backlogTasks.map((t) => ({ ...t })));
+      }
+      if (url === "/api/projects/p1/sprints") return Promise.resolve(sprints);
+      if (url === "/api/users/list") return Promise.resolve([]);
+      return Promise.reject(new Error(`unexpected GET ${url}`));
+    });
+    api.put.mockResolvedValue({});
+
+    const { rerender } = render(<SprintsPage />);
+    await screen.findByRole("heading", { name: "Sprints" });
+    await screen.findByText("TP-1");
+    expect(screen.getByTestId("sprint-progress").textContent).toBe("4/8");
+
+    // Simulates the navigation the Planning button's router.push would have caused —
+    // router.push is a spy here and does not itself move the mocked address bar.
+    query.current = "sprint=s1&view=planning";
+    rerender(<SprintsPage />);
+    await screen.findByText("Backlog task");
+
+    await click(screen.getByRole("button", { name: "Add Backlog task to the sprint" }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("sprint-progress").textContent).toBe("4/9")
+    );
+  });
+});
