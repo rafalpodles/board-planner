@@ -19,8 +19,8 @@ afterEach(cleanup);
 
 function renderBar() {
   const onPosted = vi.fn();
-  render(<MobileCommentBar projectId="p1" taskId="t1" onPosted={onPosted} />);
-  return onPosted;
+  const { container } = render(<MobileCommentBar projectId="p1" taskId="t1" onPosted={onPosted} />);
+  return Object.assign(onPosted, { container });
 }
 
 function field() {
@@ -40,8 +40,10 @@ function type(value: string) {
 describe("MobileCommentBar", () => {
   // The whole point: reachable from anywhere in the task, not at the end of the page
   it("pins itself to the bottom and stays off wide screens", () => {
-    renderBar();
-    const bar = field().parentElement!;
+    const { container } = renderBar();
+    // The rendered root, not the field's parent: the field sits inside its own wrapper now, and
+    // walking up one level found that instead of the bar
+    const bar = container.firstElementChild as HTMLElement;
     expect(bar.className).toContain("sticky");
     expect(bar.className).toContain("bottom-0");
     expect(bar.className).toContain("lg:hidden");
