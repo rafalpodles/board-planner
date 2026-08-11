@@ -25,6 +25,8 @@ import { MobileSummary } from "@/components/tasks/detail/MobileSummary";
 import { PropertyRail } from "@/components/tasks/detail/PropertyRail";
 import { TaskTopBar } from "@/components/tasks/detail/TaskTopBar";
 import { useTaskEditor } from "@/components/tasks/detail/useTaskEditor";
+import type { Trigger } from "@/hooks/use-trigger-autocomplete";
+import { useEditorTriggers } from "@/hooks/use-editor-triggers";
 
 interface TaskDetailProps {
   projectId: string;
@@ -146,6 +148,7 @@ function TaskDetailView({
   // What a written task key is measured against. Former keys included, because this board renamed
   // itself once and everything written before that still says the old prefix.
   const scope = { key: project.key, formerKeys: project.formerKeys };
+  const triggers = useEditorTriggers(projectId, project.key);
   const taskKey = `${project.key}-${task.taskNumber}`;
   const assignee = users.find((u) => u.username === draft.assignee);
   const reporter =
@@ -323,6 +326,7 @@ function TaskDetailView({
             onChange={(value) => set("description", value)}
             onFileUpload={handleFileUpload}
             scope={scope}
+            triggers={triggers}
             collapsible
           />
 

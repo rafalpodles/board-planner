@@ -5,6 +5,7 @@ import { MarkdownContent } from "@/components/ui/MarkdownContent";
 import { MarkdownEditor } from "@/components/ui/MarkdownEditor";
 import { SectionLabel } from "./atoms";
 import type { ReferenceScope } from "@/lib/task-references";
+import type { Trigger } from "@/hooks/use-trigger-autocomplete";
 
 interface DescriptionSectionProps {
   value: string;
@@ -14,6 +15,8 @@ interface DescriptionSectionProps {
   collapsible?: boolean;
   /** The board this text belongs to, so a written task key becomes a link to that task */
   scope?: ReferenceScope | null;
+  /** Autocomplete for @ and the board's key, so the description offers what the composer does */
+  triggers?: Trigger[];
 }
 
 export function DescriptionSection({
@@ -22,6 +25,7 @@ export function DescriptionSection({
   onFileUpload,
   collapsible = false,
   scope,
+  triggers,
 }: DescriptionSectionProps) {
   const [editing, setEditing] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -48,6 +52,7 @@ export function DescriptionSection({
           value={value}
           onChange={onChange}
           onFileUpload={onFileUpload}
+          triggers={triggers}
           placeholder="Markdown supported — use the toolbar, or Cmd/Ctrl+B and Cmd/Ctrl+I"
         />
       ) : value.trim() ? (

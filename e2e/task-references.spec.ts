@@ -108,6 +108,55 @@ test("a key inside code stays text, and another project's key is left alone", as
   await expect(page.getByRole("link", { name: "ACME-4" })).toHaveCount(0);
 });
 
+test.describe("picking a task from the list", () => {
+  test("typing the board key offers tasks, and Enter puts the key in the text", async ({ page }) => {
+    await signIn(page);
+    await page.goto(`/projects/${PROJECT_KEY}/tasks/1`);
+
+    const box = page.getByPlaceholder(/comment/i).first();
+    await box.fill(`blocked by ${PROJECT_KEY}-`);
+
+    const list = page.getByRole("listbox");
+    await expect(list).toBeVisible();
+    await expect(list.getByRole("option").first()).toBeVisible();
+    // The ticket asks for at most ten, and the seeded board has fewer
+    expect(await list.getByRole("option").count()).toBeLessThanOrEqual(10);
+
+    const first = (await list.getByRole("option").first().innerText()).split("\n")[0].trim();
+    await box.press("Enter");
+
+    // Plain text, not a markdown link — that is the whole of approach (A)
+    await expect(box).toHaveValue(`blocked by ${first} `);
+  });
+
+  test("arrows move the selection and Escape puts the list away", async ({ page }) => {
+    await signIn(page);
+    await page.goto(`/projects/${PROJECT_KEY}/tasks/1`);
+
+    const box = page.getByPlaceholder(/comment/i).first();
+    await box.fill(`see ${PROJECT_KEY}-`);
+    const list = page.getByRole("listbox");
+    await expect(list).toBeVisible();
+
+    await box.press("ArrowDown");
+    await expect(list.getByRole("option").nth(1)).toHaveAttribute("aria-selected", "true");
+
+    await box.press("Escape");
+    await expect(list).toBeHidden();
+    // Escape dismisses the list, it does not edit what was written
+    await expect(box).toHaveValue(`see ${PROJECT_KEY}-`);
+  });
+
+  test("offers nothing for another project's key", async ({ page }) => {
+    await signIn(page);
+    await page.goto(`/projects/${PROJECT_KEY}/tasks/1`);
+
+    await page.getByPlaceholder(/comment/i).first().fill("blocked by ACME-");
+
+    await expect(page.getByRole("listbox")).toBeHidden();
+  });
+});
+
 // Pasting is the same feature as picking from a list, which is the point of storing plain text
 test("a key typed into a new comment is a link once posted", async ({ page }) => {
   await signIn(page);

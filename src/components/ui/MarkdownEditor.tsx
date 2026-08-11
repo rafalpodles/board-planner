@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Textarea } from "./Textarea";
 import { MarkdownContent } from "./MarkdownContent";
+import { useTriggerAutocomplete, type Trigger } from "@/hooks/use-trigger-autocomplete";
+import { SuggestionList } from "@/components/ui/SuggestionList";
 
 interface MarkdownEditorProps {
   label?: string;
@@ -13,7 +15,14 @@ interface MarkdownEditorProps {
   minHeight?: number;
   // Show the rendered text first; click to edit, blur to go back
   previewFirst?: boolean;
+  /** Autocomplete triggers — `@` for people, the board's key for tasks. Optional: the PM chat and
+      anywhere without a project has nothing to suggest. */
+  triggers?: Trigger[];
 }
+
+// A stable identity, so the hook does not see a new trigger list on every render of a caller that
+// has none to give
+const EMPTY_TRIGGERS: Trigger[] = [];
 
 type Action =
   | { kind: "wrap"; before: string; after: string; placeholder: string }
@@ -88,10 +97,12 @@ export function MarkdownEditor({
   placeholder,
   minHeight = 400,
   previewFirst = false,
+  triggers,
 }: MarkdownEditorProps) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const pendingSelection = useRef<[number, number] | null>(null);
+  const autocomplete = useTriggerAutocomplete(triggers ?? EMPTY_TRIGGERS, textareaRef, onChange);
   // Nothing to render means nothing to preview, so an empty field opens for typing
   const [preview, setPreview] = useState(() => previewFirst && value.trim().length > 0);
   const focusOnEdit = useRef(false);
@@ -224,17 +235,37 @@ export function MarkdownEditor({
           )}
         </div>
       ) : (
-        <Textarea
+        <div className="relative">
+          <SuggestionList
+            items={autocomplete.items}
+            index={autocomplete.index}
+            onPick={autocomplete.choose}
+            onHover={autocomplete.setIndex}
+          />
+          <Textarea
           ref={textareaRef}
           value={value}
-          onChange={(e) => onChange(e.target.value)}
-          onKeyDown={handleKeyDown}
-          onBlur={previewFirst ? handleBlur : undefined}
+          onChange={(e) => {
+            onChange(e.target.value);
+            autocomplete.detect(e.target.value, e.target.selectionStart);
+          }}
+          onKeyDown={(e) => {
+            // The list first: while it is open the arrows and Enter belong to it, and the editor's
+            // own shortcuts would otherwise steal the key that picks a suggestion
+            autocomplete.onKeyDown(e);
+            if (e.defaultPrevented) return;
+            handleKeyDown(e);
+          }}
+          onBlur={(e) => {
+            setTimeout(autocomplete.close, 150);
+            if (previewFirst) handleBlur(e);
+          }}
           onFileUpload={onFileUpload}
           placeholder={placeholder}
           className="rounded-t-none"
           style={{ minHeight }}
-        />
+          />
+        </div>
       )}
     </div>
   );
