@@ -50,6 +50,7 @@ export function ProjectBoardView({
     sprints,
     assignableUsers,
     scope,
+    loadedScope,
     viewMode: boardViewMode,
     setViewMode,
     showNewTask,
@@ -238,86 +239,97 @@ export function ProjectBoardView({
         onFilter={setFilteredTasks}
       />
 
-      {tasks.length === 0 &&
-        (emptyState !== undefined ? (
-          emptyState
-        ) : (
-          <div className="flex flex-col items-center justify-center py-16 text-center">
-            <svg className="w-16 h-16 text-text-muted/30 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-            </svg>
-            <h2 className="text-lg font-medium text-text-muted mb-2">No tasks yet</h2>
-            <p className="text-sm text-text-muted mb-4">Create your first task to get started</p>
-            {!readOnly && (
-              <Button size="sm" onClick={() => setShowNewTask(true)}>
-                Create Task
-              </Button>
-            )}
-          </div>
-        ))}
-
-      {/* Without this the empty state sits above a strip of zero-count columns.
-          ListView already returns null when it has no tasks; Board did not. */}
-      {tasks.length > 0 && (
-      <div className={`lg:flex-1 lg:min-h-0 ${viewMode === "board" ? "lg:overflow-hidden" : "lg:overflow-y-auto"}`}>
-      {viewMode === "board" ? (
-        <Board
-          tasks={filteredTasks}
-          projectKey={project.key}
-          customFields={project.customFields || []}
-          projectCategories={project.categories || []}
-          columns={project.columns || []}
-          selectedTasks={readOnly ? undefined : selectedTasks}
-          selectionMode={readOnly ? undefined : selectionMode}
-          collapseEmptyColumns={user?.collapseEmptyColumns ?? true}
-          onStatusChange={readOnly ? undefined : handleStatusChange}
-          onTaskDrop={readOnly ? undefined : handleTaskDrop}
-          onTaskClick={openTask}
-          onTaskSelect={readOnly ? undefined : handleTaskSelect}
-          onTaskContextMenu={readOnly ? undefined : (taskId, x, y) => setContextMenu({ taskId, x, y })}
-          readOnly={readOnly}
-        />
+      {/* board.tasks still holds the previous scope's list until its own request lands —
+          swapping the task area in for a beat rather than showing those stale cards.
+          The header and filter bar above stay put; only this region blanks. */}
+      {loadedScope !== scope ? (
+        <div className="flex justify-center py-12" role="status" aria-label="Loading tasks">
+          <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary border-t-transparent" />
+        </div>
       ) : (
-        <ListView
-          tasks={filteredTasks}
-          projectKey={project.key}
-          projectId={projectId}
-          customFields={project.customFields || []}
-          sprints={sprints}
-          categories={project.categories || []}
-          columns={project.columns || []}
-          focusedIndex={focusedTaskIndex}
-          selectedTasks={readOnly ? undefined : selectedTasks}
-          selectionMode={readOnly ? undefined : selectionMode}
-          sortField={sortField}
-          sortDir={sortDir}
-          onSortChange={(field, dir) => {
-            setSortField(field);
-            setSortDir(dir);
-          }}
-          hiddenColumns={hiddenColumns}
-          assignableUsers={assignableUsers}
-          onTaskClick={openTask}
-          onStatusChange={readOnly ? undefined : handleStatusChange}
-          onAssigneeChange={readOnly ? undefined : handleAssigneeChange}
-          onTaskSelect={readOnly ? undefined : handleTaskSelect}
-          onTaskContextMenu={readOnly ? undefined : (taskId, x, y) => setContextMenu({ taskId, x, y })}
-          onReorder={readOnly ? undefined : handleReorder}
-          onPriorityChange={
-            readOnly
-              ? undefined
-              : (taskId, priority) => patchTask(taskId, { priority }, "priority")
-          }
-          onCategoryChange={
-            readOnly
-              ? undefined
-              : (taskId, category) => patchTask(taskId, { category }, "category")
-          }
-          onSprintChange={readOnly ? undefined : handleRowSprintChange}
-          onFieldChange={readOnly ? undefined : handleFieldValueChange}
-        />
-      )}
-      </div>
+        <>
+          {tasks.length === 0 &&
+            (emptyState !== undefined ? (
+              emptyState
+            ) : (
+              <div className="flex flex-col items-center justify-center py-16 text-center">
+                <svg className="w-16 h-16 text-text-muted/30 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                </svg>
+                <h2 className="text-lg font-medium text-text-muted mb-2">No tasks yet</h2>
+                <p className="text-sm text-text-muted mb-4">Create your first task to get started</p>
+                {!readOnly && (
+                  <Button size="sm" onClick={() => setShowNewTask(true)}>
+                    Create Task
+                  </Button>
+                )}
+              </div>
+            ))}
+
+          {/* Without this the empty state sits above a strip of zero-count columns.
+              ListView already returns null when it has no tasks; Board did not. */}
+          {tasks.length > 0 && (
+          <div className={`lg:flex-1 lg:min-h-0 ${viewMode === "board" ? "lg:overflow-hidden" : "lg:overflow-y-auto"}`}>
+          {viewMode === "board" ? (
+            <Board
+              tasks={filteredTasks}
+              projectKey={project.key}
+              customFields={project.customFields || []}
+              projectCategories={project.categories || []}
+              columns={project.columns || []}
+              selectedTasks={readOnly ? undefined : selectedTasks}
+              selectionMode={readOnly ? undefined : selectionMode}
+              collapseEmptyColumns={user?.collapseEmptyColumns ?? true}
+              onStatusChange={readOnly ? undefined : handleStatusChange}
+              onTaskDrop={readOnly ? undefined : handleTaskDrop}
+              onTaskClick={openTask}
+              onTaskSelect={readOnly ? undefined : handleTaskSelect}
+              onTaskContextMenu={readOnly ? undefined : (taskId, x, y) => setContextMenu({ taskId, x, y })}
+              readOnly={readOnly}
+            />
+          ) : (
+            <ListView
+              tasks={filteredTasks}
+              projectKey={project.key}
+              projectId={projectId}
+              customFields={project.customFields || []}
+              sprints={sprints}
+              categories={project.categories || []}
+              columns={project.columns || []}
+              focusedIndex={focusedTaskIndex}
+              selectedTasks={readOnly ? undefined : selectedTasks}
+              selectionMode={readOnly ? undefined : selectionMode}
+              sortField={sortField}
+              sortDir={sortDir}
+              onSortChange={(field, dir) => {
+                setSortField(field);
+                setSortDir(dir);
+              }}
+              hiddenColumns={hiddenColumns}
+              assignableUsers={assignableUsers}
+              onTaskClick={openTask}
+              onStatusChange={readOnly ? undefined : handleStatusChange}
+              onAssigneeChange={readOnly ? undefined : handleAssigneeChange}
+              onTaskSelect={readOnly ? undefined : handleTaskSelect}
+              onTaskContextMenu={readOnly ? undefined : (taskId, x, y) => setContextMenu({ taskId, x, y })}
+              onReorder={readOnly ? undefined : handleReorder}
+              onPriorityChange={
+                readOnly
+                  ? undefined
+                  : (taskId, priority) => patchTask(taskId, { priority }, "priority")
+              }
+              onCategoryChange={
+                readOnly
+                  ? undefined
+                  : (taskId, category) => patchTask(taskId, { category }, "category")
+              }
+              onSprintChange={readOnly ? undefined : handleRowSprintChange}
+              onFieldChange={readOnly ? undefined : handleFieldValueChange}
+            />
+          )}
+          </div>
+          )}
+        </>
       )}
 
       {/* readOnly can flip true while this menu is already open; contextMenu state does

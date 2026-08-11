@@ -48,9 +48,10 @@ function makeBoard(overrides: Partial<ProjectBoard> = {}): ProjectBoard {
     sprints: [],
     assignableUsers: [],
     loading: false,
+    loadError: false,
     reload: vi.fn(),
     viewMode: "board",
-    loadedScope: undefined,
+    loadedScope: "all",
     setViewMode: vi.fn(),
     showNewTask: false,
     setShowNewTask: vi.fn(),
@@ -208,6 +209,42 @@ describe("ProjectBoardView's pinViewMode prop", () => {
     const { container } = render(<ProjectBoardView board={makeBoard({ tasks, viewMode: "list" })} />);
     expect(container.querySelector("table")).toBeTruthy();
     expect(screen.queryByTestId("column-todo")).toBeNull();
+  });
+});
+
+describe("ProjectBoardView's loadedScope gate", () => {
+  // board.tasks still holds the previous scope's list until its own request lands;
+  // showing them under the new scope would be the board stating something untrue
+  it("shows a spinner instead of stale cards while the new scope's tasks are in flight", () => {
+    render(
+      <ProjectBoardView board={makeBoard({ tasks, scope: "sprint-2", loadedScope: "sprint-1" })} />
+    );
+    expect(screen.queryByText("A bug")).toBeNull();
+    expect(screen.getByRole("status", { name: "Loading tasks" })).toBeTruthy();
+  });
+
+  it("keeps the filter bar visible while the task area is blank", () => {
+    render(
+      <ProjectBoardView board={makeBoard({ tasks, scope: "sprint-2", loadedScope: "sprint-1" })} />
+    );
+    expect(screen.getByRole("button", { name: /^Select/ })).toBeTruthy();
+  });
+
+  it("renders the tasks once loadedScope catches up to scope", () => {
+    render(<ProjectBoardView board={makeBoard({ tasks, scope: "sprint-2", loadedScope: "sprint-2" })} />);
+    expect(screen.getByText("A bug")).toBeTruthy();
+    expect(screen.queryByRole("status", { name: "Loading tasks" })).toBeNull();
+  });
+
+  it("does not blank the board on an ordinary poll that returns the same scope", () => {
+    const { rerender } = render(
+      <ProjectBoardView board={makeBoard({ tasks, scope: "all", loadedScope: "all" })} />
+    );
+    expect(screen.getByText("A bug")).toBeTruthy();
+
+    rerender(<ProjectBoardView board={makeBoard({ tasks, scope: "all", loadedScope: "all" })} />);
+    expect(screen.getByText("A bug")).toBeTruthy();
+    expect(screen.queryByRole("status", { name: "Loading tasks" })).toBeNull();
   });
 });
 
