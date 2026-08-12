@@ -76,6 +76,9 @@ export function PlanningView({ projectId, board, sprintId, onTasksChange }: Plan
     applyLocally(task, targetSprintId);
     try {
       await api.put(`/api/projects/${projectId}/tasks/${task._id}`, { sprint: targetSprintId });
+      // applySprintChange can drop a task out of board.tasks but never insert one, so a
+      // task pulled in from the backlog only exists here until board.tasks catches up
+      board.reload();
     } catch {
       applyLocally(task, targetSprintId === null ? sprintId : null);
       toast("Failed to move task", "error");

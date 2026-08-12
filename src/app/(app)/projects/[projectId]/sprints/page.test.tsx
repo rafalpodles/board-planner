@@ -558,6 +558,66 @@ describe("Board / Planning toggle", () => {
     );
   });
 
+  // applySprintChange can only ever drop a task out of board.tasks, never insert one, so a
+  // task pulled in from the backlog exists only in PlanningView's own overlay — which is
+  // component state and dies the moment the view unmounts. Without a reload on the success
+  // path, switching to Board drops the card and switching back loses it from both panes.
+  it("keeps a task added in Planning once the view switches to Board", async () => {
+    const backlogTasks = [
+      {
+        _id: "b1",
+        taskNumber: 20,
+        title: "Backlog task",
+        status: "todo",
+        priority: "medium",
+        category: "bug",
+        order: 0,
+        sprint: null,
+        createdAt: "2026-08-01T00:00:00Z",
+        updatedAt: "2026-08-01T00:00:00Z",
+      },
+    ] as ApiTask[];
+
+    // The server-side truth: a PUT actually moving b1 into the sprint is reflected on the
+    // next GET, the way a real backend (not a static fixture) would behave.
+    let movedIn = false;
+    api.get.mockImplementation((url: string) => {
+      if (url === "/api/projects/p1") return Promise.resolve(project);
+      if (url === "/api/projects/p1/tasks?sprint=s1") {
+        const list = movedIn
+          ? [...sprintTasks, { ...backlogTasks[0], sprint: "s1" }]
+          : sprintTasks;
+        return Promise.resolve(list.map((t) => ({ ...t })));
+      }
+      if (url === "/api/projects/p1/tasks?sprint=backlog") {
+        return Promise.resolve(movedIn ? [] : backlogTasks.map((t) => ({ ...t })));
+      }
+      if (url === "/api/projects/p1/sprints") return Promise.resolve(sprints);
+      if (url === "/api/users/list") return Promise.resolve([]);
+      return Promise.reject(new Error(`unexpected GET ${url}`));
+    });
+    api.put.mockImplementation(() => {
+      movedIn = true;
+      return Promise.resolve({});
+    });
+
+    const { rerender } = render(<SprintsPage />);
+    await screen.findByRole("heading", { name: "Sprints" });
+    await screen.findByText("TP-1");
+
+    query.current = "sprint=s1&view=planning";
+    rerender(<SprintsPage />);
+    await screen.findByText("Backlog task");
+
+    await click(screen.getByRole("button", { name: "Add Backlog task to the sprint" }));
+    await waitFor(() => expect(screen.getByTestId("sprint-progress").textContent).toBe("4/9"));
+
+    query.current = "sprint=s1";
+    rerender(<SprintsPage />);
+
+    expect(await screen.findByText("TP-20")).toBeTruthy();
+  });
+
   // PlanningView reports on every render, including the ones before its own tasksLoaded
   // is true for the new sprint — those report an empty array, which is truthy, so it used
   // to beat the selected?.doneCount fallback and paint "0/0" for one window per switch.
