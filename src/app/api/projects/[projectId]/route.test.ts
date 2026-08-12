@@ -163,6 +163,22 @@ describe("PUT /api/projects/[projectId] estimateFieldId", () => {
     expect(projectFindByIdAndUpdate).not.toHaveBeenCalled();
   });
 
+  it("refuses a non-string designation instead of coercing it", async () => {
+    // String([]) === "" and String([numberFieldId]) === numberFieldId — either would have
+    // slipped past a bare String(...) coercion instead of being refused.
+    const res = await PUT(putRequest({ estimateFieldId: [] }), ctx());
+
+    expect(res.status).toBe(400);
+    expect(projectFindByIdAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("refuses a non-string designation that would coerce to a real field id", async () => {
+    const res = await PUT(putRequest({ estimateFieldId: [numberFieldId] }), ctx());
+
+    expect(res.status).toBe(400);
+    expect(projectFindByIdAndUpdate).not.toHaveBeenCalled();
+  });
+
   it("accepts an empty designation", async () => {
     const res = await PUT(putRequest({ estimateFieldId: "" }), ctx());
 

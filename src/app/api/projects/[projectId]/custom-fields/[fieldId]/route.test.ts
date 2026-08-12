@@ -98,6 +98,16 @@ describe("PATCH /api/projects/:projectId/custom-fields/:fieldId", () => {
     expect(project.estimateFieldId).toBe(numberFieldId);
   });
 
+  it("does not restore the designation when the field is un-archived again", async () => {
+    await PATCH(patchRequest({ archived: true }), fieldCtx(numberFieldId));
+    expect(project.estimateFieldId).toBe("");
+
+    const res = await PATCH(patchRequest({ archived: false }), fieldCtx(numberFieldId));
+
+    expect(res.status).toBe(200);
+    expect(project.estimateFieldId).toBe("");
+  });
+
   it("leaves the designation alone when the designated field is patched without archiving it", async () => {
     const res = await PATCH(patchRequest({ name: "Story Points" }), fieldCtx(numberFieldId));
 

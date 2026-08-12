@@ -70,7 +70,13 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
   }
 
   if (updates.estimateFieldId !== undefined) {
-    const id = String(updates.estimateFieldId);
+    const id = updates.estimateFieldId;
+    if (typeof id !== "string") {
+      return NextResponse.json(
+        { error: "estimateFieldId must be a string" },
+        { status: 400 }
+      );
+    }
     if (id !== "") {
       const existing = await Project.findById(projectId).select("customFields");
       if (!existing) {
@@ -84,7 +90,6 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
         );
       }
     }
-    updates.estimateFieldId = id;
   }
 
   if (body.worker !== undefined) {
