@@ -301,6 +301,74 @@ export async function renameField(
   await mongoose.disconnect();
 }
 
+// A sprint with a done and an undone task already in it, plus a fourth task sitting in the
+// backlog with no sprint — enough for a drag to cross the boundary in either direction and for
+// the header's done/total to have somewhere real to move from.
+export const PLANNING_SPRINT_ID = id("e2e00000000000000000c101");
+export const PLANNING_SPRINT_NAME = "Sprint Alpha";
+
+export const PLANNING_SPRINT_TASK_NUMBER = 7;
+export const PLANNING_SPRINT_TASK_ID = id("e2e00000000000000000d101");
+export const PLANNING_SPRINT_TASK_TITLE = "Already in the sprint";
+
+export const PLANNING_SPRINT_DONE_TASK_NUMBER = 8;
+export const PLANNING_SPRINT_DONE_TASK_ID = id("e2e00000000000000000d102");
+export const PLANNING_SPRINT_DONE_TASK_TITLE = "Already done in the sprint";
+
+export const PLANNING_BACKLOG_TASK_NUMBER = 9;
+export const PLANNING_BACKLOG_TASK_ID = id("e2e00000000000000000d103");
+export const PLANNING_BACKLOG_TASK_TITLE = "Waiting in the backlog";
+
+export async function seedSprintPlanning() {
+  const db = (await connect()).db!;
+  const now = new Date();
+
+  await db.collection("sprints").insertOne({
+    _id: PLANNING_SPRINT_ID,
+    project: PROJECT_ID,
+    name: PLANNING_SPRINT_NAME,
+    startDate: now,
+    endDate: new Date(now.getTime() + 14 * 86_400_000),
+    goal: "",
+    status: "active",
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  const task = taskFactory(now);
+  await db.collection("tasks").insertMany([
+    task({
+      _id: PLANNING_SPRINT_TASK_ID,
+      taskNumber: PLANNING_SPRINT_TASK_NUMBER,
+      title: PLANNING_SPRINT_TASK_TITLE,
+      status: SOURCE_COLUMN.id,
+      sprint: PLANNING_SPRINT_ID,
+      order: 0,
+    }),
+    task({
+      _id: PLANNING_SPRINT_DONE_TASK_ID,
+      taskNumber: PLANNING_SPRINT_DONE_TASK_NUMBER,
+      title: PLANNING_SPRINT_DONE_TASK_TITLE,
+      status: "done",
+      sprint: PLANNING_SPRINT_ID,
+      order: 1,
+    }),
+    task({
+      _id: PLANNING_BACKLOG_TASK_ID,
+      taskNumber: PLANNING_BACKLOG_TASK_NUMBER,
+      title: PLANNING_BACKLOG_TASK_TITLE,
+      status: SPARE_COLUMN.id,
+      sprint: null,
+      order: 2,
+    }),
+  ]);
+  await db
+    .collection("projects")
+    .updateOne({ _id: PROJECT_ID }, { $max: { taskCounter: PLANNING_BACKLOG_TASK_NUMBER } });
+
+  await mongoose.disconnect();
+}
+
 export async function seedQuietTask(quietForMs: number) {
   const now = new Date();
   await addTask(

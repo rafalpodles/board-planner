@@ -11,15 +11,13 @@ import { ListColumnId } from "@/lib/list-columns";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Board } from "@/components/kanban/Board";
 import { BoardFilters } from "@/components/kanban/BoardFilters";
-import { TaskForm } from "@/components/tasks/TaskForm";
 import { TaskContextMenu } from "@/components/kanban/TaskContextMenu";
 import { ListView } from "@/components/kanban/ListView";
 import { Button } from "@/components/ui/Button";
-import { Modal } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
 import { ShortcutHelp } from "@/components/ui/ShortcutHelp";
 import { taskPath } from "@/lib/urls";
-import { ALL_TASKS, sprintDefaultForNewTask } from "@/lib/sprint-scope";
+import { NewTaskModal } from "@/components/tasks/NewTaskModal";
 
 interface ProjectBoardViewProps {
   board: ProjectBoard;
@@ -409,28 +407,18 @@ export function ProjectBoardView({
       />
 
       {!readOnly && (
-        <Modal
+        <NewTaskModal
+          projectId={projectId}
+          project={project}
+          sprints={sprints}
+          scope={scope}
           open={showNewTask}
           onClose={() => setShowNewTask(false)}
-          title="New Task"
-          size="lg"
-        >
-          <TaskForm
-            projectId={projectId}
-            projectKey={project.key}
-              categories={(project.categories || []).map((c) => c.name)}
-            columns={project.columns || []}
-            taskTemplates={project.taskTemplates || []}
-            sprints={sprints}
-            defaultSprint={sprintDefaultForNewTask(scope ?? ALL_TASKS)}
-            customFields={project.customFields || []}
-            onSaved={() => {
-              setShowNewTask(false);
-              reload();
-            }}
-            onCancel={() => setShowNewTask(false)}
-          />
-        </Modal>
+          onSaved={() => {
+            setShowNewTask(false);
+            reload();
+          }}
+        />
       )}
 
 

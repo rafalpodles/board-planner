@@ -34,6 +34,8 @@ function renderHeader(overrides: Partial<React.ComponentProps<typeof SprintHeade
       doneCount={4}
       totalCount={8}
       readOnly={false}
+      view="board"
+      onViewChange={noop}
       onActivate={noop}
       onComplete={noop}
       onEdit={noop}
@@ -95,5 +97,28 @@ describe("SprintHeader sprint picker", () => {
   it("still shows the heading text once, next to the chevron", () => {
     renderHeader();
     expect(screen.getByText("Sprint 6")).toBeTruthy();
+  });
+});
+
+describe("SprintHeader view toggle", () => {
+  it("offers Board and Planning when the sprint is not read-only", () => {
+    renderHeader({ readOnly: false });
+    expect(screen.getByRole("button", { name: "Board" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Planning" })).toBeTruthy();
+  });
+
+  it("withholds the toggle on a read-only sprint", () => {
+    renderHeader({ readOnly: true });
+    expect(screen.queryByRole("button", { name: "Board" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Planning" })).toBeNull();
+  });
+
+  it("reports the picked view", () => {
+    const onViewChange = vi.fn();
+    renderHeader({ onViewChange });
+
+    fireEvent.click(screen.getByRole("button", { name: "Planning" }));
+
+    expect(onViewChange).toHaveBeenCalledWith("planning");
   });
 });
