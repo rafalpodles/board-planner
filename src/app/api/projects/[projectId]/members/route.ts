@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { withProjectOwner } from "@/lib/middleware";
 import { User } from "@/models/user";
@@ -44,7 +45,7 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
   const body = (await request.json().catch(() => null)) ?? {};
   const { userId, relation } = body as { userId?: string; relation?: GrantRelation };
 
-  if (!userId || !relation || !GRANT_RELATIONS.includes(relation)) {
+  if (typeof userId !== "string" || !isValidObjectId(userId) || !relation || !GRANT_RELATIONS.includes(relation)) {
     return NextResponse.json(
       { error: "userId and a relation of owner or member are required" },
       { status: 400 }

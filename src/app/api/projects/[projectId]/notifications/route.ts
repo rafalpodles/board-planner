@@ -5,6 +5,7 @@ import { Project } from "@/models/project";
 import { logProjectAudit } from "@/lib/projectAudit";
 import { NOTIFICATION_CHANNEL_TYPES, WEBHOOK_EVENTS, NotificationChannelType } from "@/types";
 import { sanitizeProjectSecrets } from "@/lib/project-secrets";
+import { parseWebhookUrl, parseWebhookEvents } from "@/lib/webhook-input";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function masked(project: any) {
@@ -36,18 +37,21 @@ export const POST = withProjectOwner(async (request, { params, user }) => {
     );
   }
 
-  if (!webhookUrl || typeof webhookUrl !== "string" || !webhookUrl.trim()) {
-    return NextResponse.json({ error: "Webhook URL is required" }, { status: 400 });
-  }
-
-  try {
-    new URL(webhookUrl.trim());
-  } catch {
-    return NextResponse.json({ error: "Invalid URL" }, { status: 400 });
+  const parsedUrl = parseWebhookUrl(webhookUrl);
+  if (!parsedUrl) {
+    return NextResponse.json({ error: "A valid webhook URL is required" }, { status: 400 });
   }
 
   if (!name || typeof name !== "string" || !name.trim()) {
     return NextResponse.json({ error: "Name is required" }, { status: 400 });
+  }
+
+  const parsedEvents = events === undefined ? [...WEBHOOK_EVENTS] : parseWebhookEvents(events);
+  if (!parsedEvents) {
+    return NextResponse.json(
+      { error: `events must be a list of: ${WEBHOOK_EVENTS.join(", ")}` },
+      { status: 400 }
+    );
   }
 
   const project = await Project.findById(projectId);
@@ -59,8 +63,8 @@ export const POST = withProjectOwner(async (request, { params, user }) => {
   channels.push({
     type: type as NotificationChannelType,
     name: name.trim(),
-    webhookUrl: webhookUrl.trim(),
-    events: events || [...WEBHOOK_EVENTS],
+    webhookUrl: parsedUrl,
+    events: parsedEvents,
     enabled: true,
   } as typeof channels[number]);
   project.notificationChannels = channels;
@@ -92,10 +96,30 @@ export const PUT = withProjectOwner(async (request, { params }) => {
     return NextResponse.json({ error: "Channel not found" }, { status: 404 });
   }
 
-  if (updates.name !== undefined) channel.name = updates.name;
-  if (updates.webhookUrl !== undefined) channel.webhookUrl = updates.webhookUrl;
-  if (updates.events !== undefined) channel.events = updates.events;
-  if (updates.enabled !== undefined) channel.enabled = updates.enabled;
+  if (updates.name !== undefined) {
+    if (typeof updates.name !== "string" || !updates.name.trim()) {
+      return NextResponse.json({ error: "Name is required" }, { status: 400 });
+    }
+    channel.name = updates.name.trim();
+  }
+  if (updates.webhookUrl !== undefined) {
+    const parsedUrl = parseWebhookUrl(updates.webhookUrl);
+    if (!parsedUrl) {
+      return NextResponse.json({ error: "A valid webhook URL is required" }, { status: 400 });
+    }
+    channel.webhookUrl = parsedUrl;
+  }
+  if (updates.events !== undefined) {
+    const parsedEvents = parseWebhookEvents(updates.events);
+    if (!parsedEvents) {
+      return NextResponse.json(
+        { error: `events must be a list of: ${WEBHOOK_EVENTS.join(", ")}` },
+        { status: 400 }
+      );
+    }
+    channel.events = parsedEvents;
+  }
+  if (updates.enabled !== undefined) channel.enabled = !!updates.enabled;
 
   await project.save();
   return NextResponse.json(masked(project));

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
 import { Task } from "@/models/task";
@@ -40,7 +41,10 @@ export const PUT = withProjectAccess(async (request, { params }) => {
       (item: unknown) =>
         typeof item === "object" && item !== null &&
         typeof (item as Record<string, unknown>).text === "string" &&
-        typeof (item as Record<string, unknown>).done === "boolean"
+        typeof (item as Record<string, unknown>).done === "boolean" &&
+        ((item as Record<string, unknown>)._id === undefined ||
+          (typeof (item as Record<string, unknown>)._id === "string" &&
+            isValidObjectId((item as Record<string, unknown>)._id as string)))
     );
     if (!valid) {
       return NextResponse.json(
@@ -64,7 +68,7 @@ export const PUT = withProjectAccess(async (request, { params }) => {
     return NextResponse.json(task.checklist);
   }
 
-  if (!itemId) {
+  if (typeof itemId !== "string" || !isValidObjectId(itemId)) {
     return NextResponse.json({ error: "itemId is required" }, { status: 400 });
   }
 
@@ -91,7 +95,7 @@ export const DELETE = withProjectAccess(async (request, { params }) => {
   await connectDB();
 
   const { itemId } = await request.json();
-  if (!itemId) {
+  if (typeof itemId !== "string" || !isValidObjectId(itemId)) {
     return NextResponse.json({ error: "itemId is required" }, { status: 400 });
   }
 
