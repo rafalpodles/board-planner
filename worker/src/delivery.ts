@@ -69,23 +69,54 @@ function repoArgs(prUrl: string): string[] {
 
 type MergeState = "merged" | "unmerged" | "unknown";
 
+// Order matters for credential.helper: the empty value clears whatever the repository or a global
+// file configured, and the entry after it names the one helper we trust. Clearing alone would be a
+// regression — GIT_CONFIG_GLOBAL below also hides the helper `gh auth setup-git` installs, so an
+// https remote would stop authenticating.
+const HARDENED_CONFIG: ReadonlyArray<readonly [string, string]> = [
+  ["core.hooksPath", "/dev/null"],
+  ["core.fsmonitor", "false"],
+  ["core.pager", "cat"],
+  ["core.sshCommand", "ssh"],
+  ["remote.origin.receivepack", "git-receive-pack"],
+  ["credential.helper", ""],
+  ["credential.helper", "!gh auth git-credential"],
+];
+
+// NOSYSTEM drops /etc/gitconfig; GLOBAL=/dev/null drops ~/.gitconfig, which is as reachable to the
+// agent as the repository's own — it holds HOME. The repository config cannot be pointed elsewhere,
+// so the keys above override it instead, at the highest precedence git has.
+export function hardenedGitConfig(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_CONFIG_COUNT: String(HARDENED_CONFIG.length),
+  };
+  HARDENED_CONFIG.forEach(([key, value], index) => {
+    env[`GIT_CONFIG_KEY_${index}`] = key;
+    env[`GIT_CONFIG_VALUE_${index}`] = value;
+  });
+  return env;
+}
+
 export function createDelivery(runner: Runner, baseBranch?: string): Delivery {
   const baseArgs = baseBranch?.trim() ? ["--base", baseBranch.trim()] : [];
 
-  // Delivery runs our own commands, never agent-authored ones, so it is the one place that may
-  // carry the credentials git and gh need to reach the remote. The repository was approved by
-  // bindRepository, but its gitconfig (credential.helper, core.sshCommand, ...) still fires on
-  // every git call unless each one, not just the one at bind time, neutralises it too. gh does not
-  // understand git's -c flag, so only git invocations get it; GIT_CONFIG_NOSYSTEM is harmless for gh.
+  // Delivery is the one place that may carry the credentials git and gh need for the remote — and
+  // it runs inside the worktree the agent just wrote. The command is ours; what git *executes* on
+  // our behalf is not. Every key below is a "run this program" hook, and the agent holds
+  // `Bash(git *)` plus Write, so it can set any of them in the repository config — which a linked
+  // worktree shares with the main clone, so what it plants outlives the run.
+  //
+  // Through GIT_CONFIG_* rather than `-c`, because the environment reaches the git that `gh`
+  // shells out to; `-c` covers only the process we spawn ourselves.
   function run(command: string, args: string[], cwd: string): Promise<CommandResult> {
-    const fullArgs =
-      command === "git" ? ["-c", "core.fsmonitor=false", "-c", "core.pager=cat", ...args] : args;
-    return runner.run(command, fullArgs, {
+    return runner.run(command, args, {
       cwd,
       timeoutMs: TIMEOUT_MS,
       env: {
         ...childEnv(["SSH_AUTH_SOCK", "GH_TOKEN", "GITHUB_TOKEN", "GH_CONFIG_DIR", "XDG_CONFIG_HOME"]),
-        GIT_CONFIG_NOSYSTEM: "1",
+        ...hardenedGitConfig(),
       },
     });
   }
@@ -113,9 +144,11 @@ export function createDelivery(runner: Runner, baseBranch?: string): Delivery {
       // clone has never seen
       // -- keeps the branch in git's positional slot: without it a name beginning with a dash is
       // read as an option, and --receive-pack=<cmd> would run that command on the remote
+      // --no-verify says the same thing as core.hooksPath above, in the one place it matters most:
+      // two independent ways for a planted pre-push to be skipped, rather than one
       const result = await run(
         "git",
-        ["push", "--force-with-lease", "-u", "origin", "--", branch],
+        ["push", "--no-verify", "--force-with-lease", "-u", "origin", "--", branch],
         worktreePath
       );
       if (result.code !== 0) throw failure("git push", result);

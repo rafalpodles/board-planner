@@ -159,9 +159,18 @@ and `SIGINT` both finish the task in flight before the loop exits.
   changes to `package.json`, lockfiles, `.npmrc`, hooks and workflows *before* the build gate runs
   npm on the worktree, and installs run with `--ignore-scripts`. Cost ordering alone would have
   executed agent-written lifecycle scripts first.
-- **No subprocess inherits the worker's secrets.** The child environment is an allowlist, so
-  the worker's credential reaches neither the agent nor any dependency's install script. Only delivery,
-  which runs our own commands, carries what `git` and `gh` need for the remote.
+- **No subprocess inherits the worker's secrets through its environment.** The child environment is
+  an allowlist, so the worker's credential reaches neither the agent nor any dependency's install
+  script. Only delivery carries what `git` and `gh` need for the remote — and it runs inside the
+  worktree the agent just wrote, so running "our own commands" there is not by itself a guarantee.
+  Every key git treats as *run this program* — hooks, `credential.helper`, `core.sshCommand`,
+  `core.pager`, `core.fsmonitor`, `receivepack` — is overridden on those calls, `/etc/gitconfig` and
+  `~/.gitconfig` are taken out of the picture, and the push adds `--no-verify`. It travels in
+  `GIT_CONFIG_*` rather than `-c` so it also reaches the `git` that `gh` shells out to.
+
+  What this does **not** claim: the allowlist includes `HOME`, because the CLI authenticates from
+  its logged-in session there. An agent that goes looking can read what is under it — the
+  environment is the boundary, the filesystem is not.
 - **The executor runs with `bypassPermissions` inside the worktree**, so the worktree is checked
   for uncommitted files before the gates run — an agent cannot hide a change from the gates by
   never staging it.
