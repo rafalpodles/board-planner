@@ -207,22 +207,29 @@ export function TaskFieldsSection({
     fieldId: string,
     patch: FieldDraft | Record<string, unknown>,
   ) {
-    patchProject({
-      customFields: await api.patch(
-        `/api/projects/${projectId}/custom-fields/${fieldId}`,
-        patch,
-      ),
-    });
+    const customFields: ApiCustomField[] = await api.patch(
+      `/api/projects/${projectId}/custom-fields/${fieldId}`,
+      patch,
+    );
+    const nowArchived = customFields.find((f) => f._id === fieldId)?.archived;
+    patchProject(
+      nowArchived && project.estimateFieldId === fieldId
+        ? { customFields, estimateFieldId: "" }
+        : { customFields },
+    );
     setFieldForm(null);
   }
 
   async function removeCustomField(fieldId: string) {
     try {
-      patchProject({
-        customFields: await api.del(
-          `/api/projects/${projectId}/custom-fields/${fieldId}`,
-        ),
-      });
+      const customFields: ApiCustomField[] = await api.del(
+        `/api/projects/${projectId}/custom-fields/${fieldId}`,
+      );
+      patchProject(
+        project.estimateFieldId === fieldId
+          ? { customFields, estimateFieldId: "" }
+          : { customFields },
+      );
     } catch (err) {
       fail(err, "Failed to remove custom field");
     }
@@ -406,7 +413,7 @@ export function TaskFieldsSection({
 
       <SettingsCard
         title="Sprint estimates"
-        description="The numeric field summed for sprint progress and velocity."
+        description="Which field on a task is its size."
       >
         {numericFields.length === 0 ? (
           <SettingRow
