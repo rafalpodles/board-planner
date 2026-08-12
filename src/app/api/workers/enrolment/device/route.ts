@@ -4,9 +4,14 @@ import { protocolOf } from "@/lib/middleware";
 import { PROTOCOL_VERSION } from "@/lib/worker-service";
 import {
   DEVICE_ENROLMENT_TTL_MS,
+  TooManyPendingEnrolments,
   formatUserCode,
   startDeviceEnrolment,
 } from "@/lib/device-enrolment";
+import { getClientIp } from "@/lib/auth";
+import { isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
+
+const ENROLMENTS_PER_WINDOW = 10;
 
 // Unauthenticated, and that is the point: the machine has nothing to authenticate with yet — this
 // exists so nobody has to copy a token onto it by hand. Nothing is granted here. A pending row is
@@ -27,7 +32,22 @@ export async function POST(request: Request) {
     );
   }
 
-  const started = await startDeviceEnrolment({ machineName, machineHost });
+  // Unauthenticated and costing a bcrypt.hash per call, so the address is the only bound there is
+  const throttleKey = sourceKey(getClientIp(request) ?? "-", "device_enrolment");
+  if (isRateLimited(throttleKey, ENROLMENTS_PER_WINDOW)) {
+    return NextResponse.json({ error: "too many enrolment attempts, try again later" }, { status: 429 });
+  }
+  recordFailedAttempt(throttleKey);
+
+  let started;
+  try {
+    started = await startDeviceEnrolment({ machineName, machineHost });
+  } catch (error) {
+    if (error instanceof TooManyPendingEnrolments) {
+      return NextResponse.json({ error: error.message }, { status: 429 });
+    }
+    throw error;
+  }
   const base = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ?? "";
 
   return NextResponse.json(

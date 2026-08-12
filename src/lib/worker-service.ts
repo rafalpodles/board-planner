@@ -14,6 +14,17 @@ export const WORKER_HEARTBEAT_MS = 60 * 1000;
 
 export type Verdict = { ok: true } | { ok: false; reason: string };
 
+export function approvedProjectIds(worker: Pick<IWorker, "approvedProjects">): string[] {
+  return (worker.approvedProjects ?? []).map(String);
+}
+
+export function isApprovedFor(
+  worker: Pick<IWorker, "approvedProjects">,
+  projectId: string
+): boolean {
+  return approvedProjectIds(worker).includes(projectId);
+}
+
 export function verdictFor(
   worker: IWorker,
   project: AssignableProject | null,
@@ -43,6 +54,11 @@ export function verdictFor(
   // place rather than trusting a list the server would have had to write.
   if (!project?.worker?.enabled) {
     return { ok: false, reason: "this project is not enabled for workers" };
+  }
+  // The repos a worker reports are self-asserted and a remote is public information, so they can
+  // only narrow what an admin approved — never stand in for it (BP-305)
+  if (!isApprovedFor(worker, String(project._id))) {
+    return { ok: false, reason: "this worker was not approved for this project" };
   }
   const usable = usableRepos(worker as unknown as CheckoutClaimant, others, now);
   if (!matchRepo(project, usable)) {
@@ -103,11 +119,14 @@ export const overriddenWorkerPolicy = (worker: IWorker) =>
 // checkout whose remote matches the project's repository. The path never travels; the remote does.
 export function assignmentsFor(
   reported: RepoReport[],
-  projects: AssignableProject[]
+  projects: AssignableProject[],
+  approved: string[]
 ): ResolvedAssignment[] {
+  const allowed = new Set(approved);
   const out: ResolvedAssignment[] = [];
   for (const project of projects) {
     if (!project.worker?.enabled) continue;
+    if (!allowed.has(String(project._id))) continue;
     const remote = matchRepo(project, reported);
     if (!remote) continue;
     out.push({
@@ -264,6 +283,7 @@ export function toApiWorker(
     version: worker.version,
     protocolVersion: worker.protocolVersion,
     repos: (worker.repos ?? []).map((r) => ({ remote: r.remote, path: r.path })),
+    approvedProjects: approvedProjectIds(worker),
     policy: worker.policy,
     policyOverrides: [...(worker.policyOverrides ?? [])],
     enabled: worker.enabled,

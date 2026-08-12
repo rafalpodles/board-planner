@@ -5,6 +5,7 @@ const check = vi.fn();
 const verifyWorkerCredential = vi.fn();
 const workerFindById = vi.fn();
 const projectFind = vi.fn();
+const countDocuments = vi.fn();
 const workerFindOthers = vi.fn();
 const workerFindByIdAndUpdate = vi.fn();
 const logInstanceAudit = vi.fn();
@@ -18,7 +19,7 @@ vi.mock("@/lib/auth", () => ({
 vi.mock("@/lib/grants", () => ({ check, accessibleProjectIds: vi.fn() }));
 vi.mock("@/models/task", () => ({ Task: {} }));
 vi.mock("@/models/project", () => ({
-  Project: { find: () => ({ select: () => ({ lean: projectFind }) }) },
+  Project: { find: () => ({ select: () => ({ lean: projectFind }) }), countDocuments },
 }));
 vi.mock("@/models/worker", () => ({
   Worker: {
@@ -58,6 +59,8 @@ const WORKER = {
   policy: { pollIntervalMs: 30_000 },
   policyOverrides: [],
   repos: [{ remote: "git@github.com:owner/repo.git", path: "/repo" }],
+  // BP-305: assignments are the approved set narrowed by the reported repos
+  approvedProjects: ["p1"],
   enabled: true,
   lockedByInstance: false,
   createdAt: new Date("2026-06-01"),
@@ -88,6 +91,44 @@ beforeEach(() => {
       worker: { enabled: true, policy: { autoMerge: true }, policyOverrides: ["autoMerge"] },
     },
   ]);
+});
+
+// BP-305: the only way to widen or narrow what an already-enrolled machine may claim, and the
+// recovery path for an enrolment predating it — those have an empty set and so claim nothing
+describe("PATCH approvedProjects", () => {
+  const PROJECT = "69a52e3b399b27d3cbb2c5c9";
+
+  beforeEach(() => {
+    getAuthUser.mockResolvedValue(INSTANCE_ADMIN);
+  });
+
+  it("stores the approved set", async () => {
+    countDocuments.mockResolvedValue(1);
+
+    const res = await PATCH(patchRequest({ approvedProjects: [PROJECT] }), ctx());
+
+    expect(res.status).toBe(200);
+    expect(workerFindByIdAndUpdate).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ $set: expect.objectContaining({ approvedProjects: [PROJECT] }) }),
+      expect.anything()
+    );
+  });
+
+  it("refuses a project that does not exist", async () => {
+    countDocuments.mockResolvedValue(0);
+
+    const res = await PATCH(patchRequest({ approvedProjects: [PROJECT] }), ctx());
+
+    expect(res.status).toBe(400);
+  });
+
+  it("refuses anything that is not a list of project ids", async () => {
+    const res = await PATCH(patchRequest({ approvedProjects: ["not-an-id"] }), ctx());
+
+    expect(res.status).toBe(400);
+    expect(countDocuments).not.toHaveBeenCalled();
+  });
 });
 
 describe("PATCH /api/workers/:workerId", () => {
@@ -180,6 +221,31 @@ describe("PATCH /api/workers/:workerId", () => {
 // The worker polls this between heartbeats for its current policy and assignments. It returned
 // neither once assignments stopped being stored, so a worker that had reported its checkouts never
 // learned which projects they matched — caught by running it, not by a test.
+// BP-305: the one withWorker route that answered a killed worker, handing it its policy, its
+// assignments and the whole fleet inventory
+describe("the kill switch covers this route too", () => {
+  function killSwitchRequest() {
+    return new Request(`http://localhost/api/workers/${WORKER_ID}`, {
+      headers: {
+        authorization: "Bearer cpw_secret",
+        "x-worker-id": WORKER_ID,
+        "x-cp-protocol": "1",
+      },
+    });
+  }
+
+  it.each([{ enabled: false }, { lockedByInstance: true }])(
+    "refuses a worker that may not run (%o)",
+    async (state) => {
+      verifyWorkerCredential.mockResolvedValue({ ...WORKER, ...state });
+
+      const res = await GET(killSwitchRequest(), ctx());
+
+      expect(res.status).toBe(403);
+    }
+  );
+});
+
 describe("GET /api/workers/:workerId", () => {
   function getRequest() {
     return new Request(`http://localhost/api/workers/${WORKER_ID}`, {

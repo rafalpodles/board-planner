@@ -44,6 +44,8 @@ function worker(overrides: Record<string, unknown> = {}) {
     lastSeenAt: fresh,
     host: "mac.home",
     repos: [{ remote: REMOTE, path: "/repo" }],
+    // BP-305: what an admin approved. The reported repos narrow this, they never define it.
+    approvedProjects: [PROJECT_ID],
     ...overrides,
   } as never;
 }
@@ -184,17 +186,45 @@ describe("verifyWorkerCredential", () => {
 // run's checkout moves under the other's feet.
 // Assignment is no longer stored: it is the project being enabled AND this machine reporting a
 // checkout of its repository. Nothing the server writes decides it.
+// BP-305: a remote is public information and the worker reports its own, so approval for one
+// project must not become approval for every enabled one
+describe("the approved set, not the reported repos", () => {
+  it("refuses a project this worker was never approved for", () => {
+    const verdict = verdictFor(
+      worker({ approvedProjects: ["someone-else"] }),
+      project(),
+      PROTOCOL_VERSION,
+      fresh
+    );
+
+    expect(verdict).toEqual({ ok: false, reason: "this worker was not approved for this project" });
+  });
+
+  it("refuses a worker approved for nothing, which is what a pre-BP-305 enrolment is", () => {
+    const verdict = verdictFor(worker({ approvedProjects: [] }), project(), PROTOCOL_VERSION, fresh);
+
+    expect(verdict.ok).toBe(false);
+  });
+
+  it("offers no assignment for a project outside the approved set", () => {
+    const reported = [{ remote: REMOTE, path: "/repo" }];
+
+    expect(assignmentsFor(reported, [project()], [])).toEqual([]);
+    expect(assignmentsFor(reported, [project()], ["other"])).toEqual([]);
+  });
+});
+
 describe("assignmentsFor", () => {
   const reported = [{ remote: REMOTE, path: "/repo" }];
 
   it("offers an enabled project whose repository this machine has", () => {
-    expect(assignmentsFor(reported, [project()])).toEqual([
+    expect(assignmentsFor(reported, [project()], [PROJECT_ID])).toEqual([
       { project: PROJECT_ID, remote: REMOTE, policy: {} },
     ]);
   });
 
   it("answers with the remote the worker reported, never a path", () => {
-    const [assignment] = assignmentsFor(reported, [project()]);
+    const [assignment] = assignmentsFor(reported, [project()], [PROJECT_ID]);
 
     expect(assignment.remote).toBe(REMOTE);
     expect(Object.keys(assignment).sort()).toEqual(["policy", "project", "remote"]);
@@ -203,11 +233,11 @@ describe("assignmentsFor", () => {
   it("skips a project nobody enabled for workers", () => {
     const off = project({ worker: { enabled: false, policy: {}, policyOverrides: [] } });
 
-    expect(assignmentsFor(reported, [off])).toEqual([]);
+    expect(assignmentsFor(reported, [off], [PROJECT_ID])).toEqual([]);
   });
 
   it("skips a project whose repository this machine does not have", () => {
-    expect(assignmentsFor([{ remote: "git@github.com:someone/else.git", path: "/x" }], [project()]))
+    expect(assignmentsFor([{ remote: "git@github.com:someone/else.git", path: "/x" }], [project()], [PROJECT_ID]))
       .toEqual([]);
   });
 
@@ -220,7 +250,7 @@ describe("assignmentsFor", () => {
       },
     });
 
-    expect(assignmentsFor(reported, [configured])[0].policy).toEqual({
+    expect(assignmentsFor(reported, [configured], [PROJECT_ID])[0].policy).toEqual({
       autoMerge: true,
       model: "haiku",
     });
@@ -233,7 +263,7 @@ describe("assignmentsFor", () => {
       { remote: "git@github.com:owner/other.git", path: "/other" },
     ];
 
-    expect(assignmentsFor(both, [project(), other]).map((a) => a.project)).toEqual([
+    expect(assignmentsFor(both, [project(), other], [PROJECT_ID, "p2"]).map((a) => a.project)).toEqual([
       PROJECT_ID,
       "p2",
     ]);
