@@ -5,6 +5,15 @@ import remarkGfm from "remark-gfm";
 import { useMemo } from "react";
 import { remarkTaskReferences, type ReferenceScope } from "@/lib/task-references";
 
+// "//evil.example" is a protocol-relative URL and "/\\evil.example" is folded into one by some
+// parsers — both start with a slash and both leave the origin. Same check safeNextPath makes,
+// and getting it wrong here means an off-site anchor rendered without rel="noopener" (BP-306).
+function isInternalHref(href: string | undefined): href is string {
+  if (typeof href !== "string" || !href.startsWith("/")) return false;
+  if (href.startsWith("//") || href.includes("\\")) return false;
+  return true;
+}
+
 const components = {
   // Internal task references route through the client without a full page load; anything else a
   // person pasted stays an ordinary anchor and opens where they expect
@@ -17,7 +26,7 @@ const components = {
   // `node` is react-markdown's mdast node and must not be spread onto an element; the rest is
   // dropped with it because nothing else here needs forwarding.
   a: ({ href, children }: React.AnchorHTMLAttributes<HTMLAnchorElement>) =>
-    href?.startsWith("/") ? (
+    isInternalHref(href) ? (
       <a href={href} className="text-primary hover:underline">
         {children}
       </a>

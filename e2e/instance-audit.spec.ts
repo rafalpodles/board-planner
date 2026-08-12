@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import mongoose from "mongoose";
-import { ADMIN_AUTH, signInApi } from "./api";
+import { ADMIN_AUTH, SAME_ORIGIN, signInApi } from "./api";
 import { ADMIN_PASSWORD, ADMIN_USERNAME, E2E_MONGODB_URI, PROJECT_ID, PROJECT_KEY, seed } from "./seed";
 
 /**
@@ -147,9 +147,14 @@ test("changing worker policy without changing whether they run records nothing",
 // Through the API, not the browser: the settings screen saves one section at a time, so no
 // gesture produces a request carrying both. Intercepting the response in the page would be worse
 // than no test — the handler under examination would never run at all.
+//
+// A browser session rather than the API token every other call here carries: since BP-306 the
+// worker fields refuse a machine credential outright, so a token answers 403 and never reaches
+// the ordering this test is about.
 test("a refused save leaves no record of a decision that never happened", async ({ request }) => {
+  await signInApi(request, ADMIN_USERNAME, ADMIN_PASSWORD);
   const response = await request.put(`/api/projects/${PROJECT_KEY}`, {
-    headers: ADMIN_AUTH,
+    headers: SAME_ORIGIN,
     data: { worker: { enabled: false }, gitlabHost: "http://gitlab.internal" },
   });
 
@@ -157,6 +162,22 @@ test("a refused save leaves no record of a decision that never happened", async 
   expect(await auditRows()).toHaveLength(0);
 
   // And the decision itself did not land either, so the absent row is telling the truth
+  const handle = await db();
+  const project = await handle.collection("projects").findOne({ _id: PROJECT_ID });
+  expect(project?.worker?.enabled).toBe(true);
+});
+
+// BP-306: an unscoped admin API token keeps role: "admin" and so passed withAdmin. Committing a
+// machine to running agent-written code needs a person at a keyboard, which is the line the
+// device-enrolment route performing the same enable already drew.
+test("worker settings refuse an admin API token", async ({ request }) => {
+  const response = await request.put(`/api/projects/${PROJECT_KEY}`, {
+    headers: ADMIN_AUTH,
+    data: { worker: { enabled: false } },
+  });
+
+  expect(response.status()).toBe(403);
+
   const handle = await db();
   const project = await handle.collection("projects").findOne({ _id: PROJECT_ID });
   expect(project?.worker?.enabled).toBe(true);

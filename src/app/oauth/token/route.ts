@@ -72,8 +72,15 @@ export async function POST(req: Request) {
       return tokenError("invalid_request", "code and code_verifier are required");
     }
 
-    const rec = await OAuthCode.findOne({ codeHash: sha256(code) });
-    if (!rec || rec.used || rec.expiresAt.getTime() < Date.now()) {
+    // Claimed in one conditional update, matching the refresh path beside it. Read-then-write
+    // let two requests racing the same code both pass the `used` check and both get tokens —
+    // and the checks below are what would have rejected the second one (BP-306).
+    const rec = await OAuthCode.findOneAndUpdate(
+      { codeHash: sha256(code), used: { $ne: true } },
+      { $set: { used: true } },
+      { returnDocument: "before" }
+    );
+    if (!rec || rec.expiresAt.getTime() < Date.now()) {
       return tokenError("invalid_grant", "authorization code is invalid or expired");
     }
     if (clientId && rec.clientId !== clientId) {
@@ -85,9 +92,6 @@ export async function POST(req: Request) {
     if (!verifyPkceS256(codeVerifier, rec.codeChallenge)) {
       return tokenError("invalid_grant", "PKCE verification failed");
     }
-
-    rec.used = true;
-    await rec.save();
 
     return issueTokens(rec.clientId, rec.user as Types.ObjectId, rec.scope, rec.allowedProjects);
   }
