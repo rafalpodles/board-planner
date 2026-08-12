@@ -6,7 +6,7 @@ import { User } from "@/models/user";
 import { Comment } from "@/models/comment";
 import { Worker } from "@/models/worker";
 import { ApiTaskExecution, ICustomField, ITask, ITaskExecution, RunConflict, DEFAULT_PRIORITY } from "@/types";
-import { getColumnIds, defaultStatusFor, roleOf, getProjectColumns } from "@/lib/columns";
+import { getColumnIds, defaultStatusFor, roleOf, getProjectColumns, columnIdsWithRole } from "@/lib/columns";
 import { escalationColumnId } from "@/lib/escalation";
 import { logActivity } from "@/lib/activity";
 import { dispatchWebhooks } from "@/lib/webhooks";
@@ -748,6 +748,41 @@ export async function releaseExpiredTasks(projectId: string, now = new Date()): 
   return spent.modifiedCount + retryable.modifiedCount;
 }
 
+// The blockers that tasks waiting in the approved column actually name, narrowed to those that have
+// not finished. Bounded by the work waiting to start rather than by the size of the board: asking
+// for every unfinished task instead grew the claim filter with the backlog forever, and could not
+// be served from the { project, status } index because _id is not in it.
+//
+// A blocker always sits in the same project — the links endpoint refuses one that does not — so
+// nothing outside this project has to be consulted.
+async function openBlockersFor(
+  projectId: string,
+  approved: string[],
+  done: string[]
+): Promise<Types.ObjectId[]> {
+  const waiting = await Task.find(
+    { project: projectId, status: { $in: approved }, blockedBy: { $exists: true, $ne: [] } },
+    "blockedBy"
+  ).lean();
+
+  // isValid, because these are stored values going back into a query: an id that cannot be cast
+  // would reject the claim and stop this project's worker until somebody repaired the data. A
+  // blocker nothing can resolve reads as "not open", the same as one that was deleted.
+  const named = [
+    ...new Set(waiting.flatMap((t) => (t.blockedBy ?? []).map(String))),
+  ].filter((id) => Types.ObjectId.isValid(id));
+  if (named.length === 0) return [];
+
+  // project, though blockers are same-project today: a foreign blocker would otherwise have its
+  // status judged against this board's done ids, and a board that calls finished anything else
+  // would freeze the dependent for good. Scoped, it drops out and the dependent goes through.
+  const open = await Task.find(
+    { project: projectId, _id: { $in: named }, status: { $nin: done } },
+    "_id"
+  ).lean();
+  return open.map((t) => t._id);
+}
+
 export async function claimNextTask(
   projectId: string,
   workerId: string,
@@ -807,10 +842,37 @@ export async function claimNextTask(
   // setting, and the settings screen says so rather than leaving it to be discovered.
   if (claimable.length === 0) return null;
 
+  // Finished is the done role, not a status called "done": a board that renamed its last column
+  // would otherwise read every shipped blocker as still open. A board with NO done-role column
+  // cannot express "finished" at all, so it cannot express "blocked" either — gating on it would
+  // freeze every dependent for good with nothing on the task or in any log saying why, so the gate
+  // is skipped there rather than deadlocking the queue.
+  //
+  // Read before the claim rather than joined inside it, because MongoDB cannot join in an update.
+  // The claim itself stays the one atomic findOneAndUpdate it was, so two workers still cannot take
+  // the same task.
+  //
+  // What can age is this gate: it is computed from the approved column as it stood a moment ago.
+  // Four ways, all bounded by one round trip, and all of them settle the way acting a millisecond
+  // earlier or later already would, since nothing revokes a claim that is already running:
+  //   - a blocker finishes in the window — its dependent waits for the next poll;
+  //   - a blocker is reopened — its dependent goes through;
+  //   - a blocked task is promoted into the approved column — its blocker was not named when this
+  //     was computed, so it goes through;
+  //   - a blocked_by link is added to a task already in the column — same.
+  // Closing the last two means keeping an open-blocker count on the task itself, maintained by
+  // every link and status writer, so the gate can live inside the atomic filter. That is a much
+  // larger change than this one.
+  const done = columnIdsWithRole(project, "done");
+  const openBlockers = done.length > 0 ? await openBlockersFor(projectId, approved, done) : [];
+
   return Task.findOneAndUpdate(
     {
       project: projectId,
       status: { $in: approved },
+      // On an array field this means "holds none of them", so a task with no blockers, one whose
+      // blockers have all finished, and one written before the field existed all still qualify
+      blockedBy: { $nin: openBlockers },
       $and: [
         { $or: claimable },
         // Mongoose applies defaults at hydration, so tasks created before the

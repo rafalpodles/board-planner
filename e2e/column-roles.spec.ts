@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import mongoose from "mongoose";
 import { ADMIN_AUTH } from "./api";
+import { claimNextTask } from "@/lib/task-service";
 import { ADMIN_ID, E2E_MONGODB_URI, PROJECT_ID, PROJECT_KEY, seed } from "./seed";
 
 /**
@@ -208,5 +209,39 @@ test.describe("My Tasks across boards that agree on roles and nothing else", () 
 
     expect(tasks[0].project).not.toHaveProperty("columns");
     expect(tasks[0].project).toHaveProperty("key", PROJECT_KEY);
+  });
+});
+
+/**
+ * BP-280. The worker's claim gate reads "finished" off the done role. On the seeded board the
+ * finished column is literally called `done`, so an implementation that hardcoded that id would
+ * pass every blocker test written there. This board's finished column is `shipped`.
+ */
+test.describe("a worker claiming on a board with no column called done", () => {
+  const WORKER = "w-column-roles";
+
+  test.beforeEach(async () => {
+    // connectDB reads this when it is called, not when the module loads
+    process.env.MONGODB_URI = E2E_MONGODB_URI;
+    const handle = await db();
+    await handle
+      .collection("projects")
+      .updateOne(
+        { _id: PROJECT_ID },
+        { $set: { "worker.policy.claimScope": "any", "worker.claimAssignee": null } }
+      );
+  });
+
+  test("waits for its blocker until that blocker reaches Shipped", async () => {
+    const blocker = await addTask("checking", { order: 1 });
+    const blocked = await addTask("ready", { blockedBy: [blocker], order: 2 });
+
+    expect(await claimNextTask(String(PROJECT_ID), WORKER, "run-1")).toBeNull();
+
+    const handle = await db();
+    await handle.collection("tasks").updateOne({ _id: blocker }, { $set: { status: "shipped" } });
+
+    const claimed = await claimNextTask(String(PROJECT_ID), WORKER, "run-2");
+    expect(String(claimed?._id)).toBe(String(blocked));
   });
 });
