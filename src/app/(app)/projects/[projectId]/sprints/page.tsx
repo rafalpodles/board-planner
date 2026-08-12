@@ -12,6 +12,7 @@ import { resolveSelectedSprint } from "@/lib/sprint-selection";
 import { SprintSelector } from "@/components/sprints/SprintSelector";
 import { SprintHeader } from "@/components/sprints/SprintHeader";
 import { PlanningView } from "@/components/sprints/PlanningView";
+import { VelocityChart } from "@/components/sprints/VelocityChart";
 import { SprintFormModal, SprintFormValues } from "@/components/sprints/SprintFormModal";
 import { CompleteSprintDialog } from "@/components/sprints/CompleteSprintDialog";
 import { NewTaskModal } from "@/components/tasks/NewTaskModal";
@@ -307,6 +308,12 @@ export default function SprintsPage() {
               <Spinner />
             )}
           </div>
+        </div>
+      )}
+
+      {estimateFieldId && (
+        <div className="mt-6 shrink-0">
+          <VelocityChart sprints={board.sprints} />
         </div>
       )}
 
