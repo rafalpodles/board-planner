@@ -15,17 +15,9 @@ const task: ClaimedTask = {
 
 const ok: CommandResult = { code: 0, stdout: "", stderr: "", timedOut: false };
 
-// Drops the "-c key=value" pairs delivery.ts prepends to git commands, so a response keyed by
-// "git push" still matches regardless of which config flags ride along in front of it.
-function withoutConfigFlags(args: string[]): string[] {
-  const rest = [...args];
-  while (rest[0] === "-c") rest.splice(0, 2);
-  return rest;
-}
-
 function fakeCli(responses: Record<string, Partial<CommandResult>>) {
   const run = vi.fn(async (command: string, args: string[]): Promise<CommandResult> => {
-    const line = `${command} ${withoutConfigFlags(args).join(" ")}`;
+    const line = `${command} ${args.join(" ")}`;
     const key = Object.keys(responses).find((prefix) => line.startsWith(prefix));
     return { ...ok, ...(key ? responses[key] : {}) };
   });
@@ -34,6 +26,20 @@ function fakeCli(responses: Record<string, Partial<CommandResult>>) {
 
 function argsOf(run: ReturnType<typeof vi.fn>, index = 0): string[] {
   return run.mock.calls[index][1] as string[];
+}
+
+function envOf(run: ReturnType<typeof vi.fn>, index = 0): Record<string, string> {
+  return (run.mock.calls[index][2] as { env: Record<string, string> }).env;
+}
+
+// git reads GIT_CONFIG_KEY_n / GIT_CONFIG_VALUE_n as ordered pairs, so the assertions read them
+// back the same way rather than asserting on the numbering
+function configuredBy(env: Record<string, string | undefined>): [string, string][] {
+  const count = Number(env.GIT_CONFIG_COUNT ?? 0);
+  return Array.from({ length: count }, (_, i) => [
+    env[`GIT_CONFIG_KEY_${i}`] ?? "",
+    env[`GIT_CONFIG_VALUE_${i}`] ?? "",
+  ]);
 }
 
 function valueOf(args: string[], flag: string): string {
@@ -47,18 +53,7 @@ describe("push", () => {
 
     expect(run).toHaveBeenCalledWith(
       "git",
-      [
-        "-c",
-        "core.fsmonitor=false",
-        "-c",
-        "core.pager=cat",
-        "push",
-        "--force-with-lease",
-        "-u",
-        "origin",
-        "--",
-        "cp-158/worker",
-      ],
+      ["push", "--no-verify", "--force-with-lease", "-u", "origin", "--", "cp-158/worker"],
       expect.objectContaining({ cwd: "/wt" })
     );
   });
@@ -84,16 +79,56 @@ describe("push", () => {
     await expect(createDelivery({ run }).push("/wt", "cp-158/worker")).rejects.toThrow(/timed out/);
   });
 
-  // The repository was approved by bindRepository, but its own gitconfig (credential.helper,
-  // core.sshCommand, ...) still fires on this call unless it is neutralised here too
-  it("neutralises system and repository git config on the push", async () => {
+  // What the repository config can still make git execute on our behalf. That the flags are spelled
+  // correctly is all a mocked runner can show — delivery.hooks.integration.test.ts proves the effect
+  // against a real git and a really planted hook.
+  it("neutralises every config file git would otherwise read", async () => {
     const run = vi.fn().mockResolvedValue(ok);
     await createDelivery({ run }).push("/wt", "cp-158/worker");
 
-    const [command, args, opts] = run.mock.calls[0];
-    expect(command).toBe("git");
-    expect(args).toEqual(expect.arrayContaining(["-c", "core.pager=cat"]));
-    expect((opts as { env: Record<string, string> }).env.GIT_CONFIG_NOSYSTEM).toBe("1");
+    const env = envOf(run);
+    expect(env.GIT_CONFIG_NOSYSTEM).toBe("1");
+    expect(env.GIT_CONFIG_GLOBAL).toBe("/dev/null");
+  });
+
+  it.each([
+    ["core.hooksPath", "/dev/null"],
+    ["core.sshCommand", "ssh"],
+    ["remote.origin.receivepack", "git-receive-pack"],
+    ["core.fsmonitor", "false"],
+    ["core.pager", "cat"],
+  ])("overrides %s, which the repository config could otherwise point at a program", async (key, value) => {
+    const run = vi.fn().mockResolvedValue(ok);
+    await createDelivery({ run }).push("/wt", "cp-158/worker");
+
+    expect(configuredBy(envOf(run))).toContainEqual([key, value]);
+  });
+
+  // Clearing the helper list is what makes GIT_CONFIG_GLOBAL safe to set; naming ours after it is
+  // what keeps an https remote authenticating once the global file is gone
+  it("clears inherited credential helpers and names the one it trusts, in that order", async () => {
+    const run = vi.fn().mockResolvedValue(ok);
+    await createDelivery({ run }).push("/wt", "cp-158/worker");
+
+    const helpers = configuredBy(envOf(run)).filter(([key]) => key === "credential.helper");
+    expect(helpers).toEqual([
+      ["credential.helper", ""],
+      ["credential.helper", "!gh auth git-credential"],
+    ]);
+  });
+
+  // gh does not take -c, and shells out to git itself, so the hardening has to travel in the
+  // environment or those inner invocations run unprotected
+  it("hands gh the same hardening as git", async () => {
+    const { runner, run } = fakeCli({
+      "gh pr create": { stdout: "https://github.com/o/r/pull/1\n" },
+    });
+    await createDelivery(runner).openPr("/wt", task, "summary");
+
+    const ghCall = run.mock.calls.find((call) => call[0] === "gh");
+    const env = (ghCall?.[2] as { env: Record<string, string> }).env;
+    expect(env.GIT_CONFIG_GLOBAL).toBe("/dev/null");
+    expect(configuredBy(env)).toContainEqual(["core.hooksPath", "/dev/null"]);
   });
 });
 
