@@ -196,7 +196,9 @@ SMTP_PORT=587
 SMTP_USER=
 SMTP_PASS=
 SMTP_FROM=
-ENCRYPTION_KEY=           # Optional — 32 bytes (hex or base64), encrypts stored GitHub/GitLab tokens
+ENCRYPTION_KEY=           # 32 bytes (hex or base64) — without it integration tokens cannot be saved;
+                          # a wrong-length key stops the app from starting
+ENCRYPTION_KEYS_OLD=      # Optional — comma-separated retired keys, so a rotation can still decrypt
 NEXT_PUBLIC_APP_URL=      # Frontend URL for links — read at BUILD time, not runtime
 ```
 

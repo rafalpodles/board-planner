@@ -30,7 +30,8 @@ Everything is optional. Put overrides in a `.env` file next to `docker-compose.y
 | `APP_ORIGIN` | `http://localhost:${APP_PORT}` | Comma-separated list of origins the app is served from, used to reject cross-site writes |
 | `OPENAI_API_KEY` | — | AI task generation |
 | `OPENROUTER_API_KEY`, `PM_MODEL`, `PM_MAX_TOKENS`, `PM_DAILY_TURN_CAP`, `PM_SCHEDULER_TICK_MS` | — | PM agent |
-| `ENCRYPTION_KEY` | — | 32 bytes (hex or base64) encrypting stored GitHub/GitLab tokens at rest |
+| `ENCRYPTION_KEY` | — | 32 bytes (hex or base64) encrypting stored integration tokens at rest. Without it those tokens cannot be saved at all |
+| `ENCRYPTION_KEYS_OLD` | — | Comma-separated retired encryption keys, kept so a rotation can still read what they wrote |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | — | Email notifications |
 
 `COOKIE_ALLOW_INSECURE` and `APP_ORIGIN` are **runtime** values, read on every request. The compose
@@ -45,6 +46,18 @@ and over plain HTTP at anything other than `localhost` the browser sends no `Sec
 so the only remaining proof is `Origin` matching this list. Set it to the URL users actually open —
 `https://board.example.com`, or `http://192.168.1.10:3000` for a LAN self-host — with no trailing
 path.
+
+`ENCRYPTION_KEY` encrypts the GitHub, GitLab, Coda and MCP credentials the app stores. Generate one
+with `openssl rand -hex 32`. Without it those fields simply cannot be saved — the app answers the
+save with an error rather than writing the token in cleartext, and says so at startup. A key that is
+set but is not 32 bytes **stops the app from starting**: a fumbled variable is not the same as an
+absent one and must not be treated as one.
+
+To rotate: put the new key in `ENCRYPTION_KEY` and move the old one to `ENCRYPTION_KEYS_OLD`
+(comma-separated, so several generations can coexist). Each stored value names the key that wrote it,
+so old and new secrets are readable side by side; anything re-saved is written with the new key. Drop
+a retired key from the list only once nothing still refers to it — the app names the missing key id
+when it meets one it cannot read.
 
 `NEXT_PUBLIC_APP_URL` is a **build-time** value: Next.js inlines `NEXT_PUBLIC_*` into the bundle, so
 it is passed as a build argument and baked into the image. Changing it means rebuilding —
