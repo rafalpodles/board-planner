@@ -166,11 +166,19 @@ describe("claimNextTask", () => {
       columns: [...customBoard.columns, { id: "shipped", label: "Shipped", role: "done", order: 3 }],
     };
 
-    // Two reads: which approved tasks name a blocker, then which of those blockers are unfinished
+    // Real ObjectId hex, not readable labels: blockedBy holds refs, and the claim now refuses ids
+    // it cannot cast — labels would make every fixture here vanish before the query saw it
+    const OPEN = "6a70afff45d39cd9bc8bb600";
+    const FINISHED = "6a70afff45d39cd9bc8bb601";
+    const ALSO_FINISHED = "6a70afff45d39cd9bc8bb602";
+
+    // Two reads: which approved tasks name a blocker, then which of those blockers are unfinished.
+    // Two waiting tasks naming the same blockers, so the second read is asked about each one once
     function boardWhere(named: string[], stillOpen: string[]) {
       find.mockReset();
       find.mockReturnValueOnce({
-        lean: () => Promise.resolve(named.length ? [{ blockedBy: named }] : []),
+        lean: () =>
+          Promise.resolve(named.length ? [{ blockedBy: named }, { blockedBy: named }] : []),
       });
       find.mockReturnValueOnce({
         lean: () => Promise.resolve(stillOpen.map((_id) => ({ _id }))),
@@ -188,29 +196,29 @@ describe("claimNextTask", () => {
     });
 
     it("passes over a task whose blocker is still unfinished", async () => {
-      boardWhere(["blocker-1"], ["blocker-1"]);
+      boardWhere([OPEN], [OPEN]);
 
-      expect(matches(await claimFilter(), task({ blockedBy: ["blocker-1"] }))).toBe(false);
+      expect(matches(await claimFilter(), task({ blockedBy: [OPEN] }))).toBe(false);
     });
 
     it("holds a task back while any one of its blockers is open", async () => {
-      boardWhere(["open-1", "finished-1"], ["open-1"]);
+      boardWhere([OPEN, FINISHED], [OPEN]);
 
       const filter = await claimFilter();
-      expect(matches(filter, task({ blockedBy: ["finished-1", "open-1"] }))).toBe(false);
-      expect(matches(filter, task({ blockedBy: ["finished-1"] }))).toBe(true);
+      expect(matches(filter, task({ blockedBy: [FINISHED, OPEN] }))).toBe(false);
+      expect(matches(filter, task({ blockedBy: [FINISHED] }))).toBe(true);
     });
 
     it("becomes claimable once every blocker has reached a done-role column", async () => {
-      boardWhere(["blocker-1"], []);
+      boardWhere([OPEN], []);
 
-      expect(matches(await claimFilter(), task({ blockedBy: ["blocker-1"] }))).toBe(true);
+      expect(matches(await claimFilter(), task({ blockedBy: [OPEN] }))).toBe(true);
     });
 
     // The field has a default, but a task written before it existed has no such key at all, and
     // the guard must not quietly stop the worker on the oldest tasks on the board
     it("claims a task that predates the blockedBy field", async () => {
-      boardWhere(["blocker-1"], ["blocker-1"]);
+      boardWhere([OPEN], [OPEN]);
       const legacy = task();
       delete (legacy as Record<string, unknown>).blockedBy;
 
@@ -220,28 +228,46 @@ describe("claimNextTask", () => {
     // Bounded by the work waiting to start rather than by the size of the board: asking for every
     // unfinished task in the project grows the claim filter with the backlog forever
     it("asks only about the blockers the approved column actually names", async () => {
-      boardWhere(["blocker-1"], ["blocker-1"]);
+      boardWhere([OPEN], [OPEN]);
 
       await claimFilter();
 
-      expect(find.mock.calls[0][0]).toEqual({
-        project: "p1",
-        status: { $in: ["ready"] },
-        blockedBy: { $exists: true, $ne: [] },
-      });
+      // Judged by what the filter selects, not by what it says. A wrong first read returns nothing,
+      // `named` is empty, and the gate switches itself off silently — every other test here stubs
+      // that read with names and would sail past it
+      const asked = find.mock.calls[0][0];
+      expect(matches(asked, task({ blockedBy: [OPEN] }))).toBe(true);
+      expect(matches(asked, task({ blockedBy: [] }))).toBe(false);
+      expect(matches(asked, task({ status: "doing", blockedBy: [OPEN] }))).toBe(false);
+      const legacy = task();
+      delete (legacy as Record<string, unknown>).blockedBy;
+      expect(matches(asked, legacy)).toBe(false);
+      // one entry, though two waiting tasks named it, and scoped to the project so a blocker from
+      // another board is never judged against this board's idea of finished
       expect(find.mock.calls[1][0]).toEqual({
-        _id: { $in: ["blocker-1"] },
+        project: "p1",
+        _id: { $in: [OPEN] },
         status: { $nin: ["shipped"] },
       });
+    });
+
+    // A stored ref that cannot be cast would reject the claim and stop this project's worker until
+    // somebody repaired the data. It reads as "not open" instead, the same as a deleted blocker
+    it("keeps claiming when a stored blocker id cannot be cast", async () => {
+      boardWhere(["not-an-object-id"], []);
+
+      const filter = await claimFilter();
+
+      expect(find).toHaveBeenCalledTimes(1);
+      expect(matches(filter, task({ blockedBy: ["not-an-object-id"] }))).toBe(true);
     });
 
     it("does not ask a second time when nothing in the approved column names a blocker", async () => {
       boardWhere([], []);
 
-      const filter = await claimFilter();
+      await claimFilter();
 
       expect(find).toHaveBeenCalledTimes(1);
-      expect(filter.blockedBy).toEqual({ $nin: [] });
     });
 
     // A board with no done column cannot express "finished", so it cannot express "blocked"
@@ -254,7 +280,7 @@ describe("claimNextTask", () => {
       const filter = await claimFilter();
 
       expect(find).not.toHaveBeenCalled();
-      expect(matches(filter, task({ blockedBy: ["blocker-1"] }))).toBe(true);
+      expect(matches(filter, task({ blockedBy: [OPEN] }))).toBe(true);
     });
   });
 

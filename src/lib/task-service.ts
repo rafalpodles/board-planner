@@ -765,10 +765,21 @@ async function openBlockersFor(
     "blockedBy"
   ).lean();
 
-  const named = [...new Set(waiting.flatMap((t) => (t.blockedBy ?? []).map(String)))];
+  // isValid, because these are stored values going back into a query: an id that cannot be cast
+  // would reject the claim and stop this project's worker until somebody repaired the data. A
+  // blocker nothing can resolve reads as "not open", the same as one that was deleted.
+  const named = [
+    ...new Set(waiting.flatMap((t) => (t.blockedBy ?? []).map(String))),
+  ].filter((id) => Types.ObjectId.isValid(id));
   if (named.length === 0) return [];
 
-  const open = await Task.find({ _id: { $in: named }, status: { $nin: done } }, "_id").lean();
+  // project, though blockers are same-project today: a foreign blocker would otherwise have its
+  // status judged against this board's done ids, and a board that calls finished anything else
+  // would freeze the dependent for good. Scoped, it drops out and the dependent goes through.
+  const open = await Task.find(
+    { project: projectId, _id: { $in: named }, status: { $nin: done } },
+    "_id"
+  ).lean();
   return open.map((t) => t._id);
 }
 
@@ -839,10 +850,19 @@ export async function claimNextTask(
   //
   // Read before the claim rather than joined inside it, because MongoDB cannot join in an update.
   // The claim itself stays the one atomic findOneAndUpdate it was, so two workers still cannot take
-  // the same task. Only the blocker picture can age, both ways: a blocker finished in that window
-  // leaves its dependent for the next poll, and one reopened in it lets the dependent through —
-  // which is the same outcome a reopen a millisecond after the claim already gives, since nothing
-  // revokes a claim that is already running.
+  // the same task.
+  //
+  // What can age is this gate: it is computed from the approved column as it stood a moment ago.
+  // Four ways, all bounded by one round trip, and all of them settle the way acting a millisecond
+  // earlier or later already would, since nothing revokes a claim that is already running:
+  //   - a blocker finishes in the window — its dependent waits for the next poll;
+  //   - a blocker is reopened — its dependent goes through;
+  //   - a blocked task is promoted into the approved column — its blocker was not named when this
+  //     was computed, so it goes through;
+  //   - a blocked_by link is added to a task already in the column — same.
+  // Closing the last two means keeping an open-blocker count on the task itself, maintained by
+  // every link and status writer, so the gate can live inside the atomic filter. That is a much
+  // larger change than this one.
   const done = columnIdsWithRole(project, "done");
   const openBlockers = done.length > 0 ? await openBlockersFor(projectId, approved, done) : [];
 
