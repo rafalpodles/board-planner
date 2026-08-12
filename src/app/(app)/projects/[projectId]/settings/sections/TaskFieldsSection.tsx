@@ -12,18 +12,20 @@ import {
 import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
 import { Button } from "@/components/ui/Button";
+import { Select } from "@/components/ui/Select";
 import { CustomFieldEditor } from "./CustomFieldEditor";
 import {
   CustomFieldForm,
   FieldDraft,
 } from "@/components/settings/CustomFieldForm";
-import { sortedFields } from "@/lib/custom-fields";
+import { activeFields, sortedFields } from "@/lib/custom-fields";
 import {
   SettingsCard,
   EmptyState,
   ListRow,
 } from "@/components/settings/SettingsCard";
 import { ListEditor } from "@/components/settings/ListEditor";
+import { SettingRow } from "@/components/settings/SettingRow";
 import { useDirtyGroup } from "@/components/settings/settings-context";
 import { useDraft } from "@/hooks/use-draft";
 import { Popover } from "@/components/ui/Popover";
@@ -32,6 +34,18 @@ import { categoryDiff, CategoryDraft } from "@/lib/category-diff";
 import { diffById } from "@/lib/row-diff";
 import { nextColour } from "@/lib/palette";
 import { SectionProps } from "./types";
+
+const ESTIMATE_FIELD_NAME = "Story points";
+
+function estimateFieldHint(canAdmin: boolean, hasNumericField: boolean): string {
+  const base = "Summed for sprint progress and velocity";
+  if (hasNumericField) {
+    return canAdmin ? base : `${base}. Only a project owner can change this.`;
+  }
+  return canAdmin
+    ? `${base}. This project has no numeric field yet.`
+    : `${base}. Only a project owner can create one.`;
+}
 
 export function TaskFieldsSection({
   projectId,
@@ -44,6 +58,11 @@ export function TaskFieldsSection({
   const canDelete = !!project.canAdmin;
   const api = useApi();
   const { toast } = useToast();
+
+  const numericFields = sortedFields(
+    activeFields(project.customFields || []).filter((f) => f.fieldType === "number"),
+  );
+  const [creatingEstimateField, setCreatingEstimateField] = useState(false);
 
   // Explicit, because a row added here has no _id until it is saved
   const categories = useDraft<{ categories: CategoryDraft[] }>({
@@ -209,6 +228,34 @@ export function TaskFieldsSection({
     }
   }
 
+  async function designateEstimateField(fieldId: string) {
+    try {
+      await api.put(`/api/projects/${projectId}`, { estimateFieldId: fieldId });
+      patchProject({ estimateFieldId: fieldId });
+    } catch (err) {
+      fail(err, "Failed to save estimate field");
+    }
+  }
+
+  async function createEstimateField() {
+    setCreatingEstimateField(true);
+    try {
+      const fields: ApiCustomField[] = await api.post(
+        `/api/projects/${projectId}/custom-fields`,
+        { name: ESTIMATE_FIELD_NAME, fieldType: "number" },
+      );
+      patchProject({ customFields: fields });
+      const created = fields.find(
+        (f) => f.fieldType === "number" && f.name === ESTIMATE_FIELD_NAME,
+      );
+      if (created) await designateEstimateField(created._id);
+    } catch (err) {
+      fail(err, `Failed to create "${ESTIMATE_FIELD_NAME}"`);
+    } finally {
+      setCreatingEstimateField(false);
+    }
+  }
+
   function editTemplate(index: number, patch: Partial<ApiTaskTemplate>) {
     templates.set(
       "templates",
@@ -354,6 +401,43 @@ export function TaskFieldsSection({
           >
             + Add field
           </Button>
+        )}
+      </SettingsCard>
+
+      <SettingsCard
+        title="Sprint estimates"
+        description="The numeric field summed for sprint progress and velocity."
+      >
+        {numericFields.length === 0 ? (
+          <SettingRow
+            label="Estimate field"
+            hint={estimateFieldHint(!!project.canAdmin, false)}
+          >
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={!project.canAdmin || creatingEstimateField}
+              onClick={createEstimateField}
+            >
+              {creatingEstimateField ? "Creating..." : `Create "${ESTIMATE_FIELD_NAME}"`}
+            </Button>
+          </SettingRow>
+        ) : (
+          <SettingRow
+            label="Estimate field"
+            hint={estimateFieldHint(!!project.canAdmin, true)}
+          >
+            <Select
+              aria-label="Estimate field"
+              value={project.estimateFieldId}
+              disabled={!project.canAdmin}
+              options={[
+                { value: "", label: "None" },
+                ...numericFields.map((f) => ({ value: f._id, label: f.name })),
+              ]}
+              onChange={(e) => designateEstimateField(e.target.value)}
+            />
+          </SettingRow>
         )}
       </SettingsCard>
 
