@@ -100,6 +100,19 @@ describe("SprintHeader sprint picker", () => {
   });
 });
 
+describe("SprintHeader estimate", () => {
+  it("shows nothing about estimates when none is given", () => {
+    renderHeader();
+    expect(screen.queryByTestId("sprint-estimate-progress")).toBeNull();
+  });
+
+  it("shows the estimate done and total beside the task counts when given", () => {
+    renderHeader({ estimate: { total: 13, done: 5 } });
+    expect(screen.getByTestId("sprint-estimate-progress").textContent).toBe("5/13 pts");
+    expect(screen.getByTestId("sprint-progress").textContent).toBe("4/8");
+  });
+});
+
 describe("SprintHeader view toggle", () => {
   it("offers Board and Planning when the sprint is not read-only", () => {
     renderHeader({ readOnly: false });

@@ -14,7 +14,12 @@ const { api, toast, router, query, pathname, headerCalls } = vi.hoisted(() => ({
   // Every commit calls SprintHeader again, including ones a single act() flush discards
   // before the test can read the DOM — this is the only way to see a render that never
   // survives to be read back with screen.getByTestId
-  headerCalls: [] as Array<{ name: string; doneCount: number; totalCount: number }>,
+  headerCalls: [] as Array<{
+    name: string;
+    doneCount: number;
+    totalCount: number;
+    estimate?: { total: number; done: number };
+  }>,
 }));
 
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
@@ -28,6 +33,7 @@ vi.mock("@/components/sprints/SprintHeader", async (importOriginal) => {
         name: props.sprint.name,
         doneCount: props.doneCount,
         totalCount: props.totalCount,
+        estimate: props.estimate,
       });
       return actual.SprintHeader(props);
     },
@@ -129,13 +135,23 @@ const sprintTasks = Array.from({ length: 8 }, (_, i) => ({
   updatedAt: "2026-08-01T00:00:00Z",
 })) as ApiTask[];
 
+const projectWithEstimate = { ...project, estimateFieldId: "f1" } as unknown as ApiProject;
+
+// Done tasks (i < 4) carry 2 points each, the rest 3 — done=8, total=20, distinct from
+// doneCount/totalCount (4/8) so a test can't pass by accident on a copied number
+const sprintTasksWithEstimate = sprintTasks.map((t, i) => ({
+  ...t,
+  customFieldValues: { f1: i < 4 ? 2 : 3 },
+})) as ApiTask[];
+
 async function renderSprints(
   data: ApiSprint[] = sprints,
-  opts: { tasks?: ApiTask[] } = {}
+  opts: { tasks?: ApiTask[]; project?: ApiProject } = {}
 ) {
   const tasks = opts.tasks ?? sprintTasks;
+  const proj = opts.project ?? project;
   api.get.mockImplementation((url: string) => {
-    if (url === "/api/projects/p1") return Promise.resolve(project);
+    if (url === "/api/projects/p1") return Promise.resolve(proj);
     if (url.startsWith("/api/projects/p1/tasks")) {
       return Promise.resolve(tasks.map((t) => ({ ...t })));
     }
@@ -762,5 +778,90 @@ describe("Board / Planning toggle", () => {
     expect(screen.queryByRole("button", { name: "Planning" })).toBeNull();
     expect(screen.queryByTestId("planning-pane-backlog")).toBeNull();
     expect(screen.getByRole("link", { name: /Task 1/i })).toBeTruthy();
+  });
+});
+
+describe("Sprint header estimate", () => {
+  it("shows nothing about the estimate when the project designates no field", async () => {
+    await renderSprints();
+    expect(screen.queryByTestId("sprint-estimate-progress")).toBeNull();
+  });
+
+  it("shows the estimate total and done beside the task counts when the project designates a field", async () => {
+    await renderSprints(sprints, { tasks: sprintTasksWithEstimate, project: projectWithEstimate });
+    expect(screen.getByTestId("sprint-estimate-progress").textContent).toBe("8/20 pts");
+    expect(screen.getByTestId("sprint-progress").textContent).toBe("4/8");
+  });
+
+  it("keeps the estimate on every task in the sprint while the board is filtered", async () => {
+    await renderSprints(sprints, { tasks: sprintTasksWithEstimate, project: projectWithEstimate });
+    expect(screen.getByTestId("sprint-estimate-progress").textContent).toBe("8/20 pts");
+
+    await act(async () => {
+      fireEvent.change(screen.getByPlaceholderText("Search tasks, or TP-128…"), {
+        target: { value: "Task 1" },
+      });
+    });
+
+    expect(screen.getByText("TP-1")).toBeTruthy();
+    expect(screen.getByTestId("sprint-estimate-progress").textContent).toBe("8/20 pts");
+  });
+
+  // Same regression the sprint header's own doneCount/totalCount hit twice already
+  // (see "never renders a sprint's counts under a different sprint's name" above):
+  // the estimate figures must move through the exact same branches, or they can paint
+  // one sprint's numbers under another sprint's name for a frame during a switch.
+  it("never carries one sprint's estimate under a different sprint's name mid-switch", async () => {
+    const planningSprintsWithEstimate = [
+      { ...sprints[0], estimateTotal: 20, estimateDone: 8 },
+      {
+        _id: "s2",
+        name: "Sprint 13",
+        startDate: "2026-08-03T00:00:00Z",
+        endDate: "2026-08-17T00:00:00Z",
+        goal: "",
+        status: "planned",
+        taskCount: 5,
+        doneCount: 2,
+        estimateTotal: 13,
+        estimateDone: 6,
+      },
+    ] as ApiSprint[];
+
+    api.get.mockImplementation((url: string) => {
+      if (url === "/api/projects/p1") return Promise.resolve(projectWithEstimate);
+      if (url === "/api/projects/p1/tasks?sprint=s1") {
+        return Promise.resolve(sprintTasksWithEstimate.map((t) => ({ ...t })));
+      }
+      if (url === "/api/projects/p1/tasks?sprint=backlog") return Promise.resolve([]);
+      // Sprint 13's tasks never arrive, keeping the mid-switch window open under test
+      if (url === "/api/projects/p1/tasks?sprint=s2") return new Promise(() => {});
+      if (url === "/api/projects/p1/sprints") return Promise.resolve(planningSprintsWithEstimate);
+      if (url === "/api/users/list") return Promise.resolve([]);
+      return Promise.reject(new Error(`unexpected GET ${url}`));
+    });
+
+    query.current = "sprint=s1&view=planning";
+    const { rerender } = render(<SprintsPage />);
+    await screen.findByRole("heading", { name: "Sprints" });
+    await screen.findByTestId("planning-pane-sprint");
+    expect(screen.getByTestId("sprint-estimate-progress").textContent).toBe("8/20 pts");
+
+    headerCalls.length = 0;
+    query.current = "sprint=s2&view=planning";
+    await act(async () => {
+      rerender(<SprintsPage />);
+    });
+
+    expect(screen.getByRole("heading", { name: "Sprint 13", level: 2 })).toBeTruthy();
+    expect(screen.getByTestId("sprint-estimate-progress").textContent).toBe("6/13 pts");
+
+    // Sprint 13's only valid estimate, ever, is its own (6/13) — never Sprint 12's
+    // leftover 8/20 painted under Sprint 13's name for one frame along the way
+    const mislabeled = headerCalls.filter(
+      (call) =>
+        call.name === "Sprint 13" && (call.estimate?.done !== 6 || call.estimate?.total !== 13)
+    );
+    expect(mislabeled).toEqual([]);
   });
 });

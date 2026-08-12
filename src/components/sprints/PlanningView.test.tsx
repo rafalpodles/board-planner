@@ -57,6 +57,8 @@ const sprintTasks = [
   },
 ] as ApiTask[];
 
+const projectWithEstimate = { ...project, estimateFieldId: "f1" } as unknown as ApiProject;
+
 // One of the three sits in the done-role column; while the filter box is empty it is the
 // difference between this list's length and the "Backlog (2)" count the pane shows
 const backlogTasks = [
@@ -388,5 +390,45 @@ describe("PlanningView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
 
     expect(await screen.findByText("Backlog (2)")).toBeTruthy();
+  });
+});
+
+describe("PlanningView estimate", () => {
+  it("shows nothing about the estimate when the project designates no field", async () => {
+    await renderPlanning();
+    expect(screen.getByText("Sprint 12 (1)")).toBeTruthy();
+    expect(screen.queryByText(/pts/)).toBeNull();
+  });
+
+  it("shows the scope pane's estimate total beside its count, and leaves the backlog pane alone", async () => {
+    const tasksWithEstimate = [{ ...sprintTasks[0], customFieldValues: { f1: 5 } }] as ApiTask[];
+    await renderPlanning({ project: projectWithEstimate, tasks: tasksWithEstimate });
+    expect(screen.getByText("Sprint 12 (1) · 5 pts")).toBeTruthy();
+    expect(screen.getByText("Backlog (2)")).toBeTruthy();
+  });
+
+  it("moves the scope pane's estimate total the instant a task is added, before the server answers", async () => {
+    const backlogWithEstimate = [{ ...backlogTasks[0], customFieldValues: { f1: 3 } }] as ApiTask[];
+    api.get.mockImplementation((url: string) => {
+      if (url === "/api/projects/p1/tasks?sprint=backlog") {
+        return Promise.resolve(backlogWithEstimate.map((t) => ({ ...t })));
+      }
+      return Promise.reject(new Error(`unexpected GET ${url}`));
+    });
+    let settle: (v: unknown) => void = () => {};
+    api.put.mockImplementation(() => new Promise((r) => { settle = r; }));
+
+    const tasksWithEstimate = [{ ...sprintTasks[0], customFieldValues: { f1: 5 } }] as ApiTask[];
+    const board = makeBoard({ project: projectWithEstimate, tasks: tasksWithEstimate });
+    render(<PlanningView projectId="p1" board={board} sprintId="s1" />);
+    await screen.findByText("Sprint 12 (1) · 5 pts");
+
+    const addButton = await screen.findByRole("button", {
+      name: "Add Fix the login redirect to the sprint",
+    });
+    fireEvent.click(addButton);
+
+    expect(screen.getByText("Sprint 12 (2) · 8 pts")).toBeTruthy();
+    settle({});
   });
 });
