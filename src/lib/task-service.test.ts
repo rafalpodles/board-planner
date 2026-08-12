@@ -70,15 +70,18 @@ const findByIdAndUpdate = vi.fn();
 const findById = vi.fn();
 const userFindOne = vi.fn();
 const workerFindById = vi.fn();
+const taskFindById = vi.fn();
 
 vi.mock("./db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/worker", () => ({ Worker: { findById: workerFindById } }));
 vi.mock("@/models/task", () => ({
-  Task: { findOneAndUpdate, updateMany, updateOne, findOne, find, findByIdAndUpdate, create: taskCreate },
+  Task: { findOneAndUpdate, updateMany, updateOne, findOne, find, findByIdAndUpdate, findById: taskFindById, create: taskCreate },
 }));
 vi.mock("@/models/project", () => ({ Project: { findById, findOneAndUpdate: projectFindOneAndUpdate } }));
 vi.mock("@/models/user", () => ({ User: { findOne: userFindOne } }));
 vi.mock("@/models/comment", () => ({ Comment: {} }));
+const sprintExists = vi.fn();
+vi.mock("@/models/sprint", () => ({ Sprint: { exists: sprintExists } }));
 vi.mock("@/lib/activity", () => ({ logActivity: vi.fn() }));
 vi.mock("@/lib/webhooks", () => ({ dispatchWebhooks: vi.fn() }));
 vi.mock("@/lib/notifications", () => ({ dispatchNotifications: vi.fn() }));
@@ -99,6 +102,7 @@ const {
   phaseFrom,
   changeStatus,
   updateTask,
+  createTask,
   MAX_EXECUTION_ATTEMPTS,
   MAX_PHASE_LENGTH,
   EXECUTION_LEASE_MS,
@@ -1433,5 +1437,100 @@ describe("a status change announces the same things whichever path made it", () 
     await updateTask("p1", "t1", { title: "renamed" }, "actor");
     expect(dispatchWebhooks).not.toHaveBeenCalled();
     expect(taskCreate).not.toHaveBeenCalled();
+  });
+});
+
+// BP-314: `sprint` was on updateTask's allowed list and written straight through, and the sprint
+// routes then read and sweep by sprint id alone — so a task from board A could sit in board B's
+// sprint, inflate its counts and be moved when B completed it.
+const OURS = "507f1f77bcf86cd799439011";
+
+describe("a task's sprint has to belong to the task's project", () => {
+  const OTHER = "507f1f77bcf86cd799439012";
+
+  beforeEach(() => {
+    sprintExists.mockClear();
+    sprintExists.mockResolvedValue(null);
+  });
+
+  it("refuses a sprint this project does not have", async () => {
+    const result = await updateTask("p1", "t1", { sprint: OTHER }, "actor");
+
+    expect(result.ok).toBe(false);
+    expect(sprintExists).toHaveBeenCalledWith({ _id: OTHER, project: "p1" });
+  });
+
+  it("refuses a sprint id that is not an object id at all", async () => {
+    const result = await updateTask("p1", "t1", { sprint: "nope" }, "actor");
+
+    expect(result.ok).toBe(false);
+    expect(sprintExists).not.toHaveBeenCalled();
+  });
+
+  it("lets a task be taken out of its sprint", async () => {
+    const result = await updateTask("p1", "t1", { sprint: null }, "actor");
+
+    expect(sprintExists).not.toHaveBeenCalled();
+    expect(result.ok).toBe(true);
+  });
+
+  // "" is what a cleared <select> sends. sprint is an ObjectId, so it used to reach the update and
+  // surface as a CastError 500 rather than clearing the field.
+  it("treats an empty string as clearing the sprint, not as a value to cast", async () => {
+    const result = await updateTask("p1", "t1", { sprint: "" }, "actor");
+
+    expect(sprintExists).not.toHaveBeenCalled();
+    expect(result.ok).toBe(true);
+    const written = findOneAndUpdate.mock.calls.at(-1)?.[1] as { $set?: Record<string, unknown> };
+    expect(written?.$set?.sprint ?? null).toBeNull();
+  });
+
+  it("keeps a sprint this project does have", async () => {
+    sprintExists.mockResolvedValue({ _id: OURS });
+
+    const result = await updateTask("p1", "t1", { sprint: OURS }, "actor");
+
+    expect(result.ok).toBe(true);
+    expect(sprintExists).toHaveBeenCalledWith({ _id: OURS, project: "p1" });
+  });
+});
+
+// createTask writes `sprint` too, and reverting its guard used to leave the whole suite green
+describe("createTask and a foreign sprint", () => {
+  const OTHER = "507f1f77bcf86cd799439012";
+
+  beforeEach(() => {
+    sprintExists.mockClear();
+    sprintExists.mockResolvedValue(null);
+    projectFindOneAndUpdate.mockResolvedValue({
+      _id: "p1",
+      taskCounter: 1,
+      key: "BP",
+      ...customBoard,
+    });
+    taskCreate.mockImplementation(async (doc: Record<string, unknown>) => ({ ...doc, _id: "new" }));
+    taskFindById.mockReturnValue({ populate: () => ({ lean: async () => ({ _id: "new" }) }) });
+  });
+
+  it("does not store a sprint belonging to another project", async () => {
+    await createTask("p1", "actor", { title: "x", sprint: OTHER });
+
+    expect(sprintExists).toHaveBeenCalledWith({ _id: OTHER, project: "p1" });
+    expect(taskCreate.mock.calls.at(-1)?.[0].sprint).toBeNull();
+  });
+
+  it("does not query for a sprint id that is not an object id", async () => {
+    await createTask("p1", "actor", { title: "x", sprint: "nope" });
+
+    expect(sprintExists).not.toHaveBeenCalled();
+    expect(taskCreate.mock.calls.at(-1)?.[0].sprint).toBeNull();
+  });
+
+  it("keeps a sprint this project does have", async () => {
+    sprintExists.mockResolvedValue({ _id: OURS });
+
+    await createTask("p1", "actor", { title: "x", sprint: OURS });
+
+    expect(taskCreate.mock.calls.at(-1)?.[0].sprint).toBe(OURS);
   });
 });

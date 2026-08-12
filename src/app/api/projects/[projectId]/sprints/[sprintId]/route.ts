@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
 import { Sprint } from "@/models/sprint";
@@ -14,17 +15,36 @@ async function doneColumnIds(projectId: string): Promise<string[]> {
   return columnIdsWithRole(project, "done");
 }
 
+// `withProjectAccess` authorises the projectId in the path and nothing else — `withResolvedIds`
+// special-cases taskId and hands sprintId through raw. So every handler here has to establish
+// that the sprint is this project's before it touches anything, and every task query has to say
+// `project` as well as `sprint`. Without that a member of any board could act on a sprint id
+// belonging to a board they cannot read (BP-314).
+async function ownedSprintId(
+  projectId: string,
+  sprintId: string
+): Promise<string | null> {
+  if (!isValidObjectId(sprintId)) return null;
+  const sprint = await Sprint.findOne({ _id: sprintId, project: projectId }).select("_id").lean();
+  return sprint ? sprintId : null;
+}
+
 export const GET = withProjectAccess(async (_request, { params }) => {
   const { projectId, sprintId } = await params;
   await connectDB();
+
+  if (!isValidObjectId(sprintId)) {
+    return NextResponse.json({ error: "Invalid sprint id" }, { status: 400 });
+  }
 
   const sprint = await Sprint.findOne({ _id: sprintId, project: projectId }).lean();
   if (!sprint) {
     return NextResponse.json({ error: "Sprint not found" }, { status: 404 });
   }
 
-  const taskCount = await Task.countDocuments({ sprint: sprintId });
+  const taskCount = await Task.countDocuments({ project: projectId, sprint: sprintId });
   const doneCount = await Task.countDocuments({
+    project: projectId,
     sprint: sprintId,
     status: { $in: await doneColumnIds(projectId) },
   });
@@ -35,6 +55,15 @@ export const GET = withProjectAccess(async (_request, { params }) => {
 export const PUT = withProjectAccess(async (request, { params }) => {
   const { projectId, sprintId } = await params;
   await connectDB();
+
+  // Before any write. The task moves below used to run first and the ownership check second,
+  // so a refused request still emptied somebody else's sprint and answered 404 (BP-314).
+  if (!isValidObjectId(sprintId)) {
+    return NextResponse.json({ error: "Invalid sprint id" }, { status: 400 });
+  }
+  if (!(await ownedSprintId(projectId, sprintId))) {
+    return NextResponse.json({ error: "Sprint not found" }, { status: 404 });
+  }
 
   const body = await request.json();
 
@@ -64,13 +93,31 @@ export const PUT = withProjectAccess(async (request, { params }) => {
   // id, a project whose board was renamed had every finished task look unfinished and get dragged
   // into the next sprint — the one case in this ticket that moves somebody's work without asking.
   if (updates.status === "completed" && (body.moveIncompleteToBacklog || body.moveIncompleteToSprint)) {
-    const unfinished = { sprint: sprintId, status: { $nin: await doneColumnIds(projectId) } };
-
-    if (body.moveIncompleteToBacklog) {
-      await Task.updateMany(unfinished, { $set: { sprint: null } });
-    }
+    // Every refusal ahead of every write. The destination is a caller-supplied id like the one in
+    // the path, so it gets the same ownership check — and it gets it *here*, because validating it
+    // inside the second branch let the first branch's sweep commit before the 400. That is the same
+    // write-then-refuse shape this whole change exists to remove.
+    let destination: string | null = null;
     if (body.moveIncompleteToSprint) {
-      await Task.updateMany(unfinished, { $set: { sprint: body.moveIncompleteToSprint } });
+      destination = await ownedSprintId(projectId, String(body.moveIncompleteToSprint));
+      if (!destination) {
+        return NextResponse.json({ error: "Destination sprint not found" }, { status: 400 });
+      }
+    }
+
+    // `project` as well as `sprint`: the sprint id is owned by this project, but a task carrying
+    // it may not be — nothing stopped a cross-project reference being written until BP-314
+    const unfinished = {
+      project: projectId,
+      sprint: sprintId,
+      status: { $nin: await doneColumnIds(projectId) },
+    };
+
+    // Exclusive: a body carrying both used to run the sweep and then the move over the top of it
+    if (destination) {
+      await Task.updateMany(unfinished, { $set: { sprint: destination } });
+    } else if (body.moveIncompleteToBacklog) {
+      await Task.updateMany(unfinished, { $set: { sprint: null } });
     }
   }
 
@@ -91,6 +138,10 @@ export const DELETE = withProjectAccess(async (_request, { params }) => {
   const { projectId, sprintId } = await params;
   await connectDB();
 
+  if (!isValidObjectId(sprintId)) {
+    return NextResponse.json({ error: "Invalid sprint id" }, { status: 400 });
+  }
+
   const sprint = await Sprint.findOneAndDelete({
     _id: sprintId,
     project: projectId,
@@ -102,7 +153,7 @@ export const DELETE = withProjectAccess(async (_request, { params }) => {
 
   // Move all tasks in this sprint back to backlog
   await Task.updateMany(
-    { sprint: sprintId },
+    { project: projectId, sprint: sprintId },
     { $set: { sprint: null } }
   );
 
