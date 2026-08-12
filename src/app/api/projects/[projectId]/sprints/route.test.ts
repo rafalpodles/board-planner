@@ -141,4 +141,51 @@ describe("GET /api/projects/[projectId]/sprints — estimate accumulators", () =
     expect(body[0]).not.toHaveProperty("estimateTotal");
     expect(body[0]).not.toHaveProperty("estimateDone");
   });
+
+  // The schema doesn't constrain estimateFieldId to ObjectId hex, so a migration, a bulk
+  // import, or a direct database edit could leave something else there. Trusting it straight
+  // into the $convert path would let a leading "$" parse as an aggregation operator and throw
+  // at parse time — the one failure onError/onNull cannot cover, since they guard conversion,
+  // not a malformed path.
+  it("treats a non-hex estimateFieldId (e.g. one starting with '$') as no designation", async () => {
+    projectFindById.mockReturnValue({
+      lean: () =>
+        Promise.resolve({ columns: [TODO_COLUMN, DONE_COLUMN], estimateFieldId: "$where" }),
+    });
+
+    await GET(req(), ctx());
+
+    const group = groupStageOf(taskAggregate.mock.calls[0][0]);
+    expect(group.estimateTotal).toBeUndefined();
+    expect(group.estimateDone).toBeUndefined();
+  });
+
+  it("treats an estimateFieldId of the wrong length as no designation, even if every character is hex", async () => {
+    projectFindById.mockReturnValue({
+      lean: () =>
+        Promise.resolve({
+          columns: [TODO_COLUMN, DONE_COLUMN],
+          estimateFieldId: ESTIMATE_FIELD_ID.slice(0, 12), // 12 hex chars, not 24
+        }),
+    });
+
+    await GET(req(), ctx());
+
+    const group = groupStageOf(taskAggregate.mock.calls[0][0]);
+    expect(group.estimateTotal).toBeUndefined();
+    expect(group.estimateDone).toBeUndefined();
+  });
+
+  it("also omits the malformed-designation case from the response, matching no-designation", async () => {
+    projectFindById.mockReturnValue({
+      lean: () =>
+        Promise.resolve({ columns: [TODO_COLUMN, DONE_COLUMN], estimateFieldId: "$where" }),
+    });
+    taskAggregate.mockResolvedValue([{ _id: SPRINT_ID, total: 5, done: 2 }]);
+
+    const body = await json(await GET(req(), ctx()));
+
+    expect(body[0]).not.toHaveProperty("estimateTotal");
+    expect(body[0]).not.toHaveProperty("estimateDone");
+  });
 });
