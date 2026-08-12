@@ -107,9 +107,11 @@ export function createDelivery(runner: Runner, baseBranch?: string): Delivery {
       // a retried attempt rebuilds the branch off the base, so what the previous attempt pushed is
       // a diverged history a plain push rejects; the lease still refuses to overwrite commits this
       // clone has never seen
+      // -- keeps the branch in git's positional slot: without it a name beginning with a dash is
+      // read as an option, and --receive-pack=<cmd> would run that command on the remote
       const result = await run(
         "git",
-        ["push", "--force-with-lease", "-u", "origin", branch],
+        ["push", "--force-with-lease", "-u", "origin", "--", branch],
         worktreePath
       );
       if (result.code !== 0) throw failure("git push", result);
