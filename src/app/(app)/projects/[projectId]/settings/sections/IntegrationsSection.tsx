@@ -551,6 +551,15 @@ export function IntegrationsSection({
                       placeholder="https://gitlab.com (or your self-hosted instance)"
                     />
                   </div>
+                  {project.gitlabTokenSet &&
+                    gitlab.isDirty("gitlabHost") &&
+                    !gitlab.value.gitlabToken && (
+                      <p className="text-sm text-warning">
+                        The stored token was issued for the old host. Saving a new host clears it —
+                        enter the token for the new host below, or it will have to be re-entered
+                        before the next sync.
+                      </p>
+                    )}
                   <Input
                     label="Access token"
                     type="password"
@@ -655,6 +664,15 @@ export function IntegrationsSection({
                     onChange={(e) => coda.set("codaHost", e.target.value)}
                     placeholder="https://coda.io"
                   />
+                  {project.codaTokenSet &&
+                    coda.isDirty("codaHost") &&
+                    !coda.value.codaToken && (
+                      <p className="text-sm text-warning">
+                        The stored token was issued for the old host. Saving a new host clears it —
+                        enter the token for the new host below, or it will have to be re-entered
+                        before the next sync.
+                      </p>
+                    )}
                   <Input
                     label="API token"
                     type="password"

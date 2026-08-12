@@ -14,6 +14,7 @@ import { Sprint } from "@/models/sprint";
 import { Notification } from "@/models/notification";
 import { PmMessage } from "@/models/pmMessage";
 import { logProjectAudit } from "@/lib/projectAudit";
+import { tokensInvalidatedByHostChange } from "@/lib/host-bound-secrets";
 import { encryptSecret, isEncryptionConfigured } from "@/lib/encryption";
 import { isAllowedMcpServerUrl } from "@/lib/url-validation";
 import { validatePmConfig, isPmAvailable, mergeMcpServerTokens, sanitizeMcpServers } from "@/lib/pm/config";
@@ -183,6 +184,24 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
     updates.codaHost = host || "https://coda.io";
   }
 
+  // A stored token is issued for one host. It is deliberately unreadable — sanitizeProjectSecrets
+  // strips it from every response — but the host it is sent to was an ordinary editable field, so
+  // repointing it and triggering a sync delivered the cleartext credential to an address of the
+  // caller's choosing. The MCP OAuth branch in mergeMcpServerTokens already draws this line and
+  // says why: the credential "was issued for a different resource" (BP-315).
+  const clearedByHostChange: string[] = [];
+  if (updates.gitlabHost !== undefined || updates.codaHost !== undefined) {
+    const before = await Project.findById(
+      projectId,
+      "gitlabHost gitlabToken codaHost codaToken"
+    ).lean();
+
+    for (const pair of tokensInvalidatedByHostChange(updates, before as never)) {
+      updates[pair.token] = "";
+      clearedByHostChange.push(pair.label);
+    }
+  }
+
   const incomingTokens = ["githubToken", "gitlabToken", "codaToken"] as const;
   const storingAToken = incomingTokens.some(
     (field) => typeof updates[field] === "string" && updates[field]
@@ -232,6 +251,17 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
     ? `Changed: ${changedFields ? changedFields + ", " : ""}GitHub token`
     : `Changed: ${changedFields}`;
   logProjectAudit(projectId, user._id, "settings_updated", auditDetail);
+
+  // Its own entry, not folded into the "Changed: …" list. Somebody reading the trail after a
+  // suspected leak needs to see that a credential's destination moved, and when.
+  if (clearedByHostChange.length > 0) {
+    logProjectAudit(
+      projectId,
+      user._id,
+      "settings_updated",
+      `Integration host changed — stored ${clearedByHostChange.join(" and ")} token cleared, must be re-entered`
+    );
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const obj: any = sanitizeProjectSecrets(project.toObject());

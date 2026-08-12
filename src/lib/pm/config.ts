@@ -209,13 +209,15 @@ export function mergeMcpServerTokens(
   const merged: IPmMcpServer[] = [];
   for (const server of incoming) {
     const prior = stored.get(server.name);
-    const authToken = server.authToken
-      ? encryptSecret(server.authToken)
-      : prior?.authToken ?? "";
+    // Carried forward only while the URL is unchanged. A bearer token is issued for one server,
+    // so moving the URL and keeping the token pointed the stored credential at the new address —
+    // the same rule the OAuth branch below already applies, and for the same reason (BP-315).
+    const carriedOver = prior && prior.url === server.url ? prior.authToken ?? "" : "";
+    const authToken = server.authToken ? encryptSecret(server.authToken) : carriedOver;
     if (server.authType === "bearer" && !authToken) {
       return {
         valid: false,
-        error: `MCP server "${server.name}" uses bearer auth but has no token — provide one (renaming a server requires re-entering its token)`,
+        error: `MCP server "${server.name}" uses bearer auth but has no token — provide one (renaming a server, or changing its URL, requires re-entering its token)`,
       };
     }
 
