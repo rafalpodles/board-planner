@@ -618,6 +618,36 @@ describe("Board / Planning toggle", () => {
     expect(await screen.findByText("TP-20")).toBeTruthy();
   });
 
+  // Proves the optimistic drop itself, not board.reload() eventually converging: api.put
+  // never resolves here, so if applySprintChange were not called from PlanningView's
+  // applyLocally, board.tasks — and the header reading it — would never move.
+  it("moves the header's count down immediately on a planning removal, before the server answers", async () => {
+    api.get.mockImplementation((url: string) => {
+      if (url === "/api/projects/p1") return Promise.resolve(project);
+      if (url === "/api/projects/p1/tasks?sprint=s1") {
+        return Promise.resolve(sprintTasks.map((t) => ({ ...t })));
+      }
+      if (url === "/api/projects/p1/tasks?sprint=backlog") return Promise.resolve([]);
+      if (url === "/api/projects/p1/sprints") return Promise.resolve(sprints);
+      if (url === "/api/users/list") return Promise.resolve([]);
+      return Promise.reject(new Error(`unexpected GET ${url}`));
+    });
+    api.put.mockImplementation(() => new Promise(() => {}));
+
+    const { rerender } = render(<SprintsPage />);
+    await screen.findByRole("heading", { name: "Sprints" });
+    await screen.findByText("TP-1");
+    expect(screen.getByTestId("sprint-progress").textContent).toBe("4/8");
+
+    query.current = "sprint=s1&view=planning";
+    rerender(<SprintsPage />);
+    await screen.findByTestId("planning-pane-sprint");
+
+    await click(screen.getByRole("button", { name: "Remove Task 5 from the sprint" }));
+
+    expect(screen.getByTestId("sprint-progress").textContent).toBe("4/7");
+  });
+
   // PlanningView reports on every render, including the ones before its own tasksLoaded
   // is true for the new sprint — those report an empty array, which is truthy, so it used
   // to beat the selected?.doneCount fallback and paint "0/0" for one window per switch.

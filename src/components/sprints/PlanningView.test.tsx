@@ -144,6 +144,13 @@ function makeBoard(overrides: Partial<ProjectBoard> = {}): ProjectBoard {
   };
 }
 
+// Only "text/plain" carries the dragged task's id, mirroring the one key PlanningPane
+// actually reads — a stub that answers every key alike would never notice the source
+// asking for the wrong one.
+function dataTransferFor(taskId: string) {
+  return { getData: (key: string) => (key === "text/plain" ? taskId : "") };
+}
+
 async function renderPlanning(overrides: Partial<ProjectBoard> = {}) {
   api.get.mockImplementation((url: string) => {
     if (url === "/api/projects/p1/tasks?sprint=backlog") {
@@ -253,7 +260,7 @@ describe("PlanningView", () => {
   it("drops a dragged task into the sprint pane", async () => {
     await renderPlanning();
     fireEvent.drop(screen.getByTestId("planning-pane-sprint"), {
-      dataTransfer: { getData: () => "t1" },
+      dataTransfer: dataTransferFor("t1"),
     });
     expect(api.put).toHaveBeenCalledWith("/api/projects/p1/tasks/t1", { sprint: "s1" });
   });
@@ -261,7 +268,7 @@ describe("PlanningView", () => {
   it("drops a dragged task into the backlog pane", async () => {
     await renderPlanning();
     fireEvent.drop(screen.getByTestId("planning-pane-backlog"), {
-      dataTransfer: { getData: () => "t9" },
+      dataTransfer: dataTransferFor("t9"),
     });
     expect(api.put).toHaveBeenCalledWith("/api/projects/p1/tasks/t9", { sprint: null });
   });
@@ -269,12 +276,31 @@ describe("PlanningView", () => {
   it("writes nothing when a task is dropped back onto the pane it is already in", async () => {
     await renderPlanning();
     fireEvent.drop(screen.getByTestId("planning-pane-backlog"), {
-      dataTransfer: { getData: () => "t1" },
+      dataTransfer: dataTransferFor("t1"),
     });
     fireEvent.drop(screen.getByTestId("planning-pane-sprint"), {
-      dataTransfer: { getData: () => "t9" },
+      dataTransfer: dataTransferFor("t9"),
     });
     expect(api.put).not.toHaveBeenCalled();
+  });
+
+  // PlanningPane's onDrop reads the id off "text/plain" specifically; a stub that answers
+  // any key would never notice the source asking for a different one
+  it("ignores a drop whose payload sits under a key the pane never asked for", async () => {
+    await renderPlanning();
+    fireEvent.drop(screen.getByTestId("planning-pane-sprint"), {
+      dataTransfer: { getData: (key: string) => (key === "application/x-other" ? "t1" : "") },
+    });
+    expect(api.put).not.toHaveBeenCalled();
+  });
+
+  // onDragOver must call preventDefault, or the browser's native HTML5 DnD contract never
+  // permits a drop at that position in the first place — fireEvent returns false exactly
+  // when the default was prevented, mirroring Board.test.tsx:221's own drag-over check
+  it("prevents the default drag-over so a drop can land", async () => {
+    await renderPlanning();
+    const notPrevented = fireEvent.dragOver(screen.getByTestId("planning-pane-sprint"));
+    expect(notPrevented).toBe(false);
   });
 
   it("does not show the previous sprint's tasks under the new sprint's name mid-switch", async () => {
