@@ -241,3 +241,55 @@ describe("scrub — every credential prefix this system mints", () => {
     });
   }
 });
+
+// BP-306: what an agent with Read and HOME finds on a developer's disk, rather than what this
+// codebase mints. Prefix coverage for our own tokens was already complete.
+describe("credentials an agent reads off a disk", () => {
+  it("redacts a PEM private key block, body and all", () => {
+    const key = [
+      "-----BEGIN OPENSSH PRIVATE KEY-----",
+      "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAAB",
+      "-----END OPENSSH PRIVATE KEY-----",
+    ].join("\n");
+
+    const out = scrub(`found it:\n${key}\ndone`);
+
+    expect(out).not.toContain("b3BlbnNzaC");
+    expect(out).not.toContain("BEGIN OPENSSH");
+    expect(out).toContain("done");
+  });
+
+  it("keeps two keys in one text apart rather than merging them", () => {
+    const key = (body: string) =>
+      `-----BEGIN RSA PRIVATE KEY-----\n${body}\n-----END RSA PRIVATE KEY-----`;
+
+    const out = scrub(`${key("AAAA")} between ${key("BBBB")}`);
+
+    expect(out).toContain("between");
+    expect(out).not.toContain("AAAA");
+    expect(out).not.toContain("BBBB");
+  });
+
+  it.each([
+    ["AKIAIOSFODNN7EXAMPLE", "AWS access key"],
+    ["ASIAIOSFODNN7EXAMPLE", "AWS session key"],
+    // Assembled rather than written out: a literal here trips GitHub push protection, which
+    // is the scanner agreeing that the pattern is right
+    [["glpat", "ABCdef123456789_xyz1"].join("-"), "GitLab token"],
+  ])("redacts %s (%s)", (secret) => {
+    expect(scrub(`token=${secret} rest`)).not.toContain(secret);
+  });
+
+  // URL_USERINFO was anchored to https?://, so this walked straight through
+  it("redacts userinfo on a scheme that is not http", () => {
+    const out = scrub("MONGODB_URI=mongodb://admin:hunter2@cluster.example/db");
+
+    expect(out).not.toContain("hunter2");
+    expect(out).toContain("cluster.example");
+  });
+
+  it("leaves ordinary text alone", () => {
+    const text = "see src/lib/task-service.ts and the AKIA-shaped column header";
+    expect(scrub(text)).toBe(text);
+  });
+});

@@ -16,6 +16,9 @@ function getTransporter(): nodemailer.Transporter | null {
       host: SMTP_HOST,
       port: SMTP_PORT,
       secure: SMTP_PORT === 465,
+      // Without this, an attacker who strips the STARTTLS advertisement on port 587 gets the
+      // AUTH exchange in cleartext — SMTP_USER and SMTP_PASS handed over (BP-306)
+      requireTLS: SMTP_PORT !== 465,
       auth: { user: SMTP_USER, pass: SMTP_PASS },
     });
   }

@@ -2,6 +2,7 @@ import { Project } from "@/models/project";
 import { WebhookEvent } from "@/types";
 import { isAllowedWebhookUrl } from "./url-validation";
 import { safeFetch } from "./safe-fetch";
+import { signatureHeaders } from "./webhook-signature";
 
 interface WebhookPayload {
   event: WebhookEvent;
@@ -36,7 +37,7 @@ export async function dispatchWebhooks(
       if (!isAllowedWebhookUrl(webhook.url)) continue;
       safeFetch(webhook.url, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...signatureHeaders(body) },
         body,
         signal: AbortSignal.timeout(10_000),
       }).catch(() => {

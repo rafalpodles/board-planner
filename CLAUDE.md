@@ -191,6 +191,7 @@ PM_MODEL=                 # Optional — PM agent model (default: moonshotai/kim
 PM_MAX_TOKENS=            # Optional — PM agent max output tokens per call (default: 8192)
 PM_DAILY_TURN_CAP=        # Optional — PM agent turns per project per day (default: 100)
 PM_SCHEDULER_TICK_MS=     # Optional — PM autonomy scheduler tick (default: 300000)
+WEBHOOK_SIGNING_SECRET=   # Optional — HMACs outgoing webhook deliveries (x-boardplanner-signature)
 SMTP_HOST=                # Optional — Email notifications
 SMTP_PORT=587
 SMTP_USER=
