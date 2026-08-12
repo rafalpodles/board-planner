@@ -1,4 +1,4 @@
-import { join, sep } from "path";
+import { resolve, sep } from "path";
 import { WorkerConfig } from "./config.js";
 import { childEnv } from "./env.js";
 import { Runner } from "./exec.js";
@@ -27,7 +27,18 @@ export async function reapOrphans(workspace: Workspace, worktreeRoot: string): P
 }
 
 export function createWorkspace(config: WorkerConfig, runner: Runner): Workspace {
-  const pathFor = (taskKey: string) => join(config.worktreeRoot, taskKey);
+  // api.ts refuses a key that is not a name; this is the sink where a key becomes a path, and the
+  // only place that can still tell a traversal from a directory name
+  function pathFor(taskKey: string): string {
+    const root = resolve(config.worktreeRoot);
+    const path = resolve(root, taskKey);
+    if (!path.startsWith(`${root}${sep}`)) {
+      throw new Error(
+        `refusing task key ${JSON.stringify(taskKey)}: its path falls outside the worktree root ${root}`
+      );
+    }
+    return path;
+  }
 
   // Same neutralisation as diff.ts, delivery.ts, repos.ts and pipeline.ts: config.repoPath was
   // approved once by bindRepository, but its gitconfig still fires on every git call after that,
