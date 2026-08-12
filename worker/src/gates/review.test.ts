@@ -216,6 +216,19 @@ describe("reviewGate", () => {
     expect(run.mock.calls[0][2].env?.PATH).toBe(process.env.PATH);
   });
 
+  it("keeps the operator's own credentials out of the reviewer's environment", async () => {
+    vi.stubEnv("CP_API_TOKEN", "cp_operator_credential");
+    vi.stubEnv("GH_TOKEN", "gh_operator_credential");
+    const { runner, run } = claudeReturning({ approved: true, reason: "" });
+
+    await reviewGate(runner, TIMEOUT_MS).run(context());
+
+    const env = run.mock.calls[0][2].env;
+    expect(env?.CP_API_TOKEN).toBeUndefined();
+    expect(env?.GH_TOKEN).toBeUndefined();
+    expect(env?.HOME).toBe(process.env.HOME);
+  });
+
   it("passes the context's signal through to the runner, so a stop can kill the reviewer", async () => {
     const controller = new AbortController();
     const { runner, run } = claudeReturning({ approved: true, reason: "" });

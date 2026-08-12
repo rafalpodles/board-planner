@@ -33,12 +33,14 @@ function machine(spec: Machine = {}): {
   runner: Runner;
   calls: string[][];
   ranWith: Record<string, string | undefined>;
+  envs: Record<string, NodeJS.ProcessEnv | undefined>;
   isExecutable: (path: string) => boolean;
 } {
   const has = spec.has ?? ["git", "npm", "claude", "gh"];
   const onDisk = spec.onDiskOnly ?? {};
   const calls: string[][] = [];
   const ranWith: Record<string, string | undefined> = {};
+  const envs: Record<string, NodeJS.ProcessEnv | undefined> = {};
 
   const runner: Runner = {
     run: vi.fn(async (command: string, args: string[], opts) => {
@@ -53,6 +55,7 @@ function machine(spec: Machine = {}): {
 
       const tool = command.split("/").pop() ?? command;
       ranWith[tool] = opts.env?.PATH;
+      envs[tool] = opts.env;
 
       if (command.endsWith("/claude") && args[0] === "auth") return spec.claudeAuth ?? ok(LOGGED_IN);
       if (command.endsWith("/gh") && args[0] === "auth") {
@@ -66,6 +69,7 @@ function machine(spec: Machine = {}): {
     runner,
     calls,
     ranWith,
+    envs,
     isExecutable: (path: string) => Object.values(onDisk).includes(path),
   };
 }
@@ -96,6 +100,17 @@ describe("runPreflight", () => {
     expect(report.ok).toBe(true);
     expect(report.account).toBe("someone@example.com");
     expect(report.checks.filter((c) => !c.ok)).toEqual([]);
+  });
+
+  it("probes the tools without handing them the worker's own credentials", async () => {
+    const m = machine();
+    const withSecrets = { ...env, CP_API_TOKEN: "cp_operator_credential" } as typeof env;
+
+    await runPreflight(depsFor(m, { env: withSecrets }));
+
+    expect(m.envs.claude?.CP_API_TOKEN).toBeUndefined();
+    expect(m.envs.gh?.CP_API_TOKEN).toBeUndefined();
+    expect(m.envs.claude?.HOME).toBe("/Users/someone");
   });
 
   it("resolves absolute paths rather than only reporting that a tool exists", async () => {
