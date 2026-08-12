@@ -220,3 +220,23 @@ describe("reapOrphans", () => {
     expect(workspace.destroy).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("a task key that is not a name this worker can use", () => {
+  it("refuses to build a worktree path outside the worktree root", async () => {
+    const { runner, run } = runnerReturning();
+
+    await expect(createWorkspace(config, runner).create("../escape-1", "worker")).rejects.toThrow(
+      /worktree root/,
+    );
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("refuses the same path on destroy", async () => {
+    const { runner, run } = runnerReturning();
+
+    await expect(createWorkspace(config, runner).destroy("../escape-1")).rejects.toThrow(
+      /worktree root/,
+    );
+    expect(run).not.toHaveBeenCalled();
+  });
+});
