@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { ApiTask } from "@/types";
 import { TaskCard } from "@/components/kanban/TaskCard";
@@ -38,10 +39,28 @@ export function PlanningPane({
   testId,
 }: PlanningPaneProps) {
   const router = useRouter();
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const buttonRefs = useRef(new Map<string, HTMLButtonElement>());
+  const prevIds = useRef<string[]>(tasks.map((t) => t._id));
+
+  // A move unmounts the button that triggered it, dropping focus to <body>. Send it to
+  // whichever button now sits at the same position, or the pane itself once the list is empty.
+  useEffect(() => {
+    const ids = tasks.map((t) => t._id);
+    const removedIndex = prevIds.current.findIndex((id) => !ids.includes(id));
+    if (removedIndex !== -1 && document.activeElement === document.body) {
+      const nextId = ids[Math.min(removedIndex, ids.length - 1)];
+      const target = nextId ? buttonRefs.current.get(nextId) : containerRef.current;
+      target?.focus();
+    }
+    prevIds.current = ids;
+  }, [tasks]);
 
   return (
     <div
-      className="flex min-h-0 flex-1 flex-col"
+      ref={containerRef}
+      tabIndex={-1}
+      className="focus-ring flex min-h-0 flex-1 flex-col"
       data-testid={testId}
       onDragOver={onDropTask ? (e) => e.preventDefault() : undefined}
       onDrop={
@@ -74,9 +93,13 @@ export function PlanningPane({
               </div>
               <button
                 type="button"
+                ref={(el) => {
+                  if (el) buttonRefs.current.set(task._id, el);
+                  else buttonRefs.current.delete(task._id);
+                }}
                 aria-label={action.label(task)}
                 onClick={() => action.onClick(task)}
-                className="focus-ring shrink-0 rounded-md border border-border p-1.5 text-text-muted transition-colors hover:bg-bg-hover hover:text-text lg:hidden"
+                className="focus-ring shrink-0 rounded-md border border-border p-1.5 text-text-muted transition-colors hover:bg-bg-hover hover:text-text"
               >
                 <ActionIcon kind={actionIcon} />
               </button>

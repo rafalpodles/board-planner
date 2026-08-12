@@ -225,6 +225,22 @@ describe("PlanningView", () => {
     expect(toast).toHaveBeenCalledWith("Failed to move task", "error");
   });
 
+  // The clicked button unmounts the instant its task leaves the pane, dropping focus to
+  // <body> — this pins that PlanningPane sends it somewhere useful instead
+  it("moves focus to the next action button when a move unmounts the one that had it", async () => {
+    await renderPlanning();
+    const firstButton = screen.getByRole("button", {
+      name: "Add Fix the login redirect to the sprint",
+    });
+    firstButton.focus();
+    fireEvent.click(firstButton);
+
+    const nextButton = await screen.findByRole("button", {
+      name: "Add Rename the export button to the sprint",
+    });
+    await waitFor(() => expect(document.activeElement).toBe(nextButton));
+  });
+
   it("returns the task to the pane it came from when removing fails", async () => {
     api.put.mockRejectedValue(new Error("nope"));
     await renderPlanning();
