@@ -106,10 +106,15 @@ describe("SprintHeader estimate", () => {
     expect(screen.queryByTestId("sprint-estimate-progress")).toBeNull();
   });
 
-  it("shows the estimate done and total beside the task counts when given", () => {
-    renderHeader({ estimate: { total: 13, done: 5 } });
-    expect(screen.getByTestId("sprint-estimate-progress").textContent).toBe("5/13 pts");
+  it("shows the estimate done and total beside the task counts, labelled with the designated field's own name", () => {
+    renderHeader({ estimate: { total: 13, done: 5, label: "Story points" } });
+    expect(screen.getByTestId("sprint-estimate-progress").textContent).toBe("5/13 Story points");
     expect(screen.getByTestId("sprint-progress").textContent).toBe("4/8");
+  });
+
+  it("shows a designated field's zero total rather than hiding it", () => {
+    renderHeader({ estimate: { total: 0, done: 0, label: "Hours" } });
+    expect(screen.getByTestId("sprint-estimate-progress").textContent).toBe("0/0 Hours");
   });
 });
 

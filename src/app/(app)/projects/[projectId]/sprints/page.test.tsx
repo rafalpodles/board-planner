@@ -135,7 +135,11 @@ const sprintTasks = Array.from({ length: 8 }, (_, i) => ({
   updatedAt: "2026-08-01T00:00:00Z",
 })) as ApiTask[];
 
-const projectWithEstimate = { ...project, estimateFieldId: "f1" } as unknown as ApiProject;
+const projectWithEstimate = {
+  ...project,
+  estimateFieldId: "f1",
+  customFields: [{ _id: "f1", name: "Story points", fieldType: "number" }],
+} as unknown as ApiProject;
 
 // Done tasks (i < 4) carry 2 points each, the rest 3 — done=8, total=20, distinct from
 // doneCount/totalCount (4/8) so a test can't pass by accident on a copied number
@@ -789,13 +793,13 @@ describe("Sprint header estimate", () => {
 
   it("shows the estimate total and done beside the task counts when the project designates a field", async () => {
     await renderSprints(sprints, { tasks: sprintTasksWithEstimate, project: projectWithEstimate });
-    expect(screen.getByTestId("sprint-estimate-progress").textContent).toBe("8/20 pts");
+    expect(screen.getByTestId("sprint-estimate-progress").textContent).toBe("8/20 Story points");
     expect(screen.getByTestId("sprint-progress").textContent).toBe("4/8");
   });
 
   it("keeps the estimate on every task in the sprint while the board is filtered", async () => {
     await renderSprints(sprints, { tasks: sprintTasksWithEstimate, project: projectWithEstimate });
-    expect(screen.getByTestId("sprint-estimate-progress").textContent).toBe("8/20 pts");
+    expect(screen.getByTestId("sprint-estimate-progress").textContent).toBe("8/20 Story points");
 
     await act(async () => {
       fireEvent.change(screen.getByPlaceholderText("Search tasks, or TP-128…"), {
@@ -804,7 +808,7 @@ describe("Sprint header estimate", () => {
     });
 
     expect(screen.getByText("TP-1")).toBeTruthy();
-    expect(screen.getByTestId("sprint-estimate-progress").textContent).toBe("8/20 pts");
+    expect(screen.getByTestId("sprint-estimate-progress").textContent).toBe("8/20 Story points");
   });
 
   // Same regression the sprint header's own doneCount/totalCount hit twice already
@@ -845,7 +849,7 @@ describe("Sprint header estimate", () => {
     const { rerender } = render(<SprintsPage />);
     await screen.findByRole("heading", { name: "Sprints" });
     await screen.findByTestId("planning-pane-sprint");
-    expect(screen.getByTestId("sprint-estimate-progress").textContent).toBe("8/20 pts");
+    expect(screen.getByTestId("sprint-estimate-progress").textContent).toBe("8/20 Story points");
 
     headerCalls.length = 0;
     query.current = "sprint=s2&view=planning";
@@ -854,7 +858,7 @@ describe("Sprint header estimate", () => {
     });
 
     expect(screen.getByRole("heading", { name: "Sprint 13", level: 2 })).toBeTruthy();
-    expect(screen.getByTestId("sprint-estimate-progress").textContent).toBe("6/13 pts");
+    expect(screen.getByTestId("sprint-estimate-progress").textContent).toBe("6/13 Story points");
 
     // Sprint 13's only valid estimate, ever, is its own (6/13) — never Sprint 12's
     // leftover 8/20 painted under Sprint 13's name for one frame along the way

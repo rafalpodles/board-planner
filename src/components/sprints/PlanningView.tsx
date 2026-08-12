@@ -5,7 +5,7 @@ import { useApi } from "@/hooks/use-api";
 import { ApiTask } from "@/types";
 import { ProjectBoard } from "@/hooks/use-project-board";
 import { columnIdsWithRole } from "@/lib/columns";
-import { sumEstimates } from "@/lib/estimates";
+import { estimateFieldName, sumEstimates } from "@/lib/estimates";
 import { useToast } from "@/components/ui/Toast";
 import { PlanningPane } from "./PlanningPane";
 
@@ -112,7 +112,12 @@ export function PlanningView({ projectId, board, sprintId, onTasksChange }: Plan
   const sprintName = board.sprints.find((s) => s._id === sprintId)?.name ?? "Sprint";
   const projectKey = board.project?.key ?? "";
   const estimateFieldId = board.project?.estimateFieldId || "";
-  const estimateTotal = estimateFieldId ? sumEstimates(sprintTasks, estimateFieldId) : undefined;
+  const estimate = estimateFieldId
+    ? {
+        total: sumEstimates(sprintTasks, estimateFieldId),
+        label: estimateFieldName(board.project, estimateFieldId),
+      }
+    : undefined;
 
   return (
     <div className="lg:flex lg:min-h-0 lg:flex-1 lg:gap-5 lg:overflow-hidden">
@@ -155,7 +160,7 @@ export function PlanningView({ projectId, board, sprintId, onTasksChange }: Plan
           actionIcon="remove"
           onDropTask={tasksLoaded ? dropInto(sprintId) : undefined}
           loading={!tasksLoaded}
-          estimateTotal={estimateTotal}
+          estimate={estimate}
           testId="planning-pane-sprint"
         />
       </div>

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { estimateOf, sumEstimates } from "./estimates";
-import { ApiTask } from "@/types";
+import { estimateFieldName, estimateOf, sumEstimates } from "./estimates";
+import { ApiCustomField, ApiTask } from "@/types";
 
 function task(customFieldValues: Record<string, unknown>): ApiTask {
   return { customFieldValues } as ApiTask;
@@ -31,6 +31,16 @@ describe("estimateOf", () => {
   it("treats a task with no customFieldValues at all as zero, not a crash", () => {
     expect(estimateOf({} as ApiTask, "f1")).toBe(0);
   });
+
+  it("treats a stored boolean as zero, not a number", () => {
+    expect(estimateOf(task({ f1: true }), "f1")).toBe(0);
+    expect(estimateOf(task({ f1: false }), "f1")).toBe(0);
+  });
+
+  it("treats a stored array or object as zero, not whatever Number() coerces it to", () => {
+    expect(estimateOf(task({ f1: [5] }), "f1")).toBe(0);
+    expect(estimateOf(task({ f1: {} }), "f1")).toBe(0);
+  });
 });
 
 describe("sumEstimates", () => {
@@ -41,5 +51,36 @@ describe("sumEstimates", () => {
   it("sums across every task, mixing numbers, numeric strings, and absent values", () => {
     const tasks = [task({ f1: 2 }), task({ f1: "5" }), task({}), task({ f1: "not a number" })];
     expect(sumEstimates(tasks, "f1")).toBe(7);
+  });
+});
+
+function field(over: Partial<ApiCustomField> & { _id: string; name: string }): ApiCustomField {
+  return {
+    fieldType: "number",
+    options: [],
+    required: false,
+    order: 0,
+    showOnCard: false,
+    showInList: false,
+    filterable: false,
+    archived: false,
+    ...over,
+  } as ApiCustomField;
+}
+
+describe("estimateFieldName", () => {
+  it("names the designated field", () => {
+    const fields = [field({ _id: "f1", name: "Story points" }), field({ _id: "f2", name: "Hours" })];
+    expect(estimateFieldName({ customFields: fields }, "f2")).toBe("Hours");
+  });
+
+  it("is empty when no field on the project matches the id", () => {
+    const fields = [field({ _id: "f1", name: "Story points" })];
+    expect(estimateFieldName({ customFields: fields }, "f9")).toBe("");
+  });
+
+  it("is empty when the project itself is not given", () => {
+    expect(estimateFieldName(null, "f1")).toBe("");
+    expect(estimateFieldName(undefined, "f1")).toBe("");
   });
 });

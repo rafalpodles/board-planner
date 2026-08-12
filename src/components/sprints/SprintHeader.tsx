@@ -10,7 +10,7 @@ interface SprintHeaderProps {
   sprints: ApiSprint[];
   doneCount: number;
   totalCount: number;
-  estimate?: { total: number; done: number };
+  estimate?: { total: number; done: number; label: string };
   readOnly: boolean;
   view: "board" | "planning";
   onViewChange: (view: "board" | "planning") => void;
@@ -227,7 +227,7 @@ export function SprintHeader({
         </span>
         {estimate && (
           <span data-testid="sprint-estimate-progress" className="tabular-nums">
-            {estimate.done}/{estimate.total} pts
+            {estimate.done}/{estimate.total} {estimate.label}
           </span>
         )}
       </div>

@@ -19,7 +19,7 @@ interface PlanningPaneProps {
   errorMessage?: string;
   onRetry?: () => void;
   testId?: string;
-  estimateTotal?: number;
+  estimate?: { total: number; label: string };
 }
 
 function ActionIcon({ kind }: { kind: "add" | "remove" }) {
@@ -44,7 +44,7 @@ export function PlanningPane({
   errorMessage,
   onRetry,
   testId,
-  estimateTotal,
+  estimate,
 }: PlanningPaneProps) {
   const router = useRouter();
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -67,9 +67,9 @@ export function PlanningPane({
   const heading =
     loading || error
       ? title
-      : estimateTotal === undefined
+      : estimate === undefined
         ? `${title} (${tasks.length})`
-        : `${title} (${tasks.length}) · ${estimateTotal} pts`;
+        : `${title} (${tasks.length}) · ${estimate.total} ${estimate.label}`;
 
   return (
     <div

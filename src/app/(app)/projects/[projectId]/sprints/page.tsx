@@ -5,7 +5,7 @@ import { useParams, usePathname, useRouter, useSearchParams } from "next/navigat
 import { useApi } from "@/hooks/use-api";
 import { ApiSprint, ApiTask } from "@/types";
 import { columnIdsWithRole } from "@/lib/columns";
-import { sumEstimates } from "@/lib/estimates";
+import { estimateFieldName, sumEstimates } from "@/lib/estimates";
 import { useProjectBoard } from "@/hooks/use-project-board";
 import { ProjectBoardView } from "@/components/kanban/ProjectBoardView";
 import { resolveSelectedSprint } from "@/lib/sprint-selection";
@@ -188,7 +188,9 @@ export default function SprintsPage() {
       : tasksLoaded
         ? sumEstimates(board.tasks.filter((t) => doneIds.has(t.status)), estimateFieldId)
         : selected?.estimateDone ?? 0;
-  const estimate = estimateFieldId ? { total: estimateTotal, done: estimateDone } : undefined;
+  const estimate = estimateFieldId
+    ? { total: estimateTotal, done: estimateDone, label: estimateFieldName(board.project, estimateFieldId) }
+    : undefined;
 
   // Latches once, on the first render where there is nothing left to wait for, and never
   // resets — a later sprint switch is ProjectBoardView's own loadedScope/scope gate, not this
