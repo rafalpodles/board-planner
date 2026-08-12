@@ -6,7 +6,7 @@ import { User } from "@/models/user";
 import { Comment } from "@/models/comment";
 import { Worker } from "@/models/worker";
 import { ApiTaskExecution, ICustomField, ITask, ITaskExecution, RunConflict, DEFAULT_PRIORITY } from "@/types";
-import { getColumnIds, defaultStatusFor, roleOf, getProjectColumns } from "@/lib/columns";
+import { getColumnIds, defaultStatusFor, roleOf, getProjectColumns, columnIdsWithRole } from "@/lib/columns";
 import { escalationColumnId } from "@/lib/escalation";
 import { logActivity } from "@/lib/activity";
 import { dispatchWebhooks } from "@/lib/webhooks";
@@ -767,6 +767,21 @@ export async function claimNextTask(
   const activeStatus = columns.find((c) => c.role === "active")?.id;
   if (approved.length === 0 || !activeStatus) return null;
 
+  // A blocker always sits in the same project — the links endpoint refuses one that does not — so
+  // this project's unfinished tasks are the complete set of things that can still be blocking
+  // something here. Finished is the done role rather than a status called "done": a board that
+  // renamed its last column would otherwise report every shipped blocker as open.
+  //
+  // Read before the claim rather than joined inside it, because MongoDB cannot join in an update.
+  // The claim itself stays the one atomic findOneAndUpdate it was, so two workers still cannot
+  // take the same task; only the blocker picture can age, and it ages the safe way — a blocker
+  // finished in that window leaves its dependent for the next poll, seconds later.
+  const unfinished = await Task.find(
+    { project: projectId, status: { $nin: columnIdsWithRole(project, "done") } },
+    "_id"
+  ).lean();
+  const openBlockers = unfinished.map((t) => t._id);
+
   // Cast here, not in the pipeline. Mongoose casts a plain $set against the schema and does not
   // cast an update pipeline at all, so the raw string would be stored in an ObjectId ref field —
   // populate still renders it, and every query that casts its side (My Tasks, the board's assignee
@@ -811,6 +826,9 @@ export async function claimNextTask(
     {
       project: projectId,
       status: { $in: approved },
+      // On an array field this means "holds none of them", so a task with no blockers, or whose
+      // blockers have all finished, still qualifies
+      blockedBy: { $nin: openBlockers },
       $and: [
         { $or: claimable },
         // Mongoose applies defaults at hydration, so tasks created before the

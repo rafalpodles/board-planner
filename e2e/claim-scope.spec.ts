@@ -198,6 +198,55 @@ test.describe("claimScope: any", () => {
   });
 });
 
+/**
+ * BP-280. The unit tests judge the filter through sift, which compares JavaScript values — and
+ * blockedBy holds ObjectIds, where the whole question is whether MongoDB reads `$nin` over an
+ * array of refs the way the claim assumes. Only a real database answers that.
+ */
+test.describe("blockers", () => {
+  const DONE = "done";
+
+  test("a task whose blocker is still open is passed over", async () => {
+    await setScope("any");
+    // The blocker sits outside the approved column, so the only thing the claim could take is the
+    // blocked task — anything but null here means it took work that cannot start
+    const blocker = await addTask({ status: "in_review", order: 1 });
+    const blocked = await addTask({ blockedBy: [blocker], order: 2 });
+
+    expect(await claimNextTask(String(PROJECT_ID), WORKER, "run-1", IDENTITY)).toBeNull();
+    expect((await read(blocked)).status).toBe(APPROVED);
+  });
+
+  test("the unblocked sibling behind it is claimed instead", async () => {
+    await setScope("any");
+    // Ordered ahead of the sibling, so claiming the sibling can only mean the blocked one was
+    // skipped rather than merely sorted second
+    const blocker = await addTask({ status: "in_review", order: 1 });
+    const blocked = await addTask({ blockedBy: [blocker], order: 2 });
+    const free = await addTask({ order: 3 });
+
+    const claimed = await claimNextTask(String(PROJECT_ID), WORKER, "run-1", IDENTITY);
+
+    expect(String(claimed?._id)).toBe(String(free));
+    expect((await read(blocked)).status).toBe(APPROVED);
+  });
+
+  test("finishing the blocker makes the task claimable", async () => {
+    await setScope("any");
+    const blocker = await addTask({ status: "in_review", order: 1 });
+    const blocked = await addTask({ blockedBy: [blocker], order: 2 });
+
+    expect(await claimNextTask(String(PROJECT_ID), WORKER, "run-1", IDENTITY)).toBeNull();
+
+    const handle = await db();
+    await handle.collection("tasks").updateOne({ _id: blocker }, { $set: { status: DONE } });
+
+    const claimed = await claimNextTask(String(PROJECT_ID), WORKER, "run-2", IDENTITY);
+    expect(String(claimed?._id)).toBe(String(blocked));
+    expect((await read(blocked)).status).toBe(ACTIVE);
+  });
+});
+
 test.describe("releasing gives back exactly what the claim took", () => {
   test("a hand-over survives the release, so the task can be retried", async () => {
     await setScope("assigned");

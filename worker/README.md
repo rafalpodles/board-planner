@@ -144,6 +144,11 @@ and `SIGINT` both finish the task in flight before the loop exits.
   The nominee is an ordinary user a person picks, deliberately not the worker's own identity: that
   is an auto-created `worker-<id>` account with kind `machine`, excluded from every list the
   product offers. Keying the predicate on it would have described a hand-over nobody could perform.
+- **Nothing starts before its blockers finish.** A task whose `blockedBy` still names an unfinished
+  task is passed over, and the claim takes the next one that is free instead. Finished means the
+  blocker sits in a column with the `done` role, so a board that renamed its last column is read
+  correctly. Nothing is pushed when a blocker finishes: the dependent simply stops being skipped,
+  and the next poll — seconds later — picks it up.
 - **Nothing merges unreviewed.** The review gate is a separate Claude with no memory of writing
   the code, and it sees only the diff.
 - **Nothing executes before the static gates have read the diff.** `protected-paths` refuses

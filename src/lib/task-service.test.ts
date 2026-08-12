@@ -65,6 +65,7 @@ const projectFindOneAndUpdate = vi.fn();
 const updateMany = vi.fn();
 const updateOne = vi.fn();
 const findOne = vi.fn();
+const find = vi.fn();
 const findByIdAndUpdate = vi.fn();
 const findById = vi.fn();
 const userFindOne = vi.fn();
@@ -73,7 +74,7 @@ const workerFindById = vi.fn();
 vi.mock("./db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/worker", () => ({ Worker: { findById: workerFindById } }));
 vi.mock("@/models/task", () => ({
-  Task: { findOneAndUpdate, updateMany, updateOne, findOne, findByIdAndUpdate, create: taskCreate },
+  Task: { findOneAndUpdate, updateMany, updateOne, findOne, find, findByIdAndUpdate, create: taskCreate },
 }));
 vi.mock("@/models/project", () => ({ Project: { findById, findOneAndUpdate: projectFindOneAndUpdate } }));
 vi.mock("@/models/user", () => ({ User: { findOne: userFindOne } }));
@@ -134,11 +135,80 @@ const customBoard = {
 const claimStages = (call: unknown[]) => call[1] as Record<string, never>[];
 const claimSet = (call: unknown[]) => claimStages(call)[0].$set as unknown as Record<string, unknown>;
 
+// A document satisfying every clause of the claim filter, so a sift verdict on one built from it
+// is about the clause the test varies and nothing else
+const task = (over: Record<string, unknown> = {}) => ({
+  project: "p1",
+  status: "ready",
+  assignee: null,
+  execution: { attempts: 0 },
+  blockedBy: [],
+  ...over,
+});
+
 describe("claimNextTask", () => {
   beforeEach(() => {
     findOneAndUpdate.mockReset();
     findById.mockReset();
     findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    find.mockReset();
+    find.mockReturnValue({ lean: () => Promise.resolve([]) });
+  });
+
+  // A task nobody can start yet is not work, and the worker was taking it anyway: blockedBy was
+  // never consulted. Judged through sift rather than by reading the filter, because what matters
+  // is what MongoDB does with $nin over an array field, not that the source says "$nin".
+  describe("blockers", () => {
+    const unfinishedBlocker = { _id: "blocker-1" };
+
+    it("passes over a task whose blocker is still unfinished", async () => {
+      find.mockReturnValue({ lean: () => Promise.resolve([unfinishedBlocker]) });
+      findOneAndUpdate.mockResolvedValue(null);
+
+      await claimNextTask("p1", "worker-a", "run-1");
+
+      const filter = findOneAndUpdate.mock.calls[0][0];
+      expect(matches(filter, task({ blockedBy: ["blocker-1"] }))).toBe(false);
+    });
+
+    it("claims the unblocked sibling standing behind it", async () => {
+      find.mockReturnValue({ lean: () => Promise.resolve([unfinishedBlocker]) });
+      findOneAndUpdate.mockResolvedValue(null);
+
+      await claimNextTask("p1", "worker-a", "run-1");
+
+      const filter = findOneAndUpdate.mock.calls[0][0];
+      expect(matches(filter, task({ blockedBy: [] }))).toBe(true);
+      expect(matches(filter, task({ blockedBy: ["something-else"] }))).toBe(true);
+    });
+
+    it("becomes claimable once the blocker reaches a done-role column", async () => {
+      // The blocker finished, so it is no longer among the project's unfinished tasks
+      find.mockReturnValue({ lean: () => Promise.resolve([]) });
+      findOneAndUpdate.mockResolvedValue(null);
+
+      await claimNextTask("p1", "worker-a", "run-1");
+
+      const filter = findOneAndUpdate.mock.calls[0][0];
+      expect(matches(filter, task({ blockedBy: ["blocker-1"] }))).toBe(true);
+    });
+
+    // The board under test calls its finished column "shipped": an implementation comparing
+    // against the literal "done" would read every shipped blocker as still open
+    it("reads finished off the column role, not a status named done", async () => {
+      findById.mockReturnValue({
+        lean: () =>
+          Promise.resolve({
+            ...customBoard,
+            columns: [...customBoard.columns, { id: "shipped", label: "Shipped", role: "done", order: 3 }],
+          }),
+      });
+      findOneAndUpdate.mockResolvedValue(null);
+
+      await claimNextTask("p1", "worker-a", "run-1");
+
+      expect(find.mock.calls[0][0]).toEqual({ project: "p1", status: { $nin: ["shipped"] } });
+    });
   });
 
   it("derives the source column from the approved role, not a fixed id", async () => {
