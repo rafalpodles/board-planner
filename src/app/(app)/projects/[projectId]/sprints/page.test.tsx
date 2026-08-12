@@ -4,16 +4,35 @@ import { render, screen, cleanup, within, act, fireEvent, waitFor } from "@testi
 import SprintsPage from "./page";
 import { ApiProject, ApiSprint, ApiTask } from "@/types";
 
-const { api, toast, router, query, pathname } = vi.hoisted(() => ({
+const { api, toast, router, query, pathname, headerCalls } = vi.hoisted(() => ({
   api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), del: vi.fn() },
   toast: vi.fn(),
   router: { push: vi.fn(), replace: vi.fn() },
   // Stands in for the address bar: a test writes it and rerenders, as a navigation would
   query: { current: "" },
   pathname: { current: "/projects/p1/sprints" },
+  // Every commit calls SprintHeader again, including ones a single act() flush discards
+  // before the test can read the DOM — this is the only way to see a render that never
+  // survives to be read back with screen.getByTestId
+  headerCalls: [] as Array<{ name: string; doneCount: number; totalCount: number }>,
 }));
 
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
+vi.mock("@/components/sprints/SprintHeader", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/components/sprints/SprintHeader")>();
+  return {
+    ...actual,
+    SprintHeader: (props: Parameters<typeof actual.SprintHeader>[0]) => {
+      headerCalls.push({
+        name: props.sprint.name,
+        doneCount: props.doneCount,
+        totalCount: props.totalCount,
+      });
+      return actual.SprintHeader(props);
+    },
+  };
+});
 vi.mock("@/hooks/use-auth", () => ({
   useAuth: () => ({
     user: { username: "rpo", collapseEmptyColumns: false },
@@ -152,6 +171,7 @@ beforeEach(() => {
   router.replace.mockReset();
   query.current = "";
   pathname.current = "/projects/p1/sprints";
+  headerCalls.length = 0;
   localStorage.clear();
 });
 afterEach(cleanup);
@@ -575,6 +595,62 @@ describe("Board / Planning toggle", () => {
     // Sprint 13's own doneCount/taskCount (2/5) is the fallback while its tasks are still
     // in flight — never "0/0", which is what an empty, "loaded" report would produce
     expect(screen.getByTestId("sprint-progress").textContent).toBe("2/5");
+  });
+
+  // Milder than the 0/0 case above but the same bug: planningTasks from Sprint 12 outlives
+  // the render where the header already reads Sprint 13's name off `selected`. Checking only
+  // the settled DOM (as the test above does) can't see it — the stale render commits and
+  // reverts within the same act() flush. Reading every SprintHeader call, not just the last
+  // one still standing, is what catches it.
+  it("never renders a sprint's counts under a different sprint's name", async () => {
+    const planningSprints = [
+      sprints[0],
+      {
+        _id: "s2",
+        name: "Sprint 13",
+        startDate: "2026-08-03T00:00:00Z",
+        endDate: "2026-08-17T00:00:00Z",
+        goal: "",
+        status: "planned",
+        taskCount: 5,
+        doneCount: 2,
+      },
+    ] as ApiSprint[];
+
+    api.get.mockImplementation((url: string) => {
+      if (url === "/api/projects/p1") return Promise.resolve(project);
+      if (url === "/api/projects/p1/tasks?sprint=s1") {
+        return Promise.resolve(sprintTasks.map((t) => ({ ...t })));
+      }
+      if (url === "/api/projects/p1/tasks?sprint=backlog") return Promise.resolve([]);
+      // Sprint 13's tasks never arrive, keeping the mid-switch window open under test
+      if (url === "/api/projects/p1/tasks?sprint=s2") return new Promise(() => {});
+      if (url === "/api/projects/p1/sprints") return Promise.resolve(planningSprints);
+      if (url === "/api/users/list") return Promise.resolve([]);
+      return Promise.reject(new Error(`unexpected GET ${url}`));
+    });
+
+    query.current = "sprint=s1&view=planning";
+    const { rerender } = render(<SprintsPage />);
+    await screen.findByRole("heading", { name: "Sprints" });
+    await screen.findByTestId("planning-pane-sprint");
+    expect(screen.getByTestId("sprint-progress").textContent).toBe("4/8");
+
+    headerCalls.length = 0;
+    query.current = "sprint=s2&view=planning";
+    await act(async () => {
+      rerender(<SprintsPage />);
+    });
+
+    expect(screen.getByRole("heading", { name: "Sprint 13", level: 2 })).toBeTruthy();
+    expect(screen.getByTestId("sprint-progress").textContent).toBe("2/5");
+
+    // Sprint 13's only valid counts, ever, are its own (2/5) — never Sprint 12's
+    // leftover 4/8 painted under Sprint 13's name for one frame along the way
+    const mislabeled = headerCalls.filter(
+      (call) => call.name === "Sprint 13" && (call.doneCount !== 2 || call.totalCount !== 5)
+    );
+    expect(mislabeled).toEqual([]);
   });
 
   // page.tsx:153 clamps the view back to "board" whenever the selected sprint is

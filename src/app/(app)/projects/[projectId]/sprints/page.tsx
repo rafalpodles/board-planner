@@ -55,12 +55,15 @@ export default function SprintsPage() {
   // only ever drop a task out of that list, never add one — so a task the planning view just
   // pulled in from the backlog has no other way to reach the header's done/total.
   const [planningTasks, setPlanningTasks] = useState<ApiTask[] | null>(null);
-
-  // A sprint switch must not paint the outgoing sprint's counts under the incoming one's
-  // name for the one frame before PlanningView's own effect reports the new list
-  useEffect(() => {
+  // Reset during render, not in an effect: an effect only runs after this render has
+  // already committed with the new sprint's name and the outgoing sprint's counts still
+  // attached to planningTasks. Resetting here lets React throw that render away before
+  // anything paints, instead of one frame later.
+  const [planningTasksScope, setPlanningTasksScope] = useState<string | null>(null);
+  if (planningTasksScope !== scope) {
+    setPlanningTasksScope(scope);
     setPlanningTasks(null);
-  }, [scope]);
+  }
 
   useEffect(() => {
     if (board.loading) return;
