@@ -79,6 +79,8 @@ vi.mock("@/models/task", () => ({
 vi.mock("@/models/project", () => ({ Project: { findById, findOneAndUpdate: projectFindOneAndUpdate } }));
 vi.mock("@/models/user", () => ({ User: { findOne: userFindOne } }));
 vi.mock("@/models/comment", () => ({ Comment: {} }));
+const sprintExists = vi.fn();
+vi.mock("@/models/sprint", () => ({ Sprint: { exists: sprintExists } }));
 vi.mock("@/lib/activity", () => ({ logActivity: vi.fn() }));
 vi.mock("@/lib/webhooks", () => ({ dispatchWebhooks: vi.fn() }));
 vi.mock("@/lib/notifications", () => ({ dispatchNotifications: vi.fn() }));
@@ -1433,5 +1435,38 @@ describe("a status change announces the same things whichever path made it", () 
     await updateTask("p1", "t1", { title: "renamed" }, "actor");
     expect(dispatchWebhooks).not.toHaveBeenCalled();
     expect(taskCreate).not.toHaveBeenCalled();
+  });
+});
+
+// BP-314: `sprint` was on updateTask's allowed list and written straight through, and the sprint
+// routes then read and sweep by sprint id alone — so a task from board A could sit in board B's
+// sprint, inflate its counts and be moved when B completed it.
+describe("a task's sprint has to belong to the task's project", () => {
+  const OTHER = "507f1f77bcf86cd799439012";
+
+  beforeEach(() => {
+    sprintExists.mockClear();
+    sprintExists.mockResolvedValue(null);
+  });
+
+  it("refuses a sprint this project does not have", async () => {
+    const result = await updateTask("p1", "t1", { sprint: OTHER }, "actor");
+
+    expect(result.ok).toBe(false);
+    expect(sprintExists).toHaveBeenCalledWith({ _id: OTHER, project: "p1" });
+  });
+
+  it("refuses a sprint id that is not an object id at all", async () => {
+    const result = await updateTask("p1", "t1", { sprint: "nope" }, "actor");
+
+    expect(result.ok).toBe(false);
+    expect(sprintExists).not.toHaveBeenCalled();
+  });
+
+  it("lets a task be taken out of its sprint", async () => {
+    const result = await updateTask("p1", "t1", { sprint: null }, "actor");
+
+    expect(sprintExists).not.toHaveBeenCalled();
+    expect(result.ok).toBe(true);
   });
 });

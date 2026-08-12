@@ -5,6 +5,7 @@ import { Project } from "@/models/project";
 import { User } from "@/models/user";
 import { Comment } from "@/models/comment";
 import { Worker } from "@/models/worker";
+import { Sprint } from "@/models/sprint";
 import { ApiTaskExecution, ICustomField, ITask, ITaskExecution, RunConflict, DEFAULT_PRIORITY } from "@/types";
 import { getColumnIds, defaultStatusFor, roleOf, getProjectColumns, columnIdsWithRole } from "@/lib/columns";
 import { escalationColumnId } from "@/lib/escalation";
@@ -132,6 +133,16 @@ async function refuseHeldRun(conflict: RunConflict, taskKey: string): Promise<Ta
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Body = Record<string, any>;
 
+/**
+ * A task's sprint is written from the request body, and nothing else re-checks it — the sprint
+ * routes then read and sweep by sprint id, so a cross-project reference lets one board's task
+ * appear in another board's counts and be moved by its sprint completion (BP-314).
+ */
+async function sprintBelongsToProject(projectId: string, sprint: unknown): Promise<boolean> {
+  if (typeof sprint !== "string" || !Types.ObjectId.isValid(sprint)) return false;
+  return (await Sprint.exists({ _id: sprint, project: projectId })) !== null;
+}
+
 export async function createTask(
   projectId: string,
   actorId: string,
@@ -198,7 +209,7 @@ export async function createTask(
             ? body.acceptanceCriteria.join("\n")
             : (body.acceptanceCriteria ?? "")
         ),
-    sprint: body.sprint || null,
+    sprint: (await sprintBelongsToProject(projectId, body.sprint)) ? body.sprint : null,
     customFieldValues: (() => {
       const raw = body.customFieldValues || {};
       if (typeof raw !== "object" || Array.isArray(raw)) return {};
@@ -370,6 +381,12 @@ export async function updateTask(
   for (const field of allowed) {
     if (body[field] !== undefined) {
       updates[field] = body[field];
+    }
+  }
+
+  if (updates.sprint !== undefined && updates.sprint !== null && updates.sprint !== "") {
+    if (!(await sprintBelongsToProject(projectId, updates.sprint))) {
+      return { ok: false, error: "Sprint not found in this project", status: 400 };
     }
   }
 
