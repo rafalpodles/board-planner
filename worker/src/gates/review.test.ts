@@ -219,6 +219,9 @@ describe("reviewGate", () => {
   it("keeps the operator's own credentials out of the reviewer's environment", async () => {
     vi.stubEnv("CP_API_TOKEN", "cp_operator_credential");
     vi.stubEnv("GH_TOKEN", "gh_operator_credential");
+    // stubbed rather than read back from process.env: on a machine without HOME the assertion
+    // would compare undefined to undefined and hold whatever the gate did
+    vi.stubEnv("HOME", "/Users/someone");
     const { runner, run } = claudeReturning({ approved: true, reason: "" });
 
     await reviewGate(runner, TIMEOUT_MS).run(context());
@@ -226,7 +229,7 @@ describe("reviewGate", () => {
     const env = run.mock.calls[0][2].env;
     expect(env?.CP_API_TOKEN).toBeUndefined();
     expect(env?.GH_TOKEN).toBeUndefined();
-    expect(env?.HOME).toBe(process.env.HOME);
+    expect(env?.HOME).toBe("/Users/someone");
   });
 
   it("passes the context's signal through to the runner, so a stop can kill the reviewer", async () => {
