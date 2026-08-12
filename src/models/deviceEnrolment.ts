@@ -8,6 +8,9 @@ const deviceEnrolmentSchema = new Schema<IDeviceEnrolment>(
   {
     // Hashed, because it is the app's half of the exchange and is what the credential is handed to
     deviceCodeHash: { type: String, required: true, unique: true, index: true },
+    // "cpd_" + the code's first 8 hex, so a poll compares against the handful of rows sharing it
+    // rather than bcrypt-ing its way through the whole candidate window (BP-305)
+    deviceCodePrefix: { type: String, required: true, index: true },
     // Shown on both screens so a person can see they are approving the machine in front of them
     userCode: { type: String, required: true, unique: true, index: true, uppercase: true },
     machineName: { type: String, required: true, trim: true },

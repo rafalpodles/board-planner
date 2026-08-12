@@ -912,9 +912,16 @@ export async function claimNextTask(
 export async function releaseTask(
   projectId: string,
   taskId: string,
-  options: { refund?: boolean } = {}
+  options: { refund?: boolean; workerId?: string } = {}
 ): Promise<ITask | null> {
   await connectDB();
+
+  // "held by SOME run" is enough for a person clearing a stuck task from the board, but not for a
+  // worker: without naming the holder, worker A could release worker B's task mid-run, decrementing
+  // its attempts or parking it in escalation. Same line the events route already draws (BP-305).
+  const held = options.workerId
+    ? { ...STILL_HELD, "execution.workerId": options.workerId }
+    : STILL_HELD;
 
   const project = await Project.findById(projectId, "columns").lean();
   const columns = getProjectColumns(project);
@@ -926,7 +933,7 @@ export async function releaseTask(
     const exhausted = escalationColumnId(columns) ?? approved;
 
     return Task.findOneAndUpdate(
-      { _id: taskId, project: projectId, status: { $in: active }, ...STILL_HELD },
+      { _id: taskId, project: projectId, status: { $in: active }, ...held },
       [
         {
           $set: {
@@ -952,7 +959,7 @@ export async function releaseTask(
       project: projectId,
       status: { $in: active },
       "execution.attempts": { $gt: 0 },
-      ...STILL_HELD,
+      ...held,
     },
     [
       {

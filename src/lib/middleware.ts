@@ -4,7 +4,7 @@ import { getAuthUser } from "./auth";
 import { ProvenanceError } from "./session";
 import { connectDB } from "./db";
 import { check } from "./grants";
-import { verifyWorkerCredential } from "./worker-service";
+import { verifyWorkerCredential, isApprovedFor } from "./worker-service";
 import { Project } from "@/models/project";
 import { User } from "@/models/user";
 import { Task } from "@/models/task";
@@ -208,7 +208,11 @@ export function withProjectAccessOrWorker(handler: AuthenticatedHandler) {
     const project = await Project.findById(projectId)
       .select("_id repositoryUrl githubRepo gitlabRepo gitlabHost worker")
       .lean();
-    if (!project?.worker?.enabled || !matchRepo(project as never, worker.repos ?? [])) {
+    if (
+      !project?.worker?.enabled ||
+      !isApprovedFor(worker, String(project._id)) ||
+      !matchRepo(project as never, worker.repos ?? [])
+    ) {
       return NextResponse.json(
         { error: "this worker is not assigned to this project" },
         { status: 403 }

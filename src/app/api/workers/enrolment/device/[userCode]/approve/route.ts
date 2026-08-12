@@ -4,6 +4,7 @@ import { connectDB } from "@/lib/db";
 import { withAdmin } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { DeviceEnrolment } from "@/models/deviceEnrolment";
+import { Worker } from "@/models/worker";
 import { registerWorker } from "@/lib/worker-service";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import {
@@ -115,6 +116,10 @@ export const POST = withAdmin(async (request, { params, user }) => {
     user: String(user._id),
     detail: `Approved for ${key} on ${enrolment.machineHost}`,
   });
+
+  // The approval, recorded where the claim path reads it. Until BP-305 this decision lived only on
+  // the enrolment row and was never consulted again, so approving for one project granted them all.
+  await Worker.updateOne({ _id: worker._id }, { $addToSet: { approvedProjects: project._id } });
 
   await DeviceEnrolment.updateOne(
     { _id: enrolment._id, status: "pending" },

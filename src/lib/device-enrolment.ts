@@ -18,6 +18,14 @@ export const DEVICE_ENROLMENT_TTL_MS = 15 * 60 * 1000;
 // What the app waits between polls. Short enough to feel immediate, long enough not to hammer.
 export const DEVICE_POLL_INTERVAL_MS = 2_000;
 
+// Same shape the cp_/cpe_ credential paths use: an indexed, non-secret prefix narrows the
+// candidates so exactly one bcrypt compare runs per poll. 8 hex of 64 leaves 224 bits of secret.
+const DEVICE_PREFIX_LENGTH = DEVICE_PREFIX.length + 8;
+
+export function devicePrefixOf(deviceCode: string): string {
+  return deviceCode.slice(0, DEVICE_PREFIX_LENGTH);
+}
+
 export function formatUserCode(raw: string): string {
   return `${raw.slice(0, 4)}-${raw.slice(4)}`;
 }
@@ -45,11 +53,28 @@ export interface StartedEnrolment {
 // Unauthenticated on purpose: the machine has nothing to authenticate with yet, which is the whole
 // point. Nothing is granted here — a row in "pending" is worth nothing until a signed-in admin
 // approves it, and it reaps itself in fifteen minutes if nobody does.
+// Each pending row costs a bcrypt.hash to create and sits in the collection until it reaps, so
+// the number of them one unapproved caller can hold open has to be bounded somewhere (BP-305)
+export const MAX_PENDING_ENROLMENTS = 20;
+
+export class TooManyPendingEnrolments extends Error {
+  constructor() {
+    super("too many enrolments are already waiting for approval");
+    this.name = "TooManyPendingEnrolments";
+  }
+}
+
 export async function startDeviceEnrolment(
   input: { machineName: string; machineHost: string },
   now = new Date()
 ): Promise<StartedEnrolment> {
   await connectDB();
+
+  const pending = await DeviceEnrolment.countDocuments({
+    status: "pending",
+    expiresAt: { $gt: now },
+  });
+  if (pending >= MAX_PENDING_ENROLMENTS) throw new TooManyPendingEnrolments();
 
   const deviceCode = `${DEVICE_PREFIX}${crypto.randomBytes(32).toString("hex")}`;
   const expiresAt = new Date(now.getTime() + DEVICE_ENROLMENT_TTL_MS);
@@ -61,6 +86,7 @@ export async function startDeviceEnrolment(
     try {
       await DeviceEnrolment.create({
         deviceCodeHash: await bcrypt.hash(deviceCode, 10),
+        deviceCodePrefix: devicePrefixOf(deviceCode),
         userCode,
         machineName: input.machineName,
         machineHost: input.machineHost,
@@ -114,9 +140,13 @@ export async function pollDeviceEnrolment(
     return { state: "expired" };
   }
 
-  const candidates = await DeviceEnrolment.find({ status: { $in: ["pending", "approved"] } })
-    .sort({ createdAt: -1 })
-    .limit(200);
+  // Narrowed by the indexed prefix rather than a 200-row window: the old shape ran up to 200
+  // bcrypt compares per unauthenticated request, and sustained flooding pushed an approved
+  // enrolment out of the window so its poll answered "expired" forever (BP-305)
+  const candidates = await DeviceEnrolment.find({
+    deviceCodePrefix: devicePrefixOf(deviceCode),
+    status: { $in: ["pending", "approved"] },
+  }).limit(20);
 
   for (const candidate of candidates) {
     if (!(await bcrypt.compare(deviceCode, candidate.deviceCodeHash))) continue;

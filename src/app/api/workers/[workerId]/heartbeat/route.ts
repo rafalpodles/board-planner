@@ -5,7 +5,7 @@ import { Project } from "@/models/project";
 import { Worker } from "@/models/worker";
 import { RepoReport } from "@/lib/repo-match";
 import { WorkerPreflight, WorkerPreflightCheck } from "@/types";
-import { assignmentsFor, overriddenWorkerPolicy, touchWorker, usableRepos } from "@/lib/worker-service";
+import { assignmentsFor, approvedProjectIds, overriddenWorkerPolicy, touchWorker, usableRepos } from "@/lib/worker-service";
 
 // A worker reports its own checkouts; anything else is discarded rather than trusted, since this
 // list decides which projects it is offered.
@@ -109,6 +109,6 @@ export const POST = withWorker(async (request, { worker }) => {
     // Only what an operator set: everything else resolves against the worker's own defaults, so
     // raising a default reaches every machine that never pinned it
     policy: overriddenWorkerPolicy(worker),
-    assignments: assignmentsFor(inventory, projects as never),
+    assignments: assignmentsFor(inventory, projects as never, approvedProjectIds(worker)),
   });
 });
