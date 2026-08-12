@@ -1,8 +1,17 @@
 import { createMcpHandler, withMcpAuth, getPublicOrigin } from "mcp-handler";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { getAuthUser } from "@/lib/auth";
-import { ProvenanceError } from "@/lib/session";
+import { ProvenanceError, appOrigins } from "@/lib/session";
 import { registerPlannerTools } from "@/lib/mcp/tools";
+
+/**
+ * The MCP tools call this instance's own API through it, so it must not come from
+ * a request header. `getPublicOrigin` reads client-supplied x-forwarded-host, which
+ * turned every token holder into a reader of whatever it named (BP-303).
+ */
+function plannerBaseUrl(req: Request): string {
+  return appOrigins()[0] ?? getPublicOrigin(req);
+}
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,7 +42,7 @@ async function verifyToken(req: Request, bearerToken?: string): Promise<AuthInfo
     clientId: user.username,
     scopes: [],
     extra: {
-      baseUrl: getPublicOrigin(req),
+      baseUrl: plannerBaseUrl(req),
       username: user.username,
     },
   };

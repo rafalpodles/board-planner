@@ -1,5 +1,9 @@
 import crypto from "crypto";
 import { isAllowedMcpServerUrl } from "@/lib/url-validation";
+import { safeFetch } from "@/lib/safe-fetch";
+
+// Mirrors the carve-out isAllowedMcpServerUrl makes for local MCP servers outside production
+const MCP_DESTINATION = { allowLoopback: process.env.NODE_ENV !== "production" };
 
 const DISCOVERY_TIMEOUT_MS = 10_000;
 const TOKEN_TIMEOUT_MS = 15_000;
@@ -28,7 +32,7 @@ async function fetchJson(url: string, init?: RequestInit): Promise<Record<string
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), DISCOVERY_TIMEOUT_MS);
   try {
-    const res = await fetch(url, { ...init, signal: controller.signal });
+    const res = await safeFetch(url, { ...init, signal: controller.signal }, MCP_DESTINATION);
     if (!res.ok) return null;
     return (await res.json()) as Record<string, unknown>;
   } catch {
@@ -54,12 +58,12 @@ async function probeResourceMetadataUrl(mcpUrl: string): Promise<string | null> 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), DISCOVERY_TIMEOUT_MS);
   try {
-    const res = await fetch(mcpUrl, {
+    const res = await safeFetch(mcpUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
       body: JSON.stringify({ jsonrpc: "2.0", id: 0, method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "boardplanner-pm", version: "1.0" } } }),
       signal: controller.signal,
-    });
+    }, MCP_DESTINATION);
     if (res.status !== 401) return null;
     const header = res.headers.get("www-authenticate") || "";
     const match = header.match(/resource_metadata="([^"]+)"/i);
@@ -134,7 +138,7 @@ export async function registerClient(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TOKEN_TIMEOUT_MS);
   try {
-    const res = await fetch(registrationEndpoint, {
+    const res = await safeFetch(registrationEndpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({
@@ -145,7 +149,7 @@ export async function registerClient(
         token_endpoint_auth_method: "none",
       }),
       signal: controller.signal,
-    });
+    }, MCP_DESTINATION);
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       throw new Error(`Dynamic client registration failed (${res.status}): ${body.slice(0, 200)}`);
@@ -211,12 +215,12 @@ async function tokenRequest(opts: TokenRequestOpts): Promise<TokenSet> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TOKEN_TIMEOUT_MS);
   try {
-    const res = await fetch(opts.tokenEndpoint, {
+    const res = await safeFetch(opts.tokenEndpoint, {
       method: "POST",
       headers,
       body: body.toString(),
       signal: controller.signal,
-    });
+    }, MCP_DESTINATION);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const data = (await res.json().catch(() => ({}))) as any;
     if (!res.ok || !data.access_token) {

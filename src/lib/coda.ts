@@ -1,3 +1,5 @@
+import { safeFetch, logUpstreamFailure } from "./safe-fetch";
+
 const DEFAULT_HOST = "https://coda.io";
 const REQUEST_TIMEOUT_MS = 15000;
 const MUTATION_POLL_ATTEMPTS = 10;
@@ -43,7 +45,7 @@ function apiBase(host: string, docId: string): string {
 }
 
 async function codaFetch<T>(url: string, token: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, {
+  const res = await safeFetch(url, {
     ...init,
     headers: {
       Authorization: `Bearer ${token}`,
@@ -53,7 +55,8 @@ async function codaFetch<T>(url: string, token: string, init?: RequestInit): Pro
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   if (!res.ok) {
-    throw new Error(`Coda API ${res.status}: ${await res.text().catch(() => res.statusText)}`);
+    await logUpstreamFailure("Coda", res);
+    throw new Error(`Coda API `);
   }
   return res.json();
 }

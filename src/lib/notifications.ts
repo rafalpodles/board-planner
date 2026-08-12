@@ -1,6 +1,7 @@
 import { Project } from "@/models/project";
 import { WebhookEvent, NotificationChannelType, STATUS_LABELS } from "@/types";
 import { isAllowedWebhookUrl } from "./url-validation";
+import { safeFetch } from "./safe-fetch";
 
 interface NotificationPayload {
   project: { key: string; name: string };
@@ -215,7 +216,7 @@ export async function dispatchNotifications(
       if (!isAllowedWebhookUrl(channel.webhookUrl)) continue;
       const body = JSON.stringify(formatPayload(channel.type, event, payload, appUrl));
 
-      fetch(channel.webhookUrl, {
+      safeFetch(channel.webhookUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body,
