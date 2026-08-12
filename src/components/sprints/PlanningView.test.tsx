@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor, act } from "@testing-library/react";
 import { PlanningView } from "./PlanningView";
 import { ProjectBoard } from "@/hooks/use-project-board";
 import { ApiProject, ApiSprint, ApiTask } from "@/types";
@@ -333,5 +333,60 @@ describe("PlanningView", () => {
     expect(screen.queryByText("Ship the header")).toBeNull();
     expect(screen.getByText("Sprint 13")).toBeTruthy();
     expect(screen.queryByText("Sprint 13 (1)")).toBeNull();
+  });
+
+  it("shows the backlog as loading rather than claiming it is empty while its fetch is in flight", async () => {
+    let resolveBacklog: (tasks: ApiTask[]) => void = () => {};
+    api.get.mockImplementation((url: string) => {
+      if (url === "/api/projects/p1/tasks?sprint=backlog") {
+        return new Promise((resolve) => {
+          resolveBacklog = resolve;
+        });
+      }
+      return Promise.reject(new Error(`unexpected GET ${url}`));
+    });
+
+    render(<PlanningView projectId="p1" board={makeBoard()} sprintId="s1" />);
+
+    expect(screen.getByText("Backlog")).toBeTruthy();
+    expect(screen.queryByText("No tasks in the backlog")).toBeNull();
+
+    await act(async () => {
+      resolveBacklog(backlogTasks.map((t) => ({ ...t })));
+    });
+    expect(await screen.findByText("Backlog (2)")).toBeTruthy();
+  });
+
+  it("offers a retry rather than pretending the backlog is empty when its fetch fails", async () => {
+    api.get.mockImplementation((url: string) => {
+      if (url === "/api/projects/p1/tasks?sprint=backlog") {
+        return Promise.reject(new Error("500"));
+      }
+      return Promise.reject(new Error(`unexpected GET ${url}`));
+    });
+
+    render(<PlanningView projectId="p1" board={makeBoard()} sprintId="s1" />);
+
+    expect(await screen.findByText("Couldn't load the backlog.")).toBeTruthy();
+    expect(screen.queryByText("No tasks in the backlog")).toBeNull();
+  });
+
+  it("retries the backlog fetch when asked", async () => {
+    api.get.mockImplementationOnce((url: string) =>
+      url === "/api/projects/p1/tasks?sprint=backlog"
+        ? Promise.reject(new Error("500"))
+        : Promise.reject(new Error(`unexpected GET ${url}`))
+    );
+    render(<PlanningView projectId="p1" board={makeBoard()} sprintId="s1" />);
+    await screen.findByRole("button", { name: "Retry" });
+
+    api.get.mockImplementation((url: string) =>
+      url === "/api/projects/p1/tasks?sprint=backlog"
+        ? Promise.resolve(backlogTasks.map((t) => ({ ...t })))
+        : Promise.reject(new Error(`unexpected GET ${url}`))
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    expect(await screen.findByText("Backlog (2)")).toBeTruthy();
   });
 });

@@ -15,6 +15,9 @@ interface PlanningPaneProps {
   actionIcon: "add" | "remove";
   onDropTask?: (taskId: string) => void;
   loading?: boolean;
+  error?: boolean;
+  errorMessage?: string;
+  onRetry?: () => void;
   testId?: string;
 }
 
@@ -36,6 +39,9 @@ export function PlanningPane({
   actionIcon,
   onDropTask,
   loading = false,
+  error = false,
+  errorMessage,
+  onRetry,
   testId,
 }: PlanningPaneProps) {
   const router = useRouter();
@@ -74,10 +80,21 @@ export function PlanningPane({
       }
     >
       <h3 className="mb-2 shrink-0 text-sm font-medium text-text-muted">
-        {loading ? title : `${title} (${tasks.length})`}
+        {loading || error ? title : `${title} (${tasks.length})`}
       </h3>
       {loading ? (
         <p className="py-8 text-center text-sm text-text-muted">Loading…</p>
+      ) : error ? (
+        <div className="py-8 text-center text-sm text-text-muted">
+          <p>{errorMessage}</p>
+          <button
+            type="button"
+            onClick={onRetry}
+            className="focus-ring mt-2 text-primary underline decoration-dotted underline-offset-2"
+          >
+            Retry
+          </button>
+        </div>
       ) : tasks.length === 0 ? (
         <p className="py-8 text-center text-sm text-text-muted">{emptyMessage}</p>
       ) : (

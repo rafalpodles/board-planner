@@ -21,6 +21,9 @@ export function PlanningView({ projectId, board, sprintId, onTasksChange }: Plan
   const api = useApi();
   const { toast } = useToast();
   const [backlog, setBacklog] = useState<ApiTask[]>([]);
+  const [backlogLoading, setBacklogLoading] = useState(true);
+  const [backlogError, setBacklogError] = useState(false);
+  const [backlogReloadToken, setBacklogReloadToken] = useState(0);
   const [filter, setFilter] = useState("");
   // board.applySprintChange can only ever drop a task out of board.tasks, never add one in —
   // a task moved here from the backlog has nowhere else to live until the next poll catches up
@@ -30,12 +33,15 @@ export function PlanningView({ projectId, board, sprintId, onTasksChange }: Plan
   // 10s poll, a second held-move dialog and a second copy of every write handler for a list
   // that needs none of them.
   useEffect(() => {
+    setBacklogLoading(true);
+    setBacklogError(false);
     api
       .get(`/api/projects/${projectId}/tasks?sprint=backlog`)
       .then(setBacklog)
-      .catch(() => setBacklog([]));
+      .catch(() => setBacklogError(true))
+      .finally(() => setBacklogLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId]);
+  }, [projectId, backlogReloadToken]);
 
   useEffect(() => {
     setSprintOverlay([]);
@@ -126,6 +132,10 @@ export function PlanningView({ projectId, board, sprintId, onTasksChange }: Plan
           }}
           actionIcon="add"
           onDropTask={dropInto(null)}
+          loading={backlogLoading}
+          error={backlogError}
+          errorMessage="Couldn't load the backlog."
+          onRetry={() => setBacklogReloadToken((n) => n + 1)}
           testId="planning-pane-backlog"
         />
       </div>
