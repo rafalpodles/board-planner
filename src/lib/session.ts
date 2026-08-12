@@ -34,6 +34,27 @@ export function appOrigins(): string[] {
     .filter((origin) => origin.length > 0);
 }
 
+/**
+ * This instance's own origin, from configuration only.
+ *
+ * Never from a request header. `x-forwarded-host` is client-supplied on a deployment with no
+ * proxy in front, and reading it turned the MCP tool client into a reader of whatever address a
+ * token holder named, and the PM OAuth callback into an open redirect (BP-316). Returns null
+ * rather than guessing, so every caller has to decide what "not configured" means for it.
+ */
+export function selfOrigin(): string | null {
+  const configured = appOrigins()[0];
+  if (configured) return configured;
+
+  const built = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  if (!built) return null;
+  try {
+    return normaliseOrigin(new URL(built).origin);
+  } catch {
+    return null;
+  }
+}
+
 export function assertSessionConfig(): void {
   if (!allowsInsecureCookie()) return;
 

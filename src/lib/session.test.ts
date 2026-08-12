@@ -14,6 +14,7 @@ vi.mock("@/models/session", () => ({
 const {
   allowsInsecureCookie,
   appOrigins,
+  selfOrigin,
   assertSessionConfig,
   buildSessionCookie,
   checkProvenance,
@@ -453,5 +454,51 @@ describe("buildSessionCookie — Max-Age follows the absolute cap", () => {
 
     expect(maxAge).toBeGreaterThan(SESSION_IDLE_TTL_MS / 1000);
     expect(maxAge).toBeLessThanOrEqual(SESSION_ABSOLUTE_TTL_MS / 1000);
+  });
+});
+
+// BP-316: this app's own origin used to be read off x-forwarded-host in two places — the MCP tool
+// client's base URL and the PM OAuth redirect_uri. On a deployment with no proxy in front that
+// header is whatever the caller sends.
+describe("selfOrigin", () => {
+  const ORIGINAL = { ...process.env };
+
+  beforeEach(() => {
+    delete process.env.APP_ORIGIN;
+    delete process.env.NEXT_PUBLIC_APP_URL;
+  });
+
+  afterEach(() => {
+    process.env = { ...ORIGINAL };
+  });
+
+  it("prefers the configured APP_ORIGIN", () => {
+    process.env.APP_ORIGIN = "https://board.example.com";
+    process.env.NEXT_PUBLIC_APP_URL = "https://stale.example.com";
+
+    expect(selfOrigin()).toBe("https://board.example.com");
+  });
+
+  it("takes the first origin when several are configured", () => {
+    process.env.APP_ORIGIN = "https://board.example.com,https://alias.example.com";
+
+    expect(selfOrigin()).toBe("https://board.example.com");
+  });
+
+  it("falls back to the build-time app URL, reduced to its origin", () => {
+    process.env.NEXT_PUBLIC_APP_URL = "https://board.example.com/some/path";
+
+    expect(selfOrigin()).toBe("https://board.example.com");
+  });
+
+  // The point of the whole change: no header, no guess, no default that happens to work in dev
+  it("returns null rather than guessing when neither is configured", () => {
+    expect(selfOrigin()).toBeNull();
+  });
+
+  it("returns null for a build-time value that is not a URL", () => {
+    process.env.NEXT_PUBLIC_APP_URL = "not a url";
+
+    expect(selfOrigin()).toBeNull();
   });
 });

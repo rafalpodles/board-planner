@@ -32,7 +32,7 @@ export const POST = withProjectOwner(async (request, { params, user }) => {
     return NextResponse.json({ error: `Server "${name}" does not use OAuth auth` }, { status: 400 });
   }
 
-  const redirectUri = getPmOauthRedirectUri(request);
+  const redirectUri = getPmOauthRedirectUri();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const oauth: any = server.oauth ?? {};
 

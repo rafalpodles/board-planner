@@ -1,11 +1,22 @@
 import { NextResponse } from "next/server";
-import { getPublicOrigin, metadataCorsOptionsRequestHandler } from "mcp-handler";
+import { metadataCorsOptionsRequestHandler } from "mcp-handler";
+import { selfOrigin } from "@/lib/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET(req: Request) {
-  const origin = getPublicOrigin(req);
+// This document tells an MCP client where to send the user to authorize and where to POST the
+// code, so the origin in it must not come from a request header. It carries no Cache-Control, so
+// a forged x-forwarded-host stored by any shared cache would hand other clients an attacker's
+// authorization and token endpoints (BP-316).
+export async function GET() {
+  const origin = selfOrigin();
+  if (!origin) {
+    return NextResponse.json(
+      { error: "server_error", error_description: "APP_ORIGIN is not configured" },
+      { status: 500, headers: { "Access-Control-Allow-Origin": "*" } }
+    );
+  }
   return NextResponse.json(
     {
       issuer: origin,
