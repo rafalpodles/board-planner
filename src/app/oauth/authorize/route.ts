@@ -76,6 +76,10 @@ function htmlPage(body: string, status = 200): Response {
       .proj{display:flex;align-items:center;gap:8px;font-size:14px;padding:5px 0;cursor:pointer}
       .key{color:#9aa0aa;font-family:ui-monospace,monospace;font-size:12px}
       .hint{color:#9aa0aa;font-size:12px;margin-top:10px;line-height:1.5}
+      .dest{background:#0f1115;border:1px solid #2a2e37;border-radius:8px;padding:10px 12px;margin:0 0 16px;font-size:12px;color:#9aa0aa;line-height:1.6}
+      .dest b{display:block;color:#c3c8d1;font-weight:600;margin-bottom:2px}
+      .dest code{font-family:ui-monospace,monospace;color:#e6e6e6;word-break:break-all}
+      .warn{background:#3a2f1d;border:1px solid #6b552b;color:#f0d9a8;padding:8px 12px;border-radius:8px;font-size:12px;margin-bottom:12px;line-height:1.5}
       input[type=radio],input[type=checkbox]{accent-color:#5b7cfa}
     </style></head><body><div class="card">${body}</div></body></html>`,
     { status, headers: { "content-type": "text/html; charset=utf-8" } }
@@ -100,11 +104,36 @@ function hiddenFields(p: AuthParams): string {
     .join("");
 }
 
+// The one fact that lets somebody notice they are on an attacker's authorization: the whole
+// flow happens on the real domain with a real certificate, and the client name is free text
+// the client chose for itself.
+function provenance(clientName: string, redirectUri: string): string {
+  const label = clientName ? escapeHtml(clientName) : "An application";
+  return `
+    <div class="dest">
+      <b>Sends your authorization to</b>
+      <code>${escapeHtml(originOf(redirectUri))}</code>
+    </div>
+    <div class="warn">
+      ${label} registered itself with this ${APP_NAME} instance. Nobody has reviewed it. Continue only if
+      you started this yourself and recognise the address above.
+    </div>`;
+}
+
+function originOf(redirectUri: string): string {
+  try {
+    return new URL(redirectUri).origin;
+  } catch {
+    return redirectUri;
+  }
+}
+
 function loginForm(p: AuthParams, clientName: string, error?: string): Response {
   const label = clientName ? escapeHtml(clientName) : "An application";
   return htmlPage(`
     <h1>Sign in to ${APP_NAME}</h1>
     <p class="sub"><span class="app">${label}</span> wants to access your ${APP_NAME} account.</p>
+    ${provenance(clientName, p.redirectUri)}
     ${error ? `<div class="err">${escapeHtml(error)}</div>` : ""}
     <form method="post" action="/oauth/authorize">
       <input type="hidden" name="phase" value="login">
@@ -120,6 +149,7 @@ function loginForm(p: AuthParams, clientName: string, error?: string): Response 
 function consentForm(
   ticket: string,
   clientName: string,
+  redirectUri: string,
   projects: { _id: string; name: string; key: string }[],
   error?: string
 ): Response {
@@ -133,12 +163,13 @@ function consentForm(
   return htmlPage(`
     <h1>Grant access</h1>
     <p class="sub">Choose what <span class="app">${label}</span> may access.</p>
+    ${provenance(clientName, redirectUri)}
     ${error ? `<div class="err">${escapeHtml(error)}</div>` : ""}
     <form method="post" action="/oauth/authorize">
       <input type="hidden" name="phase" value="consent">
       <input type="hidden" name="ticket" value="${escapeHtml(ticket)}">
-      <label class="mode"><input type="radio" name="access" value="all" checked> All projects — full account access</label>
-      <label class="mode"><input type="radio" name="access" value="limited"> Only selected projects</label>
+      <label class="mode"><input type="radio" name="access" value="limited" checked> Only selected projects</label>
+      <label class="mode"><input type="radio" name="access" value="all"> All projects — full account access</label>
       <div class="projects">${rows || '<span class="key">No projects</span>'}</div>
       <p class="hint">If you pick specific projects, this connection is limited to them (tasks, comments, sprints) and cannot perform admin actions.</p>
       <button class="primary" type="submit">Authorize</button>
@@ -216,12 +247,13 @@ export async function POST(req: Request) {
     expiresAt: new Date(Date.now() + CONSENT_TTL_SECONDS * 1000),
   });
 
-  return consentForm(ticket, client.clientName, await accessibleProjects(user));
+  return consentForm(ticket, client.clientName, p.redirectUri, await accessibleProjects(user));
 }
 
 async function handleConsent(form: FormData): Promise<Response> {
   const ticket = String(form.get("ticket") || "");
-  const access = String(form.get("access") || "all");
+  // Absent means the narrow grant: a request that never made the choice must not get the wide one
+  const access = String(form.get("access") || "limited");
   const selected = form.getAll("projects").map((v) => String(v));
 
   const consent = await OAuthConsent.findOne({ ticketHash: sha256(ticket) });
@@ -247,7 +279,13 @@ async function handleConsent(form: FormData): Promise<Response> {
     const accessibleIds = new Set(accessible.map((p) => p._id));
     allowedProjects = [...new Set(selected)].filter((id) => accessibleIds.has(id));
     if (allowedProjects.length === 0) {
-      return consentForm(ticket, client.clientName, accessible, "Select at least one project, or choose “All projects”.");
+      return consentForm(
+        ticket,
+        client.clientName,
+        consent.redirectUri,
+        accessible,
+        "Select at least one project, or choose “All projects”."
+      );
     }
   }
 

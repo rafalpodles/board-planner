@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { OAuthClient } from "@/models/oauthClient";
 import { newClientId } from "@/lib/oauth";
+import { getClientIp } from "@/lib/auth";
+import { isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,11 +14,26 @@ const CORS = {
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
+const MAX_CLIENT_NAME = 80;
+const MAX_REDIRECT_URIS = 10;
+const REGISTRATIONS_PER_WINDOW = 10;
+
+function isLoopback(hostname: string): boolean {
+  const host = hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  // Anchored at both ends: 127.0.0.1.attacker.example starts with "127." and is not loopback
+  return host === "localhost" || host === "::1" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host);
+}
+
+/**
+ * RFC 8252: `http` only for loopback. Anything else must be `https`, or the
+ * authorization code travels in cleartext to a host the user never sees.
+ */
 function isValidRedirectUri(value: unknown): value is string {
-  if (typeof value !== "string") return false;
+  if (typeof value !== "string" || value.length > 500) return false;
   try {
     const u = new URL(value);
-    return u.protocol === "https:" || u.protocol === "http:";
+    if (u.protocol === "https:") return true;
+    return u.protocol === "http:" && isLoopback(u.hostname);
   } catch {
     return false;
   }
@@ -29,18 +46,40 @@ function isValidRedirectUri(value: unknown): value is string {
 export async function POST(req: Request) {
   await connectDB();
 
+  // Unauthenticated and public by design, so the only bound on how far the client
+  // collection can be grown is the caller's address
+  const clientIp = getClientIp(req);
+  const throttleKey = sourceKey(clientIp ?? "-", "oauth_register");
+  if (isRateLimited(throttleKey, REGISTRATIONS_PER_WINDOW)) {
+    return NextResponse.json(
+      { error: "invalid_request", error_description: "Too many client registrations from this address. Try again later." },
+      { status: 429, headers: CORS }
+    );
+  }
+  recordFailedAttempt(throttleKey);
+
   const body = await req.json().catch(() => null);
   const redirectUris = body?.redirect_uris;
 
-  if (!Array.isArray(redirectUris) || redirectUris.length === 0 || !redirectUris.every(isValidRedirectUri)) {
+  if (
+    !Array.isArray(redirectUris) ||
+    redirectUris.length === 0 ||
+    redirectUris.length > MAX_REDIRECT_URIS ||
+    !redirectUris.every(isValidRedirectUri)
+  ) {
     return NextResponse.json(
-      { error: "invalid_redirect_uri", error_description: "redirect_uris must be a non-empty array of valid http(s) URIs" },
+      {
+        error: "invalid_redirect_uri",
+        error_description:
+          "redirect_uris must be a non-empty array of https URIs; http is accepted only for loopback addresses",
+      },
       { status: 400, headers: CORS }
     );
   }
 
   const clientId = newClientId();
-  const clientName = typeof body?.client_name === "string" ? body.client_name : "";
+  const clientName =
+    typeof body?.client_name === "string" ? body.client_name.slice(0, MAX_CLIENT_NAME) : "";
 
   await OAuthClient.create({ clientId, clientName, redirectUris });
 
