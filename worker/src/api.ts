@@ -35,6 +35,15 @@ export interface ApiClient {
   postEvent(event: PhaseEvent): Promise<{ applied: boolean }>;
 }
 
+// A task key is server-controlled text that the worker turns into a directory name under its own
+// worktree root and into a positional git argument. Refused here rather than sanitised: a key this
+// worker cannot name safely is one it must not run under some other name nobody chose.
+const SAFE_TASK_KEY = /^[A-Za-z0-9][A-Za-z0-9_-]*-\d+$/;
+
+function isSafeTaskKey(taskKey: string): boolean {
+  return SAFE_TASK_KEY.test(taskKey);
+}
+
 interface RawTask {
   _id: string;
   project?: unknown;
@@ -215,10 +224,23 @@ export function createApiClient(
       if (response.status === 204) return null;
 
       const raw = (await response.json()) as RawTask;
+      const taskKey = `${await keyForTasks(projectId)}-${raw.taskNumber}`;
+      if (!isSafeTaskKey(taskKey)) {
+        // Handed back with the attempt charged, not refunded: no later attempt can name this key
+        // either, so charging is what eventually parks the task for a human instead of claiming
+        // and refusing it again on every poll.
+        await send(projectId, `/tasks/${raw._id}/release`, "POST", { refund: false }).catch(
+          () => {}
+        );
+        throw new Error(
+          `refusing task key ${JSON.stringify(taskKey)}: expected a project key followed by a task number`
+        );
+      }
+
       return {
         taskId: raw._id,
         projectId: typeof raw.project === "string" && raw.project ? raw.project : projectId,
-        taskKey: `${await keyForTasks(projectId)}-${raw.taskNumber}`,
+        taskKey,
         taskNumber: raw.taskNumber,
         title: raw.title,
         description: raw.description,
