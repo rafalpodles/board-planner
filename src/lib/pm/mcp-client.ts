@@ -1,3 +1,8 @@
+import { safeFetch } from "@/lib/safe-fetch";
+
+// Mirrors the carve-out isAllowedMcpServerUrl makes for local MCP servers outside production
+const MCP_DESTINATION = { allowLoopback: process.env.NODE_ENV !== "production" };
+
 const PROTOCOL_VERSION = "2025-03-26";
 const DISCOVERY_TIMEOUT_MS = 10_000;
 const CALL_TIMEOUT_MS = 30_000;
@@ -88,12 +93,12 @@ export class McpClient {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const res = await fetch(this.url, {
+      const res = await safeFetch(this.url, {
         method: "POST",
         headers: this.headers(),
         body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
         signal: controller.signal,
-      });
+      }, MCP_DESTINATION);
       const sid = res.headers.get("mcp-session-id");
       if (sid) this.sessionId = sid;
       if (!res.ok) {
@@ -116,12 +121,12 @@ export class McpClient {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), DISCOVERY_TIMEOUT_MS);
     try {
-      await fetch(this.url, {
+      await safeFetch(this.url, {
         method: "POST",
         headers: this.headers(),
         body: JSON.stringify({ jsonrpc: "2.0", method }),
         signal: controller.signal,
-      });
+      }, MCP_DESTINATION);
     } catch {
       // Notifications are best-effort; some servers reject them entirely.
     } finally {
