@@ -3,15 +3,17 @@
 import { useEffect, useState } from "react";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
-import { ApiSprint } from "@/types";
+import { ApiSprint, ApiTask } from "@/types";
 import { columnIdsWithRole } from "@/lib/columns";
 import { useProjectBoard } from "@/hooks/use-project-board";
 import { ProjectBoardView } from "@/components/kanban/ProjectBoardView";
 import { resolveSelectedSprint } from "@/lib/sprint-selection";
 import { SprintSelector } from "@/components/sprints/SprintSelector";
 import { SprintHeader } from "@/components/sprints/SprintHeader";
+import { PlanningView } from "@/components/sprints/PlanningView";
 import { SprintFormModal, SprintFormValues } from "@/components/sprints/SprintFormModal";
 import { CompleteSprintDialog } from "@/components/sprints/CompleteSprintDialog";
+import { NewTaskModal } from "@/components/tasks/NewTaskModal";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useToast } from "@/components/ui/Toast";
@@ -34,6 +36,9 @@ export default function SprintsPage() {
   const { toast } = useToast();
 
   const requested = searchParams.get("sprint");
+  // Anything other than "planning" means the board — including absent, mistyped, or a
+  // value left over from a feature this page never grew.
+  const requestedView = searchParams.get("view") === "planning" ? "planning" : "board";
 
   // Starts null on purpose: passing `requested` straight through would fire
   // /tasks?sprint=<unvalidated>, and that endpoint casts the value into a Mongoose filter
@@ -47,6 +52,19 @@ export default function SprintsPage() {
   const [completing, setCompleting] = useState<ApiSprint | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<ApiSprint | null>(null);
   const [initialLoadDone, setInitialLoadDone] = useState(false);
+  // The panes' own counts come straight from board.tasks, but board.applySprintChange can
+  // only ever drop a task out of that list, never add one — so a task the planning view just
+  // pulled in from the backlog has no other way to reach the header's done/total.
+  const [planningTasks, setPlanningTasks] = useState<ApiTask[] | null>(null);
+  // Reset during render, not in an effect: an effect only runs after this render has
+  // already committed with the new sprint's name and the outgoing sprint's counts still
+  // attached to planningTasks. Resetting here lets React throw that render away before
+  // anything paints, instead of one frame later.
+  const [planningTasksScope, setPlanningTasksScope] = useState<string | null>(null);
+  if (planningTasksScope !== scope) {
+    setPlanningTasksScope(scope);
+    setPlanningTasks(null);
+  }
 
   useEffect(() => {
     if (board.loading) return;
@@ -58,9 +76,12 @@ export default function SprintsPage() {
     const next = resolveSelectedSprint(board.sprints, requested);
     if (next !== scope) setScope(next);
     if (next && next !== requested) {
-      router.replace(`/projects/${projectId}/sprints?sprint=${next}`);
+      // A second writer touches this same URL (the view toggle); carry whatever it wrote
+      // rather than clobbering it back to just ?sprint=.
+      const suffix = requestedView === "planning" ? "&view=planning" : "";
+      router.replace(`/projects/${projectId}/sprints?sprint=${next}${suffix}`);
     }
-  }, [board.loading, board.sprints, requested, scope, projectId, router, pathname]);
+  }, [board.loading, board.sprints, requested, requestedView, scope, projectId, router, pathname]);
 
   function openForm(sprint: ApiSprint | null) {
     setEditing(sprint);
@@ -121,20 +142,38 @@ export default function SprintsPage() {
     }
   }
 
+  // sprintScopeToQuery (src/lib/sprint-scope.ts) emits a leading "?" and stops at one
+  // parameter, so a second one is built by hand here rather than forced through it.
+  function sprintUrl(sprintId: string, targetView: "board" | "planning"): string {
+    const suffix = targetView === "planning" ? "&view=planning" : "";
+    return `/projects/${projectId}/sprints?sprint=${sprintId}${suffix}`;
+  }
+
   const selected = scope ? board.sprints.find((s) => s._id === scope) ?? null : null;
   // The one place this page decides a sprint is locked; passed down to every read-only
   // gate on this page (SprintHeader included) so they can't drift apart
   const sprintIsReadOnly = selected?.status === "completed";
+  // A completed sprint offers no planning — never lets a stale ?view=planning bookmark in
+  const view = !sprintIsReadOnly && requestedView === "planning" ? "planning" : "board";
   // Until this sprint's own tasks are in, `board.tasks` still holds the sprint we came from,
   // and showing them under this name would be the page stating something untrue
   const tasksLoaded = scope !== null && board.loadedScope === scope;
   const doneIds = new Set(columnIdsWithRole(board.project, "done"));
-  // The sprint list's own counts stand in meanwhile; after that the tasks are the truth, so
-  // a filter on the board cannot move the sprint's progress
-  const doneCount = tasksLoaded
-    ? board.tasks.filter((t) => doneIds.has(t.status)).length
-    : selected?.doneCount ?? 0;
-  const totalCount = tasksLoaded ? board.tasks.length : selected?.taskCount ?? 0;
+  // The planning view's own merged list is the truth while it's mounted, since it is the
+  // only place a task moved in from the backlog exists; the sprint list's own counts stand
+  // in until the first round trip lands, and board.tasks after that
+  const doneCount =
+    view === "planning" && planningTasks
+      ? planningTasks.filter((t) => doneIds.has(t.status)).length
+      : tasksLoaded
+        ? board.tasks.filter((t) => doneIds.has(t.status)).length
+        : selected?.doneCount ?? 0;
+  const totalCount =
+    view === "planning" && planningTasks
+      ? planningTasks.length
+      : tasksLoaded
+        ? board.tasks.length
+        : selected?.taskCount ?? 0;
 
   // Latches once, on the first render where there is nothing left to wait for, and never
   // resets — a later sprint switch is ProjectBoardView's own loadedScope/scope gate, not this
@@ -191,7 +230,7 @@ export default function SprintsPage() {
           <SprintSelector
             sprints={board.sprints}
             selectedId={scope}
-            onSelect={(id) => router.push(`/projects/${projectId}/sprints?sprint=${id}`)}
+            onSelect={(id) => router.push(sprintUrl(id, view))}
           />
           <div className="min-w-0 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:overflow-hidden">
             {selected ? (
@@ -202,26 +241,49 @@ export default function SprintsPage() {
                   doneCount={doneCount}
                   totalCount={totalCount}
                   readOnly={sprintIsReadOnly}
+                  view={view}
+                  onViewChange={(next) => router.push(sprintUrl(selected._id, next))}
                   onActivate={() => handleActivate(selected._id)}
                   onComplete={() => setCompleting(selected)}
                   onEdit={() => openForm(selected)}
                   onDelete={() => setConfirmDelete(selected)}
-                  onSelectSprint={(id) =>
-                    router.push(`/projects/${projectId}/sprints?sprint=${id}`)
-                  }
+                  onSelectSprint={(id) => router.push(sprintUrl(id, view))}
                 />
-                <ProjectBoardView
-                  board={board}
-                  readOnly={sprintIsReadOnly}
-                  pinViewMode="board"
-                  emptyState={
-                    <div className="flex flex-col items-center justify-center py-16 text-center">
-                      <h2 className="text-lg font-medium text-text-muted mb-2">
-                        No tasks in this sprint
-                      </h2>
-                    </div>
-                  }
-                />
+                {view === "planning" ? (
+                  <>
+                    <PlanningView
+                      projectId={projectId}
+                      board={board}
+                      sprintId={selected._id}
+                      onTasksChange={setPlanningTasks}
+                    />
+                    <NewTaskModal
+                      projectId={projectId}
+                      project={board.project}
+                      sprints={board.sprints}
+                      scope={scope}
+                      open={board.showNewTask}
+                      onClose={() => board.setShowNewTask(false)}
+                      onSaved={() => {
+                        board.setShowNewTask(false);
+                        board.reload();
+                      }}
+                    />
+                  </>
+                ) : (
+                  <ProjectBoardView
+                    board={board}
+                    readOnly={sprintIsReadOnly}
+                    pinViewMode="board"
+                    emptyState={
+                      <div className="flex flex-col items-center justify-center py-16 text-center">
+                        <h2 className="text-lg font-medium text-text-muted mb-2">
+                          No tasks in this sprint
+                        </h2>
+                      </div>
+                    }
+                  />
+                )}
               </>
             ) : (
               <Spinner />
