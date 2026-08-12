@@ -8,7 +8,7 @@ import { getPmUser } from "./pm-user";
 import { runPmTurn } from "./agent";
 import { isOverDailyTurnCap } from "./turn-cap";
 import { acquireTurnLock, releaseTurnLock } from "./turn-lock";
-import { buildNeedsHumanReviewPrompt } from "./autonomy";
+import { NEEDS_HUMAN_REVIEW_DISALLOWED_TOOLS, buildNeedsHumanReviewPrompt } from "./autonomy";
 import { getProjectColumns } from "@/lib/columns";
 import { isPmRunnable } from "./availability";
 
@@ -123,6 +123,7 @@ export async function runPmTrigger(trigger: IPmTrigger): Promise<PmTriggerOutcom
       userMessage: buildNeedsHumanReviewPrompt(trigger.taskKey),
       triggeredByUserId: String(pmUser._id),
       trigger: { type: "needs_human_review", taskKey: trigger.taskKey },
+      disallowedTools: NEEDS_HUMAN_REVIEW_DISALLOWED_TOOLS,
       signal: abort.signal,
     });
     if (result.ok) {

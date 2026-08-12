@@ -386,7 +386,7 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
           checked={draft.value.handleNhr}
           onChange={(v) => draft.set("handleNhr", v)}
           label={'Review tasks that land in "Needs human review"'}
-          hint="Queued as they arrive, one turn each."
+          hint="Queued as they arrive, one turn each. It answers in a comment — it never moves or assigns the task."
         />
       </SettingsCard>
 
