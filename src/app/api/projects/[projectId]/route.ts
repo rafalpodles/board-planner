@@ -50,7 +50,7 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
   const { projectId } = await params;
   const body = await request.json();
 
-  const allowed = ["name", "description", "key", "icon", "repositoryUrl", "githubToken", "gitlabHost", "gitlabToken", "codaHost", "codaDocId", "codaTableId", "codaToken"];
+  const allowed = ["name", "description", "key", "icon", "estimateFieldId", "repositoryUrl", "githubToken", "gitlabHost", "gitlabToken", "codaHost", "codaDocId", "codaTableId", "codaToken"];
   const updates: Record<string, unknown> = {};
   let workerAudit: PendingWorkerAudit[] = [];
   for (const field of allowed) {
@@ -67,6 +67,24 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
         { status: 400 }
       );
     }
+  }
+
+  if (updates.estimateFieldId !== undefined) {
+    const id = String(updates.estimateFieldId);
+    if (id !== "") {
+      const existing = await Project.findById(projectId).select("customFields");
+      if (!existing) {
+        return NextResponse.json({ error: "Project not found" }, { status: 404 });
+      }
+      const field = (existing.customFields || []).find((f) => f._id.toString() === id);
+      if (!field || field.fieldType !== "number" || field.archived) {
+        return NextResponse.json(
+          { error: "estimateFieldId must name a numeric field that is not archived" },
+          { status: 400 }
+        );
+      }
+    }
+    updates.estimateFieldId = id;
   }
 
   if (body.worker !== undefined) {

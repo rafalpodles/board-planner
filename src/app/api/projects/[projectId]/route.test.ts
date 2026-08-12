@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const getAuthUser = vi.fn();
 const check = vi.fn();
 const projectFindById = vi.fn();
+const projectFindByIdAndUpdate = vi.fn();
 const taskFind = vi.fn();
 const taskDeleteMany = vi.fn();
 const commentDeleteMany = vi.fn();
@@ -21,10 +22,12 @@ vi.mock("@/lib/auth", () => ({
   RateLimitError: class RateLimitError extends Error {},
 }));
 vi.mock("@/lib/grants", () => ({ check }));
+vi.mock("@/lib/projectAudit", () => ({ logProjectAudit: vi.fn() }));
 vi.mock("@/models/project", () => ({
   Project: {
     findById: projectFindById,
     findByIdAndDelete: projectFindByIdAndDelete,
+    findByIdAndUpdate: projectFindByIdAndUpdate,
   },
 }));
 vi.mock("@/models/task", () => ({
@@ -56,14 +59,32 @@ vi.mock("@/models/projectAuditLog", () => ({
   ProjectAuditLog: { deleteMany: projectAuditLogDeleteMany },
 }));
 
-const { DELETE } = await import("./route");
+const { DELETE, PUT } = await import("./route");
 
 const OWNER = { _id: "u1", role: "member" };
 const MEMBER = { _id: "u2", role: "member" };
 const PROJECT_ID = "507f1f77bcf86cd799439011";
 
+const numberFieldId = "6a70afff45d39cd9bc8bb501";
+const textFieldId = "6a70afff45d39cd9bc8bb502";
+const archivedNumberFieldId = "6a70afff45d39cd9bc8bb503";
+
+const PROJECT_CUSTOM_FIELDS = [
+  { _id: { toString: () => numberFieldId }, fieldType: "number", archived: false },
+  { _id: { toString: () => textFieldId }, fieldType: "text", archived: false },
+  { _id: { toString: () => archivedNumberFieldId }, fieldType: "number", archived: true },
+];
+
 function request() {
   return new Request("http://localhost/api/projects/p1", { method: "DELETE" });
+}
+
+function putRequest(body: unknown) {
+  return new Request("http://localhost/api/projects/p1", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
 }
 
 const ctx = () => ({ params: Promise.resolve({ projectId: PROJECT_ID }) });
@@ -73,6 +94,14 @@ beforeEach(() => {
   getAuthUser.mockResolvedValue(OWNER);
   projectFindById.mockReturnValue({
     toObject: () => ({ _id: PROJECT_ID, name: "Test Project" }),
+    select: () => Promise.resolve({ customFields: PROJECT_CUSTOM_FIELDS }),
+  });
+  projectFindByIdAndUpdate.mockReturnValue({
+    populate: () =>
+      Promise.resolve({
+        _id: PROJECT_ID,
+        toObject: () => ({ _id: PROJECT_ID, name: "Test Project" }),
+      }),
   });
   taskFind.mockReturnValue({
     distinct: () => Promise.resolve([]),
@@ -105,5 +134,54 @@ describe("DELETE /api/projects/[projectId]", () => {
 
     expect(response.status).toBe(403);
     expect(projectFindByIdAndDelete).not.toHaveBeenCalled();
+  });
+});
+
+describe("PUT /api/projects/[projectId] estimateFieldId", () => {
+  beforeEach(() => {
+    check.mockResolvedValue(true);
+  });
+
+  it("refuses a designation naming a field the project does not have", async () => {
+    const res = await PUT(putRequest({ estimateFieldId: "6a70afff45d39cd9bc8bb5ff" }), ctx());
+
+    expect(res.status).toBe(400);
+    expect(projectFindByIdAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("refuses a designation naming a field that is not numeric", async () => {
+    const res = await PUT(putRequest({ estimateFieldId: textFieldId }), ctx());
+
+    expect(res.status).toBe(400);
+    expect(projectFindByIdAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("refuses a designation naming an archived field", async () => {
+    const res = await PUT(putRequest({ estimateFieldId: archivedNumberFieldId }), ctx());
+
+    expect(res.status).toBe(400);
+    expect(projectFindByIdAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("accepts an empty designation", async () => {
+    const res = await PUT(putRequest({ estimateFieldId: "" }), ctx());
+
+    expect(res.status).toBe(200);
+    expect(projectFindByIdAndUpdate).toHaveBeenCalledWith(
+      PROJECT_ID,
+      expect.objectContaining({ estimateFieldId: "" }),
+      expect.anything()
+    );
+  });
+
+  it("accepts a designation naming a numeric, non-archived field", async () => {
+    const res = await PUT(putRequest({ estimateFieldId: numberFieldId }), ctx());
+
+    expect(res.status).toBe(200);
+    expect(projectFindByIdAndUpdate).toHaveBeenCalledWith(
+      PROJECT_ID,
+      expect.objectContaining({ estimateFieldId: numberFieldId }),
+      expect.anything()
+    );
   });
 });
