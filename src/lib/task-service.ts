@@ -772,6 +772,10 @@ export async function claimNextTask(
   // something here. Finished is the done role rather than a status called "done": a board that
   // renamed its last column would otherwise report every shipped blocker as open.
   //
+  // $nin over the done ids, not $in over the remaining columns: a task left behind by a deleted
+  // column names no column at all, and the fail-safe reading of that is "not finished" — hold the
+  // dependent back rather than start work on a promise nothing can confirm.
+  //
   // Read before the claim rather than joined inside it, because MongoDB cannot join in an update.
   // The claim itself stays the one atomic findOneAndUpdate it was, so two workers still cannot
   // take the same task; only the blocker picture can age, and it ages the safe way — a blocker
