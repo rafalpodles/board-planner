@@ -808,6 +808,9 @@ export interface ApiSprint {
   status: SprintStatus;
   taskCount?: number;
   doneCount?: number;
+  // Present only when the project designates an estimate field
+  estimateTotal?: number;
+  estimateDone?: number;
   createdAt: string;
   updatedAt: string;
 }

@@ -21,8 +21,23 @@ export const GET = withProjectAccess(async (_request, { params }) => {
 
   // Resolved once for the whole list rather than per sprint: every sprint here belongs to the same
   // project, so they share a board
-  const project = await Project.findById(projectId, "columns").lean();
+  const project = await Project.findById(projectId, "columns estimateFieldId").lean();
   const doneIds = columnIdsWithRole(project, "done");
+  const estimateFieldId = project?.estimateFieldId || "";
+  // This pipeline runs on the board's poll, so one legacy value must not be able to throw and
+  // take the poll down with it (onError) — and a bare $sum would instead silently ignore a
+  // value stored as a string and produce a total that looks right and is wrong (onNull covers
+  // the same case for a task that never got a value at all).
+  const estimate = estimateFieldId
+    ? {
+        $convert: {
+          input: `$customFieldValues.${estimateFieldId}`,
+          to: "double",
+          onError: 0,
+          onNull: 0,
+        },
+      }
+    : null;
 
   const counts = await Task.aggregate([
     { $match: { project: new mongoose.Types.ObjectId(projectId), sprint: { $in: sprintIds } } },
@@ -31,6 +46,12 @@ export const GET = withProjectAccess(async (_request, { params }) => {
         _id: "$sprint",
         total: { $sum: 1 },
         done: { $sum: { $cond: [{ $in: ["$status", doneIds] }, 1, 0] } },
+        ...(estimate
+          ? {
+              estimateTotal: { $sum: estimate },
+              estimateDone: { $sum: { $cond: [{ $in: ["$status", doneIds] }, estimate, 0] } },
+            }
+          : {}),
       },
     },
   ]);
@@ -43,6 +64,9 @@ export const GET = withProjectAccess(async (_request, { params }) => {
       ...s,
       taskCount: c?.total || 0,
       doneCount: c?.done || 0,
+      ...(estimate
+        ? { estimateTotal: c?.estimateTotal || 0, estimateDone: c?.estimateDone || 0 }
+        : {}),
     };
   });
 
