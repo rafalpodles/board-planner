@@ -13,6 +13,7 @@ import { SprintHeader } from "@/components/sprints/SprintHeader";
 import { PlanningView } from "@/components/sprints/PlanningView";
 import { SprintFormModal, SprintFormValues } from "@/components/sprints/SprintFormModal";
 import { CompleteSprintDialog } from "@/components/sprints/CompleteSprintDialog";
+import { NewTaskModal } from "@/components/tasks/NewTaskModal";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useToast } from "@/components/ui/Toast";
@@ -249,12 +250,26 @@ export default function SprintsPage() {
                   onSelectSprint={(id) => router.push(sprintUrl(id, view))}
                 />
                 {view === "planning" ? (
-                  <PlanningView
-                    projectId={projectId}
-                    board={board}
-                    sprintId={selected._id}
-                    onTasksChange={setPlanningTasks}
-                  />
+                  <>
+                    <PlanningView
+                      projectId={projectId}
+                      board={board}
+                      sprintId={selected._id}
+                      onTasksChange={setPlanningTasks}
+                    />
+                    <NewTaskModal
+                      projectId={projectId}
+                      project={board.project}
+                      sprints={board.sprints}
+                      scope={scope}
+                      open={board.showNewTask}
+                      onClose={() => board.setShowNewTask(false)}
+                      onSaved={() => {
+                        board.setShowNewTask(false);
+                        board.reload();
+                      }}
+                    />
+                  </>
                 ) : (
                   <ProjectBoardView
                     board={board}

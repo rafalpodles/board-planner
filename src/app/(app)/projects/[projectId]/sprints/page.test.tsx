@@ -323,6 +323,15 @@ describe("Sprints tab", () => {
     expect(screen.queryByRole("button", { name: "Create Task" })).toBeNull();
   });
 
+  // ProjectBoardView's own New Task modal is not mounted in Planning; Create Task must
+  // work there too rather than silently doing nothing until the next switch to Board
+  it("opens the new task modal from Planning, not just Board", async () => {
+    query.current = "sprint=s1&view=planning";
+    await renderSprints();
+    await click(screen.getByRole("button", { name: "Create Task" }));
+    expect(screen.getByRole("heading", { name: "New Task" })).toBeTruthy();
+  });
+
   it("shows 0/0 for a sprint with no tasks", async () => {
     await renderSprints(sprints, { tasks: [] });
     expect(screen.getByTestId("sprint-progress").textContent).toBe("0/0");
