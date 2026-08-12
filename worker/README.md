@@ -149,6 +149,10 @@ and `SIGINT` both finish the task in flight before the loop exits.
   blocker sits in a column with the `done` role, so a board that renamed its last column is read
   correctly. Nothing is pushed when a blocker finishes: the dependent simply stops being skipped,
   and the next poll — seconds later — picks it up.
+
+  A board with no `done`-role column at all cannot say what finished means, so it cannot say what
+  blocked means either; there the gate is skipped rather than freezing every dependent for good
+  with nothing on the task to say why.
 - **Nothing merges unreviewed.** The review gate is a separate Claude with no memory of writing
   the code, and it sees only the diff.
 - **Nothing executes before the static gates have read the diff.** `protected-paths` refuses

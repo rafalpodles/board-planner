@@ -217,6 +217,29 @@ test.describe("blockers", () => {
     expect((await read(blocked)).status).toBe(APPROVED);
   });
 
+  // The everyday shape this exists for: two cards in the approved column, one waiting on the other.
+  // Here the guard has to beat the board order — the blocked card is the one the claim reaches first
+  test("the blocker is taken first, against board order", async () => {
+    await setScope("any");
+    const blocker = await addTask({ order: 2 });
+    const blocked = await addTask({ blockedBy: [blocker], order: 1 });
+
+    const claimed = await claimNextTask(String(PROJECT_ID), WORKER, "run-1", IDENTITY);
+
+    expect(String(claimed?._id)).toBe(String(blocker));
+    expect((await read(blocked)).status).toBe(APPROVED);
+  });
+
+  // A deleted column leaves its tasks naming no column at all. That is not "finished", and reading
+  // it as finished would start work on a promise nothing can confirm
+  test("a blocker orphaned by a deleted column still counts as unfinished", async () => {
+    await setScope("any");
+    const blocker = await addTask({ status: "column_since_deleted", order: 1 });
+    await addTask({ blockedBy: [blocker], order: 2 });
+
+    expect(await claimNextTask(String(PROJECT_ID), WORKER, "run-1", IDENTITY)).toBeNull();
+  });
+
   test("the unblocked sibling behind it is claimed instead", async () => {
     await setScope("any");
     // Ordered ahead of the sibling, so claiming the sibling can only mean the blocked one was
