@@ -1,4 +1,5 @@
 import { DEFAULT_REVIEW_MODEL, modelOr } from "../config.js";
+import { childEnv } from "../env.js";
 import { CommandResult, Runner } from "../exec.js";
 import { Gate, GateContext } from "../types.js";
 
@@ -121,8 +122,10 @@ export function reviewGate(runner: Runner, timeoutMs: number, reviewModel?: stri
         return { ok: false, reason: "there is no patch to review" };
       }
 
-      const env = { ...process.env };
-      delete env.ANTHROPIC_API_KEY;
+      // Same allowlist as the implementer: the CLI authenticates from its logged-in session under
+      // HOME, and the reviewer judges a diff written by an agent, so it is the last place that
+      // should hold the operator's board or GitHub credential
+      const env = childEnv();
 
       const result = await runner.run(
         "claude",
