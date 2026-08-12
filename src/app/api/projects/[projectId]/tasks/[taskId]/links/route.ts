@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
 import { Task } from "@/models/task";
@@ -12,10 +13,10 @@ export const POST = withProjectAccess(async (request, { params }) => {
 
   const body = await request.json();
   // blockedByTaskId is the pre-CP-143 field name, still accepted
-  const targetTaskId: string | undefined = body.taskId || body.blockedByTaskId;
+  const targetTaskId: unknown = body.taskId || body.blockedByTaskId;
   const type: DependencyType = body.type || "blocked_by";
 
-  if (!targetTaskId) {
+  if (typeof targetTaskId !== "string" || !isValidObjectId(targetTaskId)) {
     return NextResponse.json({ error: "taskId is required" }, { status: 400 });
   }
   if (!DEPENDENCY_TYPES.includes(type)) {
@@ -146,11 +147,17 @@ export const DELETE = withProjectAccess(async (request, { params }) => {
   await connectDB();
 
   const body = await request.json();
-  const targetTaskId: string | undefined = body.taskId || body.blockedByTaskId;
+  const targetTaskId: unknown = body.taskId || body.blockedByTaskId;
   const type: DependencyType = body.type || "blocked_by";
 
-  if (!targetTaskId) {
+  if (typeof targetTaskId !== "string" || !isValidObjectId(targetTaskId)) {
     return NextResponse.json({ error: "taskId is required" }, { status: 400 });
+  }
+  if (!DEPENDENCY_TYPES.includes(type)) {
+    return NextResponse.json(
+      { error: `type must be one of: ${DEPENDENCY_TYPES.join(", ")}` },
+      { status: 400 }
+    );
   }
 
   const update =

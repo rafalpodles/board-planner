@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { withAdmin } from "@/lib/middleware";
 import { OAuthClient } from "@/models/oauthClient";
@@ -36,7 +37,7 @@ export const DELETE = withAdmin(async (request) => {
   await connectDB();
 
   const { id } = await request.json();
-  if (!id) {
+  if (typeof id !== "string" || !isValidObjectId(id)) {
     return NextResponse.json({ error: "Client id is required" }, { status: 400 });
   }
 
