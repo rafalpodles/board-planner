@@ -18,6 +18,10 @@ const workerSchema = new Schema<IWorker>(
       }],
       default: [],
     },
+    // What an admin approved this machine for. Written at approval and read on every claim: the
+    // repos the worker reports narrow this set, they do not define it. A worker with none claims
+    // nothing, which is what an enrolment predating BP-305 means.
+    approvedProjects: { type: [{ type: Schema.Types.ObjectId, ref: "Project" }], default: [] },
     policy: {
       pollIntervalMs: { type: Number, default: 30_000 },
     },

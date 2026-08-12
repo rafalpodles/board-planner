@@ -6,10 +6,11 @@ const find = vi.fn();
 const findOneAndUpdate = vi.fn();
 const updateOne = vi.fn();
 const projectLean = vi.fn();
+const countDocuments = vi.fn();
 
 vi.mock("./db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/deviceEnrolment", () => ({
-  DeviceEnrolment: { create, findOne, find, findOneAndUpdate, updateOne },
+  DeviceEnrolment: { create, findOne, find, findOneAndUpdate, updateOne, countDocuments },
 }));
 // The poll now also reads the approved project, so the app knows what to clone
 vi.mock("@/models/project", () => ({
@@ -29,12 +30,13 @@ const {
 const bcrypt = (await import("bcryptjs")).default;
 
 function candidates(rows: unknown[]) {
-  find.mockReturnValue({ sort: () => ({ limit: () => Promise.resolve(rows) }) });
+  find.mockReturnValue({ limit: () => Promise.resolve(rows) });
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
   create.mockResolvedValue({});
+  countDocuments.mockResolvedValue(0);
   candidates([]);
   projectLean.mockResolvedValue({ key: "TP", repositoryUrl: "https://github.com/o/r" });
 });
@@ -84,6 +86,37 @@ describe("starting an enrolment", () => {
     const started = await startDeviceEnrolment({ machineName: "M", machineHost: "" });
 
     expect(started.userCode).not.toMatch(/[O0I1LUAEY]/);
+  });
+});
+
+// BP-305: the poll used to load 200 rows and bcrypt.compare each one — 85ms apiece, ~17s of CPU
+// per unauthenticated request, with the attacker supplying the rows through the equally
+// unauthenticated start endpoint
+describe("the cost of a poll", () => {
+  it("narrows candidates by the indexed prefix instead of a 200-row window", async () => {
+    await pollDeviceEnrolment("cpd_" + "a".repeat(64));
+
+    expect(find).toHaveBeenCalledWith(
+      expect.objectContaining({ deviceCodePrefix: "cpd_aaaaaaaa" })
+    );
+    expect(find.mock.results[0].value.sort).toBeUndefined();
+  });
+
+  it("stores the prefix so the narrowed lookup can find the row", async () => {
+    const started = await startDeviceEnrolment({ machineName: "MacBook", machineHost: "" });
+
+    expect(create.mock.calls[0][0].deviceCodePrefix).toBe(started.deviceCode.slice(0, 12));
+  });
+
+  // The old candidate window was sort({createdAt:-1}).limit(200), so sustained flooding pushed an
+  // approved enrolment out of it and its poll answered "expired" forever
+  it("caps how many enrolments one flood can leave waiting for approval", async () => {
+    countDocuments.mockResolvedValue(20);
+
+    await expect(
+      startDeviceEnrolment({ machineName: "MacBook", machineHost: "" })
+    ).rejects.toThrow(/waiting for approval/);
+    expect(create).not.toHaveBeenCalled();
   });
 });
 

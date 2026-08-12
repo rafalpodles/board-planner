@@ -11,7 +11,8 @@ import { usePollWhileVisible } from "@/hooks/use-poll-while-visible";
 import { timeAgo } from "@/lib/time";
 import { workerPolicyRows } from "@/lib/worker-policy-view";
 import { commandStatus, WorkerCommand } from "@/lib/worker-command-status";
-import { ApiWorker, ApiWorkerPreflight } from "@/types";
+import { ApiWorker, ApiWorkerPreflight, ApiProject } from "@/types";
+import { useProjects } from "@/hooks/use-projects";
 
 const POLL_MS = 5_000;
 
@@ -20,6 +21,60 @@ const TONE_CLASSES = {
   applied: "text-text-muted",
   warning: "text-danger",
 };
+
+// What an admin approved this machine for. A worker with none claims nothing — which is what
+// every enrolment predating BP-305 is, so this is also the recovery path for them.
+function ApprovedProjectsCell({
+  worker,
+  projects,
+  disabled,
+  onToggle,
+}: {
+  worker: ApiWorker;
+  projects: ApiProject[];
+  disabled: boolean;
+  onToggle: (approvedProjects: string[]) => void;
+}) {
+  const approved = new Set(worker.approvedProjects ?? []);
+
+  if (projects.length === 0) {
+    return <span className="text-xs text-text-muted">no projects</span>;
+  }
+
+  return (
+    <div className="flex flex-col gap-1">
+      {approved.size === 0 && (
+        <span className="text-xs text-danger">claims nothing until approved</span>
+      )}
+      <div className="flex flex-wrap gap-1">
+        {projects.map((project) => {
+          const on = approved.has(project._id);
+          return (
+            <button
+              key={project._id}
+              disabled={disabled}
+              onClick={() =>
+                onToggle(
+                  on
+                    ? [...approved].filter((id) => id !== project._id)
+                    : [...approved, project._id]
+                )
+              }
+              className={`text-xs px-1.5 py-0.5 rounded border transition-colors cursor-pointer ${
+                on
+                  ? "border-primary bg-primary/10 text-primary"
+                  : "border-border text-text-muted hover:text-text"
+              }`}
+              title={on ? `Approved for ${project.name}` : `Approve for ${project.name}`}
+            >
+              {project.key}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 // A worker that has never reported this is not a worker that passed — showing it green would be the
 // "healthy in the console, fails every task" this column exists to end.
@@ -48,6 +103,7 @@ export default function AdminWorkersPage() {
   const api = useApi();
   const router = useRouter();
   const { isAdmin, isLoading: authLoading } = useAuth();
+  const { projects } = useProjects();
   const { toast } = useToast();
 
   const [workers, setWorkers] = useState<ApiWorker[] | null>(null);
@@ -74,7 +130,10 @@ export default function AdminWorkersPage() {
 
   usePollWhileVisible(load, POLL_MS, !authLoading && isAdmin);
 
-  async function patch(worker: ApiWorker, changes: Partial<Pick<ApiWorker, "enabled" | "lockedByInstance">>) {
+  async function patch(
+    worker: ApiWorker,
+    changes: Partial<Pick<ApiWorker, "enabled" | "lockedByInstance" | "approvedProjects">>
+  ) {
     setSavingId(worker._id);
     try {
       const updated = await api.patch(`/api/workers/${worker._id}`, changes);
@@ -143,6 +202,7 @@ export default function AdminWorkersPage() {
                 <th className="text-left px-3 py-2 font-medium">Host</th>
                 <th className="text-left px-3 py-2 font-medium">Version</th>
                 <th className="text-left px-3 py-2 font-medium">Checkouts</th>
+                <th className="text-left px-3 py-2 font-medium">Approved for</th>
                 <th className="text-left px-3 py-2 font-medium">Running</th>
                 <th className="text-left px-3 py-2 font-medium">Last seen</th>
                 <th className="text-left px-3 py-2 font-medium">Preflight</th>
@@ -207,6 +267,14 @@ export default function AdminWorkersPage() {
                           </span>
                         )}
                       </div>
+                    </td>
+                    <td className="px-3 py-2 max-w-[16rem]">
+                      <ApprovedProjectsCell
+                        worker={worker}
+                        projects={projects ?? []}
+                        disabled={savingId === worker._id}
+                        onToggle={(approvedProjects) => patch(worker, { approvedProjects })}
+                      />
                     </td>
                     <td className="px-3 py-2 max-w-[14rem]">
                       <PreflightCell preflight={worker.preflight} />

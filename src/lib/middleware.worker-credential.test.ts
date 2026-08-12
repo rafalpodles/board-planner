@@ -6,7 +6,10 @@ const projectFindById = vi.fn();
 const userFindById = vi.fn();
 
 vi.mock("./db", () => ({ connectDB: vi.fn() }));
-vi.mock("./worker-service", () => ({ verifyWorkerCredential }));
+vi.mock("./worker-service", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./worker-service")>();
+  return { ...actual, verifyWorkerCredential };
+});
 vi.mock("./auth", () => ({ getAuthUser, RateLimitError: class extends Error {} }));
 vi.mock("@/models/project", () => ({
   Project: { findById: projectFindById, findOne: vi.fn() },
@@ -27,6 +30,8 @@ function workerDoc(overrides: Record<string, unknown> = {}) {
     lockedByInstance: false,
     identity: IDENTITY_ID,
     repos: [{ remote: REMOTE, path: "/checkout" }],
+    // BP-305: the reported repos narrow what an admin approved, they never stand in for it
+    approvedProjects: [PROJECT_ID],
     ...overrides,
   };
 }

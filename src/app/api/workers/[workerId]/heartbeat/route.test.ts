@@ -45,6 +45,8 @@ function workerDoc(overrides: Record<string, unknown> = {}) {
     policy: { pollIntervalMs: 5000 },
     policyOverrides: ["pollIntervalMs"],
     repos: [{ remote: REMOTE, path: "/repo" }],
+    // BP-305: assignments are the approved set narrowed by the reported repos
+    approvedProjects: [PROJECT_ID],
     command: "",
     commandIssuedAt: null,
     ...overrides,
@@ -215,6 +217,7 @@ describe("one working tree, one worker", () => {
   // Only the contested checkout drops out; a second, uncontested one must still be offered
   it("drops only the contested checkout, not the whole inventory", async () => {
     workerFind.mockResolvedValue([otherOnSameHost]);
+    verifyWorkerCredential.mockResolvedValue(workerDoc({ approvedProjects: [PROJECT_ID, "p2"] }));
     projectFind.mockResolvedValue([
       enabledProject(),
       { _id: "p2", githubRepo: "owner/other", worker: { enabled: true, policy: {}, policyOverrides: [] } },

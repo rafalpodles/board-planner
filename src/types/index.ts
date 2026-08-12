@@ -548,6 +548,7 @@ export type WorkerPreset = "write" | "review" | "merge";
 export interface IDeviceEnrolment {
   _id: Types.ObjectId;
   deviceCodeHash: string;
+  deviceCodePrefix: string;
   userCode: string;
   machineName: string;
   machineHost: string;
@@ -586,6 +587,8 @@ export interface IWorker {
   protocolVersion: number;
   credentialHash: string;
   repos: WorkerRepo[];
+  // Projects an admin approved this machine for; the reported repos narrow this, never widen it
+  approvedProjects: Types.ObjectId[];
   policy: WorkerPolicy;
   // Which policy fields an operator actually set; everything else follows the default
   policyOverrides: string[];
@@ -611,6 +614,8 @@ export interface ApiWorker {
   version: string;
   protocolVersion: number;
   repos: WorkerRepo[];
+  // Projects an admin approved this machine for; empty means it claims nothing
+  approvedProjects: string[];
   policy: WorkerPolicy;
   policyOverrides: string[];
   enabled: boolean;

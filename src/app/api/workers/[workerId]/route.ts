@@ -4,7 +4,7 @@ import { connectDB } from "@/lib/db";
 import { withAuth, withWorker } from "@/lib/middleware";
 import { Worker } from "@/models/worker";
 import { Project } from "@/models/project";
-import { assignmentsFor, overriddenWorkerPolicy, toApiWorker, usableRepos } from "@/lib/worker-service";
+import { assignmentsFor, approvedProjectIds, overriddenWorkerPolicy, toApiWorker, usableRepos } from "@/lib/worker-service";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { InstanceAuditAction } from "@/types";
 
@@ -18,6 +18,12 @@ const POLICY_FIELDS = ["pollIntervalMs"] as const;
 // answer the same question the heartbeat does — otherwise a worker that reported its checkouts
 // would never learn which projects they match.
 export const GET = withWorker(async (_request, { worker }) => {
+  // The one withWorker route that used to answer a killed worker, handing it its policy, its
+  // assignments and the whole fleet inventory — an incomplete kill switch (BP-305)
+  if (!worker.enabled || worker.lockedByInstance) {
+    return NextResponse.json({ error: "this worker may not run", abort: true }, { status: 403 });
+  }
+
   await connectDB();
   const [projects, others] = await Promise.all([
     Project.find({ "worker.enabled": true }).select("_id repositoryUrl githubRepo gitlabRepo gitlabHost worker").lean(),
@@ -31,7 +37,7 @@ export const GET = withWorker(async (_request, { worker }) => {
     policy: overriddenWorkerPolicy(worker),
     // This is the field the worker actually reads, so the contested-checkout decision has to be
     // applied here and not only on the heartbeat, whose assignments nothing consumes.
-    assignments: assignmentsFor(usableRepos(worker as never, others as never), projects as never),
+    assignments: assignmentsFor(usableRepos(worker as never, others as never), projects as never, approvedProjectIds(worker)),
   });
 });
 
@@ -70,6 +76,23 @@ export const PATCH = withAuth(async (request, { params, user }) => {
   }
 
   const update: Record<string, unknown> = {};
+
+  // The only way to widen or narrow what an already-enrolled machine may claim, and the recovery
+  // path for a worker enrolled before BP-305 — those have an empty set and so claim nothing.
+  if ("approvedProjects" in body) {
+    const ids = body.approvedProjects;
+    if (!Array.isArray(ids) || ids.some((id) => typeof id !== "string" || !isValidObjectId(id))) {
+      return NextResponse.json(
+        { error: "approvedProjects must be an array of project ids" },
+        { status: 400 }
+      );
+    }
+    const known = await Project.countDocuments({ _id: { $in: ids } });
+    if (known !== new Set(ids).size) {
+      return NextResponse.json({ error: "approvedProjects names a project that does not exist" }, { status: 400 });
+    }
+    update.approvedProjects = [...new Set(ids as string[])];
+  }
 
   for (const field of ADMIN_FIELDS) {
     if (!(field in body)) continue;
