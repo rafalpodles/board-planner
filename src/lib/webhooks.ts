@@ -1,6 +1,7 @@
 import { Project } from "@/models/project";
 import { WebhookEvent } from "@/types";
 import { isAllowedWebhookUrl } from "./url-validation";
+import { safeFetch } from "./safe-fetch";
 
 interface WebhookPayload {
   event: WebhookEvent;
@@ -33,7 +34,7 @@ export async function dispatchWebhooks(
     // Fire-and-forget, don't block the main request
     for (const webhook of activeWebhooks) {
       if (!isAllowedWebhookUrl(webhook.url)) continue;
-      fetch(webhook.url, {
+      safeFetch(webhook.url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body,
