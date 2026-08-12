@@ -52,9 +52,13 @@ export function PlanningView({ projectId, board, sprintId, onTasksChange }: Plan
     [tasksLoaded, board.tasks, sprintOverlay]
   );
 
+  // Reporting on every render — including the ones before tasksLoaded catches up with a
+  // new sprintId — would hand the page an empty (but truthy) array it can't tell apart
+  // from "this sprint genuinely has no tasks", flashing 0/0 over the fallback count.
   useEffect(() => {
+    if (!tasksLoaded) return;
     onTasksChange?.(sprintTasks);
-  }, [sprintTasks, onTasksChange]);
+  }, [tasksLoaded, sprintTasks, onTasksChange]);
 
   function applyLocally(task: ApiTask, targetSprintId: string | null) {
     const moved = { ...task, sprint: targetSprintId };

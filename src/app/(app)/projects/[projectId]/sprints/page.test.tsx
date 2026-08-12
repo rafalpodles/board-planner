@@ -528,4 +528,64 @@ describe("Board / Planning toggle", () => {
       expect(screen.getByTestId("sprint-progress").textContent).toBe("4/9")
     );
   });
+
+  // PlanningView reports on every render, including the ones before its own tasksLoaded
+  // is true for the new sprint — those report an empty array, which is truthy, so it used
+  // to beat the selected?.doneCount fallback and paint "0/0" for one window per switch.
+  it("never shows 0/0 while switching sprints with Planning open", async () => {
+    const planningSprints = [
+      sprints[0],
+      {
+        _id: "s2",
+        name: "Sprint 13",
+        startDate: "2026-08-03T00:00:00Z",
+        endDate: "2026-08-17T00:00:00Z",
+        goal: "",
+        status: "planned",
+        taskCount: 5,
+        doneCount: 2,
+      },
+    ] as ApiSprint[];
+
+    api.get.mockImplementation((url: string) => {
+      if (url === "/api/projects/p1") return Promise.resolve(project);
+      if (url === "/api/projects/p1/tasks?sprint=s1") {
+        return Promise.resolve(sprintTasks.map((t) => ({ ...t })));
+      }
+      if (url === "/api/projects/p1/tasks?sprint=backlog") return Promise.resolve([]);
+      // Sprint 13's tasks never arrive, keeping the mid-switch window open under test
+      if (url === "/api/projects/p1/tasks?sprint=s2") return new Promise(() => {});
+      if (url === "/api/projects/p1/sprints") return Promise.resolve(planningSprints);
+      if (url === "/api/users/list") return Promise.resolve([]);
+      return Promise.reject(new Error(`unexpected GET ${url}`));
+    });
+
+    query.current = "sprint=s1&view=planning";
+    const { rerender } = render(<SprintsPage />);
+    await screen.findByRole("heading", { name: "Sprints" });
+    await screen.findByTestId("planning-pane-sprint");
+    expect(screen.getByTestId("sprint-progress").textContent).toBe("4/8");
+
+    query.current = "sprint=s2&view=planning";
+    await act(async () => {
+      rerender(<SprintsPage />);
+    });
+
+    expect(screen.getByRole("heading", { name: "Sprint 13", level: 2 })).toBeTruthy();
+    // Sprint 13's own doneCount/taskCount (2/5) is the fallback while its tasks are still
+    // in flight — never "0/0", which is what an empty, "loaded" report would produce
+    expect(screen.getByTestId("sprint-progress").textContent).toBe("2/5");
+  });
+
+  // page.tsx:153 clamps the view back to "board" whenever the selected sprint is
+  // read-only, even if the URL already asked for Planning — this exercises that guard
+  // for a completed sprint reached with ?view=planning already set.
+  it("clamps a completed sprint back to the board even when the URL already asks for Planning", async () => {
+    query.current = "sprint=s3&view=planning";
+    await renderSprints(completedOnly);
+
+    expect(screen.queryByRole("button", { name: "Planning" })).toBeNull();
+    expect(screen.queryByTestId("planning-pane-backlog")).toBeNull();
+    expect(screen.getByRole("link", { name: /Task 1/i })).toBeTruthy();
+  });
 });
