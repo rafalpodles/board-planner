@@ -14,7 +14,7 @@ import { Sprint } from "@/models/sprint";
 import { Notification } from "@/models/notification";
 import { PmMessage } from "@/models/pmMessage";
 import { logProjectAudit } from "@/lib/projectAudit";
-import { encryptSecret } from "@/lib/encryption";
+import { encryptSecret, isEncryptionConfigured } from "@/lib/encryption";
 import { isAllowedMcpServerUrl } from "@/lib/url-validation";
 import { validatePmConfig, isPmAvailable, mergeMcpServerTokens, sanitizeMcpServers } from "@/lib/pm/config";
 import { sanitizeProjectSecrets } from "@/lib/project-secrets";
@@ -174,15 +174,23 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
     updates.codaHost = host || "https://coda.io";
   }
 
-  // Encrypt the GitHub/GitLab tokens at rest (no-op if ENCRYPTION_KEY is unset).
-  if (typeof updates.githubToken === "string" && updates.githubToken) {
-    updates.githubToken = encryptSecret(updates.githubToken);
+  const incomingTokens = ["githubToken", "gitlabToken", "codaToken"] as const;
+  const storingAToken = incomingTokens.some(
+    (field) => typeof updates[field] === "string" && updates[field]
+  );
+  if (storingAToken && !isEncryptionConfigured()) {
+    return NextResponse.json(
+      {
+        error:
+          "ENCRYPTION_KEY is not configured on this server, so integration tokens cannot be stored. Set it to 32 bytes of hex or base64 and try again.",
+      },
+      { status: 400 }
+    );
   }
-  if (typeof updates.gitlabToken === "string" && updates.gitlabToken) {
-    updates.gitlabToken = encryptSecret(updates.gitlabToken);
-  }
-  if (typeof updates.codaToken === "string" && updates.codaToken) {
-    updates.codaToken = encryptSecret(updates.codaToken);
+  for (const field of incomingTokens) {
+    if (typeof updates[field] === "string" && updates[field]) {
+      updates[field] = encryptSecret(updates[field] as string);
+    }
   }
 
   // Read before the write: a renamed key must be remembered or every pull request opened

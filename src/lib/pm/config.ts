@@ -6,7 +6,7 @@ import {
   PM_MCP_AUTH_TYPES,
   PmMcpAuthType,
 } from "@/types";
-import { encryptSecret, decryptSecret } from "@/lib/encryption";
+import { encryptSecret, decryptSecret, isEncryptionConfigured } from "@/lib/encryption";
 import { isAllowedMcpServerUrl } from "@/lib/url-validation";
 import { isValidTimezone } from "./autonomy";
 
@@ -195,6 +195,16 @@ export function mergeMcpServerTokens(
   incoming: IPmMcpServer[],
   existing: IPmMcpServer[] | undefined
 ): { valid: true; value: IPmMcpServer[] } | { valid: false; error: string } {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const carriesSecret = incoming.some((s) => s.authToken || (s as any).oauthClientSecret);
+  if (carriesSecret && !isEncryptionConfigured()) {
+    return {
+      valid: false,
+      error:
+        "ENCRYPTION_KEY is not configured on this server, so MCP credentials cannot be stored. Set it to 32 bytes of hex or base64 and try again.",
+    };
+  }
+
   const stored = new Map((existing ?? []).map((s) => [s.name, s]));
   const merged: IPmMcpServer[] = [];
   for (const server of incoming) {
