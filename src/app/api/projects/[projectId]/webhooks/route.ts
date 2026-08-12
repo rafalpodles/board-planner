@@ -4,6 +4,8 @@ import { withProjectOwner } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { logProjectAudit } from "@/lib/projectAudit";
 import { maskSecretUrl, sanitizeProjectSecrets } from "@/lib/project-secrets";
+import { parseWebhookUrl, parseWebhookEvents } from "@/lib/webhook-input";
+import { WEBHOOK_EVENTS } from "@/types";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function masked(project: any) {
@@ -27,14 +29,17 @@ export const POST = withProjectOwner(async (request, { params, user }) => {
   await connectDB();
 
   const { url, events } = await request.json();
-  if (!url || typeof url !== "string" || !url.trim()) {
-    return NextResponse.json({ error: "URL is required" }, { status: 400 });
+  const parsedUrl = parseWebhookUrl(url);
+  if (!parsedUrl) {
+    return NextResponse.json({ error: "A valid URL is required" }, { status: 400 });
   }
 
-  try {
-    new URL(url.trim());
-  } catch {
-    return NextResponse.json({ error: "Invalid URL" }, { status: 400 });
+  const parsedEvents = events === undefined ? [...WEBHOOK_EVENTS] : parseWebhookEvents(events);
+  if (!parsedEvents) {
+    return NextResponse.json(
+      { error: `events must be a list of: ${WEBHOOK_EVENTS.join(", ")}` },
+      { status: 400 }
+    );
   }
 
   const project = await Project.findById(projectId);
@@ -44,14 +49,14 @@ export const POST = withProjectOwner(async (request, { params, user }) => {
 
   const webhooks = project.webhooks || [];
   webhooks.push({
-    url: url.trim(),
-    events: events || ["task_created", "status_changed", "comment_added"],
+    url: parsedUrl,
+    events: parsedEvents,
     enabled: true,
   } as typeof webhooks[number]);
   project.webhooks = webhooks;
   await project.save();
 
-  logProjectAudit(projectId, user._id, "settings_updated", `Webhook added: ${maskSecretUrl(url.trim())}`);
+  logProjectAudit(projectId, user._id, "settings_updated", `Webhook added: ${maskSecretUrl(parsedUrl)}`);
 
   return NextResponse.json(masked(project), { status: 201 });
 });
@@ -77,9 +82,24 @@ export const PUT = withProjectOwner(async (request, { params }) => {
     return NextResponse.json({ error: "Webhook not found" }, { status: 404 });
   }
 
-  if (updates.url !== undefined) webhook.url = updates.url;
-  if (updates.events !== undefined) webhook.events = updates.events;
-  if (updates.enabled !== undefined) webhook.enabled = updates.enabled;
+  if (updates.url !== undefined) {
+    const parsedUrl = parseWebhookUrl(updates.url);
+    if (!parsedUrl) {
+      return NextResponse.json({ error: "A valid URL is required" }, { status: 400 });
+    }
+    webhook.url = parsedUrl;
+  }
+  if (updates.events !== undefined) {
+    const parsedEvents = parseWebhookEvents(updates.events);
+    if (!parsedEvents) {
+      return NextResponse.json(
+        { error: `events must be a list of: ${WEBHOOK_EVENTS.join(", ")}` },
+        { status: 400 }
+      );
+    }
+    webhook.events = parsedEvents;
+  }
+  if (updates.enabled !== undefined) webhook.enabled = !!updates.enabled;
 
   await project.save();
   return NextResponse.json(masked(project));

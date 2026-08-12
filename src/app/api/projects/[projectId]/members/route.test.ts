@@ -46,6 +46,12 @@ const { GET, PUT, DELETE } = await import("./route");
 const PROJECT = "69a52e3b399b27d3cbb2c5a5";
 const params = Promise.resolve({ projectId: PROJECT });
 
+// Real object ids: PUT rejects anything else before it queries (BP-304)
+const U1 = "507f1f77bcf86cd799439011";
+const U2 = "507f1f77bcf86cd799439012";
+const GHOST = "507f1f77bcf86cd799439013";
+const W1 = "507f1f77bcf86cd799439014";
+
 function put(body: unknown) {
   return new Request(`http://x/api/projects/${PROJECT}/members`, {
     method: "PUT",
@@ -111,38 +117,38 @@ describe("GET members", () => {
 
 describe("PUT members", () => {
   it("upserts one grant for the named user", async () => {
-    const res = await PUT(put({ userId: "u1", relation: "owner" }), { params });
+    const res = await PUT(put({ userId: U1, relation: "owner" }), { params });
     expect(res.status).toBe(200);
     expect(grantUpdateOne).toHaveBeenCalledWith(
-      { subject: "u1", objectType: "project", object: PROJECT },
+      { subject: U1, objectType: "project", object: PROJECT },
       { $set: { relation: "owner" }, $setOnInsert: { createdBy: "o1" } },
       { upsert: true }
     );
   });
 
   it("rejects a relation that is not owner or member", async () => {
-    const res = await PUT(put({ userId: "u1", relation: "root" }), { params });
+    const res = await PUT(put({ userId: U1, relation: "root" }), { params });
     expect(res.status).toBe(400);
     expect(grantUpdateOne).not.toHaveBeenCalled();
   });
 
   it("refuses anyone who is not an owner of this project", async () => {
     check.mockResolvedValue(false);
-    const res = await PUT(put({ userId: "u1", relation: "owner" }), { params });
+    const res = await PUT(put({ userId: U1, relation: "owner" }), { params });
     expect(res.status).toBe(403);
     expect(grantUpdateOne).not.toHaveBeenCalled();
   });
 
   it("404s when the target user does not exist", async () => {
     userFindByIdSelect.mockResolvedValue(null);
-    const res = await PUT(put({ userId: "ghost", relation: "member" }), { params });
+    const res = await PUT(put({ userId: GHOST, relation: "member" }), { params });
     expect(res.status).toBe(404);
     expect(grantUpdateOne).not.toHaveBeenCalled();
   });
 
   it("404s when the target is a machine identity", async () => {
-    userFindByIdSelect.mockResolvedValue({ _id: "w1", role: "member", kind: "machine" });
-    const res = await PUT(put({ userId: "w1", relation: "member" }), { params });
+    userFindByIdSelect.mockResolvedValue({ _id: W1, role: "member", kind: "machine" });
+    const res = await PUT(put({ userId: W1, relation: "member" }), { params });
     expect(res.status).toBe(404);
     expect(grantUpdateOne).not.toHaveBeenCalled();
   });
@@ -150,10 +156,10 @@ describe("PUT members", () => {
   it("allows granting member to someone who was never an owner, even with only one owner on the board", async () => {
     grantFindOneLean.mockResolvedValue(null);
     grantCountDocuments.mockResolvedValue(1);
-    const res = await PUT(put({ userId: "u2", relation: "member" }), { params });
+    const res = await PUT(put({ userId: U2, relation: "member" }), { params });
     expect(res.status).toBe(200);
     expect(grantUpdateOne).toHaveBeenCalledWith(
-      { subject: "u2", objectType: "project", object: PROJECT },
+      { subject: U2, objectType: "project", object: PROJECT },
       { $set: { relation: "member" }, $setOnInsert: { createdBy: "o1" } },
       { upsert: true }
     );
@@ -162,19 +168,19 @@ describe("PUT members", () => {
   it("refuses to demote the last owner", async () => {
     grantFindOneLean.mockResolvedValue({ relation: "owner" });
     grantCountDocuments.mockResolvedValue(1);
-    const res = await PUT(put({ userId: "u1", relation: "member" }), { params });
+    const res = await PUT(put({ userId: U1, relation: "member" }), { params });
     expect(res.status).toBe(409);
-    expect(grantFindOne).toHaveBeenCalledWith({ subject: "u1", objectType: "project", object: PROJECT });
+    expect(grantFindOne).toHaveBeenCalledWith({ subject: U1, objectType: "project", object: PROJECT });
     expect(grantUpdateOne).not.toHaveBeenCalled();
   });
 
   it("lets one owner demote another, leaving the board with one owner", async () => {
     grantFindOneLean.mockResolvedValue({ relation: "owner" });
     grantCountDocuments.mockResolvedValue(2);
-    const res = await PUT(put({ userId: "u2", relation: "member" }), { params });
+    const res = await PUT(put({ userId: U2, relation: "member" }), { params });
     expect(res.status).toBe(200);
     expect(grantUpdateOne).toHaveBeenCalledWith(
-      { subject: "u2", objectType: "project", object: PROJECT },
+      { subject: U2, objectType: "project", object: PROJECT },
       { $set: { relation: "member" }, $setOnInsert: { createdBy: "o1" } },
       { upsert: true }
     );
@@ -182,8 +188,24 @@ describe("PUT members", () => {
 
   it("survives a concurrent double submit", async () => {
     grantUpdateOne.mockRejectedValueOnce(Object.assign(new Error("dup"), { code: 11000 }));
-    const res = await PUT(put({ userId: "u1", relation: "owner" }), { params });
+    const res = await PUT(put({ userId: U1, relation: "owner" }), { params });
     expect(res.status).toBe(200);
+  });
+
+  // BP-304: {"$ne": null} resolved to an arbitrary user, which both sidestepped the
+  // machine-account exclusion and wrote over whichever grant row Mongo returned first —
+  // on a board with two owners the last-owner guard never fires.
+  it("refuses a Mongo operator in place of a userId", async () => {
+    const res = await PUT(put({ userId: { $ne: null }, relation: "member" }), { params });
+    expect(res.status).toBe(400);
+    expect(userFindById).not.toHaveBeenCalled();
+    expect(grantUpdateOne).not.toHaveBeenCalled();
+  });
+
+  it("refuses a string that is not an object id", async () => {
+    const res = await PUT(put({ userId: "not-an-object-id", relation: "member" }), { params });
+    expect(res.status).toBe(400);
+    expect(grantUpdateOne).not.toHaveBeenCalled();
   });
 });
 
