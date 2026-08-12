@@ -78,6 +78,15 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
         { status: 403 }
       );
     }
+    // Enabling a project for workers, or turning on autoMerge, commits somebody's machine to
+    // running agent-written code. The device-enrolment route performing the same enable is
+    // already gated this way; an unscoped admin API token used to walk past this one (BP-306).
+    if (user.viaMachineCredential) {
+      return NextResponse.json(
+        { error: "Interactive admin session required to change worker settings" },
+        { status: 403 }
+      );
+    }
     const existing = await Project.findById(projectId).select("worker key");
     if (!existing) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });

@@ -32,6 +32,7 @@ Everything is optional. Put overrides in a `.env` file next to `docker-compose.y
 | `OPENROUTER_API_KEY`, `PM_MODEL`, `PM_MAX_TOKENS`, `PM_DAILY_TURN_CAP`, `PM_SCHEDULER_TICK_MS` | — | PM agent |
 | `ENCRYPTION_KEY` | — | 32 bytes (hex or base64) encrypting stored integration tokens at rest. Without it those tokens cannot be saved at all |
 | `ENCRYPTION_KEYS_OLD` | — | Comma-separated retired encryption keys, kept so a rotation can still read what they wrote |
+| `WEBHOOK_SIGNING_SECRET` | — | Signs outgoing webhook deliveries so a receiver can tell them from anyone else who learned the URL |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | — | Email notifications |
 
 `COOKIE_ALLOW_INSECURE` and `APP_ORIGIN` are **runtime** values, read on every request. The compose

@@ -1,6 +1,7 @@
 import { childEnv } from "./env.js";
 import { CommandResult, Runner } from "./exec.js";
 import { ClaimedTask } from "./types.js";
+import { scrub } from "./scrub.js";
 
 const TIMEOUT_MS = 120_000;
 const MAX_TITLE_CHARS = 256;
@@ -40,12 +41,15 @@ function lastPrUrl(text: string): string {
 }
 
 function prTitle(task: ClaimedTask): string {
-  const title = `${task.taskKey}: ${task.title}`.replace(/\s+/g, " ").trim();
+  const title = scrub(`${task.taskKey}: ${task.title}`).replace(/\s+/g, " ").trim();
   return title.length <= MAX_TITLE_CHARS ? title : `${title.slice(0, MAX_TITLE_CHARS - 3)}...`;
 }
 
+// Scrubbed here as well as on the board path. The PR body is the more public sink of the two —
+// on a public repository a secret the agent quoted is published verbatim, while the board copy
+// already showed [redacted] (BP-306).
 function prBody(summary: string): string {
-  const body = summary.trim();
+  const body = scrub(summary).trim();
   if (body.length <= MAX_BODY_CHARS) return body;
   return `${body.slice(0, MAX_BODY_CHARS)}\n\n[summary truncated to ${MAX_BODY_CHARS} characters]`;
 }

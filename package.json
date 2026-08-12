@@ -24,7 +24,6 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "bcryptjs": "^3.0.3",
-    "gray-matter": "^4.0.3",
     "mcp-handler": "^1.1.0",
     "mdast-util-find-and-replace": "3.0.2",
     "mongoose": "^9.2.3",

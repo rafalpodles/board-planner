@@ -12,6 +12,13 @@ const COMMANDS = ["pause", "resume", "stop"] as const;
 // commandAckedAt so the console can tell "asked to pause" from "actually paused",
 // which a field-by-field edit on /api/workers/:workerId must not be able to do
 export const POST = withAdmin(async (request, { params, user }) => {
+  // A machine credential must not reach a kill switch. An unscoped admin API token keeps
+  // role: "admin" and so passes withAdmin; the counterpart to this action is already gated
+  // this way, and the asymmetry was the bug (BP-306).
+  if (user.viaMachineCredential) {
+    return NextResponse.json({ error: "Interactive admin session required" }, { status: 403 });
+  }
+
   await connectDB();
 
   const { workerId } = await params;

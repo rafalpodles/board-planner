@@ -3,7 +3,12 @@ const REDACTED = "[redacted]";
 // A credential in a URL's userinfo is not a token shape, it is a position — so it is redacted by
 // where it sits, not by what it looks like. gh pr create against a credential-bearing remote puts
 // one straight into the PR url, and the host stays visible because that is the diagnostic part.
-const URL_USERINFO = /(https?:\/\/)[^\s/@]+@/g;
+// Any scheme, not only http(s): the agent has Read over the disk with HOME set, and
+// mongodb://user:pass@host walked past an https?-anchored pattern (BP-306).
+// The scheme is length-bounded, not open-ended: `[a-z][a-z0-9+.-]*` restarts at every character
+// of a long summary and scans forward before failing, which is quadratic and timed out the
+// runaway-summary test at 30k characters.
+const URL_USERINFO = /([a-z][a-z0-9+.-]{0,15}:\/\/)[^\s/@]+@/gi;
 
 // Every alternative carries its own minimum length. A bare `sk-` matches `task-service`,
 // `risk-based` and `disk-usage`, and dropping the line it sits on would delete the single most
@@ -31,10 +36,22 @@ const SECRET = new RegExp(
     "cp(?:w|s|e|d|at|rt|ac|ct|c)?_[a-fA-F0-9]{32,}",
     "sk-or-v1-[a-fA-F0-9]{32,}",
     "sk-ant-(?=[\\w-]*\\d)(?=[\\w-]*[A-Z])[\\w-]{20,}",
+    // What an agent with Read and HOME finds on a developer's disk, rather than what this
+    // codebase mints — ~/.aws, ~/.ssh and a GitLab checkout are all in reach (BP-306)
+    "AKIA[0-9A-Z]{16}",
+    "ASIA[0-9A-Z]{16}",
+    "glpat-[A-Za-z0-9_-]{20,}",
   ].join("|"),
   "g"
 );
 
+// A private key is a block, not a token: redacting the header alone leaves the body, and the
+// body is the secret. Matched non-greedily so two keys in one text do not merge into one match.
+const PEM_BLOCK = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g;
+
 export function scrub(text: string): string {
-  return text.replace(URL_USERINFO, `$1${REDACTED}@`).replace(SECRET, REDACTED);
+  return text
+    .replace(PEM_BLOCK, REDACTED)
+    .replace(URL_USERINFO, `$1${REDACTED}@`)
+    .replace(SECRET, REDACTED);
 }
