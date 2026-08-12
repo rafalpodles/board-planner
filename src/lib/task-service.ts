@@ -384,7 +384,11 @@ export async function updateTask(
     }
   }
 
-  if (updates.sprint !== undefined && updates.sprint !== null && updates.sprint !== "") {
+  // "" is what a cleared <select> sends, and it is not a value this field can hold: `sprint` is an
+  // ObjectId, so an empty string casts to a CastError and surfaces as a 500. Normalise first, then
+  // there is exactly one way to say "no sprint" and one check for everything else.
+  if (updates.sprint === "") updates.sprint = null;
+  if (updates.sprint !== undefined && updates.sprint !== null) {
     if (!(await sprintBelongsToProject(projectId, updates.sprint))) {
       return { ok: false, error: "Sprint not found in this project", status: 400 };
     }

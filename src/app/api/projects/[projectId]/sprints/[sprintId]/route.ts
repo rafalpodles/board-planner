@@ -93,6 +93,18 @@ export const PUT = withProjectAccess(async (request, { params }) => {
   // id, a project whose board was renamed had every finished task look unfinished and get dragged
   // into the next sprint — the one case in this ticket that moves somebody's work without asking.
   if (updates.status === "completed" && (body.moveIncompleteToBacklog || body.moveIncompleteToSprint)) {
+    // Every refusal ahead of every write. The destination is a caller-supplied id like the one in
+    // the path, so it gets the same ownership check — and it gets it *here*, because validating it
+    // inside the second branch let the first branch's sweep commit before the 400. That is the same
+    // write-then-refuse shape this whole change exists to remove.
+    let destination: string | null = null;
+    if (body.moveIncompleteToSprint) {
+      destination = await ownedSprintId(projectId, String(body.moveIncompleteToSprint));
+      if (!destination) {
+        return NextResponse.json({ error: "Destination sprint not found" }, { status: 400 });
+      }
+    }
+
     // `project` as well as `sprint`: the sprint id is owned by this project, but a task carrying
     // it may not be — nothing stopped a cross-project reference being written until BP-314
     const unfinished = {
@@ -101,17 +113,11 @@ export const PUT = withProjectAccess(async (request, { params }) => {
       status: { $nin: await doneColumnIds(projectId) },
     };
 
-    if (body.moveIncompleteToBacklog) {
-      await Task.updateMany(unfinished, { $set: { sprint: null } });
-    }
-    if (body.moveIncompleteToSprint) {
-      // The destination is a caller-supplied id like any other, so it needs the same ownership
-      // check the sprint in the path gets
-      const destination = await ownedSprintId(projectId, String(body.moveIncompleteToSprint));
-      if (!destination) {
-        return NextResponse.json({ error: "Destination sprint not found" }, { status: 400 });
-      }
+    // Exclusive: a body carrying both used to run the sweep and then the move over the top of it
+    if (destination) {
       await Task.updateMany(unfinished, { $set: { sprint: destination } });
+    } else if (body.moveIncompleteToBacklog) {
+      await Task.updateMany(unfinished, { $set: { sprint: null } });
     }
   }
 
