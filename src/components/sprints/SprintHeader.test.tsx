@@ -116,6 +116,12 @@ describe("SprintHeader estimate", () => {
     renderHeader({ estimate: { total: 0, done: 0, label: "Hours" } });
     expect(screen.getByTestId("sprint-estimate-progress").textContent).toBe("0/0 Hours");
   });
+
+  it("lets a long field name shrink and ellipsize instead of forcing the row to overflow", () => {
+    renderHeader({ estimate: { total: 5, done: 2, label: "A".repeat(100) } });
+    expect(screen.getByTestId("sprint-estimate-progress").className).toContain("truncate");
+    expect(screen.getByTestId("sprint-estimate-progress").className).toContain("min-w-0");
+  });
 });
 
 describe("SprintHeader view toggle", () => {

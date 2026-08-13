@@ -213,7 +213,7 @@ export function SprintHeader({
         </div>
       </div>
 
-      <div className="mt-2 flex items-center gap-3 text-xs text-text-muted">
+      <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-text-muted">
         {range && <span>{range}</span>}
         {remaining && <span>{remaining}</span>}
         <div className="h-1.5 max-w-[16rem] flex-1 overflow-hidden rounded-full bg-bg-input">
@@ -226,7 +226,10 @@ export function SprintHeader({
           {doneCount}/{totalCount}
         </span>
         {estimate && (
-          <span data-testid="sprint-estimate-progress" className="tabular-nums">
+          <span
+            data-testid="sprint-estimate-progress"
+            className="min-w-0 truncate tabular-nums"
+          >
             {estimate.done}/{estimate.total} {estimate.label}
           </span>
         )}
