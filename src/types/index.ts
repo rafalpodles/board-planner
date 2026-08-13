@@ -832,6 +832,7 @@ export interface ITask {
   relations: ITaskRelation[];
   watchers: Types.ObjectId[];
   sprint: Types.ObjectId | ISprint | null;
+  agent: Types.ObjectId | IAgent | null;
   customFieldValues: Map<string, unknown>;
   recurrence: IRecurrence | null;
   recurringParentId: Types.ObjectId | null;
@@ -1288,4 +1289,85 @@ export interface ParsedTask {
   assignee?: string;
   description?: string;
   acceptanceCriteria?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Agents: what a worker does between claiming a task and delivering it. Until
+// BP-331 this was a hardcoded array in worker/src.
+
+export const AGENT_BUCKETS = ["analysis", "implementation", "verification", "delivery"] as const;
+export type AgentBucket = (typeof AGENT_BUCKETS)[number];
+
+export const AGENT_SCOPES = ["global", "user", "project"] as const;
+export type AgentScope = (typeof AGENT_SCOPES)[number];
+
+export const BLOCK_KINDS = ["step", "gate"] as const;
+export type BlockKind = (typeof BLOCK_KINDS)[number];
+
+// What a step may touch. The worker owns these; the server names one and never composes a tool list.
+export const STEP_CAPABILITIES = ["read-only", "edit"] as const;
+export type StepCapability = (typeof STEP_CAPABILITIES)[number];
+
+export type AgentComposition = Record<AgentBucket, string[]>;
+
+export interface IAgentBlock {
+  _id: Types.ObjectId;
+  key: string;
+  kind: BlockKind;
+  name: string;
+  description: string;
+  builtIn: boolean;
+  /** gate only — the worker implementation this configures */
+  gateKind: string;
+  params: Record<string, string>;
+  /** step only */
+  prompt: string;
+  capability: StepCapability;
+  model: string;
+  fallbackModel: string;
+  /** a worker action rather than a model call */
+  deterministic: boolean;
+  createdBy: Types.ObjectId | IUser | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface IAgent {
+  _id: Types.ObjectId;
+  name: string;
+  description: string;
+  scope: AgentScope;
+  owner: Types.ObjectId | IUser | null;
+  project: Types.ObjectId | IProject | null;
+  composition: AgentComposition;
+  builtIn: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface ApiAgentBlock {
+  _id: string;
+  key: string;
+  kind: BlockKind;
+  name: string;
+  description: string;
+  builtIn: boolean;
+  gateKind: string;
+  params: Record<string, string>;
+  prompt: string;
+  capability: StepCapability;
+  model: string;
+  fallbackModel: string;
+  deterministic: boolean;
+}
+
+export interface ApiAgent {
+  _id: string;
+  name: string;
+  description: string;
+  scope: AgentScope;
+  projectId: string | null;
+  projectName: string | null;
+  composition: AgentComposition;
+  builtIn: boolean;
 }

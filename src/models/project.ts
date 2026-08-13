@@ -187,6 +187,9 @@ const projectSchema = new Schema<IProject>(
       // A person picks this, so it is an ordinary user — a worker's own identity is a machine
       // account, excluded from every list the product offers and unselectable by design.
       claimAssignee: { type: Schema.Types.ObjectId, ref: "User", default: null },
+      // A plain field, not a policy one: the agent travels on the claim response, where the task is
+      // known, rather than in the assignment payload, which is built at heartbeat time.
+      agent: { type: Schema.Types.ObjectId, ref: "Agent", default: null },
       policyOverrides: { type: [String], default: [] },
     },
     // The one place a project names its repository, whoever hosts it. The provider is derived from
