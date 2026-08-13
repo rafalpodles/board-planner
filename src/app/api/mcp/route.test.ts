@@ -79,10 +79,12 @@ describe("POST /api/mcp", () => {
   it("says the origin is unconfigured instead of blaming the client's token", async () => {
     delete process.env.PUBLIC_ORIGIN;
 
-    const res = await POST(request({ authorization: "Bearer cpat_x" }));
+    const res = await POST(request({ ...forged, authorization: "Bearer cpat_x" }));
     const body = await res.json();
 
     expect(res.status).toBe(500);
     expect(body.error_description).toMatch(/PUBLIC_ORIGIN/);
+    // Not "unconfigured, so fall back to what the caller says" — that was the shape of the bug
+    expect(JSON.stringify(body)).not.toContain("evil.example");
   });
 });
