@@ -16,6 +16,7 @@ const draft: TaskDraft = {
   dueDate: null,
   checklist: [],
   sprint: null,
+  agent: null,
   recurrence: null,
   customFieldValues: {},
 };
@@ -52,9 +53,9 @@ function renderRail(over: Partial<React.ComponentProps<typeof PropertyRail>> = {
     <PropertyRail
       draft={draft}
       set={set}
-      taskKey="TP-1"
       users={users}
       sprints={sprints}
+      agents={[]}
       categories={["user-story", "bug"]}
       customFields={[]}
       reporter="Claude Code"

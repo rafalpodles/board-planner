@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import {
@@ -28,7 +28,8 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { PageHeader } from "@/components/shell/PageHeader";
 import { Button } from "@/components/ui/Button";
-import { BUCKETS, BucketId, Block, emptyComposition } from "../catalog";
+import { BUCKETS, emptyComposition } from "../catalog";
+import { AgentBucket, ApiAgentBlock } from "@/types";
 import { useStore } from "../store";
 
 interface Entry {
@@ -36,7 +37,7 @@ interface Entry {
   key: string;
 }
 
-type Entries = Record<BucketId, Entry[]>;
+type Entries = Record<AgentBucket, Entry[]>;
 
 const NEW_PREFIX = "new:";
 const BUCKET_PREFIX = "bucket:";
@@ -52,7 +53,7 @@ const collisionDetection: CollisionDetection = (args) => {
   return byPointer.length > 0 ? byPointer : rectIntersection(args);
 };
 
-function KindDot({ kind }: { kind: Block["kind"] }) {
+function KindDot({ kind }: { kind: ApiAgentBlock["kind"] }) {
   return (
     <span
       aria-hidden
@@ -63,7 +64,7 @@ function KindDot({ kind }: { kind: Block["kind"] }) {
   );
 }
 
-function BlockBody({ block, muted }: { block: Block; muted?: boolean }) {
+function BlockBody({ block, muted }: { block: ApiAgentBlock; muted?: boolean }) {
   return (
     <div className="min-w-0">
       <div className="flex items-center gap-2">
@@ -77,7 +78,7 @@ function BlockBody({ block, muted }: { block: Block; muted?: boolean }) {
   );
 }
 
-function PaletteItem({ block }: { block: Block }) {
+function PaletteItem({ block }: { block: ApiAgentBlock }) {
   const { setNodeRef, attributes, listeners, isDragging } = useDraggable({
     id: `${NEW_PREFIX}${block.key}`,
   });
@@ -103,7 +104,7 @@ function SortableEntry({
 }: {
   entry: Entry;
   onRemove: () => void;
-  lookup: (key: string) => Block | undefined;
+  lookup: (key: string) => ApiAgentBlock | undefined;
 }) {
   const { setNodeRef, attributes, listeners, transform, transition, isDragging } = useSortable({
     id: entry.uid,
@@ -143,12 +144,12 @@ function Bucket({
   onRemove,
   lookup,
 }: {
-  id: BucketId;
+  id: AgentBucket;
   label: string;
   hint: string;
   entries: Entry[];
   onRemove: (uid: string) => void;
-  lookup: (key: string) => Block | undefined;
+  lookup: (key: string) => ApiAgentBlock | undefined;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: `${BUCKET_PREFIX}${id}` });
 
@@ -187,7 +188,7 @@ function Bucket({
 export default function AgentDetailPage() {
   const params = useParams<{ agentId: string }>();
   const store = useStore();
-  const agent = store.allAgents.find((a) => a.id === params.agentId);
+  const agent = store.allAgents.find((a) => a._id === params.agentId);
   const lookup = (key: string) =>
     [...store.allSteps, ...store.allGates].find((b) => b.key === key);
   const [saved, setSaved] = useState(false);
@@ -201,7 +202,21 @@ export default function AgentDetailPage() {
       delivery: source.delivery.map((key) => ({ uid: nextUid(), key })),
     };
   });
-  const [dragging, setDragging] = useState<Block | null>(null);
+  const [dragging, setDragging] = useState<ApiAgentBlock | null>(null);
+
+  // The agent arrives after the first render, so the editor has to be seeded when it does — and
+  // exactly once, or every save would be undone by the refetch that follows it.
+  const seeded = useRef(false);
+  useEffect(() => {
+    if (!agent || seeded.current) return;
+    seeded.current = true;
+    setEntries({
+      analysis: agent.composition.analysis.map((key) => ({ uid: nextUid(), key })),
+      implementation: agent.composition.implementation.map((key) => ({ uid: nextUid(), key })),
+      verification: agent.composition.verification.map((key) => ({ uid: nextUid(), key })),
+      delivery: agent.composition.delivery.map((key) => ({ uid: nextUid(), key })),
+    });
+  }, [agent]);
 
   // Making delivery composable makes its order expressible, and therefore breakable. The rules the
   // worker used to hold in code — nothing merges unreviewed, nothing merges that was never opened —
@@ -249,9 +264,9 @@ export default function AgentDetailPage() {
     [entries]
   );
 
-  function resolveTarget(overId: string): { bucket: BucketId; index: number } | null {
+  function resolveTarget(overId: string): { bucket: AgentBucket; index: number } | null {
     if (overId.startsWith(BUCKET_PREFIX)) {
-      const bucket = overId.slice(BUCKET_PREFIX.length) as BucketId;
+      const bucket = overId.slice(BUCKET_PREFIX.length) as AgentBucket;
       return { bucket, index: entries[bucket].length };
     }
     const bucket = bucketOf(overId);
@@ -315,6 +330,14 @@ export default function AgentDetailPage() {
       return { ...prev, [bucket]: prev[bucket].filter((e) => e.uid !== uid) };
     });
 
+  if (store.loading) {
+    return (
+      <>
+        <PageHeader title="Agent" subtitle="Loading" />
+      </>
+    );
+  }
+
   if (!agent) {
     return (
       <>
@@ -341,7 +364,7 @@ export default function AgentDetailPage() {
             <Button
               size="sm"
               onClick={() => {
-                store.saveComposition(agent.id, {
+                store.saveComposition(agent._id, {
                   analysis: entries.analysis.map((e) => e.key),
                   implementation: entries.implementation.map((e) => e.key),
                   verification: entries.verification.map((e) => e.key),

@@ -138,6 +138,20 @@ type Body = Record<string, any>;
  * routes then read and sweep by sprint id, so a cross-project reference lets one board's task
  * appear in another board's counts and be moved by its sprint completion (BP-314).
  */
+/**
+ * A project agent belongs to one project and must not be borrowed by another's task — the same
+ * shape of cross-project reference BP-314 closed for sprints. Global and personal agents run
+ * anywhere their owner can reach.
+ */
+async function agentUsableOnProject(projectId: string, agent: unknown): Promise<boolean> {
+  if (typeof agent !== "string" || !Types.ObjectId.isValid(agent)) return false;
+  const { Agent } = await import("@/models/agent");
+  const found = await Agent.findById(agent, "scope project").lean();
+  if (!found) return false;
+  if (found.scope !== "project") return true;
+  return String(found.project) === String(projectId);
+}
+
 async function sprintBelongsToProject(projectId: string, sprint: unknown): Promise<boolean> {
   if (typeof sprint !== "string" || !Types.ObjectId.isValid(sprint)) return false;
   return (await Sprint.exists({ _id: sprint, project: projectId })) !== null;
@@ -391,6 +405,13 @@ export async function updateTask(
   if (updates.sprint !== undefined && updates.sprint !== null) {
     if (!(await sprintBelongsToProject(projectId, updates.sprint))) {
       return { ok: false, error: "Sprint not found in this project", status: 400 };
+    }
+  }
+
+  if (updates.agent === "") updates.agent = null;
+  if (updates.agent !== undefined && updates.agent !== null) {
+    if (!(await agentUsableOnProject(projectId, updates.agent))) {
+      return { ok: false, error: "That agent cannot run on this project", status: 400 };
     }
   }
 

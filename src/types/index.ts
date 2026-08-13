@@ -504,6 +504,7 @@ export interface ProjectWorkerPolicy {
 }
 
 export interface ProjectWorkerConfig {
+  agent?: string | null;
   enabled: boolean;
   policy: ProjectWorkerPolicy;
   policyOverrides: string[];
@@ -1045,6 +1046,7 @@ export interface ApiTask {
   relatedFrom: ApiTaskRelation[];
   watchers: string[];
   sprint: string | null;
+  agent?: string | null;
   customFieldValues: Record<string, unknown>;
   recurrence: ApiRecurrence | null;
   recurringParentId: string | null;
