@@ -1,0 +1,67 @@
+import { NextResponse } from "next/server";
+import { connectDB } from "@/lib/db";
+import { withAuth } from "@/lib/middleware";
+import { AgentBlock } from "@/models/agentBlock";
+import { allBlocks, toApiBlock } from "@/lib/agent-service";
+import { BLOCK_KINDS, STEP_CAPABILITIES, StepCapability } from "@/types";
+
+const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
+
+export const GET = withAuth(async () => {
+  await connectDB();
+  const blocks = await allBlocks();
+  return NextResponse.json(blocks.map(toApiBlock));
+});
+
+export const POST = withAuth(async (request, { user }) => {
+  await connectDB();
+  const body = await request.json();
+
+  const kind = BLOCK_KINDS.find((k) => k === body.kind);
+  if (!kind) return NextResponse.json({ error: "kind must be step or gate" }, { status: 400 });
+
+  const name = typeof body.name === "string" ? body.name.trim() : "";
+  if (!name) return NextResponse.json({ error: "A name is required" }, { status: 400 });
+
+  const key = typeof body.key === "string" ? body.key.trim() : "";
+  if (!SLUG.test(key)) {
+    return NextResponse.json(
+      { error: "key must be a slug: lower case, digits and dashes" },
+      { status: 400 }
+    );
+  }
+  if (await AgentBlock.exists({ key })) {
+    return NextResponse.json({ error: "That key is taken" }, { status: 409 });
+  }
+
+  // Parameters are values, never patterns or commands: the worker owns what a gate does and this
+  // only says how strictly. Anything unrecognised is dropped rather than passed through.
+  const params: Record<string, string> = {};
+  if (body.params && typeof body.params === "object") {
+    for (const [k, v] of Object.entries(body.params as Record<string, unknown>)) {
+      if (typeof v === "string" || typeof v === "number") params[k] = String(v);
+    }
+  }
+
+  const capability: StepCapability =
+    STEP_CAPABILITIES.find((c) => c === body.capability) ?? "read-only";
+
+  const block = await AgentBlock.create({
+    key,
+    kind,
+    name,
+    description: typeof body.description === "string" ? body.description.trim() : "",
+    builtIn: false,
+    gateKind: kind === "gate" && typeof body.gateKind === "string" ? body.gateKind : "",
+    params: kind === "gate" ? params : {},
+    prompt: kind === "step" && typeof body.prompt === "string" ? body.prompt.trim() : "",
+    capability: kind === "step" ? capability : "read-only",
+    model: kind === "step" && typeof body.model === "string" ? body.model : "",
+    fallbackModel:
+      kind === "step" && typeof body.fallbackModel === "string" ? body.fallbackModel : "",
+    deterministic: false,
+    createdBy: user._id,
+  });
+
+  return NextResponse.json(toApiBlock(block.toObject()), { status: 201 });
+});

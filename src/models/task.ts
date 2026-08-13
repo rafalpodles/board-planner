@@ -84,6 +84,12 @@ const taskSchema = new Schema<ITask>(
       ref: "Sprint",
       default: null,
     },
+    // Overrides the project's default for this one task. Null means the project decides.
+    agent: {
+      type: Schema.Types.ObjectId,
+      ref: "Agent",
+      default: null,
+    },
     customFieldValues: {
       type: Map,
       of: Schema.Types.Mixed,
