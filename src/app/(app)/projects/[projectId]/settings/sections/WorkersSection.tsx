@@ -67,6 +67,18 @@ function draftFrom(project: ApiProject): Draft {
 
 export function WorkersSection({ projectId, project, replaceProject, isAdmin }: SectionProps) {
   const store = useStore();
+  const agentApi = useApi();
+  const [defaultAgent, setDefaultAgent] = useState(String(project.worker?.agent ?? ""));
+
+  const saveDefaultAgent = async (agentId: string) => {
+    const previous = defaultAgent;
+    setDefaultAgent(agentId);
+    try {
+      await agentApi.put(`/api/projects/${projectId}/agent`, { agentId });
+    } catch {
+      setDefaultAgent(previous);
+    }
+  };
   const api = useApi();
   const { toast } = useToast();
 
@@ -326,60 +338,25 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
         <div className="max-w-md">
           <p className="text-sm font-medium mb-2">Default agent</p>
           <select
-            value={store.projectDefaults[projectId] ?? "default"}
-            disabled={!isAdmin}
-            onChange={(e) => store.setProjectDefault(projectId, e.target.value)}
+            value={defaultAgent}
+            disabled={!isAdmin || store.loading}
+            onChange={(e) => saveDefaultAgent(e.target.value)}
             className="w-full rounded-lg border border-border bg-bg-input px-2 py-1.5 text-sm"
           >
-            {store.allAgents.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name}
-              </option>
-            ))}
+            {store.allAgents
+              .filter((a) => a.scope !== "user")
+              .map((a) => (
+                <option key={a._id} value={a._id}>
+                  {a.name}
+                </option>
+              ))}
           </select>
           <p className="mt-1 text-xs text-text-muted">
-            {store.allAgents.find((a) => a.id === (store.projectDefaults[projectId] ?? "default"))
-              ?.description ?? ""}{" "}
+            {store.allAgents.find((a) => a._id === defaultAgent)?.description ?? ""}{" "}
             <Link href="/agents" className="text-primary hover:underline">
               Manage agents
             </Link>
           </p>
-        </div>
-
-        <div className="mt-6">
-          <p className="text-sm font-medium mb-2">Recent runs</p>
-          {store.runs.length === 0 ? (
-            <p className="text-xs text-text-muted">Nothing has run yet.</p>
-          ) : (
-            <div className="overflow-hidden rounded-lg border border-border">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border bg-bg-input text-xs text-text-muted">
-                    <th className="px-3 py-2 text-left font-normal">Task</th>
-                    <th className="px-3 py-2 text-left font-normal">Agent</th>
-                    <th className="px-3 py-2 text-left font-normal">Outcome</th>
-                    <th className="px-3 py-2 text-right font-normal">Took</th>
-                    <th className="px-3 py-2 text-right font-normal">Cost</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {store.runs.map((run) => (
-                    <tr key={run.id} className="border-b border-border last:border-0">
-                      <td className="px-3 py-2">{run.taskKey}</td>
-                      <td className="px-3 py-2 text-text-muted">{run.agentName}</td>
-                      <td className={`px-3 py-2 ${run.failed ? "text-danger" : "text-success"}`}>
-                        {run.outcome}
-                      </td>
-                      <td className="px-3 py-2 text-right text-text-muted">{run.minutes} min</td>
-                      <td className="px-3 py-2 text-right text-text-muted">
-                        ${run.costUsd.toFixed(2)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
         </div>
       </SettingsCard>
     </div>

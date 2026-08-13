@@ -1,138 +1,79 @@
 "use client";
 
-import { useSyncExternalStore } from "react";
-import {
-  Agent,
-  Block,
-  Composition,
-  DEFAULT_GATES,
-  DEFAULT_STEPS,
-  SEEDED_AGENTS,
-} from "./catalog";
+import { useCallback, useEffect, useState } from "react";
+import { useApi } from "@/hooks/use-api";
+import { AgentComposition, ApiAgent, ApiAgentBlock } from "@/types";
 
-// TODO(BP-331): localStorage stands in for the API so the whole flow is walkable before the
-// backend exists. Everything here is replaced by fetches, not extended.
-const KEY = "bp-agents-preview";
-const EVENT = "bp-agents-preview-change";
-
-export interface RunRecord {
-  id: string;
-  taskKey: string;
-  agentName: string;
-  outcome: string;
-  failed: boolean;
-  minutes: number;
-  costUsd: number;
+export interface NewAgent {
+  name: string;
+  description: string;
+  projectId?: string;
 }
 
-export interface StoreShape {
-  agents: Agent[];
-  gates: Block[];
-  steps: Block[];
-  /** projectId → agent id */
-  projectDefaults: Record<string, string>;
-  /** taskKey → agent id */
-  taskAgents: Record<string, string>;
-  runs: RunRecord[];
-}
-
-const EMPTY: StoreShape = {
-  agents: [],
-  gates: [],
-  steps: [],
-  projectDefaults: {},
-  taskAgents: {},
-  runs: [
-    { id: "r1", taskKey: "TP-12", agentName: "Default", outcome: "Pull request open", failed: false, minutes: 18, costUsd: 0.74 },
-    { id: "r2", taskKey: "TP-11", agentName: "Default", outcome: "Refused: Size", failed: true, minutes: 9, costUsd: 0.31 },
-  ],
-};
-
-let cache: StoreShape = EMPTY;
-let cacheRaw: string | null = null;
-
-function read(): StoreShape {
-  if (typeof window === "undefined") return EMPTY;
-  const raw = window.localStorage.getItem(KEY);
-  if (raw === cacheRaw) return cache;
-  cacheRaw = raw;
-  if (!raw) {
-    cache = EMPTY;
-    return cache;
-  }
-  try {
-    cache = { ...EMPTY, ...(JSON.parse(raw) as Partial<StoreShape>) };
-  } catch {
-    cache = EMPTY;
-  }
-  return cache;
-}
-
-function write(next: StoreShape) {
-  window.localStorage.setItem(KEY, JSON.stringify(next));
-  window.dispatchEvent(new Event(EVENT));
-}
-
-function subscribe(cb: () => void) {
-  window.addEventListener(EVENT, cb);
-  window.addEventListener("storage", cb);
-  return () => {
-    window.removeEventListener(EVENT, cb);
-    window.removeEventListener("storage", cb);
-  };
+export interface NewBlock {
+  key: string;
+  kind: "step" | "gate";
+  name: string;
+  description: string;
+  gateKind?: string;
+  params?: Record<string, string>;
+  prompt?: string;
+  capability?: string;
+  model?: string;
 }
 
 export function useStore() {
-  const state = useSyncExternalStore(subscribe, read, () => EMPTY);
+  const api = useApi();
+  const [agents, setAgents] = useState<ApiAgent[]>([]);
+  const [blocks, setBlocks] = useState<ApiAgentBlock[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const update = (patch: (prev: StoreShape) => StoreShape) => write(patch(read()));
+  const load = useCallback(async () => {
+    try {
+      const [a, b] = await Promise.all([api.get("/api/agents"), api.get("/api/agent-blocks")]);
+      setAgents(Array.isArray(a) ? (a as ApiAgent[]) : []);
+      setBlocks(Array.isArray(b) ? (b as ApiAgentBlock[]) : []);
+    } finally {
+      setLoading(false);
+    }
+  }, [api]);
 
-  // A stored copy of a seeded agent replaces it in place rather than sitting beside it: two rows
-  // with one id made every lookup return the shipped version and hid the edit.
-  const allAgents = [
-    ...SEEDED_AGENTS.map((seed) => state.agents.find((a) => a.id === seed.id) ?? seed),
-    ...state.agents.filter((a) => !SEEDED_AGENTS.some((s) => s.id === a.id)),
-  ];
+  useEffect(() => {
+    load();
+  }, [load]);
 
   return {
-    ...state,
-    allAgents,
-    allGates: [...DEFAULT_GATES, ...state.gates],
-    allSteps: [...DEFAULT_STEPS, ...state.steps],
+    loading,
+    allAgents: agents,
+    allSteps: blocks.filter((b) => b.kind === "step"),
+    allGates: blocks.filter((b) => b.kind === "gate"),
 
-    addAgent: (agent: Agent) => update((s) => ({ ...s, agents: [...s.agents, agent] })),
-    addGate: (gate: Block) => update((s) => ({ ...s, gates: [...s.gates, gate] })),
-    addStep: (step: Block) => update((s) => ({ ...s, steps: [...s.steps, step] })),
+    addAgent: async (agent: NewAgent) => {
+      await api.post("/api/agents", agent);
+      await load();
+    },
 
-    saveComposition: (agentId: string, composition: Composition) =>
-      update((s) => {
-        const seeded = SEEDED_AGENTS.find((a) => a.id === agentId);
-        const owned = s.agents.find((a) => a.id === agentId);
-        if (owned) {
-          return {
-            ...s,
-            agents: s.agents.map((a) => (a.id === agentId ? { ...a, composition } : a)),
-          };
-        }
-        // Editing a seeded agent stores an override under the same id and keeps its scope, so it
-        // stays where the user found it instead of moving to another section
-        if (seeded) {
-          return { ...s, agents: [...s.agents, { ...seeded, composition }] };
-        }
-        return s;
-      }),
+    addBlock: async (block: NewBlock) => {
+      await api.post("/api/agent-blocks", block);
+      await load();
+    },
 
-    setProjectDefault: (projectId: string, agentId: string) =>
-      update((s) => ({ ...s, projectDefaults: { ...s.projectDefaults, [projectId]: agentId } })),
+    saveComposition: async (agentId: string, composition: AgentComposition) => {
+      await api.put(`/api/agents/${agentId}`, { composition });
+      await load();
+    },
 
-    setTaskAgent: (taskKey: string, agentId: string) =>
-      update((s) => ({ ...s, taskAgents: { ...s.taskAgents, [taskKey]: agentId } })),
-
-    reset: () => write(EMPTY),
+    reload: load,
   };
 }
 
-export function blockLookup(gates: Block[], steps: Block[]) {
-  const all = [...steps, ...gates];
-  return (key: string) => all.find((b) => b.key === key);
+/** A slug the worker can key off, derived from what the user typed. */
+export function slugify(name: string): string {
+  return (
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 48) || "block"
+  );
 }

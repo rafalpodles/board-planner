@@ -9,17 +9,9 @@ import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
 import { Select } from "@/components/ui/Select";
 import { useProjects } from "@/hooks/use-projects";
-import {
-  Agent,
-  BUCKETS,
-  Block,
-  CAPABILITIES,
-  GATE_KINDS,
-  MODELS,
-  emptyComposition,
-  gateKindByKey,
-} from "./catalog";
-import { useStore } from "./store";
+import { BUCKETS, CAPABILITIES, GATE_KINDS, MODELS, gateKindByKey } from "./catalog";
+import { slugify, useStore } from "./store";
+import { ApiAgent, ApiAgentBlock } from "@/types";
 
 type Tab = "agents" | "gates" | "steps";
 
@@ -39,7 +31,7 @@ function DefaultBadge() {
   );
 }
 
-function paramSummary(block: Block): string {
+function paramSummary(block: ApiAgentBlock): string {
   if (block.kind === "step") {
     if (block.deterministic) return "no model";
     const cap = CAPABILITIES.find((c) => c.value === block.capability)?.label ?? "";
@@ -59,7 +51,7 @@ function paramSummary(block: Block): string {
     .join(" · ");
 }
 
-function BlockList({ rows }: { rows: Block[] }) {
+function BlockList({ rows }: { rows: ApiAgentBlock[] }) {
   return (
     <ul className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-bg-card">
       {rows.map((row) => {
@@ -79,12 +71,12 @@ function BlockList({ rows }: { rows: Block[] }) {
   );
 }
 
-function summarise(agent: Agent): string {
+function summarise(agent: ApiAgent): string {
   const count = BUCKETS.reduce((n, b) => n + agent.composition[b.id].length, 0);
   return count === 0 ? "Nothing in it yet" : `${count} in sequence`;
 }
 
-function AgentList({ rows, empty }: { rows: Agent[]; empty: string }) {
+function AgentList({ rows, empty }: { rows: ApiAgent[]; empty: string }) {
   if (rows.length === 0) {
     return (
       <p className="rounded-lg border border-dashed border-border px-3.5 py-6 text-center text-[13px] text-text-muted">
@@ -95,9 +87,9 @@ function AgentList({ rows, empty }: { rows: Agent[]; empty: string }) {
   return (
     <ul className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-bg-card">
       {rows.map((agent) => (
-        <li key={agent.id}>
+        <li key={agent._id}>
           <Link
-            href={`/agents/${agent.id}`}
+            href={`/agents/${agent._id}`}
             className="focus-ring block px-3.5 py-3 transition-colors hover:bg-bg-hover"
           >
             <div className="flex items-baseline gap-2">
@@ -156,7 +148,7 @@ export default function AgentsPage() {
   const [capability, setCapability] = useState<string>(CAPABILITIES[0].value);
   const [stepModel, setStepModel] = useState<string>(MODELS[0].value);
 
-  const mine = store.allAgents.filter((a) => a.scope === "mine");
+  const mine = store.allAgents.filter((a) => a.scope === "user");
   const perProject = store.allAgents.filter((a) => a.scope === "project");
   const global = store.allAgents.filter((a) => a.scope === "global");
   const kind = gateKindByKey(gateKind);
@@ -187,40 +179,34 @@ export default function AgentsPage() {
     setStepModel(MODELS[0].value);
   };
 
-  const createAgent = () => {
+  const createAgent = async () => {
     const project = projects.find((p) => p._id === scope);
-    store.addAgent({
-      id: `agent-${Date.now()}`,
+    await store.addAgent({
       name: name.trim(),
       description: description.trim(),
-      scope: project ? "project" : "mine",
       projectId: project?._id,
-      projectName: project?.name,
-      composition: emptyComposition(),
     });
     close();
   };
 
-  const createGate = () => {
-    store.addGate({
-      key: `gate-${Date.now()}`,
+  const createGate = async () => {
+    await store.addBlock({
+      key: slugify(name),
       kind: "gate",
       name: name.trim(),
       description: description.trim() || kind?.description || "",
-      builtIn: false,
       gateKind,
       params,
     });
     close();
   };
 
-  const createStep = () => {
-    store.addStep({
-      key: `step-${Date.now()}`,
+  const createStep = async () => {
+    await store.addBlock({
+      key: slugify(name),
       kind: "step",
       name: name.trim(),
       description: description.trim(),
-      builtIn: false,
       prompt: prompt.trim(),
       capability,
       model: stepModel,

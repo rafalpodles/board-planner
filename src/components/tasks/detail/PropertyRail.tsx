@@ -15,7 +15,7 @@ import { activeFields, orderedOptions, sortedFields } from "@/lib/custom-fields"
 import { Avatar, PriorityBars, SectionLabel } from "./atoms";
 import { EmptyValue, FieldRow, OptionItem, OptionList, PickerRow } from "./FieldRow";
 import type { TaskDraft } from "./useTaskEditor";
-import { useStore } from "@/app/(app)/agents/store";
+import type { ApiAgent } from "@/types";
 
 const RECURRENCE_UNITS: Record<RecurrenceFrequency, string> = {
   daily: "day",
@@ -44,10 +44,10 @@ interface PropertyRailProps {
   set: <K extends keyof TaskDraft>(key: K, value: TaskDraft[K]) => void;
   users: ApiUser[];
   sprints: ApiSprint[];
+  agents: ApiAgent[];
   categories: string[];
   customFields: ApiCustomField[];
   reporter: string | null;
-  taskKey: string;
   onDelete: () => void;
   /** Sheet rows are taller and the delete affordance sits beside the sheet's Done */
   touch?: boolean;
@@ -58,10 +58,10 @@ export function PropertyRail({
   set,
   users,
   sprints,
+  agents,
   categories,
   customFields,
   reporter,
-  taskKey,
   onDelete,
   touch = false,
 }: PropertyRailProps) {
@@ -69,9 +69,7 @@ export function PropertyRail({
   const sprint = sprints.find((s) => s._id === draft.sprint);
   const fields = sortedFields(activeFields(customFields));
   const selectableSprints = sprints.filter((s) => s.status !== "completed");
-  const store = useStore();
-  const agentId = store.taskAgents[taskKey] ?? "default";
-  const agentName = store.allAgents.find((a) => a.id === agentId)?.name ?? "Default";
+  const agentName = agents.find((a) => a._id === draft.agent)?.name ?? "Project default";
 
   return (
     <div className="flex h-full flex-col gap-6">
@@ -128,12 +126,21 @@ export function PropertyRail({
           value={<span className="truncate">{agentName}</span>}
           panel={(close) => (
             <OptionList label="Agent">
-              {store.allAgents.map((a) => (
+              <OptionItem
+                selected={!draft.agent}
+                onClick={() => {
+                  set("agent", null);
+                  close();
+                }}
+              >
+                <span className="truncate">Project default</span>
+              </OptionItem>
+              {agents.map((a) => (
                 <OptionItem
-                  key={a.id}
-                  selected={a.id === agentId}
+                  key={a._id}
+                  selected={a._id === draft.agent}
                   onClick={() => {
-                    store.setTaskAgent(taskKey, a.id);
+                    set("agent", a._id);
                     close();
                   }}
                 >
