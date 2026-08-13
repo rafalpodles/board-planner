@@ -12,6 +12,8 @@ import { CLAIM_SCOPES, ClaimScope, PROJECT_POLICY_DEFAULTS } from "@/lib/worker-
 import { projectRemotes, sameRepo } from "@/lib/repo-match";
 import { ApiProject, ApiUserSummary, ApiWorker } from "@/types";
 import { SectionProps } from "./types";
+import Link from "next/link";
+import { useStore } from "@/app/(app)/agents/store";
 
 const NUMBER_FIELDS = new Set(["taskTimeoutMs", "maxDiffLines", "maxDiffFiles"]);
 const LABELS: Record<string, string> = {
@@ -35,7 +37,19 @@ const CLAIM_SCOPE_LABELS: Record<ClaimScope, string> = {
 type PolicyValue = string | number | boolean;
 type Draft = Record<string, PolicyValue>;
 
-const FIELDS = Object.keys(PROJECT_POLICY_DEFAULTS);
+// Moved onto the block that does the thing: size thresholds are the Size gate's, review is the
+// Reviewed gate's presence and parameters, and the models belong to the step that calls them.
+const MOVED_TO_BLOCKS = new Set([
+  "autoMerge",
+  "maxDiffLines",
+  "maxDiffFiles",
+  "reviewGate",
+  "reviewModel",
+  "model",
+  "fallbackModel",
+]);
+
+const FIELDS = Object.keys(PROJECT_POLICY_DEFAULTS).filter((f) => !MOVED_TO_BLOCKS.has(f));
 const DEFAULTS = PROJECT_POLICY_DEFAULTS as unknown as Record<string, PolicyValue>;
 
 // An inherited field shows the default rather than the stored copy of it: the two diverge once a
@@ -52,6 +66,7 @@ function draftFrom(project: ApiProject): Draft {
 }
 
 export function WorkersSection({ projectId, project, replaceProject, isAdmin }: SectionProps) {
+  const store = useStore();
   const api = useApi();
   const { toast } = useToast();
 
@@ -230,6 +245,13 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
         description="These describe this repository, so every machine serving it runs under the same values. A field you have not set follows the default."
         instanceScoped
       >
+        <p className="mb-3 text-xs text-text-muted">
+          Diff limits, review, merging and the models moved to the{" "}
+          <Link href="/agents" className="text-primary hover:underline">
+            steps and gates
+          </Link>{" "}
+          that do them.
+        </p>
         <div className="space-y-3">
           {FIELDS.map((field) => {
             const value = draft.value[field];
@@ -294,6 +316,70 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
               </div>
             );
           })}
+        </div>
+      </SettingsCard>
+
+      <SettingsCard
+        title="Agent"
+        description="How a worker carries a task on this project. Pick a different one on a single task when it needs it."
+      >
+        <div className="max-w-md">
+          <p className="text-sm font-medium mb-2">Default agent</p>
+          <select
+            value={store.projectDefaults[projectId] ?? "default"}
+            disabled={!isAdmin}
+            onChange={(e) => store.setProjectDefault(projectId, e.target.value)}
+            className="w-full rounded-lg border border-border bg-bg-input px-2 py-1.5 text-sm"
+          >
+            {store.allAgents.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+              </option>
+            ))}
+          </select>
+          <p className="mt-1 text-xs text-text-muted">
+            {store.allAgents.find((a) => a.id === (store.projectDefaults[projectId] ?? "default"))
+              ?.description ?? ""}{" "}
+            <Link href="/agents" className="text-primary hover:underline">
+              Manage agents
+            </Link>
+          </p>
+        </div>
+
+        <div className="mt-6">
+          <p className="text-sm font-medium mb-2">Recent runs</p>
+          {store.runs.length === 0 ? (
+            <p className="text-xs text-text-muted">Nothing has run yet.</p>
+          ) : (
+            <div className="overflow-hidden rounded-lg border border-border">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-bg-input text-xs text-text-muted">
+                    <th className="px-3 py-2 text-left font-normal">Task</th>
+                    <th className="px-3 py-2 text-left font-normal">Agent</th>
+                    <th className="px-3 py-2 text-left font-normal">Outcome</th>
+                    <th className="px-3 py-2 text-right font-normal">Took</th>
+                    <th className="px-3 py-2 text-right font-normal">Cost</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {store.runs.map((run) => (
+                    <tr key={run.id} className="border-b border-border last:border-0">
+                      <td className="px-3 py-2">{run.taskKey}</td>
+                      <td className="px-3 py-2 text-text-muted">{run.agentName}</td>
+                      <td className={`px-3 py-2 ${run.failed ? "text-danger" : "text-success"}`}>
+                        {run.outcome}
+                      </td>
+                      <td className="px-3 py-2 text-right text-text-muted">{run.minutes} min</td>
+                      <td className="px-3 py-2 text-right text-text-muted">
+                        ${run.costUsd.toFixed(2)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </SettingsCard>
     </div>

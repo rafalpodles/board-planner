@@ -33,6 +33,7 @@ const ICONS = {
   monitor:
     "M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z",
   check: "M5 13l4 4L19 7",
+  agents: "M9 3v2m6-2v2M9 19v2m6-2v2M3 9h2m-2 6h2m14-6h2m-2 6h2M8 8h8v8H8z",
 } as const;
 
 const THEME_OPTIONS = [
@@ -296,6 +297,16 @@ export function Sidebar({
           />
         )}
       </nav>
+
+      <div className="px-2.5 pb-2.5">
+        <NavItem
+          href="/agents"
+          icon={ICONS.agents}
+          label="Agents"
+          active={isActive("/agents")}
+          collapsed={compact}
+        />
+      </div>
 
       <div className="border-t border-border p-2.5" ref={menuRef}>
         <div className="relative">
