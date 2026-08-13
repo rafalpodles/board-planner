@@ -18,6 +18,7 @@ import { CompleteSprintDialog } from "@/components/sprints/CompleteSprintDialog"
 import { NewTaskModal } from "@/components/tasks/NewTaskModal";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { Modal } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
 import { PageHeader } from "@/components/shell/PageHeader";
 
@@ -54,6 +55,7 @@ export default function SprintsPage() {
   const [completing, setCompleting] = useState<ApiSprint | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<ApiSprint | null>(null);
   const [initialLoadDone, setInitialLoadDone] = useState(false);
+  const [showVelocity, setShowVelocity] = useState(false);
   // The panes' own counts come straight from board.tasks, but board.applySprintChange can
   // only ever drop a task out of that list, never add one — so a task the planning view just
   // pulled in from the backlog has no other way to reach the header's done/total.
@@ -178,9 +180,10 @@ export default function SprintsPage() {
         : selected?.taskCount ?? 0;
   const estimateField = resolveEstimateField(board.project);
   const estimateFieldId = estimateField?._id ?? "";
-  // VelocityChart itself renders null only with zero completed sprints; matched here so its
-  // wrapper doesn't mount an empty mt-6 margin in that same case
+  // Also gates the Velocity button: VelocityChart itself renders null with zero
+  // completed sprints, so there would be nothing to open either
   const hasCompletedSprint = board.sprints.some((s) => s.status === "completed");
+  const canShowVelocity = !!estimateField && hasCompletedSprint;
   const estimateTotal =
     view === "planning" && planningTasks
       ? sumEstimates(planningTasks, estimateFieldId)
@@ -231,6 +234,11 @@ export default function SprintsPage() {
             {selected && !sprintIsReadOnly && (
               <Button size="sm" variant="secondary" onClick={() => board.setShowNewTask(true)}>
                 Create Task
+              </Button>
+            )}
+            {canShowVelocity && (
+              <Button size="sm" variant="secondary" onClick={() => setShowVelocity(true)}>
+                Velocity
               </Button>
             )}
             <Button size="sm" onClick={() => openForm(null)}>
@@ -315,10 +323,10 @@ export default function SprintsPage() {
         </div>
       )}
 
-      {estimateFieldId && hasCompletedSprint && (
-        <div className="mt-6 shrink-0">
+      {showVelocity && (
+        <Modal open onClose={() => setShowVelocity(false)} title="Velocity">
           <VelocityChart sprints={board.sprints} />
-        </div>
+        </Modal>
       )}
 
       {showForm && (

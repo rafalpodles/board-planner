@@ -923,24 +923,57 @@ describe("Sprint header estimate", () => {
   });
 });
 
-describe("Velocity chart", () => {
-  it("shows the velocity chart once two completed sprints exist and the project designates an estimate field", async () => {
+// The chart moved out of the page's flex column into a dialog opened from a header
+// button (BP-208 follow-up): it no longer takes any of the board's height, on any
+// sprint or view, and the button is what "findable" now means for these fixtures.
+describe("Velocity", () => {
+  it("offers a Velocity button once two completed sprints exist and the project designates an estimate field", async () => {
     await renderSprints(twoCompletedSprints, { tasks: [], project: projectWithEstimate });
-    expect(screen.getByRole("heading", { name: "Velocity" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Velocity" })).toBeTruthy();
+    // Nothing is drawn until asked for — the chart lives in a dialog, not the page
+    expect(screen.queryByRole("heading", { name: "Velocity" })).toBeNull();
   });
 
-  it("hides the velocity chart when the project designates no estimate field, even with two completed sprints", async () => {
+  it("opens the velocity chart in a dialog on click, and closes it without leaving the page", async () => {
+    await renderSprints(twoCompletedSprints, { tasks: [], project: projectWithEstimate });
+
+    await click(screen.getByRole("button", { name: "Velocity" }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByRole("heading", { name: "Velocity", level: 2 })).toBeTruthy();
+    expect(within(dialog).getByText("Sprint 9")).toBeTruthy();
+    // The page underneath is still there — this is a dialog over the tab, not a navigation
+    expect(screen.getByRole("heading", { name: "Sprints" })).toBeTruthy();
+
+    await click(screen.getByRole("button", { name: "Close dialog" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("offers no Velocity button when the project designates no estimate field, even with two completed sprints", async () => {
     await renderSprints(twoCompletedSprints, { tasks: [] });
-    expect(screen.queryByRole("heading", { name: "Velocity" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Velocity" })).toBeNull();
   });
 
-  it("hides the velocity chart when the designated field no longer exists on the project, even with two completed sprints", async () => {
+  it("offers no Velocity button when the designated field no longer exists on the project, even with two completed sprints", async () => {
     await renderSprints(twoCompletedSprints, { tasks: [], project: projectWithDanglingEstimate });
-    expect(screen.queryByRole("heading", { name: "Velocity" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Velocity" })).toBeNull();
   });
 
-  it("does not mount the chart's wrapper for a designating project with no completed sprint", async () => {
-    const { container } = await renderSprints(sprints, { tasks: [], project: projectWithEstimate });
-    expect(container.querySelector(".mt-6.shrink-0")).toBeNull();
+  it("offers no Velocity button for a designating project with no completed sprint", async () => {
+    await renderSprints(sprints, { tasks: [], project: projectWithEstimate });
+    expect(screen.queryByRole("button", { name: "Velocity" })).toBeNull();
+  });
+
+  // The report this fixed named this exact case: a planned sprint has no velocity of its
+  // own, but the project-wide history behind the button is unrelated to which sprint (or
+  // view) happens to be selected.
+  it("still offers the Velocity button on a planned sprint that has no velocity of its own, in Planning too", async () => {
+    query.current = "sprint=s2&view=planning";
+    await renderSprints([...twoCompletedSprints, sprints[1]], {
+      tasks: [],
+      project: projectWithEstimate,
+    });
+    expect(screen.getByRole("heading", { name: "Sprint 13", level: 2 })).toBeTruthy();
+    await click(screen.getByRole("button", { name: "Velocity" }));
+    expect(within(screen.getByRole("dialog")).getByText("Sprint 9")).toBeTruthy();
   });
 });
