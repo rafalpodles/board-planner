@@ -1205,6 +1205,50 @@ describe("refusing to detach a live run", () => {
     expect(unsetKeys(findOneAndUpdate.mock.calls[0][1])).toEqual(RUN_KEYS);
   });
 
+  // BP-335: the hold exists to stop a task being taken away from the machine running it, which is
+  // not something that machine can do to itself. Refusing the holder meant every worker success
+  // path answered 409 — the outbox retried forever and the task sat in the active column until the
+  // two-hour lease expired, with its work already merged.
+  it("lets the run's own holder report its outcome", async () => {
+    const result = await changeStatus("p1", "t1", "checking", "actor", { workerId: "w1" });
+
+    expect(result.ok).toBe(true);
+    expect(unsetKeys(findOneAndUpdate.mock.calls[0][1])).toEqual(RUN_KEYS);
+  });
+
+  it("still refuses a different worker", async () => {
+    const result = await changeStatus("p1", "t1", "checking", "actor", { workerId: "w2" });
+
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.status).toBe(409);
+  });
+
+  // A person has no verified worker id, so an absent one must never read as "I am the holder"
+  it("does not treat an absent worker id as the holder", async () => {
+    const result = await changeStatus("p1", "t1", "checking", "actor", { workerId: undefined });
+
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.status).toBe(409);
+  });
+
+  // The run's workerId is "" on a task claimed before that field existed; an empty caller id must
+  // not match it
+  it("does not treat an empty worker id as matching an empty holder", async () => {
+    findOne.mockReturnValue({
+      lean: () =>
+        Promise.resolve({
+          _id: "t1",
+          taskNumber: 1,
+          status: "doing",
+          execution: { runId: "r1", workerId: "" },
+        }),
+    });
+
+    const result = await changeStatus("p1", "t1", "checking", "actor", { workerId: "" });
+
+    expect(result.ok).toBe(false);
+  });
+
   // A reorder inside the column resends the status the task already has — that never released
   // the run, and must not start refusing either
   it("does not refuse a status that is not actually changing", async () => {

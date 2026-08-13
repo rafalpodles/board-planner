@@ -241,13 +241,31 @@ export async function createTask(
   return { ok: true, data: populated as ITask };
 }
 
+export interface StatusChangeOptions {
+  /** A person's "take it from that worker anyway", after being shown the 409. Never a machine's. */
+  force?: boolean;
+  /**
+   * The verified worker id of the caller, when the caller is a worker.
+   *
+   * The hold exists to stop a task being taken away from the machine running it — which is not
+   * something that machine can do to itself. Without this the refusal fired on the holder's own
+   * report, so every worker success path answered 409, the outbox retried it forever, and the task
+   * sat in the active column until the two-hour lease expired with its work already merged (BP-335).
+   */
+  workerId?: string;
+}
+
 export async function changeStatus(
   projectId: string,
   taskId: string,
   status: string,
   actorId: string,
-  force = false
+  options: StatusChangeOptions | boolean = {}
 ): Promise<TaskServiceResult> {
+  // The boolean form is the old signature; kept so a caller passing `true` still means force
+  const { force = false, workerId: callerWorkerId } =
+    typeof options === "boolean" ? { force: options, workerId: undefined } : options;
+
   await connectDB();
 
   const projectColumns = await Project.findById(projectId, "columns key").lean();
@@ -277,7 +295,11 @@ export async function changeStatus(
 
   if (!force && leavesColumn) {
     const conflict = runHolding(oldTask);
-    if (conflict) {
+    // The holder is exempt: reporting the outcome of your own run is the run ending, not somebody
+    // taking the task off you. Everyone else — another worker, the PM agent, a person without
+    // force — is still refused (BP-335).
+    const byItsHolder = !!conflict && !!callerWorkerId && conflict.workerId === callerWorkerId;
+    if (conflict && !byItsHolder) {
       const key = projectColumns?.key ? `${projectColumns.key}-${oldTask.taskNumber}` : `#${oldTask.taskNumber}`;
       return refuseHeldRun(conflict, key);
     }
