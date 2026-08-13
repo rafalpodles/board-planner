@@ -49,8 +49,14 @@ let project: {
   markModified: ReturnType<typeof vi.fn>;
 };
 
+// A snapshot taken when save() runs, not read afterwards — the mock's estimateFieldId
+// reflects the final in-memory state either way, so only this tells "cleared before the
+// save that persists it" apart from "cleared only after".
+let savedEstimateFieldId: string | undefined;
+
 beforeEach(() => {
   vi.clearAllMocks();
+  savedEstimateFieldId = undefined;
   getAuthUser.mockResolvedValue(OWNER);
   check.mockResolvedValue(true);
   project = {
@@ -60,7 +66,9 @@ beforeEach(() => {
       { _id: { toString: () => numberFieldId }, name: "Points", fieldType: "number", archived: false },
       { _id: { toString: () => otherFieldId }, name: "Other", fieldType: "number", archived: false },
     ],
-    save: vi.fn().mockResolvedValue(undefined),
+    save: vi.fn().mockImplementation(async () => {
+      savedEstimateFieldId = project.estimateFieldId;
+    }),
     markModified: vi.fn(),
   };
   projectFindById.mockReturnValue(project);
@@ -73,6 +81,7 @@ describe("DELETE /api/projects/:projectId/custom-fields/:fieldId", () => {
 
     expect(res.status).toBe(200);
     expect(project.estimateFieldId).toBe("");
+    expect(savedEstimateFieldId).toBe("");
   });
 
   it("leaves the designation alone when a different field is deleted", async () => {
@@ -89,6 +98,7 @@ describe("PATCH /api/projects/:projectId/custom-fields/:fieldId", () => {
 
     expect(res.status).toBe(200);
     expect(project.estimateFieldId).toBe("");
+    expect(savedEstimateFieldId).toBe("");
   });
 
   it("leaves the designation alone when a different field is archived", async () => {

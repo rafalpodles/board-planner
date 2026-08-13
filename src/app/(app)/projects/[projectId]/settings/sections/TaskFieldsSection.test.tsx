@@ -201,6 +201,17 @@ describe("TaskFieldsSection estimate field", () => {
     expect([...select.options].map((o) => o.text)).toEqual(["None", "Story points"]);
   });
 
+  it("shows the project's existing designation in the picker", () => {
+    render(
+      <TaskFieldsSection
+        {...props}
+        project={{ ...project, customFields: twoNumericFields, estimateFieldId: numberFieldId }}
+      />
+    );
+    const select = screen.getByLabelText("Estimate field") as HTMLSelectElement;
+    expect(select.value).toBe(numberFieldId);
+  });
+
   it("saves the designation on the project", async () => {
     render(<TaskFieldsSection {...props} />);
     fireEvent.change(screen.getByLabelText("Estimate field"), { target: { value: numberFieldId } });
