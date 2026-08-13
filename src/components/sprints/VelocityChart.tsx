@@ -1,6 +1,7 @@
 "use client";
 
 import { ApiSprint } from "@/types";
+import { roundForDisplay } from "@/lib/estimates";
 
 const BAR_TRACK_PX = 96;
 const MIN_VISIBLE_BAR_PX = 4;
@@ -48,7 +49,7 @@ export function VelocityChart({ sprints }: VelocityChartProps) {
               <div key={sprint._id} className="flex min-w-0 flex-1 flex-col items-center gap-1.5">
                 <svg
                   role="img"
-                  aria-label={`${sprint.name}: ${value} completed`}
+                  aria-label={`${sprint.name}: ${roundForDisplay(value)} completed`}
                   width="100%"
                   height={BAR_TRACK_PX}
                 >
@@ -61,7 +62,9 @@ export function VelocityChart({ sprints }: VelocityChartProps) {
                   />
                 </svg>
                 <span className="max-w-full truncate text-xs text-text-muted">{sprint.name}</span>
-                <span className="text-xs font-medium tabular-nums text-text">{value}</span>
+                <span className="text-xs font-medium tabular-nums text-text">
+                  {roundForDisplay(value)}
+                </span>
               </div>
             );
           })}

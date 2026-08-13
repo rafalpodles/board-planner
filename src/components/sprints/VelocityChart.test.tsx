@@ -153,4 +153,15 @@ describe("VelocityChart", () => {
     expect(bars[1].getAttribute("aria-label")).toBe("Sprint B: 0 completed");
     expect(screen.queryByText("-5")).toBeNull();
   });
+
+  it("rounds a floating-point sum for display instead of printing every trailing digit", () => {
+    const imprecise: ApiSprint[] = [
+      sprint({ _id: "x", name: "Sprint A", startDate: "2026-01-01T00:00:00Z", estimateDone: 8 }),
+      sprint({ _id: "y", name: "Sprint B", startDate: "2026-02-01T00:00:00Z", estimateDone: 0.6000000000000001 }),
+    ];
+    render(<VelocityChart sprints={imprecise} />);
+    const bars = screen.getAllByRole("img", { hidden: true });
+    expect(bars[1].getAttribute("aria-label")).toBe("Sprint B: 0.6 completed");
+    expect(screen.getByText("0.6")).toBeTruthy();
+  });
 });

@@ -117,6 +117,11 @@ describe("SprintHeader estimate", () => {
     expect(screen.getByTestId("sprint-estimate-progress").textContent).toBe("0/0 Hours");
   });
 
+  it("rounds a floating-point sum for display instead of printing every trailing digit", () => {
+    renderHeader({ estimate: { total: 20, done: 0.6000000000000001, label: "Story points" } });
+    expect(screen.getByTestId("sprint-estimate-progress").textContent).toBe("0.6/20 Story points");
+  });
+
   it("lets a long field name shrink and ellipsize instead of forcing the row to overflow", () => {
     renderHeader({ estimate: { total: 5, done: 2, label: "A".repeat(100) } });
     expect(screen.getByTestId("sprint-estimate-progress").className).toContain("truncate");

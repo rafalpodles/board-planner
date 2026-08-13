@@ -11,6 +11,11 @@ export function sumEstimates(tasks: ApiTask[], fieldId: string): number {
   return tasks.reduce((sum, t) => sum + estimateOf(t, fieldId), 0);
 }
 
+// Rounds for display only — never feed this back into anything that stores or sums.
+export function roundForDisplay(value: number): number {
+  return Number.isFinite(value) ? Math.round(value * 100) / 100 : value;
+}
+
 type HasCustomFields = { customFields?: ApiCustomField[] | null };
 
 export function estimateFieldName(

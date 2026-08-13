@@ -3,6 +3,7 @@
 import { type CSSProperties } from "react";
 import { ApiSprint, SprintStatus, SPRINT_STATUS_LABELS } from "@/types";
 import { Button } from "@/components/ui/Button";
+import { roundForDisplay } from "@/lib/estimates";
 import { groupSprints, sprintOptionLabel } from "@/lib/sprint-selection";
 
 interface SprintHeaderProps {
@@ -230,7 +231,7 @@ export function SprintHeader({
             data-testid="sprint-estimate-progress"
             className="min-w-0 truncate tabular-nums"
           >
-            {estimate.done}/{estimate.total} {estimate.label}
+            {roundForDisplay(estimate.done)}/{roundForDisplay(estimate.total)} {estimate.label}
           </span>
         )}
       </div>

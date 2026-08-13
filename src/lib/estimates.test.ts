@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { estimateFieldName, estimateOf, sumEstimates } from "./estimates";
+import { estimateFieldName, estimateOf, roundForDisplay, sumEstimates } from "./estimates";
 import { ApiCustomField, ApiTask } from "@/types";
 
 function task(customFieldValues: Record<string, unknown>): ApiTask {
@@ -67,6 +67,35 @@ function field(over: Partial<ApiCustomField> & { _id: string; name: string }): A
     ...over,
   } as ApiCustomField;
 }
+
+describe("roundForDisplay", () => {
+  it("rounds a binary floating-point addition artifact to a clean value", () => {
+    expect(1.1 + 2.2).not.toBe(3.3);
+    expect(roundForDisplay(1.1 + 2.2)).toBe(3.3);
+  });
+
+  it("reconciles the server's compensated sum with the client's plain reduce", () => {
+    expect(roundForDisplay(0.6000000000000001)).toBe(roundForDisplay(0.6));
+  });
+
+  it("leaves a whole number as itself, not a decimal", () => {
+    expect(roundForDisplay(5)).toBe(5);
+  });
+
+  it("keeps precision up to two decimal places", () => {
+    expect(roundForDisplay(3.14159)).toBe(3.14);
+  });
+
+  it("leaves zero and negative values alone", () => {
+    expect(roundForDisplay(0)).toBe(0);
+    expect(roundForDisplay(-5)).toBe(-5);
+  });
+
+  it("passes through non-finite input rather than producing NaN silently", () => {
+    expect(roundForDisplay(NaN)).toBeNaN();
+    expect(roundForDisplay(Infinity)).toBe(Infinity);
+  });
+});
 
 describe("estimateFieldName", () => {
   it("names the designated field", () => {
