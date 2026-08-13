@@ -122,6 +122,37 @@ const completedOnly = [
   },
 ] as ApiSprint[];
 
+// Two completed sprints, both with a nonzero estimateDone: the minimum fixture that can
+// tell "the chart renders" apart from "the chart renders null" — no other fixture in this
+// file has two completed sprints, which is exactly how the chart's own wiring on this page
+// went untested.
+const twoCompletedSprints = [
+  {
+    _id: "s5",
+    name: "Sprint 9",
+    startDate: "2026-06-08T00:00:00Z",
+    endDate: "2026-06-22T00:00:00Z",
+    goal: "",
+    status: "completed",
+    taskCount: 4,
+    doneCount: 4,
+    estimateTotal: 10,
+    estimateDone: 10,
+  },
+  {
+    _id: "s6",
+    name: "Sprint 10",
+    startDate: "2026-06-22T00:00:00Z",
+    endDate: "2026-07-06T00:00:00Z",
+    goal: "",
+    status: "completed",
+    taskCount: 6,
+    doneCount: 6,
+    estimateTotal: 15,
+    estimateDone: 15,
+  },
+] as ApiSprint[];
+
 // Four of eight in a column whose role is "done", under an id nothing hardcodes
 const sprintTasks = Array.from({ length: 8 }, (_, i) => ({
   _id: `t${i + 1}`,
@@ -867,5 +898,17 @@ describe("Sprint header estimate", () => {
         call.name === "Sprint 13" && (call.estimate?.done !== 6 || call.estimate?.total !== 13)
     );
     expect(mislabeled).toEqual([]);
+  });
+});
+
+describe("Velocity chart", () => {
+  it("shows the velocity chart once two completed sprints exist and the project designates an estimate field", async () => {
+    await renderSprints(twoCompletedSprints, { tasks: [], project: projectWithEstimate });
+    expect(screen.getByRole("heading", { name: "Velocity" })).toBeTruthy();
+  });
+
+  it("hides the velocity chart when the project designates no estimate field, even with two completed sprints", async () => {
+    await renderSprints(twoCompletedSprints, { tasks: [] });
+    expect(screen.queryByRole("heading", { name: "Velocity" })).toBeNull();
   });
 });
