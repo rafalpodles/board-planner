@@ -911,4 +911,9 @@ describe("Velocity chart", () => {
     await renderSprints(twoCompletedSprints, { tasks: [] });
     expect(screen.queryByRole("heading", { name: "Velocity" })).toBeNull();
   });
+
+  it("does not mount the chart's wrapper for a designating project with no completed sprint", async () => {
+    const { container } = await renderSprints(sprints, { tasks: [], project: projectWithEstimate });
+    expect(container.querySelector(".mt-6.shrink-0")).toBeNull();
+  });
 });

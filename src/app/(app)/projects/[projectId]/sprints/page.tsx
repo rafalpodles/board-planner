@@ -177,6 +177,9 @@ export default function SprintsPage() {
         ? board.tasks.length
         : selected?.taskCount ?? 0;
   const estimateFieldId = board.project?.estimateFieldId || "";
+  // VelocityChart itself renders null only with zero completed sprints; matched here so its
+  // wrapper doesn't mount an empty mt-6 margin in that same case
+  const hasCompletedSprint = board.sprints.some((s) => s.status === "completed");
   const estimateTotal =
     view === "planning" && planningTasks
       ? sumEstimates(planningTasks, estimateFieldId)
@@ -311,7 +314,7 @@ export default function SprintsPage() {
         </div>
       )}
 
-      {estimateFieldId && (
+      {estimateFieldId && hasCompletedSprint && (
         <div className="mt-6 shrink-0">
           <VelocityChart sprints={board.sprints} />
         </div>
