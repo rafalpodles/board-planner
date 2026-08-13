@@ -41,15 +41,39 @@ export function appOrigins(): string[] {
  * proxy in front, and reading it turned the MCP tool client into a reader of whatever address a
  * token holder named, and the PM OAuth callback into an open redirect (BP-316). Returns null
  * rather than guessing, so every caller has to decide what "not configured" means for it.
+ *
+ * `APP_ORIGIN` is an allowlist rather than an address — the compose file's own default lists
+ * localhost, and a deployment that accepts both a LAN and a public origin has no reason to order
+ * them. So it is a source only when it names exactly one origin; anything else needs
+ * `PUBLIC_ORIGIN`, which is a single value and settable at runtime. `NEXT_PUBLIC_APP_URL` is last
+ * because it is baked in at build time and cannot be corrected without a rebuild.
+ *
+ * Every candidate is parsed, not just trimmed: this value used to feed an equality test, where a
+ * schemeless `app.example.com` failed safe, and now it is interpolated into the endpoints of a
+ * discovery document and into a redirect_uri registered with third-party servers.
  */
-export function selfOrigin(): string | null {
-  const configured = appOrigins()[0];
-  if (configured) return configured;
+export const ORIGIN_REQUIRED =
+  "This instance's own origin is not configured. Set PUBLIC_ORIGIN (or a single-origin APP_ORIGIN): the MCP endpoint publishes it to clients and calls this instance's own API with it, so it must not come from a request header.";
 
-  const built = process.env.NEXT_PUBLIC_APP_URL?.trim();
-  if (!built) return null;
+export function selfOrigin(): string | null {
+  const allowlist = appOrigins();
+  const candidates = [
+    process.env.PUBLIC_ORIGIN,
+    allowlist.length === 1 ? allowlist[0] : undefined,
+    process.env.NEXT_PUBLIC_APP_URL,
+  ];
+  for (const candidate of candidates) {
+    const parsed = parseOrigin(candidate);
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
+function parseOrigin(value: string | undefined): string | null {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
   try {
-    return normaliseOrigin(new URL(built).origin);
+    return normaliseOrigin(new URL(trimmed).origin);
   } catch {
     return null;
   }

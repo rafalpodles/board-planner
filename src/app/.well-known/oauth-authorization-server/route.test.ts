@@ -2,6 +2,11 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 vi.mock("mcp-handler", () => ({ metadataCorsOptionsRequestHandler: () => () => new Response(null) }));
 
+// The zero-arity handler could still reach a forged header this way, which is why the signature
+// assertion it used to carry proved nothing
+let headerStore = new Headers();
+vi.mock("next/headers", () => ({ headers: () => Promise.resolve(headerStore) }));
+
 const { GET } = await import("./route");
 
 const ORIGINAL = { ...process.env };
@@ -9,6 +14,8 @@ const ORIGINAL = { ...process.env };
 beforeEach(() => {
   delete process.env.APP_ORIGIN;
   delete process.env.NEXT_PUBLIC_APP_URL;
+  delete process.env.PUBLIC_ORIGIN;
+  headerStore = new Headers();
 });
 
 afterEach(() => {
@@ -29,8 +36,16 @@ describe("GET /.well-known/oauth-authorization-server", () => {
     expect(body.authorization_endpoint).toBe("https://board.example.com/oauth/authorize");
   });
 
-  it("takes no request, so no header can reach it", () => {
-    expect(GET.length).toBe(0);
+  // Was `expect(GET.length).toBe(0)` — an assertion about the signature, which a rewrite reading
+  // headers() from next/headers keeps green while restoring the vulnerability (BP-316 review)
+  it("emits the same endpoints while a forged host header is in scope", async () => {
+    process.env.APP_ORIGIN = "https://board.example.com";
+    headerStore = new Headers({ "x-forwarded-host": "evil.example", host: "evil.example" });
+
+    const body = await (await GET()).json();
+
+    expect(body.issuer).toBe("https://board.example.com");
+    expect(JSON.stringify(body)).not.toContain("evil.example");
   });
 
   it("fails closed when no origin is configured", async () => {

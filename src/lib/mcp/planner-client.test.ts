@@ -62,3 +62,33 @@ describe("PlannerClient path building", () => {
     expect(new URL(requestedUrl()).origin).toBe("https://board.example.com");
   });
 });
+
+// Only getProject/getTask/listTasks were covered, so removing seg() from the other eight left the
+// suite green — the mutation the BP-316 review ran (see [[security-fix-needs-review-of-the-result]])
+describe("every method that takes an id encodes it", () => {
+  const client = new PlannerClient("https://board.example.com", "cp_token");
+  const HOSTILE = "a/../b";
+  const ENCODED = "a%2F..%2Fb";
+
+  const calls: Array<[string, () => Promise<unknown>]> = [
+    ["getProject", () => client.getProject(HOSTILE)],
+    ["listTasks", () => client.listTasks(HOSTILE)],
+    ["getTask", () => client.getTask(HOSTILE, HOSTILE)],
+    ["createTask", () => client.createTask(HOSTILE, {})],
+    ["updateTask", () => client.updateTask(HOSTILE, HOSTILE, {})],
+    ["changeTaskStatus", () => client.changeTaskStatus(HOSTILE, HOSTILE, "done")],
+    ["listComments", () => client.listComments(HOSTILE, HOSTILE)],
+    ["addComment", () => client.addComment(HOSTILE, HOSTILE, "hi")],
+    ["listSprints", () => client.listSprints(HOSTILE)],
+    ["createSprint", () => client.createSprint(HOSTILE, {})],
+    ["updateSprint", () => client.updateSprint(HOSTILE, HOSTILE, {})],
+  ];
+
+  it.each(calls)("%s", async (_name, call) => {
+    await call().catch(() => {});
+
+    const url = requestedUrl();
+    expect(url).toContain(ENCODED);
+    expect(new URL(url).pathname).not.toContain("/b");
+  });
+});

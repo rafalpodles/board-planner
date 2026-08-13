@@ -466,6 +466,7 @@ describe("selfOrigin", () => {
   beforeEach(() => {
     delete process.env.APP_ORIGIN;
     delete process.env.NEXT_PUBLIC_APP_URL;
+    delete process.env.PUBLIC_ORIGIN;
   });
 
   afterEach(() => {
@@ -479,8 +480,25 @@ describe("selfOrigin", () => {
     expect(selfOrigin()).toBe("https://board.example.com");
   });
 
-  it("takes the first origin when several are configured", () => {
-    process.env.APP_ORIGIN = "https://board.example.com,https://alias.example.com";
+  // APP_ORIGIN is an allowlist. Nothing orders it, the compose file's own default is localhost,
+  // and listing the LAN origin first is the natural thing to do — so a list is not an address, and
+  // taking [0] published localhost as this instance's issuer (BP-316 review).
+  it("refuses to pick an address out of a multi-origin allowlist", () => {
+    process.env.APP_ORIGIN = "http://localhost:3000,https://board.example.com";
+
+    expect(selfOrigin()).toBeNull();
+  });
+
+  it("takes PUBLIC_ORIGIN over an allowlist of any length", () => {
+    process.env.PUBLIC_ORIGIN = "https://board.example.com";
+    process.env.APP_ORIGIN = "http://localhost:3000,https://board.example.com";
+
+    expect(selfOrigin()).toBe("https://board.example.com");
+  });
+
+  it("takes PUBLIC_ORIGIN over the build-time app URL, which cannot be corrected without a rebuild", () => {
+    process.env.PUBLIC_ORIGIN = "https://board.example.com";
+    process.env.NEXT_PUBLIC_APP_URL = "http://localhost:3000";
 
     expect(selfOrigin()).toBe("https://board.example.com");
   });
@@ -500,5 +518,21 @@ describe("selfOrigin", () => {
     process.env.NEXT_PUBLIC_APP_URL = "not a url";
 
     expect(selfOrigin()).toBeNull();
+  });
+
+  // This value used to feed an equality test, where a schemeless origin failed safe. It is now
+  // interpolated into discovery endpoints and into a redirect_uri registered with third parties,
+  // so the source that wins has to be parsed too — not only the fallback.
+  it.each(["PUBLIC_ORIGIN", "APP_ORIGIN"])("returns null for a schemeless %s", (variable) => {
+    process.env[variable] = "app.example.com";
+
+    expect(selfOrigin()).toBeNull();
+  });
+
+  it("moves on to the next source when a higher-precedence one is unusable", () => {
+    process.env.APP_ORIGIN = "app.example.com";
+    process.env.NEXT_PUBLIC_APP_URL = "https://board.example.com";
+
+    expect(selfOrigin()).toBe("https://board.example.com");
   });
 });

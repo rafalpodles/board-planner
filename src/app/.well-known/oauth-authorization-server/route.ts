@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { metadataCorsOptionsRequestHandler } from "mcp-handler";
-import { selfOrigin } from "@/lib/session";
+import { selfOrigin, ORIGIN_REQUIRED } from "@/lib/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,7 +13,7 @@ export async function GET() {
   const origin = selfOrigin();
   if (!origin) {
     return NextResponse.json(
-      { error: "server_error", error_description: "APP_ORIGIN is not configured" },
+      { error: "server_error", error_description: ORIGIN_REQUIRED },
       { status: 500, headers: { "Access-Control-Allow-Origin": "*" } }
     );
   }
