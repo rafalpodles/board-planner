@@ -52,6 +52,7 @@ function renderRail(over: Partial<React.ComponentProps<typeof PropertyRail>> = {
     <PropertyRail
       draft={draft}
       set={set}
+      taskKey="TP-1"
       users={users}
       sprints={sprints}
       categories={["user-story", "bug"]}

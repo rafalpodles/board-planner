@@ -15,6 +15,7 @@ import { activeFields, orderedOptions, sortedFields } from "@/lib/custom-fields"
 import { Avatar, PriorityBars, SectionLabel } from "./atoms";
 import { EmptyValue, FieldRow, OptionItem, OptionList, PickerRow } from "./FieldRow";
 import type { TaskDraft } from "./useTaskEditor";
+import { useStore } from "@/app/(app)/agents/store";
 
 const RECURRENCE_UNITS: Record<RecurrenceFrequency, string> = {
   daily: "day",
@@ -46,6 +47,7 @@ interface PropertyRailProps {
   categories: string[];
   customFields: ApiCustomField[];
   reporter: string | null;
+  taskKey: string;
   onDelete: () => void;
   /** Sheet rows are taller and the delete affordance sits beside the sheet's Done */
   touch?: boolean;
@@ -59,6 +61,7 @@ export function PropertyRail({
   categories,
   customFields,
   reporter,
+  taskKey,
   onDelete,
   touch = false,
 }: PropertyRailProps) {
@@ -66,6 +69,9 @@ export function PropertyRail({
   const sprint = sprints.find((s) => s._id === draft.sprint);
   const fields = sortedFields(activeFields(customFields));
   const selectableSprints = sprints.filter((s) => s.status !== "completed");
+  const store = useStore();
+  const agentId = store.taskAgents[taskKey] ?? "default";
+  const agentName = store.allAgents.find((a) => a.id === agentId)?.name ?? "Default";
 
   return (
     <div className="flex h-full flex-col gap-6">
@@ -110,6 +116,28 @@ export function PropertyRail({
                 >
                   <Avatar name={user.fullName} size={20} />
                   <span className="truncate">{user.fullName}</span>
+                </OptionItem>
+              ))}
+            </OptionList>
+          )}
+        />
+
+        <PickerRow
+          label="Agent"
+          touch={touch}
+          value={<span className="truncate">{agentName}</span>}
+          panel={(close) => (
+            <OptionList label="Agent">
+              {store.allAgents.map((a) => (
+                <OptionItem
+                  key={a.id}
+                  selected={a.id === agentId}
+                  onClick={() => {
+                    store.setTaskAgent(taskKey, a.id);
+                    close();
+                  }}
+                >
+                  <span className="truncate">{a.name}</span>
                 </OptionItem>
               ))}
             </OptionList>

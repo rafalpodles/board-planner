@@ -367,6 +367,7 @@ function TaskDetailView({
             set={set}
             users={users}
             sprints={sprints}
+            taskKey={taskKey}
             categories={(project.categories || []).map((c) => c.name)}
             customFields={project.customFields || []}
             reporter={reporter}
@@ -391,6 +392,7 @@ function TaskDetailView({
         <PropertyRail
           draft={draft}
           set={set}
+          taskKey={taskKey}
           users={users}
           sprints={sprints}
           categories={(project.categories || []).map((c) => c.name)}
