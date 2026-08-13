@@ -24,6 +24,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
           ref={ref}
           className={`w-full rounded-lg border bg-bg-input px-3 py-2 text-text min-h-[44px]
             focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent
+            disabled:opacity-50 disabled:pointer-events-none
             ${error ? "border-danger" : dirty ? "border-warning/60" : "border-border"}
             ${className}`}
           {...props}

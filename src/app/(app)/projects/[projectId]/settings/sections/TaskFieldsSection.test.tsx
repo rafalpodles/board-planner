@@ -209,9 +209,11 @@ describe("TaskFieldsSection estimate field", () => {
     );
   });
 
-  it("disables the row for somebody who does not own the project", () => {
+  it("disables the row for somebody who does not own the project, and greys it out", () => {
     render(<TaskFieldsSection {...props} project={{ ...project, canAdmin: false }} />);
-    expect((screen.getByLabelText("Estimate field") as HTMLSelectElement).disabled).toBe(true);
+    const select = screen.getByLabelText("Estimate field") as HTMLSelectElement;
+    expect(select.disabled).toBe(true);
+    expect(select.className).toContain("disabled:opacity-50");
   });
 
   it("offers to create a field when the project has no numeric one", () => {
