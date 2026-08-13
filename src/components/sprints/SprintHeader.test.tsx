@@ -100,6 +100,35 @@ describe("SprintHeader sprint picker", () => {
   });
 });
 
+describe("SprintHeader estimate", () => {
+  it("shows nothing about estimates when none is given", () => {
+    renderHeader();
+    expect(screen.queryByTestId("sprint-estimate-progress")).toBeNull();
+  });
+
+  it("shows the estimate done and total beside the task counts, labelled with the designated field's own name", () => {
+    renderHeader({ estimate: { total: 13, done: 5, label: "Story points" } });
+    expect(screen.getByTestId("sprint-estimate-progress").textContent).toBe("5/13 Story points");
+    expect(screen.getByTestId("sprint-progress").textContent).toBe("4/8");
+  });
+
+  it("shows a designated field's zero total rather than hiding it", () => {
+    renderHeader({ estimate: { total: 0, done: 0, label: "Hours" } });
+    expect(screen.getByTestId("sprint-estimate-progress").textContent).toBe("0/0 Hours");
+  });
+
+  it("rounds a floating-point sum for display instead of printing every trailing digit", () => {
+    renderHeader({ estimate: { total: 20, done: 0.6000000000000001, label: "Story points" } });
+    expect(screen.getByTestId("sprint-estimate-progress").textContent).toBe("0.6/20 Story points");
+  });
+
+  it("lets a long field name shrink and ellipsize instead of forcing the row to overflow", () => {
+    renderHeader({ estimate: { total: 5, done: 2, label: "A".repeat(100) } });
+    expect(screen.getByTestId("sprint-estimate-progress").className).toContain("truncate");
+    expect(screen.getByTestId("sprint-estimate-progress").className).toContain("min-w-0");
+  });
+});
+
 describe("SprintHeader view toggle", () => {
   it("offers Board and Planning when the sprint is not read-only", () => {
     renderHeader({ readOnly: false });

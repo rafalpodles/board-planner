@@ -3,6 +3,7 @@
 import { type CSSProperties } from "react";
 import { ApiSprint, SprintStatus, SPRINT_STATUS_LABELS } from "@/types";
 import { Button } from "@/components/ui/Button";
+import { roundForDisplay } from "@/lib/estimates";
 import { groupSprints, sprintOptionLabel } from "@/lib/sprint-selection";
 
 interface SprintHeaderProps {
@@ -10,6 +11,7 @@ interface SprintHeaderProps {
   sprints: ApiSprint[];
   doneCount: number;
   totalCount: number;
+  estimate?: { total: number; done: number; label: string };
   readOnly: boolean;
   view: "board" | "planning";
   onViewChange: (view: "board" | "planning") => void;
@@ -67,6 +69,7 @@ export function SprintHeader({
   sprints,
   doneCount,
   totalCount,
+  estimate,
   readOnly,
   view,
   onViewChange,
@@ -211,7 +214,7 @@ export function SprintHeader({
         </div>
       </div>
 
-      <div className="mt-2 flex items-center gap-3 text-xs text-text-muted">
+      <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-text-muted">
         {range && <span>{range}</span>}
         {remaining && <span>{remaining}</span>}
         <div className="h-1.5 max-w-[16rem] flex-1 overflow-hidden rounded-full bg-bg-input">
@@ -223,6 +226,14 @@ export function SprintHeader({
         <span data-testid="sprint-progress" className="tabular-nums">
           {doneCount}/{totalCount}
         </span>
+        {estimate && (
+          <span
+            data-testid="sprint-estimate-progress"
+            className="min-w-0 truncate tabular-nums"
+          >
+            {roundForDisplay(estimate.done)}/{roundForDisplay(estimate.total)} {estimate.label}
+          </span>
+        )}
       </div>
     </div>
   );

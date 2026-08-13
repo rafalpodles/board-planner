@@ -165,6 +165,14 @@ describe("PropertyRail", () => {
     expect(set).toHaveBeenCalledWith("customFieldValues", { f2: "XL" });
   });
 
+  it("rounds a number field's floating-point value for display", () => {
+    renderRail({
+      customFields: [field({ _id: "f3", name: "Estimate", fieldType: "number", options: [] })],
+      draft: { ...draft, customFieldValues: { f3: 0.6000000000000001 } },
+    });
+    expect(screen.getByText("0.6")).toBeTruthy();
+  });
+
   it("announces a row as something that opens a popup", async () => {
     renderRail();
     const row = await openRow("Priority");
