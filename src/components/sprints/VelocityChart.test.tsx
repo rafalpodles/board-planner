@@ -118,4 +118,39 @@ describe("VelocityChart", () => {
     expect(screen.getAllByRole("img", { hidden: true })).toHaveLength(3);
     expect(screen.queryByText("Sprint 13")).toBeNull();
   });
+
+  it("explains there is no total yet rather than drawing an empty band, when every completed sprint scored zero", () => {
+    const allZero: ApiSprint[] = [
+      sprint({ _id: "a", name: "Sprint 10", startDate: "2026-01-01T00:00:00Z", estimateDone: 0 }),
+      sprint({ _id: "b", name: "Sprint 11", startDate: "2026-02-01T00:00:00Z" }),
+    ];
+    render(<VelocityChart sprints={allZero} />);
+    expect(screen.getByRole("heading", { name: "Velocity" })).toBeTruthy();
+    expect(screen.queryAllByRole("img", { hidden: true })).toHaveLength(0);
+    expect(screen.queryByText("0")).toBeNull();
+  });
+
+  it("scales the tallest bar to the full track even when every total is under one", () => {
+    const fractional: ApiSprint[] = [
+      sprint({ _id: "x", name: "Sprint A", startDate: "2026-01-01T00:00:00Z", estimateDone: 0.5 }),
+      sprint({ _id: "y", name: "Sprint B", startDate: "2026-02-01T00:00:00Z", estimateDone: 0.25 }),
+    ];
+    const { container } = render(<VelocityChart sprints={fractional} />);
+    const heights = Array.from(container.querySelectorAll("rect")).map((r) =>
+      Number(r.getAttribute("height"))
+    );
+    expect(heights[0]).toBe(96);
+    expect(heights[1]).toBe(48);
+  });
+
+  it("treats a negative total as zero rather than pairing an empty bar with a negative label", () => {
+    const negative: ApiSprint[] = [
+      sprint({ _id: "x", name: "Sprint A", startDate: "2026-01-01T00:00:00Z", estimateDone: 8 }),
+      sprint({ _id: "y", name: "Sprint B", startDate: "2026-02-01T00:00:00Z", estimateDone: -5 }),
+    ];
+    render(<VelocityChart sprints={negative} />);
+    const bars = screen.getAllByRole("img", { hidden: true });
+    expect(bars[1].getAttribute("aria-label")).toBe("Sprint B: 0 completed");
+    expect(screen.queryByText("-5")).toBeNull();
+  });
 });

@@ -29,41 +29,48 @@ export function VelocityChart({ sprints }: VelocityChartProps) {
     );
   }
 
-  const values = completed.map((s) => s.estimateDone ?? 0);
-  const max = Math.max(...values, 1);
+  const values = completed.map((s) => Math.max(s.estimateDone ?? 0, 0));
+  const hasVelocity = values.some((v) => v > 0);
+  const max = Math.max(...values);
 
   return (
     <div>
       <h3 className="mb-3 text-sm font-semibold text-text">Velocity</h3>
-      <div className="flex items-end gap-4">
-        {completed.map((sprint, i) => {
-          const value = values[i];
-          const barHeight =
-            value > 0
-              ? Math.max(Math.round((value / max) * BAR_TRACK_PX), MIN_VISIBLE_BAR_PX)
-              : 0;
-          return (
-            <div key={sprint._id} className="flex min-w-0 flex-1 flex-col items-center gap-1.5">
-              <svg
-                role="img"
-                aria-label={`${sprint.name}: ${value} completed`}
-                width="100%"
-                height={BAR_TRACK_PX}
-              >
-                <rect
-                  x="0"
-                  y={BAR_TRACK_PX - barHeight}
+      {hasVelocity ? (
+        <div className="flex items-end gap-4">
+          {completed.map((sprint, i) => {
+            const value = values[i];
+            const barHeight =
+              value > 0
+                ? Math.max(Math.round((value / max) * BAR_TRACK_PX), MIN_VISIBLE_BAR_PX)
+                : 0;
+            return (
+              <div key={sprint._id} className="flex min-w-0 flex-1 flex-col items-center gap-1.5">
+                <svg
+                  role="img"
+                  aria-label={`${sprint.name}: ${value} completed`}
                   width="100%"
-                  height={barHeight}
-                  fill="var(--color-primary)"
-                />
-              </svg>
-              <span className="max-w-full truncate text-xs text-text-muted">{sprint.name}</span>
-              <span className="text-xs font-medium tabular-nums text-text">{value}</span>
-            </div>
-          );
-        })}
-      </div>
+                  height={BAR_TRACK_PX}
+                >
+                  <rect
+                    x="0"
+                    y={BAR_TRACK_PX - barHeight}
+                    width="100%"
+                    height={barHeight}
+                    fill="var(--color-primary)"
+                  />
+                </svg>
+                <span className="max-w-full truncate text-xs text-text-muted">{sprint.name}</span>
+                <span className="text-xs font-medium tabular-nums text-text">{value}</span>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="flex h-24 items-center justify-center rounded border border-dashed border-border px-4">
+          <p className="text-center text-xs text-text-muted">No completed sprint has a total yet.</p>
+        </div>
+      )}
     </div>
   );
 }
