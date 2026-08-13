@@ -267,7 +267,15 @@ export async function changeStatus(
 
   // Leaving the column is what releases the run, so that is what has to be refused. Staying put
   // — a reorder, or resending the status already held — never touches the worker.
-  if (!force && oldTask.status !== status) {
+  //
+  // Decided once and used for BOTH the refusal and the write. They used to disagree: the guard was
+  // conditional on the status changing while the pipeline below unconditionally unset the run
+  // fields, so resending the status a task already held skipped the 409 and still detached the
+  // worker — no force needed, so the machine-credential refusal never fired either (BP-320).
+  // updateTask has had the conditional shape all along; this is the same rule, finally matching.
+  const leavesColumn = oldTask.status !== status;
+
+  if (!force && leavesColumn) {
     const conflict = runHolding(oldTask);
     if (conflict) {
       const key = projectColumns?.key ? `${projectColumns.key}-${oldTask.taskNumber}` : `#${oldTask.taskNumber}`;
@@ -277,7 +285,9 @@ export async function changeStatus(
 
   const task = await Task.findOneAndUpdate(
     { _id: taskId, project: projectId },
-    [{ $set: { status, ...CLEAR_WORKER_ASSIGNEE } }, { $unset: RUN_FIELDS }],
+    leavesColumn
+      ? [{ $set: { status, ...CLEAR_WORKER_ASSIGNEE } }, { $unset: RUN_FIELDS }]
+      : [{ $set: { status } }],
     { returnDocument: "after", updatePipeline: true }
   ).populate([
     { path: "assignee", select: "username fullName" },

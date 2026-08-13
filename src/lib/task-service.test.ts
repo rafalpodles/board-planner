@@ -759,6 +759,27 @@ describe("clearing the phase on every exit from the active column", () => {
     expect(unsetKeys(findOneAndUpdate.mock.calls[0][1])).toEqual([]);
   });
 
+  // BP-320: the 409 guard was conditional on the status actually changing, but the pipeline that
+  // followed unset the run fields unconditionally. So resending the status a task already held
+  // skipped the refusal and still detached the worker — no force needed, so the machine-credential
+  // refusal on the route never fired either. CLAUDE.md states the opposite as a guarantee:
+  // "staying in the column — a reorder, or resending the status already held — never touches the run".
+  it("leaves the run alone when the status a task already holds is resent", async () => {
+    await changeStatus("p1", "t1", "doing", "actor");
+
+    expect(unsetKeys(findOneAndUpdate.mock.calls[0][1])).toEqual([]);
+  });
+
+  it("does not clear the assignee when the status is resent unchanged", async () => {
+    await changeStatus("p1", "t1", "doing", "actor");
+
+    const stages = findOneAndUpdate.mock.calls[0][1] as Record<string, never>[];
+    const setStage = stages.find((stage) => "$set" in stage) as
+      | { $set: Record<string, unknown> }
+      | undefined;
+    expect(setStage?.$set).not.toHaveProperty("assignee");
+  });
+
   it("clears it when the task is released with the attempt refunded", async () => {
     findOneAndUpdate.mockResolvedValue({ _id: "t1" });
 
