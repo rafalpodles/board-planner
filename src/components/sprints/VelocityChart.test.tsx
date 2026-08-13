@@ -34,19 +34,14 @@ afterEach(cleanup);
 
 describe("VelocityChart", () => {
   it("plots one bar per completed sprint, oldest first", () => {
-    render(<VelocityChart sprints={threeCompleted} />);
-    const bars = screen.getAllByRole("img", { hidden: true });
-    expect(bars).toHaveLength(3);
+    const { container } = render(<VelocityChart sprints={threeCompleted} />);
+    expect(container.querySelectorAll("svg")).toHaveLength(3);
   });
 
   it("orders bars oldest to newest regardless of input order", () => {
     render(<VelocityChart sprints={threeCompleted} />);
-    const bars = screen.getAllByRole("img", { hidden: true });
-    expect(bars.map((b) => b.getAttribute("aria-label"))).toEqual([
-      "Sprint 10: 13 completed",
-      "Sprint 11: 8 completed",
-      "Sprint 12: 20 completed",
-    ]);
+    const names = screen.getAllByText(/^Sprint \d+$/);
+    expect(names.map((n) => n.textContent)).toEqual(["Sprint 10", "Sprint 11", "Sprint 12"]);
   });
 
   it("says there is not enough history rather than drawing an empty frame", () => {
@@ -76,8 +71,9 @@ describe("VelocityChart", () => {
   });
 
   it("shows the chart, not the sentence, at exactly two completed sprints", () => {
-    render(<VelocityChart sprints={threeCompleted.slice(0, 2)} />);
-    expect(screen.getAllByRole("img", { hidden: true })).toHaveLength(2);
+    const { container } = render(<VelocityChart sprints={threeCompleted.slice(0, 2)} />);
+    expect(screen.getAllByRole("img", { hidden: true })).toHaveLength(1);
+    expect(container.querySelectorAll("svg")).toHaveLength(2);
     expect(screen.queryByText(/two completed sprints/i)).toBeNull();
   });
 
@@ -102,10 +98,9 @@ describe("VelocityChart", () => {
       sprint({ _id: "x", name: "Sprint A", startDate: "2026-01-01T00:00:00Z", estimateDone: 10 }),
       sprint({ _id: "y", name: "Sprint B", startDate: "2026-02-01T00:00:00Z", estimateDone: undefined }),
     ];
-    render(<VelocityChart sprints={withGap} />);
-    const bars = screen.getAllByRole("img", { hidden: true });
-    expect(bars).toHaveLength(2);
-    expect(bars[1].getAttribute("aria-label")).toBe("Sprint B: 0 completed");
+    const { container } = render(<VelocityChart sprints={withGap} />);
+    expect(container.querySelectorAll("svg")).toHaveLength(2);
+    expect(screen.getByText("0")).toBeTruthy();
   });
 
   it("ignores sprints outside completed status when picking the set to plot", () => {
@@ -114,8 +109,8 @@ describe("VelocityChart", () => {
       sprint({ _id: "d", name: "Sprint 13", status: "active", estimateDone: 999 }),
       sprint({ _id: "e", name: "Sprint 9", status: "planned" }),
     ];
-    render(<VelocityChart sprints={mixed} />);
-    expect(screen.getAllByRole("img", { hidden: true })).toHaveLength(3);
+    const { container } = render(<VelocityChart sprints={mixed} />);
+    expect(container.querySelectorAll("svg")).toHaveLength(3);
     expect(screen.queryByText("Sprint 13")).toBeNull();
   });
 
@@ -148,9 +143,9 @@ describe("VelocityChart", () => {
       sprint({ _id: "x", name: "Sprint A", startDate: "2026-01-01T00:00:00Z", estimateDone: 8 }),
       sprint({ _id: "y", name: "Sprint B", startDate: "2026-02-01T00:00:00Z", estimateDone: -5 }),
     ];
-    render(<VelocityChart sprints={negative} />);
-    const bars = screen.getAllByRole("img", { hidden: true });
-    expect(bars[1].getAttribute("aria-label")).toBe("Sprint B: 0 completed");
+    const { container } = render(<VelocityChart sprints={negative} />);
+    expect(container.querySelectorAll("svg")).toHaveLength(2);
+    expect(screen.getByText("0")).toBeTruthy();
     expect(screen.queryByText("-5")).toBeNull();
   });
 
@@ -160,8 +155,36 @@ describe("VelocityChart", () => {
       sprint({ _id: "y", name: "Sprint B", startDate: "2026-02-01T00:00:00Z", estimateDone: 0.6000000000000001 }),
     ];
     render(<VelocityChart sprints={imprecise} />);
-    const bars = screen.getAllByRole("img", { hidden: true });
-    expect(bars[1].getAttribute("aria-label")).toBe("Sprint B: 0.6 completed");
     expect(screen.getByText("0.6")).toBeTruthy();
+  });
+
+  it("gives the whole chart one accessible description instead of one image per bar", () => {
+    const { container } = render(<VelocityChart sprints={threeCompleted} />);
+    const images = screen.getAllByRole("img", { hidden: true });
+    expect(images).toHaveLength(1);
+    expect(images[0].getAttribute("aria-label")).toBe("Velocity across completed sprints");
+    expect(images[0].querySelector("svg")).toBeTruthy();
+    expect(container.querySelectorAll("svg")).toHaveLength(3);
+  });
+
+  it("does not let individual bars announce themselves, since the visible name and value already do", () => {
+    const { container } = render(<VelocityChart sprints={threeCompleted} />);
+    const svgs = container.querySelectorAll("svg");
+    expect(svgs.length).toBeGreaterThan(0);
+    svgs.forEach((svg) => {
+      expect(svg.getAttribute("role")).toBeNull();
+      expect(svg.getAttribute("aria-label")).toBeNull();
+    });
+  });
+
+  it("caps each bar's width instead of letting flex stretch it edge to edge", () => {
+    const { container } = render(<VelocityChart sprints={threeCompleted.slice(0, 2)} />);
+    const columns = Array.from(container.querySelectorAll("svg")).map(
+      (svg) => svg.parentElement as HTMLElement
+    );
+    expect(columns).toHaveLength(2);
+    columns.forEach((column) => {
+      expect(Number.parseInt(column.style.maxWidth, 10)).toBeGreaterThan(0);
+    });
   });
 });

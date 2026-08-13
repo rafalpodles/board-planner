@@ -5,6 +5,7 @@ import { roundForDisplay } from "@/lib/estimates";
 
 const BAR_TRACK_PX = 96;
 const MIN_VISIBLE_BAR_PX = 4;
+const MAX_BAR_WIDTH_PX = 64;
 
 function oldestFirst(sprints: ApiSprint[]): ApiSprint[] {
   return [...sprints].sort((a, b) => {
@@ -38,7 +39,11 @@ export function VelocityChart({ sprints }: VelocityChartProps) {
     <div>
       <h3 className="mb-3 text-sm font-semibold text-text">Velocity</h3>
       {hasVelocity ? (
-        <div className="flex items-end gap-4">
+        <div
+          role="img"
+          aria-label="Velocity across completed sprints"
+          className="flex items-end gap-4"
+        >
           {completed.map((sprint, i) => {
             const value = values[i];
             const barHeight =
@@ -46,13 +51,12 @@ export function VelocityChart({ sprints }: VelocityChartProps) {
                 ? Math.max(Math.round((value / max) * BAR_TRACK_PX), MIN_VISIBLE_BAR_PX)
                 : 0;
             return (
-              <div key={sprint._id} className="flex min-w-0 flex-1 flex-col items-center gap-1.5">
-                <svg
-                  role="img"
-                  aria-label={`${sprint.name}: ${roundForDisplay(value)} completed`}
-                  width="100%"
-                  height={BAR_TRACK_PX}
-                >
+              <div
+                key={sprint._id}
+                className="flex min-w-0 flex-1 flex-col items-center gap-1.5"
+                style={{ maxWidth: MAX_BAR_WIDTH_PX }}
+              >
+                <svg aria-hidden="true" width="100%" height={BAR_TRACK_PX}>
                   <rect
                     x="0"
                     y={BAR_TRACK_PX - barHeight}
