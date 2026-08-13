@@ -369,6 +369,93 @@ export async function seedSprintPlanning() {
   await mongoose.disconnect();
 }
 
+// BP-208 Task 11: a sprint whose tasks span every shape a numeric field's stored value takes in
+// this database — a genuine number, a value the inline editor wrote as a string ("value: string"
+// on ListView's onFieldChange), a string pre-dating CP-213's validation that isn't a number at
+// all, and a task nobody ever gave one. Only a real MongoDB can say what $convert does with the
+// last two — a unit test mocking Task.aggregate would just echo back whatever it's told to.
+export const ESTIMATE_FIELD_ID = id("e2e00000000000000000f008");
+export const ESTIMATE_SPRINT_ID = id("e2e00000000000000000c201");
+export const ESTIMATE_SPRINT_NAME = "Sprint Estimates";
+
+export const ESTIMATE_DONE_NUMERIC_TASK_ID = id("e2e00000000000000000d201");
+export const ESTIMATE_OPEN_STRING_TASK_ID = id("e2e00000000000000000d202");
+export const ESTIMATE_DONE_GARBLED_TASK_ID = id("e2e00000000000000000d203");
+export const ESTIMATE_OPEN_ABSENT_TASK_ID = id("e2e00000000000000000d204");
+
+export async function seedSprintEstimates() {
+  const db = (await connect()).db!;
+  const now = new Date();
+
+  const pointsField = {
+    ...fieldDefaults,
+    _id: ESTIMATE_FIELD_ID,
+    name: "Points",
+    fieldType: "number",
+    options: [],
+    order: 0,
+  };
+  await db.collection("projects").updateOne(
+    { _id: PROJECT_ID },
+    { $set: { customFields: [pointsField], estimateFieldId: String(ESTIMATE_FIELD_ID) } }
+  );
+
+  await db.collection("sprints").insertOne({
+    _id: ESTIMATE_SPRINT_ID,
+    project: PROJECT_ID,
+    name: ESTIMATE_SPRINT_NAME,
+    startDate: now,
+    endDate: new Date(now.getTime() + 14 * 86_400_000),
+    goal: "",
+    status: "active",
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  const task = taskFactory(now);
+  await db.collection("tasks").insertMany([
+    task({
+      _id: ESTIMATE_DONE_NUMERIC_TASK_ID,
+      taskNumber: 101,
+      title: "Estimated and done",
+      status: "done",
+      sprint: ESTIMATE_SPRINT_ID,
+      customFieldValues: { [String(ESTIMATE_FIELD_ID)]: 5 },
+      order: 0,
+    }),
+    task({
+      _id: ESTIMATE_OPEN_STRING_TASK_ID,
+      taskNumber: 102,
+      title: "Estimated through the inline editor, still open",
+      status: "in_progress",
+      sprint: ESTIMATE_SPRINT_ID,
+      customFieldValues: { [String(ESTIMATE_FIELD_ID)]: "3" },
+      order: 1,
+    }),
+    task({
+      _id: ESTIMATE_DONE_GARBLED_TASK_ID,
+      taskNumber: 103,
+      title: "Done, but its value predates validation",
+      status: "done",
+      sprint: ESTIMATE_SPRINT_ID,
+      customFieldValues: { [String(ESTIMATE_FIELD_ID)]: "TBD" },
+      order: 2,
+    }),
+    task({
+      _id: ESTIMATE_OPEN_ABSENT_TASK_ID,
+      taskNumber: 104,
+      title: "Never estimated",
+      status: "in_progress",
+      sprint: ESTIMATE_SPRINT_ID,
+      customFieldValues: {},
+      order: 3,
+    }),
+  ]);
+  await db.collection("projects").updateOne({ _id: PROJECT_ID }, { $max: { taskCounter: 104 } });
+
+  await mongoose.disconnect();
+}
+
 export async function seedQuietTask(quietForMs: number) {
   const now = new Date();
   await addTask(

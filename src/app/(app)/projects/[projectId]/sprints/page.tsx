@@ -5,17 +5,20 @@ import { useParams, usePathname, useRouter, useSearchParams } from "next/navigat
 import { useApi } from "@/hooks/use-api";
 import { ApiSprint, ApiTask } from "@/types";
 import { columnIdsWithRole } from "@/lib/columns";
+import { resolveEstimateField, sumEstimates } from "@/lib/estimates";
 import { useProjectBoard } from "@/hooks/use-project-board";
 import { ProjectBoardView } from "@/components/kanban/ProjectBoardView";
 import { resolveSelectedSprint } from "@/lib/sprint-selection";
 import { SprintSelector } from "@/components/sprints/SprintSelector";
 import { SprintHeader } from "@/components/sprints/SprintHeader";
 import { PlanningView } from "@/components/sprints/PlanningView";
+import { VelocityChart } from "@/components/sprints/VelocityChart";
 import { SprintFormModal, SprintFormValues } from "@/components/sprints/SprintFormModal";
 import { CompleteSprintDialog } from "@/components/sprints/CompleteSprintDialog";
 import { NewTaskModal } from "@/components/tasks/NewTaskModal";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { Modal } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
 import { PageHeader } from "@/components/shell/PageHeader";
 
@@ -52,6 +55,7 @@ export default function SprintsPage() {
   const [completing, setCompleting] = useState<ApiSprint | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<ApiSprint | null>(null);
   const [initialLoadDone, setInitialLoadDone] = useState(false);
+  const [showVelocity, setShowVelocity] = useState(false);
   // The panes' own counts come straight from board.tasks, but board.applySprintChange can
   // only ever drop a task out of that list, never add one — so a task the planning view just
   // pulled in from the backlog has no other way to reach the header's done/total.
@@ -174,6 +178,27 @@ export default function SprintsPage() {
       : tasksLoaded
         ? board.tasks.length
         : selected?.taskCount ?? 0;
+  const estimateField = resolveEstimateField(board.project);
+  const estimateFieldId = estimateField?._id ?? "";
+  // Also gates the Velocity button: VelocityChart itself renders null with zero
+  // completed sprints, so there would be nothing to open either
+  const hasCompletedSprint = board.sprints.some((s) => s.status === "completed");
+  const canShowVelocity = !!estimateField && hasCompletedSprint;
+  const estimateTotal =
+    view === "planning" && planningTasks
+      ? sumEstimates(planningTasks, estimateFieldId)
+      : tasksLoaded
+        ? sumEstimates(board.tasks, estimateFieldId)
+        : selected?.estimateTotal ?? 0;
+  const estimateDone =
+    view === "planning" && planningTasks
+      ? sumEstimates(planningTasks.filter((t) => doneIds.has(t.status)), estimateFieldId)
+      : tasksLoaded
+        ? sumEstimates(board.tasks.filter((t) => doneIds.has(t.status)), estimateFieldId)
+        : selected?.estimateDone ?? 0;
+  const estimate = estimateField
+    ? { total: estimateTotal, done: estimateDone, label: estimateField.name }
+    : undefined;
 
   // Latches once, on the first render where there is nothing left to wait for, and never
   // resets — a later sprint switch is ProjectBoardView's own loadedScope/scope gate, not this
@@ -211,6 +236,11 @@ export default function SprintsPage() {
                 Create Task
               </Button>
             )}
+            {canShowVelocity && (
+              <Button size="sm" variant="secondary" onClick={() => setShowVelocity(true)}>
+                Velocity
+              </Button>
+            )}
             <Button size="sm" onClick={() => openForm(null)}>
               New Sprint
             </Button>
@@ -240,6 +270,7 @@ export default function SprintsPage() {
                   sprints={board.sprints}
                   doneCount={doneCount}
                   totalCount={totalCount}
+                  estimate={estimate}
                   readOnly={sprintIsReadOnly}
                   view={view}
                   onViewChange={(next) => router.push(sprintUrl(selected._id, next))}
@@ -290,6 +321,12 @@ export default function SprintsPage() {
             )}
           </div>
         </div>
+      )}
+
+      {showVelocity && (
+        <Modal open onClose={() => setShowVelocity(false)} title="Velocity">
+          <VelocityChart sprints={board.sprints} />
+        </Modal>
       )}
 
       {showForm && (

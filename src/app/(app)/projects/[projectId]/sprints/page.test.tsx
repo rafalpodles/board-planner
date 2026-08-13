@@ -14,7 +14,12 @@ const { api, toast, router, query, pathname, headerCalls } = vi.hoisted(() => ({
   // Every commit calls SprintHeader again, including ones a single act() flush discards
   // before the test can read the DOM — this is the only way to see a render that never
   // survives to be read back with screen.getByTestId
-  headerCalls: [] as Array<{ name: string; doneCount: number; totalCount: number }>,
+  headerCalls: [] as Array<{
+    name: string;
+    doneCount: number;
+    totalCount: number;
+    estimate?: { total: number; done: number };
+  }>,
 }));
 
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
@@ -28,6 +33,7 @@ vi.mock("@/components/sprints/SprintHeader", async (importOriginal) => {
         name: props.sprint.name,
         doneCount: props.doneCount,
         totalCount: props.totalCount,
+        estimate: props.estimate,
       });
       return actual.SprintHeader(props);
     },
@@ -116,6 +122,37 @@ const completedOnly = [
   },
 ] as ApiSprint[];
 
+// Two completed sprints, both with a nonzero estimateDone: the minimum fixture that can
+// tell "the chart renders" apart from "the chart renders null" — no other fixture in this
+// file has two completed sprints, which is exactly how the chart's own wiring on this page
+// went untested.
+const twoCompletedSprints = [
+  {
+    _id: "s5",
+    name: "Sprint 9",
+    startDate: "2026-06-08T00:00:00Z",
+    endDate: "2026-06-22T00:00:00Z",
+    goal: "",
+    status: "completed",
+    taskCount: 4,
+    doneCount: 4,
+    estimateTotal: 10,
+    estimateDone: 10,
+  },
+  {
+    _id: "s6",
+    name: "Sprint 10",
+    startDate: "2026-06-22T00:00:00Z",
+    endDate: "2026-07-06T00:00:00Z",
+    goal: "",
+    status: "completed",
+    taskCount: 6,
+    doneCount: 6,
+    estimateTotal: 15,
+    estimateDone: 15,
+  },
+] as ApiSprint[];
+
 // Four of eight in a column whose role is "done", under an id nothing hardcodes
 const sprintTasks = Array.from({ length: 8 }, (_, i) => ({
   _id: `t${i + 1}`,
@@ -129,13 +166,41 @@ const sprintTasks = Array.from({ length: 8 }, (_, i) => ({
   updatedAt: "2026-08-01T00:00:00Z",
 })) as ApiTask[];
 
+const projectWithEstimate = {
+  ...project,
+  estimateFieldId: "f1",
+  customFields: [{ _id: "f1", name: "Story points", fieldType: "number" }],
+} as unknown as ApiProject;
+
+// Done tasks (i < 4) carry 2 points each, the rest 3 — done=8, total=20, distinct from
+// doneCount/totalCount (4/8) so a test can't pass by accident on a copied number
+const sprintTasksWithEstimate = sprintTasks.map((t, i) => ({
+  ...t,
+  customFieldValues: { f1: i < 4 ? 2 : 3 },
+})) as ApiTask[];
+
+// A designation reachable through a migration, a bulk import, or a direct database edit —
+// never through the API, which clears estimateFieldId along with the field itself — so a
+// task can still carry a leftover value under the id the project no longer has a field for.
+const projectWithDanglingEstimate = {
+  ...project,
+  estimateFieldId: "gone",
+  customFields: [],
+} as unknown as ApiProject;
+
+const sprintTasksWithLeftoverValue = sprintTasks.map((t, i) => ({
+  ...t,
+  customFieldValues: { gone: i < 4 ? 2 : 3 },
+})) as ApiTask[];
+
 async function renderSprints(
   data: ApiSprint[] = sprints,
-  opts: { tasks?: ApiTask[] } = {}
+  opts: { tasks?: ApiTask[]; project?: ApiProject } = {}
 ) {
   const tasks = opts.tasks ?? sprintTasks;
+  const proj = opts.project ?? project;
   api.get.mockImplementation((url: string) => {
-    if (url === "/api/projects/p1") return Promise.resolve(project);
+    if (url === "/api/projects/p1") return Promise.resolve(proj);
     if (url.startsWith("/api/projects/p1/tasks")) {
       return Promise.resolve(tasks.map((t) => ({ ...t })));
     }
@@ -762,5 +827,153 @@ describe("Board / Planning toggle", () => {
     expect(screen.queryByRole("button", { name: "Planning" })).toBeNull();
     expect(screen.queryByTestId("planning-pane-backlog")).toBeNull();
     expect(screen.getByRole("link", { name: /Task 1/i })).toBeTruthy();
+  });
+});
+
+describe("Sprint header estimate", () => {
+  it("shows nothing about the estimate when the project designates no field", async () => {
+    await renderSprints();
+    expect(screen.queryByTestId("sprint-estimate-progress")).toBeNull();
+  });
+
+  it("shows nothing about the estimate when the designated field no longer exists on the project", async () => {
+    await renderSprints(sprints, {
+      tasks: sprintTasksWithLeftoverValue,
+      project: projectWithDanglingEstimate,
+    });
+    expect(screen.queryByTestId("sprint-estimate-progress")).toBeNull();
+  });
+
+  it("shows the estimate total and done beside the task counts when the project designates a field", async () => {
+    await renderSprints(sprints, { tasks: sprintTasksWithEstimate, project: projectWithEstimate });
+    expect(screen.getByTestId("sprint-estimate-progress").textContent).toBe("8/20 Story points");
+    expect(screen.getByTestId("sprint-progress").textContent).toBe("4/8");
+  });
+
+  it("keeps the estimate on every task in the sprint while the board is filtered", async () => {
+    await renderSprints(sprints, { tasks: sprintTasksWithEstimate, project: projectWithEstimate });
+    expect(screen.getByTestId("sprint-estimate-progress").textContent).toBe("8/20 Story points");
+
+    await act(async () => {
+      fireEvent.change(screen.getByPlaceholderText("Search tasks, or TP-128…"), {
+        target: { value: "Task 1" },
+      });
+    });
+
+    expect(screen.getByText("TP-1")).toBeTruthy();
+    expect(screen.getByTestId("sprint-estimate-progress").textContent).toBe("8/20 Story points");
+  });
+
+  // Same regression the sprint header's own doneCount/totalCount hit twice already
+  // (see "never renders a sprint's counts under a different sprint's name" above):
+  // the estimate figures must move through the exact same branches, or they can paint
+  // one sprint's numbers under another sprint's name for a frame during a switch.
+  it("never carries one sprint's estimate under a different sprint's name mid-switch", async () => {
+    const planningSprintsWithEstimate = [
+      { ...sprints[0], estimateTotal: 20, estimateDone: 8 },
+      {
+        _id: "s2",
+        name: "Sprint 13",
+        startDate: "2026-08-03T00:00:00Z",
+        endDate: "2026-08-17T00:00:00Z",
+        goal: "",
+        status: "planned",
+        taskCount: 5,
+        doneCount: 2,
+        estimateTotal: 13,
+        estimateDone: 6,
+      },
+    ] as ApiSprint[];
+
+    api.get.mockImplementation((url: string) => {
+      if (url === "/api/projects/p1") return Promise.resolve(projectWithEstimate);
+      if (url === "/api/projects/p1/tasks?sprint=s1") {
+        return Promise.resolve(sprintTasksWithEstimate.map((t) => ({ ...t })));
+      }
+      if (url === "/api/projects/p1/tasks?sprint=backlog") return Promise.resolve([]);
+      // Sprint 13's tasks never arrive, keeping the mid-switch window open under test
+      if (url === "/api/projects/p1/tasks?sprint=s2") return new Promise(() => {});
+      if (url === "/api/projects/p1/sprints") return Promise.resolve(planningSprintsWithEstimate);
+      if (url === "/api/users/list") return Promise.resolve([]);
+      return Promise.reject(new Error(`unexpected GET ${url}`));
+    });
+
+    query.current = "sprint=s1&view=planning";
+    const { rerender } = render(<SprintsPage />);
+    await screen.findByRole("heading", { name: "Sprints" });
+    await screen.findByTestId("planning-pane-sprint");
+    expect(screen.getByTestId("sprint-estimate-progress").textContent).toBe("8/20 Story points");
+
+    headerCalls.length = 0;
+    query.current = "sprint=s2&view=planning";
+    await act(async () => {
+      rerender(<SprintsPage />);
+    });
+
+    expect(screen.getByRole("heading", { name: "Sprint 13", level: 2 })).toBeTruthy();
+    expect(screen.getByTestId("sprint-estimate-progress").textContent).toBe("6/13 Story points");
+
+    // Sprint 13's only valid estimate, ever, is its own (6/13) — never Sprint 12's
+    // leftover 8/20 painted under Sprint 13's name for one frame along the way
+    const mislabeled = headerCalls.filter(
+      (call) =>
+        call.name === "Sprint 13" && (call.estimate?.done !== 6 || call.estimate?.total !== 13)
+    );
+    expect(mislabeled).toEqual([]);
+  });
+});
+
+// The chart moved out of the page's flex column into a dialog opened from a header
+// button (BP-208 follow-up): it no longer takes any of the board's height, on any
+// sprint or view, and the button is what "findable" now means for these fixtures.
+describe("Velocity", () => {
+  it("offers a Velocity button once two completed sprints exist and the project designates an estimate field", async () => {
+    await renderSprints(twoCompletedSprints, { tasks: [], project: projectWithEstimate });
+    expect(screen.getByRole("button", { name: "Velocity" })).toBeTruthy();
+    // Nothing is drawn until asked for — the chart lives in a dialog, not the page
+    expect(screen.queryByRole("heading", { name: "Velocity" })).toBeNull();
+  });
+
+  it("opens the velocity chart in a dialog on click, and closes it without leaving the page", async () => {
+    await renderSprints(twoCompletedSprints, { tasks: [], project: projectWithEstimate });
+
+    await click(screen.getByRole("button", { name: "Velocity" }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByRole("heading", { name: "Velocity", level: 2 })).toBeTruthy();
+    expect(within(dialog).getByText("Sprint 9")).toBeTruthy();
+    // The page underneath is still there — this is a dialog over the tab, not a navigation
+    expect(screen.getByRole("heading", { name: "Sprints" })).toBeTruthy();
+
+    await click(screen.getByRole("button", { name: "Close dialog" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("offers no Velocity button when the project designates no estimate field, even with two completed sprints", async () => {
+    await renderSprints(twoCompletedSprints, { tasks: [] });
+    expect(screen.queryByRole("button", { name: "Velocity" })).toBeNull();
+  });
+
+  it("offers no Velocity button when the designated field no longer exists on the project, even with two completed sprints", async () => {
+    await renderSprints(twoCompletedSprints, { tasks: [], project: projectWithDanglingEstimate });
+    expect(screen.queryByRole("button", { name: "Velocity" })).toBeNull();
+  });
+
+  it("offers no Velocity button for a designating project with no completed sprint", async () => {
+    await renderSprints(sprints, { tasks: [], project: projectWithEstimate });
+    expect(screen.queryByRole("button", { name: "Velocity" })).toBeNull();
+  });
+
+  // The report this fixed named this exact case: a planned sprint has no velocity of its
+  // own, but the project-wide history behind the button is unrelated to which sprint (or
+  // view) happens to be selected.
+  it("still offers the Velocity button on a planned sprint that has no velocity of its own, in Planning too", async () => {
+    query.current = "sprint=s2&view=planning";
+    await renderSprints([...twoCompletedSprints, sprints[1]], {
+      tasks: [],
+      project: projectWithEstimate,
+    });
+    expect(screen.getByRole("heading", { name: "Sprint 13", level: 2 })).toBeTruthy();
+    await click(screen.getByRole("button", { name: "Velocity" }));
+    expect(within(screen.getByRole("dialog")).getByText("Sprint 9")).toBeTruthy();
   });
 });
