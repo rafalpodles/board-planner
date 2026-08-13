@@ -179,6 +179,20 @@ const sprintTasksWithEstimate = sprintTasks.map((t, i) => ({
   customFieldValues: { f1: i < 4 ? 2 : 3 },
 })) as ApiTask[];
 
+// A designation reachable through a migration, a bulk import, or a direct database edit —
+// never through the API, which clears estimateFieldId along with the field itself — so a
+// task can still carry a leftover value under the id the project no longer has a field for.
+const projectWithDanglingEstimate = {
+  ...project,
+  estimateFieldId: "gone",
+  customFields: [],
+} as unknown as ApiProject;
+
+const sprintTasksWithLeftoverValue = sprintTasks.map((t, i) => ({
+  ...t,
+  customFieldValues: { gone: i < 4 ? 2 : 3 },
+})) as ApiTask[];
+
 async function renderSprints(
   data: ApiSprint[] = sprints,
   opts: { tasks?: ApiTask[]; project?: ApiProject } = {}
@@ -822,6 +836,14 @@ describe("Sprint header estimate", () => {
     expect(screen.queryByTestId("sprint-estimate-progress")).toBeNull();
   });
 
+  it("shows nothing about the estimate when the designated field no longer exists on the project", async () => {
+    await renderSprints(sprints, {
+      tasks: sprintTasksWithLeftoverValue,
+      project: projectWithDanglingEstimate,
+    });
+    expect(screen.queryByTestId("sprint-estimate-progress")).toBeNull();
+  });
+
   it("shows the estimate total and done beside the task counts when the project designates a field", async () => {
     await renderSprints(sprints, { tasks: sprintTasksWithEstimate, project: projectWithEstimate });
     expect(screen.getByTestId("sprint-estimate-progress").textContent).toBe("8/20 Story points");
@@ -909,6 +931,11 @@ describe("Velocity chart", () => {
 
   it("hides the velocity chart when the project designates no estimate field, even with two completed sprints", async () => {
     await renderSprints(twoCompletedSprints, { tasks: [] });
+    expect(screen.queryByRole("heading", { name: "Velocity" })).toBeNull();
+  });
+
+  it("hides the velocity chart when the designated field no longer exists on the project, even with two completed sprints", async () => {
+    await renderSprints(twoCompletedSprints, { tasks: [], project: projectWithDanglingEstimate });
     expect(screen.queryByRole("heading", { name: "Velocity" })).toBeNull();
   });
 

@@ -5,7 +5,7 @@ import { useApi } from "@/hooks/use-api";
 import { ApiTask } from "@/types";
 import { ProjectBoard } from "@/hooks/use-project-board";
 import { columnIdsWithRole } from "@/lib/columns";
-import { estimateFieldName, sumEstimates } from "@/lib/estimates";
+import { resolveEstimateField, sumEstimates } from "@/lib/estimates";
 import { useToast } from "@/components/ui/Toast";
 import { PlanningPane } from "./PlanningPane";
 
@@ -111,11 +111,11 @@ export function PlanningView({ projectId, board, sprintId, onTasksChange }: Plan
 
   const sprintName = board.sprints.find((s) => s._id === sprintId)?.name ?? "Sprint";
   const projectKey = board.project?.key ?? "";
-  const estimateFieldId = board.project?.estimateFieldId || "";
-  const estimate = estimateFieldId
+  const estimateField = resolveEstimateField(board.project);
+  const estimate = estimateField
     ? {
-        total: sumEstimates(sprintTasks, estimateFieldId),
-        label: estimateFieldName(board.project, estimateFieldId),
+        total: sumEstimates(sprintTasks, estimateField._id),
+        label: estimateField.name,
       }
     : undefined;
 

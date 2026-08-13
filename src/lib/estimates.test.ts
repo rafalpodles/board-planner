@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { estimateFieldName, estimateOf, roundForDisplay, sumEstimates } from "./estimates";
+import {
+  estimateFieldName,
+  estimateOf,
+  resolveEstimateField,
+  roundForDisplay,
+  sumEstimates,
+} from "./estimates";
 import { ApiCustomField, ApiTask } from "@/types";
 
 function task(customFieldValues: Record<string, unknown>): ApiTask {
@@ -111,5 +117,40 @@ describe("estimateFieldName", () => {
   it("is empty when the project itself is not given", () => {
     expect(estimateFieldName(null, "f1")).toBe("");
     expect(estimateFieldName(undefined, "f1")).toBe("");
+  });
+});
+
+describe("resolveEstimateField", () => {
+  it("resolves the designated field when it is live and numeric", () => {
+    const fields = [field({ _id: "f1", name: "Story points" })];
+    expect(resolveEstimateField({ estimateFieldId: "f1", customFields: fields })).toBe(fields[0]);
+  });
+
+  it("is undefined when the project designates no field", () => {
+    const fields = [field({ _id: "f1", name: "Story points" })];
+    expect(resolveEstimateField({ estimateFieldId: "", customFields: fields })).toBeUndefined();
+  });
+
+  // Reachable through a migration, a bulk import, or a direct database edit — never through
+  // the API, which keeps estimateFieldId and customFields in sync — but the client must not
+  // trust the pointer just because it is non-empty.
+  it("is undefined when the designated field id no longer names any field on the project", () => {
+    const fields = [field({ _id: "f1", name: "Story points" })];
+    expect(resolveEstimateField({ estimateFieldId: "gone", customFields: fields })).toBeUndefined();
+  });
+
+  it("is undefined when the designated field has been archived", () => {
+    const fields = [field({ _id: "f1", name: "Story points", archived: true })];
+    expect(resolveEstimateField({ estimateFieldId: "f1", customFields: fields })).toBeUndefined();
+  });
+
+  it("is undefined when the designated field is no longer a number field", () => {
+    const fields = [field({ _id: "f1", name: "Story points", fieldType: "text" })];
+    expect(resolveEstimateField({ estimateFieldId: "f1", customFields: fields })).toBeUndefined();
+  });
+
+  it("is undefined when the project itself is not given", () => {
+    expect(resolveEstimateField(null)).toBeUndefined();
+    expect(resolveEstimateField(undefined)).toBeUndefined();
   });
 });

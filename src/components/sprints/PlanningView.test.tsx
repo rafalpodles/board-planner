@@ -417,6 +417,23 @@ describe("PlanningView estimate", () => {
     expect(screen.getByText("Sprint 12 (1) · 0 Story points")).toBeTruthy();
   });
 
+  // Reachable through a migration, a bulk import, or a direct database edit — never through
+  // the API, which clears estimateFieldId along with the field — but a task can still carry
+  // a leftover value under the dangling id. That must not paint a blank-labelled total.
+  it("shows nothing about the estimate when the designated field no longer exists on the project", async () => {
+    const projectWithDanglingEstimate = {
+      ...project,
+      estimateFieldId: "gone",
+      customFields: [],
+    } as unknown as ApiProject;
+    const tasksWithLeftoverValue = [
+      { ...sprintTasks[0], customFieldValues: { gone: 5 } },
+    ] as ApiTask[];
+    await renderPlanning({ project: projectWithDanglingEstimate, tasks: tasksWithLeftoverValue });
+    expect(screen.getByText("Sprint 12 (1)")).toBeTruthy();
+    expect(screen.queryByText(/Sprint 12 \(1\) ·/)).toBeNull();
+  });
+
   it("moves the scope pane's estimate total the instant a task is added or removed, before the server answers", async () => {
     const backlogWithEstimate = [{ ...backlogTasks[0], customFieldValues: { f1: 3 } }] as ApiTask[];
     api.get.mockImplementation((url: string) => {

@@ -24,3 +24,19 @@ export function estimateFieldName(
 ): string {
   return project?.customFields?.find((f) => f._id === fieldId)?.name ?? "";
 }
+
+type HasEstimateField = HasCustomFields & { estimateFieldId?: string | null };
+
+// Mirrors the PUT /api/projects/:id validation (estimateFieldId must name a numeric,
+// non-archived field): a designation that no longer resolves — the field was deleted or
+// archived outside that route, e.g. by a migration or a direct database edit — must read
+// exactly like no designation at all, not like a designation with a zero total.
+export function resolveEstimateField(
+  project: HasEstimateField | null | undefined
+): ApiCustomField | undefined {
+  const fieldId = project?.estimateFieldId || "";
+  if (!fieldId) return undefined;
+  return project?.customFields?.find(
+    (f) => f._id === fieldId && f.fieldType === "number" && !f.archived
+  );
+}

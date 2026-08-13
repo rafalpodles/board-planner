@@ -5,7 +5,7 @@ import { useParams, usePathname, useRouter, useSearchParams } from "next/navigat
 import { useApi } from "@/hooks/use-api";
 import { ApiSprint, ApiTask } from "@/types";
 import { columnIdsWithRole } from "@/lib/columns";
-import { estimateFieldName, sumEstimates } from "@/lib/estimates";
+import { resolveEstimateField, sumEstimates } from "@/lib/estimates";
 import { useProjectBoard } from "@/hooks/use-project-board";
 import { ProjectBoardView } from "@/components/kanban/ProjectBoardView";
 import { resolveSelectedSprint } from "@/lib/sprint-selection";
@@ -176,7 +176,8 @@ export default function SprintsPage() {
       : tasksLoaded
         ? board.tasks.length
         : selected?.taskCount ?? 0;
-  const estimateFieldId = board.project?.estimateFieldId || "";
+  const estimateField = resolveEstimateField(board.project);
+  const estimateFieldId = estimateField?._id ?? "";
   // VelocityChart itself renders null only with zero completed sprints; matched here so its
   // wrapper doesn't mount an empty mt-6 margin in that same case
   const hasCompletedSprint = board.sprints.some((s) => s.status === "completed");
@@ -192,8 +193,8 @@ export default function SprintsPage() {
       : tasksLoaded
         ? sumEstimates(board.tasks.filter((t) => doneIds.has(t.status)), estimateFieldId)
         : selected?.estimateDone ?? 0;
-  const estimate = estimateFieldId
-    ? { total: estimateTotal, done: estimateDone, label: estimateFieldName(board.project, estimateFieldId) }
+  const estimate = estimateField
+    ? { total: estimateTotal, done: estimateDone, label: estimateField.name }
     : undefined;
 
   // Latches once, on the first render where there is nothing left to wait for, and never
