@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { useDraft } from "@/hooks/use-draft";
 import { CODA_COLUMNS, CODA_KEY_COLUMN } from "@/lib/coda";
+import { sameOrigin } from "@/lib/host-bound-secrets";
 import { useToast } from "@/components/ui/Toast";
 import {
   ApiWebhook,
@@ -552,7 +553,7 @@ export function IntegrationsSection({
                     />
                   </div>
                   {project.gitlabTokenSet &&
-                    gitlab.isDirty("gitlabHost") &&
+                    !sameOrigin(gitlab.value.gitlabHost, gitlab.baseline.gitlabHost) &&
                     !gitlab.value.gitlabToken && (
                       <p className="text-sm text-warning">
                         The stored token was issued for the old host. Saving a new host clears it —
@@ -665,7 +666,7 @@ export function IntegrationsSection({
                     placeholder="https://coda.io"
                   />
                   {project.codaTokenSet &&
-                    coda.isDirty("codaHost") &&
+                    !sameOrigin(coda.value.codaHost, coda.baseline.codaHost) &&
                     !coda.value.codaToken && (
                       <p className="text-sm text-warning">
                         The stored token was issued for the old host. Saving a new host clears it —

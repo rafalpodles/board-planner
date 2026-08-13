@@ -77,4 +77,94 @@ describe("mergeMcpServerTokens and a moved URL", () => {
     expect(result.valid).toBe(true);
     if (result.valid) expect(result.value[0].authToken).toBe("");
   });
+
+  // The rule the integration hosts already follow: a retyped trailing slash is not a new server,
+  // and a 400 here is paid for by re-entering a token the admin may not hold
+  it.each([
+    "https://mcp.notion.com/mcp/",
+    "https://MCP.Notion.com/mcp",
+  ])("carries the token across the cosmetic difference in %s", (url) => {
+    const result = mergeMcpServerTokens([server({ url })], stored());
+
+    expect(result.valid).toBe(true);
+    if (result.valid) expect(result.value[0].authToken).toBe("enc:stored-secret");
+  });
+});
+
+function oauthStored(overrides: Record<string, unknown> = {}) {
+  return [
+    server({
+      authType: "oauth",
+      authToken: "",
+      oauth: {
+        clientId: "client-1",
+        clientSecret: "enc:client-secret",
+        accessToken: "enc:access",
+        refreshToken: "enc:refresh",
+        authorizationEndpoint: "https://mcp.notion.com/authorize",
+        tokenEndpoint: "https://mcp.notion.com/token",
+        status: "connected",
+      },
+      ...overrides,
+    }),
+  ];
+}
+
+// The bearer fix above left the OAuth half open two ways, both found by the BP-315 review.
+describe("mergeMcpServerTokens and moved OAuth credentials", () => {
+  const moved = { url: "https://collector.attacker.example/mcp" };
+
+  it("drops the access and refresh tokens when the URL moves", () => {
+    const result = mergeMcpServerTokens([server({ authType: "oauth", ...moved })], oauthStored());
+
+    expect(result.valid).toBe(true);
+    if (result.valid) {
+      expect(result.value[0].oauth?.accessToken).toBe("");
+      expect(result.value[0].oauth?.refreshToken).toBe("");
+    }
+  });
+
+  // A client registered with the old provider is not a credential for the new one. Keeping it made
+  // the next Connect skip re-registration and send the secret to the new server's token endpoint.
+  it("drops the client registration when the URL moves", () => {
+    const result = mergeMcpServerTokens([server({ authType: "oauth", ...moved })], oauthStored());
+
+    expect(result.valid).toBe(true);
+    if (result.valid) {
+      expect(result.value[0].oauth?.clientId).toBe("");
+      expect(result.value[0].oauth?.clientSecret).toBe("");
+    }
+  });
+
+  // The reset used to sit inside `if (authType === "oauth")`, so one save could park a live token
+  // against the new URL and the next could flip auth back with the URLs already equal
+  it("does not smuggle a live token to a new URL by way of another authType", () => {
+    const first = mergeMcpServerTokens(
+      [server({ authType: "none", ...moved })],
+      oauthStored()
+    );
+
+    expect(first.valid).toBe(true);
+    if (!first.valid) return;
+    expect(first.value[0].oauth?.accessToken ?? "").toBe("");
+
+    const second = mergeMcpServerTokens(
+      [server({ authType: "oauth", ...moved })],
+      first.value
+    );
+
+    expect(second.valid).toBe(true);
+    if (second.valid) expect(second.value[0].oauth?.accessToken ?? "").toBe("");
+  });
+
+  it("keeps the whole OAuth connection while the URL is unchanged", () => {
+    const result = mergeMcpServerTokens([server({ authType: "oauth" })], oauthStored());
+
+    expect(result.valid).toBe(true);
+    if (result.valid) {
+      expect(result.value[0].oauth?.accessToken).toBe("enc:access");
+      expect(result.value[0].oauth?.clientId).toBe("client-1");
+      expect(result.value[0].oauth?.status).toBe("connected");
+    }
+  });
 });

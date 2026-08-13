@@ -10,8 +10,8 @@
  * its tokens when the server URL moves, because "they were issued for a different resource".
  */
 export const HOST_BOUND_SECRETS = [
-  { host: "gitlabHost", token: "gitlabToken", label: "GitLab" },
-  { host: "codaHost", token: "codaToken", label: "Coda" },
+  { host: "gitlabHost", token: "gitlabToken", label: "GitLab", fallback: "https://gitlab.com" },
+  { host: "codaHost", token: "codaToken", label: "Coda", fallback: "https://coda.io" },
 ] as const;
 
 export type HostBoundSecret = (typeof HOST_BOUND_SECRETS)[number];
@@ -20,6 +20,27 @@ export type HostBoundSecret = (typeof HOST_BOUND_SECRETS)[number];
 export function sameOrigin(a: unknown, b: unknown): boolean {
   const left = originOf(a);
   return left !== null && left === originOf(b);
+}
+
+/**
+ * The same question for an endpoint rather than a host: two MCP servers on one origin are two
+ * servers, so the path is part of the identity — but a trailing slash or a retyped case is not a
+ * different server, and rejecting a save over one is how an admin loses a token they cannot re-read.
+ */
+export function sameEndpoint(a: unknown, b: unknown): boolean {
+  const left = endpointOf(a);
+  return left !== null && left === endpointOf(b);
+}
+
+function endpointOf(value: unknown): string | null {
+  const trimmed = typeof value === "string" ? value.trim() : "";
+  if (!trimmed) return null;
+  try {
+    const url = new URL(trimmed);
+    return `${url.origin.toLowerCase()}${url.pathname.replace(/\/+$/, "")}${url.search}`;
+  } catch {
+    return trimmed.toLowerCase().replace(/\/+$/, "");
+  }
 }
 
 function originOf(value: unknown): string | null {
@@ -37,6 +58,11 @@ function originOf(value: unknown): string | null {
 /**
  * Which stored tokens this update invalidates. A request that supplies a new token alongside the
  * new host is the intended way to move an integration, and keeps its token.
+ *
+ * Absent is not a move: `before` is read lean, so a document written before the host field existed
+ * has no value where the schema default would put one, and the form posts that default on every
+ * save. Comparing the two literally made an edit to the doc id look like a repointed host and threw
+ * away a working token (BP-315 review).
  */
 export function tokensInvalidatedByHostChange(
   updates: Record<string, unknown>,
@@ -44,8 +70,14 @@ export function tokensInvalidatedByHostChange(
 ): HostBoundSecret[] {
   return HOST_BOUND_SECRETS.filter((pair) => {
     if (updates[pair.host] === undefined) return false;
-    if (sameOrigin(updates[pair.host], before?.[pair.host])) return false;
+    const next = configuredHost(updates[pair.host], pair);
+    const stored = configuredHost(before?.[pair.host], pair);
+    if (sameOrigin(next, stored)) return false;
     if (typeof updates[pair.token] === "string" && updates[pair.token]) return false;
     return Boolean(before?.[pair.token]);
   });
+}
+
+function configuredHost(value: unknown, pair: HostBoundSecret): unknown {
+  return typeof value === "string" && value.trim() ? value : pair.fallback;
 }

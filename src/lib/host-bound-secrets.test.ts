@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { tokensInvalidatedByHostChange, sameOrigin } from "./host-bound-secrets";
+import { tokensInvalidatedByHostChange, sameOrigin, sameEndpoint } from "./host-bound-secrets";
 
 const stored = {
   gitlabHost: "https://gitlab.example.com",
@@ -70,6 +70,52 @@ describe("tokensInvalidatedByHostChange", () => {
     expect(labels({ gitlabHost: "https://elsewhere.example", gitlabToken: "" })).toEqual([
       "GitLab",
     ]);
+  });
+
+  // The route reads `before` with .lean(), which does not apply the schema default, while the form
+  // posts that default on every save. Comparing the two literally threw away a working token on a
+  // save that never touched the host (BP-315 review).
+  it.each([
+    ["absent", undefined],
+    ["empty", ""],
+    ["whitespace", "   "],
+  ])("treats a %s stored host as the default rather than as a move", (_case, storedHost) => {
+    const before = { ...stored, gitlabHost: storedHost as string };
+    expect(labels({ gitlabHost: "https://gitlab.com" }, before)).toEqual([]);
+  });
+
+  it("still invalidates when a defaulted stored host is repointed elsewhere", () => {
+    const before = { ...stored, gitlabHost: undefined as unknown as string };
+    expect(labels({ gitlabHost: "https://collector.attacker.example" }, before)).toEqual([
+      "GitLab",
+    ]);
+  });
+
+  it("treats a Coda save that only edits the doc id as no move at all", () => {
+    const before = { ...stored, codaHost: undefined as unknown as string };
+    expect(labels({ codaHost: "https://coda.io", codaDocId: "d2" }, before)).toEqual([]);
+  });
+});
+
+describe("sameEndpoint", () => {
+  // Two MCP servers on one origin are two servers, so unlike sameOrigin the path counts
+  it("distinguishes paths on the same origin", () => {
+    expect(sameEndpoint("https://a.example/mcp", "https://a.example/other")).toBe(false);
+    expect(sameEndpoint("https://a.example/mcp", "https://a.example/mcp")).toBe(true);
+  });
+
+  it("ignores a trailing slash and a case difference in the host", () => {
+    expect(sameEndpoint("https://a.example/mcp/", "https://a.example/mcp")).toBe(true);
+    expect(sameEndpoint("https://A.Example/mcp", "https://a.example/mcp")).toBe(true);
+  });
+
+  it("keeps the query, which selects the resource on some servers", () => {
+    expect(sameEndpoint("https://a.example/mcp?v=1", "https://a.example/mcp?v=2")).toBe(false);
+  });
+
+  it("is false when either side is missing", () => {
+    expect(sameEndpoint(undefined, "https://a.example/mcp")).toBe(false);
+    expect(sameEndpoint("", "")).toBe(false);
   });
 });
 
