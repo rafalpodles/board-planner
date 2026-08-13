@@ -158,16 +158,18 @@ describe("VelocityChart", () => {
     expect(screen.getByText("0.6")).toBeTruthy();
   });
 
-  it("gives the whole chart one accessible description instead of one image per bar", () => {
+  it("gives the whole chart one accessible description that carries every sprint's value", () => {
     const { container } = render(<VelocityChart sprints={threeCompleted} />);
     const images = screen.getAllByRole("img", { hidden: true });
     expect(images).toHaveLength(1);
-    expect(images[0].getAttribute("aria-label")).toBe("Velocity across completed sprints");
+    expect(images[0].getAttribute("aria-label")).toBe(
+      "Velocity across completed sprints: Sprint 10 13, Sprint 11 8, Sprint 12 20"
+    );
     expect(images[0].querySelector("svg")).toBeTruthy();
     expect(container.querySelectorAll("svg")).toHaveLength(3);
   });
 
-  it("does not let individual bars announce themselves, since the visible name and value already do", () => {
+  it("does not let individual bars announce themselves, since the chart-level description already carries their values", () => {
     const { container } = render(<VelocityChart sprints={threeCompleted} />);
     const svgs = container.querySelectorAll("svg");
     expect(svgs.length).toBeGreaterThan(0);
@@ -177,14 +179,20 @@ describe("VelocityChart", () => {
     });
   });
 
-  it("caps each bar's width instead of letting flex stretch it edge to edge", () => {
+  it("caps the drawn bar's width but leaves the column free to size to the layout", () => {
     const { container } = render(<VelocityChart sprints={threeCompleted.slice(0, 2)} />);
-    const columns = Array.from(container.querySelectorAll("svg")).map(
-      (svg) => svg.parentElement as HTMLElement
-    );
-    expect(columns).toHaveLength(2);
-    columns.forEach((column) => {
-      expect(Number.parseInt(column.style.maxWidth, 10)).toBeGreaterThan(0);
+    const svgs = Array.from(container.querySelectorAll("svg"));
+    expect(svgs).toHaveLength(2);
+    svgs.forEach((svg) => {
+      expect(Number.parseInt(svg.style.maxWidth, 10)).toBeGreaterThan(0);
+      const column = svg.parentElement as HTMLElement;
+      expect(column.style.maxWidth).toBe("");
     });
+  });
+
+  it("puts the full sprint name in a title attribute so a truncated label is recoverable on hover", () => {
+    render(<VelocityChart sprints={threeCompleted} />);
+    const label = screen.getByText("Sprint 10");
+    expect(label.getAttribute("title")).toBe("Sprint 10");
   });
 });
