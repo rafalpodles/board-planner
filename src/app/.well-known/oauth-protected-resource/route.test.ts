@@ -53,4 +53,13 @@ describe("GET /.well-known/oauth-protected-resource", () => {
   it("fails closed when no origin is configured", async () => {
     expect((await GET(request())).status).toBe(500);
   });
+
+  // Without it a browser MCP client sees an opaque CORS error rather than the message that names
+  // the variable — and the message is there for exactly that operator
+  it("keeps the cross-origin header on the failure it added", async () => {
+    const res = await GET(request());
+
+    expect(res.headers.get("access-control-allow-origin")).toBe("*");
+    expect((await res.json()).error_description).toMatch(/PUBLIC_ORIGIN/);
+  });
 });

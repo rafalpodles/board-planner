@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import { isAllowedMcpServerUrl } from "@/lib/url-validation";
 import { safeFetch } from "@/lib/safe-fetch";
-import { selfOrigin } from "@/lib/session";
+import { selfOrigin, ORIGIN_REQUIRED } from "@/lib/session";
 
 // Mirrors the carve-out isAllowedMcpServerUrl makes for local MCP servers outside production
 const MCP_DESTINATION = { allowLoopback: process.env.NODE_ENV !== "production" };
@@ -297,10 +297,6 @@ export function refreshTokens(opts: {
  */
 export function getPmOauthRedirectUri(): string {
   const base = selfOrigin();
-  if (!base) {
-    throw new Error(
-      "APP_ORIGIN (or NEXT_PUBLIC_APP_URL) must be set to connect an MCP server over OAuth: the redirect_uri is registered with the provider and cannot be derived from a request"
-    );
-  }
+  if (!base) throw new Error(ORIGIN_REQUIRED);
   return `${base}/api/pm/oauth/callback`;
 }

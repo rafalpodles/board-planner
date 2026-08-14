@@ -5,6 +5,7 @@ import { withProjectOwner } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { PmOauthState } from "@/models/pmOauthState";
 import { encryptSecret } from "@/lib/encryption";
+import { selfOrigin, ORIGIN_REQUIRED } from "@/lib/session";
 import {
   discoverOauthConfig,
   registerClient,
@@ -32,6 +33,13 @@ export const POST = withProjectOwner(async (request, { params, user }) => {
     return NextResponse.json({ error: `Server "${name}" does not use OAuth auth` }, { status: 400 });
   }
 
+  // Outside the try below, and no middleware has a catch-all — so an unconfigured instance answered
+  // Next's bodiless 500 here while the three other origin-dependent routes return the message that
+  // names the variable (BP-316 review).
+  const origin = selfOrigin();
+  if (!origin) {
+    return NextResponse.json({ error: ORIGIN_REQUIRED }, { status: 500 });
+  }
   const redirectUri = getPmOauthRedirectUri();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const oauth: any = server.oauth ?? {};

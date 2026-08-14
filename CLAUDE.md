@@ -205,7 +205,8 @@ APP_ORIGIN=               # Comma-separated origins allowed to write — the CSR
 PUBLIC_ORIGIN=            # This instance's own address, at runtime. Required for /api/mcp, both
                           # /.well-known documents and the PM OAuth redirect_uri, which answer 500
                           # without it rather than falling back to a request header (BP-316).
-                          # Falls back to APP_ORIGIN only when that names exactly one origin
+                          # Falls back to APP_ORIGIN only when that names exactly one origin —
+                          # never to NEXT_PUBLIC_APP_URL, which is a build-machine literal
 ```
 
 ## Build

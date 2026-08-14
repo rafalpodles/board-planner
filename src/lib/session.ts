@@ -45,35 +45,36 @@ export function appOrigins(): string[] {
  * `APP_ORIGIN` is an allowlist rather than an address — the compose file's own default lists
  * localhost, and a deployment that accepts both a LAN and a public origin has no reason to order
  * them. So it is a source only when it names exactly one origin; anything else needs
- * `PUBLIC_ORIGIN`, which is a single value and settable at runtime. `NEXT_PUBLIC_APP_URL` is last
- * because it is baked in at build time and cannot be corrected without a rebuild.
+ * `PUBLIC_ORIGIN`, which is a single value and settable at runtime.
  *
- * Every candidate is parsed, not just trimmed: this value used to feed an equality test, where a
- * schemeless `app.example.com` failed safe, and now it is interpolated into the endpoints of a
- * discovery document and into a redirect_uri registered with third-party servers.
+ * `NEXT_PUBLIC_APP_URL` is deliberately NOT a source. Next.js inlines it at build time, so in the
+ * shipped bundle it is a literal from the build machine — the Dockerfile defaults it to
+ * `http://localhost:3000`, which made it always truthy and turned the intended fail-closed 500
+ * into a discovery document advertising localhost, cached for an hour. A value that cannot be
+ * corrected at runtime cannot be this one (BP-316 review).
+ *
+ * Every candidate is parsed, and the scheme is checked. `new URL()` accepts `board.example.com:8443`
+ * as an opaque URL whose `.origin` is the string "null" — truthy, so every "not configured" guard
+ * would pass and the endpoints would read `null/oauth/token`.
  */
 export const ORIGIN_REQUIRED =
-  "This instance's own origin is not configured. Set PUBLIC_ORIGIN (or a single-origin APP_ORIGIN): the MCP endpoint publishes it to clients and calls this instance's own API with it, so it must not come from a request header.";
+  "This instance's own origin is not configured. Set PUBLIC_ORIGIN to an http(s) URL (or give APP_ORIGIN exactly one origin): the MCP endpoint publishes it to clients and calls this instance's own API with it, so it must not come from a request header.";
 
 export function selfOrigin(): string | null {
   const allowlist = appOrigins();
-  const candidates = [
-    process.env.PUBLIC_ORIGIN,
-    allowlist.length === 1 ? allowlist[0] : undefined,
-    process.env.NEXT_PUBLIC_APP_URL,
-  ];
-  for (const candidate of candidates) {
-    const parsed = parseOrigin(candidate);
-    if (parsed) return parsed;
-  }
-  return null;
+  return (
+    parseOrigin(process.env.PUBLIC_ORIGIN) ??
+    (allowlist.length === 1 ? parseOrigin(allowlist[0]) : null)
+  );
 }
 
 function parseOrigin(value: string | undefined): string | null {
   const trimmed = value?.trim();
   if (!trimmed) return null;
   try {
-    return normaliseOrigin(new URL(trimmed).origin);
+    const url = new URL(trimmed);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    return normaliseOrigin(url.origin);
   } catch {
     return null;
   }

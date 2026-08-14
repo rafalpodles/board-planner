@@ -15,9 +15,11 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request) {
   const origin = selfOrigin();
   if (!origin) {
+    // The header its success path carries: these documents exist to be fetched cross-origin, and
+    // without it a browser MCP client gets an opaque CORS error instead of the message
     return NextResponse.json(
       { error: "server_error", error_description: ORIGIN_REQUIRED },
-      { status: 500 }
+      { status: 500, headers: { "Access-Control-Allow-Origin": "*" } }
     );
   }
   return protectedResourceHandler({ authServerUrls: [origin], resourceUrl: origin })(req);

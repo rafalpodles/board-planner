@@ -496,42 +496,47 @@ describe("selfOrigin", () => {
     expect(selfOrigin()).toBe("https://board.example.com");
   });
 
-  it("takes PUBLIC_ORIGIN over the build-time app URL, which cannot be corrected without a rebuild", () => {
-    process.env.PUBLIC_ORIGIN = "https://board.example.com";
+  // NEXT_PUBLIC_* is inlined at build time, so in the shipped bundle this leg is a literal from the
+  // build machine — and the Dockerfile defaults it to http://localhost:3000. As a fallback it was
+  // always truthy, which turned the intended 500 into a discovery document advertising localhost,
+  // cached for an hour. It is not a source at all now, and this test would have been green either
+  // way under vitest, which does no build-time substitution (BP-316 review).
+  it("does not use the build-time app URL, which cannot be corrected at runtime", () => {
     process.env.NEXT_PUBLIC_APP_URL = "http://localhost:3000";
 
-    expect(selfOrigin()).toBe("https://board.example.com");
-  });
-
-  it("falls back to the build-time app URL, reduced to its origin", () => {
-    process.env.NEXT_PUBLIC_APP_URL = "https://board.example.com/some/path";
-
-    expect(selfOrigin()).toBe("https://board.example.com");
-  });
-
-  // The point of the whole change: no header, no guess, no default that happens to work in dev
-  it("returns null rather than guessing when neither is configured", () => {
     expect(selfOrigin()).toBeNull();
   });
 
-  it("returns null for a build-time value that is not a URL", () => {
-    process.env.NEXT_PUBLIC_APP_URL = "not a url";
-
+  // The point of the whole change: no header, no guess, no default that happens to work in dev
+  it("returns null rather than guessing when nothing is configured", () => {
     expect(selfOrigin()).toBeNull();
   });
 
   // This value used to feed an equality test, where a schemeless origin failed safe. It is now
-  // interpolated into discovery endpoints and into a redirect_uri registered with third parties,
-  // so the source that wins has to be parsed too — not only the fallback.
+  // interpolated into discovery endpoints and into a redirect_uri registered with third parties.
   it.each(["PUBLIC_ORIGIN", "APP_ORIGIN"])("returns null for a schemeless %s", (variable) => {
     process.env[variable] = "app.example.com";
 
     expect(selfOrigin()).toBeNull();
   });
 
-  it("moves on to the next source when a higher-precedence one is unusable", () => {
-    process.env.APP_ORIGIN = "app.example.com";
-    process.env.NEXT_PUBLIC_APP_URL = "https://board.example.com";
+  // new URL() takes these without throwing and reports origin === "null" — a truthy string, so
+  // every "not configured" guard passes and the endpoints come out as `null/oauth/token`
+  it.each([
+    "board.example.com:8443",
+    "localhost:3000",
+    "javascript:alert(1)",
+    "ws://board.example.com",
+    "file:///etc/passwd",
+  ])("returns null for %s, which new URL() accepts", (value) => {
+    process.env.PUBLIC_ORIGIN = value;
+
+    expect(selfOrigin()).toBeNull();
+  });
+
+  it("moves on to the allowlist when PUBLIC_ORIGIN is unusable", () => {
+    process.env.PUBLIC_ORIGIN = "app.example.com";
+    process.env.APP_ORIGIN = "https://board.example.com";
 
     expect(selfOrigin()).toBe("https://board.example.com");
   });

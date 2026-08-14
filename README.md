@@ -28,7 +28,7 @@ Everything is optional. Put overrides in a `.env` file next to `docker-compose.y
 | `MONGODB_URI` | `mongodb://mongo:27017/boardplanner` | Point the app at your own MongoDB instead of the bundled one |
 | `COOKIE_ALLOW_INSECURE` | `1` (compose only) | Set to `1` to issue the session cookie without `Secure` and without the `__Host-` prefix, for an instance served over plain HTTP |
 | `APP_ORIGIN` | `http://localhost:${APP_PORT}` | Comma-separated list of origins the app is served from, used to reject cross-site writes |
-| `PUBLIC_ORIGIN` | falls back to `APP_ORIGIN` when it names exactly one origin, then to `NEXT_PUBLIC_APP_URL` | The one address this instance calls its own. Required for the MCP endpoint and PM OAuth |
+| `PUBLIC_ORIGIN` | `http://localhost:${APP_PORT}` (compose); otherwise `APP_ORIGIN` when it names exactly one origin | The one address this instance calls its own. Required for the MCP endpoint and PM OAuth |
 | `OPENAI_API_KEY` | — | AI task generation |
 | `OPENROUTER_API_KEY`, `PM_MODEL`, `PM_MAX_TOKENS`, `PM_DAILY_TURN_CAP`, `PM_SCHEDULER_TICK_MS` | — | PM agent |
 | `ENCRYPTION_KEY` | — | 32 bytes (hex or base64) encrypting stored integration tokens at rest. Without it those tokens cannot be saved at all |
@@ -69,11 +69,16 @@ compose file does; there is no runtime override.
 `PUBLIC_ORIGIN` exists because the other two cannot answer "what is this instance's own address".
 `APP_ORIGIN` is a list, and nothing says which entry is the public one — the compose default lists
 `localhost`, and a deployment that also accepts a LAN origin has no reason to put the public one
-first. `NEXT_PUBLIC_APP_URL` is baked into the image and cannot be corrected without a rebuild. So
-an instance behind a proxy sets `PUBLIC_ORIGIN` at runtime. The MCP endpoint, both
-`/.well-known` documents and the PM agent's OAuth `redirect_uri` are built from it and answer
-**500** when it resolves to nothing — deliberately, because the value they used to fall back to was
-a request header (BP-316).
+first. `NEXT_PUBLIC_APP_URL` is baked into the image, so in the running container it is whatever the
+*build machine* had, which is why it is not consulted at all: as a fallback it was always set and
+always wrong, and it silently replaced the intended failure with a discovery document naming
+`localhost`.
+
+So **an instance reachable at anything other than the compose default must set `PUBLIC_ORIGIN`.**
+The MCP endpoint, both `/.well-known` documents and the PM agent's OAuth `redirect_uri` are built
+from it and answer **500** when it resolves to nothing — deliberately, because the value they used
+to fall back to was a request header (BP-316). It must be an `http`/`https` URL; `board.example.com:8443`
+is not one, however much it looks like it.
 
 MongoDB is pinned to **4.4** and is not published on a host port — only the app container reaches it.
 The aggregations deliberately avoid operators that only exist from 5.0, and pinning the version is
