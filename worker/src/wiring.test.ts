@@ -481,11 +481,14 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     expect(phases).toEqual([
       "claiming",
       "worktree",
+      // the block the run is on, then the three events its own agent produced under it
+      "step:implement",
       "agent",
       "agent",
-      "agent",
-      "gates:diff-size",
+      // protected-paths first: it is what decides whether the agent was allowed to write the files
+      // the build and test gates would go on to execute
       "gates:protected-paths",
+      "gates:diff-size",
       "gates:test-presence",
     ]);
   });

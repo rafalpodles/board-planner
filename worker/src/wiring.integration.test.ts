@@ -32,6 +32,9 @@ const CLAIMED_AGENT = {
   name: "Default",
   sequence: [
     { key: "implement", kind: "step", name: "Implement", prompt: "do it", capability: "edit" },
+    { key: "protected-paths", kind: "gate", name: "Protected files", gateKind: "protected-paths" },
+    { key: "diff-size", kind: "gate", name: "Size", gateKind: "diff-size" },
+    { key: "test-presence", kind: "gate", name: "Test written", gateKind: "test-presence" },
     { key: "push", kind: "step", name: "Push", deterministic: true },
     { key: "pull-request", kind: "step", name: "Pull request", deterministic: true },
   ],

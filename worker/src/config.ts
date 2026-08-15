@@ -7,8 +7,6 @@ import { clampCeiling, DEFAULT_RUN_CEILING_MS } from "./budget.js";
 // task: Bootstrap's connection details plus the current EffectiveConfig policy plus one assignment's
 // bound repository. main.ts assembles it at runtime; nothing loads it from the environment anymore.
 export interface WorkerConfig {
-  autoMerge: boolean;
-  reviewGate: boolean;
   apiBaseUrl: string;
   apiToken: string;
   repoPath: string;
@@ -54,8 +52,6 @@ export interface Bootstrap {
 // Mirrors the server's WorkerPolicy (src/types/index.ts): worker-wide settings an instance or
 // project admin edits in /settings/workers, never the laptop's own environment.
 export interface EffectiveConfig {
-  autoMerge: boolean;
-  reviewGate: boolean;
   baseBranch: string;
   pollIntervalMs: number;
   taskTimeoutMs: number;
@@ -69,10 +65,6 @@ export interface EffectiveConfig {
 }
 
 export const DEFAULT_POLICY: EffectiveConfig = {
-  // Off by default, deliberately: a worker nobody has configured pushes a branch and opens a pull
-  // request, and stops there. Merging is a thing an operator turns on.
-  autoMerge: false,
-  reviewGate: true,
   baseBranch: "main",
   pollIntervalMs: 30_000,
   taskTimeoutMs: 1_800_000,
@@ -188,14 +180,6 @@ export function applyPolicy(current: EffectiveConfig, patch: unknown): Effective
   const source = patch as Record<string, unknown>;
   const next = { ...current };
 
-  if (typeof source.autoMerge === "boolean") next.autoMerge = source.autoMerge;
-  if (typeof source.reviewGate === "boolean") next.reviewGate = source.reviewGate;
-
-  // The worker does not trust a policy it was handed. "Nothing merges unreviewed" is the one
-  // safety property this README asserts outright, and a server that sent the pair — through a bug,
-  // a rollback to an older validator, or otherwise — must not be able to talk this into it. Failing
-  // safe rather than refusing the work: the branch is still pushed and the pull request opened.
-  if (next.autoMerge && !next.reviewGate) next.autoMerge = false;
   if (isNonEmptyString(source.baseBranch)) next.baseBranch = source.baseBranch.trim();
   if (isPositiveNumber(source.pollIntervalMs)) next.pollIntervalMs = source.pollIntervalMs;
   if (isPositiveNumber(source.taskTimeoutMs)) next.taskTimeoutMs = source.taskTimeoutMs;
