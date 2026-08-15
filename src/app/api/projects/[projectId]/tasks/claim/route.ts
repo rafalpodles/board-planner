@@ -49,10 +49,10 @@ export const POST = withWorker(async (request, { params, worker }) => {
     // Holding a task a machine cannot run would park it behind a lease for two hours. Hand it back
     // at once and say why, so the board shows the cause rather than a silent stall.
     await releaseTask(projectId, String(task._id), { refund: true }).catch(() => {});
-    return NextResponse.json(
-      { error: "This project has no agent a worker can run" },
-      { status: 409 }
-    );
+    // 204, not an error: the worker's loop treats a failed claim as a cycle failure and retries on
+    // the next poll, so an unrunnable default would claim and release every thirty seconds forever.
+    // Nothing is claimable here until somebody fixes the project, which is what 204 means.
+    return new NextResponse(null, { status: 204 });
   }
 
   return NextResponse.json({ ...task, agent });

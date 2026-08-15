@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { withAuth } from "@/lib/middleware";
 import { Agent } from "@/models/agent";
@@ -10,6 +11,8 @@ import { AGENT_BUCKETS } from "@/types";
 // changes the label and never the key.
 export const PUT = withAuth(async (request, { params, user }) => {
   const { blockId } = await params;
+  // An id that is not one reaches Mongoose as a CastError and answers 500; this is a 404.
+  if (!isValidObjectId(blockId)) return NextResponse.json({ error: "No such record" }, { status: 404 });
   await connectDB();
 
   const block = await AgentBlock.findById(blockId);
@@ -19,6 +22,11 @@ export const PUT = withAuth(async (request, { params, user }) => {
       { error: "Only an instance admin can change a built-in block" },
       { status: 403 }
     );
+  }
+  // A block's prompt is instructions a worker executes on somebody's checkout, so editing one is
+  // the author's call. DELETE already said so; this said nothing.
+  if (block.createdBy && String(block.createdBy) !== String(user._id) && user.role !== "admin") {
+    return NextResponse.json({ error: "Not yours to change" }, { status: 403 });
   }
 
   const body = await request.json();
@@ -40,6 +48,8 @@ export const PUT = withAuth(async (request, { params, user }) => {
 
 export const DELETE = withAuth(async (_request, { params, user }) => {
   const { blockId } = await params;
+  // An id that is not one reaches Mongoose as a CastError and answers 500; this is a 404.
+  if (!isValidObjectId(blockId)) return NextResponse.json({ error: "No such record" }, { status: 404 });
   await connectDB();
 
   const block = await AgentBlock.findById(blockId);

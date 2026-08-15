@@ -4,6 +4,7 @@ import { withProjectAccess } from "@/lib/middleware";
 import { check } from "@/lib/grants";
 import { Agent } from "@/models/agent";
 import { Project } from "@/models/project";
+import { isRunnable, normaliseComposition } from "@/lib/agent-rules";
 
 // Its own route rather than a field on the worker policy: policy is instance-admin only and travels
 // in the assignment payload, and this is neither — a project admin picks it, and it rides the claim.
@@ -19,7 +20,7 @@ export const PUT = withProjectAccess(async (request, { params, user }) => {
   const agentId = typeof body.agentId === "string" ? body.agentId : "";
   if (!agentId) return NextResponse.json({ error: "agentId is required" }, { status: 400 });
 
-  const agent = await Agent.findById(agentId, "scope project").lean();
+  const agent = await Agent.findById(agentId, "scope project composition").lean();
   if (!agent) return NextResponse.json({ error: "No such agent" }, { status: 404 });
   if (agent.scope === "project" && String(agent.project) !== String(projectId)) {
     return NextResponse.json({ error: "That agent belongs to another project" }, { status: 400 });
@@ -27,6 +28,13 @@ export const PUT = withProjectAccess(async (request, { params, user }) => {
   if (agent.scope === "user") {
     return NextResponse.json(
       { error: "A personal agent cannot be a project's default" },
+      { status: 400 }
+    );
+  }
+
+  if (!isRunnable(normaliseComposition(agent.composition))) {
+    return NextResponse.json(
+      { error: "That agent has nothing in it yet, so a worker would claim a task and stall" },
       { status: 400 }
     );
   }
