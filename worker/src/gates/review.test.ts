@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { reviewGate } from "./review.js";
 import { CommandResult, Runner } from "../exec.js";
 import { ClaimedTask, DiffStats, GateContext } from "../types.js";
+import { claimedTask } from "../__fixtures__/task.js";
 
 const TIMEOUT_MS = 5000;
 
@@ -18,16 +19,7 @@ const patch = [
 function context(diff: Partial<DiffStats> = {}, task: Partial<ClaimedTask> = {}): GateContext {
   return {
     worktreePath: "/wt",
-    task: {
-      taskId: "1",
-      taskKey: "CP-158",
-      taskNumber: 158,
-      title: "Add a thing",
-      description: "body",
-      acceptanceCriteria: [],
-      attempts: 0,
-      ...task,
-    },
+    task: claimedTask(task),
     result: {
       status: "completed",
       summary: "I did exactly what the task asked",

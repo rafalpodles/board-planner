@@ -2,18 +2,11 @@ import { readFileSync } from "fs";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { createExecutor } from "./executor.js";
 import { parseStream, StreamEvent } from "./stream.js";
+import { claimedTask } from "./__fixtures__/task.js";
 
 const config = { taskTimeoutMs: 1000, apiBaseUrl: "https://app.example.com", apiToken: "cp_t" } as never;
 
-const task = {
-  taskId: "t1",
-  taskKey: "CP-158",
-  taskNumber: 158,
-  title: "Add a thing",
-  description: "Do it well",
-  acceptanceCriteria: ["works"],
-  attempts: 1,
-};
+const task = claimedTask({ description: "Do it well", acceptanceCriteria: ["works"] });
 
 // What the pipeline hands one writing step. The brief carries the block's prompt and models; the
 // tool list is not in it, and never comes from the server.
@@ -128,6 +121,39 @@ describe("createExecutor", () => {
 
     const args = run.mock.calls[0][1] as string[];
     expect(args[args.indexOf("--tools") + 1]).toBe("Read Edit Write Grep Glob");
+  });
+
+  // The catalog and the UI both promise a read-only block "cannot change anything". Nothing tested
+  // the list that promise rests on — every case in this file ran with capability "edit".
+  it("gives a read-only step no way to change anything", async () => {
+    const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
+
+    await createExecutor(config, runner).execute({
+      ...options,
+      brief: { ...options.brief, capability: "read-only" },
+    });
+
+    const tools = (run.mock.calls[0][1] as string[])[
+      (run.mock.calls[0][1] as string[]).indexOf("--tools") + 1
+    ];
+    expect(tools).toBe("Read Grep Glob");
+    for (const forbidden of ["Edit", "Write", "Bash"]) {
+      expect(tools.split(" ")).not.toContain(forbidden);
+    }
+  });
+
+  // The block's prompt is editable from the board; the framing around it is not
+  it("keeps the untrusted-data framing ahead of the block's own prompt", async () => {
+    const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
+
+    await createExecutor(config, runner).execute({
+      ...options,
+      brief: { ...options.brief, prompt: "tidy the imports" },
+    });
+
+    const args = run.mock.calls[0][1] as string[];
+    const prompt = args[args.indexOf("--append-system-prompt") + 1];
+    expect(prompt.indexOf("untrusted party")).toBeLessThan(prompt.indexOf("tidy the imports"));
   });
 
   // An agent told to commit and unable to would report itself blocked

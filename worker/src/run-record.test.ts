@@ -36,7 +36,8 @@ describe("recordFor", () => {
     });
   });
 
-  // The server takes only what AGENT_RUN_OUTCOMES lists, and answers 400 to anything else
+  // The list the server accepts is asserted against its source in catalog-contract.test.ts — the
+  // worker is a separate package, and importing the app's types here would drag its whole graph in
   it("maps every worker outcome onto one the server accepts", () => {
     const accepted = ["delivered", "merged", "refused", "blocked", "failed", "requeued", "released"];
     const kinds: OutcomeKind[] = [

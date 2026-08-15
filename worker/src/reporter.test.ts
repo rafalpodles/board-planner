@@ -2,17 +2,9 @@ import { describe, it, expect, vi } from "vitest";
 import { StatusIds } from "./api.js";
 import { createReporter } from "./reporter.js";
 import { ClaimedTask } from "./types.js";
+import { claimedTask } from "./__fixtures__/task.js";
 
-const task: ClaimedTask = {
-  taskId: "t1",
-  projectId: "CP",
-  taskKey: "CP-158",
-  taskNumber: 158,
-  title: "Add a thing",
-  description: "body",
-  acceptanceCriteria: [],
-  attempts: 1,
-};
+const task = claimedTask();
 
 // Deliberately none of the seeded ids, so any surviving literal fails
 const statuses: StatusIds = { approved: "ready", review: "checking", done: "shipped" };
@@ -28,6 +20,10 @@ function apiSpy() {
       .mockResolvedValue(undefined),
     release: vi.fn<(projectId: string, taskId: string) => Promise<void>>().mockResolvedValue(undefined),
     statusIds: vi.fn<() => Promise<StatusIds>>().mockResolvedValue(statuses),
+    // Not used by the reporter, but an ApiClient carries them — and this mock stands in for one
+    columnIds: vi.fn<() => Promise<string[]>>().mockResolvedValue([]),
+    postEvent: vi.fn().mockResolvedValue({ applied: true }),
+    postRun: vi.fn().mockResolvedValue(undefined),
   };
 }
 

@@ -1,19 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { testPresenceGate } from "./test-presence.js";
 import { DiffStats, GateContext } from "../types.js";
+import { claimedTask } from "../__fixtures__/task.js";
 
 function context(diff: Partial<DiffStats>): GateContext {
   return {
     worktreePath: "/wt",
-    task: {
-      taskId: "1",
-      taskKey: "CP-1",
-      taskNumber: 1,
-      title: "t",
-      description: "d",
-      acceptanceCriteria: [],
-      attempts: 0,
-    },
+    task: claimedTask({ taskKey: "CP-1", taskNumber: 1, title: "t", description: "d" }),
     result: {
       status: "completed",
       summary: "",

@@ -21,6 +21,12 @@ describe("gitArgs", () => {
     ]);
   });
 
+  // The split from deliveryGitArgs is the whole point of the module, and only one half of it was
+  // asserted: removing this from SAFE_CONFIG left every test green
+  it("clears the credential helper on every call that is not delivery", () => {
+    expect(gitArgs(["status"])).toContain("credential.helper=");
+  });
+
   it("refuses the system config", () => {
     expect(GIT_SAFE_ENV.GIT_CONFIG_NOSYSTEM).toBe("1");
   });

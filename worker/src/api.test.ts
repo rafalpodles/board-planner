@@ -3,12 +3,14 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { describe, it, expect, vi, afterAll } from "vitest";
 import { createApiClient } from "./api.js";
+import { Bootstrap } from "./config.js";
 
+// Spreadable, unlike `as never`: three tests build a variant of it with their own stateDir
 const config = {
   apiBaseUrl: "https://app.example.com",
   apiToken: "cp_token",
   workerId: "worker-a",
-} as never;
+} as unknown as Bootstrap;
 
 // A stored identity, injected in place of the real <stateDir>/worker.json so claim() (the only
 // method that needs one) can authenticate without touching the filesystem
