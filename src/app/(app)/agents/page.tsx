@@ -6,7 +6,13 @@ import { Button } from "@/components/ui/Button";
 import { useProjects } from "@/hooks/use-projects";
 import { useStore } from "./store";
 import { AgentList, BlockList, Section } from "./components/lists";
-import { NewAgentDialog, NewGateDialog, NewStepDialog } from "./components/dialogs";
+import {
+  EditBlockDialog,
+  NewAgentDialog,
+  NewGateDialog,
+  NewStepDialog,
+} from "./components/dialogs";
+import { ApiAgentBlock } from "@/types";
 
 type Tab = "agents" | "gates" | "steps";
 
@@ -22,6 +28,7 @@ export default function AgentsPage() {
 
   const [tab, setTab] = useState<Tab>("agents");
   const [dialog, setDialog] = useState<Tab | null>(null);
+  const [editing, setEditing] = useState<ApiAgentBlock | null>(null);
   const tabRefs = useRef<Record<Tab, HTMLButtonElement | null>>({
     agents: null,
     gates: null,
@@ -120,7 +127,7 @@ export default function AgentsPage() {
           title="Gates"
           hint="Checks that can stop a change. A gate never edits anything — it only says yes or no."
         >
-          <BlockList rows={store.allGates} onDelete={store.removeBlock} />
+          <BlockList rows={store.allGates} onDelete={store.removeBlock} onEdit={setEditing} />
         </Section>
       </div>
 
@@ -134,10 +141,15 @@ export default function AgentsPage() {
           title="Steps"
           hint="Work an agent does. Each step is its own session, with a fresh head."
         >
-          <BlockList rows={store.allSteps} onDelete={store.removeBlock} />
+          <BlockList rows={store.allSteps} onDelete={store.removeBlock} onEdit={setEditing} />
         </Section>
       </div>
 
+      <EditBlockDialog
+        block={editing}
+        onClose={() => setEditing(null)}
+        onSave={store.updateBlock}
+      />
       <NewAgentDialog
         open={dialog === "agents"}
         projects={projects}
