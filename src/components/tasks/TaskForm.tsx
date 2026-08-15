@@ -389,7 +389,7 @@ export function TaskForm({
                     onChange={(e) =>
                       setCustomFieldValues((prev) => ({ ...prev, [field._id]: e.target.checked }))
                     }
-                    className="rounded border-border"
+                    className="focus-ring rounded border-border"
                   />
                   {field.name}
                   {field.required && <span className="text-danger">*</span>}
@@ -491,7 +491,7 @@ export function TaskForm({
                     )
                   )
                 }
-                className="rounded border-border"
+                className="focus-ring rounded border-border"
               />
               <input
                 type="text"

@@ -174,14 +174,16 @@ body {
   outline-offset: -2px;
 }
 
-/* For a scroll container holding full-width fields: the padding gives the focus ring the
-   room the scrollport would otherwise clip, and the negative margin puts the content back
-   on the line it was on, so nothing moves. Wide enough for a 2px outline at 2px offset. */
+/* For a scroll container holding fields: the padding gives the focus ring the room the
+   scrollport would otherwise clip, and the equal negative margin puts the content back where
+   it was, so by construction nothing moves. Wide enough for a 2px outline at 2px offset.
+
+   All four sides, not just the horizontal ones. An axis with nothing to scroll still clips —
+   a short list under `max-h-48` never moves vertically, and its checkboxes lost the top and
+   bottom of their ring to the same edge. */
 .scroll-ring-room {
-  padding-left: 0.3125rem;
-  padding-right: 0.3125rem;
-  margin-left: -0.3125rem;
-  margin-right: -0.3125rem;
+  padding: 0.3125rem;
+  margin: -0.3125rem;
 }
 
 /* Every scroll container scrolls without a visible bar. Only the bar's appearance

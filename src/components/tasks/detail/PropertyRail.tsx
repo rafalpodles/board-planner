@@ -351,7 +351,7 @@ function CustomFieldRow({ field, value, onChange, touch }: CustomFieldRowProps) 
             type="checkbox"
             checked={!!value}
             onChange={(e) => onChange(e.target.checked)}
-            className="rounded border-border"
+            className="focus-ring rounded border-border"
           />
           <span className="text-text-muted">{value ? "Yes" : "No"}</span>
         </label>

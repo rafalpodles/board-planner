@@ -192,7 +192,7 @@ export default function TokensPage() {
                     type="checkbox"
                     checked={scope.includes(p._id)}
                     onChange={() => toggleScope(p._id)}
-                    className="rounded border-border"
+                    className="focus-ring rounded border-border"
                   />
                   <span>{p.name}</span>
                   <span className="text-text-muted font-mono text-xs">{p.key}</span>
