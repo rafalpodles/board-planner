@@ -109,12 +109,26 @@ describe("the legacy api token", () => {
 });
 
 describe("applyPolicy", () => {
+  // The one field the worker recomputes rather than adopts: a ceiling past the server's own lease
+  // gets the task reclaimed under a running worker
+  it("clamps a run ceiling that would outlive the server's lease", () => {
+    expect(applyPolicy(DEFAULT_POLICY, { runCeilingMs: 8 * 60 * 60_000 }).runCeilingMs).toBeLessThan(
+      2 * 60 * 60_000
+    );
+  });
+
+  it("keeps the run ceiling it already had when a patch does not mention one", () => {
+    const first = applyPolicy(DEFAULT_POLICY, { runCeilingMs: 3_600_000 });
+    expect(applyPolicy(first, { baseBranch: "develop" }).runCeilingMs).toBe(3_600_000);
+  });
+
   it("adopts every known field from a well-formed patch", () => {
     const next = applyPolicy(DEFAULT_POLICY, {
       autoMerge: true,
       baseBranch: "develop",
       pollIntervalMs: 5_000,
       taskTimeoutMs: 60_000,
+      runCeilingMs: 3_600_000,
       maxDiffLines: 100,
       maxDiffFiles: 3,
       model: "sonnet",
@@ -128,6 +142,7 @@ describe("applyPolicy", () => {
       baseBranch: "develop",
       pollIntervalMs: 5_000,
       taskTimeoutMs: 60_000,
+      runCeilingMs: 3_600_000,
       maxDiffLines: 100,
       maxDiffFiles: 3,
       model: "sonnet",

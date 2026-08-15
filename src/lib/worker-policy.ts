@@ -33,6 +33,7 @@ export const PROJECT_POLICY_DEFAULTS = {
   claimScope: "assigned" as ClaimScope,
   baseBranch: "main",
   taskTimeoutMs: 1_800_000,
+  runCeilingMs: 5_400_000,
   maxDiffLines: 400,
   maxDiffFiles: 10,
   model: "opus",
