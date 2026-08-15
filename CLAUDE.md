@@ -4,8 +4,9 @@
 
 **Product documentation** — anything a user reads — lives in the `board-planner-site` repo as Markdown under
 `src/content/docs/docs/**` and is published at https://board-planner.com/docs. That repo is the single source
-of truth: edit the page there and open a pull request. Notion keeps no copy of it. Publishing the site is
-**manual** (`railway up` from `board-planner-site`) — merging to `main` ships nothing.
+of truth: edit the page there and open a pull request. Notion keeps no copy of it. Railway deploys that repo
+**automatically from `main`**, so merging publishes — verify with `railway deployment list` rather than
+assuming either way.
 
 **Project documentation** — architecture, decisions, implementation notes, anything a user never sees — lives
 in **Notion** under the `🗂️ Board Planner` root. Use the Notion MCP tools, and search first so an existing
