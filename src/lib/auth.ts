@@ -30,6 +30,7 @@ export { getClientIp } from "./client-ip";
  * the gap with the suite green (BP-318 review).
  */
 export const PASSWORD_COST_FACTOR = 10;
+export const MIN_PASSWORD_LENGTH = 8;
 const ABSENT_USER_HASH = bcrypt.hashSync("::no such user::", PASSWORD_COST_FACTOR);
 
 export async function verifyCredentials(

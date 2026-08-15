@@ -12,8 +12,10 @@ import { Modal } from "@/components/ui/Modal";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useToast } from "@/components/ui/Toast";
 
+const MIN_PASSWORD_LENGTH = 8;
+
 export default function UsersPage() {
-  const { isAdmin, isLoading: authLoading } = useAuth();
+  const { user: currentUser, isAdmin, isLoading: authLoading } = useAuth();
   const router = useRouter();
   const [users, setUsers] = useState<ApiUser[]>([]);
   const [loading, setLoading] = useState(true);
@@ -28,6 +30,9 @@ export default function UsersPage() {
   const [editUser, setEditUser] = useState<ApiUser | null>(null);
   const [editRole, setEditRole] = useState<"admin" | "member">("member");
   const [editSaving, setEditSaving] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [passwordError, setPasswordError] = useState("");
 
   // Delete state
   const [confirmDeleteUser, setConfirmDeleteUser] = useState<ApiUser | null>(
@@ -76,20 +81,47 @@ export default function UsersPage() {
   function openEdit(user: ApiUser) {
     setEditUser(user);
     setEditRole(user.role || "member");
+    closePasswordField();
+  }
+
+  function closePasswordField() {
+    setNewPassword("");
+    setPasswordError("");
+    setShowPassword(false);
+  }
+
+  function closeEdit() {
+    setEditUser(null);
+    closePasswordField();
   }
 
   async function handleEditSave() {
     if (!editUser) return;
+    setPasswordError("");
+
+    if (newPassword && newPassword.length < MIN_PASSWORD_LENGTH) {
+      setPasswordError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters`);
+      return;
+    }
+
     setEditSaving(true);
+    const { username } = editUser;
+    const passwordWasSet = !!newPassword;
 
     try {
       await api.put(`/api/users/${editUser._id}`, {
         role: editRole,
+        ...(passwordWasSet ? { password: newPassword } : {}),
       });
-      setEditUser(null);
+      closeEdit();
       const data = await api.get("/api/users");
       setUsers(data);
-      toast("User updated", "success");
+      toast(
+        passwordWasSet
+          ? `Password set for ${username}. They were signed out everywhere.`
+          : "User updated",
+        "success"
+      );
     } catch (err) {
       toast(err instanceof Error ? err.message : "Failed to update user", "error");
     } finally {
@@ -178,6 +210,9 @@ export default function UsersPage() {
           <Input
             label="Password"
             type="password"
+            autoComplete="new-password"
+            minLength={MIN_PASSWORD_LENGTH}
+            placeholder={`At least ${MIN_PASSWORD_LENGTH} characters`}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
@@ -209,7 +244,7 @@ export default function UsersPage() {
       {/* Edit User Modal */}
       <Modal
         open={!!editUser}
-        onClose={() => setEditUser(null)}
+        onClose={closeEdit}
         title={editUser ? `Edit ${editUser.fullName}` : ""}
       >
         {editUser && (
@@ -242,6 +277,60 @@ export default function UsersPage() {
               </div>
             </div>
 
+            <div className="border-t border-border pt-4">
+              {currentUser?._id === editUser._id ? (
+                <>
+                  <p className="text-sm font-medium mb-1">Set a new password</p>
+                  <p className="text-sm text-text-muted">
+                    Your own password is changed under Settings → Security, where the current one is
+                    required.
+                  </p>
+                </>
+              ) : (
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    handleEditSave();
+                  }}
+                  className="space-y-2"
+                >
+                  <label
+                    htmlFor="newUserPassword"
+                    className="block text-sm font-medium mb-1"
+                  >
+                    Set a new password
+                  </label>
+                  <p id="newUserPasswordHelp" className="text-sm text-text-muted">
+                    Nothing is sent — tell {editUser.fullName} yourself. Saving signs them out
+                    everywhere.
+                  </p>
+                  <div className="flex items-start gap-2">
+                    <Input
+                      id="newUserPassword"
+                      type={showPassword ? "text" : "password"}
+                      autoComplete="new-password"
+                      aria-describedby="newUserPasswordHelp"
+                      minLength={MIN_PASSWORD_LENGTH}
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      placeholder={`At least ${MIN_PASSWORD_LENGTH} characters`}
+                      error={passwordError}
+                    />
+                    {/* Read out over the phone more often than typed twice, so showing it beats a
+                        confirm field: a typo here locks the account out of every session it had */}
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="shrink-0"
+                      onClick={() => setShowPassword((shown) => !shown)}
+                    >
+                      {showPassword ? "Hide" : "Show"}
+                    </Button>
+                  </div>
+                </form>
+              )}
+            </div>
+
             <p className="text-sm text-text-muted">
               Board access is granted per board, under that board&apos;s Settings → General.
             </p>
@@ -252,14 +341,14 @@ export default function UsersPage() {
               </Button>
               <Button
                 variant="secondary"
-                onClick={() => setEditUser(null)}
+                onClick={closeEdit}
               >
                 Cancel
               </Button>
               <Button
                 variant="danger"
                 onClick={() => {
-                  setEditUser(null);
+                  closeEdit();
                   setConfirmDeleteUser(editUser);
                 }}
               >
