@@ -5,6 +5,11 @@ const oauthClientFindOne = vi.fn();
 const oauthConsentCreate = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
+vi.mock("@/models/rateLimit", async () => {
+  const { inMemoryRateLimitModel } = await import("@/lib/rate-limit-test-store");
+  return { RateLimit: inMemoryRateLimitModel() };
+});
+
 vi.mock("@/lib/auth", () => ({ verifyCredentials, getClientIp: () => "203.0.113.7" }));
 vi.mock("@/lib/grants", () => ({ accessibleProjectIds: vi.fn().mockResolvedValue(null) }));
 vi.mock("@/models/oauthClient", () => ({ OAuthClient: { findOne: oauthClientFindOne } }));
@@ -50,9 +55,9 @@ async function attempt(username: string): Promise<string> {
   return res.text();
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.clearAllMocks();
-  resetRateLimits();
+  await resetRateLimits();
   oauthClientFindOne.mockResolvedValue({
     clientId: "c1",
     clientName: "Some App",

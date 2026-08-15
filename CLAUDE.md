@@ -4,8 +4,9 @@
 
 **Product documentation** — anything a user reads — lives in the `board-planner-site` repo as Markdown under
 `src/content/docs/docs/**` and is published at https://board-planner.com/docs. That repo is the single source
-of truth: edit the page there and open a pull request. Notion keeps no copy of it. Publishing the site is
-**manual** (`railway up` from `board-planner-site`) — merging to `main` ships nothing.
+of truth: edit the page there and open a pull request. Notion keeps no copy of it. Railway deploys that repo
+**automatically from `main`**, so merging publishes — verify with `railway deployment list` rather than
+assuming either way.
 
 **Project documentation** — architecture, decisions, implementation notes, anything a user never sees — lives
 in **Notion** under the `🗂️ Board Planner` root. Use the Notion MCP tools, and search first so an existing
@@ -210,6 +211,9 @@ ENCRYPTION_KEY=           # 32 bytes (hex or base64) — without it integration 
 ENCRYPTION_KEYS_OLD=      # Optional — comma-separated retired keys, so a rotation can still decrypt
 NEXT_PUBLIC_APP_URL=      # Frontend URL for links — read at BUILD time, not runtime
 APP_ORIGIN=               # Comma-separated origins allowed to write — the CSRF allowlist
+TRUSTED_PROXY_HOPS=       # Proxies appending to X-Forwarded-For in front of the app; default 0,
+                          # which ignores the header. The login throttle keys on it, so on a
+                          # proxy-less deployment a forged header used to reset every counter (BP-318)
 PUBLIC_ORIGIN=            # This instance's own address, at runtime. Required for /api/mcp, both
                           # /.well-known documents and the PM OAuth redirect_uri, which answer 500
                           # without it rather than falling back to a request header (BP-316).
