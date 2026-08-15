@@ -171,14 +171,26 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
   let keepWorktree = false;
   try {
     enter("agent");
+    // Reads the one writing step of the agent the claim resolved. The loop over the whole sequence
+    // lands next; until then this is what makes the block's prompt and model take effect at all.
+    const implementStep = task.agent.sequence.find(
+      (entry) => entry.kind === "step" && entry.capability === "edit"
+    );
     // The only agent-authored material that reaches a sink, and it reaches one only through
     // summarise(), whose result type cannot hold a file body, a prompt or a diff
-    const outcome = await executor.execute(
+    const outcome = await executor.execute({
       task,
       worktreePath,
-      deps.signal,
-      telemetry && ((event) => telemetry.emitEvent(event))
-    );
+      signal: deps.signal,
+      onEvent: telemetry && ((event) => telemetry.emitEvent(event)),
+      brief: {
+        prompt: implementStep?.prompt ?? "",
+        capability: "edit",
+        model: implementStep?.model ?? "",
+        fallbackModel: implementStep?.fallbackModel ?? "",
+        timeoutMs: config.taskTimeoutMs,
+      },
+    });
     if (await releaseIfAborted(deps, reporter, task)) return;
 
     if (outcome.kind === "usage_limit") {
