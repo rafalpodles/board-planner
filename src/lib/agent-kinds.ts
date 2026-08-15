@@ -40,30 +40,17 @@ export const GATE_KINDS: GateKind[] = [
     key: "protected-paths",
     name: "Protected files",
     description: "Refuses a change to files a later step runs, or loads as its own instructions.",
-    params: [
-      {
-        key: "extraPaths",
-        label: "Also protect",
-        type: "text",
-        placeholder: "infra/, deploy.sh",
-        hint: "Added to the built-in list. Nothing can be taken off it.",
-      },
-    ],
+    // A parameter listed here is one the worker reads. "Also protect" and "Also count as a test"
+    // were offered before either gate could act on them, which is a form the operator fills in and
+    // nothing obeys — worse than not offering it. They come back with the gates (BP-343).
+    params: [],
     defaults: {},
   },
   {
     key: "test-presence",
     name: "Test written",
     description: "Refuses code that came without a test.",
-    params: [
-      {
-        key: "extraPatterns",
-        label: "Also count as a test",
-        type: "text",
-        placeholder: "*.spec.py",
-        hint: "Widens what counts. It cannot narrow it.",
-      },
-    ],
+    params: [],
     defaults: {},
   },
   {
