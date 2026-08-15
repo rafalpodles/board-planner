@@ -16,7 +16,10 @@ export const RESULT_SCHEMA = {
   required: ["status", "summary", "filesChanged", "testsAdded", "blockedReason"],
 } as const;
 
-const ALLOWED_TOOLS = "Read Edit Write Grep Glob Bash(git *) Bash(npm *)";
+// --tools, not --allowedTools. Measured 2026-08-15: under --permission-mode bypassPermissions,
+// --allowedTools "Read Grep Glob" still ran Bash, because it is an allowlist for *skipping the
+// permission prompt* and nothing prompts. --tools is what decides which built-ins exist at all.
+const TOOLS = "Read Edit Write Grep Glob Bash";
 
 const SYSTEM_PROMPT = [
   "You are executing a single task from a project board, unattended.",
@@ -186,8 +189,12 @@ export function createExecutor(config: WorkerConfig, runner: Runner): Executor {
           JSON.stringify(RESULT_SCHEMA),
           "--permission-mode",
           "bypassPermissions",
-          "--allowedTools",
-          ALLOWED_TOOLS,
+          "--tools",
+          TOOLS,
+          // Built-ins are not the whole surface. The same run reported Jira, Notion, GitHub, Figma
+          // and Board Planner itself still available from the operator's own ~/.claude.json — so an
+          // unattended agent could move the task it is working on, and no gate or diff would see it.
+          "--strict-mcp-config",
           "--append-system-prompt",
           SYSTEM_PROMPT,
           "--model",

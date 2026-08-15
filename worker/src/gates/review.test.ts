@@ -143,7 +143,11 @@ describe("reviewGate", () => {
     await reviewGate(runner, TIMEOUT_MS).run(context());
 
     const args = run.mock.calls[0][1];
-    expect(args[args.indexOf("--allowedTools") + 1]).toBe("Read Grep Glob");
+    // --tools, not --allowedTools: the latter only skips the permission prompt, so it left the
+    // reviewer able to write while this test said otherwise
+    expect(args[args.indexOf("--tools") + 1]).toBe("Read Grep Glob");
+    expect(args).not.toContain("--allowedTools");
+    expect(args).toContain("--strict-mcp-config");
     expect(args).not.toContain("--permission-mode");
     expect(args[args.indexOf("--model") + 1]).toBe("opus");
   });

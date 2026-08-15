@@ -138,8 +138,10 @@ export function reviewGate(runner: Runner, timeoutMs: number, reviewModel?: stri
           JSON.stringify(VERDICT_SCHEMA),
           "--append-system-prompt",
           REVIEWER_PROMPT,
-          "--allowedTools",
+          // The reviewer's whole value is that it only reads; --allowedTools did not make that true
+          "--tools",
           "Read Grep Glob",
+          "--strict-mcp-config",
           "--model",
           model,
         ],
