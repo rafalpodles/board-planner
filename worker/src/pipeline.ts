@@ -1,4 +1,5 @@
 import { ApiClient, StatusIds } from "./api.js";
+import { commitAll } from "./commit.js";
 import { WorkerConfig } from "./config.js";
 import { Delivery } from "./delivery.js";
 import { childEnv } from "./env.js";
@@ -10,7 +11,7 @@ import { SHUTDOWN_SIGNAL } from "./commands.js";
 import { scrub } from "./scrub.js";
 import { OutcomeKind, Phase, Telemetry } from "./telemetry.js";
 import { Workspace } from "./workspace.js";
-import { ClaimedTask, DiffStats, Gate, GateContext, GateResult } from "./types.js";
+import { ClaimedTask, DiffStats, ExecutionResult, Gate, GateContext, GateResult } from "./types.js";
 
 export interface PipelineDeps {
   config: WorkerConfig;
@@ -53,6 +54,15 @@ export async function resolveStatusIds(
 // CLI ran out of subscription is a release, not a rejection a human has to clear
 function hitUsageLimit(verdict: GateResult): boolean {
   return /could not be completed/i.test(verdict.reason) && /usage limit reached/i.test(verdict.reason);
+}
+
+const MAX_SUBJECT = 72;
+
+// The summary is model-authored prose; a commit subject is one bounded line.
+function commitSubject(task: ClaimedTask, result: ExecutionResult): string {
+  const first = scrub(result.summary).split("\n")[0].trim() || "apply the change";
+  const subject = `${task.taskKey}: ${first}`;
+  return subject.length <= MAX_SUBJECT ? subject : `${subject.slice(0, MAX_SUBJECT - 1)}…`;
 }
 
 async function unfinishedWork(runner: Runner, worktreePath: string): Promise<string | null> {
@@ -189,6 +199,20 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
     if (outcome.result.status === "blocked") {
       settle("blocked", outcome.result.blockedReason);
       await reporter.blocked(task, outcome.result.blockedReason);
+      return;
+    }
+
+    try {
+      await commitAll(runner, worktreePath, commitSubject(task, outcome.result));
+    } catch (error) {
+      // The outer catch requeues and destroys the worktree, which here would delete the only copy
+      // of work the agent finished.
+      keepWorktree = true;
+      settle("failed", "the change could not be committed");
+      await reporter.failed(
+        task,
+        `the agent's change could not be committed: ${String(error)}\n\nNothing was pushed; the worktree is kept at \`${worktreePath}\` on the worker host.`
+      );
       return;
     }
 

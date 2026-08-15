@@ -315,6 +315,31 @@ describe("runTask", () => {
     expect(h.workspace.destroy).not.toHaveBeenCalled();
   });
 
+  // The agent has no Bash any more, so nothing but this puts its work in a commit
+  it("commits what the agent wrote, under the task key", async () => {
+    const runner = { run: vi.fn<Runner["run"]>().mockResolvedValue(shell(" M src/a.ts\n")) };
+    const h = harness({ runner, gates: [] });
+    await runTask(h.deps, task);
+
+    const commit = runner.run.mock.calls.find(([, args]) => args.includes("commit"));
+    expect(commit).toBeDefined();
+    expect(commit![1][commit![1].indexOf("-m") + 1]).toMatch(/^CP-158: /);
+  });
+
+  it("does not commit a run the agent reported blocked", async () => {
+    const runner = { run: vi.fn<Runner["run"]>().mockResolvedValue(shell(" M src/a.ts\n")) };
+    const executor = {
+      execute: vi.fn<Executor["execute"]>().mockResolvedValue({
+        kind: "result",
+        result: { ...completed, status: "blocked", blockedReason: "unclear" },
+      }),
+    };
+    const h = harness({ runner, executor, gates: [] });
+    await runTask(h.deps, task);
+
+    expect(runner.run.mock.calls.some(([, args]) => args.includes("commit"))).toBe(false);
+  });
+
   it("runs the gates on a clean worktree", async () => {
     const gate = passingGate("diff-size");
     const h = harness({ gates: [gate] });
