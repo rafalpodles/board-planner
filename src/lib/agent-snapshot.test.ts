@@ -1,10 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const agentFindById = vi.fn();
+const agentFindOne = vi.fn();
 const blockFind = vi.fn();
 const projectFindById = vi.fn();
 
-vi.mock("@/models/agent", () => ({ Agent: { findById: (...a: unknown[]) => agentFindById(...a) } }));
+vi.mock("@/models/agent", () => ({
+  Agent: {
+    findById: (...a: unknown[]) => agentFindById(...a),
+    findOne: (...a: unknown[]) => agentFindOne(...a),
+  },
+}));
 vi.mock("@/models/agentBlock", () => ({
   AgentBlock: { find: (...a: unknown[]) => blockFind(...a) },
 }));
@@ -37,6 +43,9 @@ const BLOCKS = [
 
 beforeEach(() => {
   agentFindById.mockReset();
+  agentFindOne.mockReset();
+  // Nothing seeded unless a test says so, so the old "neither names one" case still means nothing
+  agentFindOne.mockReturnValue(lean(null));
   blockFind.mockReset();
   projectFindById.mockReset();
   blockFind.mockReturnValue(lean(BLOCKS));
@@ -66,8 +75,22 @@ describe("snapshotFor", () => {
     expect(snapshot?.name).toBe("Default");
   });
 
-  it("has nothing to run when neither the task nor the project names one", async () => {
+  // Every project that had a worker before the catalog existed names no agent. Without this each
+  // of them would stop dead on the first claim after the deploy.
+  it("falls back to the seeded Default when neither the task nor the project names one", async () => {
     projectFindById.mockReturnValue(lean({ worker: {} }));
+    agentFindOne.mockReturnValue(lean(AGENT));
+
+    const snapshot = await snapshotFor("p1", null);
+
+    expect(snapshot?.name).toBe("Default");
+    expect(agentFindOne).toHaveBeenCalledWith({ scope: "global", name: "Default" });
+  });
+
+  it("has nothing to run when not even the seeded Default is there", async () => {
+    projectFindById.mockReturnValue(lean({ worker: {} }));
+    agentFindOne.mockReturnValue(lean(null));
+
     expect(await snapshotFor("p1", null)).toBeNull();
   });
 

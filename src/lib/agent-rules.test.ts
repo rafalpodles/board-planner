@@ -37,6 +37,10 @@ const BLOCKS: ApiAgentBlock[] = [
   block({ key: "security-review", gateKind: "review" }),
   block({ key: "diff-size", gateKind: "diff-size" }),
   block({ key: "protected-paths", gateKind: "protected-paths" }),
+  // A second block of the same kind, as POST /api/agent-blocks would create it: the key comes from
+  // the name, so nothing keyed on the literal "protected-paths" would recognise this one
+  block({ key: "protected-files-strict", gateKind: "protected-paths" }),
+  block({ key: "polish", kind: "step", capability: "edit" }),
   block({ key: "build", gateKind: "build" }),
   block({ key: "test-run", gateKind: "test-run" }),
 ];
@@ -211,6 +215,84 @@ describe("rules the shape of the old pipeline used to guarantee", () => {
     );
     expect(problems.some((p) => /before .*protected/i.test(p.message))).toBe(true);
     expect(problems.find((p) => /before .*protected/i.test(p.message))?.severity).toBe("broken");
+  });
+
+  // build was the only executing gate any composition here used, so dropping test-run from the set
+  // was undetectable — and a Tests pass gate runs the suite over files the agent just wrote
+  it("refuses a test-run that comes before protected-paths, exactly as it refuses a build", () => {
+    const problems = agentProblems(
+      composition({
+        implementation: ["implement"],
+        verification: ["test-run", "protected-paths"],
+        delivery: ["push"],
+      }),
+      lookup
+    );
+    expect(problems.some((p) => p.severity === "broken" && /protected/i.test(p.message))).toBe(true);
+  });
+
+  // One gate standing after one write is not the property. The second write is unread.
+  it("refuses a second write that no protected-paths gate stands between and the build", () => {
+    const problems = agentProblems(
+      composition({
+        implementation: ["implement"],
+        verification: ["protected-paths", "polish", "build"],
+        delivery: ["push"],
+      }),
+      lookup
+    );
+    expect(problems.some((p) => p.severity === "broken" && /protected/i.test(p.message))).toBe(true);
+  });
+
+  it("accepts a second protected-paths gate after the second write", () => {
+    const problems = agentProblems(
+      composition({
+        implementation: ["implement"],
+        verification: ["protected-paths", "polish", "protected-files-strict", "build"],
+        delivery: ["push"],
+      }),
+      lookup
+    );
+    expect(problems).toEqual([]);
+  });
+
+  // Keyed on the kind, like the worker: a block created from the catalog gets a key from its name
+  it("accepts any protected-paths-kind gate as the guard, not just the one named protected-paths", () => {
+    const problems = agentProblems(
+      composition({
+        implementation: ["implement"],
+        verification: ["protected-files-strict", "build"],
+        delivery: ["push"],
+      }),
+      lookup
+    );
+    expect(problems).toEqual([]);
+  });
+
+  // Anything after a merge judges a change that has already landed: it cannot stop it, and the
+  // board would say the merge was blocked for work that is on the base branch
+  it("refuses a gate placed after Merge", () => {
+    const problems = agentProblems(
+      composition({
+        implementation: ["implement"],
+        verification: ["protected-paths"],
+        delivery: ["push", "pull-request", "merge", "review"],
+      }),
+      lookup
+    );
+    expect(problems.some((p) => p.severity === "broken" && /not last/i.test(p.message))).toBe(true);
+  });
+
+  it("accepts the same agent with Merge at the end", () => {
+    const problems = agentProblems(
+      composition({
+        implementation: ["implement"],
+        verification: ["protected-paths", "review"],
+        delivery: ["push", "pull-request", "merge"],
+      }),
+      lookup
+    );
+    expect(problems).toEqual([]);
   });
 
   it("accepts the same gates in the order the worker used to hardcode", () => {
