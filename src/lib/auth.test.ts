@@ -9,11 +9,17 @@ const sessionUpdateOne = vi.fn();
 const bcryptCompare = vi.fn();
 
 vi.mock("./db", () => ({ connectDB: vi.fn() }));
-const bcryptHashSync = vi.fn(() => "$2a$10$absent");
+// A plain array, not a spy: beforeEach clears mocks, and this call happens once at module load
+const hashSyncCalls: unknown[][] = [];
+const bcryptHashSync = (...args: unknown[]) => {
+  hashSyncCalls.push(args);
+  return "$2a$10$absent";
+};
 vi.mock("bcryptjs", () => ({
   default: { compare: bcryptCompare, hashSync: bcryptHashSync },
 }));
-vi.mock("@/models/user", () => ({ User: { findById: userFindById, findOne: vi.fn() } }));
+const userFindOne = vi.fn();
+vi.mock("@/models/user", () => ({ User: { findById: userFindById, findOne: userFindOne } }));
 vi.mock("@/models/apiToken", () => ({
   ApiToken: { find: apiTokenFind, findByIdAndUpdate: apiTokenFindByIdAndUpdate },
 }));
@@ -22,7 +28,7 @@ vi.mock("@/models/session", () => ({
   Session: { findOne: sessionFindOne, updateOne: sessionUpdateOne },
 }));
 
-const { getAuthUser } = await import("./auth");
+const { getAuthUser, verifyCredentials } = await import("./auth");
 const { ProvenanceError, SESSION_IDLE_TTL_MS } = await import("./session");
 const { sha256 } = await import("./oauth");
 
@@ -333,5 +339,50 @@ describe("getAuthUser — the five machine-gated endpoints", () => {
     });
     const viaToken = await getAuthUser(request({ authorization: `Bearer cp_${"c".repeat(64)}` }));
     expect(viaToken?.viaMachineCredential).toBe(true);
+  });
+});
+
+// BP-318: the miss path returned before bcrypt, so an unknown username answered in single-digit
+// milliseconds against ~100 ms for a real one — a username oracle on /api/auth/login and
+// /oauth/authorize that needs no statistics to read.
+describe("verifyCredentials and the username oracle", () => {
+  function lookupReturns(user: unknown) {
+    userFindOne.mockReturnValue({ select: () => Promise.resolve(user) });
+  }
+
+  it("compares against a hash even when no such user exists", async () => {
+    lookupReturns(null);
+
+    const result = await verifyCredentials("nobody", "hunter2");
+
+    expect(result).toBeNull();
+    expect(bcryptCompare).toHaveBeenCalledTimes(1);
+    expect(bcryptCompare.mock.calls[0][0]).toBe("hunter2");
+  });
+
+  it("does the same amount of comparing for a hit and a miss", async () => {
+    lookupReturns(null);
+    await verifyCredentials("nobody", "hunter2");
+    const onMiss = bcryptCompare.mock.calls.length;
+
+    bcryptCompare.mockClear();
+    lookupReturns({ username: "rpo", password: "$2a$10$stored" });
+    bcryptCompare.mockResolvedValue(true);
+    await verifyCredentials("rpo", "hunter2");
+
+    expect(bcryptCompare.mock.calls.length).toBe(onMiss);
+  });
+
+  // The stand-in must be a real hash comparison, not a cheap string compare that returns at once
+  it("uses a hash generated at module load, at the same cost factor", () => {
+    expect(hashSyncCalls.length).toBe(1);
+    expect(hashSyncCalls[0][1]).toBe(10);
+  });
+
+  it("still refuses a wrong password for a user that does exist", async () => {
+    lookupReturns({ username: "rpo", password: "$2a$10$stored" });
+    bcryptCompare.mockResolvedValue(false);
+
+    expect(await verifyCredentials("rpo", "wrong")).toBeNull();
   });
 });
