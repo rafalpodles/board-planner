@@ -18,46 +18,91 @@ const STANDALONE = join(process.cwd(), "mcp-server/src/api-client.ts");
 describe("the standalone MCP client does not drift from PlannerClient", () => {
   const source = readFileSync(STANDALONE, "utf8");
 
+  // The first version stopped at `[^,)]+`, so it truncated the captured expression at the closing
+  // paren of the FIRST seg(...) — every path yielded zero interpolations and the filter below could
+  // never flag anything. It survived its mutation only by accident: removing seg() removes the
+  // paren too, which let the capture run on to the end. Match to the closing quote instead.
   function pathExpressions(): string[] {
-    // Every second argument to this.request(...) — however it is built
-    return [...source.matchAll(/this\.request\(\s*"[A-Z]+"\s*,\s*([^,)]+(?:,|\))?)/g)].map(
-      ([, expr]) => expr.replace(/[,)]$/, "").trim()
+    return [...source.matchAll(/this\.request\(\s*"[A-Z]+"\s*,\s*(`[^`]*`|"[^"]*")/g)].map(
+      ([, expr]) => expr.trim()
     );
   }
 
+  function interpolationsIn(expr: string): string[] {
+    return [...expr.matchAll(/\$\{([^}]*)\}/g)].map(([, inner]) => inner.trim());
+  }
+
+  // Guards the guard. A scan that stops seeing anything goes quiet rather than failing, which is
+  // precisely how the check below was broken while looking healthy.
+  it("can actually see the interpolated segments", () => {
+    expect(pathExpressions().flatMap(interpolationsIn).length).toBeGreaterThanOrEqual(11);
+  });
+
+  // `${query}` is an already-built query string appended after the path, not a segment
   it("routes every id it puts in a path through an encoder", () => {
     const unencoded = pathExpressions().filter((expr) => {
-      const interpolations = [...expr.matchAll(/\$\{([^}]*)\}/g)].map(([, inner]) => inner.trim());
       const concatenated = expr.includes("+");
-      return concatenated || interpolations.some((i) => i !== "query" && !i.startsWith("seg("));
+      return (
+        concatenated || interpolationsIn(expr).some((i) => i !== "query" && !i.startsWith("seg("))
+      );
     });
 
     expect(unencoded).toEqual([]);
   });
 
-  it("encodes a traversal attempt the same way PlannerClient does", async () => {
+  async function bothClients() {
     const { ApiClient } = await import("../../../mcp-server/src/api-client");
+    return {
+      standalone: new ApiClient("https://board.example.com", { token: "cp_x" }),
+      planner: new PlannerClient("https://board.example.com", "cp_x"),
+    };
+  }
+
+  // Stubbed even though the guard should throw first: without it, a regression here stops being a
+  // test failure and starts being four real outbound requests
+  async function withStubbedFetch(run: () => Promise<void>): Promise<string[]> {
     const calls: string[] = [];
-    const capture = (url: string) => {
+    const original = globalThis.fetch;
+    globalThis.fetch = ((url: string) => {
       calls.push(url);
       return Promise.resolve(new Response("{}", { headers: { "content-type": "application/json" } }));
-    };
-
-    const standalone = new ApiClient("https://board.example.com", { token: "cp_x" });
-    const planner = new PlannerClient("https://board.example.com", "cp_x");
-
-    const original = globalThis.fetch;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    globalThis.fetch = capture as any;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    }) as any;
     try {
-      await standalone.getTask("a/../b", "c/../d").catch(() => {});
-      await planner.getTask("a/../b", "c/../d").catch(() => {});
+      await run();
     } finally {
       globalThis.fetch = original;
     }
+    return calls;
+  }
+
+  // The fix for BP-339 had to land in both copies, and "I edited both files" is not evidence
+  it.each(["..", ".", "", "a/../b", "//attacker.example/x"])(
+    "refuses the segment %o in both clients, and fetches nothing",
+    async (value) => {
+      const { standalone, planner } = await bothClients();
+
+      const calls = await withStubbedFetch(async () => {
+        await expect(standalone.getTask(value, "t1")).rejects.toThrow(/Invalid path segment/);
+        await expect(planner.getTask(value, "t1")).rejects.toThrow(/Invalid path segment/);
+      });
+
+      expect(calls).toEqual([]);
+    }
+  );
+
+  it("builds the identical URL for an ordinary id", async () => {
+    const { standalone, planner } = await bothClients();
+
+    const calls = await withStubbedFetch(async () => {
+      await standalone.getTask("507f1f77bcf86cd799439011", "507f1f77bcf86cd799439012");
+      await planner.getTask("507f1f77bcf86cd799439011", "507f1f77bcf86cd799439012");
+    });
 
     expect(calls[0]).toBe(calls[1]);
-    expect(new URL(calls[0]).pathname).not.toContain("/b");
+    expect(new URL(calls[0]).pathname).toBe(
+      "/api/projects/507f1f77bcf86cd799439011/tasks/507f1f77bcf86cd799439012"
+    );
   });
 
   // resolveTaskKey lives in mcp-server/src/index.ts rather than on its client — the one divergence
