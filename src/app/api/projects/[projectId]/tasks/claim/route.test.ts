@@ -21,7 +21,12 @@ vi.mock("@/lib/worker-service", () => ({
   verdictFor,
   PROTOCOL_VERSION: 1,
 }));
-vi.mock("@/lib/task-service", () => ({ claimNextTask, releaseExpiredTasks }));
+vi.mock("@/lib/task-service", () => ({ claimNextTask, releaseExpiredTasks, releaseTask: vi.fn() }));
+// Resolving an agent is tested in agent-snapshot.test.ts; here it only has to succeed so the route
+// gets past it
+vi.mock("@/lib/agent-snapshot", () => ({
+  snapshotFor: vi.fn(async () => ({ agentId: "a1", name: "Default", sequence: [] })),
+}));
 vi.mock("@/lib/middleware", () => ({
   resolveProjectId,
   protocolOf: (r: Request) => Number(r.headers.get("x-cp-protocol") ?? NaN),

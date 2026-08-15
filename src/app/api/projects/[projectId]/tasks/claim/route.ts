@@ -5,6 +5,8 @@ import { claimNextTask, releaseExpiredTasks } from "@/lib/task-service";
 import { Project } from "@/models/project";
 import { Worker } from "@/models/worker";
 import { verdictFor } from "@/lib/worker-service";
+import { snapshotFor } from "@/lib/agent-snapshot";
+import { releaseTask } from "@/lib/task-service";
 
 export const POST = withWorker(async (request, { params, worker }) => {
   const { projectId: identifier } = await params;
@@ -40,5 +42,18 @@ export const POST = withWorker(async (request, { params, worker }) => {
   );
   if (!task) return new NextResponse(null, { status: 204 });
 
-  return NextResponse.json(task);
+  // Resolved here rather than referenced, so the run means what it meant when it started even if
+  // the agent is edited while it holds the task.
+  const agent = await snapshotFor(projectId, task.agent);
+  if (!agent) {
+    // Holding a task a machine cannot run would park it behind a lease for two hours. Hand it back
+    // at once and say why, so the board shows the cause rather than a silent stall.
+    await releaseTask(projectId, String(task._id), { refund: true }).catch(() => {});
+    return NextResponse.json(
+      { error: "This project has no agent a worker can run" },
+      { status: 409 }
+    );
+  }
+
+  return NextResponse.json({ ...task, agent });
 });
