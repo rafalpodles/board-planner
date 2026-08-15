@@ -54,7 +54,10 @@ function renderRail(over: Partial<React.ComponentProps<typeof PropertyRail>> = {
       set={set}
       users={users}
       sprints={sprints}
-      categories={["user-story", "bug"]}
+      categories={[
+        { _id: "c1", name: "user-story", color: "#3b82f6" },
+        { _id: "c2", name: "bug", color: "#ef4444" },
+      ]}
       customFields={[]}
       reporter="Claude Code"
       onDelete={() => {}}
@@ -64,10 +67,12 @@ function renderRail(over: Partial<React.ComponentProps<typeof PropertyRail>> = {
   return set;
 }
 
+// Picker rows are comboboxes; the two that open something other than a list of options
+// — Due date, Repeats — stay plain buttons
 async function openRow(label: string | RegExp) {
-  const row = screen
-    .getAllByRole("button")
-    .find((b) => (typeof label === "string" ? b.textContent?.startsWith(label) : label.test(b.textContent || "")));
+  const row = [...screen.getAllByRole("combobox"), ...screen.getAllByRole("button")].find((b) =>
+    typeof label === "string" ? b.textContent?.startsWith(label) : label.test(b.textContent || "")
+  );
   await act(async () => row!.click());
   return row!;
 }
@@ -173,11 +178,36 @@ describe("PropertyRail", () => {
     expect(screen.getByText("0.6")).toBeTruthy();
   });
 
-  it("announces a row as something that opens a popup", async () => {
+  it("announces a picker row as the listbox it opens", async () => {
     renderRail();
     const row = await openRow("Priority");
+    expect(row.getAttribute("aria-haspopup")).toBe("listbox");
+    expect(row.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("announces a row that opens something other than a list as a dialog", async () => {
+    renderRail();
+    const row = await openRow("Repeats");
     expect(row.getAttribute("aria-haspopup")).toBe("dialog");
     expect(row.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  // The tick is drawn, not typed: a "✓" in every row's text would be read out with
+  // the label and would land in any assertion on an option's name
+  it("keeps the selection tick out of the option's text", async () => {
+    renderRail();
+    await openRow("Priority");
+    const options = screen.getAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual(["Low", "Medium", "High", "Urgent"]);
+    expect(options.find((o) => o.textContent === "Medium")?.getAttribute("aria-selected")).toBe(
+      "true"
+    );
+  });
+
+  it("tints the type chip with the project's own colour for that category", () => {
+    renderRail({ draft: { ...draft, category: "bug" } });
+    const chip = screen.getByText("bug");
+    expect(chip.getAttribute("style")).toContain("#ef4444");
   });
 
   it("names the reporter and keeps delete at the end", () => {

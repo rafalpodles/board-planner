@@ -1,18 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import { useApi } from "@/hooks/use-api";
 import { useToast } from "@/components/ui/Toast";
 import {
   ApiCustomField,
+  ApiProjectCategory,
   ApiTaskTemplate,
   CATEGORIES,
   Category,
 } from "@/types";
+import { categoryColor } from "@/lib/category-colors";
 import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
 import { Button } from "@/components/ui/Button";
 import { Select } from "@/components/ui/Select";
+import { Combobox } from "@/components/ui/Combobox";
 import { CustomFieldEditor } from "./CustomFieldEditor";
 import {
   CustomFieldForm,
@@ -117,6 +120,18 @@ export function TaskFieldsSection({
               name,
             });
           }
+          // commit, not rebase: on success the server's answer is the whole truth, and the
+          // rows it just created carry ids the draft has never seen. Moving the baseline
+          // alone would leave those as a difference, so the save bar would never close and
+          // the next Save would re-issue a diff that had already been applied.
+          patchProject({ categories: saved });
+          categories.commit({
+            categories: saved.map((c) => ({
+              _id: c._id,
+              name: c.name,
+              color: c.color,
+            })),
+          });
           toast("Categories saved", "success");
         } catch (err) {
           fail(err, "Failed to save categories");
@@ -181,6 +196,8 @@ export function TaskFieldsSection({
               templateId,
             });
           }
+          patchProject({ taskTemplates: saved });
+          templates.commit({ templates: saved });
           toast("Templates saved", "success");
         } catch (err) {
           fail(err, "Failed to save templates");
@@ -492,7 +509,22 @@ export function TaskFieldsSection({
                     onChange={(e) => editTemplate(i, { name: e.target.value })}
                   />
                 </div>
-                <span className="text-xs text-text-muted">{tpl.category}</span>
+                {tpl.category && (
+                  <span
+                    className="chip chip-custom rounded px-2 py-0.5 text-xs"
+                    style={
+                      {
+                        "--chip":
+                          categoryColor(
+                            categories.value.categories as ApiProjectCategory[],
+                            tpl.category,
+                          ) || "var(--color-text-muted)",
+                      } as CSSProperties
+                    }
+                  >
+                    {tpl.category}
+                  </span>
+                )}
                 <Button
                   variant="ghost"
                   size="sm"
@@ -514,24 +546,39 @@ export function TaskFieldsSection({
                       <label className="mb-1 block text-sm font-medium text-text-muted">
                         Category
                       </label>
-                      <select
+                      {/* The draft, not the project: a rename staged in the categories
+                          group above has not reached `project` yet, and the save sends
+                          whatever this picker holds */}
+                      <Combobox
+                        label="Template category"
                         value={tpl.category}
-                        aria-label="Template category"
-                        onChange={(e) =>
-                          editTemplate(i, {
-                            category: e.target.value as Category,
-                          })
+                        options={
+                          categories.value.categories.length > 0
+                            ? categories.value.categories.map((c) => ({
+                                value: c.name,
+                                label: c.name,
+                                color: c.color,
+                              }))
+                            : CATEGORIES.map((c) => ({ value: c, label: c }))
                         }
-                        className="focus-ring w-full rounded-lg border border-border bg-bg-input px-3 py-2 text-sm"
+                        onChange={(value) =>
+                          editTemplate(i, { category: value as Category })
+                        }
+                        triggerClassName="w-full rounded-lg border border-border bg-bg-input px-3 py-2 text-left text-sm"
                       >
-                        {(
-                          project.categories?.map((x) => x.name) || CATEGORIES
-                        ).map((c) => (
-                          <option key={c} value={c}>
-                            {c}
-                          </option>
-                        ))}
-                      </select>
+                        {(selected) => (
+                          <span className="flex items-center gap-2">
+                            {selected?.color && (
+                              <span
+                                aria-hidden
+                                className="h-2 w-2 shrink-0 rounded-full"
+                                style={{ backgroundColor: selected.color }}
+                              />
+                            )}
+                            {selected?.label || tpl.category}
+                          </span>
+                        )}
+                      </Combobox>
                     </div>
                     <Textarea
                       label="Description"

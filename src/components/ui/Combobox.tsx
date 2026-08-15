@@ -8,14 +8,12 @@ export interface ComboboxOption {
   label: string;
   /** Drawn as a dot before the label, for options that carry a colour */
   color?: string;
+  /** Replaces the colour dot when a row needs more than one — an avatar, priority bars */
+  adornment?: ReactNode;
 }
 
-interface ComboboxProps {
-  value: string;
+interface SharedProps {
   options: ComboboxOption[];
-  onChange: (value: string) => void;
-  /** The closed state; gets the selected option, or undefined when nothing matches */
-  children: (selected: ComboboxOption | undefined) => ReactNode;
   /** Accessible name for the trigger */
   label: string;
   disabled?: boolean;
@@ -23,22 +21,42 @@ interface ComboboxProps {
   searchThreshold?: number;
   panelClassName?: string;
   triggerClassName?: string;
+  /** Offered above the options; picking it clears the field */
+  emptyOption?: string;
 }
+
+interface SingleProps extends SharedProps {
+  multiple?: false;
+  value: string;
+  onChange: (value: string) => void;
+  /** The closed state; gets the selected option, or undefined when nothing matches */
+  children: (selected: ComboboxOption | undefined) => ReactNode;
+}
+
+interface MultiProps extends SharedProps {
+  multiple: true;
+  value: string[];
+  onChange: (value: string[]) => void;
+  /** The closed state; gets every selected option, in the options' own order */
+  children: (selected: ComboboxOption[]) => ReactNode;
+}
+
+type ComboboxProps = SingleProps | MultiProps;
 
 const PANEL_WIDTH = 224;
 const PANEL_MAX_HEIGHT = 260;
 
-export function Combobox({
-  value,
-  options,
-  onChange,
-  children,
-  label,
-  disabled,
-  searchThreshold = 8,
-  panelClassName = "",
-  triggerClassName = "",
-}: ComboboxProps) {
+export function Combobox(props: ComboboxProps) {
+  const {
+    options,
+    label,
+    disabled,
+    searchThreshold = 8,
+    panelClassName = "",
+    triggerClassName = "",
+    emptyOption,
+  } = props;
+
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
@@ -48,11 +66,22 @@ export function Combobox({
   const panel = useRef<HTMLDivElement>(null);
   const search = useRef<HTMLInputElement>(null);
 
-  const selected = options.find((o) => o.value === value);
+  const picked = useMemo(
+    () => (props.multiple ? props.value : props.value ? [props.value] : []),
+    [props.multiple, props.value],
+  );
+  const pickedSet = useMemo(() => new Set(picked), [picked]);
+
+  // The clear row is an option like any other, so one keyboard path covers both
+  const rows = useMemo<ComboboxOption[]>(
+    () => (emptyOption ? [{ value: "", label: emptyOption }, ...options] : options),
+    [emptyOption, options],
+  );
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return q ? options.filter((o) => o.label.toLowerCase().includes(q)) : options;
-  }, [options, query]);
+    return q ? rows.filter((o) => o.label.toLowerCase().includes(q)) : rows;
+  }, [rows, query]);
 
   const showSearch = options.length >= searchThreshold;
 
@@ -63,14 +92,28 @@ export function Combobox({
   }
 
   function pick(option: ComboboxOption) {
-    onChange(option.value);
+    if (props.multiple) {
+      // Stays open: picking several labels in a row is the whole point of the mode,
+      // and the query survives so a search narrowing to three does not have to be retyped
+      if (!option.value) {
+        props.onChange([]);
+        return;
+      }
+      props.onChange(
+        pickedSet.has(option.value)
+          ? picked.filter((v) => v !== option.value)
+          : [...picked, option.value],
+      );
+      return;
+    }
+    props.onChange(option.value);
     close();
   }
 
   // Keyed on `open` alone: every call site builds its options inline, so depending on
   // them would reset the highlight and re-measure on each parent render — the board
   // polls every ten seconds, which would snap the selection back mid-keyboard-nav
-  const selectedIndex = options.findIndex((o) => o.value === value);
+  const selectedIndex = rows.findIndex((o) => pickedSet.has(o.value));
   const selectedIndexRef = useRef(selectedIndex);
   selectedIndexRef.current = selectedIndex;
 
@@ -145,6 +188,10 @@ export function Combobox({
   const below = rect ? window.innerHeight - rect.bottom : 0;
   const flip = rect ? below < PANEL_MAX_HEIGHT && rect.top > below : false;
 
+  const trigger = props.multiple
+    ? props.children(options.filter((o) => pickedSet.has(o.value)))
+    : props.children(options.find((o) => o.value === props.value));
+
   return (
     <>
       <button
@@ -168,7 +215,7 @@ export function Combobox({
         }}
         className={`focus-ring ${triggerClassName}`}
       >
-        {children(selected)}
+        {trigger}
       </button>
 
       {open &&
@@ -215,37 +262,58 @@ export function Combobox({
               id={`${listboxId}-list`}
               role="listbox"
               aria-label={label}
+              aria-multiselectable={props.multiple || undefined}
               className="max-h-52 overflow-y-auto py-1"
             >
               {filtered.length === 0 && (
                 <p className="px-2.5 py-2 text-xs text-text-muted">No matches</p>
               )}
-              {filtered.map((option, index) => (
-                <button
-                  key={option.value}
-                  id={`${listboxId}-${index}`}
-                  type="button"
-                  role="option"
-                  aria-selected={option.value === value}
-                  onMouseEnter={() => setActive(index)}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    pick(option);
-                  }}
-                  className={`flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs transition-colors ${
-                    index === active ? "bg-bg-hover text-text" : "text-text-muted"
-                  }`}
-                >
-                  {option.color && (
-                    <span
-                      className="h-2 w-2 shrink-0 rounded-full"
-                      style={{ backgroundColor: option.color }}
-                    />
-                  )}
-                  <span className="truncate">{option.label}</span>
-                  {option.value === value && <span className="ml-auto text-primary">✓</span>}
-                </button>
-              ))}
+              {filtered.map((option, index) => {
+                // The clear row reads as selected only while nothing else is
+                const on = option.value ? pickedSet.has(option.value) : picked.length === 0;
+                return (
+                  <button
+                    key={option.value || "__empty"}
+                    id={`${listboxId}-${index}`}
+                    type="button"
+                    role="option"
+                    aria-selected={on}
+                    onMouseEnter={() => setActive(index)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      pick(option);
+                    }}
+                    className={`flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs transition-colors ${
+                      index === active ? "bg-bg-hover text-text" : "text-text-muted"
+                    }`}
+                  >
+                    {option.adornment ??
+                      (option.color && (
+                        <span
+                          className="h-2 w-2 shrink-0 rounded-full"
+                          style={{ backgroundColor: option.color }}
+                        />
+                      ))}
+                    <span className="truncate">{option.label}</span>
+                    {/* Reserved rather than conditional, so the labels do not shift as
+                        the tick appears and disappears under the cursor. Drawn rather
+                        than typed: a "✓" character would join every option's
+                        textContent, selected or not, and be read out with the label */}
+                    <svg
+                      aria-hidden
+                      viewBox="0 0 16 16"
+                      className={`ml-auto h-3.5 w-3.5 shrink-0 text-primary ${on ? "" : "opacity-0"}`}
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth={2.25}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M3.5 8.5l3 3 6-7" />
+                    </svg>
+                  </button>
+                );
+              })}
             </div>
           </div>,
           document.body

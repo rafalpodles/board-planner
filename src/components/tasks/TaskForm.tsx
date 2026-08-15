@@ -4,6 +4,7 @@ import { useState, useCallback, FormEvent, useEffect, type CSSProperties } from 
 import { useApi } from "@/hooks/use-api";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
+import { MultiSelect } from "@/components/ui/MultiSelect";
 import { MarkdownEditor } from "@/components/ui/MarkdownEditor";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
@@ -412,40 +413,21 @@ export function TaskForm({
               );
             }
             if (field.fieldType === "multiselect") {
-              const picked = Array.isArray(val) ? (val as string[]) : [];
               return (
-                <div key={field._id}>
-                  <label className="block text-sm font-medium mb-1">
-                    {field.name}
-                    {field.required && <span className="text-danger">*</span>}
-                  </label>
-                  <div className="flex flex-wrap gap-2">
-                    {orderedOptions(field).map((option) => {
-                      const on = picked.includes(option.id);
-                      return (
-                        <button
-                          key={option.id}
-                          type="button"
-                          onClick={() =>
-                            setCustomFieldValues((prev) => ({
-                              ...prev,
-                              [field._id]: on
-                                ? picked.filter((id) => id !== option.id)
-                                : [...picked, option.id],
-                            }))
-                          }
-                          aria-pressed={on}
-                          className={`focus-ring chip chip-custom rounded-full px-2.5 py-1 text-xs transition-opacity ${
-                            on ? "" : "opacity-40"
-                          }`}
-                          style={{ "--chip": option.color } as CSSProperties}
-                        >
-                          {option.value}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
+                <MultiSelect
+                  key={field._id}
+                  label={field.name}
+                  required={field.required}
+                  value={Array.isArray(val) ? (val as string[]) : []}
+                  options={orderedOptions(field).map((o) => ({
+                    value: o.id,
+                    label: o.value,
+                    color: o.color,
+                  }))}
+                  onChange={(next) =>
+                    setCustomFieldValues((prev) => ({ ...prev, [field._id]: next }))
+                  }
+                />
               );
             }
             return (

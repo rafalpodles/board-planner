@@ -2,6 +2,34 @@
 
 import type { ReactNode } from "react";
 import { Popover } from "@/components/ui/Popover";
+import { Combobox, ComboboxOption } from "@/components/ui/Combobox";
+
+function rowClass(touch: boolean, align: "center" | "start") {
+  return `flex w-full gap-2.5 rounded-lg px-2.5 text-left ${
+    touch ? "min-h-[44px] py-2.5" : "py-1.5"
+  } ${align === "center" ? "items-center" : "items-start"}`;
+}
+
+function RowBody({
+  label,
+  align,
+  children,
+}: {
+  label: string;
+  align: "center" | "start";
+  children: ReactNode;
+}) {
+  return (
+    <>
+      <span
+        className={`w-[86px] shrink-0 text-xs text-text-muted ${align === "start" ? "pt-0.5" : ""}`}
+      >
+        {label}
+      </span>
+      <span className="min-w-0 flex-1 text-sm">{children}</span>
+    </>
+  );
+}
 
 interface FieldRowProps {
   label: string;
@@ -22,19 +50,11 @@ export function FieldRow({
   align = "center",
   expanded,
 }: FieldRowProps) {
-  const shared = `flex w-full gap-2.5 rounded-lg px-2.5 text-left ${
-    touch ? "min-h-[44px] py-2.5" : "py-1.5"
-  } ${align === "center" ? "items-center" : "items-start"}`;
-
+  const shared = rowClass(touch, align);
   const body = (
-    <>
-      <span
-        className={`w-[86px] shrink-0 text-xs text-text-muted ${align === "start" ? "pt-0.5" : ""}`}
-      >
-        {label}
-      </span>
-      <span className="min-w-0 flex-1 text-sm">{children}</span>
-    </>
+    <RowBody label={label} align={align}>
+      {children}
+    </RowBody>
   );
 
   if (!onClick) {
@@ -94,6 +114,79 @@ export function PickerRow({
     >
       {({ close }) => panel(close)}
     </Popover>
+  );
+}
+
+interface ComboboxRowSharedProps {
+  label: string;
+  options: ComboboxOption[];
+  touch?: boolean;
+  align?: "center" | "start";
+  /** Offered above the options; picking it clears the field */
+  emptyOption?: string;
+}
+
+interface ComboboxRowSingleProps extends ComboboxRowSharedProps {
+  multiple?: false;
+  value: string;
+  onChange: (value: string) => void;
+  children: (selected: ComboboxOption | undefined) => ReactNode;
+}
+
+interface ComboboxRowMultiProps extends ComboboxRowSharedProps {
+  multiple: true;
+  value: string[];
+  onChange: (value: string[]) => void;
+  children: (selected: ComboboxOption[]) => ReactNode;
+}
+
+/**
+ * A rail row whose value comes from a fixed set. The same picker the board's list view
+ * uses — one implementation, so a tick, a colour dot and the search box behave the same
+ * wherever a value is chosen.
+ */
+export function ComboboxRow(props: ComboboxRowSingleProps | ComboboxRowMultiProps) {
+  const { label, options, touch = false, align = "center", emptyOption } = props;
+  const trigger = `-mx-2.5 cursor-pointer transition-colors hover:bg-bg-hover ${rowClass(
+    touch,
+    align,
+  )}`;
+
+  if (props.multiple) {
+    return (
+      <Combobox
+        multiple
+        value={props.value}
+        options={options}
+        onChange={props.onChange}
+        label={label}
+        emptyOption={emptyOption}
+        triggerClassName={trigger}
+      >
+        {(selected) => (
+          <RowBody label={label} align={align}>
+            {props.children(selected)}
+          </RowBody>
+        )}
+      </Combobox>
+    );
+  }
+
+  return (
+    <Combobox
+      value={props.value}
+      options={options}
+      onChange={props.onChange}
+      label={label}
+      emptyOption={emptyOption}
+      triggerClassName={trigger}
+    >
+      {(selected) => (
+        <RowBody label={label} align={align}>
+          {props.children(selected)}
+        </RowBody>
+      )}
+    </Combobox>
   );
 }
 

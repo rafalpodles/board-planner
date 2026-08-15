@@ -369,7 +369,7 @@ function TaskDetailView({
             set={set}
             users={users}
             sprints={sprints}
-            categories={(project.categories || []).map((c) => c.name)}
+            categories={project.categories || []}
             customFields={project.customFields || []}
             reporter={reporter}
             onDelete={requestDelete}
@@ -395,7 +395,7 @@ function TaskDetailView({
           set={set}
           users={users}
           sprints={sprints}
-          categories={(project.categories || []).map((c) => c.name)}
+          categories={project.categories || []}
           customFields={project.customFields || []}
           reporter={reporter}
           onDelete={requestDelete}
