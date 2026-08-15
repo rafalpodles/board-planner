@@ -43,6 +43,7 @@ export default function AgentDetailPage() {
   );
 
   const [saved, setSaved] = useState(false);
+  const [refusal, setRefusal] = useState("");
   const problems = agentProblems(composition, lookup);
 
   const sensors = useSensors(
@@ -82,9 +83,14 @@ export default function AgentDetailPage() {
             <Button
               size="sm"
               onClick={async () => {
-                await store.saveComposition(agent._id, composition);
-                setSaved(true);
-                window.setTimeout(() => setSaved(false), 2000);
+                setRefusal("");
+                try {
+                  await store.saveComposition(agent._id, composition);
+                  setSaved(true);
+                  window.setTimeout(() => setSaved(false), 2000);
+                } catch (error) {
+                  setRefusal(error instanceof Error ? error.message : "Could not save");
+                }
               }}
             >
               {saved ? "Saved" : "Save"}
@@ -93,11 +99,24 @@ export default function AgentDetailPage() {
         }
       />
 
+      {refusal && (
+        <p className="mb-4 rounded-lg border border-danger/40 bg-danger/10 px-3.5 py-2.5 text-[13px] text-danger">
+          Not saved. {refusal}
+        </p>
+      )}
+
       {problems.length > 0 && (
-        <ul className="mb-4 flex flex-col gap-1.5 rounded-lg border border-danger/40 bg-danger/10 px-3.5 py-2.5">
+        <ul className="mb-4 flex flex-col gap-1.5">
           {problems.map((problem) => (
-            <li key={problem} className="text-[13px] text-danger">
-              {problem}
+            <li
+              key={problem.message}
+              className={`rounded-lg border px-3.5 py-2.5 text-[13px] ${
+                problem.severity === "broken"
+                  ? "border-danger/40 bg-danger/10 text-danger"
+                  : "border-warning/40 bg-warning/10 text-warning"
+              }`}
+            >
+              {problem.message}
             </li>
           ))}
         </ul>

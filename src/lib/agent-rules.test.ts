@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { agentProblems, sequenceOf } from "./agent-rules";
+import { agentProblems, brokenProblems, sequenceOf } from "./agent-rules";
 import { AgentComposition, ApiAgentBlock } from "@/types";
 
 function block(over: Partial<ApiAgentBlock> & Pick<ApiAgentBlock, "key">): ApiAgentBlock {
@@ -75,7 +75,8 @@ describe("agentProblems", () => {
       lookup
     );
     expect(problems).toHaveLength(1);
-    expect(problems[0]).toMatch(/nothing having reviewed/);
+    expect(problems[0].message).toMatch(/nothing having reviewed/);
+    expect(problems[0].severity).toBe("risky");
   });
 
   // The gate is recognised by what it does, not by the key somebody gave it
@@ -99,7 +100,7 @@ describe("agentProblems", () => {
       }),
       lookup
     );
-    expect(problems.some((p) => /nothing having reviewed/.test(p))).toBe(true);
+    expect(problems.some((p) => /nothing having reviewed/.test(p.message))).toBe(true);
   });
 
   it("refuses a merge with no pull request to merge", () => {
@@ -111,9 +112,10 @@ describe("agentProblems", () => {
       }),
       lookup
     );
-    expect(problems).toContain(
-      "Merge runs without a pull request to merge. Put Pull request before it."
-    );
+    expect(problems).toContainEqual({
+      severity: "broken",
+      message: "Merge runs without a pull request to merge. Put Pull request before it.",
+    });
   });
 
   it("refuses a pull request on a branch nobody pushed", () => {
@@ -121,7 +123,7 @@ describe("agentProblems", () => {
       composition({ implementation: ["implement"], delivery: ["pull-request"] }),
       lookup
     );
-    expect(problems.some((p) => /never pushed/.test(p))).toBe(true);
+    expect(problems.some((p) => /never pushed/.test(p.message))).toBe(true);
   });
 
   it("refuses work that nothing sends anywhere", () => {
@@ -130,7 +132,8 @@ describe("agentProblems", () => {
       lookup
     );
     expect(problems).toHaveLength(1);
-    expect(problems[0]).toMatch(/stays in a worktree/);
+    expect(problems[0].message).toMatch(/stays in a worktree/);
+    expect(problems[0].severity).toBe("broken");
   });
 
   // The point of the rule is the writing, not the pushing: an agent that only reads has nothing
@@ -149,7 +152,7 @@ describe("agentProblems", () => {
       lookup
     );
     expect(problems).toHaveLength(1);
-    expect(problems[0]).toMatch(/before the last step that changes files/);
+    expect(problems[0].message).toMatch(/before the last step that changes files/);
   });
 
   it("names every problem at once rather than stopping at the first", () => {
@@ -158,5 +161,27 @@ describe("agentProblems", () => {
       lookup
     );
     expect(problems).toHaveLength(3);
+  });
+});
+
+describe("brokenProblems", () => {
+  // The operator chose to allow this one; refusing it on save would take the choice back
+  it("leaves an unreviewed merge to the operator", () => {
+    const broken = brokenProblems(
+      composition({
+        implementation: ["implement"],
+        delivery: ["push", "pull-request", "merge"],
+      }),
+      lookup
+    );
+    expect(broken).toEqual([]);
+  });
+
+  it("keeps the ones that cannot run at all", () => {
+    const broken = brokenProblems(
+      composition({ implementation: ["implement"], delivery: ["merge"] }),
+      lookup
+    );
+    expect(broken.map((p) => p.severity)).toEqual(["broken", "broken"]);
   });
 });

@@ -4,8 +4,24 @@ import { withAuth } from "@/lib/middleware";
 import { accessibleProjectIds, check } from "@/lib/grants";
 import { Agent } from "@/models/agent";
 import { Project } from "@/models/project";
-import { toApiAgent, visibleAgents } from "@/lib/agent-service";
-import { normaliseComposition } from "@/lib/agent-rules";
+import { allBlocks, toApiAgent, toApiBlock, visibleAgents } from "@/lib/agent-service";
+import { brokenProblems, normaliseComposition } from "@/lib/agent-rules";
+import { AgentComposition } from "@/types";
+
+/**
+ * The editor shows these before you save, but the editor is not the only way in. A composition that
+ * cannot run must not be stored: the failure would surface on a machine, mid-task, instead of here.
+ */
+async function refusalFor(composition: AgentComposition) {
+  const blocks = await allBlocks();
+  const lookup = (key: string) => blocks.map(toApiBlock).find((b) => b.key === key);
+  const broken = brokenProblems(composition, lookup);
+  if (broken.length === 0) return null;
+  return NextResponse.json(
+    { error: broken[0].message, problems: broken.map((p) => p.message) },
+    { status: 400 }
+  );
+}
 
 export const GET = withAuth(async (_request, { user }) => {
   await connectDB();
@@ -38,13 +54,17 @@ export const POST = withAuth(async (request, { user }) => {
     }
   }
 
+  const composition = normaliseComposition(body.composition);
+  const refusal = await refusalFor(composition);
+  if (refusal) return refusal;
+
   const agent = await Agent.create({
     name,
     description: typeof body.description === "string" ? body.description.trim() : "",
     scope: projectId ? "project" : "user",
     owner: projectId ? null : user._id,
     project: projectId || null,
-    composition: normaliseComposition(body.composition),
+    composition,
     builtIn: false,
   });
 
