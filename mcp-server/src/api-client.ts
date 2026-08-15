@@ -2,7 +2,15 @@
 // `..` before the request goes out, so an id of `p1/../../admin/users` would otherwise fetch a
 // route the tool never named. Kept identical to src/lib/mcp/planner-client.ts, which this file is
 // a copy of — CI builds the two packages separately, so nothing flags a divergence (BP-316 review).
-const seg = (value: string) => encodeURIComponent(value);
+//
+// Encoding is not enough on its own: it escapes `/` and leaves dots alone, so a bare `..` walked
+// through and dropped the `projects/<id>` segment (BP-339).
+const seg = (value: string) => {
+  if (value === "" || value === "." || value === "..") {
+    throw new Error(`Invalid path segment: "${value}"`);
+  }
+  return encodeURIComponent(value);
+};
 
 export class ApiClient {
   private baseUrl: string;

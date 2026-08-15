@@ -35,6 +35,16 @@ describe("the standalone MCP client does not drift from PlannerClient", () => {
     expect(unencoded).toEqual([]);
   });
 
+  // The fix for BP-339 had to land in both copies, and "I edited both files" is not evidence
+  it.each(["..", ".", ""])("refuses the segment %o in both clients", async (value) => {
+    const { ApiClient } = await import("../../../mcp-server/src/api-client");
+    const standalone = new ApiClient("https://board.example.com", { token: "cp_x" });
+    const planner = new PlannerClient("https://board.example.com", "cp_x");
+
+    await expect(standalone.getTask(value, "t1")).rejects.toThrow(/Invalid path segment/);
+    await expect(planner.getTask(value, "t1")).rejects.toThrow(/Invalid path segment/);
+  });
+
   it("encodes a traversal attempt the same way PlannerClient does", async () => {
     const { ApiClient } = await import("../../../mcp-server/src/api-client");
     const calls: string[] = [];
