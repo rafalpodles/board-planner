@@ -29,8 +29,9 @@ import { CSS } from "@dnd-kit/utilities";
 import { PageHeader } from "@/components/shell/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { BUCKETS, emptyComposition } from "../catalog";
-import { AgentBucket, ApiAgentBlock } from "@/types";
+import { AGENT_BUCKETS, AgentBucket, AgentComposition, ApiAgentBlock } from "@/types";
 import { useStore } from "../store";
+import { agentProblems } from "@/lib/agent-rules";
 
 interface Entry {
   uid: string;
@@ -44,6 +45,21 @@ const BUCKET_PREFIX = "bucket:";
 
 let counter = 0;
 const nextUid = () => `e${++counter}`;
+
+// Entries carry a uid so the same block can appear twice; the stored composition is just the keys.
+const toEntries = (composition: AgentComposition): Entries => {
+  const out = {} as Entries;
+  for (const bucket of AGENT_BUCKETS) {
+    out[bucket] = (composition[bucket] ?? []).map((key) => ({ uid: nextUid(), key }));
+  }
+  return out;
+};
+
+const toComposition = (entries: Entries): AgentComposition => {
+  const out = {} as AgentComposition;
+  for (const bucket of AGENT_BUCKETS) out[bucket] = entries[bucket].map((e) => e.key);
+  return out;
+};
 
 // Corner distance picks a neighbouring bucket's first row over the bucket the cursor is actually
 // inside; the pointer is the only honest signal here. rectIntersection is the keyboard fallback,
@@ -193,15 +209,9 @@ export default function AgentDetailPage() {
     [...store.allSteps, ...store.allGates].find((b) => b.key === key);
   const [saved, setSaved] = useState(false);
 
-  const [entries, setEntries] = useState<Entries>(() => {
-    const source = agent?.composition ?? emptyComposition();
-    return {
-      analysis: source.analysis.map((key) => ({ uid: nextUid(), key })),
-      implementation: source.implementation.map((key) => ({ uid: nextUid(), key })),
-      verification: source.verification.map((key) => ({ uid: nextUid(), key })),
-      delivery: source.delivery.map((key) => ({ uid: nextUid(), key })),
-    };
-  });
+  const [entries, setEntries] = useState<Entries>(() =>
+    toEntries(agent?.composition ?? emptyComposition())
+  );
   const [dragging, setDragging] = useState<ApiAgentBlock | null>(null);
 
   // The agent arrives after the first render, so the editor has to be seeded when it does — and
@@ -210,48 +220,10 @@ export default function AgentDetailPage() {
   useEffect(() => {
     if (!agent || seeded.current) return;
     seeded.current = true;
-    setEntries({
-      analysis: agent.composition.analysis.map((key) => ({ uid: nextUid(), key })),
-      implementation: agent.composition.implementation.map((key) => ({ uid: nextUid(), key })),
-      verification: agent.composition.verification.map((key) => ({ uid: nextUid(), key })),
-      delivery: agent.composition.delivery.map((key) => ({ uid: nextUid(), key })),
-    });
+    setEntries(toEntries(agent.composition));
   }, [agent]);
 
-  // Making delivery composable makes its order expressible, and therefore breakable. The rules the
-  // worker used to hold in code — nothing merges unreviewed, nothing merges that was never opened —
-  // now have to be read off the sequence.
-  const sequence = BUCKETS.flatMap((b) => entries[b.id].map((e) => e.key));
-  const at = (key: string) => sequence.indexOf(key);
-  const before = (a: string, b: string) => at(a) !== -1 && (at(b) === -1 || at(b) > at(a));
-
-  const problems: string[] = [];
-  const mergeAt = at("merge");
-  if (mergeAt !== -1 && !sequence.slice(0, mergeAt).some((k) => lookup(k)?.gateKind === "review")) {
-    problems.push(
-      "Merge runs with nothing having reviewed the change. Put a Reviewed gate before it, or take the Merge step out and let a human decide."
-    );
-  }
-  if (mergeAt !== -1 && !before("pull-request", "merge")) {
-    problems.push("Merge runs without a pull request to merge. Put Pull request before it.");
-  }
-  if (at("pull-request") !== -1 && !before("push", "pull-request")) {
-    problems.push("Pull request opens on a branch that was never pushed. Put Push before it.");
-  }
-
-  // Only an agent that writes needs a push. One that just reads and judges has nothing to send,
-  // and demanding it there would be noise.
-  const lastWriteAt = sequence.reduce(
-    (last, key, i) => (lookup(key)?.capability === "edit" ? i : last),
-    -1
-  );
-  if (lastWriteAt !== -1 && (at("push") === -1 || at("push") < lastWriteAt)) {
-    problems.push(
-      at("push") === -1
-        ? "Nothing pushes the work, so it stays in a worktree on the machine and nobody can reach it. Add a Push step."
-        : "Push runs before the last step that changes files, so what it sends is not the finished work."
-    );
-  }
+  const problems = agentProblems(toComposition(entries), lookup);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -364,12 +336,7 @@ export default function AgentDetailPage() {
             <Button
               size="sm"
               onClick={() => {
-                store.saveComposition(agent._id, {
-                  analysis: entries.analysis.map((e) => e.key),
-                  implementation: entries.implementation.map((e) => e.key),
-                  verification: entries.verification.map((e) => e.key),
-                  delivery: entries.delivery.map((e) => e.key),
-                });
+                store.saveComposition(agent._id, toComposition(entries));
                 setSaved(true);
                 window.setTimeout(() => setSaved(false), 2000);
               }}
