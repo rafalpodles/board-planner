@@ -210,6 +210,22 @@ describe("TaskCard selection", () => {
   });
 });
 
+describe("TaskCard copy link", () => {
+  it("keeps the copy button outside the link so the card stays a valid link", () => {
+    renderCard();
+    const copy = screen.getByRole("button", { name: "Copy link to TP-7" });
+    expect(copy.closest("a")).toBeNull();
+  });
+
+  it("clears the checkbox's corner rather than sitting under it", () => {
+    renderCard({ onSelect: vi.fn(), selectionActive: true });
+    expect(screen.getByRole("button", { name: "Copy link to TP-7" }).className).toContain("right-9");
+    cleanup();
+    renderCard();
+    expect(screen.getByRole("button", { name: "Copy link to TP-7" }).className).toContain("right-2");
+  });
+});
+
 describe("TaskCard drag", () => {
   it("still hands the task id to the column", async () => {
     const card = renderCard();

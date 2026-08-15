@@ -18,6 +18,7 @@ import {
 import { ListColumnId, isColumnVisible, listColumns as projectListColumns } from "@/lib/list-columns";
 import { fieldCellText, orderedOptions } from "@/lib/custom-fields";
 import { effectiveColumns } from "@/lib/columns";
+import { CopyTaskLink } from "@/components/tasks/CopyTaskLink";
 import {
   DndContext,
   DragEndEvent,
@@ -520,6 +521,11 @@ export function ListView({
                   >
                     <span className="flex items-center gap-1.5">
                       <span className="truncate">{taskKey}</span>
+                      <CopyTaskLink
+                        projectRef={projectKey}
+                        taskNumber={task.taskNumber}
+                        taskKey={taskKey}
+                      />
                       <RunDot execution={task.execution} />
                     </span>
                   </td>
