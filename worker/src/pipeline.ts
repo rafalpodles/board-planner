@@ -79,6 +79,10 @@ function hitUsageLimit(verdict: GateResult): boolean {
 // into the gate cap silently cut every step from thirty minutes to ten.
 const GATE_CAP_MS = 600_000;
 
+// Below this there is no point starting anything: whatever it is would fail on the clock and be
+// reported as its own verdict rather than as the ceiling.
+const MIN_ENTRY_MS = 30_000;
+
 const EMPTY_RESULT: ExecutionResult = {
   status: "completed",
   summary: "",
@@ -100,6 +104,13 @@ function phaseFor(entry: SnapshotEntry): Phase {
   return DELIVERY_PHASES[entry.key] ?? `step:${entry.key}`;
 }
 
+// Committed but unpushed work is invisible from the board, so an exit that leaves some has to say
+// where it is — the branch ref alone does not survive the next attempt's `git worktree add -B`.
+function unpushedWork(state: RunState, worktreePath: string): string {
+  if (!state.committed || state.pushed) return "";
+  return `\n\nAn earlier step had already committed. That work is not pushed; the worktree is kept at \`${worktreePath}\` on the worker host.`;
+}
+
 // A stop between the push and the merge leaves work on the remote, and the release comment is the
 // only place that says so.
 function whatLanded(state: RunState, branch: string): string {
@@ -107,15 +118,6 @@ function whatLanded(state: RunState, branch: string): string {
   if (state.prUrl) return `: \`${branch}\` is pushed and ${state.prUrl} is open, but it was not merged`;
   if (state.pushed) return `: \`${branch}\` is pushed, but no pull request was opened for it`;
   return "";
-}
-
-const MAX_SUBJECT = 72;
-
-// The summary is model-authored prose; a commit subject is one bounded line.
-function commitSubject(task: ClaimedTask, result: ExecutionResult): string {
-  const first = scrub(result.summary).split("\n")[0].trim() || "apply the change";
-  const subject = `${task.taskKey}: ${first}`;
-  return subject.length <= MAX_SUBJECT ? subject : `${subject.slice(0, MAX_SUBJECT - 1)}…`;
 }
 
 async function unfinishedWork(runner: Runner, worktreePath: string): Promise<string | null> {
@@ -224,6 +226,9 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
       deps.api.comment(task.projectId, task.taskId, scrub(`Returned to the queue: ${String(error)}`))
     );
     await quietly(() => deps.api.release(task.projectId, task.taskId));
+    // settle, like every other exit: without it the menubar shows the run parked in "claiming"
+    // for ever and no AgentRun is written for a task that was genuinely claimed and handed back.
+    settle("released", "the board could not route the outcome");
     return;
   }
 
@@ -243,6 +248,7 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
 
   let keepWorktree = false;
   const state: RunState = {
+    committed: false,
     pushed: false,
     prUrl: "",
     merged: false,
@@ -254,9 +260,12 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
     const budget = createBudget(config.runCeilingMs, now);
 
     for (const entry of task.agent.sequence) {
-      if (await releaseIfAborted(deps, reporter, task)) return;
+      if (await releaseIfAborted(deps, reporter, task, whatLanded(state, branch))) return;
 
-      if (budget.exhausted()) {
+      // Not just exhausted: an entry handed the few seconds left would fail on the clock and be
+      // reported as its own refusal — "blocked the merge at the build gate" for a build that never
+      // ran. Below the floor the run is over, and the reason says so.
+      if (budget.exhausted() || budget.remaining() < MIN_ENTRY_MS) {
         settle("requeued", "the run hit its ceiling");
         await reporter.requeued(
           task,
@@ -282,11 +291,21 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
           signal: deps.signal,
           onEvent,
         });
-        if (await releaseIfAborted(deps, reporter, task, whatLanded(state, branch))) return;
+        // Never once the merge has landed — see the same guard after the loop. gh pr merge runs
+        // without a signal, so the stop is only ever observed after the change is on the base
+        // branch, and releasing there queues a second full run over work that has already landed.
+        if (!state.merged && (await releaseIfAborted(deps, reporter, task, whatLanded(state, branch)))) {
+          return;
+        }
+
+        // Only when this step ends the run. An earlier step may already have committed, and exiting
+        // without keeping the worktree destroys the only copy of that work: nothing is pushed, and
+        // the branch ref the parent clone holds is reset by the next attempt's `git worktree add -B`.
+        if (outcome.kind !== "ok" && state.committed) keepWorktree = true;
 
         if (outcome.kind === "usage_limit") {
           settle("released", "usage limit reached");
-          await reporter.released(task, "usage limit reached");
+          await reporter.released(task, `usage limit reached${unpushedWork(state, worktreePath)}`);
           return;
         }
         if (outcome.kind === "timeout") {
@@ -296,16 +315,24 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
         }
         if (outcome.kind === "blocked") {
           settle("blocked", outcome.reason);
-          await reporter.blocked(task, outcome.reason);
+          await reporter.blocked(task, `${outcome.reason}${unpushedWork(state, worktreePath)}`);
           return;
         }
         if (outcome.kind === "error") {
-          keepWorktree = true;
-          settle("failed", outcome.message);
-          await reporter.failed(
-            task,
-            `${entry.name} failed: ${outcome.message}\n\nThe worktree is kept at \`${worktreePath}\` on the worker host.`
-          );
+          // A delivery step failing is the run's failure — a human has to look at the remote. A
+          // model step failing is usually the CLI flaking ("could not parse claude output"), which
+          // main retried inside the attempt budget; parking the task on one flake wastes a human.
+          if (entry.deterministic) {
+            keepWorktree = true;
+            settle("failed", outcome.message);
+            await reporter.failed(
+              task,
+              `${entry.name} failed${whatLanded(state, branch)}: ${outcome.message}\n\nThe worktree is kept at \`${worktreePath}\` on the worker host, with the branch checked out.`
+            );
+          } else {
+            settle("requeued", outcome.message);
+            await reporter.requeued(task, `${entry.name} failed: ${outcome.message}`);
+          }
           return;
         }
       } else {
@@ -367,8 +394,12 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
         }
       }
 
-      // Between every pair of entries, not once: with several steps an unclean tree poisons
-      // everything after it, and a gate would judge a diff that is not what was committed.
+      // After every step that could write — not after a gate. With several steps an unclean tree
+      // poisons everything after it, and a gate would judge a diff that is not what was committed.
+      // Gates are the wrong place to ask: `build` runs npm ci and `test-run` runs the suite, so any
+      // artifact the target repo does not gitignore would fail a run that did nothing wrong.
+      if (entry.kind !== "step" || entry.capability !== "edit") continue;
+
       const leftover = await unfinishedWork(runner, worktreePath);
       if (leftover) {
         keepWorktree = true;
@@ -381,7 +412,12 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
       }
     }
 
-    if (await releaseIfAborted(deps, reporter, task)) return;
+    // Not checked once the merge landed: gh pr merge deliberately runs without a signal, so a stop
+    // pressed during it is only seen afterwards — and releasing there would put a task whose change
+    // is already on the base branch back in the queue for another full run.
+    if (!state.merged && (await releaseIfAborted(deps, reporter, task, whatLanded(state, branch)))) {
+      return;
+    }
 
     // Merged because the sequence carried a Merge step, not because a flag beside it said so.
     // Branching on the pull request url instead would call every merge a delivery: the url is set

@@ -298,7 +298,8 @@ describe("runTask", () => {
     const h = harness({ executor: { execute } });
     await runTask(h.deps, task);
 
-    expect(h.reporter.failed.mock.calls[0][1]).toMatch(/could not parse claude output/);
+    expect(h.reporter.requeued.mock.calls[0][1]).toMatch(/could not parse claude output/);
+    expect(h.reporter.failed).not.toHaveBeenCalled();
     expect(h.reporter.released).not.toHaveBeenCalled();
   });
 
@@ -347,11 +348,17 @@ describe("runTask", () => {
     expect(h.workspace.destroy).not.toHaveBeenCalled();
   });
 
+  // The commit's own status has to succeed first, or commitAll fails and this never reaches the
+  // check it is named after — which is exactly how it passed while asserting nothing
   it("treats a worktree whose state cannot be read as dirty", async () => {
+    let calls = 0;
     const runner = {
-      run: vi
-        .fn<Runner["run"]>()
-        .mockResolvedValue(shell("", { code: 128, stderr: "not a git repository" })),
+      run: vi.fn<Runner["run"]>(async () => {
+        calls += 1;
+        return calls === 1
+          ? shell("")
+          : shell("", { code: 128, stderr: "not a git repository" });
+      }),
     };
     const h = harness({ runner });
     await runTask(h.deps, running("implement", "diff-size"));
@@ -713,23 +720,50 @@ describe("runTask", () => {
     expect(h.workspace.destroy).not.toHaveBeenCalled();
   });
 
-  // With several steps an unclean tree poisons everything after it, so this runs between every pair
-  it("ends the run when an entry other than the first leaves the tree unclean", async () => {
+  // With several writing steps an unclean tree poisons everything after it, so the check runs after
+  // each of them rather than once after the first
+  it("ends the run when a later writing step leaves the tree unclean", async () => {
     let calls = 0;
     const runner = {
       run: vi.fn<Runner["run"]>(async () => {
         calls += 1;
-        // 1: the commit's own status, 2: the check after the implement step, 3: the one after the
-        // gate — which is the check that only exists because entries can follow one another
-        return shell(calls > 2 ? " M src/a.ts\n" : "");
+        // 1: the first commit's status, 2: the check after step one, 3: the second commit's status,
+        // 4: the check after step two — the one that only exists because steps can follow steps
+        return shell(calls >= 4 ? " M src/a.ts\n" : "");
+      }),
+    };
+    const second: SnapshotEntry = {
+      key: "polish",
+      kind: "step",
+      name: "Polish",
+      prompt: "tidy it",
+      capability: "edit",
+    };
+    const h = harness({ runner });
+    const twoWrites = { ...task, agent: agentOf([KNOWN.get("implement")!, second, MERGE]) };
+
+    await runTask(h.deps, twoWrites);
+
+    expect(h.reporter.failed.mock.calls[0][1]).toMatch(/Polish left the worktree unclean/);
+    expect(h.delivery.merge).not.toHaveBeenCalled();
+  });
+
+  // A gate that runs npm ci or the project's suite leaves build output behind; failing the run over
+  // an artifact the target repo does not gitignore would be a refusal of nothing
+  it("does not judge the tree after a gate, only after a step that could write", async () => {
+    let calls = 0;
+    const runner = {
+      run: vi.fn<Runner["run"]>(async () => {
+        calls += 1;
+        return shell(calls > 2 ? "?? dist/main.js\n" : "");
       }),
     };
     const h = harness({ runner });
 
-    await runTask(h.deps, running("implement", "diff-size", "push"));
+    await runTask(h.deps, running("implement", "build", "push", "pull-request"));
 
-    expect(h.reporter.failed.mock.calls[0][1]).toMatch(/unclean/);
-    expect(h.delivery.push).not.toHaveBeenCalled();
+    expect(h.reporter.failed).not.toHaveBeenCalled();
+    expect(h.delivery.push).toHaveBeenCalled();
   });
 
   // A pushed branch carrying .github/workflows/*.yml runs in Actions with the repository's secrets,
@@ -818,6 +852,41 @@ describe("runTask", () => {
     });
   });
 
+  // Every other exit settles; this one returned bare, so the menubar showed the run parked in
+  // "claiming" for ever and no record was written for a task that was claimed and handed back
+  it("leaves a record when the board cannot route the outcome", async () => {
+    const columnIds = vi
+      .fn<PipelineDeps["columnIds"]>()
+      .mockResolvedValue(["ready", "doing", "checking"]);
+    const h = harness({ columnIds });
+
+    await runTask(h.deps, task);
+
+    expect(h.recordRun).toHaveBeenCalledWith("CP", expect.objectContaining({ taskKey: "CP-158" }));
+  });
+
+  // A gate handed the last few seconds fails on the clock and is reported as its own refusal —
+  // "blocked the merge at the build gate" for a build that never ran
+  it("calls the ceiling rather than starting an entry that cannot finish", async () => {
+    let now = 0;
+    const h = harness({
+      config: { ...config, runCeilingMs: 600_000 },
+      now: () => now,
+      executor: {
+        execute: vi.fn<Executor["execute"]>(async () => {
+          now = 599_000;
+          return { kind: "result", result: completed };
+        }),
+      },
+    });
+
+    await runTask(h.deps, running("implement", "build"));
+
+    expect(h.gateFor).not.toHaveBeenCalled();
+    expect(h.reporter.gateRejected).not.toHaveBeenCalled();
+    expect(h.reporter.requeued.mock.calls[0][1]).toMatch(/ceiling/);
+  });
+
   // The record is a durable sink and the detail is model-authored prose, the same as a comment
   it("redacts a credential in the detail it records", async () => {
     const credential = `cpw_${"9f3c".repeat(16)}`;
@@ -846,6 +915,67 @@ describe("runTask", () => {
     await runTask(h.deps, running("implement"));
 
     expect(h.recordRun.mock.calls[0][1].costUsd).toBe(0.25);
+  });
+
+  // With one step this could not happen — a step that blocks never reaches its commit. With two,
+  // the first one's work is committed and only the worktree holds it: nothing is pushed, and the
+  // branch ref the parent clone keeps is reset by the next attempt's `git worktree add -B`.
+  it("keeps the worktree when a later step blocks after an earlier one committed", async () => {
+    let calls = 0;
+    const runner = {
+      run: vi.fn<Runner["run"]>(async () => {
+        calls += 1;
+        // 1: the commit's status, dirty so a commit happens; the rest clean
+        return calls === 1 ? shell(" M src/a.ts\n") : shell("");
+      }),
+    };
+    const second: SnapshotEntry = {
+      key: "polish",
+      kind: "step",
+      name: "Polish",
+      capability: "edit",
+    };
+    let step = 0;
+    const executor = {
+      execute: vi.fn<Executor["execute"]>(async () => {
+        step += 1;
+        return step === 1
+          ? { kind: "result", result: completed }
+          : {
+              kind: "result",
+              result: { ...completed, status: "blocked", blockedReason: "unclear" },
+            };
+      }),
+    };
+    const h = harness({ runner, executor });
+
+    await runTask(h.deps, { ...task, agent: agentOf([KNOWN.get("implement")!, second]) });
+
+    expect(h.reporter.blocked).toHaveBeenCalled();
+    expect(h.workspace.destroy).not.toHaveBeenCalled();
+    expect(h.reporter.blocked.mock.calls[0][1]).toMatch(/not pushed/);
+  });
+
+  // gh pr merge deliberately runs with no signal, so a stop pressed during it is only observed
+  // afterwards. Releasing there puts a task whose change is already on the base branch back in the
+  // queue, and the next claim runs the whole agent again over work that has landed.
+  it("reports a merged run as merged even when the stop lands during the merge", async () => {
+    const controller = new AbortController();
+    const delivery = deliverySpy({
+      merge: vi.fn<Delivery["merge"]>(async () => {
+        controller.abort();
+      }),
+    });
+    const h = harness({
+      createDelivery: vi.fn<PipelineDeps["createDelivery"]>(() => delivery),
+      signal: controller.signal,
+    });
+
+    await runTask(h.deps, merging);
+
+    expect(h.reporter.merged).toHaveBeenCalled();
+    expect(h.reporter.released).not.toHaveBeenCalled();
+    expect(h.reporter.requeued).not.toHaveBeenCalled();
   });
 
   it("requeues and runs no executor when the worktree cannot be created", async () => {
