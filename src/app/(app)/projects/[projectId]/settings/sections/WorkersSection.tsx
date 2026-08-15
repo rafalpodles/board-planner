@@ -28,13 +28,14 @@ const FAILED_OUTCOMES = new Set<AgentRunOutcome>(["refused", "blocked", "failed"
 import Link from "next/link";
 import { useStore } from "@/app/(app)/agents/store";
 
-const NUMBER_FIELDS = new Set(["taskTimeoutMs", "maxDiffLines", "maxDiffFiles"]);
+const NUMBER_FIELDS = new Set(["taskTimeoutMs", "runCeilingMs", "maxDiffLines", "maxDiffFiles"]);
 const LABELS: Record<string, string> = {
   autoMerge: "Merge automatically",
   reviewGate: "Review the diff before delivering",
   claimScope: "Tasks a worker may take",
   baseBranch: "Base branch",
-  taskTimeoutMs: "Task timeout (ms)",
+  taskTimeoutMs: "Timeout for one step (ms)",
+  runCeilingMs: "Timeout for the whole run (ms)",
   maxDiffLines: "Largest diff (lines)",
   maxDiffFiles: "Largest diff (files)",
   model: "Model",

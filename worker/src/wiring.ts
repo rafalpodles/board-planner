@@ -192,6 +192,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       baseBranch: repo.config.baseBranch,
       pollIntervalMs: repo.config.pollIntervalMs,
       taskTimeoutMs: repo.config.taskTimeoutMs,
+      runCeilingMs: repo.config.runCeilingMs,
       maxDiffLines: repo.config.maxDiffLines,
       maxDiffFiles: repo.config.maxDiffFiles,
       model: repo.config.model,

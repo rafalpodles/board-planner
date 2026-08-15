@@ -1,6 +1,7 @@
 import { readFileSync, statSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
+import { clampCeiling, DEFAULT_RUN_CEILING_MS } from "./budget.js";
 
 // The shape workspace.ts, executor.ts, gates/index.ts, loop.ts and pipeline.ts run against for one
 // task: Bootstrap's connection details plus the current EffectiveConfig policy plus one assignment's
@@ -16,6 +17,7 @@ export interface WorkerConfig {
   baseBranch: string;
   pollIntervalMs: number;
   taskTimeoutMs: number;
+  runCeilingMs: number;
   maxDiffLines: number;
   maxDiffFiles: number;
   workerId: string;
@@ -57,6 +59,8 @@ export interface EffectiveConfig {
   baseBranch: string;
   pollIntervalMs: number;
   taskTimeoutMs: number;
+  // taskTimeoutMs bounds one model call. A composed agent makes several, so this bounds the run.
+  runCeilingMs: number;
   maxDiffLines: number;
   maxDiffFiles: number;
   model: string;
@@ -72,6 +76,7 @@ export const DEFAULT_POLICY: EffectiveConfig = {
   baseBranch: "main",
   pollIntervalMs: 30_000,
   taskTimeoutMs: 1_800_000,
+  runCeilingMs: DEFAULT_RUN_CEILING_MS,
   maxDiffLines: 400,
   maxDiffFiles: 10,
   model: DEFAULT_MODEL,
@@ -194,6 +199,11 @@ export function applyPolicy(current: EffectiveConfig, patch: unknown): Effective
   if (isNonEmptyString(source.baseBranch)) next.baseBranch = source.baseBranch.trim();
   if (isPositiveNumber(source.pollIntervalMs)) next.pollIntervalMs = source.pollIntervalMs;
   if (isPositiveNumber(source.taskTimeoutMs)) next.taskTimeoutMs = source.taskTimeoutMs;
+  // Clamped, not taken: a ceiling past the server's own lease gets the task reclaimed under a
+  // running worker, and the abort that follows reads as the machine dying.
+  next.runCeilingMs = clampCeiling(
+    isPositiveNumber(source.runCeilingMs) ? source.runCeilingMs : current.runCeilingMs
+  );
   if (isPositiveNumber(source.maxDiffLines)) next.maxDiffLines = source.maxDiffLines;
   if (isPositiveNumber(source.maxDiffFiles)) next.maxDiffFiles = source.maxDiffFiles;
   if (isNonEmptyString(source.model)) next.model = source.model.trim();
