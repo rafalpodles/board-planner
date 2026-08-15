@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { isAllowedMcpServerUrl } from "@/lib/url-validation";
-import { safeFetch } from "@/lib/safe-fetch";
+import { safeFetch, readBoundedJson, MAX_RESPONSE_BYTES, readBoundedText } from "@/lib/safe-fetch";
 import { selfOrigin, ORIGIN_REQUIRED } from "@/lib/session";
 
 // Mirrors the carve-out isAllowedMcpServerUrl makes for local MCP servers outside production
@@ -35,7 +35,7 @@ async function fetchJson(url: string, init?: RequestInit): Promise<Record<string
   try {
     const res = await safeFetch(url, { ...init, signal: controller.signal }, MCP_DESTINATION);
     if (!res.ok) return null;
-    return (await res.json()) as Record<string, unknown>;
+    return await readBoundedJson<Record<string, unknown>>(res, MAX_RESPONSE_BYTES);
   } catch {
     return null;
   } finally {
@@ -152,11 +152,11 @@ export async function registerClient(
       signal: controller.signal,
     }, MCP_DESTINATION);
     if (!res.ok) {
-      const body = await res.text().catch(() => "");
+      const body = await readBoundedText(res, 4096);
       throw new Error(`Dynamic client registration failed (${res.status}): ${body.slice(0, 200)}`);
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const data = (await res.json()) as any;
+    const data = (await readBoundedJson(res, MAX_RESPONSE_BYTES)) as any;
     if (!data.client_id) throw new Error("Registration response has no client_id");
     return { clientId: String(data.client_id), clientSecret: String(data.client_secret ?? "") };
   } finally {
@@ -223,7 +223,7 @@ async function tokenRequest(opts: TokenRequestOpts): Promise<TokenSet> {
       signal: controller.signal,
     }, MCP_DESTINATION);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const data = (await res.json().catch(() => ({}))) as any;
+    const data = (await readBoundedJson(res, MAX_RESPONSE_BYTES).catch(() => ({}))) as any;
     if (!res.ok || !data.access_token) {
       throw new Error(
         `Token request failed (${res.status}): ${String(data.error ?? "no access_token")}`

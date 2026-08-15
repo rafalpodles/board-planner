@@ -1,4 +1,4 @@
-import { safeFetch, logUpstreamFailure } from "./safe-fetch";
+import { safeFetch, logUpstreamFailure, readBoundedJson, MAX_RESPONSE_BYTES } from "./safe-fetch";
 
 const DEFAULT_HOST = "https://coda.io";
 const REQUEST_TIMEOUT_MS = 15000;
@@ -58,7 +58,7 @@ async function codaFetch<T>(url: string, token: string, init?: RequestInit): Pro
     await logUpstreamFailure("Coda", res);
     throw new Error(`Coda API `);
   }
-  return res.json();
+  return readBoundedJson(res, MAX_RESPONSE_BYTES);
 }
 
 interface CodaColumn {
