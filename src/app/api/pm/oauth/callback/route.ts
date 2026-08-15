@@ -3,18 +3,20 @@ import { connectDB } from "@/lib/db";
 import { Project } from "@/models/project";
 import { PmOauthState } from "@/models/pmOauthState";
 import { decryptSecret, encryptSecret } from "@/lib/encryption";
-import { exchangeCode, getPmOauthRedirectUri, requestBaseUrl } from "@/lib/pm/mcp-oauth";
+import { exchangeCode, getPmOauthRedirectUri } from "@/lib/pm/mcp-oauth";
 
 export const maxDuration = 60;
 
-function settingsRedirect(request: Request, projectId: string | null, result: string): NextResponse {
-  const base = (
-    requestBaseUrl(request) || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"
-  ).replace(/\/$/, "");
-  const target = projectId
-    ? `${base}/projects/${projectId}/settings?mcp_oauth=${encodeURIComponent(result)}`
-    : `${base}/projects?mcp_oauth=${encodeURIComponent(result)}`;
-  return NextResponse.redirect(target);
+/**
+ * A relative Location, deliberately. This route is unauthenticated, and building an absolute URL
+ * meant reading the origin off `x-forwarded-host` — so `GET /api/pm/oauth/callback?state=x` with
+ * a forged header answered a 302 to wherever the caller named (BP-316). The browser resolves a
+ * relative Location against the origin it actually asked, which no header can move.
+ */
+function settingsRedirect(projectId: string | null, result: string): NextResponse {
+  const query = `?mcp_oauth=${encodeURIComponent(result)}`;
+  const target = projectId ? `/projects/${projectId}/settings${query}` : `/projects${query}`;
+  return new NextResponse(null, { status: 302, headers: { Location: target } });
 }
 
 // Unauthenticated by necessity (browser redirect carries no Authorization header);
@@ -28,21 +30,21 @@ export async function GET(request: Request) {
 
   const pending = state ? await PmOauthState.findOneAndDelete({ state }) : null;
   if (!pending) {
-    return settingsRedirect(request, null, "error:invalid_state");
+    return settingsRedirect(null, "error:invalid_state");
   }
   const projectId = String(pending.project);
 
   if (providerError) {
-    return settingsRedirect(request, projectId, `error:${providerError.slice(0, 40)}`);
+    return settingsRedirect(projectId, `error:${providerError.slice(0, 40)}`);
   }
   if (!code) {
-    return settingsRedirect(request, projectId, "error:missing_code");
+    return settingsRedirect(projectId, "error:missing_code");
   }
 
   const project = await Project.findById(pending.project);
   const server = (project?.pm?.mcpServers ?? []).find((s) => s.name === pending.serverName);
   if (!project || !server || server.authType !== "oauth" || !server.oauth?.tokenEndpoint) {
-    return settingsRedirect(request, projectId, "error:connection_gone");
+    return settingsRedirect(projectId, "error:connection_gone");
   }
 
   try {
@@ -53,7 +55,7 @@ export async function GET(request: Request) {
       tokenAuthMethod: server.oauth.tokenAuthMethod || "none",
       code,
       codeVerifier: pending.codeVerifier,
-      redirectUri: server.oauth.redirectUri || getPmOauthRedirectUri(request),
+      redirectUri: server.oauth.redirectUri || getPmOauthRedirectUri(),
       resource: server.url,
     });
     server.oauth.accessToken = encryptSecret(tokens.accessToken);
@@ -62,9 +64,9 @@ export async function GET(request: Request) {
     server.oauth.status = "connected";
     project.markModified("pm.mcpServers");
     await project.save();
-    return settingsRedirect(request, projectId, "ok");
+    return settingsRedirect(projectId, "ok");
   } catch (err) {
     console.error("PM OAuth token exchange failed:", err);
-    return settingsRedirect(request, projectId, "error:token_exchange");
+    return settingsRedirect(projectId, "error:token_exchange");
   }
 }
