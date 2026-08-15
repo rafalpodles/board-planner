@@ -192,47 +192,48 @@ describe("safeFetch", () => {
 // BP-317: the 500 characters that reach the log were sliced off a string the process had already
 // materialised in full, so an integration host answering an error with a huge body could exhaust
 // the container while being politely refused.
+// BP-317: the 500 characters that reach the log were sliced off a string the process had already
+// materialised in full, so an integration host answering an error with a huge body could exhaust
+// the container while being politely refused.
 describe("reading an upstream error body", () => {
-  function streamOf(chunks: string[], onCancel?: () => void): Response {
+  // Large but finite on purpose: an endless stream would make an unbounded read hang rather than
+  // fail, and a test that hangs is a worse signal than one that fails
+  function countedStream(chunkCount: number, onCancel?: () => void) {
     const encoder = new TextEncoder();
-    let index = 0;
+    const pulled = { count: 0 };
     const body = new ReadableStream<Uint8Array>({
       pull(controller) {
-        if (index >= chunks.length) return controller.close();
-        controller.enqueue(encoder.encode(chunks[index++]));
+        if (pulled.count >= chunkCount) return controller.close();
+        pulled.count += 1;
+        controller.enqueue(encoder.encode("x".repeat(1024)));
       },
       cancel: onCancel,
     });
-    return new Response(body, { status: 500, statusText: "Server Error" });
+    return { pulled, response: new Response(body, { status: 500, statusText: "Server Error" }) };
   }
 
-  it("stops reading once it has its prefix, rather than draining the body", async () => {
-    let pulls = 0;
-    const encoder = new TextEncoder();
-    const body = new ReadableStream<Uint8Array>({
-      pull(controller) {
-        pulls += 1;
-        controller.enqueue(encoder.encode("x".repeat(1024)));
-      },
-    });
+  it("reads only as far as its bound, however much the host is willing to send", async () => {
+    const { pulled, response } = countedStream(10_000);
 
-    const text = await readBoundedText(new Response(body, { status: 500 }), 4096);
+    const text = await readBoundedText(response, 4096);
 
     expect(text).toBe("x".repeat(4096));
-    // The stream is infinite: without the bound this never returns at all
-    expect(pulls).toBeLessThanOrEqual(5);
+    expect(pulled.count).toBeLessThanOrEqual(5);
   });
 
   it("cancels the rest of the stream so the connection is not left draining", async () => {
     const cancelled = vi.fn();
+    const { response } = countedStream(100, cancelled);
 
-    await readBoundedText(streamOf(Array.from({ length: 100 }, () => "y".repeat(1024)), cancelled), 2048);
+    await readBoundedText(response, 2048);
 
     expect(cancelled).toHaveBeenCalled();
   });
 
   it("returns a short body whole", async () => {
-    expect(await readBoundedText(streamOf(["not found"]), 4096)).toBe("not found");
+    const short = new Response("not found", { status: 500 });
+
+    expect(await readBoundedText(short, 4096)).toBe("not found");
   });
 
   it("survives a body that is missing or breaks mid-read", async () => {
@@ -245,13 +246,17 @@ describe("reading an upstream error body", () => {
     expect(await readBoundedText(broken, 4096)).toBe("");
   });
 
-  it("logs a bounded prefix and does not put the body in what the caller sees", async () => {
+  // The bound has to be on what is allocated, not on what is printed — slicing after the fact is
+  // what this replaced, and it logs an identical line
+  it("does not materialise the whole body just to log 500 characters of it", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { pulled, response } = countedStream(10_000);
 
-    await logUpstreamFailure("GitLab", streamOf([`{"secret":"${"z".repeat(100_000)}"}`]));
+    await logUpstreamFailure("GitLab", response);
 
     expect(error).toHaveBeenCalled();
     expect(String(error.mock.calls[0][0]).length).toBeLessThan(600);
+    expect(pulled.count).toBeLessThanOrEqual(5);
     error.mockRestore();
   });
 });
