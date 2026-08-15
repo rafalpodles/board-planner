@@ -143,13 +143,20 @@ type Body = Record<string, any>;
  * shape of cross-project reference BP-314 closed for sprints. Global and personal agents run
  * anywhere their owner can reach.
  */
-async function agentUsableOnProject(projectId: string, agent: unknown): Promise<boolean> {
+async function agentUsableOnProject(
+  projectId: string,
+  agent: unknown,
+  actingUserId: unknown
+): Promise<boolean> {
   if (typeof agent !== "string" || !Types.ObjectId.isValid(agent)) return false;
   const { Agent } = await import("@/models/agent");
-  const found = await Agent.findById(agent, "scope project").lean();
+  const found = await Agent.findById(agent, "scope project owner").lean();
   if (!found) return false;
-  if (found.scope !== "project") return true;
-  return String(found.project) === String(projectId);
+  if (found.scope === "project") return String(found.project) === String(projectId);
+  // A personal agent is somebody's own; pointing a task at another person's would run their
+  // prompts, with write access, on this project's checkout.
+  if (found.scope === "user") return String(found.owner) === String(actingUserId);
+  return true;
 }
 
 async function sprintBelongsToProject(projectId: string, sprint: unknown): Promise<boolean> {
@@ -389,7 +396,7 @@ export async function updateTask(
   // Whitelist allowed fields to prevent overwriting protected fields
   const allowed = [
     "title", "description", "priority", "category",
-    "status", "assignee", "dueDate", "checklist", "order", "sprint", "customFieldValues", "recurrence",
+    "status", "assignee", "dueDate", "checklist", "order", "sprint", "agent", "customFieldValues", "recurrence",
   ];
   const updates: Record<string, unknown> = {};
   for (const field of allowed) {
@@ -410,7 +417,7 @@ export async function updateTask(
 
   if (updates.agent === "") updates.agent = null;
   if (updates.agent !== undefined && updates.agent !== null) {
-    if (!(await agentUsableOnProject(projectId, updates.agent))) {
+    if (!(await agentUsableOnProject(projectId, updates.agent, actorId))) {
       return { ok: false, error: "That agent cannot run on this project", status: 400 };
     }
   }

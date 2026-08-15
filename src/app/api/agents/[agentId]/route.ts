@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { withAuth } from "@/lib/middleware";
 import { check } from "@/lib/grants";
@@ -29,6 +30,8 @@ async function mayEdit(user: IUser, agent: { scope: string; owner: unknown; proj
 
 export const PUT = withAuth(async (request, { params, user }) => {
   const { agentId } = await params;
+  // An id that is not one reaches Mongoose as a CastError and answers 500; this is a 404.
+  if (!isValidObjectId(agentId)) return NextResponse.json({ error: "No such record" }, { status: 404 });
   await connectDB();
 
   const agent = await Agent.findById(agentId);
@@ -56,6 +59,8 @@ export const PUT = withAuth(async (request, { params, user }) => {
 
 export const DELETE = withAuth(async (_request, { params, user }) => {
   const { agentId } = await params;
+  // An id that is not one reaches Mongoose as a CastError and answers 500; this is a 404.
+  if (!isValidObjectId(agentId)) return NextResponse.json({ error: "No such record" }, { status: 404 });
   await connectDB();
 
   const agent = await Agent.findById(agentId);

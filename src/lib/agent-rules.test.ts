@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { agentProblems, brokenProblems, sequenceOf } from "./agent-rules";
+import { agentProblems, brokenProblems, isRunnable, sequenceOf } from "./agent-rules";
 import { AgentComposition, ApiAgentBlock } from "@/types";
 
 function block(over: Partial<ApiAgentBlock> & Pick<ApiAgentBlock, "key">): ApiAgentBlock {
@@ -29,6 +29,9 @@ const BLOCKS: ApiAgentBlock[] = [
   block({ key: "review", gateKind: "review" }),
   block({ key: "security-review", gateKind: "review" }),
   block({ key: "diff-size", gateKind: "diff-size" }),
+  block({ key: "protected-paths", gateKind: "protected-paths" }),
+  block({ key: "build", gateKind: "build" }),
+  block({ key: "test-run", gateKind: "test-run" }),
 ];
 
 const lookup = (key: string) => BLOCKS.find((b) => b.key === key);
@@ -183,5 +186,89 @@ describe("brokenProblems", () => {
       lookup
     );
     expect(broken.map((p) => p.severity)).toEqual(["broken", "broken"]);
+  });
+});
+
+describe("rules the shape of the old pipeline used to guarantee", () => {
+  // worker/src/gates/index.ts said it outright: the static gates run first because build runs npm
+  // on a tree the agent just wrote, executing its content before any gate has read it
+  it("refuses a build that runs on written code before protected-paths has read it", () => {
+    const problems = agentProblems(
+      composition({
+        implementation: ["implement"],
+        verification: ["build", "protected-paths", "review"],
+        delivery: ["push", "pull-request"],
+      }),
+      lookup
+    );
+    expect(problems.some((p) => /before .*protected/i.test(p.message))).toBe(true);
+    expect(problems.find((p) => /before .*protected/i.test(p.message))?.severity).toBe("broken");
+  });
+
+  it("accepts the same gates in the order the worker used to hardcode", () => {
+    const problems = agentProblems(
+      composition({
+        implementation: ["implement"],
+        verification: ["protected-paths", "build", "review"],
+        delivery: ["push", "pull-request"],
+      }),
+      lookup
+    );
+    expect(problems).toEqual([]);
+  });
+
+  // Nothing was written, so there is nothing whose content the build could execute
+  it("says nothing about ordering when no step writes", () => {
+    const problems = agentProblems(
+      composition({ verification: ["build", "protected-paths"] }),
+      lookup
+    );
+    expect(problems).toEqual([]);
+  });
+
+  // The review has to judge the finished work, not an empty tree in an earlier bucket
+  it("refuses a review that ran before the last thing that wrote", () => {
+    const problems = agentProblems(
+      composition({
+        analysis: ["review"],
+        implementation: ["implement"],
+        verification: ["protected-paths"],
+        delivery: ["push", "pull-request", "merge"],
+      }),
+      lookup
+    );
+    expect(problems.some((p) => /nothing having reviewed/.test(p.message))).toBe(true);
+  });
+
+  it("accepts a review that comes after the writing", () => {
+    const problems = agentProblems(
+      composition({
+        implementation: ["implement"],
+        verification: ["protected-paths", "review"],
+        delivery: ["push", "pull-request", "merge"],
+      }),
+      lookup
+    );
+    expect(problems).toEqual([]);
+  });
+
+  // A composition can carry the same block twice, so a rule reading the first occurrence is wrong
+  it("reads the last push, not the first, when the agent pushes twice", () => {
+    const problems = agentProblems(
+      composition({
+        implementation: ["push", "implement"],
+        delivery: ["push", "pull-request"],
+      }),
+      lookup
+    );
+    expect(problems).toEqual([]);
+  });
+
+  // Every agent is empty between "New agent" and the first block dragged in, so an empty one is a
+  // draft. isRunnable is what the project-default route asks before pointing a worker at it.
+  it("treats an empty agent as a draft rather than a broken composition", () => {
+    expect(agentProblems(composition(), lookup)).toEqual([]);
+    expect(isRunnable(composition())).toBe(false);
+    expect(isRunnable(composition({ implementation: ["implement"], delivery: ["push"] }))).toBe(true);
   });
 });

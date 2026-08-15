@@ -3,6 +3,7 @@ import { connectDB } from "@/lib/db";
 import { withProjectAccessOrWorker } from "@/lib/middleware";
 import { AgentRun } from "@/models/agentRun";
 import { toApiRun } from "@/lib/agent-service";
+import { Types } from "mongoose";
 import { AGENT_RUN_OUTCOMES, AgentRunOutcome } from "@/types";
 
 const MAX_DETAIL = 2000;
@@ -12,7 +13,10 @@ export const GET = withProjectAccessOrWorker(async (request, { params }) => {
   await connectDB();
 
   const url = new URL(request.url);
-  const limit = Math.min(Number(url.searchParams.get("limit") ?? 20), 100);
+  // Number("") is 0 and Mongoose reads .limit(0) as no limit at all, so a blank parameter used to
+  // return every run in the project.
+  const asked = Number(url.searchParams.get("limit"));
+  const limit = Number.isInteger(asked) && asked > 0 ? Math.min(asked, 100) : 20;
 
   const runs = await AgentRun.find({ project: projectId })
     .sort({ finishedAt: -1 })
@@ -33,6 +37,24 @@ export const POST = withProjectAccessOrWorker(async (request, { params }) => {
     return NextResponse.json({ error: "taskId and taskKey are required" }, { status: 400 });
   }
 
+  // The same cross-project reference BP-314 closed for sprints: a member of one board could
+  // otherwise write history naming another board's task or agent.
+  const { Task } = await import("@/models/task");
+  if (!Types.ObjectId.isValid(body.taskId)) {
+    return NextResponse.json({ error: "taskId is not an id" }, { status: 400 });
+  }
+  if (!(await Task.exists({ _id: body.taskId, project: projectId }))) {
+    return NextResponse.json({ error: "That task is not on this project" }, { status: 400 });
+  }
+
+  let agentId: string | null = null;
+  if (typeof body.agentId === "string" && Types.ObjectId.isValid(body.agentId)) {
+    const { Agent } = await import("@/models/agent");
+    const agent = await Agent.findById(body.agentId, "scope project").lean();
+    const usable = agent && (agent.scope !== "project" || String(agent.project) === String(projectId));
+    if (usable) agentId = body.agentId;
+  }
+
   const startedAt = new Date(body.startedAt ?? Date.now());
   const finishedAt = new Date(body.finishedAt ?? Date.now());
 
@@ -45,7 +67,7 @@ export const POST = withProjectAccessOrWorker(async (request, { params }) => {
     task: body.taskId,
     taskKey: body.taskKey,
     worker: body.workerId ?? null,
-    agent: body.agentId ?? null,
+    agent: agentId,
     agentName: typeof body.agentName === "string" ? body.agentName : "",
     outcome,
     refusedBy: typeof body.refusedBy === "string" ? body.refusedBy : "",
