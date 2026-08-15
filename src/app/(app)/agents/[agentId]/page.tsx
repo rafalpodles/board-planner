@@ -1,65 +1,27 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import {
-  DndContext,
-  DragEndEvent,
-  DragOverlay,
-  DragStartEvent,
   CollisionDetection,
+  DndContext,
+  DragOverlay,
   KeyboardSensor,
   PointerSensor,
   pointerWithin,
   rectIntersection,
-  useDraggable,
-  useDroppable,
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
-import {
-  SortableContext,
-  arrayMove,
-  sortableKeyboardCoordinates,
-  useSortable,
-  verticalListSortingStrategy,
-} from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
+import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { PageHeader } from "@/components/shell/PageHeader";
 import { Button } from "@/components/ui/Button";
-import { BUCKETS, emptyComposition } from "../catalog";
-import { AGENT_BUCKETS, AgentBucket, AgentComposition, ApiAgentBlock } from "@/types";
-import { useStore } from "../store";
 import { agentProblems } from "@/lib/agent-rules";
-
-interface Entry {
-  uid: string;
-  key: string;
-}
-
-type Entries = Record<AgentBucket, Entry[]>;
-
-const NEW_PREFIX = "new:";
-const BUCKET_PREFIX = "bucket:";
-
-let counter = 0;
-const nextUid = () => `e${++counter}`;
-
-// Entries carry a uid so the same block can appear twice; the stored composition is just the keys.
-const toEntries = (composition: AgentComposition): Entries => {
-  const out = {} as Entries;
-  for (const bucket of AGENT_BUCKETS) {
-    out[bucket] = (composition[bucket] ?? []).map((key) => ({ uid: nextUid(), key }));
-  }
-  return out;
-};
-
-const toComposition = (entries: Entries): AgentComposition => {
-  const out = {} as AgentComposition;
-  for (const bucket of AGENT_BUCKETS) out[bucket] = entries[bucket].map((e) => e.key);
-  return out;
-};
+import { BUCKETS } from "../catalog";
+import { useStore } from "../store";
+import { useComposition } from "../useComposition";
+import { BlockBody, Bucket, Palette } from "../components/blocks";
 
 // Corner distance picks a neighbouring bucket's first row over the bucket the cursor is actually
 // inside; the pointer is the only honest signal here. rectIntersection is the keyboard fallback,
@@ -69,253 +31,37 @@ const collisionDetection: CollisionDetection = (args) => {
   return byPointer.length > 0 ? byPointer : rectIntersection(args);
 };
 
-function KindDot({ kind }: { kind: ApiAgentBlock["kind"] }) {
-  return (
-    <span
-      aria-hidden
-      className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${
-        kind === "step" ? "bg-primary" : "bg-text-muted"
-      }`}
-    />
-  );
-}
-
-function BlockBody({ block, muted }: { block: ApiAgentBlock; muted?: boolean }) {
-  return (
-    <div className="min-w-0">
-      <div className="flex items-center gap-2">
-        <KindDot kind={block.kind} />
-        <span className={`truncate text-[13px] font-medium ${muted ? "text-text-muted" : ""}`}>
-          {block.name}
-        </span>
-      </div>
-      <p className="mt-0.5 truncate text-[12px] text-text-muted">{block.description}</p>
-    </div>
-  );
-}
-
-function PaletteItem({ block }: { block: ApiAgentBlock }) {
-  const { setNodeRef, attributes, listeners, isDragging } = useDraggable({
-    id: `${NEW_PREFIX}${block.key}`,
-  });
-
-  return (
-    <li
-      ref={setNodeRef}
-      {...attributes}
-      {...listeners}
-      className={`cursor-grab rounded-lg border border-border bg-bg-card px-3 py-2 transition-colors hover:border-border-strong ${
-        isDragging ? "opacity-40" : ""
-      }`}
-    >
-      <BlockBody block={block} />
-    </li>
-  );
-}
-
-function SortableEntry({
-  entry,
-  onRemove,
-  lookup,
-}: {
-  entry: Entry;
-  onRemove: () => void;
-  lookup: (key: string) => ApiAgentBlock | undefined;
-}) {
-  const { setNodeRef, attributes, listeners, transform, transition, isDragging } = useSortable({
-    id: entry.uid,
-  });
-  const block = lookup(entry.key);
-  if (!block) return null;
-
-  return (
-    <li
-      ref={setNodeRef}
-      style={{ transform: CSS.Transform.toString(transform), transition }}
-      className={`flex items-center gap-2 rounded-lg border border-border bg-bg-card px-3 py-2 ${
-        isDragging ? "relative z-10 opacity-85" : ""
-      }`}
-    >
-      <span {...attributes} {...listeners} className="min-w-0 flex-1 cursor-grab">
-        <BlockBody block={block} />
-      </span>
-      <button
-        onClick={onRemove}
-        aria-label={`Remove ${block.name}`}
-        className="focus-ring shrink-0 rounded p-1 text-text-muted transition-colors hover:text-danger"
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4">
-          <path d="M6 18L18 6M6 6l12 12" strokeLinecap="round" />
-        </svg>
-      </button>
-    </li>
-  );
-}
-
-function Bucket({
-  id,
-  label,
-  hint,
-  entries,
-  onRemove,
-  lookup,
-}: {
-  id: AgentBucket;
-  label: string;
-  hint: string;
-  entries: Entry[];
-  onRemove: (uid: string) => void;
-  lookup: (key: string) => ApiAgentBlock | undefined;
-}) {
-  const { setNodeRef, isOver } = useDroppable({ id: `${BUCKET_PREFIX}${id}` });
-
-  return (
-    <section className="mb-5">
-      <div className="mb-1.5 flex items-baseline gap-2">
-        <h2 className="text-[10.5px] font-bold uppercase tracking-wider text-text-muted">{label}</h2>
-        <span className="text-[12px] text-text-muted">{hint}</span>
-      </div>
-
-      <ul
-        ref={setNodeRef}
-        className={`flex min-h-[72px] flex-col gap-2 rounded-lg border border-dashed p-2 transition-colors ${
-          isOver ? "border-primary bg-primary/5" : "border-border"
-        }`}
-      >
-        <SortableContext items={entries.map((e) => e.uid)} strategy={verticalListSortingStrategy}>
-          {entries.map((entry) => (
-            <SortableEntry
-              key={entry.uid}
-              entry={entry}
-              lookup={lookup}
-              onRemove={() => onRemove(entry.uid)}
-            />
-          ))}
-        </SortableContext>
-
-        {entries.length === 0 && (
-          <p className="py-3 text-center text-[12px] text-text-muted">Drag a step or a gate here.</p>
-        )}
-      </ul>
-    </section>
-  );
-}
-
 export default function AgentDetailPage() {
   const params = useParams<{ agentId: string }>();
   const store = useStore();
   const agent = store.allAgents.find((a) => a._id === params.agentId);
-  const lookup = (key: string) =>
-    [...store.allSteps, ...store.allGates].find((b) => b.key === key);
-  const [saved, setSaved] = useState(false);
 
-  const [entries, setEntries] = useState<Entries>(() =>
-    toEntries(agent?.composition ?? emptyComposition())
+  const lookup = (key: string) => [...store.allSteps, ...store.allGates].find((b) => b.key === key);
+  const { entries, dragging, composition, onDragStart, onDragEnd, remove } = useComposition(
+    agent?.composition,
+    lookup
   );
-  const [dragging, setDragging] = useState<ApiAgentBlock | null>(null);
 
-  // The agent arrives after the first render, so the editor has to be seeded when it does — and
-  // exactly once, or every save would be undone by the refetch that follows it.
-  const seeded = useRef(false);
-  useEffect(() => {
-    if (!agent || seeded.current) return;
-    seeded.current = true;
-    setEntries(toEntries(agent.composition));
-  }, [agent]);
-
-  const problems = agentProblems(toComposition(entries), lookup);
+  const [saved, setSaved] = useState(false);
+  const problems = agentProblems(composition, lookup);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
-  const bucketOf = useMemo(
-    () => (uid: string) =>
-      BUCKETS.map((b) => b.id).find((id) => entries[id].some((e) => e.uid === uid)),
-    [entries]
-  );
-
-  function resolveTarget(overId: string): { bucket: AgentBucket; index: number } | null {
-    if (overId.startsWith(BUCKET_PREFIX)) {
-      const bucket = overId.slice(BUCKET_PREFIX.length) as AgentBucket;
-      return { bucket, index: entries[bucket].length };
-    }
-    const bucket = bucketOf(overId);
-    if (!bucket) return null;
-    return { bucket, index: entries[bucket].findIndex((e) => e.uid === overId) };
-  }
-
-  function handleDragStart({ active }: DragStartEvent) {
-    const id = String(active.id);
-    const key = id.startsWith(NEW_PREFIX) ? id.slice(NEW_PREFIX.length) : entriesKey(id);
-    setDragging(lookup(key ?? "") ?? null);
-  }
-
-  function entriesKey(uid: string): string | undefined {
-    for (const b of BUCKETS) {
-      const found = entries[b.id].find((e) => e.uid === uid);
-      if (found) return found.key;
-    }
-    return undefined;
-  }
-
-  function handleDragEnd({ active, over }: DragEndEvent) {
-    setDragging(null);
-    if (!over) return;
-
-    const activeId = String(active.id);
-    const target = resolveTarget(String(over.id));
-    if (!target) return;
-
-    if (activeId.startsWith(NEW_PREFIX)) {
-      const key = activeId.slice(NEW_PREFIX.length);
-      setEntries((prev) => {
-        const next = { ...prev, [target.bucket]: [...prev[target.bucket]] };
-        next[target.bucket].splice(target.index, 0, { uid: nextUid(), key });
-        return next;
-      });
-      return;
-    }
-
-    const from = bucketOf(activeId);
-    if (!from) return;
-
-    setEntries((prev) => {
-      const fromIndex = prev[from].findIndex((e) => e.uid === activeId);
-      if (from === target.bucket) {
-        if (fromIndex === target.index) return prev;
-        return { ...prev, [from]: arrayMove(prev[from], fromIndex, target.index) };
-      }
-      const moved = prev[from][fromIndex];
-      const nextFrom = prev[from].filter((e) => e.uid !== activeId);
-      const nextTo = [...prev[target.bucket]];
-      nextTo.splice(target.index, 0, moved);
-      return { ...prev, [from]: nextFrom, [target.bucket]: nextTo };
-    });
-  }
-
-  const remove = (uid: string) =>
-    setEntries((prev) => {
-      const bucket = BUCKETS.map((b) => b.id).find((id) => prev[id].some((e) => e.uid === uid));
-      if (!bucket) return prev;
-      return { ...prev, [bucket]: prev[bucket].filter((e) => e.uid !== uid) };
-    });
-
-  if (store.loading) {
-    return (
-      <>
-        <PageHeader title="Agent" subtitle="Loading" />
-      </>
-    );
-  }
+  if (store.loading) return <PageHeader title="Agent" subtitle="Loading" />;
 
   if (!agent) {
     return (
       <>
         <PageHeader title="Agent" subtitle="Not found" />
         <p className="text-[13px] text-text-muted">
-          No agent with that id. <Link href="/agents" className="text-primary">Back to agents</Link>.
+          No agent with that id.{" "}
+          <Link href="/agents" className="text-primary">
+            Back to agents
+          </Link>
+          .
         </p>
       </>
     );
@@ -335,8 +81,8 @@ export default function AgentDetailPage() {
             </Link>
             <Button
               size="sm"
-              onClick={() => {
-                store.saveComposition(agent._id, toComposition(entries));
+              onClick={async () => {
+                await store.saveComposition(agent._id, composition);
                 setSaved(true);
                 window.setTimeout(() => setSaved(false), 2000);
               }}
@@ -360,41 +106,25 @@ export default function AgentDetailPage() {
       <DndContext
         sensors={sensors}
         collisionDetection={collisionDetection}
-        onDragStart={handleDragStart}
-        onDragEnd={handleDragEnd}
+        onDragStart={onDragStart}
+        onDragEnd={onDragEnd}
       >
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_260px]">
           <div>
-            {BUCKETS.map((b) => (
+            {BUCKETS.map((bucket) => (
               <Bucket
-                key={b.id}
-                id={b.id}
-                label={b.label}
-                hint={b.hint}
-                entries={entries[b.id]}
+                key={bucket.id}
+                id={bucket.id}
+                label={bucket.label}
+                hint={bucket.hint}
+                entries={entries[bucket.id]}
                 lookup={lookup}
                 onRemove={remove}
               />
             ))}
           </div>
 
-          <aside className="lg:sticky lg:top-4 lg:self-start">
-            <h2 className="text-[10.5px] font-bold uppercase tracking-wider text-text-muted">Steps</h2>
-            <p className="mb-2 mt-1 text-[12px] text-text-muted">Work. Each one is a fresh session.</p>
-            <ul className="mb-5 flex flex-col gap-2">
-              {store.allSteps.map((block) => (
-                <PaletteItem key={block.key} block={block} />
-              ))}
-            </ul>
-
-            <h2 className="text-[10.5px] font-bold uppercase tracking-wider text-text-muted">Gates</h2>
-            <p className="mb-2 mt-1 text-[12px] text-text-muted">Checks. They only say yes or no.</p>
-            <ul className="flex flex-col gap-2">
-              {store.allGates.map((block) => (
-                <PaletteItem key={block.key} block={block} />
-              ))}
-            </ul>
-          </aside>
+          <Palette steps={store.allSteps} gates={store.allGates} />
         </div>
 
         <DragOverlay>
