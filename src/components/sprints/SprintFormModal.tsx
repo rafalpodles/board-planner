@@ -105,7 +105,7 @@ export function SprintFormModal({
               value={startDate}
               onChange={(e) => handleStartDateChange(e.target.value)}
               required
-              className="w-full bg-bg-input border border-border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+              className="focus-ring w-full bg-bg-input border border-border rounded px-3 py-1.5 text-sm"
             />
           </div>
           <div>
@@ -124,7 +124,7 @@ export function SprintFormModal({
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
               required
-              className="w-full bg-bg-input border border-border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+              className="focus-ring w-full bg-bg-input border border-border rounded px-3 py-1.5 text-sm"
             />
           </div>
         </div>

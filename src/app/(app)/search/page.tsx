@@ -110,8 +110,8 @@ function SearchContent() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search tasks by title, description, or key (e.g. CP-12)..."
-            className="w-full bg-bg-input border border-border rounded-lg pl-10 pr-4 py-2.5
-              text-text placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary"
+            className="focus-ring w-full bg-bg-input border border-border rounded-lg pl-10 pr-4 py-2.5
+              text-text placeholder:text-text-muted"
           />
         </div>
       </form>

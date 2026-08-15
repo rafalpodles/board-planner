@@ -251,7 +251,7 @@ export function Comments({
                     onBlur={() => setTimeout(editMention.close, 150)}
                     rows={3}
                     autoFocus
-                    className="w-full rounded-lg border border-border bg-bg-input px-3 py-2 text-text min-h-[88px] placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent resize-y"
+                    className="focus-ring w-full rounded-lg border border-border bg-bg-input px-3 py-2 text-text min-h-[88px] placeholder:text-text-muted resize-y"
                   />
                 </div>
                 <div className="flex gap-2">
@@ -353,7 +353,7 @@ export function Comments({
               onBlur={() => setTimeout(newMention.close, 150)}
               placeholder="Write a comment, @mention someone…"
               rows={2}
-              className="min-h-[44px] w-full resize-y rounded-xl border border-border bg-bg-input px-3 py-2.5 text-text placeholder:text-text-muted focus:border-transparent focus:outline-none focus:ring-2 focus:ring-primary"
+              className="focus-ring min-h-[44px] w-full resize-y rounded-xl border border-border bg-bg-input px-3 py-2.5 text-text placeholder:text-text-muted"
             />
           </div>
           <div className="flex items-center gap-3">

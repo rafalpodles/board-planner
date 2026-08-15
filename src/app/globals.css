@@ -154,9 +154,14 @@ body {
   }
 }
 
-/* One keyboard-focus treatment for the shell. An outline rather than a box-shadow
-   ring: the sidebar and the column bodies scroll, and a ring on an item at the
-   edge is clipped by its overflow container while an outline never is. */
+/* One keyboard-focus treatment for every field and control. An outline rather than a
+   box-shadow ring so the element keeps its own border while focused, instead of trading
+   it for a ring drawn where the border used to be.
+
+   This does NOT survive a scroll container on its own. A scrollport clips everything its
+   descendants paint outside it, an outline exactly as much as a box-shadow — measured, in
+   both directions, four ways. A field flush against the edge loses the left and right of
+   its ring whichever mechanism draws it, which is what `.scroll-ring-room` below is for. */
 .focus-ring:focus-visible {
   outline: 2px solid var(--color-primary);
   outline-offset: 2px;
@@ -167,6 +172,16 @@ body {
 .focus-ring-inset:focus-visible {
   outline: 2px solid var(--color-primary);
   outline-offset: -2px;
+}
+
+/* For a scroll container holding full-width fields: the padding gives the focus ring the
+   room the scrollport would otherwise clip, and the negative margin puts the content back
+   on the line it was on, so nothing moves. Wide enough for a 2px outline at 2px offset. */
+.scroll-ring-room {
+  padding-left: 0.3125rem;
+  padding-right: 0.3125rem;
+  margin-left: -0.3125rem;
+  margin-right: -0.3125rem;
 }
 
 /* Every scroll container scrolls without a visible bar. Only the bar's appearance

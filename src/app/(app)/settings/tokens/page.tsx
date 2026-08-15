@@ -182,7 +182,7 @@ export default function TokensPage() {
           {projects.length === 0 ? (
             <p className="text-sm text-text-muted">No projects available.</p>
           ) : (
-            <div className="space-y-2 max-h-48 overflow-y-auto">
+            <div className="space-y-2 max-h-48 overflow-y-auto scroll-ring-room">
               {projects.map((p) => (
                 <label
                   key={p._id}

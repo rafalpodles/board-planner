@@ -204,7 +204,7 @@ export function TaskForm({
               value={aiPrompt}
               onChange={(e) => setAiPrompt(e.target.value)}
               placeholder="Describe what you need, e.g. 'add dark mode toggle'"
-              className="flex-1 bg-bg border border-border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+              className="focus-ring flex-1 bg-bg border border-border rounded px-3 py-1.5 text-sm"
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   e.preventDefault();
@@ -326,7 +326,7 @@ export function TaskForm({
             type="date"
             value={dueDate}
             onChange={(e) => setDueDate(e.target.value)}
-            className="w-full bg-bg-input border border-border rounded px-3 py-1.5 text-sm min-h-[44px] focus:outline-none focus:ring-1 focus:ring-primary"
+            className="focus-ring w-full bg-bg-input border border-border rounded px-3 py-1.5 text-sm min-h-[44px]"
           />
         </div>
       </div>
@@ -353,7 +353,7 @@ export function TaskForm({
                 max={365}
                 value={recurrenceInterval}
                 onChange={(e) => setRecurrenceInterval(Math.max(1, parseInt(e.target.value) || 1))}
-                className="w-16 sm:w-20 bg-bg-input border border-border rounded px-3 py-1.5 text-sm min-h-[44px] focus:outline-none focus:ring-1 focus:ring-primary"
+                className="focus-ring w-16 sm:w-20 bg-bg-input border border-border rounded px-3 py-1.5 text-sm min-h-[44px]"
               />
               <span className="text-sm text-text-muted">
                 {recurrenceFreq === "daily" ? "day(s)" : recurrenceFreq === "weekly" ? "week(s)" : "month(s)"}
@@ -503,7 +503,7 @@ export function TaskForm({
                     )
                   )
                 }
-                className="flex-1 bg-transparent border-b border-transparent focus:border-border text-sm py-0.5 focus:outline-none"
+                className="focus-ring flex-1 bg-transparent border-b border-transparent focus:border-border text-sm py-0.5"
               />
               <button
                 type="button"
@@ -523,7 +523,7 @@ export function TaskForm({
             value={newChecklistItem}
             onChange={(e) => setNewChecklistItem(e.target.value)}
             placeholder="Add checklist item..."
-            className="flex-1 bg-bg-input border border-border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+            className="focus-ring flex-1 bg-bg-input border border-border rounded px-3 py-1.5 text-sm"
             onKeyDown={(e) => {
               if (e.key === "Enter" && newChecklistItem.trim()) {
                 e.preventDefault();
