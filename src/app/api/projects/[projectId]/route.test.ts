@@ -15,6 +15,7 @@ const pmMessageDeleteMany = vi.fn();
 const projectAuditLogDeleteMany = vi.fn();
 
 const logInstanceAudit = vi.fn();
+const logProjectAudit = vi.fn();
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({
@@ -22,7 +23,12 @@ vi.mock("@/lib/auth", () => ({
   RateLimitError: class RateLimitError extends Error {},
 }));
 vi.mock("@/lib/grants", () => ({ check }));
-vi.mock("@/lib/projectAudit", () => ({ logProjectAudit: vi.fn() }));
+vi.mock("@/lib/projectAudit", () => ({ logProjectAudit }));
+vi.mock("@/lib/encryption", () => ({
+  encryptSecret: (v: string) => `enc:${v}`,
+  isEncryptionConfigured: () => true,
+}));
+vi.mock("@/lib/url-validation", () => ({ isAllowedMcpServerUrl: () => true }));
 vi.mock("@/models/project", () => ({
   Project: {
     findById: projectFindById,
@@ -199,5 +205,81 @@ describe("PUT /api/projects/[projectId] estimateFieldId", () => {
       expect.objectContaining({ estimateFieldId: numberFieldId }),
       expect.anything()
     );
+  });
+});
+
+// The clearing rule was pinned only in the helper's own unit tests, so deleting the whole block
+// from this route left the suite green — the mutation the BP-315 review ran to prove it.
+describe("PUT /api/projects/[projectId] and a repointed integration host", () => {
+  function storedProject(overrides: Record<string, unknown> = {}) {
+    return {
+      gitlabHost: "https://gitlab.example.com",
+      gitlabToken: "enc:v2:k:stored",
+      codaHost: "https://coda.io",
+      codaToken: "enc:v2:k:coda",
+      ...overrides,
+    };
+  }
+
+  function storedAs(project: Record<string, unknown>) {
+    projectFindById.mockReturnValue({
+      lean: () => Promise.resolve(project),
+      select: () => Promise.resolve({ customFields: PROJECT_CUSTOM_FIELDS }),
+      toObject: () => ({ _id: PROJECT_ID, name: "Test Project" }),
+    });
+  }
+
+  function updatesSentToMongo() {
+    return projectFindByIdAndUpdate.mock.calls[0][1] as Record<string, unknown>;
+  }
+
+  beforeEach(() => {
+    check.mockResolvedValue(true);
+    storedAs(storedProject());
+  });
+
+  it("clears the stored token when the host is repointed", async () => {
+    const response = await PUT(
+      putRequest({ gitlabHost: "https://collector.attacker.example" }),
+      ctx()
+    );
+
+    expect(response.status).toBe(200);
+    expect(updatesSentToMongo()).toMatchObject({
+      gitlabHost: "https://collector.attacker.example",
+      gitlabToken: "",
+    });
+  });
+
+  it("keeps the token when a new one comes with the new host", async () => {
+    await PUT(
+      putRequest({ gitlabHost: "https://gitlab.other.example", gitlabToken: "glpat-fresh" }),
+      ctx()
+    );
+
+    expect(updatesSentToMongo().gitlabToken).not.toBe("");
+  });
+
+  it("leaves the token alone when the host does not move", async () => {
+    await PUT(putRequest({ gitlabHost: "https://gitlab.example.com/" }), ctx());
+
+    expect(updatesSentToMongo()).not.toHaveProperty("gitlabToken");
+  });
+
+  // .lean() skips the schema default, and the form posts that default on every save
+  it("does not clear the token when the stored host was never persisted", async () => {
+    storedAs(storedProject({ gitlabHost: undefined }));
+
+    await PUT(putRequest({ gitlabHost: "https://gitlab.com" }), ctx());
+
+    expect(updatesSentToMongo()).not.toHaveProperty("gitlabToken");
+  });
+
+  it("records the clearing in the project audit trail as its own entry", async () => {
+    await PUT(putRequest({ codaHost: "https://collector.attacker.example" }), ctx());
+
+    expect(
+      logProjectAudit.mock.calls.some(([, , , detail]) => /Coda token cleared/.test(String(detail)))
+    ).toBe(true);
   });
 });
