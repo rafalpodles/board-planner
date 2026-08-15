@@ -61,6 +61,10 @@ export default defineConfig({
         // before it writes anything — see the guard at the top of run-conflict.spec.ts.
         MONGODB_URI: E2E_MONGODB_URI,
         NEXT_PUBLIC_APP_URL: BASE_URL,
+        // /api/mcp answers 500 without it and will not take NEXT_PUBLIC_APP_URL, which is a
+        // build-time literal. Setting it here is not a test convenience: this run is what proved
+        // a real deployment needs it too, by 500ing three MCP specs when it was missing (BP-316).
+        PUBLIC_ORIGIN: BASE_URL,
         // Presence alone is what isPmAvailable checks; the stub never looks at it
         OPENROUTER_API_KEY: "e2e-stub-key",
         OPENROUTER_BASE_URL: `${PM_STUB_URL}/v1`,
