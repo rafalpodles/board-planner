@@ -135,6 +135,13 @@ export class McpClient {
   }
 }
 
+/**
+ * One event without a separator grows this buffer forever, so a hostile MCP server could hold the
+ * connection open and stream until the process died. The cap is far above any real tool result
+ * (BP-317).
+ */
+const MAX_SSE_BUFFER_BYTES = 4 * 1024 * 1024;
+
 async function readSseResponse(res: Response, id: number): Promise<JsonRpcMessage> {
   if (!res.body) throw new Error("Empty SSE response body");
   const reader = res.body.getReader();
@@ -145,6 +152,11 @@ async function readSseResponse(res: Response, id: number): Promise<JsonRpcMessag
       const { done, value } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
+      if (buffer.length > MAX_SSE_BUFFER_BYTES) {
+        throw new Error(
+          `SSE response exceeded ${MAX_SSE_BUFFER_BYTES} bytes without a complete event`
+        );
+      }
       let sep;
       while ((sep = buffer.match(/\r?\n\r?\n/))) {
         const rawEvent = buffer.slice(0, sep.index);

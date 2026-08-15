@@ -92,8 +92,10 @@ export async function safeFetch(
 
     const next = await assertPublicDestination(new URL(location, target).toString(), options);
 
-    // Credentials are for the host they were issued to, not for wherever it points next
-    if (next.origin !== origin) request = { ...request, headers: withoutAuth(request.headers) };
+    // Credentials are for the host they were issued to, not for wherever it points next. `origin`
+    // carries the scheme, so an https→http downgrade to the same host counts as a different origin
+    // and drops them too — the credential would otherwise go out in clear text.
+    if (next.origin !== origin) request = { ...request, headers: withoutCredentials(request.headers) };
 
     const method = (request.method ?? "GET").toUpperCase();
     if (response.status === 303 || ((response.status === 301 || response.status === 302) && method === "POST")) {
@@ -106,11 +108,30 @@ export async function safeFetch(
   throw new BlockedDestinationError(`More than ${MAX_REDIRECTS} redirects from ${rawUrl}`);
 }
 
-function withoutAuth(headers: HeadersInit | undefined): HeadersInit {
-  const next = new Headers(headers);
-  next.delete("authorization");
-  next.delete("cookie");
-  return next;
+/**
+ * What survives a hop to another origin — an allowlist, because the denylist it replaced knew about
+ * this app's own two credential headers and not about an integration's. GitLab sends its PAT as
+ * `PRIVATE-TOKEN` (`gitlab.ts`), so the rule this function exists to enforce did not hold for the
+ * one caller in the repo that authenticates with anything else (BP-317).
+ *
+ * An allowlist also covers the header a future integration adds, which is the shape of the mistake
+ * rather than the instance of it. Everything here describes the *request* rather than the caller:
+ * nothing in the list identifies anyone.
+ */
+const CARRIED_ACROSS_ORIGINS = new Set([
+  "accept",
+  "accept-encoding",
+  "accept-language",
+  "content-type",
+  "user-agent",
+]);
+
+function withoutCredentials(headers: HeadersInit | undefined): HeadersInit {
+  const kept = new Headers();
+  new Headers(headers).forEach((value, name) => {
+    if (CARRIED_ACROSS_ORIGINS.has(name.toLowerCase())) kept.append(name, value);
+  });
+  return kept;
 }
 
 /**
@@ -118,6 +139,47 @@ function withoutAuth(headers: HeadersInit | undefined): HeadersInit {
  * returning it is what turned a blind SSRF into a read one (BP-303).
  */
 export async function logUpstreamFailure(service: string, response: Response): Promise<void> {
-  const body = await response.text().catch(() => "");
+  const body = await readBoundedText(response, LOGGED_BODY_BYTES);
   console.error(`${service} API ${response.status} ${response.statusText}: ${body.slice(0, 500)}`);
+}
+
+const LOGGED_BODY_BYTES = 4096;
+
+/**
+ * The 500 characters that reach the log used to be sliced off a string the process had already
+ * materialised in full — `await response.text()` then `.slice()`. An integration host answering an
+ * error with a multi-gigabyte body could exhaust the container while being politely refused, so
+ * nothing in the log looked like an attack (BP-317).
+ *
+ * Reads a bounded prefix and cancels the rest, so the bound is on what is allocated rather than on
+ * what is printed.
+ */
+export async function readBoundedText(response: Response, maxBytes: number): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) return "";
+
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (total < maxBytes) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) {
+        chunks.push(value);
+        total += value.byteLength;
+      }
+    }
+  } catch {
+    // A truncated or broken body is not worth failing the caller's error path over
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+
+  const joined = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    joined.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(joined.subarray(0, maxBytes));
 }
