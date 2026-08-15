@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
 import { Select } from "@/components/ui/Select";
 import { CAPABILITIES, GATE_KINDS, MODELS, gateKindByKey } from "../catalog";
-import { NewAgent, NewBlock, slugify } from "../store";
+import { NewAgent, NewBlock } from "../store";
 
 const MINE = "mine";
 
@@ -173,7 +173,6 @@ export function NewGateDialog({
           disabled={!name.trim()}
           onCreate={async () => {
             await onCreate({
-              key: slugify(name),
               kind: "gate",
               name: name.trim(),
               description: kind?.description ?? "",
@@ -260,7 +259,6 @@ export function NewStepDialog({
           disabled={!name.trim()}
           onCreate={async () => {
             await onCreate({
-              key: slugify(name),
               kind: "step",
               name: name.trim(),
               description: description.trim(),

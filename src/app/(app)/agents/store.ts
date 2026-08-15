@@ -11,7 +11,6 @@ export interface NewAgent {
 }
 
 export interface NewBlock {
-  key: string;
   kind: "step" | "gate";
   name: string;
   description: string;
@@ -65,15 +64,4 @@ export function useStore() {
 
     reload: load,
   };
-}
-
-/** A slug the worker can key off, derived from what the user typed. */
-export function slugify(name: string): string {
-  return (
-    name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 48) || "block"
-  );
 }

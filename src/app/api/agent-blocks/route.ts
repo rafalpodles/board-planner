@@ -2,10 +2,8 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withAuth } from "@/lib/middleware";
 import { AgentBlock } from "@/models/agentBlock";
-import { allBlocks, toApiBlock } from "@/lib/agent-service";
+import { allBlocks, freeBlockKey, toApiBlock } from "@/lib/agent-service";
 import { BLOCK_KINDS, STEP_CAPABILITIES, StepCapability } from "@/types";
-
-const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 export const GET = withAuth(async () => {
   await connectDB();
@@ -23,16 +21,7 @@ export const POST = withAuth(async (request, { user }) => {
   const name = typeof body.name === "string" ? body.name.trim() : "";
   if (!name) return NextResponse.json({ error: "A name is required" }, { status: 400 });
 
-  const key = typeof body.key === "string" ? body.key.trim() : "";
-  if (!SLUG.test(key)) {
-    return NextResponse.json(
-      { error: "key must be a slug: lower case, digits and dashes" },
-      { status: 400 }
-    );
-  }
-  if (await AgentBlock.exists({ key })) {
-    return NextResponse.json({ error: "That key is taken" }, { status: 409 });
-  }
+  const key = await freeBlockKey(name);
 
   // Parameters are values, never patterns or commands: the worker owns what a gate does and this
   // only says how strictly. Anything unrecognised is dropped rather than passed through.
