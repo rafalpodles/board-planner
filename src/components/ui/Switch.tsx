@@ -10,9 +10,20 @@ interface SwitchProps {
   hint?: string;
   disabled?: boolean;
   dirty?: boolean;
+  /** For a row that already names the setting beside the control — the label stays the
+   *  accessible name rather than being dropped */
+  labelHidden?: boolean;
 }
 
-export function Switch({ checked, onChange, label, hint, disabled, dirty }: SwitchProps) {
+export function Switch({
+  checked,
+  onChange,
+  label,
+  hint,
+  disabled,
+  dirty,
+  labelHidden,
+}: SwitchProps) {
   const hintId = useId();
 
   return (
@@ -25,6 +36,7 @@ export function Switch({ checked, onChange, label, hint, disabled, dirty }: Swit
         checked={checked}
         disabled={disabled}
         aria-describedby={hint ? hintId : undefined}
+        aria-label={labelHidden ? label : undefined}
         onChange={(e) => onChange(e.target.checked)}
         className="peer sr-only"
       />
@@ -37,17 +49,19 @@ export function Switch({ checked, onChange, label, hint, disabled, dirty }: Swit
           after:transition-transform
           ${checked ? "bg-primary-solid after:translate-x-4 after:bg-white" : "bg-bg-input after:bg-text-muted"}`}
       />
-      <span className="min-w-0">
-        <span className="flex items-center gap-1.5 text-[13.5px] font-medium text-text">
-          {label}
-          {dirty && <span className="h-1.5 w-1.5 rounded-full bg-warning" title="Unsaved" />}
-        </span>
-        {hint && (
-          <span id={hintId} className="mt-0.5 block text-xs text-text-muted">
-            {hint}
+      {!labelHidden && (
+        <span className="min-w-0">
+          <span className="flex items-center gap-1.5 text-[13.5px] font-medium text-text">
+            {label}
+            {dirty && <span className="h-1.5 w-1.5 rounded-full bg-warning" title="Unsaved" />}
           </span>
-        )}
-      </span>
+          {hint && (
+            <span id={hintId} className="mt-0.5 block text-xs text-text-muted">
+              {hint}
+            </span>
+          )}
+        </span>
+      )}
     </label>
   );
 }

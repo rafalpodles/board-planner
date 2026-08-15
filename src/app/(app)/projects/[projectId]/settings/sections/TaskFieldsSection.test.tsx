@@ -3,7 +3,7 @@ import { useState } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render as rtlRender, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { TaskFieldsSection } from "./TaskFieldsSection";
-import { SettingsProvider } from "@/components/settings/settings-context";
+import { SettingsProvider, useDirtyRegistry } from "@/components/settings/settings-context";
 import { ApiCustomField, ApiProject } from "@/types";
 import { SectionProps } from "./types";
 
@@ -50,6 +50,32 @@ function Harness({ initial }: { initial: ApiProject }) {
         stats={null}
       />
     </>
+  );
+}
+
+// The real registry the save bar reads, so "how many edits are pending" is answered by the
+// same code the page uses rather than by an assertion about a mock.
+function DirtyHarness({ initial }: { initial: ApiProject }) {
+  const [project, setProject] = useState(initial);
+  const { register, unregister, pending, total } = useDirtyRegistry();
+  function patchProject(
+    patch: Partial<ApiProject> | ((prev: ApiProject) => Partial<ApiProject>)
+  ) {
+    setProject((p) => ({ ...p, ...(typeof patch === "function" ? patch(p) : patch) }));
+  }
+  return (
+    <SettingsProvider register={register} unregister={unregister}>
+      <span data-testid="pending-total">{total}</span>
+      <button onClick={() => pending.forEach((g) => g.save())}>Save all</button>
+      <TaskFieldsSection
+        projectId="p1"
+        project={project}
+        patchProject={patchProject}
+        replaceProject={vi.fn()}
+        isAdmin={false}
+        stats={null}
+      />
+    </SettingsProvider>
   );
 }
 
@@ -193,6 +219,91 @@ beforeEach(() => {
   };
 });
 afterEach(cleanup);
+
+describe("TaskFieldsSection save bar", () => {
+  it("stops reporting pending templates once the save succeeds", async () => {
+    const saved = [
+      {
+        _id: "t1",
+        name: "Bug report",
+        title: "",
+        description: "",
+        category: "bug",
+        acceptanceCriteria: "",
+      },
+    ];
+    api.post.mockResolvedValue(saved);
+
+    render(<DirtyHarness initial={{ ...project, categories: [{ _id: "c1", name: "bug", color: "#ef4444" }] } as ApiProject} />);
+    fireEvent.click(screen.getByRole("button", { name: "+ Add template" }));
+    fireEvent.change(screen.getByLabelText("Template name"), {
+      target: { value: "Bug report" },
+    });
+    expect(screen.getByTestId("pending-total").textContent).toBe("1");
+
+    fireEvent.click(screen.getByRole("button", { name: "Save all" }));
+
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("Templates saved", "success"));
+    await waitFor(() => expect(screen.getByTestId("pending-total").textContent).toBe("0"));
+  });
+
+  it("does not re-POST a template the save already created", async () => {
+    api.post.mockResolvedValue([
+      {
+        _id: "t1",
+        name: "Bug report",
+        title: "",
+        description: "",
+        category: "bug",
+        acceptanceCriteria: "",
+      },
+    ]);
+
+    render(<DirtyHarness initial={{ ...project, categories: [{ _id: "c1", name: "bug", color: "#ef4444" }] } as ApiProject} />);
+    fireEvent.click(screen.getByRole("button", { name: "+ Add template" }));
+    fireEvent.change(screen.getByLabelText("Template name"), {
+      target: { value: "Bug report" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save all" }));
+    await waitFor(() => expect(screen.getByTestId("pending-total").textContent).toBe("0"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Save all" }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1));
+  });
+
+  it("stops reporting pending categories once the save succeeds", async () => {
+    api.post.mockResolvedValue([{ _id: "c1", name: "Chore", color: "#64748b" }]);
+
+    render(<DirtyHarness initial={project} />);
+    fireEvent.click(screen.getByRole("button", { name: "+ Add category" }));
+    fireEvent.change(screen.getByLabelText("Category name"), {
+      target: { value: "Chore" },
+    });
+    expect(screen.getByTestId("pending-total").textContent).toBe("1");
+
+    fireEvent.click(screen.getByRole("button", { name: "Save all" }));
+
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("Categories saved", "success"));
+    await waitFor(() => expect(screen.getByTestId("pending-total").textContent).toBe("0"));
+  });
+
+  it("keeps the edits on screen and still reports them pending when the save fails", async () => {
+    api.post.mockRejectedValue(apiError("Category name already in use", 409));
+
+    render(<DirtyHarness initial={project} />);
+    fireEvent.click(screen.getByRole("button", { name: "+ Add category" }));
+    fireEvent.change(screen.getByLabelText("Category name"), {
+      target: { value: "Chore" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save all" }));
+
+    await waitFor(() =>
+      expect(toast).toHaveBeenCalledWith("Category name already in use", "error")
+    );
+    expect((screen.getByLabelText("Category name") as HTMLInputElement).value).toBe("Chore");
+    expect(screen.getByTestId("pending-total").textContent).toBe("1");
+  });
+});
 
 describe("TaskFieldsSection estimate field", () => {
   it("lists only the project's non-archived numeric fields, and None", async () => {

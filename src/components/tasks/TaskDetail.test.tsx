@@ -128,7 +128,8 @@ describe("TaskDetail", () => {
     renderDetail();
     await loaded();
     // "todo" is the seeded column's id; the pill shows its label
-    const pill = screen.getByRole("button", { name: /To Do/i });
+    const pill = screen.getByRole("combobox", { name: "Status" });
+    expect(pill.textContent).toMatch(/To Do/i);
     await act(async () => pill.click());
     expect(screen.getByRole("listbox", { name: "Status" })).toBeTruthy();
   });
@@ -138,7 +139,7 @@ describe("TaskDetail", () => {
     renderDetail();
     await loaded();
 
-    await act(async () => screen.getByRole("button", { name: /To Do/i }).click());
+    await act(async () => screen.getByRole("combobox", { name: "Status" }).click());
     await act(async () => screen.getByRole("option", { name: /In Progress/i }).click());
 
     expect(api.patch).toHaveBeenCalledWith("/api/projects/TP/tasks/t1/status", {
@@ -237,7 +238,7 @@ describe("TaskDetail, moving a task a worker is running", () => {
     renderDetail();
     await loaded();
 
-    await act(async () => screen.getByRole("button", { name: /To Do/i }).click());
+    await act(async () => screen.getByRole("combobox", { name: "Status" }).click());
     await act(async () => screen.getByRole("option", { name: /In Progress/i }).click());
 
     expect(screen.getByText("This task is being executed")).toBeTruthy();
@@ -251,7 +252,7 @@ describe("TaskDetail, moving a task a worker is running", () => {
     renderDetail();
     await loaded();
 
-    await act(async () => screen.getByRole("button", { name: /To Do/i }).click());
+    await act(async () => screen.getByRole("combobox", { name: "Status" }).click());
     await act(async () => screen.getByRole("option", { name: /In Progress/i }).click());
     await act(async () => screen.getByRole("button", { name: "Move anyway" }).click());
 
@@ -267,7 +268,7 @@ describe("TaskDetail, moving a task a worker is running", () => {
     renderDetail();
     await loaded();
 
-    await act(async () => screen.getByRole("button", { name: /To Do/i }).click());
+    await act(async () => screen.getByRole("combobox", { name: "Status" }).click());
     await act(async () => screen.getByRole("option", { name: /In Progress/i }).click());
 
     expect(screen.queryByText("This task is being executed")).toBeNull();

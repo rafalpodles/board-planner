@@ -12,6 +12,10 @@ interface SettingRowProps {
  * One geometry for every setting: label and explanation beside the control above 640px,
  * stacked below it. Replaces the per-card layouts that made two adjacent sections look
  * like two different products.
+ *
+ * The control column is capped rather than filling the card. Uncapped, a full-width
+ * input stretched the width of the page while a lone button floated at the 40% mark
+ * with nothing aligned to it — every control now starts and ends on the same two lines.
  */
 export function SettingRow({ label, hint, htmlFor, children }: SettingRowProps) {
   const Label = htmlFor ? "label" : "div";
@@ -22,7 +26,7 @@ export function SettingRow({ label, hint, htmlFor, children }: SettingRowProps) 
         <strong className="block text-[13.5px] font-semibold">{label}</strong>
         {hint && <span className="mt-0.5 block text-xs text-text-muted">{hint}</span>}
       </Label>
-      <div className="min-w-0 flex-1">{children}</div>
+      <div className="min-w-0 flex-1 sm:max-w-[420px]">{children}</div>
     </div>
   );
 }
