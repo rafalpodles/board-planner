@@ -11,7 +11,11 @@ vi.mock("@/models/rateLimit", async () => {
   return { RateLimit: inMemoryRateLimitModel() };
 });
 
-vi.mock("@/lib/auth", () => ({ getAuthUser, getClientIp: () => "203.0.113.9" }));
+vi.mock("@/lib/auth", () => ({
+  getAuthUser,
+  getClientIp: () => "203.0.113.9",
+  PASSWORD_COST_FACTOR: 10,
+}));
 vi.mock("@/lib/session", () => ({
   revokeUserSessions,
   ProvenanceError: class ProvenanceError extends Error {},

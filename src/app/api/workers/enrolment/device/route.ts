@@ -9,7 +9,12 @@ import {
   startDeviceEnrolment,
 } from "@/lib/device-enrolment";
 import { getClientIp } from "@/lib/auth";
-import { isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
+import {
+  anonymousMultiplier,
+  isRateLimited,
+  recordFailedAttempt,
+  sourceKey,
+} from "@/lib/rate-limit";
 
 const ENROLMENTS_PER_WINDOW = 10;
 
@@ -33,8 +38,11 @@ export async function POST(request: Request) {
   }
 
   // Unauthenticated and costing a bcrypt.hash per call, so the address is the only bound there is
-  const throttleKey = sourceKey(getClientIp(request) ?? "-", "device_enrolment");
-  if (await isRateLimited(throttleKey, ENROLMENTS_PER_WINDOW)) {
+  const clientIp = getClientIp(request);
+  const throttleKey = sourceKey(clientIp ?? "-", "device_enrolment");
+  // Shared key when there is no address, so the per-address figure would be a lever one caller
+  // could hold down against every machine trying to enrol
+  if (await isRateLimited(throttleKey, anonymousMultiplier(clientIp, ENROLMENTS_PER_WINDOW))) {
     return NextResponse.json({ error: "too many enrolment attempts, try again later" }, { status: 429 });
   }
   await recordFailedAttempt(throttleKey);

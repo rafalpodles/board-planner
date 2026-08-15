@@ -3,7 +3,12 @@ import { connectDB } from "@/lib/db";
 import { OAuthClient } from "@/models/oauthClient";
 import { newClientId } from "@/lib/oauth";
 import { getClientIp } from "@/lib/auth";
-import { isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
+import {
+  anonymousMultiplier,
+  isRateLimited,
+  recordFailedAttempt,
+  sourceKey,
+} from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -50,7 +55,10 @@ export async function POST(req: Request) {
   // collection can be grown is the caller's address
   const clientIp = getClientIp(req);
   const throttleKey = sourceKey(clientIp ?? "-", "oauth_register");
-  if (await isRateLimited(throttleKey, REGISTRATIONS_PER_WINDOW)) {
+  // With no address every caller shares this key, so the per-address figure would let one of them
+  // hold registration closed for the whole instance
+  const ceiling = anonymousMultiplier(clientIp, REGISTRATIONS_PER_WINDOW);
+  if (await isRateLimited(throttleKey, ceiling)) {
     return NextResponse.json(
       { error: "invalid_request", error_description: "Too many client registrations from this address. Try again later." },
       { status: 429, headers: CORS }

@@ -51,7 +51,10 @@ export function getClientIp(request: Request): string | null {
   if (entries.length < hops) return null;
 
   const candidate = entries[entries.length - hops];
-  return isIpAddress(candidate) ? candidate : null;
+  if (!isIpAddress(candidate)) return null;
+  // Without the zone: it is validated away but was being returned, so up to 40 characters of
+  // anything travelled into the throttle key and the session's ip column
+  return candidate.split("%")[0];
 }
 
 /**

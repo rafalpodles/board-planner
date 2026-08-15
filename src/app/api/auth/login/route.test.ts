@@ -218,6 +218,55 @@ describe("POST /api/auth/login — credentials", () => {
     expect(verifyCredentials).not.toHaveBeenCalled();
   });
 
+  // The whole point of BP-318, and the case the rest of this file cannot show because it sets
+  // TRUSTED_PROXY_HOPS: with no proxy configured the header is not an identity, so rotating it
+  // buys nothing. Before the fix each value was a fresh bucket and this loop never saw a 429.
+  it("does not sell a fresh bucket for a forged address when no proxy is configured", async () => {
+    delete process.env.TRUSTED_PROXY_HOPS;
+    verifyCredentials.mockResolvedValue(null);
+
+    let refusedAt = -1;
+    for (let attempt = 0; attempt < 80; attempt++) {
+      const forged = `203.0.113.${attempt % 256}`;
+      const res = await POST(
+        request({ "sec-fetch-site": "same-origin", "x-forwarded-for": forged }, {
+          username: "victim",
+          password: `guess-${attempt}`,
+        })
+      );
+      if (res.status === 429) {
+        refusedAt = attempt;
+        break;
+      }
+    }
+
+    expect(refusedAt).toBeGreaterThan(0);
+    expect(refusedAt).toBeLessThanOrEqual(ANONYMOUS_ACCOUNT_ATTEMPTS);
+  });
+
+  it("does not sell one either by varying the spelling of the username", async () => {
+    delete process.env.TRUSTED_PROXY_HOPS;
+    verifyCredentials.mockResolvedValue(null);
+    const spellings = ["victim", " victim", "victim ", "VICTIM", "\tvictim", "  Victim  "];
+
+    let refusedAt = -1;
+    for (let attempt = 0; attempt < 80; attempt++) {
+      const res = await POST(
+        request({ "sec-fetch-site": "same-origin" }, {
+          username: spellings[attempt % spellings.length],
+          password: `guess-${attempt}`,
+        })
+      );
+      if (res.status === 429) {
+        refusedAt = attempt;
+        break;
+      }
+    }
+
+    expect(refusedAt).toBeGreaterThan(0);
+    expect(refusedAt).toBeLessThanOrEqual(ANONYMOUS_ACCOUNT_ATTEMPTS);
+  });
+
   it("refusing one address leaves another address alone", async () => {
     verifyCredentials.mockResolvedValue(null);
     for (let attempt = 0; attempt < 55; attempt++) {

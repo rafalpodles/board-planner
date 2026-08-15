@@ -24,10 +24,13 @@ export { getClientIp } from "./client-ip";
  *
  * Without it the miss path returns in single-digit milliseconds while a hit pays ~100 ms, and the
  * difference needs no statistics to read: it is a username oracle on /api/auth/login and
- * /oauth/authorize (BP-318). Generated once at module load rather than written as a literal, so
- * it costs a real comparison at whatever cost factor this build of bcrypt uses.
+ * /oauth/authorize (BP-318). Generated once at module load rather than written as a literal, so it
+ * costs a real comparison — and at the factor stored passwords use, which is why that number has
+ * one definition instead of three: raising it at the call sites and not here would quietly reopen
+ * the gap with the suite green (BP-318 review).
  */
-const ABSENT_USER_HASH = bcrypt.hashSync("::no such user::", 10);
+export const PASSWORD_COST_FACTOR = 10;
+const ABSENT_USER_HASH = bcrypt.hashSync("::no such user::", PASSWORD_COST_FACTOR);
 
 export async function verifyCredentials(
   username: string,

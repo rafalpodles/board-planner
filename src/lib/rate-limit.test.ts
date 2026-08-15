@@ -16,6 +16,8 @@ const {
   sourceKey,
   SHARED_SOURCE_ATTEMPTS,
   ANONYMOUS_ACCOUNT_ATTEMPTS,
+  ANONYMOUS_GLOBAL_ATTEMPTS,
+  ANONYMOUS_GLOBAL_KEY,
 } = await import("./rate-limit");
 
 beforeEach(async () => {
@@ -77,27 +79,74 @@ describe("the counter itself", () => {
   });
 });
 
-// BP-318: getClientIp used to return whatever the caller put in X-Forwarded-For, so each forged
-// value was a distinct key and neither ceiling ever bit.
-describe("rotating the caller's claimed address does not raise the ceiling", () => {
-  const CLAIMED = ["203.0.113.1", "203.0.113.2", "203.0.113.3", "203.0.113.4"];
+// BP-318: the account key interpolated the username, and Mongoose applies the schema's `trim` and
+// `lowercase` to query filters — so " admin" and "admin" were one account and two buckets.
+describe("the account key names the account the lookup will find", () => {
+  it.each([" admin", "admin ", "\tadmin", "admin\n", "  admin  ", "ADMIN", "Admin"])(
+    "gives %o the same bucket as admin",
+    (typed) => {
+      expect(lockoutKey("-", typed)).toBe(lockoutKey("-", "admin"));
+    }
+  );
 
-  it("collapses every forged address onto one account key", async () => {
-    // What the routes do with a null identity: one shared key, at the raised threshold
-    for (const _ of CLAIMED) {
-      for (let i = 0; i < 20; i++) await recordFailedAttempt(lockoutKey("-", "admin"));
+  it("still separates two genuinely different accounts", () => {
+    expect(lockoutKey("-", "admin")).not.toBe(lockoutKey("-", "administrator"));
+  });
+
+  // The key becomes an _id, and nothing bounds the length of a posted username
+  it("is a bounded length whatever the caller sends", () => {
+    const huge = lockoutKey("-", "a".repeat(1_000_000));
+
+    expect(huge.length).toBeLessThan(80);
+  });
+
+  it("spends one budget however the caller spells the account", async () => {
+    for (const spelling of ["admin", " admin", "ADMIN", "admin\t", "  Admin "]) {
+      for (let i = 0; i < 10; i++) await recordFailedAttempt(lockoutKey("-", spelling));
     }
 
     expect(await isRateLimited(lockoutKey("-", "admin"), ANONYMOUS_ACCOUNT_ATTEMPTS)).toBe(true);
   });
+});
 
-  it("keeps separate buckets when the addresses are ones a proxy actually wrote", async () => {
-    for (let i = 0; i < SHARED_SOURCE_ATTEMPTS; i++) {
-      await recordFailedAttempt(sourceKey("203.0.113.1"));
+describe("a caller with no identity still meets a ceiling across accounts", () => {
+  it("counts failures from the anonymous path against one shared budget", async () => {
+    for (let i = 0; i < ANONYMOUS_GLOBAL_ATTEMPTS; i++) {
+      await withLockout(lockoutKey("-", `user${i}`), async () => null);
+    }
+    const verify = vi.fn();
+
+    const { lockedOut } = await withLockout(lockoutKey("-", "someone-new"), verify);
+
+    expect(lockedOut).toBe(true);
+    // Refused before the credential check, so it bounds the bcrypt as well as the guessing
+    expect(verify).not.toHaveBeenCalled();
+  });
+
+  it("leaves that budget alone when the caller has a real address", async () => {
+    for (let i = 0; i < 60; i++) {
+      await withLockout(lockoutKey("203.0.113.1", `user${i}`), async () => null, sourceKey("203.0.113.1"));
     }
 
-    expect(await isRateLimited(sourceKey("203.0.113.1"), SHARED_SOURCE_ATTEMPTS)).toBe(true);
-    expect(await isRateLimited(sourceKey("203.0.113.2"), SHARED_SOURCE_ATTEMPTS)).toBe(false);
+    expect(await isRateLimited(ANONYMOUS_GLOBAL_KEY, ANONYMOUS_GLOBAL_ATTEMPTS)).toBe(false);
+  });
+});
+
+// bcryptjs chunks through setImmediate, so concurrent compares finish in the same millisecond and
+// arrive here together — the read-modify-write this replaced recorded 1 for 1000 of them
+describe("counting under concurrency", () => {
+  it("records every one of a simultaneous burst", async () => {
+    await Promise.all(Array.from({ length: 50 }, () => recordFailedAttempt("burst")));
+
+    expect(await isRateLimited("burst", 50)).toBe(true);
+  });
+
+  it("does not let the burst reset an established count", async () => {
+    for (let i = 0; i < 5; i++) await recordFailedAttempt("k");
+
+    await Promise.all(Array.from({ length: 20 }, () => recordFailedAttempt("k")));
+
+    expect(await isRateLimited("k", 25)).toBe(true);
   });
 });
 

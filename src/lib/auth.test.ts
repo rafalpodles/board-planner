@@ -28,7 +28,7 @@ vi.mock("@/models/session", () => ({
   Session: { findOne: sessionFindOne, updateOne: sessionUpdateOne },
 }));
 
-const { getAuthUser, verifyCredentials } = await import("./auth");
+const { getAuthUser, verifyCredentials, PASSWORD_COST_FACTOR } = await import("./auth");
 const { ProvenanceError, SESSION_IDLE_TTL_MS } = await import("./session");
 const { sha256 } = await import("./oauth");
 
@@ -374,9 +374,21 @@ describe("verifyCredentials and the username oracle", () => {
   });
 
   // The stand-in must be a real hash comparison, not a cheap string compare that returns at once
-  it("uses a hash generated at module load, at the same cost factor", () => {
+  // Counting calls is not enough: comparing against a string that is not a hash returns in
+  // microseconds and restores the oracle with the suite green. Pin what it compares against.
+  it("compares against the module's own hash, not against something cheap", async () => {
+    lookupReturns(null);
+
+    await verifyCredentials("nobody", "hunter2");
+
+    // The mocked hashSync returns this; the assertion is that the compare uses what the module
+    // hashed at load, not a literal that bcrypt would reject in microseconds
+    expect(bcryptCompare.mock.calls[0][1]).toBe("$2a$10$absent");
+  });
+
+  it("generates that hash once, at the factor stored passwords use", () => {
     expect(hashSyncCalls.length).toBe(1);
-    expect(hashSyncCalls[0][1]).toBe(10);
+    expect(hashSyncCalls[0][1]).toBe(PASSWORD_COST_FACTOR);
   });
 
   it("still refuses a wrong password for a user that does exist", async () => {

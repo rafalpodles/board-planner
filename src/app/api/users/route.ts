@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
-import { getAuthUser } from "@/lib/auth";
+import { getAuthUser, PASSWORD_COST_FACTOR } from "@/lib/auth";
 import { ProvenanceError, provenanceRefusal } from "@/lib/session";
 import { withAdmin } from "@/lib/middleware";
 import { User } from "@/models/user";
@@ -58,7 +58,7 @@ export async function POST(request: Request) {
     }
   }
 
-  const hashedPassword = await bcrypt.hash(password, 10);
+  const hashedPassword = await bcrypt.hash(password, PASSWORD_COST_FACTOR);
 
   try {
     const user = await User.create({

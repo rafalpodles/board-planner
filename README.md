@@ -55,9 +55,15 @@ the failed-login throttle can key on, and the header is a header: with nothing i
 a caller who varies it gets a fresh counter every request and the throttle never bites. So the
 default is `0` — the header is not read at all, and anonymous callers share one bucket at a raised
 threshold. **Behind a reverse proxy, set it to the number of proxies that append to that header**
-(`1` for a single nginx or Caddy in front, `2` if there is a CDN in front of that). Set it too high
-and the header is refused as not matching what you described; set it too low and the count comes
-from an entry the caller can write. Getting it wrong costs throttle accuracy, never access.
+(`1` for a single nginx or Caddy in front, `2` if there is a CDN in front of that).
+
+Getting the number wrong has consequences in both directions, so it is worth being right. Set it
+**too high** and the header is refused as not matching what you described — every caller then shares
+the anonymous bucket, which is bounded but shared. Set it **too low** and the address counted is one
+your proxy chain writes rather than the client's, so every request on earth may land in the same
+bucket. The anonymous and shared buckets carry much larger ceilings than the per-address ones for
+exactly this reason, but a badly-set value still degrades the throttle rather than merely blunting
+it.
 
 `ENCRYPTION_KEY` encrypts the GitHub, GitLab, Coda and MCP credentials the app stores. Generate one
 with `openssl rand -hex 32`. Without it those fields simply cannot be saved — the app answers the
