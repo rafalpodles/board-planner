@@ -4,9 +4,13 @@
 // a copy of — CI builds the two packages separately, so nothing flags a divergence (BP-316 review).
 //
 // Encoding is not enough on its own: it escapes `/` and leaves dots alone, so a bare `..` walked
-// through and dropped the `projects/<id>` segment (BP-339).
+// through and dropped the `projects/<id>` segment (BP-339). An allowlist rather than a list of the
+// values that turned out to be dangerous — every id here is an ObjectId or a project key. The
+// typeof guard matters because RegExp.test coerces, so [".."] would otherwise pass.
+const SAFE_SEGMENT = /^[A-Za-z0-9_-]+$/;
+
 const seg = (value: string) => {
-  if (value === "" || value === "." || value === "..") {
+  if (typeof value !== "string" || !SAFE_SEGMENT.test(value)) {
     throw new Error(`Invalid path segment: "${value}"`);
   }
   return encodeURIComponent(value);

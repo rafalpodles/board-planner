@@ -12,11 +12,18 @@ export interface McpProject {
  *
  * Encoding alone does not do it. `encodeURIComponent` escapes `/` but leaves dots untouched, so a
  * bare `..` — the exact input this guard is named after — passed through and dropped the
- * `projects/<id>` segment, and with it the per-project scoping (BP-339). Those three values name
- * no project, task or sprint, so refusing them costs nothing.
+ * `projects/<id>` segment, and with it the per-project scoping (BP-339).
+ *
+ * An allowlist rather than the three values that turned out to be dangerous: enumerating those is
+ * the shape that failed here once already. Everything that reaches this is a Mongo ObjectId or a
+ * project key, and `get_project` — the one tool taking a free-form identifier — already falls back
+ * to a key lookup when this throws. The `typeof` guard is not redundant: `RegExp.test` coerces, so
+ * `[".."]` would otherwise pass and stringify back to a dot segment.
  */
+const SAFE_SEGMENT = /^[A-Za-z0-9_-]+$/;
+
 const seg = (value: string) => {
-  if (value === "" || value === "." || value === "..") {
+  if (typeof value !== "string" || !SAFE_SEGMENT.test(value)) {
     throw new Error(`Invalid path segment: "${value}"`);
   }
   return encodeURIComponent(value);
