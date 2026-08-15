@@ -9,8 +9,29 @@ export interface McpProject {
  * A tool argument becomes a path segment, so it has to be encoded: the WHATWG parser normalises
  * `..` away, which let a tool argument choose the path the server fetched rather than the
  * resource it named (BP-316).
+ *
+ * Encoding alone does not do it. `encodeURIComponent` escapes `/` but leaves dots untouched, so a
+ * bare `..` — the exact input this guard is named after — passed through and dropped the
+ * `projects/<id>` segment, and with it the per-project scoping (BP-339).
+ *
+ * An allowlist rather than the three values that turned out to be dangerous: enumerating those is
+ * the shape that failed here once already. Everything that reaches this is a Mongo ObjectId or a
+ * project key, and `get_project` — the one tool taking a free-form identifier — already falls back
+ * to a key lookup when this throws.
+ *
+ * The `typeof` is a boundary check, not part of the guard: values arrive from JSON despite the
+ * signature, and `RegExp.test` would coerce them. It carries no security weight on its own — the
+ * allowlist already refuses anything a coerced value could stringify into — and removing it leaves
+ * the suite green. It stays so a `Symbol` reports this error instead of a coercion TypeError.
  */
-const seg = (value: string) => encodeURIComponent(value);
+const SAFE_SEGMENT = /^[A-Za-z0-9_-]+$/;
+
+const seg = (value: string) => {
+  if (typeof value !== "string" || !SAFE_SEGMENT.test(value)) {
+    throw new Error(`Invalid path segment: "${value}"`);
+  }
+  return encodeURIComponent(value);
+};
 
 export class PlannerClient {
   private baseUrl: string;
