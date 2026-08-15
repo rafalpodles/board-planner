@@ -79,7 +79,6 @@ export function agentProblems(composition: AgentComposition, lookup: Lookup): Pr
 
   const problems: Problem[] = [];
   const mergeAt = firstAt("merge");
-  const protectedAt = firstAt("protected-paths");
 
   if (mergeAt !== -1) {
     // Reviewed means reviewed *after the last thing that wrote*. A review sitting in an earlier
@@ -127,20 +126,38 @@ export function agentProblems(composition: AgentComposition, lookup: Lookup): Pr
 
   // Nothing may execute what a step wrote before protected-paths has read it. This was the reason
   // the old pipeline hardcoded its gate order; composing the order is what put it at risk.
-  if (firstWriteAt !== -1) {
-    const executesEarly = sequence.some(
-      (key, i) =>
-        EXECUTES_THE_TREE.has(kindOf(key) ?? "") &&
-        i > firstWriteAt &&
-        (protectedAt === -1 || protectedAt > i)
-    );
-    if (executesEarly) {
-      problems.push({
-        severity: "broken",
-        message:
-          "A gate runs the project's own build or test script before Protected files has read the change, so a script the agent wrote would execute before anything checked whether it was allowed to write it. Put Protected files first.",
-      });
-    }
+  //
+  // Per write, not once for the first: an agent that writes again after its Protected files gate
+  // leaves that second write unread, and the rule would still pass because one gate stood after
+  // one write. And by kind, not by key — a Protected files block created from the catalog gets a
+  // key derived from its name, and the worker itself keys this on gateKind.
+  const guardsTheTree = (key: string) => kindOf(key) === "protected-paths";
+  const unguarded = sequence.some(
+    (key, i) =>
+      EXECUTES_THE_TREE.has(kindOf(key) ?? "") &&
+      // some write happened before this gate, and no protected-paths gate stands between them
+      writesAt.some(
+        (writeAt) =>
+          writeAt < i && !sequence.some((k, j) => guardsTheTree(k) && j > writeAt && j < i)
+      )
+  );
+  if (unguarded) {
+    problems.push({
+      severity: "broken",
+      message:
+        "A gate runs the project's own build or test script over a change that Protected files has not read, so a script the agent wrote would execute before anything checked whether it was allowed to write it. Put a Protected files gate after every step that writes and before this one.",
+    });
+  }
+
+  // Everything after a Merge judges a change that has already landed. A gate there cannot stop
+  // anything: it refuses work that is on the base branch, and the board says the merge was blocked.
+  if (mergeAt !== -1 && mergeAt < sequence.length - 1) {
+    problems.push({
+      severity: "broken",
+      message: `Merge is not last: ${sequence
+        .slice(mergeAt + 1)
+        .join(", ")} runs after the change has already landed, so nothing there can stop it. Move Merge to the end.`,
+    });
   }
 
   return problems;

@@ -57,8 +57,11 @@ export const BUILT_IN_BLOCKS: SeedBlock[] = [
   ...gateSeeds(),
 ];
 
+/** The agent a project that names none falls back to. snapshotFor depends on this name. */
+export const SEEDED_DEFAULT_NAME = "Default";
+
 // Exactly today's pipeline. Adopting agents has to be a no-op for a project that never touches one,
-// so this is the composition every existing project is backfilled with.
+// so this is what a project naming no agent of its own runs.
 export const DEFAULT_COMPOSITION: AgentComposition = {
   analysis: [],
   implementation: [{ key: "implement" }],
@@ -124,10 +127,10 @@ export async function seedAgents() {
   }
 
   await Agent.updateOne(
-    { scope: "global", name: "Default" },
+    { scope: "global", name: SEEDED_DEFAULT_NAME },
     {
       $setOnInsert: {
-        name: "Default",
+        name: SEEDED_DEFAULT_NAME,
         description: "What a worker does today: writes the change, then every check below.",
         scope: "global",
         composition: DEFAULT_COMPOSITION,

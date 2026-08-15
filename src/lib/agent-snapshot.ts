@@ -2,6 +2,7 @@ import { Agent } from "@/models/agent";
 import { AgentBlock } from "@/models/agentBlock";
 import { Project } from "@/models/project";
 import { normaliseComposition, sequenceOf } from "./agent-rules";
+import { SEEDED_DEFAULT_NAME } from "./agent-seed";
 import { StepCapability } from "@/types";
 
 /**
@@ -34,8 +35,12 @@ export interface AgentSnapshot {
 }
 
 /**
- * The task's own agent wins; otherwise the project's default. A project with neither has nothing to
- * run, and the claim says so by returning null rather than by inventing a pipeline.
+ * The task's own agent wins, then the project's default, then the seeded "Default" agent.
+ *
+ * That last fallback is what makes adopting this a no-op: every project that had a worker before
+ * the catalog existed names no agent, and without it each of them would stop dead — the claim
+ * releasing every task with nothing on the board to say why. The seeded Default is exactly the
+ * pipeline those projects were already running.
  */
 export async function snapshotFor(
   projectId: string,
@@ -48,9 +53,10 @@ export async function snapshotFor(
     const fallback = (project as { worker?: { agent?: unknown } } | null)?.worker?.agent;
     agentId = fallback ? String(fallback) : "";
   }
-  if (!agentId) return null;
 
-  const agent = await Agent.findById(agentId).lean();
+  const agent = agentId
+    ? await Agent.findById(agentId).lean()
+    : await Agent.findOne({ scope: "global", name: SEEDED_DEFAULT_NAME }).lean();
   if (!agent) return null;
 
   // A project agent must not run on another project's task, whichever way it was chosen
