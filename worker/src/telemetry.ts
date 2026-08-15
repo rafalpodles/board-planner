@@ -1,6 +1,16 @@
 import { isRateLimitEvent, isResultEvent, RateLimitEvent, RateLimitStatus, StreamEvent } from "./stream.js";
 
-export type Phase = "claiming" | "worktree" | "agent" | "push" | "pr" | "merge" | `gates:${string}`;
+// "agent" is what a run used to say for its one model call. A composed run names the block instead,
+// so a six-step agent is legible while it is running rather than only after it ends.
+export type Phase =
+  | "claiming"
+  | "worktree"
+  | "agent"
+  | "push"
+  | "pr"
+  | "merge"
+  | `step:${string}`
+  | `gates:${string}`;
 
 export interface ToolActivity {
   name: string;

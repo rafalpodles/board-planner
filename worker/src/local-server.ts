@@ -22,7 +22,6 @@ import { Telemetry } from "./telemetry.js";
 // bound project reports what it actually resolved to.
 export interface LocalProjectView {
   project: string;
-  autoMerge: boolean;
   baseBranch: string;
   model: string;
   reviewModel: string;

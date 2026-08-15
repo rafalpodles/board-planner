@@ -11,6 +11,8 @@ export type StepOutcome =
   | { kind: "error"; message: string };
 
 export interface RunState {
+  /** What has already reached the remote, so an interrupted run can say where the work is. */
+  pushed: boolean;
   prUrl: string;
   merged: boolean;
   summary: string;
@@ -31,10 +33,21 @@ export interface StepContext {
   onEvent?: (event: StreamEvent) => void;
 }
 
+// A push or a merge that throws must not reach the pipeline's outer catch: that requeues and
+// destroys the worktree, and after a failed push the worktree is the only copy of the work.
 async function runWorkerAction(entry: SnapshotEntry, ctx: StepContext): Promise<StepOutcome> {
+  try {
+    return await deliver(entry, ctx);
+  } catch (error) {
+    return { kind: "error", message: String(error) };
+  }
+}
+
+async function deliver(entry: SnapshotEntry, ctx: StepContext): Promise<StepOutcome> {
   switch (entry.key) {
     case "push":
       await ctx.delivery.push(ctx.worktreePath, ctx.branch);
+      ctx.state.pushed = true;
       return { kind: "ok" };
 
     case "pull-request":
@@ -84,9 +97,15 @@ export async function runStep(entry: SnapshotEntry, ctx: StepContext): Promise<S
   ctx.state.summary = outcome.result.summary || ctx.state.summary;
   ctx.state.lastResult = outcome.result;
 
-  // Only a step that could write has anything to commit
+  // Only a step that could write has anything to commit. A commit that fails is the step's failure:
+  // letting it throw would reach the pipeline's outer catch, which destroys the worktree holding the
+  // only copy of the work.
   if (entry.capability === "edit") {
-    await ctx.commit(`${ctx.task.taskKey}: ${entry.name.toLowerCase()}`);
+    try {
+      await ctx.commit(`${ctx.task.taskKey}: ${entry.name.toLowerCase()}`);
+    } catch (error) {
+      return { kind: "error", message: String(error) };
+    }
   }
 
   return { kind: "ok" };
