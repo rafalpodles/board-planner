@@ -4,7 +4,8 @@ import { withAuth } from "@/lib/middleware";
 import { accessibleProjectIds, check } from "@/lib/grants";
 import { Agent } from "@/models/agent";
 import { Project } from "@/models/project";
-import { normaliseComposition, toApiAgent, visibleAgents } from "@/lib/agent-service";
+import { toApiAgent, visibleAgents } from "@/lib/agent-service";
+import { normaliseComposition } from "@/lib/agent-rules";
 
 export const GET = withAuth(async (_request, { user }) => {
   await connectDB();

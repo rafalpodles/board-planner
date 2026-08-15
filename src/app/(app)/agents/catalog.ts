@@ -1,4 +1,5 @@
-import { AGENT_BUCKETS, AgentBucket, AgentComposition } from "@/types";
+import { AgentBucket } from "@/types";
+import { normaliseComposition } from "@/lib/agent-rules";
 
 export { CAPABILITIES, GATE_KINDS, MODELS, gateKindByKey } from "@/lib/agent-kinds";
 export type { GateKind, ParamSpec } from "@/lib/agent-kinds";
@@ -11,8 +12,4 @@ export const BUCKETS: { id: AgentBucket; label: string; hint: string }[] = [
   { id: "delivery", label: "Delivery", hint: "Sending it somewhere a human can reach" },
 ];
 
-export function emptyComposition(): AgentComposition {
-  const out = {} as AgentComposition;
-  for (const bucket of AGENT_BUCKETS) out[bucket] = [];
-  return out;
-}
+export const emptyComposition = () => normaliseComposition();

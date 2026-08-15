@@ -3,7 +3,8 @@ import { connectDB } from "@/lib/db";
 import { withAuth } from "@/lib/middleware";
 import { check } from "@/lib/grants";
 import { Agent } from "@/models/agent";
-import { normaliseComposition, toApiAgent } from "@/lib/agent-service";
+import { toApiAgent } from "@/lib/agent-service";
+import { normaliseComposition } from "@/lib/agent-rules";
 import { IUser } from "@/types";
 
 async function mayEdit(user: IUser, agent: { scope: string; owner: unknown; project: unknown }) {

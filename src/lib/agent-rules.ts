@@ -1,6 +1,18 @@
 import { AGENT_BUCKETS, AgentComposition, ApiAgentBlock } from "@/types";
 
 /**
+ * A bucket added after some agents were stored comes back undefined, and everything downstream
+ * indexes by bucket. Filling the gap in one place keeps that from being every caller's problem.
+ */
+export function normaliseComposition(
+  value?: Partial<AgentComposition> | null
+): AgentComposition {
+  const out = {} as AgentComposition;
+  for (const bucket of AGENT_BUCKETS) out[bucket] = value?.[bucket] ?? [];
+  return out;
+}
+
+/**
  * Delivery used to be three lines of the worker's pipeline in a fixed order. Composing it makes the
  * order expressible, and therefore breakable — so the guarantees the code used to hold by shape now
  * have to be read off the sequence.

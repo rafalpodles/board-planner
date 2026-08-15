@@ -1,8 +1,6 @@
 import { Agent } from "@/models/agent";
 import { AgentBlock } from "@/models/agentBlock";
 import {
-  AGENT_BUCKETS,
-  AgentComposition,
   ApiAgent,
   ApiAgentBlock,
   IAgent,
@@ -10,6 +8,7 @@ import {
   IProject,
   IUser,
 } from "@/types";
+import { normaliseComposition } from "./agent-rules";
 
 interface AgentDoc extends Omit<IAgent, "project"> {
   project: (IProject & { _id: unknown }) | null;
@@ -45,14 +44,6 @@ export function toApiBlock(block: IAgentBlock): ApiAgentBlock {
     fallbackModel: block.fallbackModel,
     deterministic: block.deterministic,
   };
-}
-
-// A bucket added after some agents were stored comes back undefined, and every consumer indexes by
-// bucket. Filling the gap here keeps that from being every caller's problem.
-export function normaliseComposition(value: Partial<AgentComposition> | undefined): AgentComposition {
-  const out = {} as AgentComposition;
-  for (const bucket of AGENT_BUCKETS) out[bucket] = value?.[bucket] ?? [];
-  return out;
 }
 
 /**
