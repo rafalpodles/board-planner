@@ -6,7 +6,16 @@ const userFindById = vi.fn();
 const revokeUserSessions = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
-vi.mock("@/lib/auth", () => ({ getAuthUser, getClientIp: () => "203.0.113.9" }));
+vi.mock("@/models/rateLimit", async () => {
+  const { inMemoryRateLimitModel } = await import("@/lib/rate-limit-test-store");
+  return { RateLimit: inMemoryRateLimitModel() };
+});
+
+vi.mock("@/lib/auth", () => ({
+  getAuthUser,
+  getClientIp: () => "203.0.113.9",
+  PASSWORD_COST_FACTOR: 10,
+}));
 vi.mock("@/lib/session", () => ({
   revokeUserSessions,
   ProvenanceError: class ProvenanceError extends Error {},
@@ -42,9 +51,9 @@ const ctx = () => ({ params: Promise.resolve({}) });
 
 let record: { password: string; save: ReturnType<typeof vi.fn> };
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.clearAllMocks();
-  resetRateLimits();
+  await resetRateLimits();
   record = { password: "old-hash", save: vi.fn().mockResolvedValue(undefined) };
   userFindById.mockReturnValue({ select: () => Promise.resolve(record) });
   getAuthUser.mockResolvedValue(browserUser("changer"));
