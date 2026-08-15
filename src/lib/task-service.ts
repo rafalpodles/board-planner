@@ -1,4 +1,4 @@
-import { Types } from "mongoose";
+import { HydratedDocument, Types } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { Task } from "@/models/task";
 import { Project } from "@/models/project";
@@ -839,7 +839,9 @@ export async function claimNextTask(
   // The worker's own identity user. A claim is an assignment, which is what stops two machines
   // converging on one task and what makes a task parked for a colleague untouchable.
   identity?: string | null
-): Promise<ITask | null> {
+  // A document, not a plain ITask: the caller has to know, because spreading one silently yields
+  // Mongoose internals with every real field a level down.
+): Promise<HydratedDocument<ITask> | null> {
   await connectDB();
 
   const project = await Project.findById(

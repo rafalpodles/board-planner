@@ -55,5 +55,10 @@ export const POST = withWorker(async (request, { params, worker }) => {
     return new NextResponse(null, { status: 204 });
   }
 
-  return NextResponse.json({ ...task, agent });
+  // toJSON, not a spread: claimNextTask returns a hydrated document, and spreading one yields
+  // `$__`, `$isNew` and `_doc` — every real field one level down, where the worker never looks. It
+  // read taskNumber as undefined, refused the key "BP-undefined", and left the task held for the
+  // full lease. This route used to hand the document straight to NextResponse.json, which called
+  // toJSON itself; adding a field alongside it is what removed that.
+  return NextResponse.json({ ...task.toJSON(), agent });
 });
