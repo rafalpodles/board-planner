@@ -178,7 +178,7 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
                 value={String(draft.value.claimAssignee ?? "")}
                 disabled={!isAdmin}
                 onChange={(e) => draft.set("claimAssignee", e.target.value)}
-                className="w-full rounded-lg border border-border bg-bg-input px-2 py-1.5 text-sm"
+                className="focus-ring w-full rounded-lg border border-border bg-bg-input px-2 py-1.5 text-sm"
               >
                 <option value="">Nobody yet</option>
                 {people.map((p) => (
@@ -255,7 +255,7 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
                     value={String(value)}
                     disabled={!isAdmin}
                     onChange={(e) => editField(field, e.target.value)}
-                    className="flex-1 rounded-lg border border-border bg-bg-input px-2 py-1.5 text-sm"
+                    className="focus-ring flex-1 rounded-lg border border-border bg-bg-input px-2 py-1.5 text-sm"
                   >
                     {CLAIM_SCOPES.map((scope) => (
                       <option key={scope} value={scope}>
