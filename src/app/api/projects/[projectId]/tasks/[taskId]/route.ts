@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
+import { machineMayNotForce, MACHINE_FORCE_REFUSAL } from "@/lib/force-guard";
 import { Task } from "@/models/task";
 import { Comment } from "@/models/comment";
 import { ActivityLog } from "@/models/activityLog";
@@ -78,6 +79,11 @@ export const PUT = withProjectAccess(async (request, { params, user }) => {
 
   // Kept out of the update itself: `force` is a instruction about the write, not a field on the task
   const { force, ...updates } = body ?? {};
+
+  // The status route refuses this; this route reaches the identical code path and did not (BP-320)
+  if (machineMayNotForce(user, force)) {
+    return NextResponse.json({ error: MACHINE_FORCE_REFUSAL }, { status: 403 });
+  }
 
   const result = await updateTask(projectId, taskId, updates, String(user._id), force === true);
   if (!result.ok) {

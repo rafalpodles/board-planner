@@ -14,7 +14,17 @@ import { matchRepo } from "./repo-match";
 
 type AuthenticatedHandler = (
   request: Request,
-  context: { params: Promise<Record<string, string>>; user: IUser }
+  context: {
+    params: Promise<Record<string, string>>;
+    user: IUser;
+    /**
+     * Set only when this request authenticated as a worker and the credential was verified
+     * against exactly this id. Handlers must use THIS and never read `x-worker-id` themselves:
+     * a session cookie with no Bearer takes the person branch, where that header is attacker-set
+     * and unverified (BP-336).
+     */
+    workerId?: string;
+  }
 ) => Promise<NextResponse | Response>;
 
 export function withAuth(handler: AuthenticatedHandler) {
@@ -229,7 +239,7 @@ export function withProjectAccessOrWorker(handler: AuthenticatedHandler) {
 
     const resolved = await withResolvedIds({ ...context, user: identity }, params, projectId);
     if (!resolved.ok) return resolved.response;
-    return handler(request, resolved.context);
+    return handler(request, { ...resolved.context, workerId: String(worker._id) });
   };
 }
 
