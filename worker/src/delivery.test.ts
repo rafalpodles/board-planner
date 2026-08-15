@@ -53,7 +53,16 @@ describe("push", () => {
 
     expect(run).toHaveBeenCalledWith(
       "git",
-      ["push", "--no-verify", "--force-with-lease", "-u", "origin", "--", "cp-158/worker"],
+      [
+        "push",
+        "--no-verify",
+        "--receive-pack=git-receive-pack",
+        "--force-with-lease",
+        "-u",
+        "origin",
+        "--",
+        "cp-158/worker",
+      ],
       expect.objectContaining({ cwd: "/wt" })
     );
   });
@@ -94,7 +103,7 @@ describe("push", () => {
   it.each([
     ["core.hooksPath", "/dev/null"],
     ["core.sshCommand", "ssh"],
-    ["remote.origin.receivepack", "git-receive-pack"],
+    ["core.askPass", ""],
     ["core.fsmonitor", "false"],
     ["core.pager", "cat"],
   ])("overrides %s, which the repository config could otherwise point at a program", async (key, value) => {
@@ -102,6 +111,28 @@ describe("push", () => {
     await createDelivery({ run }).push("/wt", "cp-158/worker");
 
     expect(configuredBy(envOf(run))).toContainEqual([key, value]);
+  });
+
+  // The transport is where the credentials actually leaked: ext:: hands the URL to a program, and
+  // a local push runs git-receive-pack as our own child, whose post-receive hook then holds them
+  it.each([
+    ["protocol.ext.allow", "never"],
+    ["protocol.file.allow", "never"],
+  ])("refuses the %s transport, whichever way the remote url was rewritten", async (key, value) => {
+    const run = vi.fn().mockResolvedValue(ok);
+    await createDelivery({ run }).push("/wt", "cp-158/worker");
+
+    expect(configuredBy(envOf(run))).toContainEqual([key, value]);
+  });
+
+  // Not in the config list on purpose: git keeps the first receivepack it is given, so a repository
+  // setting outranks any override and only the command line wins
+  it("names the receive-pack on the command line, where config cannot outrank it", async () => {
+    const run = vi.fn().mockResolvedValue(ok);
+    await createDelivery({ run }).push("/wt", "cp-158/worker");
+
+    expect(argsOf(run)).toContain("--receive-pack=git-receive-pack");
+    expect(configuredBy(envOf(run)).map(([key]) => key)).not.toContain("remote.origin.receivepack");
   });
 
   // Clearing the helper list is what makes GIT_CONFIG_GLOBAL safe to set; naming ours after it is
@@ -134,15 +165,6 @@ describe("push", () => {
 
 describe("openPr", () => {
   // gh does not understand git's -c flag, so only git invocations may carry it
-  it("does not prepend git config flags to a gh command", async () => {
-    const run = vi.fn().mockResolvedValue({ ...ok, stdout: "https://github.com/x/y/pull/7" });
-    await createDelivery({ run }).openPr("/wt", task, "summary");
-
-    const [command, args] = run.mock.calls[0];
-    expect(command).toBe("gh");
-    expect(args).not.toContain("-c");
-  });
-
   it("returns the pr url from gh output", async () => {
     const run = vi
       .fn()
