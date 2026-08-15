@@ -168,9 +168,20 @@ and `SIGINT` both finish the task in flight before the loop exits.
   `~/.gitconfig` are taken out of the picture, and the push adds `--no-verify`. It travels in
   `GIT_CONFIG_*` rather than `-c` so it also reaches the `git` that `gh` shells out to.
 
+  The transport is fixed on those calls too, because the way in was not always a program named in
+  the config: `ext::` hands the URL to one, and a local push runs `git-receive-pack` as delivery's
+  own child, so the destination's `post-receive` would hold the credentials. Both are refused.
+
   What this does **not** claim: the allowlist includes `HOME`, because the CLI authenticates from
   its logged-in session there. An agent that goes looking can read what is under it — the
   environment is the boundary, the filesystem is not.
+
+  **What it costs.** `~/.gitconfig` is not read on those calls, so anything an operator keeps there
+  no longer applies to delivery: a deploy key set through `core.sshCommand`, a `url.*.insteadOf`
+  rewrite pointing at a mirror, or an https credential helper other than `gh`'s. Delivery
+  authenticates over ssh with the agent socket, or over https through `gh auth git-credential`.
+  Nothing here touches the agent's own commits, which are made in a different environment that does
+  read your config.
 - **The executor runs with `bypassPermissions` inside the worktree**, so the worktree is checked
   for uncommitted files before the gates run — an agent cannot hide a change from the gates by
   never staging it.

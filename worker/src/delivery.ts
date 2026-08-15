@@ -78,10 +78,28 @@ const HARDENED_CONFIG: ReadonlyArray<readonly [string, string]> = [
   ["core.fsmonitor", "false"],
   ["core.pager", "cat"],
   ["core.sshCommand", "ssh"],
-  ["remote.origin.receivepack", "git-receive-pack"],
+  // Named by git when it wants a password and no helper answered. Empty disables it.
+  ["core.askPass", ""],
   ["credential.helper", ""],
   ["credential.helper", "!gh auth git-credential"],
+  // The transport, not the configuration, was the way through: `ext::` hands the URL to a program.
+  // The agent cannot set our environment, but it can rewrite where the push goes —
+  // `remote.origin.pushurl`, `remote.origin.url`, or `url.<ext::…>.insteadOf` — and the transport
+  // is the one chokepoint that catches all three at once.
+  //
+  // `file` is refused for the same reason. It looks harmless — no program in the URL — but a local
+  // push runs git-receive-pack against the destination, and that repository's own post-receive
+  // hook then runs holding this environment. It does NOT inherit the hooksPath above; that was
+  // assumed here once and the test written to confirm it failed instead.
+  ["protocol.ext.allow", "never"],
+  ["protocol.file.allow", "never"],
 ];
+
+// `remote.<name>.receivepack` is deliberately not in the list above: git keeps the **first** value
+// it is given for it rather than the last, so a repository setting wins over any override — with
+// "more than one receivepack given, using the first" on stderr and exit 0, which nothing reads.
+// The command line is the only place it can be won, so push passes it as a flag.
+const RECEIVE_PACK = "--receive-pack=git-receive-pack";
 
 // NOSYSTEM drops /etc/gitconfig; GLOBAL=/dev/null drops ~/.gitconfig, which is as reachable to the
 // agent as the repository's own — it holds HOME. The repository config cannot be pointed elsewhere,
@@ -148,7 +166,7 @@ export function createDelivery(runner: Runner, baseBranch?: string): Delivery {
       // two independent ways for a planted pre-push to be skipped, rather than one
       const result = await run(
         "git",
-        ["push", "--no-verify", "--force-with-lease", "-u", "origin", "--", branch],
+        ["push", "--no-verify", RECEIVE_PACK, "--force-with-lease", "-u", "origin", "--", branch],
         worktreePath
       );
       if (result.code !== 0) throw failure("git push", result);
