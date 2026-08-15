@@ -144,6 +144,7 @@ function harness(overrides: Partial<PipelineDeps> = {}) {
   // Every gate passes unless a test says otherwise. What each kind actually does is
   // gates/from-entry.test.ts's subject; this file is about the order they run in.
   const gateFor = vi.fn<PipelineDeps["gateFor"]>((entry) => passingGate(entry.key));
+  const recordRun = vi.fn<PipelineDeps["recordRun"]>();
 
   const deps: PipelineDeps = {
     config,
@@ -155,6 +156,7 @@ function harness(overrides: Partial<PipelineDeps> = {}) {
     executor,
     collectDiff,
     gateFor,
+    recordRun,
     runner,
     ...overrides,
   };
@@ -171,6 +173,7 @@ function harness(overrides: Partial<PipelineDeps> = {}) {
     executor,
     collectDiff,
     gateFor,
+    recordRun,
     runner,
   };
 }
@@ -764,6 +767,58 @@ describe("runTask", () => {
     expect(h.gateFor).not.toHaveBeenCalled();
   });
 
+  // execution.runId lives on the task and every exit clears it, so without this a finished run is
+  // one nobody can ask about afterwards
+  it("leaves a record on a delivered run, naming the agent that ran", async () => {
+    const h = harness();
+    await runTask(h.deps, task);
+
+    expect(h.recordRun).toHaveBeenCalledWith(
+      "CP",
+      expect.objectContaining({ taskKey: "CP-158", agentName: "Default", outcome: "delivered" })
+    );
+  });
+
+  it("leaves one on every other exit too, naming the block that refused", async () => {
+    const h = harness({ gateFor: () => rejectingGate("diff-size", "too big") });
+    await runTask(h.deps, running("implement", "diff-size"));
+
+    expect(h.recordRun.mock.calls[0][1]).toMatchObject({
+      outcome: "refused",
+      refusedBy: "diff-size",
+    });
+  });
+
+  // The record is a durable sink and the detail is model-authored prose, the same as a comment
+  it("redacts a credential in the detail it records", async () => {
+    const credential = `cpw_${"9f3c".repeat(16)}`;
+    const executor = {
+      execute: vi.fn<Executor["execute"]>().mockResolvedValue({
+        kind: "result",
+        result: { ...completed, status: "blocked", blockedReason: `no token like ${credential}` },
+      }),
+    };
+    const h = harness({ executor });
+
+    await runTask(h.deps, running("implement"));
+
+    expect(h.recordRun.mock.calls[0][1].detail).not.toContain("cpw_");
+  });
+
+  it("counts what the agent's own stream said the run cost", async () => {
+    const executor = {
+      execute: vi.fn<Executor["execute"]>(async ({ onEvent }) => {
+        onEvent?.({ type: "result", subtype: "success", is_error: false, total_cost_usd: 0.25 });
+        return { kind: "result", result: completed };
+      }),
+    };
+    const h = harness({ executor });
+
+    await runTask(h.deps, running("implement"));
+
+    expect(h.recordRun.mock.calls[0][1].costUsd).toBe(0.25);
+  });
+
   it("requeues and runs no executor when the worktree cannot be created", async () => {
     const workspace = {
       create: vi.fn<Workspace["create"]>().mockRejectedValue(new Error("disk full")),
@@ -953,12 +1008,14 @@ describe("what the run says it is doing", () => {
     expect(JSON.stringify(seen)).not.toContain("cpw_deadbeef");
   });
 
-  it("hands the executor no listener at all when no bus is attached", async () => {
+  // It used to hand the executor nothing when no bus was attached. Cost is read off the same
+  // stream, and a run record with costUsd permanently 0 is worse than a listener nobody watches.
+  it("listens to the agent's stream even with no bus attached, because cost is measured there", async () => {
     const h = harness();
 
     await runTask(h.deps, task);
 
-    expect(h.executor.execute.mock.calls[0][0].onEvent).toBeUndefined();
+    expect(h.executor.execute.mock.calls[0][0].onEvent).toBeTypeOf("function");
     expect(h.reporter.delivered).toHaveBeenCalled();
   });
 });

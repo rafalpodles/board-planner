@@ -3,6 +3,8 @@ import { createBudget } from "./budget.js";
 import { commitAll } from "./commit.js";
 import { WorkerConfig } from "./config.js";
 import { RunState, runStep } from "./steps.js";
+import { recordFor, RunRecord } from "./run-record.js";
+import { isResultEvent, StreamEvent } from "./stream.js";
 import { Delivery } from "./delivery.js";
 import { childEnv } from "./env.js";
 import { Runner } from "./exec.js";
@@ -33,6 +35,9 @@ export interface PipelineDeps {
     fallbackReviewModel: string
   ) => Gate | null;
   runner: Runner;
+  // Fire and forget, onto the outbox: a record that fails to post must not turn a delivered run
+  // into a failed one, and must not be lost to the redeploy a merge triggers either.
+  recordRun: (projectId: string, record: RunRecord) => void;
   signal?: AbortSignal;
   /** Injected only so a test can move the run's clock; the run itself reads the wall clock. */
   now?: () => number;
@@ -168,6 +173,7 @@ async function releaseIfAborted(
 
 export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<void> {
   const { config, workspace, executor, runner, telemetry } = deps;
+  const now = deps.now ?? Date.now;
   const branch = `${task.taskKey.toLowerCase()}/${SLUG}`;
 
   // Coarse on purpose: a phase names the stage a run is in, and every stage below either finishes
@@ -177,12 +183,31 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
   // Emitted before the matching reporter call, so a reporter that throws cannot swallow the
   // operator's only local sign that the run ended. Detail takes the same redaction as board-bound
   // text: it reaches a Notification Center database that outlives the run.
-  const settle = (outcome: OutcomeKind, detail?: string): void =>
+  const startedAt = now();
+  let costUsd = 0;
+
+  // Every exit goes through here, which is what makes it the one place a run can be recorded from.
+  const settle = (outcome: OutcomeKind, detail?: string): void => {
     telemetry?.emit(
       detail === undefined
         ? { outcome, taskKey: task.taskKey }
         : { outcome, taskKey: task.taskKey, detail: scrub(detail).slice(0, MAX_DETAIL_CHARS) }
     );
+    deps.recordRun(
+      task.projectId,
+      recordFor(task, outcome, scrub(detail ?? ""), startedAt, now(), costUsd)
+    );
+  };
+
+  // The CLI reports cost once per call, so a composed agent's cost is the sum across its steps.
+  // Attached whether or not a bus is: this is the only place cost is measured. Gate cost is still
+  // missed — review.ts runs with --output-format json and parseVerdict discards the envelope.
+  const onEvent = (event: StreamEvent): void => {
+    if (isResultEvent(event) && typeof event.total_cost_usd === "number") {
+      costUsd += event.total_cost_usd;
+    }
+    telemetry?.emitEvent(event);
+  };
 
   enter("claiming");
 
@@ -223,7 +248,7 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
   };
 
   try {
-    const budget = createBudget(config.runCeilingMs, PER_ENTRY_CAP_MS, deps.now ?? Date.now);
+    const budget = createBudget(config.runCeilingMs, PER_ENTRY_CAP_MS, now);
 
     for (const entry of task.agent.sequence) {
       if (await releaseIfAborted(deps, reporter, task)) return;
@@ -252,7 +277,7 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
           state,
           timeoutMs: budget.forEntry(),
           signal: deps.signal,
-          onEvent: telemetry && ((event) => telemetry.emitEvent(event)),
+          onEvent,
         });
         if (await releaseIfAborted(deps, reporter, task, whatLanded(state, branch))) return;
 

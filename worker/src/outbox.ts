@@ -1,4 +1,5 @@
 import { ApiClient } from "./api.js";
+import { RunRecord } from "./run-record.js";
 
 // A report that cannot be delivered is worse than a failed run: the merge already happened, so
 // the task sits in the active column where claimNextTask can never pick it up again. Merging to
@@ -7,7 +8,10 @@ import { ApiClient } from "./api.js";
 export type OutboxOp =
   | { kind: "comment"; projectId: string; taskId: string; body: string }
   | { kind: "status"; projectId: string; taskId: string; status: string }
-  | { kind: "release"; projectId: string; taskId: string; refund: boolean };
+  | { kind: "release"; projectId: string; taskId: string; refund: boolean }
+  // A record posted after a merge hits the same redeploy the comment does, and it is the only
+  // trace the run leaves — losing it makes a finished run indistinguishable from one that never ran.
+  | { kind: "run"; projectId: string; record: RunRecord };
 
 interface Entry {
   op: OutboxOp;
@@ -48,9 +52,14 @@ function serialise(entries: Entry[]): string {
   return entries.map((entry) => JSON.stringify(entry)).join("\n");
 }
 
+function taskOf(op: OutboxOp): string {
+  return op.kind === "run" ? op.record.taskId : op.taskId;
+}
+
 async function deliver(api: ApiClient, op: OutboxOp): Promise<void> {
   if (op.kind === "comment") return api.comment(op.projectId, op.taskId, op.body);
   if (op.kind === "status") return api.setStatus(op.projectId, op.taskId, op.status);
+  if (op.kind === "run") return api.postRun(op.projectId, op.record);
   return op.refund
     ? api.release(op.projectId, op.taskId)
     : api.release(op.projectId, op.taskId, { refund: false });
@@ -109,7 +118,7 @@ export function createOutbox(store: Store, log: Log = (m) => console.error(m)): 
           if (attempts >= MAX_ATTEMPTS) {
             dropped += 1;
             log(
-              `outbox: giving up on ${entry.op.kind} for task ${entry.op.taskId} after ${attempts} attempts: ${String(error)}`
+              `outbox: giving up on ${entry.op.kind} for task ${taskOf(entry.op)} after ${attempts} attempts: ${String(error)}`
             );
             continue;
           }
