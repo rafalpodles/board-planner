@@ -1374,3 +1374,45 @@ export interface ApiAgent {
   composition: AgentComposition;
   builtIn: boolean;
 }
+
+// A run that finished, kept after the task's own execution fields are cleared.
+export const AGENT_RUN_OUTCOMES = [
+  "delivered",
+  "merged",
+  "refused",
+  "blocked",
+  "failed",
+  "requeued",
+  "released",
+] as const;
+export type AgentRunOutcome = (typeof AGENT_RUN_OUTCOMES)[number];
+
+export interface IAgentRun {
+  _id: Types.ObjectId;
+  project: Types.ObjectId | IProject;
+  task: Types.ObjectId | ITask;
+  taskKey: string;
+  worker: Types.ObjectId | null;
+  agent: Types.ObjectId | IAgent | null;
+  agentName: string;
+  outcome: AgentRunOutcome;
+  refusedBy: string;
+  detail: string;
+  startedAt: Date;
+  finishedAt: Date;
+  costUsd: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface ApiAgentRun {
+  _id: string;
+  taskKey: string;
+  agentName: string;
+  outcome: AgentRunOutcome;
+  refusedBy: string;
+  detail: string;
+  minutes: number;
+  costUsd: number;
+  finishedAt: string;
+}

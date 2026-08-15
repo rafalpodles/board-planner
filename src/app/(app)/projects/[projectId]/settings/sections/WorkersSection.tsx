@@ -12,6 +12,19 @@ import { CLAIM_SCOPES, ClaimScope, PROJECT_POLICY_DEFAULTS } from "@/lib/worker-
 import { projectRemotes, sameRepo } from "@/lib/repo-match";
 import { ApiProject, ApiUserSummary, ApiWorker } from "@/types";
 import { SectionProps } from "./types";
+import { AgentRunOutcome, ApiAgentRun } from "@/types";
+
+const OUTCOME_LABELS: Record<AgentRunOutcome, string> = {
+  delivered: "Pull request open",
+  merged: "Merged",
+  refused: "Refused",
+  blocked: "Went to a human",
+  failed: "Failed",
+  requeued: "Back in the queue",
+  released: "Released",
+};
+
+const FAILED_OUTCOMES = new Set<AgentRunOutcome>(["refused", "blocked", "failed"]);
 import Link from "next/link";
 import { useStore } from "@/app/(app)/agents/store";
 
@@ -69,6 +82,14 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
   const store = useStore();
   const agentApi = useApi();
   const [defaultAgent, setDefaultAgent] = useState(String(project.worker?.agent ?? ""));
+  const [runs, setRuns] = useState<ApiAgentRun[]>([]);
+
+  useEffect(() => {
+    agentApi
+      .get(`/api/projects/${projectId}/runs?limit=10`)
+      .then((r) => setRuns(Array.isArray(r) ? (r as ApiAgentRun[]) : []))
+      .catch(() => setRuns([]));
+  }, [agentApi, projectId]);
 
   const saveDefaultAgent = async (agentId: string) => {
     const previous = defaultAgent;
@@ -357,6 +378,46 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
               Manage agents
             </Link>
           </p>
+        </div>
+
+        <div className="mt-6">
+          <p className="text-sm font-medium mb-2">Recent runs</p>
+          {runs.length === 0 ? (
+            <p className="text-xs text-text-muted">Nothing has run yet.</p>
+          ) : (
+            <div className="overflow-hidden rounded-lg border border-border">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-bg-input text-xs text-text-muted">
+                    <th className="px-3 py-2 text-left font-normal">Task</th>
+                    <th className="px-3 py-2 text-left font-normal">Agent</th>
+                    <th className="px-3 py-2 text-left font-normal">Outcome</th>
+                    <th className="px-3 py-2 text-right font-normal">Took</th>
+                    <th className="px-3 py-2 text-right font-normal">Cost</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {runs.map((run) => (
+                    <tr key={run._id} className="border-b border-border last:border-0">
+                      <td className="px-3 py-2">{run.taskKey}</td>
+                      <td className="px-3 py-2 text-text-muted">{run.agentName || "—"}</td>
+                      <td
+                        className={`px-3 py-2 ${
+                          FAILED_OUTCOMES.has(run.outcome) ? "text-danger" : "text-success"
+                        }`}
+                      >
+                        {run.refusedBy ? `Refused: ${run.refusedBy}` : OUTCOME_LABELS[run.outcome]}
+                      </td>
+                      <td className="px-3 py-2 text-right text-text-muted">{run.minutes} min</td>
+                      <td className="px-3 py-2 text-right text-text-muted">
+                        ${run.costUsd.toFixed(2)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </SettingsCard>
     </div>

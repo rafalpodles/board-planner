@@ -2,6 +2,8 @@ import { Agent } from "@/models/agent";
 import { AgentBlock } from "@/models/agentBlock";
 import {
   ApiAgent,
+  ApiAgentRun,
+  IAgentRun,
   ApiAgentBlock,
   IAgent,
   IAgentBlock,
@@ -65,6 +67,22 @@ export async function visibleAgents(user: IUser, projectIds: string[]) {
 
 export async function allBlocks() {
   return AgentBlock.find({}).sort({ kind: -1, builtIn: -1, name: 1 }).lean();
+}
+
+export function toApiRun(run: IAgentRun): ApiAgentRun {
+  const ms = run.finishedAt.valueOf() - run.startedAt.valueOf();
+  return {
+    _id: String(run._id),
+    taskKey: run.taskKey,
+    agentName: run.agentName,
+    outcome: run.outcome,
+    refusedBy: run.refusedBy,
+    detail: run.detail,
+    // Whole minutes: a run is measured in tens of them, and a decimal reads as precision it has not
+    minutes: Math.max(0, Math.round(ms / 60000)),
+    costUsd: run.costUsd,
+    finishedAt: run.finishedAt.toISOString(),
+  };
 }
 
 const SLUG_MAX = 48;
