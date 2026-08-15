@@ -15,6 +15,7 @@ vi.mock("@/lib/auth", () => ({
   getAuthUser,
   getClientIp: () => "203.0.113.9",
   PASSWORD_COST_FACTOR: 10,
+  MIN_PASSWORD_LENGTH: 8,
 }));
 vi.mock("@/lib/session", () => ({
   revokeUserSessions,

@@ -12,8 +12,10 @@ import { Modal } from "@/components/ui/Modal";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useToast } from "@/components/ui/Toast";
 
+const MIN_PASSWORD_LENGTH = 8;
+
 export default function UsersPage() {
-  const { isAdmin, isLoading: authLoading } = useAuth();
+  const { user: currentUser, isAdmin, isLoading: authLoading } = useAuth();
   const router = useRouter();
   const [users, setUsers] = useState<ApiUser[]>([]);
   const [loading, setLoading] = useState(true);
@@ -28,6 +30,9 @@ export default function UsersPage() {
   const [editUser, setEditUser] = useState<ApiUser | null>(null);
   const [editRole, setEditRole] = useState<"admin" | "member">("member");
   const [editSaving, setEditSaving] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [passwordSaving, setPasswordSaving] = useState(false);
+  const [passwordError, setPasswordError] = useState("");
 
   // Delete state
   const [confirmDeleteUser, setConfirmDeleteUser] = useState<ApiUser | null>(
@@ -76,6 +81,30 @@ export default function UsersPage() {
   function openEdit(user: ApiUser) {
     setEditUser(user);
     setEditRole(user.role || "member");
+    setNewPassword("");
+    setPasswordError("");
+  }
+
+  async function handleSetPassword(e: FormEvent) {
+    e.preventDefault();
+    if (!editUser) return;
+    setPasswordError("");
+
+    if (newPassword.length < MIN_PASSWORD_LENGTH) {
+      setPasswordError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters`);
+      return;
+    }
+
+    setPasswordSaving(true);
+    try {
+      await api.put(`/api/users/${editUser._id}`, { password: newPassword });
+      setNewPassword("");
+      toast(`Password set for ${editUser.username}. Their sessions were signed out.`, "success");
+    } catch (err) {
+      setPasswordError(err instanceof Error ? err.message : "Failed to set the password");
+    } finally {
+      setPasswordSaving(false);
+    }
   }
 
   async function handleEditSave() {
@@ -240,6 +269,50 @@ export default function UsersPage() {
                   Member
                 </button>
               </div>
+            </div>
+
+            <div className="border-t border-border pt-4">
+              {currentUser?._id === editUser._id ? (
+                <>
+                  <p className="text-sm font-medium mb-1">Set a new password</p>
+                  <p className="text-sm text-text-muted">
+                    Your own password is changed under Settings → Security, where the current one is
+                    required.
+                  </p>
+                </>
+              ) : (
+                <form onSubmit={handleSetPassword} className="space-y-2">
+                  <label
+                    htmlFor="newUserPassword"
+                    className="block text-sm font-medium mb-1"
+                  >
+                    Set a new password
+                  </label>
+                  <p className="text-sm text-text-muted">
+                    Hand it to {editUser.fullName} over something other than this app. It signs them
+                    out everywhere; their API tokens keep working.
+                  </p>
+                  <div className="flex items-start gap-2">
+                    <Input
+                      id="newUserPassword"
+                      type="password"
+                      autoComplete="new-password"
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      placeholder={`At least ${MIN_PASSWORD_LENGTH} characters`}
+                      error={passwordError}
+                    />
+                    <Button
+                      type="submit"
+                      variant="secondary"
+                      className="shrink-0"
+                      disabled={passwordSaving || !newPassword}
+                    >
+                      {passwordSaving ? "Setting…" : "Set"}
+                    </Button>
+                  </div>
+                </form>
+              )}
             </div>
 
             <p className="text-sm text-text-muted">

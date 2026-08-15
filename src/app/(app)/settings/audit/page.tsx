@@ -20,11 +20,17 @@ const LABELS: Record<string, string> = {
   enrolment_token_spent: "Enrolment token spent",
   project_workers_enabled: "Workers enabled for project",
   project_workers_disabled: "Workers disabled for project",
+  user_password_reset: "Password set by an admin",
 };
 
-// The actions worth spotting at a glance: one stops a machine, the other hands out the credential
-// that lets a new one join.
-const NOTABLE = new Set(["worker_locked", "enrolment_token_minted", "enrolment_token_spent"]);
+// The actions worth spotting at a glance: one stops a machine, one hands out the credential that
+// lets a new one join, and one hands somebody a way into another person's account.
+const NOTABLE = new Set([
+  "worker_locked",
+  "enrolment_token_minted",
+  "enrolment_token_spent",
+  "user_password_reset",
+]);
 
 export default function InstanceAuditPage() {
   const api = useApi();
@@ -67,8 +73,9 @@ export default function InstanceAuditPage() {
       <div className="mb-6">
         <h2 className="text-lg font-semibold mb-1">Instance audit log</h2>
         <p className="text-sm text-text-muted">
-          Fleet-wide actions: stopping a machine, enrolling one, and committing a project to
-          workers. Each project keeps its own log of its own settings, under that project.
+          Instance-wide actions: stopping a machine, enrolling one, committing a project to
+          workers, and setting somebody else&apos;s password. Each project keeps its own log of its
+          own settings, under that project.
         </p>
       </div>
 
