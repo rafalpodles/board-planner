@@ -127,6 +127,9 @@ describe("a worker reporting with its own credential", () => {
 
     await withProjectAccessOrWorker(handler)(forged, context());
 
+    // Without this the two `?.` below short-circuit to undefined when the handler was never
+    // reached, so the assertion would pass for the wrong reason if any gate above it changed
+    expect(handler).toHaveBeenCalled();
     expect(handler.mock.calls[0]?.[1]?.workerId).toBeUndefined();
   });
 

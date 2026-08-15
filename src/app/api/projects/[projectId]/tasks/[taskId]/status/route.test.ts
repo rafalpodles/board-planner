@@ -80,4 +80,34 @@ describe("PATCH .../tasks/:taskId/status", () => {
       workerId: undefined,
     });
   });
+
+  // Every case above sends the header and the verified id as the same value, so a revert to
+  // `request.headers.get("x-worker-id")` in the route left all three green. This is the case that
+  // separates them: a cookie session takes the person branch, where nothing has checked that header
+  // — and under the revert it would collect the holder exemption and move a held task with no force.
+  it("does not take a worker id from a header the middleware never verified", async () => {
+    const forged = new Request("https://app.example.com/api/projects/p1/tasks/t1/status", {
+      method: "PATCH",
+      headers: { "content-type": "application/json", "x-worker-id": "w1" },
+      body: JSON.stringify({ status: "in_review" }),
+    });
+
+    const res = await PATCH(forged, ctx());
+
+    expect(res.status).toBe(200);
+    expect(changeStatus).toHaveBeenCalledWith("p1", "t1", "in_review", "u1", {
+      force: false,
+      workerId: undefined,
+    });
+  });
+
+  // A machine credential that is not a worker: no verified id, so no exemption either
+  it("gives an API token no worker id", async () => {
+    await PATCH(request({ status: "in_review" }, "machineToken"), ctx());
+
+    expect(changeStatus).toHaveBeenCalledWith("p1", "t1", "in_review", "u1", {
+      force: false,
+      workerId: undefined,
+    });
+  });
 });
