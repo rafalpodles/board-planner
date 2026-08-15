@@ -3,16 +3,9 @@ import { createDelivery } from "./delivery.js";
 import { CommandResult } from "./exec.js";
 import { deliveryGitArgs } from "./git-safety.js";
 import { ClaimedTask } from "./types.js";
+import { claimedTask } from "./__fixtures__/task.js";
 
-const task: ClaimedTask = {
-  taskId: "t1",
-  taskKey: "CP-158",
-  taskNumber: 158,
-  title: "Add a thing",
-  description: "",
-  acceptanceCriteria: [],
-  attempts: 1,
-};
+const task = claimedTask();
 
 const ok: CommandResult = { code: 0, stdout: "", stderr: "", timedOut: false };
 

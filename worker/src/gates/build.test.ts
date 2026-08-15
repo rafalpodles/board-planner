@@ -2,20 +2,13 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { buildGate } from "./build.js";
 import { CommandResult, Runner } from "../exec.js";
 import { GateContext } from "../types.js";
+import { claimedTask } from "../__fixtures__/task.js";
 
 const TIMEOUT_MS = 5000;
 
 const context: GateContext = {
   worktreePath: "/wt",
-  task: {
-    taskId: "1",
-    taskKey: "CP-1",
-    taskNumber: 1,
-    title: "t",
-    description: "d",
-    acceptanceCriteria: [],
-    attempts: 0,
-  },
+  task: claimedTask({ taskKey: "CP-1", taskNumber: 1, title: "t", description: "d" }),
   result: { status: "completed", summary: "", filesChanged: [], testsAdded: [], blockedReason: "" },
   diff: { changedLines: 10, changedFiles: ["src/a.ts"], patch: "", truncated: false },
 };

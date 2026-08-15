@@ -39,6 +39,7 @@ const task: ClaimedTask = {
   description: "body",
   acceptanceCriteria: [],
   attempts: 1,
+  runId: "run-1",
   agent: agentOf(DEFAULT_SEQUENCE),
 };
 
@@ -115,6 +116,8 @@ function harness(overrides: Partial<PipelineDeps> = {}) {
     release: vi.fn<ApiClient["release"]>().mockResolvedValue(undefined),
     statusIds: vi.fn<ApiClient["statusIds"]>().mockResolvedValue(statuses),
     columnIds: vi.fn<ApiClient["columnIds"]>().mockResolvedValue(board),
+    postEvent: vi.fn<ApiClient["postEvent"]>().mockResolvedValue({ applied: true }),
+    postRun: vi.fn<ApiClient["postRun"]>().mockResolvedValue(undefined),
   };
   const columnIds = vi.fn<PipelineDeps["columnIds"]>().mockResolvedValue(board);
   const reporter = {
@@ -1106,10 +1109,15 @@ describe("what the run says it is doing", () => {
     expect(JSON.stringify(outcomes())).not.toContain("cpw_deadbeef");
   });
 
-  it("emits no outcome at all when no bus is attached", async () => {
-    const h = harness();
+  // Asserted only that runTask resolved, with no bus attached to count outcomes on — it could not
+  // fail for the property it names. Counting them on a bus that IS attached is the real question.
+  it("emits exactly one outcome for a run, never a second after it settles", async () => {
+    const { h, outcomes } = watched({ gateFor: () => rejectingGate("build", "it does not build") });
 
-    await expect(runTask(h.deps, task)).resolves.toBeUndefined();
+    await runTask(h.deps, running("implement", "build"));
+
+    expect(outcomes()).toHaveLength(1);
+    expect(outcomes()[0]).toMatchObject({ outcome: "gateRejected" });
   });
 
   it("stops at the gate that rejected, which is the phase a human needs to see", async () => {

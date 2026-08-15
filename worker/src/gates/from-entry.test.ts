@@ -74,7 +74,7 @@ describe("gateFromEntry", () => {
   });
 
   it("passes the entry's model and focus down to a review gate", async () => {
-    const run = vi.fn(async () => ({
+    const run = vi.fn(async (..._args: unknown[]) => ({
       code: 0,
       stdout: JSON.stringify({ result: { approved: true, reason: "fine" } }),
       stderr: "",
@@ -101,7 +101,7 @@ describe("gateFromEntry", () => {
   });
 
   it("falls back to the worker's review model when the entry names none", async () => {
-    const run = vi.fn(async () => ({
+    const run = vi.fn(async (..._args: unknown[]) => ({
       code: 0,
       stdout: JSON.stringify({ result: { approved: true, reason: "fine" } }),
       stderr: "",
@@ -120,6 +120,9 @@ describe("gateFromEntry", () => {
     expect(argv[argv.indexOf("--append-system-prompt") + 1]).not.toMatch(/injection/i);
   });
 
+  // That this list IS the catalog's is asserted in catalog-contract.test.ts, which reads the app's
+  // source rather than importing it — drift is what makes a run die mid-task with "this worker
+  // implements no gate of kind …", after the agent has already done the work.
   it("builds every kind the catalog offers", () => {
     for (const gateKind of ["diff-size", "protected-paths", "test-presence", "build", "test-run", "review"]) {
       expect(gateFromEntry(entry({ gateKind }), idleRunner, 1000, FALLBACKS)).not.toBeNull();
