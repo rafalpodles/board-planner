@@ -16,14 +16,20 @@ const nextUid = () => `e${++counter}`;
 function toEntries(composition: AgentComposition): Entries {
   const out = {} as Entries;
   for (const bucket of AGENT_BUCKETS) {
-    out[bucket] = (composition[bucket] ?? []).map((key) => ({ uid: nextUid(), key }));
+    out[bucket] = (composition[bucket] ?? []).map((entry) => ({
+      uid: nextUid(),
+      key: entry.key,
+      params: entry.params,
+    }));
   }
   return out;
 }
 
 function toComposition(entries: Entries): AgentComposition {
   const out = {} as AgentComposition;
-  for (const bucket of AGENT_BUCKETS) out[bucket] = entries[bucket].map((e) => e.key);
+  for (const bucket of AGENT_BUCKETS) {
+    out[bucket] = entries[bucket].map((e) => ({ key: e.key, params: e.params }));
+  }
   return out;
 }
 

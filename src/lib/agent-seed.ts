@@ -61,24 +61,24 @@ export const BUILT_IN_BLOCKS: SeedBlock[] = [
 // so this is the composition every existing project is backfilled with.
 export const DEFAULT_COMPOSITION: AgentComposition = {
   analysis: [],
-  implementation: ["implement"],
-  verification: ["diff-size", "protected-paths", "test-presence", "build", "test-run", "review"],
-  delivery: ["push", "pull-request"],
+  implementation: [{ key: "implement" }],
+  verification: [{ key: "diff-size" }, { key: "protected-paths" }, { key: "test-presence" }, { key: "build" }, { key: "test-run" }, { key: "review" }],
+  delivery: [{ key: "push" }, { key: "pull-request" }],
 };
 
 export const CAREFUL_COMPOSITION: AgentComposition = {
   analysis: [],
-  implementation: ["implement"],
+  implementation: [{ key: "implement" }],
   verification: [
-    "diff-size",
-    "protected-paths",
-    "test-presence",
-    "build",
-    "test-run",
-    "security-review",
-    "review",
+    { key: "diff-size" },
+    { key: "protected-paths" },
+    { key: "test-presence" },
+    { key: "build" },
+    { key: "test-run" },
+    { key: "security-review" },
+    { key: "review" },
   ],
-  delivery: ["push", "pull-request"],
+  delivery: [{ key: "push" }, { key: "pull-request" }],
 };
 
 export const SECURITY_REVIEW_BLOCK: SeedBlock = {

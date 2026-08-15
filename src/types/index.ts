@@ -1311,7 +1311,21 @@ export type BlockKind = (typeof BLOCK_KINDS)[number];
 export const STEP_CAPABILITIES = ["read-only", "edit"] as const;
 export type StepCapability = (typeof STEP_CAPABILITIES)[number];
 
-export type AgentComposition = Record<AgentBucket, string[]>;
+/**
+ * One position in a sequence. A block says what it does; an entry says how it does it *here* —
+ * which is why this is an object and not the key alone. Two Size gates with different limits, or a
+ * step told something extra for this agent only, need somewhere to put it that is not the catalog.
+ */
+export interface CompositionEntry {
+  key: string;
+  /** Overrides the block's own parameters, for this position only. */
+  params?: Record<string, string>;
+}
+
+export type AgentComposition = Record<AgentBucket, CompositionEntry[]>;
+
+/** What a stored composition may look like: entries, or the bare keys written before entries. */
+export type StoredComposition = Partial<Record<AgentBucket, (CompositionEntry | string)[]>>;
 
 export interface IAgentBlock {
   _id: Types.ObjectId;

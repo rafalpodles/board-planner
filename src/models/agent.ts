@@ -1,14 +1,25 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { AGENT_SCOPES, IAgent } from "@/types";
 
-// Buckets are stored as separate arrays rather than one list so a bucket's meaning survives an empty
-// one: an agent with nothing in analysis still says where analysis would go.
+// One position in the sequence. The key says which block; params override that block's own, for
+// this position only — which is what lets one agent carry two Size gates with different limits
+// without two rows in the catalog.
+const entrySchema = new Schema(
+  {
+    key: { type: String, required: true },
+    params: { type: Schema.Types.Mixed, default: undefined },
+  },
+  { _id: false }
+);
+
+// Buckets stay separate arrays rather than one list so a bucket's meaning survives an empty one:
+// an agent with nothing in analysis still says where analysis would go.
 const compositionSchema = new Schema(
   {
-    analysis: { type: [String], default: [] },
-    implementation: { type: [String], default: [] },
-    verification: { type: [String], default: [] },
-    delivery: { type: [String], default: [] },
+    analysis: { type: [entrySchema], default: [] },
+    implementation: { type: [entrySchema], default: [] },
+    verification: { type: [entrySchema], default: [] },
+    delivery: { type: [entrySchema], default: [] },
   },
   { _id: false }
 );

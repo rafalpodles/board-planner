@@ -1,12 +1,24 @@
-import { AGENT_BUCKETS, AgentComposition, ApiAgentBlock } from "@/types";
+import {
+  AGENT_BUCKETS,
+  AgentComposition,
+  ApiAgentBlock,
+  CompositionEntry,
+  StoredComposition,
+} from "@/types";
 
 /**
  * A bucket added after some agents were stored comes back undefined, and everything downstream
  * indexes by bucket. Filling the gap in one place keeps that from being every caller's problem.
  */
-export function normaliseComposition(value?: Partial<AgentComposition> | null): AgentComposition {
+export function normaliseComposition(value?: StoredComposition | null): AgentComposition {
   const out = {} as AgentComposition;
-  for (const bucket of AGENT_BUCKETS) out[bucket] = value?.[bucket] ?? [];
+  for (const bucket of AGENT_BUCKETS) {
+    // A bucket written before entries existed holds bare keys. Read either shape rather than
+    // migrating: a lazy coercion here is a rewrite on the next save, and no downtime.
+    out[bucket] = (value?.[bucket] ?? []).map((entry) =>
+      typeof entry === "string" ? { key: entry } : { key: entry.key, params: entry.params }
+    );
+  }
   return out;
 }
 
@@ -16,8 +28,12 @@ export function normaliseComposition(value?: Partial<AgentComposition> | null): 
  * makes them expressible, and therefore breakable — so the guarantees the code used to hold by its
  * shape now have to be read off the sequence.
  */
-export function sequenceOf(composition: AgentComposition): string[] {
+export function sequenceOf(composition: AgentComposition): CompositionEntry[] {
   return AGENT_BUCKETS.flatMap((bucket) => composition[bucket] ?? []);
+}
+
+export function keysOf(composition: AgentComposition): string[] {
+  return sequenceOf(composition).map((entry) => entry.key);
 }
 
 type Lookup = (key: string) => ApiAgentBlock | undefined;
@@ -41,7 +57,7 @@ export interface Problem {
 const EXECUTES_THE_TREE = new Set(["build", "test-run"]);
 
 export function agentProblems(composition: AgentComposition, lookup: Lookup): Problem[] {
-  const sequence = sequenceOf(composition);
+  const sequence = keysOf(composition);
 
   // An empty agent is a draft, not a broken one: every agent is empty between "New agent" and the
   // first thing dragged into it. It is refused where it would actually reach a machine — see

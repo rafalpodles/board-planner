@@ -1,6 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { agentProblems, brokenProblems, isRunnable, sequenceOf } from "./agent-rules";
-import { AgentComposition, ApiAgentBlock } from "@/types";
+import {
+  agentProblems,
+  brokenProblems,
+  isRunnable,
+  keysOf,
+  normaliseComposition,
+  sequenceOf,
+} from "./agent-rules";
+import { AgentComposition, ApiAgentBlock, StoredComposition } from "@/types";
 
 function block(over: Partial<ApiAgentBlock> & Pick<ApiAgentBlock, "key">): ApiAgentBlock {
   return {
@@ -36,13 +43,15 @@ const BLOCKS: ApiAgentBlock[] = [
 
 const lookup = (key: string) => BLOCKS.find((b) => b.key === key);
 
-function composition(over: Partial<AgentComposition> = {}): AgentComposition {
-  return { analysis: [], implementation: [], verification: [], delivery: [], ...over };
+// Written as bare keys on purpose: that is the shape stored before entries existed, so every
+// assertion below also exercises the coercion that reads it.
+function composition(over: StoredComposition = {}): AgentComposition {
+  return normaliseComposition(over);
 }
 
 describe("sequenceOf", () => {
   it("reads the buckets in order, so a rule spanning two of them sees them as one list", () => {
-    const seq = sequenceOf(
+    const seq = keysOf(
       composition({ implementation: ["implement"], verification: ["review"], delivery: ["push"] })
     );
     expect(seq).toEqual(["implement", "review", "push"]);
@@ -50,8 +59,7 @@ describe("sequenceOf", () => {
 
   // An agent stored before a bucket existed comes back without it, and every rule indexes by bucket
   it("survives a bucket the stored agent does not have", () => {
-    const partial = { implementation: ["implement"] } as unknown as AgentComposition;
-    expect(sequenceOf(partial)).toEqual(["implement"]);
+    expect(keysOf(composition({ implementation: ["implement"] }))).toEqual(["implement"]);
   });
 });
 
@@ -270,5 +278,25 @@ describe("rules the shape of the old pipeline used to guarantee", () => {
     expect(agentProblems(composition(), lookup)).toEqual([]);
     expect(isRunnable(composition())).toBe(false);
     expect(isRunnable(composition({ implementation: ["implement"], delivery: ["push"] }))).toBe(true);
+  });
+});
+
+describe("composition entries", () => {
+  // The shape change that makes per-position configuration possible at all
+  it("carries parameters set on a position, not only on the block", () => {
+    const composed = normaliseComposition({
+      verification: [{ key: "diff-size", params: { maxLines: "50" } }, "review"],
+    });
+    expect(sequenceOf(composed)).toEqual([
+      { key: "diff-size", params: { maxLines: "50" } },
+      { key: "review", params: undefined },
+    ]);
+  });
+
+  it("reads a composition stored as bare keys, so nothing needs migrating", () => {
+    expect(keysOf(normaliseComposition({ delivery: ["push", "pull-request"] }))).toEqual([
+      "push",
+      "pull-request",
+    ]);
   });
 });
