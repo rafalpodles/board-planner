@@ -11,6 +11,8 @@ export const BUCKET_PREFIX = "bucket:";
 export interface Entry {
   uid: string;
   key: string;
+  /** Set only where this position overrides the block's own parameters. */
+  params?: Record<string, string>;
 }
 
 export type Lookup = (key: string) => ApiAgentBlock | undefined;

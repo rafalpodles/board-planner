@@ -67,7 +67,14 @@ export const DELETE = withAuth(async (_request, { params, user }) => {
   // Deleting a block an agent still names would leave that agent referring to nothing, and the
   // worker refuses an unknown key mid-run rather than at the moment somebody caused it.
   const users = await Agent.find(
-    { $or: AGENT_BUCKETS.map((bucket) => ({ [`composition.${bucket}`]: block.key })) },
+    {
+      $or: AGENT_BUCKETS.flatMap((bucket) => [
+        // Entries are objects now; a composition written before that holds the bare key, and both
+        // shapes are still readable, so both have to be searchable.
+        { [`composition.${bucket}.key`]: block.key },
+        { [`composition.${bucket}`]: block.key },
+      ]),
+    },
     "name"
   ).lean();
 

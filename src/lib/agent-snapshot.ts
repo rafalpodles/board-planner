@@ -1,8 +1,8 @@
 import { Agent } from "@/models/agent";
 import { AgentBlock } from "@/models/agentBlock";
 import { Project } from "@/models/project";
-import { normaliseComposition } from "./agent-rules";
-import { AGENT_BUCKETS, StepCapability } from "@/types";
+import { normaliseComposition, sequenceOf } from "./agent-rules";
+import { StepCapability } from "@/types";
 
 /**
  * What the worker is handed on a claim: the agent resolved into an ordered list of blocks, whole.
@@ -57,14 +57,15 @@ export async function snapshotFor(
   if (agent.scope === "project" && String(agent.project) !== String(projectId)) return null;
 
   const composition = normaliseComposition(agent.composition);
-  const keys = AGENT_BUCKETS.flatMap((bucket) => composition[bucket]);
-  if (keys.length === 0) return null;
+  const entries = sequenceOf(composition);
+  if (entries.length === 0) return null;
 
-  const blocks = await AgentBlock.find({ key: { $in: keys } }).lean();
+  const blocks = await AgentBlock.find({ key: { $in: entries.map((e) => e.key) } }).lean();
   const byKey = new Map(blocks.map((b) => [b.key, b]));
 
   const sequence: SnapshotEntry[] = [];
-  for (const key of keys) {
+  for (const entry of entries) {
+    const key = entry.key;
     const block = byKey.get(key);
     // A key with no block is not skipped: skipping would quietly run a shorter agent than the one
     // somebody composed. The worker refuses the run and names the key.
@@ -87,7 +88,9 @@ export async function snapshotFor(
             kind: "gate",
             name: block.name,
             gateKind: block.gateKind,
-            params: block.params ?? {},
+            // The position's own parameters win over the block's: that is what makes two Size
+            // gates with different limits possible without two catalog rows.
+            params: { ...(block.params ?? {}), ...(entry.params ?? {}) },
           }
     );
   }
