@@ -344,7 +344,7 @@ export default function ProjectSettingsPage() {
                 }}
                 placeholder="Search settings..."
                 aria-label="Search settings"
-                className="w-full rounded-lg border border-border bg-bg-input px-3 py-2 text-sm placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary"
+                className="focus-ring w-full rounded-lg border border-border bg-bg-input px-3 py-2 text-sm placeholder:text-text-muted"
               />
             </div>
 

@@ -186,7 +186,7 @@ export function PropertyRail({
                 type="date"
                 value={draft.dueDate || ""}
                 onChange={(e) => set("dueDate", e.target.value || null)}
-                className="w-full rounded-lg border border-border bg-bg-input px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                className="focus-ring w-full rounded-lg border border-border bg-bg-input px-3 py-2 text-sm"
               />
               {draft.dueDate && (
                 <button
@@ -279,7 +279,7 @@ export function PropertyRail({
                         interval: Math.max(1, parseInt(e.target.value) || 1),
                       })
                     }
-                    className="w-16 rounded-lg border border-border bg-bg-input px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                    className="focus-ring w-16 rounded-lg border border-border bg-bg-input px-2 py-1 text-sm"
                   />
                   {RECURRENCE_UNITS[draft.recurrence.frequency]}s
                 </label>
@@ -351,7 +351,7 @@ function CustomFieldRow({ field, value, onChange, touch }: CustomFieldRowProps) 
             type="checkbox"
             checked={!!value}
             onChange={(e) => onChange(e.target.checked)}
-            className="rounded border-border"
+            className="focus-ring rounded border-border"
           />
           <span className="text-text-muted">{value ? "Yes" : "No"}</span>
         </label>
@@ -497,7 +497,7 @@ function CustomFieldRow({ field, value, onChange, touch }: CustomFieldRowProps) 
                   : e.target.value
               )
             }
-            className="w-full rounded-lg border border-border bg-bg-input px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+            className="focus-ring w-full rounded-lg border border-border bg-bg-input px-3 py-2 text-sm"
           />
         </div>
       )}

@@ -182,7 +182,7 @@ export default function TokensPage() {
           {projects.length === 0 ? (
             <p className="text-sm text-text-muted">No projects available.</p>
           ) : (
-            <div className="space-y-2 max-h-48 overflow-y-auto">
+            <div className="space-y-2 max-h-48 overflow-y-auto scroll-ring-room">
               {projects.map((p) => (
                 <label
                   key={p._id}
@@ -192,7 +192,7 @@ export default function TokensPage() {
                     type="checkbox"
                     checked={scope.includes(p._id)}
                     onChange={() => toggleScope(p._id)}
-                    className="rounded border-border"
+                    className="focus-ring rounded border-border"
                   />
                   <span>{p.name}</span>
                   <span className="text-text-muted font-mono text-xs">{p.key}</span>
