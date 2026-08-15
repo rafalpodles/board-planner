@@ -62,7 +62,14 @@ export const BUILT_IN_BLOCKS: SeedBlock[] = [
 export const DEFAULT_COMPOSITION: AgentComposition = {
   analysis: [],
   implementation: [{ key: "implement" }],
-  verification: [{ key: "diff-size" }, { key: "protected-paths" }, { key: "test-presence" }, { key: "build" }, { key: "test-run" }, { key: "review" }],
+  verification: [
+    { key: "protected-paths" },
+    { key: "diff-size" },
+    { key: "test-presence" },
+    { key: "build" },
+    { key: "test-run" },
+    { key: "review" },
+  ],
   delivery: [{ key: "push" }, { key: "pull-request" }],
 };
 
@@ -79,6 +86,22 @@ export const CAREFUL_COMPOSITION: AgentComposition = {
     { key: "review" },
   ],
   delivery: [{ key: "push" }, { key: "pull-request" }],
+};
+
+// The merge preset's agent. Merging is a property of the composition now, so "may this project
+// merge" is answered by whether its agent carries the step — not by a boolean beside it.
+export const MERGING_COMPOSITION: AgentComposition = {
+  analysis: [],
+  implementation: [{ key: "implement" }],
+  verification: [
+    { key: "protected-paths" },
+    { key: "diff-size" },
+    { key: "test-presence" },
+    { key: "build" },
+    { key: "test-run" },
+    { key: "review" },
+  ],
+  delivery: [{ key: "push" }, { key: "pull-request" }, { key: "merge" }],
 };
 
 export const SECURITY_REVIEW_BLOCK: SeedBlock = {
@@ -108,6 +131,21 @@ export async function seedAgents() {
         description: "What a worker does today: writes the change, then every check below.",
         scope: "global",
         composition: DEFAULT_COMPOSITION,
+        builtIn: true,
+      },
+    },
+    { upsert: true }
+  );
+
+  await Agent.updateOne(
+    { scope: "global", name: "Merges its own work" },
+    {
+      $setOnInsert: {
+        name: "Merges its own work",
+        description:
+          "Everything the default does, and merges the pull request once every check has passed.",
+        scope: "global",
+        composition: MERGING_COMPOSITION,
         builtIn: true,
       },
     },

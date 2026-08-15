@@ -21,14 +21,12 @@ export function isClaimScope(value: unknown): value is ClaimScope {
 
 // Facts about a repository and the work done in it. Set per project; every worker serving that
 // project resolves against the same values.
+//
+// Merging and reviewing are deliberately absent. Both used to be booleans here, and both are now
+// properties of the agent a project runs: it merges if its composition carries a Merge step, and it
+// is reviewed if a Reviewed gate stands after the last step that writes. A flag beside the
+// composition would describe the same decision twice, and the flag would win silently.
 export const PROJECT_POLICY_DEFAULTS = {
-  // Off by default: merging to a base branch is a thing an operator turns on, not a thing a
-  // freshly enabled project starts doing
-  autoMerge: false,
-  // The second model that reads the diff with no memory of writing it. On by default because
-  // "nothing merges unreviewed" is the safety property the worker asserts outright, and turning
-  // this off is the one thing that could quietly undo it.
-  reviewGate: true,
   // Which tasks in an approved column a worker may take. "assigned" by default for the same
   // reason autoMerge is off: enabling a project should not, by itself, set an agent on a backlog
   // somebody has not offered it. Until a task is handed over, an enabled project claims nothing.

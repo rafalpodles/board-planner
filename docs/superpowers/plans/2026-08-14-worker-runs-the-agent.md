@@ -1428,6 +1428,26 @@ not turn a delivered run into a failed one."
 
 ---
 
+## Decided since this plan was written (2026-08-15)
+
+**Merge authority comes from the composition, not from a flag.** `autoMerge` and `reviewGate` are
+retired from the project policy, and the worker's `applyPolicy` clamp goes with them. An agent
+merges if its sequence carries a Merge step, and whether the change was reviewed is read off the
+same sequence. Task 7 must therefore *not* consult `config.autoMerge` — and the review a reviewer
+would have asked it to consult no longer exists.
+
+Two rules moved into `src/lib/agent-rules.ts` to hold what those flags used to:
+- nothing may run the project's own build or test script before Protected files has read the change
+- "reviewed" means reviewed *after the last step that writes*, so a Reviewed gate parked in an
+  earlier bucket no longer satisfies it
+
+**The name stays "agent".** The worker is an agent; what gets renamed is the PM agent (BP-342).
+
+**Tasks 2 and 5 rest on a false premise** and must be rewritten before they are executed:
+`--allowedTools` does not restrict tools under `--permission-mode bypassPermissions` — it is an
+allowlist for skipping the permission prompt, and nothing prompts. `--tools` is the restricting
+flag. See BP-341; confirm by hand before changing either call site.
+
 ## What this plan does not do
 
 - **Resume across a usage limit.** With several steps, hitting the ceiling at step five discards five committed steps and the attempt is refunded, so the task can cycle. The record from Task 8 is the prerequisite for fixing it; the fix is not here.

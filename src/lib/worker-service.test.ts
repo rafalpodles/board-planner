@@ -245,13 +245,13 @@ describe("assignmentsFor", () => {
     const configured = project({
       worker: {
         enabled: true,
-        policy: { autoMerge: true, model: "haiku", baseBranch: "main" },
-        policyOverrides: ["autoMerge", "model"],
+        policy: { taskTimeoutMs: 900000, model: "haiku", baseBranch: "main" },
+        policyOverrides: ["taskTimeoutMs", "model"],
       },
     });
 
     expect(assignmentsFor(reported, [configured], [PROJECT_ID])[0].policy).toEqual({
-      autoMerge: true,
+      taskTimeoutMs: 900000,
       model: "haiku",
     });
   });
@@ -388,8 +388,8 @@ describe("overriddenWorkerPolicy", () => {
   // Work policy belongs to the project now; a stray copy on a worker document must not travel
   it("never sends a field that is no longer a machine setting", () => {
     const legacy = worker({
-      policy: { pollIntervalMs: 5000, model: "haiku", autoMerge: true },
-      policyOverrides: ["pollIntervalMs", "model", "autoMerge"],
+      policy: { pollIntervalMs: 5000, model: "haiku", taskTimeoutMs: 900000 },
+      policyOverrides: ["pollIntervalMs", "model", "taskTimeoutMs"],
     });
 
     expect(overriddenWorkerPolicy(legacy)).toEqual({ pollIntervalMs: 5000 });
