@@ -7,8 +7,18 @@ import { buildGate } from "./build.js";
 import { testRunGate } from "./test-run.js";
 import { reviewGate } from "./review.js";
 
-const DEFAULT_MAX_LINES = 400;
-const DEFAULT_MAX_FILES = 10;
+/**
+ * What a block that names no parameter of its own falls back to: the project's own worker policy.
+ *
+ * Not the built-in constants. A project that pinned maxDiffLines to 2000 before the catalog existed
+ * still has that setting stored, and dropping to 400 would refuse a 900-line change it used to
+ * accept, with the setting that explains it no longer on the screen.
+ */
+export interface GateFallbacks {
+  maxDiffLines: number;
+  maxDiffFiles: number;
+  reviewModel: string;
+}
 
 // A value this worker cannot read is the built-in default, never NaN and never zero — a threshold
 // of zero refuses every change, which reads as a broken gate rather than a strict one.
@@ -33,7 +43,7 @@ export function gateFromEntry(
   entry: SnapshotEntry,
   runner: Runner,
   timeoutMs: number,
-  fallbackReviewModel: string
+  fallbacks: GateFallbacks
 ): Gate | null {
   const params = entry.params ?? {};
 
@@ -41,8 +51,8 @@ export function gateFromEntry(
     case "diff-size":
       return named(
         diffSizeGate(
-          numberOr(params.maxLines, DEFAULT_MAX_LINES),
-          numberOr(params.maxFiles, DEFAULT_MAX_FILES)
+          numberOr(params.maxLines, fallbacks.maxDiffLines),
+          numberOr(params.maxFiles, fallbacks.maxDiffFiles)
         ),
         entry.key
       );
@@ -56,7 +66,7 @@ export function gateFromEntry(
       return named(testRunGate(runner, timeoutMs), entry.key);
     case "review":
       return named(
-        reviewGate(runner, timeoutMs, params.model || fallbackReviewModel, params.focus),
+        reviewGate(runner, timeoutMs, params.model || fallbacks.reviewModel, params.focus),
         entry.key
       );
     default:

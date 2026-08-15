@@ -748,6 +748,35 @@ describe("runTask", () => {
     expect(h.workspace.destroy).not.toHaveBeenCalled();
   });
 
+  // Nothing read the timeout a step or a gate was handed, so folding both onto the gate's cap cut
+  // every model step from thirty minutes to ten without a single test noticing
+  it("bounds a model step by the project's step timeout, and a gate by the gate cap", async () => {
+    const h = harness({ config: { ...config, taskTimeoutMs: 1_800_000 } });
+
+    await runTask(h.deps, running("implement", "build"));
+
+    expect(h.executor.execute.mock.calls[0][0].brief.timeoutMs).toBe(1_800_000);
+    expect(h.gateFor.mock.calls[0][2]).toBe(600_000);
+  });
+
+  it("gives an entry only what is left of the ceiling when that is less than its cap", async () => {
+    let now = 0;
+    const h = harness({
+      config: { ...config, taskTimeoutMs: 1_800_000, runCeilingMs: 900_000 },
+      now: () => now,
+      executor: {
+        execute: vi.fn<Executor["execute"]>(async () => {
+          now = 600_000;
+          return { kind: "result", result: completed };
+        }),
+      },
+    });
+
+    await runTask(h.deps, running("implement", "build"));
+
+    expect(h.gateFor.mock.calls[0][2]).toBe(300_000);
+  });
+
   it("requeues when the run's ceiling passes mid-sequence", async () => {
     let now = 0;
     const h = harness({
