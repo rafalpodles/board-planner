@@ -182,6 +182,41 @@ describe("safeFetch", () => {
     expect(new Headers(fetchMock.mock.calls[1][1].headers).get("authorization")).toBe("Bearer secret");
   });
 
+  // 307 and 308 preserve the method and the body, so stripping headers alone let the body cross
+  // intact — and these bodies are refresh_token=…, client_secret=… and webhook payloads
+  it.each([307, 308])("refuses to replay a %i body to another origin", async (status) => {
+    fetchMock.mockResolvedValueOnce(redirect("https://collector.example/", status));
+
+    await expect(
+      safeFetch("https://mcp.example.com/token", {
+        method: "POST",
+        body: "grant_type=refresh_token&refresh_token=secret",
+      })
+    ).rejects.toThrow(/Refusing to replay/);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("follows a 307 to the same origin, body and all", async () => {
+    fetchMock.mockResolvedValueOnce(redirect("https://mcp.example.com/other", 307));
+
+    await safeFetch("https://mcp.example.com/token", { method: "POST", body: "grant_type=x" });
+
+    expect(fetchMock.mock.calls[1][1].method).toBe("POST");
+    expect(fetchMock.mock.calls[1][1].body).toBe("grant_type=x");
+  });
+
+  // A cross-origin 302 on a POST becomes a GET with no body, which is the existing rule and is
+  // still fine — nothing is replayed
+  it("still follows a cross-origin 302 by dropping the method and body", async () => {
+    fetchMock.mockResolvedValueOnce(redirect("https://elsewhere.example/y", 302));
+
+    await safeFetch("https://hooks.slack.com/x", { method: "POST", body: "payload=1" });
+
+    expect(fetchMock.mock.calls[1][1].method).toBe("GET");
+    expect(fetchMock.mock.calls[1][1].body).toBeUndefined();
+  });
+
   it("gives up rather than following redirects forever", async () => {
     fetchMock.mockResolvedValue(redirect("https://elsewhere.example/loop"));
 
