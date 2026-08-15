@@ -4,6 +4,7 @@ import { Delivery } from "./delivery.js";
 import { childEnv } from "./env.js";
 import { Runner } from "./exec.js";
 import { Executor } from "./executor.js";
+import { gitArgs, GIT_SAFE_ENV } from "./git-safety.js";
 import { Reporter } from "./reporter.js";
 import { SHUTDOWN_SIGNAL } from "./commands.js";
 import { scrub } from "./scrub.js";
@@ -54,14 +55,11 @@ function hitUsageLimit(verdict: GateResult): boolean {
   return /could not be completed/i.test(verdict.reason) && /usage limit reached/i.test(verdict.reason);
 }
 
-// Same neutralisation as diff.ts and delivery.ts: this worktree comes from a server-proposed,
-// locally-approved repository, but the approval happens once at bind time — its gitconfig still
-// fires on every git call unless each one, not just the one at bind time, is protected too.
 async function unfinishedWork(runner: Runner, worktreePath: string): Promise<string | null> {
-  const result = await runner.run("git", ["-c", "core.fsmonitor=false", "-c", "core.pager=cat", "status", "--porcelain"], {
+  const result = await runner.run("git", gitArgs(["status", "--porcelain"]), {
     cwd: worktreePath,
     timeoutMs: GIT_TIMEOUT_MS,
-    env: { ...childEnv(), GIT_CONFIG_NOSYSTEM: "1" },
+    env: { ...childEnv(), ...GIT_SAFE_ENV },
   });
   if (result.timedOut) return `\`git status\` timed out after ${GIT_TIMEOUT_MS}ms`;
   if (result.code !== 0) return `\`git status\` failed: ${result.stderr || result.stdout}`;

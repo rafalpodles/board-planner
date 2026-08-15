@@ -2,6 +2,7 @@ import { resolve, sep } from "path";
 import { WorkerConfig } from "./config.js";
 import { childEnv } from "./env.js";
 import { Runner } from "./exec.js";
+import { gitArgs, GIT_SAFE_ENV } from "./git-safety.js";
 
 const GIT_TIMEOUT_MS = 60_000;
 
@@ -40,19 +41,12 @@ export function createWorkspace(config: WorkerConfig, runner: Runner): Workspace
     return path;
   }
 
-  // Same neutralisation as diff.ts, delivery.ts, repos.ts and pipeline.ts: config.repoPath was
-  // approved once by bindRepository, but its gitconfig still fires on every git call after that,
-  // not just the one at bind time.
   async function git(args: string[]): Promise<string> {
-    const result = await runner.run(
-      "git",
-      ["-c", "core.fsmonitor=false", "-c", "core.pager=cat", ...args],
-      {
-        cwd: config.repoPath,
-        timeoutMs: GIT_TIMEOUT_MS,
-        env: { ...childEnv(), GIT_CONFIG_NOSYSTEM: "1" },
-      }
-    );
+    const result = await runner.run("git", gitArgs(args), {
+      cwd: config.repoPath,
+      timeoutMs: GIT_TIMEOUT_MS,
+      env: { ...childEnv(), ...GIT_SAFE_ENV },
+    });
     if (result.timedOut) {
       throw new Error(`git ${args[0]} timed out after ${GIT_TIMEOUT_MS}ms`);
     }

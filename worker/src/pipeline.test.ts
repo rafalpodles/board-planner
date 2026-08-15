@@ -5,6 +5,7 @@ import { WorkerConfig } from "./config.js";
 import { Delivery } from "./delivery.js";
 import { CommandResult, Runner } from "./exec.js";
 import { Executor } from "./executor.js";
+import { gitArgs } from "./git-safety.js";
 import { Reporter } from "./reporter.js";
 import { createTelemetry, isOutcome, isQuota, Progress, TelemetryUpdate } from "./telemetry.js";
 import { Workspace } from "./workspace.js";
@@ -287,7 +288,7 @@ describe("runTask", () => {
 
     expect(runner.run).toHaveBeenCalledWith(
       "git",
-      ["-c", "core.fsmonitor=false", "-c", "core.pager=cat", "status", "--porcelain"],
+      gitArgs(["status", "--porcelain"]),
       expect.objectContaining({
         cwd: "/wt",
         env: expect.objectContaining({ GIT_CONFIG_NOSYSTEM: "1" }),
