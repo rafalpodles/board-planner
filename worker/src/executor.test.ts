@@ -106,6 +106,26 @@ describe("createExecutor", () => {
     expect(outcome).toEqual({ kind: "result", result: FIXTURE_RESULT });
   });
 
+  // Bash was in the list only so the agent could commit; the worker does that now
+  it("gives the implementer no shell", async () => {
+    const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
+
+    await createExecutor(config, runner).execute(task, "/wt");
+
+    const args = run.mock.calls[0][1] as string[];
+    expect(args[args.indexOf("--tools") + 1]).toBe("Read Edit Write Grep Glob");
+  });
+
+  // An agent told to commit and unable to would report itself blocked
+  it("tells the agent the worker commits, since it no longer can", async () => {
+    const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
+
+    await createExecutor(config, runner).execute(task, "/wt");
+
+    const args = run.mock.calls[0][1] as string[];
+    expect(args[args.indexOf("--append-system-prompt") + 1]).toMatch(/Do not commit/);
+  });
+
   it("asks the CLI for a stream, with the --verbose it refuses to stream without", async () => {
     const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
 
