@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, cleanup, act } from "@testing-library/react";
+import { render, screen, cleanup, act, fireEvent } from "@testing-library/react";
 import { PropertyRail } from "./PropertyRail";
 import type { TaskDraft } from "./useTaskEditor";
 import { ApiCustomField, ApiSprint, ApiUser } from "@/types";
@@ -170,12 +170,64 @@ describe("PropertyRail", () => {
     expect(set).toHaveBeenCalledWith("customFieldValues", { f2: "XL" });
   });
 
+  // The rail names the field on the left, so the control shows no label of its own —
+  // which is exactly how a switch ends up with no accessible name at all
+  it("gives a yes/no field a switch that still carries the field's name", async () => {
+    const set = renderRail({
+      customFields: [field({ _id: "f4", name: "Spike?", fieldType: "checkbox", options: [] })],
+    });
+    const toggle = screen.getByRole("switch", { name: "Spike?" }) as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+    await act(async () => toggle.click());
+    expect(set).toHaveBeenCalledWith("customFieldValues", { f4: true });
+  });
+
   it("rounds a number field's floating-point value for display", () => {
     renderRail({
       customFields: [field({ _id: "f3", name: "Estimate", fieldType: "number", options: [] })],
       draft: { ...draft, customFieldValues: { f3: 0.6000000000000001 } },
     });
-    expect(screen.getByText("0.6")).toBeTruthy();
+    expect((screen.getByLabelText("Estimate") as HTMLInputElement).value).toBe("0.6");
+  });
+
+  // The rail used to be a display, so rounding there cost nothing. It is an editor now:
+  // committing the rounded value would quietly drop the precision the task actually holds
+  it("shows a number field's real value once it is being edited", async () => {
+    renderRail({
+      customFields: [field({ _id: "f3", name: "Estimate", fieldType: "number", options: [] })],
+      draft: { ...draft, customFieldValues: { f3: 0.6000000000000001 } },
+    });
+    const input = screen.getByLabelText("Estimate") as HTMLInputElement;
+    await act(async () => fireEvent.focus(input));
+    expect(input.value).toBe("0.6000000000000001");
+    await act(async () => fireEvent.blur(input));
+    expect(input.value).toBe("0.6");
+  });
+
+  // A field with nothing to choose from is typed in the row; a popup would put a second
+  // box on top of the one already showing the value
+  it("edits a free-text field in the row rather than behind a picker", async () => {
+    const set = renderRail({
+      customFields: [field({ _id: "f5", name: "Notes", fieldType: "text", options: [] })],
+    });
+    const input = screen.getByLabelText("Notes") as HTMLInputElement;
+    expect(input.placeholder).toBe("Empty");
+    await act(async () =>
+      fireEvent.change(input, { target: { value: "a note" } })
+    );
+    expect(set).toHaveBeenCalledWith("customFieldValues", { f5: "a note" });
+  });
+
+  it("stores a number field as a number, and clears it to empty rather than zero", async () => {
+    const set = renderRail({
+      customFields: [field({ _id: "f3", name: "Estimate", fieldType: "number", options: [] })],
+      draft: { ...draft, customFieldValues: { f3: 3 } },
+    });
+    const input = screen.getByLabelText("Estimate") as HTMLInputElement;
+    await act(async () => fireEvent.change(input, { target: { value: "8" } }));
+    expect(set).toHaveBeenCalledWith("customFieldValues", { f3: 8 });
+    await act(async () => fireEvent.change(input, { target: { value: "" } }));
+    expect(set).toHaveBeenCalledWith("customFieldValues", { f3: "" });
   });
 
   it("announces a picker row as the listbox it opens", async () => {

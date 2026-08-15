@@ -13,10 +13,13 @@ function rowClass(touch: boolean, align: "center" | "start") {
 function RowBody({
   label,
   align,
+  anchor,
   children,
 }: {
   label: string;
   align: "center" | "start";
+  /** Marks the value column so a picker's panel opens under it, not under the label */
+  anchor?: boolean;
   children: ReactNode;
 }) {
   return (
@@ -26,7 +29,12 @@ function RowBody({
       >
         {label}
       </span>
-      <span className="min-w-0 flex-1 text-sm">{children}</span>
+      <span
+        data-combobox-anchor={anchor ? "" : undefined}
+        className="min-w-0 flex-1 text-sm"
+      >
+        {children}
+      </span>
     </>
   );
 }
@@ -164,7 +172,7 @@ export function ComboboxRow(props: ComboboxRowSingleProps | ComboboxRowMultiProp
         triggerClassName={trigger}
       >
         {(selected) => (
-          <RowBody label={label} align={align}>
+          <RowBody label={label} align={align} anchor>
             {props.children(selected)}
           </RowBody>
         )}
@@ -182,7 +190,7 @@ export function ComboboxRow(props: ComboboxRowSingleProps | ComboboxRowMultiProp
       triggerClassName={trigger}
     >
       {(selected) => (
-        <RowBody label={label} align={align}>
+        <RowBody label={label} align={align} anchor>
           {props.children(selected)}
         </RowBody>
       )}

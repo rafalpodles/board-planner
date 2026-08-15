@@ -1,6 +1,6 @@
 "use client";
 
-import type { CSSProperties } from "react";
+import { useState, type CSSProperties } from "react";
 import {
   ApiCustomField,
   ApiProjectCategory,
@@ -15,6 +15,7 @@ import {
 import { activeFields, orderedOptions, sortedFields } from "@/lib/custom-fields";
 import { categoryColor } from "@/lib/category-colors";
 import { roundForDisplay } from "@/lib/estimates";
+import { Switch } from "@/components/ui/Switch";
 import { Avatar, PriorityBars, SectionLabel } from "./atoms";
 import {
   ComboboxRow,
@@ -295,6 +296,7 @@ interface CustomFieldRowProps {
 }
 
 function CustomFieldRow({ field, value, onChange, touch }: CustomFieldRowProps) {
+  const [editing, setEditing] = useState(false);
   const options = orderedOptions(field);
   // The form marked required fields; losing the marker with the form would make a
   // required field indistinguishable from an optional one
@@ -303,15 +305,14 @@ function CustomFieldRow({ field, value, onChange, touch }: CustomFieldRowProps) 
   if (field.fieldType === "checkbox") {
     return (
       <FieldRow label={label} touch={touch}>
-        <label className="flex cursor-pointer items-center gap-2">
-          <input
-            type="checkbox"
-            checked={!!value}
-            onChange={(e) => onChange(e.target.checked)}
-            className="focus-ring rounded border-border"
-          />
-          <span className="text-text-muted">{value ? "Yes" : "No"}</span>
-        </label>
+        {/* The row already names the field on its left, so the switch carries the name
+            for a screen reader and nothing visible */}
+        <Switch
+          labelHidden
+          label={label}
+          checked={!!value}
+          onChange={onChange}
+        />
       </FieldRow>
     );
   }
@@ -386,38 +387,46 @@ function CustomFieldRow({ field, value, onChange, touch }: CustomFieldRowProps) 
   const inputType =
     field.fieldType === "number" ? "number" : field.fieldType === "date" ? "date" : "text";
 
+  // Typed in the row rather than in a popup: there is nothing to choose from, so a panel
+  // only put a second box on top of the one you were already looking at. Chromeless until
+  // hovered or focused, so a column of values does not read as a column of form fields.
+  //
+  // Rounded only while it is not being edited. roundForDisplay says never to feed its
+  // result back into anything that stores, and an editable control does exactly that —
+  // one keystroke on a field holding 1.005 would commit the 1.01 it was showing.
+  const shown =
+    value === undefined || value === ""
+      ? ""
+      : field.fieldType === "number" && !editing
+        ? String(roundForDisplay(Number(value)))
+        : String(value);
+
   return (
-    <PickerRow
-      label={label}
-      touch={touch}
-      value={
-        value === undefined || value === "" ? (
-          <EmptyValue>Empty</EmptyValue>
-        ) : field.fieldType === "number" ? (
-          String(roundForDisplay(Number(value)))
-        ) : (
-          String(value)
-        )
-      }
-      panel={() => (
-        <div className="p-1">
-          <input
-            type={inputType}
-            value={(value as string) ?? ""}
-            autoFocus
-            onChange={(e) =>
-              onChange(
-                field.fieldType === "number"
-                  ? e.target.value
-                    ? Number(e.target.value)
-                    : ""
-                  : e.target.value
-              )
-            }
-            className="focus-ring w-full rounded-lg border border-border bg-bg-input px-3 py-2 text-sm"
-          />
-        </div>
-      )}
-    />
+    <FieldRow label={label} touch={touch}>
+      <input
+        type={inputType}
+        aria-label={label}
+        value={shown}
+        placeholder="Empty"
+        onFocus={() => setEditing(true)}
+        onBlur={() => setEditing(false)}
+        // A number input takes the wheel while focused, so scrolling the rail past a
+        // field you had just clicked silently rewrote it
+        onWheel={(e) => e.currentTarget.blur()}
+        onChange={(e) =>
+          onChange(
+            field.fieldType === "number"
+              ? e.target.value
+                ? Number(e.target.value)
+                : ""
+              : e.target.value,
+          )
+        }
+        className={`focus-ring -mx-2 w-[calc(100%+1rem)] rounded-lg border border-transparent
+          bg-transparent px-2 text-sm transition-colors placeholder:text-text-muted
+          hover:border-border hover:bg-bg-input focus:border-border focus:bg-bg-input
+          ${touch ? "min-h-[36px]" : "py-1"}`}
+      />
+    </FieldRow>
   );
 }

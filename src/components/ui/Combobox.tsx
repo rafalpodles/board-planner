@@ -117,10 +117,31 @@ export function Combobox(props: ComboboxProps) {
   const selectedIndexRef = useRef(selectedIndex);
   selectedIndexRef.current = selectedIndex;
 
-  // Measured before paint so the panel never shows at the wrong place first
+  // Measured before paint so the panel never shows at the wrong place first.
+  //
+  // Horizontally the panel lines up with whatever inside the trigger carries
+  // `data-combobox-anchor`, falling back to the trigger itself. A rail row makes the
+  // whole row the button, label included, so aligning to the button put the list under
+  // the field's name instead of under the value it is about to replace. Vertically it
+  // still hangs off the trigger, so the panel clears the row rather than the text.
   useLayoutEffect(() => {
     if (!open) return;
-    setRect(anchor.current?.getBoundingClientRect() ?? null);
+    const trigger = anchor.current?.getBoundingClientRect();
+    if (!trigger) {
+      setRect(null);
+      return;
+    }
+    const inner = anchor.current
+      ?.querySelector("[data-combobox-anchor]")
+      ?.getBoundingClientRect();
+    setRect(
+      new DOMRect(
+        inner?.left ?? trigger.left,
+        trigger.top,
+        inner?.width ?? trigger.width,
+        trigger.height,
+      ),
+    );
     setActive(Math.max(0, selectedIndexRef.current));
   }, [open]);
 

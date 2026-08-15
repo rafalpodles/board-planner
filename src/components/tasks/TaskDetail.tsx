@@ -321,6 +321,7 @@ function TaskDetailView({
           <MobileSummary
             draft={draft}
             assignee={assignee}
+            categories={project.categories || []}
             onOpenDetails={() => setDetailsOpen(true)}
           />
 

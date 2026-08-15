@@ -5,6 +5,7 @@ import { useApi } from "@/hooks/use-api";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { MultiSelect } from "@/components/ui/MultiSelect";
+import { Switch } from "@/components/ui/Switch";
 import { MarkdownEditor } from "@/components/ui/MarkdownEditor";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
@@ -383,18 +384,14 @@ export function TaskForm({
             const val = customFieldValues[field._id];
             if (field.fieldType === "checkbox") {
               return (
-                <label key={field._id} className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={!!val}
-                    onChange={(e) =>
-                      setCustomFieldValues((prev) => ({ ...prev, [field._id]: e.target.checked }))
-                    }
-                    className="focus-ring rounded border-border"
-                  />
-                  {field.name}
-                  {field.required && <span className="text-danger">*</span>}
-                </label>
+                <Switch
+                  key={field._id}
+                  label={field.required ? `${field.name} *` : field.name}
+                  checked={!!val}
+                  onChange={(checked) =>
+                    setCustomFieldValues((prev) => ({ ...prev, [field._id]: checked }))
+                  }
+                />
               );
             }
             if (field.fieldType === "dropdown") {
