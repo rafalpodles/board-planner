@@ -27,6 +27,17 @@ const REVIEWER_PROMPT = [
   "is itself a reason to reject.",
 ].join(" ");
 
+// Appended after the untrusted-data clause, never before it. An agent can carry two review gates —
+// the shipped "With security review" carries security and general — and without this they run the
+// identical prompt twice and are paid for twice.
+const FOCUS: Record<string, string> = {
+  general: "",
+  security:
+    " Look specifically for injection, secret handling, authorization and path traversal, and say which one the change gets wrong.",
+  acceptance:
+    " Judge only whether the change satisfies the task's acceptance criteria, and say which one it misses.",
+};
+
 interface Verdict {
   approved: boolean;
   reason: string;
@@ -92,8 +103,14 @@ function buildPrompt(context: GateContext): string {
 
 // reviewModel is its own policy field, never policy.model: turning the implementer down for cost
 // must not quietly hand the last gate before a merge to a weaker reviewer
-export function reviewGate(runner: Runner, timeoutMs: number, reviewModel?: string): Gate {
+export function reviewGate(
+  runner: Runner,
+  timeoutMs: number,
+  reviewModel?: string,
+  focus?: string
+): Gate {
   const model = modelOr(reviewModel, DEFAULT_REVIEW_MODEL);
+  const prompt = `${REVIEWER_PROMPT}${FOCUS[focus ?? "general"] ?? ""}`;
   return {
     name: "review",
     async run(context) {
@@ -137,7 +154,7 @@ export function reviewGate(runner: Runner, timeoutMs: number, reviewModel?: stri
           "--json-schema",
           JSON.stringify(VERDICT_SCHEMA),
           "--append-system-prompt",
-          REVIEWER_PROMPT,
+          prompt,
           // The reviewer's whole value is that it only reads; --allowedTools did not make that true
           "--tools",
           "Read Grep Glob",
