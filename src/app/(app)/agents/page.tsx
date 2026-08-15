@@ -92,6 +92,7 @@ export default function AgentsPage() {
           <AgentList
             rows={store.allAgents.filter((a) => a.scope === "user")}
             empty="You have not created an agent yet."
+            onDelete={store.removeAgent}
           />
         </Section>
         <Section
@@ -101,6 +102,7 @@ export default function AgentsPage() {
           <AgentList
             rows={store.allAgents.filter((a) => a.scope === "project")}
             empty="No project has its own agent."
+            onDelete={store.removeAgent}
           />
         </Section>
         <Section title="Global" hint="Ship with Board Planner. Available on every project.">
@@ -118,7 +120,7 @@ export default function AgentsPage() {
           title="Gates"
           hint="Checks that can stop a change. A gate never edits anything — it only says yes or no."
         >
-          <BlockList rows={store.allGates} />
+          <BlockList rows={store.allGates} onDelete={store.removeBlock} />
         </Section>
       </div>
 
@@ -132,7 +134,7 @@ export default function AgentsPage() {
           title="Steps"
           hint="Work an agent does. Each step is its own session, with a fresh head."
         >
-          <BlockList rows={store.allSteps} />
+          <BlockList rows={store.allSteps} onDelete={store.removeBlock} />
         </Section>
       </div>
 

@@ -67,6 +67,24 @@ export const DELETE = withAuth(async (_request, { params, user }) => {
     return NextResponse.json({ error: "Not yours to delete" }, { status: 403 });
   }
 
+  // A project pointing at a deleted agent would claim a task and have nothing to run; a task
+  // pointing at one would fail at the machine. Both are better refused here.
+  const { Project } = await import("@/models/project");
+  const { Task } = await import("@/models/task");
+  const projects = await Project.find({ "worker.agent": agent._id }, "name").lean();
+  const tasks = await Task.countDocuments({ agent: agent._id });
+
+  if (projects.length > 0 || tasks > 0) {
+    const uses = [
+      ...projects.map((p) => p.name),
+      ...(tasks > 0 ? [`${tasks} task${tasks === 1 ? "" : "s"}`] : []),
+    ];
+    return NextResponse.json(
+      { error: `Still in use by ${uses.join(", ")}. Point those elsewhere first.` },
+      { status: 409 }
+    );
+  }
+
   await agent.deleteOne();
   return NextResponse.json({ ok: true });
 });
