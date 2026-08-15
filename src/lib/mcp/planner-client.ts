@@ -17,8 +17,12 @@ export interface McpProject {
  * An allowlist rather than the three values that turned out to be dangerous: enumerating those is
  * the shape that failed here once already. Everything that reaches this is a Mongo ObjectId or a
  * project key, and `get_project` — the one tool taking a free-form identifier — already falls back
- * to a key lookup when this throws. The `typeof` guard is not redundant: `RegExp.test` coerces, so
- * `[".."]` would otherwise pass and stringify back to a dot segment.
+ * to a key lookup when this throws.
+ *
+ * The `typeof` is a boundary check, not part of the guard: values arrive from JSON despite the
+ * signature, and `RegExp.test` would coerce them. It carries no security weight on its own — the
+ * allowlist already refuses anything a coerced value could stringify into — and removing it leaves
+ * the suite green. It stays so a `Symbol` reports this error instead of a coercion TypeError.
  */
 const SAFE_SEGMENT = /^[A-Za-z0-9_-]+$/;
 
