@@ -2,6 +2,7 @@ import { existsSync, readFileSync, statSync } from "fs";
 import { join } from "path";
 import { Bootstrap } from "./config.js";
 import { Identity, loadIdentity, PROTOCOL_VERSION, Store } from "./registration.js";
+import { RunRecord } from "./run-record.js";
 import { AgentSnapshot, ClaimedTask, SnapshotEntry } from "./types.js";
 
 type Fetch = typeof globalThis.fetch;
@@ -33,6 +34,8 @@ export interface ApiClient {
   // `applied` is the server's answer to "did this land": false when it wrote nothing, because the
   // run no longer holds the task or a newer event got there first
   postEvent(event: PhaseEvent): Promise<{ applied: boolean }>;
+  /** What a run leaves behind once execution.runId is cleared and nothing else remembers it. */
+  postRun(projectId: string, record: RunRecord): Promise<void>;
 }
 
 // A task key is server-controlled text that the worker turns into a directory name under its own
@@ -311,6 +314,15 @@ export function createApiClient(
             ? raw.execution.runId
             : runId,
       };
+    },
+
+    async postRun(projectId, record) {
+      // The machine is added here rather than travelling in the record: this is where the identity
+      // already is, and "which machine ran this" is the first question a bad run raises.
+      await send(projectId, "/runs", "POST", {
+        ...record,
+        workerId: identityOrThrow().workerId,
+      });
     },
 
     async setStatus(projectId, taskId, status) {

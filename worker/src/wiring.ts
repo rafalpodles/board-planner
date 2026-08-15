@@ -419,6 +419,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
           executor: createExecutor(taskConfig, deps.runner),
           collectDiff,
           gateFor: gateFromEntry,
+          recordRun: (project, record) => outbox.add({ kind: "run", projectId: project, record }),
           runner: deps.runner,
           signal,
           telemetry,

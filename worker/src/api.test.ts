@@ -175,6 +175,30 @@ describe("createApiClient", () => {
     await expect(api.claim("CP", "run-1")).resolves.toBeNull();
   });
 
+  // The route is src/app/api/projects/[projectId]/runs; it takes the worker from the body
+  it("posts a run record to the project's own runs endpoint, naming this machine", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 201, json: async () => ({}) });
+    const api = createApiClient(config, fetchMock as never, identityStore);
+
+    await api.postRun("CP", {
+      taskId: "t1",
+      taskKey: "CP-1",
+      agentId: "a1",
+      agentName: "Default",
+      outcome: "delivered",
+      refusedBy: "",
+      detail: "",
+      startedAt: "2026-08-15T00:00:00.000Z",
+      finishedAt: "2026-08-15T00:01:00.000Z",
+      costUsd: 0.5,
+    });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://app.example.com/api/projects/CP/runs");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toMatchObject({ taskKey: "CP-1", workerId: "w1" });
+  });
+
   it("claims against the project-scoped url", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 204 });
     const api = createApiClient(config, fetchMock as never, identityStore);
