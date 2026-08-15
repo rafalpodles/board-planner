@@ -62,6 +62,21 @@ export function useStore() {
       await load();
     },
 
+    removeAgent: async (agentId: string) => {
+      await api.del(`/api/agents/${agentId}`);
+      await load();
+    },
+
+    removeBlock: async (blockId: string) => {
+      await api.del(`/api/agent-blocks/${blockId}`);
+      await load();
+    },
+
+    renameAgent: async (agentId: string, name: string, description: string) => {
+      await api.put(`/api/agents/${agentId}`, { name, description });
+      await load();
+    },
+
     reload: load,
   };
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import { ApiAgent, ApiAgentBlock } from "@/types";
 import { BUCKETS, CAPABILITIES, gateKindByKey } from "../catalog";
 
@@ -35,18 +36,59 @@ export function blockSummary(block: ApiAgentBlock): string {
     .join(" · ");
 }
 
-export function BlockList({ rows }: { rows: ApiAgentBlock[] }) {
+function DeleteButton({ label, onDelete }: { label: string; onDelete: () => Promise<void> }) {
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  return (
+    <>
+      <button
+        disabled={busy}
+        aria-label={`Delete ${label}`}
+        onClick={async (e) => {
+          e.preventDefault();
+          setError("");
+          setBusy(true);
+          try {
+            await onDelete();
+          } catch (err) {
+            setError(err instanceof Error ? err.message : "Could not delete");
+          } finally {
+            setBusy(false);
+          }
+        }}
+        className="focus-ring shrink-0 rounded p-1 text-text-muted transition-colors hover:text-danger disabled:opacity-50"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4">
+          <path d="M6 18L18 6M6 6l12 12" strokeLinecap="round" />
+        </svg>
+      </button>
+      {error && <p className="mt-1 w-full text-[12px] text-danger">{error}</p>}
+    </>
+  );
+}
+
+export function BlockList({
+  rows,
+  onDelete,
+}: {
+  rows: ApiAgentBlock[];
+  onDelete: (blockId: string) => Promise<void>;
+}) {
   return (
     <ul className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-bg-card">
       {rows.map((row) => {
         const summary = blockSummary(row);
         return (
           <li key={row.key} className="px-3.5 py-3">
-            <div className="flex items-baseline gap-2">
+            <div className="flex flex-wrap items-baseline gap-2">
               <span className="text-[14px] font-medium">{row.name}</span>
               {row.builtIn && <DefaultBadge />}
               {summary && (
                 <span className="ml-auto shrink-0 text-[11px] text-text-muted">{summary}</span>
+              )}
+              {!row.builtIn && (
+                <DeleteButton label={row.name} onDelete={() => onDelete(row._id)} />
               )}
             </div>
             <p className="mt-0.5 text-[13px] text-text-muted">{row.description}</p>
@@ -62,7 +104,15 @@ function countOf(agent: ApiAgent): string {
   return count === 0 ? "Nothing in it yet" : `${count} in sequence`;
 }
 
-export function AgentList({ rows, empty }: { rows: ApiAgent[]; empty: string }) {
+export function AgentList({
+  rows,
+  empty,
+  onDelete,
+}: {
+  rows: ApiAgent[];
+  empty: string;
+  onDelete?: (agentId: string) => Promise<void>;
+}) {
   if (rows.length === 0) {
     return (
       <p className="rounded-lg border border-dashed border-border px-3.5 py-6 text-center text-[13px] text-text-muted">
@@ -85,6 +135,9 @@ export function AgentList({ rows, empty }: { rows: ApiAgent[]; empty: string }) 
                 <span className="text-[11px] text-text-muted">{agent.projectName}</span>
               )}
               <span className="ml-auto shrink-0 text-[11px] text-text-muted">{countOf(agent)}</span>
+              {onDelete && !agent.builtIn && (
+                <DeleteButton label={agent.name} onDelete={() => onDelete(agent._id)} />
+              )}
             </div>
             <p className="mt-0.5 text-[13px] text-text-muted">
               {agent.description || "No description yet."}

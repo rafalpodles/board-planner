@@ -504,7 +504,8 @@ export interface ProjectWorkerPolicy {
 }
 
 export interface ProjectWorkerConfig {
-  agent?: string | null;
+  // An ObjectId in the document, a string once it has been through JSON. Both readers stringify.
+  agent?: string | Types.ObjectId | null;
   enabled: boolean;
   policy: ProjectWorkerPolicy;
   policyOverrides: string[];
