@@ -119,6 +119,42 @@ describe("the forms the first table missed", () => {
     expect(isPrivateAddress("::93.184.216.34")).toBe(true);
   });
 
+  // Every row above probes the base of its range, so a mask narrowed to an exact match keeps them
+  // all green. These sit inside the range but away from its base, which is what pins the width.
+  it.each([
+    ["2001:1ff::1", "the far end of 2001::/23"],
+    ["2001:2::1", "inside 2001::/23, not the base"],
+    ["2001:db8:ffff:ffff::1", "the far end of the documentation prefix"],
+    ["feff::1", "the far end of fec0::/10"],
+    ["febf::1", "the far end of fe80::/10"],
+    ["64:ff9b:1:ffff::1", "the far end of the local-use NAT64 /48"],
+    ["100::ffff:0:0:1", "inside the discard prefix"],
+    ["fdff:ffff::1", "the far end of fc00::/7"],
+    ["3fff:0fff::1", "the far end of 3fff::/20"],
+    ["5f00:ffff::1", "inside 5f00::/16"],
+    ["2620:4f:8000:ffff::1", "inside the AS112-v6 /48"],
+    ["192.31.196.7", "AS112-v4"],
+    ["192.52.193.7", "AMT"],
+    ["192.175.48.7", "direct-delegation AS112"],
+  ])("refuses %s — %s", (host) => {
+    expect(isPrivateAddress(host)).toBe(true);
+  });
+
+  // And these sit just outside, so a mask widened the other way fails too
+  it.each([
+    ["2001:200::1", "just past 2001::/23"],
+    ["2001:db9::1", "just past the documentation prefix"],
+    ["100:0:0:1::1", "just past 100::/64"],
+    ["fe00::1", "below fc00::/7"],
+    ["3ffe::1", "just below 3fff::/20"],
+    ["3fff:1000::1", "just past the /20 inside 3fff::"],
+    ["5f01::1", "just past 5f00::/16"],
+    ["2620:4f:8001::1", "just past the AS112-v6 /48"],
+    ["192.31.197.1", "just past AS112-v4"],
+  ])("still allows %s — %s", (host) => {
+    expect(isPrivateAddress(host)).toBe(false);
+  });
+
   // Without this the additions above could be a blanket "refuse IPv6" and every test would pass
   it.each([
     "2606:4700:4700::1111",

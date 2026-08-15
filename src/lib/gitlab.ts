@@ -1,5 +1,5 @@
 import { escapeRegex, ParsedPR } from "./github";
-import { safeFetch, logUpstreamFailure } from "./safe-fetch";
+import { safeFetch, logUpstreamFailure, readBoundedJson, MAX_RESPONSE_BYTES } from "./safe-fetch";
 
 interface GitLabMR {
   iid: number;
@@ -26,7 +26,7 @@ export async function fetchMergeRequests(
     await logUpstreamFailure("GitLab", res);
     throw new Error(`GitLab API `);
   }
-  return res.json();
+  return readBoundedJson(res, MAX_RESPONSE_BYTES);
 }
 
 // Same matching rules as GitHub PRs: project key + number in branch or title
@@ -93,7 +93,7 @@ async function gitlabGet<T>(url: string, token: string): Promise<T> {
     await logUpstreamFailure("GitLab", res);
     throw new Error(`GitLab API `);
   }
-  return res.json();
+  return readBoundedJson(res, MAX_RESPONSE_BYTES);
 }
 
 // Branch search on GitLab is case-sensitive, so the whole (capped) page is filtered

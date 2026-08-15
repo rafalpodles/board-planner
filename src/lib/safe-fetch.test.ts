@@ -192,9 +192,6 @@ describe("safeFetch", () => {
 // BP-317: the 500 characters that reach the log were sliced off a string the process had already
 // materialised in full, so an integration host answering an error with a huge body could exhaust
 // the container while being politely refused.
-// BP-317: the 500 characters that reach the log were sliced off a string the process had already
-// materialised in full, so an integration host answering an error with a huge body could exhaust
-// the container while being politely refused.
 describe("reading an upstream error body", () => {
   // Large but finite on purpose: an endless stream would make an unbounded read hang rather than
   // fail, and a test that hangs is a worse signal than one that fails
@@ -228,6 +225,46 @@ describe("reading an upstream error body", () => {
     await readBoundedText(response, 2048);
 
     expect(cancelled).toHaveBeenCalled();
+  });
+
+  // The budget was tested before each read, so the last chunk was taken whole and the allocation
+  // bound was maxBytes plus one chunk. Both existing cases used 1 KB chunks against a 4 KB budget,
+  // so total landed exactly on the bound and the final trim was a no-op (BP-317 review).
+  it("cuts a chunk that is larger than the whole budget", async () => {
+    const oversized = new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("z".repeat(1_000_000)));
+          controller.close();
+        },
+      }),
+      { status: 500 }
+    );
+
+    expect((await readBoundedText(oversized, 4096)).length).toBe(4096);
+  });
+
+  // A character split by the cut is dropped rather than becoming U+FFFD in the log
+  it("does not leave a replacement character where it stopped", async () => {
+    const multibyte = new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("ą".repeat(100)));
+          controller.close();
+        },
+      }),
+      { status: 500 }
+    );
+
+    // 5 bytes is two whole two-byte characters and half of a third
+    expect(await readBoundedText(multibyte, 5)).toBe("ąą");
+  });
+
+  it("does not throw when the body cannot be read at all", async () => {
+    const response = new Response("something", { status: 500 });
+    response.body!.getReader(); // locks it
+
+    await expect(readBoundedText(response, 4096)).resolves.toBe("");
   });
 
   it("returns a short body whole", async () => {

@@ -17,7 +17,10 @@ const BLOCKED_V4: Cidr[] = [
   ["172.16.0.0", 12],
   ["192.0.0.0", 24], // IETF protocol assignments
   ["192.0.2.0", 24], // TEST-NET-1
+  ["192.31.196.0", 24], // AS112-v4
+  ["192.52.193.0", 24], // AMT
   ["192.88.99.0", 24], // 6to4 relay anycast, deprecated
+  ["192.175.48.0", 24], // direct delegation AS112
   ["192.168.0.0", 16],
   ["198.18.0.0", 15], // benchmarking
   ["198.51.100.0", 24], // TEST-NET-2
@@ -141,6 +144,12 @@ function isPrivateV6(groups: number[]): boolean {
   // is not routable — and 2001:db8::/32, which is documentation and should never be a destination
   if (g0 === 0x2001 && (g1 & 0xfe00) === 0) return true;
   if (g0 === 0x2001 && g1 === 0x0db8) return true;
+
+  // 3fff::/20 documentation, RFC 9637 — twenty bits is all of g0 and the top four of g1, so a
+  // mask on g0 alone would swallow 3ff0::–3ffe::, which is somebody else's
+  if (g0 === 0x3fff && (g1 & 0xf000) === 0) return true;
+  if (g0 === 0x5f00) return true; // 5f00::/16 SRv6 SIDs, RFC 9602
+  if (g0 === 0x2620 && g1 === 0x4f && g2 === 0x8000) return true; // 2620:4f:8000::/48 AS112-v6
 
   return false;
 }

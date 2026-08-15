@@ -1,4 +1,4 @@
-import { safeFetch } from "@/lib/safe-fetch";
+import { safeFetch, readBoundedJson, MAX_RESPONSE_BYTES } from "@/lib/safe-fetch";
 
 // Mirrors the carve-out isAllowedMcpServerUrl makes for local MCP servers outside production
 const MCP_DESTINATION = { allowLoopback: process.env.NODE_ENV !== "production" };
@@ -107,7 +107,7 @@ export class McpClient {
       const contentType = res.headers.get("content-type") || "";
       const message = contentType.includes("text/event-stream")
         ? await readSseResponse(res, id)
-        : ((await res.json()) as JsonRpcMessage);
+        : await readBoundedJson<JsonRpcMessage>(res, MAX_RESPONSE_BYTES);
       if (message?.error) {
         throw new Error(`MCP error ${message.error.code}: ${message.error.message}`);
       }
@@ -142,17 +142,25 @@ export class McpClient {
  */
 const MAX_SSE_BUFFER_BYTES = 4 * 1024 * 1024;
 
+/** Bytes off the socket, not `buffer.length` — that counts UTF-16 units, which a peer sending
+ * three-byte characters can stretch to three times the advertised budget (BP-317 review). */
+function bytesOf(chunk: Uint8Array | undefined): number {
+  return chunk?.byteLength ?? 0;
+}
+
 async function readSseResponse(res: Response, id: number): Promise<JsonRpcMessage> {
   if (!res.body) throw new Error("Empty SSE response body");
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let bytesBuffered = 0;
   try {
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
+      bytesBuffered += bytesOf(value);
       buffer += decoder.decode(value, { stream: true });
-      if (buffer.length > MAX_SSE_BUFFER_BYTES) {
+      if (bytesBuffered > MAX_SSE_BUFFER_BYTES) {
         throw new Error(
           `SSE response exceeded ${MAX_SSE_BUFFER_BYTES} bytes without a complete event`
         );
@@ -161,6 +169,9 @@ async function readSseResponse(res: Response, id: number): Promise<JsonRpcMessag
       while ((sep = buffer.match(/\r?\n\r?\n/))) {
         const rawEvent = buffer.slice(0, sep.index);
         buffer = buffer.slice((sep.index ?? 0) + sep[0].length);
+        // The budget is on one unterminated event, not on the stream: a server that keeps sending
+        // complete events is behaving, however many it sends
+        bytesBuffered = Buffer.byteLength(buffer);
         const data = rawEvent
           .split(/\r?\n/)
           .filter((line) => line.startsWith("data:"))
