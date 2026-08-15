@@ -262,7 +262,9 @@ function TaskDetailView({
     <div className="flex min-h-0 flex-col">
       <TaskTopBar
         projectName={project.name}
+        projectRef={project.key}
         taskKey={taskKey}
+        taskNumber={task.taskNumber}
         columns={columns}
         status={task.status}
         onStatusChange={handleStatusChange}

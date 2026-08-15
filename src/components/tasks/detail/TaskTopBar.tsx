@@ -1,6 +1,7 @@
 "use client";
 
 import { Popover } from "@/components/ui/Popover";
+import { CopyTaskLink } from "../CopyTaskLink";
 import { StatusPill } from "./StatusPill";
 import { OptionItem, OptionList } from "./FieldRow";
 
@@ -12,7 +13,9 @@ interface Column {
 
 interface TaskTopBarProps {
   projectName: string;
+  projectRef: string;
   taskKey: string;
+  taskNumber: number;
   columns: Column[];
   status: string;
   onStatusChange: (status: string) => void;
@@ -26,7 +29,9 @@ interface TaskTopBarProps {
 
 export function TaskTopBar({
   projectName,
+  projectRef,
   taskKey,
+  taskNumber,
   columns,
   status,
   onStatusChange,
@@ -58,6 +63,7 @@ export function TaskTopBar({
           /
         </span>
         <span className="text-text">{taskKey}</span>
+        <CopyTaskLink projectRef={projectRef} taskNumber={taskNumber} taskKey={taskKey} />
       </div>
 
       <StatusPill columns={columns} status={status} onChange={onStatusChange} />

@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/Badge";
 import { categoryColor, categoryTint } from "@/lib/category-colors";
 import { cardBadges } from "@/lib/custom-fields";
 import { taskPath } from "@/lib/urls";
+import { CopyTaskLink } from "@/components/tasks/CopyTaskLink";
 
 // A card is a summary; past a few badges it stops being one
 const MAX_CARD_BADGES = 3;
@@ -45,6 +46,7 @@ export function TaskCard({
   const catColor = categoryColor(projectCategories, task.category);
   const tinted = !selected && !!catColor;
   const dragged = useRef(false);
+  const checkboxShown = !readOnly && (selectionActive || selected);
   // toApiExecution returns nothing unless a runId still holds the task, so the field's
   // presence is the whole test — a claimed run that has not reported a phase included.
   const run = task.execution;
@@ -119,7 +121,7 @@ export function TaskCard({
         activate(e.shiftKey);
       }}
     >
-      <div className="flex flex-wrap items-center gap-1 mb-2 pr-6">
+      <div className={`flex flex-wrap items-center gap-1 mb-2 ${checkboxShown ? "pr-14" : "pr-8"}`}>
         <span className="text-xs font-mono text-text-muted flex items-center gap-1 mr-0.5">
           {task.recurrence && (
             <svg className="w-3 h-3 text-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -289,7 +291,20 @@ export function TaskCard({
       </div>
     </a>
 
-    {!readOnly && (selectionActive || selected) && (
+    {/* Outside the link, like the checkbox: a button inside an anchor is not a link
+        the browser can offer its own actions on. The corner is a wrapper's job —
+        the button carries `relative` for its own touch target, and Tailwind's
+        position utilities are ordered so `relative` would win over an `absolute`
+        passed in here */}
+    <span className={`absolute top-2 ${checkboxShown ? "right-9" : "right-2"}`}>
+      <CopyTaskLink
+        projectRef={projectKey}
+        taskNumber={task.taskNumber}
+        taskKey={`${projectKey}-${task.taskNumber}`}
+      />
+    </span>
+
+    {checkboxShown && (
       <button
         type="button"
         aria-label={`Select ${projectKey}-${task.taskNumber}`}
