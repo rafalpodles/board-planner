@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const verifyCredentials = vi.fn();
 const createSession = vi.fn();
@@ -6,6 +6,11 @@ const revokeSession = vi.fn();
 const revokeUserSessions = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
+vi.mock("@/models/rateLimit", async () => {
+  const { inMemoryRateLimitModel } = await import("@/lib/rate-limit-test-store");
+  return { RateLimit: inMemoryRateLimitModel() };
+});
+
 vi.mock("@/models/session", () => ({ Session: {} }));
 vi.mock("@/lib/auth", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/auth")>();
@@ -52,9 +57,12 @@ function sessionCookie(response: Response): string | undefined {
   return setCookies(response).find((cookie) => cookie.includes("=cps_"));
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.clearAllMocks();
-  resetRateLimits();
+  await resetRateLimits();
+  // The per-address cases below send X-Forwarded-For, which counts only where the operator says a
+  // proxy writes it. The unconfigured case has its own tests further down (BP-318).
+  process.env.TRUSTED_PROXY_HOPS = "1";
   delete process.env.COOKIE_ALLOW_INSECURE;
   delete process.env.APP_ORIGIN;
   verifyCredentials.mockResolvedValue(USER);
@@ -64,6 +72,10 @@ beforeEach(() => {
     expiresAt: new Date(Date.now() + SESSION_IDLE_TTL_MS),
     absoluteExpiresAt: new Date(Date.now() + SESSION_ABSOLUTE_TTL_MS),
   });
+});
+
+afterEach(() => {
+  delete process.env.TRUSTED_PROXY_HOPS;
 });
 
 describe("POST /api/auth/login — provenance", () => {

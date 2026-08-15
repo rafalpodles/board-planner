@@ -16,13 +16,18 @@ import { IUser } from "@/types";
 // null, not a sentinel: a literal "unknown" collapses every caller on a proxy-less deployment into
 // one identity, and a per-source refusal keyed on it becomes a way to lock a named user out.
 // Callers must decide what to do with "no identity" rather than be handed a fake one.
-export function getClientIp(request: Request): string | null {
-  const xff = request.headers.get("x-forwarded-for");
-  if (!xff) return null;
-  // Rightmost entry is appended by the closest proxy; leftmost is client-controlled
-  const parts = xff.split(",");
-  return parts[parts.length - 1].trim() || null;
-}
+// Lives in ./client-ip so the rule can be tested without the database this module needs.
+export { getClientIp } from "./client-ip";
+
+/**
+ * A bcrypt hash of a value nobody can present, compared when the username does not exist.
+ *
+ * Without it the miss path returns in single-digit milliseconds while a hit pays ~100 ms, and the
+ * difference needs no statistics to read: it is a username oracle on /api/auth/login and
+ * /oauth/authorize (BP-318). Generated once at module load rather than written as a literal, so
+ * it costs a real comparison at whatever cost factor this build of bcrypt uses.
+ */
+const ABSENT_USER_HASH = bcrypt.hashSync("::no such user::", 10);
 
 export async function verifyCredentials(
   username: string,
@@ -34,6 +39,7 @@ export async function verifyCredentials(
   );
 
   if (!user) {
+    await bcrypt.compare(password, ABSENT_USER_HASH);
     return null;
   }
 

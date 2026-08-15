@@ -34,10 +34,10 @@ export async function POST(request: Request) {
 
   // Unauthenticated and costing a bcrypt.hash per call, so the address is the only bound there is
   const throttleKey = sourceKey(getClientIp(request) ?? "-", "device_enrolment");
-  if (isRateLimited(throttleKey, ENROLMENTS_PER_WINDOW)) {
+  if (await isRateLimited(throttleKey, ENROLMENTS_PER_WINDOW)) {
     return NextResponse.json({ error: "too many enrolment attempts, try again later" }, { status: 429 });
   }
-  recordFailedAttempt(throttleKey);
+  await recordFailedAttempt(throttleKey);
 
   let started;
   try {

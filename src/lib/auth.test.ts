@@ -9,7 +9,10 @@ const sessionUpdateOne = vi.fn();
 const bcryptCompare = vi.fn();
 
 vi.mock("./db", () => ({ connectDB: vi.fn() }));
-vi.mock("bcryptjs", () => ({ default: { compare: bcryptCompare } }));
+const bcryptHashSync = vi.fn(() => "$2a$10$absent");
+vi.mock("bcryptjs", () => ({
+  default: { compare: bcryptCompare, hashSync: bcryptHashSync },
+}));
 vi.mock("@/models/user", () => ({ User: { findById: userFindById, findOne: vi.fn() } }));
 vi.mock("@/models/apiToken", () => ({
   ApiToken: { find: apiTokenFind, findByIdAndUpdate: apiTokenFindByIdAndUpdate },

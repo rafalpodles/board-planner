@@ -50,13 +50,13 @@ export async function POST(req: Request) {
   // collection can be grown is the caller's address
   const clientIp = getClientIp(req);
   const throttleKey = sourceKey(clientIp ?? "-", "oauth_register");
-  if (isRateLimited(throttleKey, REGISTRATIONS_PER_WINDOW)) {
+  if (await isRateLimited(throttleKey, REGISTRATIONS_PER_WINDOW)) {
     return NextResponse.json(
       { error: "invalid_request", error_description: "Too many client registrations from this address. Try again later." },
       { status: 429, headers: CORS }
     );
   }
-  recordFailedAttempt(throttleKey);
+  await recordFailedAttempt(throttleKey);
 
   const body = await req.json().catch(() => null);
   const redirectUris = body?.redirect_uris;

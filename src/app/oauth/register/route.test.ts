@@ -1,8 +1,13 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const create = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
+vi.mock("@/models/rateLimit", async () => {
+  const { inMemoryRateLimitModel } = await import("@/lib/rate-limit-test-store");
+  return { RateLimit: inMemoryRateLimitModel() };
+});
+
 vi.mock("@/models/oauthClient", () => ({ OAuthClient: { create } }));
 vi.mock("@/lib/oauth", () => ({ newClientId: () => "cpc_generated" }));
 
@@ -17,10 +22,16 @@ function request(body: unknown, ip = "203.0.113.7") {
   });
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.clearAllMocks();
-  resetRateLimits();
+  await resetRateLimits();
+  // X-Forwarded-For counts only where the operator says a proxy writes it (BP-318)
+  process.env.TRUSTED_PROXY_HOPS = "1";
   create.mockResolvedValue({});
+});
+
+afterEach(() => {
+  delete process.env.TRUSTED_PROXY_HOPS;
 });
 
 describe("POST /oauth/register", () => {

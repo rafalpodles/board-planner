@@ -29,6 +29,7 @@ Everything is optional. Put overrides in a `.env` file next to `docker-compose.y
 | `COOKIE_ALLOW_INSECURE` | `1` (compose only) | Set to `1` to issue the session cookie without `Secure` and without the `__Host-` prefix, for an instance served over plain HTTP |
 | `APP_ORIGIN` | `http://localhost:${APP_PORT}` | Comma-separated list of origins the app is served from, used to reject cross-site writes |
 | `PUBLIC_ORIGIN` | `http://localhost:${APP_PORT}` (compose); otherwise `APP_ORIGIN` when it names exactly one origin | The one address this instance calls its own. Required for the MCP endpoint and PM OAuth |
+| `TRUSTED_PROXY_HOPS` | `0` | How many proxies append to `X-Forwarded-For` in front of this app. At `0` the header is ignored and the login throttle counts every anonymous caller together |
 | `OPENAI_API_KEY` | — | AI task generation |
 | `OPENROUTER_API_KEY`, `PM_MODEL`, `PM_MAX_TOKENS`, `PM_DAILY_TURN_CAP`, `PM_SCHEDULER_TICK_MS` | — | PM agent |
 | `ENCRYPTION_KEY` | — | 32 bytes (hex or base64) encrypting stored integration tokens at rest. Without it those tokens cannot be saved at all |
@@ -48,6 +49,15 @@ and over plain HTTP at anything other than `localhost` the browser sends no `Sec
 so the only remaining proof is `Origin` matching this list. Set it to the URL users actually open —
 `https://board.example.com`, or `http://192.168.1.10:3000` for a LAN self-host — with no trailing
 path.
+
+`TRUSTED_PROXY_HOPS` decides whether `X-Forwarded-For` means anything here. It is the only thing
+the failed-login throttle can key on, and the header is a header: with nothing in front of the app,
+a caller who varies it gets a fresh counter every request and the throttle never bites. So the
+default is `0` — the header is not read at all, and anonymous callers share one bucket at a raised
+threshold. **Behind a reverse proxy, set it to the number of proxies that append to that header**
+(`1` for a single nginx or Caddy in front, `2` if there is a CDN in front of that). Set it too high
+and the header is refused as not matching what you described; set it too low and the count comes
+from an entry the caller can write. Getting it wrong costs throttle accuracy, never access.
 
 `ENCRYPTION_KEY` encrypts the GitHub, GitLab, Coda and MCP credentials the app stores. Generate one
 with `openssl rand -hex 32`. Without it those fields simply cannot be saved — the app answers the
