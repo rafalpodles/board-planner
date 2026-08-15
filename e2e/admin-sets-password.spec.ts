@@ -1,4 +1,5 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page, type Response } from "@playwright/test";
+import bcrypt from "bcryptjs";
 import mongoose from "mongoose";
 import { ADMIN_AUTH } from "./api";
 import {
@@ -29,6 +30,11 @@ async function db() {
   return handle;
 }
 
+async function auditRows() {
+  const handle = await db();
+  return handle.collection("instanceauditlogs").find({}).sort({ createdAt: -1 }).toArray();
+}
+
 async function signIn(page: Page, username: string, password: string) {
   await page.goto("/login");
   await page.getByLabel("Username").fill(username);
@@ -49,6 +55,18 @@ async function openMemberInUserSettings(page: Page) {
   await expect(page.getByLabel("Set a new password")).toBeVisible();
 }
 
+async function setMemberPassword(page: Page, password = NEW_PASSWORD): Promise<Response> {
+  await page.getByLabel("Set a new password").fill(password);
+  const [response] = await Promise.all([
+    page.waitForResponse(
+      (r) => /\/api\/users\/\w+$/.test(new URL(r.url()).pathname) && r.request().method() === "PUT"
+    ),
+    page.getByRole("button", { name: "Save", exact: true }).click(),
+  ]);
+  await expect(page.getByText(`Password set for ${MEMBER_USERNAME}`)).toBeVisible();
+  return response;
+}
+
 test.beforeEach(async () => {
   await seed();
   const handle = await db();
@@ -61,22 +79,22 @@ test.afterEach(async () => {
 
 test("an admin sets a member's password, and the member signs in with it", async ({ page }) => {
   await signInAsAdmin(page);
-
   await openMemberInUserSettings(page);
-  await page.getByLabel("Set a new password").fill(NEW_PASSWORD);
-  await Promise.all([
-    page.waitForResponse((r) => r.url().includes("/api/users/") && r.request().method() === "PUT"),
-    page.getByRole("button", { name: "Set", exact: true }).click(),
-  ]);
-  await expect(page.getByText(/Password set for member/)).toBeVisible();
+  const response = await setMemberPassword(page);
+
+  // The route reads the account without +password, so the hash cannot reach the wire. Only an
+  // end-to-end request can show that — a unit test mocks the document that would carry it.
+  expect(await response.json()).not.toHaveProperty("password");
 
   // An admin setting somebody else's password is exactly what the instance log exists to make
   // provable, and a row nobody can find is not an audit trail
   await page.goto("/settings/audit");
   const row = page.getByRole("row").filter({ hasText: "Password set by an admin" });
   await expect(row).toHaveCount(1);
-  await expect(row).toContainText(MEMBER_USERNAME);
-  await expect(row).toContainText(ADMIN_USERNAME);
+  // Scoped to cells: the action label itself contains the word "admin", so asserting the row's
+  // text would pass even if the log had recorded no actor at all and rendered "system"
+  await expect(row.getByRole("cell", { name: ADMIN_USERNAME, exact: true })).toHaveCount(1);
+  await expect(row.getByRole("cell", { name: MEMBER_USERNAME, exact: true })).toHaveCount(1);
 
   // The point of the ticket: the account is reachable again, by its owner, through the front door.
   // Cookies cleared rather than Logout clicked — that control lives behind the sidebar's user
@@ -89,46 +107,38 @@ test("an admin sets a member's password, and the member signs in with it", async
 test("the old password stops working", async ({ page }) => {
   await signInAsAdmin(page);
   await openMemberInUserSettings(page);
-  await page.getByLabel("Set a new password").fill(NEW_PASSWORD);
-  await Promise.all([
-    page.waitForResponse((r) => r.url().includes("/api/users/") && r.request().method() === "PUT"),
-    page.getByRole("button", { name: "Set", exact: true }).click(),
-  ]);
-  await expect(page.getByText(/Password set for member/)).toBeVisible();
+  await setMemberPassword(page);
 
   await page.context().clearCookies();
   await signIn(page, MEMBER_USERNAME, MEMBER_PASSWORD);
 
-  await expect(page).toHaveURL(/\/login/);
+  // The refusal, not the URL: the page is already on /login when this runs, so a URL assertion
+  // would pass before the server had answered anything
   await expect(page.getByText("Invalid credentials")).toBeVisible();
+  await expect(page).toHaveURL(/\/login/);
 });
 
 // Whoever knew the old password may be signed in right now — that is the case a reset is usually
 // answering. Two contexts, because one browser cannot hold two sessions of this app at once.
 test("the reset ends the session the member already had", async ({ browser }) => {
   const memberContext = await browser.newContext();
-  const memberPage = await memberContext.newPage();
-  await signIn(memberPage, MEMBER_USERNAME, MEMBER_PASSWORD);
-  await expect(memberPage).toHaveURL(/\/projects/);
-
   const adminContext = await browser.newContext();
-  const adminPage = await adminContext.newPage();
-  await signInAsAdmin(adminPage);
-  await openMemberInUserSettings(adminPage);
-  await adminPage.getByLabel("Set a new password").fill(NEW_PASSWORD);
-  await Promise.all([
-    adminPage.waitForResponse(
-      (r) => r.url().includes("/api/users/") && r.request().method() === "PUT"
-    ),
-    adminPage.getByRole("button", { name: "Set", exact: true }).click(),
-  ]);
-  await expect(adminPage.getByText(/Password set for member/)).toBeVisible();
+  try {
+    const memberPage = await memberContext.newPage();
+    await signIn(memberPage, MEMBER_USERNAME, MEMBER_PASSWORD);
+    await expect(memberPage).toHaveURL(/\/projects/);
 
-  await memberPage.reload();
-  await expect(memberPage).toHaveURL(/\/login/);
+    const adminPage = await adminContext.newPage();
+    await signInAsAdmin(adminPage);
+    await openMemberInUserSettings(adminPage);
+    await setMemberPassword(adminPage);
 
-  await memberContext.close();
-  await adminContext.close();
+    await memberPage.reload();
+    await expect(memberPage).toHaveURL(/\/login/);
+  } finally {
+    await memberContext.close();
+    await adminContext.close();
+  }
 });
 
 // The current-password check on Settings → Security is the only thing between a borrowed admin
@@ -139,7 +149,10 @@ test("an admin is not offered the field on their own account", async ({ page }) 
   await page.getByText(`@${ADMIN_USERNAME}`, { exact: true }).first().click();
 
   await expect(page.getByText(/Your own password is changed under Settings/)).toBeVisible();
-  await expect(page.getByRole("button", { name: "Set", exact: true })).toBeHidden();
+  // The field itself, not just the control beside it: a version that renders the input and drops
+  // the button would pass a button-only assertion
+  await expect(page.getByLabel("Set a new password")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Show", exact: true })).toHaveCount(0);
 });
 
 // No gesture can produce this: the screen is only reachable with a browser session. Setting an
@@ -157,6 +170,7 @@ test("an admin API token cannot set a password", async ({ request }) => {
   const member = await handle
     .collection("users")
     .findOne({ _id: MEMBER_ID }, { projection: { password: 1 } });
-  const bcrypt = await import("bcryptjs");
-  expect(await bcrypt.default.compare(MEMBER_PASSWORD, member?.password as string)).toBe(true);
+  expect(await bcrypt.compare(MEMBER_PASSWORD, member?.password as string)).toBe(true);
+  // A refusal is not a decision, and the log must not claim one happened
+  expect(await auditRows()).toHaveLength(0);
 });

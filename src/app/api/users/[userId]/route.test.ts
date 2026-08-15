@@ -53,9 +53,8 @@ function targetDoc(overrides: Record<string, unknown> = {}) {
   };
 }
 
-// The route selects +password, so the lookup is a query with a .select(), not a bare promise.
 function found(target: unknown) {
-  userFindById.mockReturnValue({ select: () => Promise.resolve(target) });
+  userFindById.mockResolvedValue(target);
 }
 
 beforeEach(() => {
@@ -128,9 +127,25 @@ describe("PUT /api/users/:id — an admin sets a password", () => {
     // No exception argument: the admin holds none of the target's sessions, and whoever knew the
     // old password must not stay signed in on one
     expect(revokeUserSessions).toHaveBeenCalledWith("target-1");
+    // The actor, not just the subject: a log naming the target as the one who acted is worse than
+    // no log, because it reads as a confession by the wrong person
     expect(logInstanceAudit).toHaveBeenCalledWith(
-      expect.objectContaining({ action: "user_password_reset", target: "target" })
+      expect.objectContaining({
+        action: "user_password_reset",
+        target: "target",
+        user: "admin-1",
+      })
     );
+  });
+
+  // The hash must never be loaded, so it can never be serialised back to the caller
+  it("does not pull the hash out of the database", async () => {
+    const target = targetDoc({ role: "member" });
+    found(target);
+
+    await PUT(put({ password: "a-fresh-password" }), ctx());
+
+    expect(userFindById).toHaveBeenCalledWith("target-1");
   });
 
   it("refuses a password from an admin API token", async () => {
@@ -169,6 +184,31 @@ describe("PUT /api/users/:id — an admin sets a password", () => {
     expect(target.password).toBe("old-hash");
     expect(target.save).not.toHaveBeenCalled();
     expect(revokeUserSessions).not.toHaveBeenCalled();
+  });
+
+  // A worker's hash is random so that nobody can sign in as it, and the account is filtered out of
+  // Settings → Users — a password here would produce a working login nobody can see
+  it("refuses to give a machine account a password", async () => {
+    const target = targetDoc({ role: "member", kind: "machine" });
+    found(target);
+
+    const res = await PUT(put({ password: "a-fresh-password" }), ctx());
+
+    expect(res.status).toBe(400);
+    expect(hash).not.toHaveBeenCalled();
+    expect(target.save).not.toHaveBeenCalled();
+  });
+
+  // A revoke that throws must leave the account exactly as it was, or the admin sees a failure
+  // while the new password is already live
+  it("does not change the password when the sessions cannot be revoked", async () => {
+    const target = targetDoc({ role: "member" });
+    found(target);
+    revokeUserSessions.mockRejectedValueOnce(new Error("mongo is having a moment"));
+
+    await expect(PUT(put({ password: "a-fresh-password" }), ctx())).rejects.toThrow();
+
+    expect(target.save).not.toHaveBeenCalled();
   });
 
   // A JSON body is whatever the caller sends; `{password: {length: 99}}` must not reach bcrypt

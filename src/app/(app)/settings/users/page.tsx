@@ -31,7 +31,7 @@ export default function UsersPage() {
   const [editRole, setEditRole] = useState<"admin" | "member">("member");
   const [editSaving, setEditSaving] = useState(false);
   const [newPassword, setNewPassword] = useState("");
-  const [passwordSaving, setPasswordSaving] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [passwordError, setPasswordError] = useState("");
 
   // Delete state
@@ -81,44 +81,47 @@ export default function UsersPage() {
   function openEdit(user: ApiUser) {
     setEditUser(user);
     setEditRole(user.role || "member");
-    setNewPassword("");
-    setPasswordError("");
+    closePasswordField();
   }
 
-  async function handleSetPassword(e: FormEvent) {
-    e.preventDefault();
-    if (!editUser) return;
+  function closePasswordField() {
+    setNewPassword("");
     setPasswordError("");
+    setShowPassword(false);
+  }
 
-    if (newPassword.length < MIN_PASSWORD_LENGTH) {
-      setPasswordError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters`);
-      return;
-    }
-
-    setPasswordSaving(true);
-    try {
-      await api.put(`/api/users/${editUser._id}`, { password: newPassword });
-      setNewPassword("");
-      toast(`Password set for ${editUser.username}. Their sessions were signed out.`, "success");
-    } catch (err) {
-      setPasswordError(err instanceof Error ? err.message : "Failed to set the password");
-    } finally {
-      setPasswordSaving(false);
-    }
+  function closeEdit() {
+    setEditUser(null);
+    closePasswordField();
   }
 
   async function handleEditSave() {
     if (!editUser) return;
+    setPasswordError("");
+
+    if (newPassword && newPassword.length < MIN_PASSWORD_LENGTH) {
+      setPasswordError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters`);
+      return;
+    }
+
     setEditSaving(true);
+    const { username } = editUser;
+    const passwordWasSet = !!newPassword;
 
     try {
       await api.put(`/api/users/${editUser._id}`, {
         role: editRole,
+        ...(passwordWasSet ? { password: newPassword } : {}),
       });
-      setEditUser(null);
+      closeEdit();
       const data = await api.get("/api/users");
       setUsers(data);
-      toast("User updated", "success");
+      toast(
+        passwordWasSet
+          ? `Password set for ${username}. They were signed out everywhere.`
+          : "User updated",
+        "success"
+      );
     } catch (err) {
       toast(err instanceof Error ? err.message : "Failed to update user", "error");
     } finally {
@@ -207,6 +210,9 @@ export default function UsersPage() {
           <Input
             label="Password"
             type="password"
+            autoComplete="new-password"
+            minLength={MIN_PASSWORD_LENGTH}
+            placeholder={`At least ${MIN_PASSWORD_LENGTH} characters`}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
@@ -238,7 +244,7 @@ export default function UsersPage() {
       {/* Edit User Modal */}
       <Modal
         open={!!editUser}
-        onClose={() => setEditUser(null)}
+        onClose={closeEdit}
         title={editUser ? `Edit ${editUser.fullName}` : ""}
       >
         {editUser && (
@@ -281,36 +287,50 @@ export default function UsersPage() {
                   </p>
                 </>
               ) : (
-                <form onSubmit={handleSetPassword} className="space-y-2">
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    handleEditSave();
+                  }}
+                  className="space-y-2"
+                >
                   <label
                     htmlFor="newUserPassword"
                     className="block text-sm font-medium mb-1"
                   >
                     Set a new password
                   </label>
-                  <p className="text-sm text-text-muted">
-                    Hand it to {editUser.fullName} over something other than this app. It signs them
-                    out everywhere; their API tokens keep working.
+                  <p id="newUserPasswordHelp" className="text-sm text-text-muted">
+                    Board Planner will not send this to {editUser.fullName} — tell them yourself,
+                    somewhere other than this app. Setting it signs them out of every browser they
+                    are logged in on. Their API tokens keep working.
                   </p>
                   <div className="flex items-start gap-2">
                     <Input
                       id="newUserPassword"
-                      type="password"
+                      type={showPassword ? "text" : "password"}
                       autoComplete="new-password"
+                      aria-describedby="newUserPasswordHelp"
+                      minLength={MIN_PASSWORD_LENGTH}
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
                       placeholder={`At least ${MIN_PASSWORD_LENGTH} characters`}
                       error={passwordError}
                     />
+                    {/* Read out over the phone more often than typed twice, so showing it beats a
+                        confirm field: a typo here locks the account out of every session it had */}
                     <Button
-                      type="submit"
+                      type="button"
                       variant="secondary"
                       className="shrink-0"
-                      disabled={passwordSaving || !newPassword}
+                      onClick={() => setShowPassword((shown) => !shown)}
                     >
-                      {passwordSaving ? "Setting…" : "Set"}
+                      {showPassword ? "Hide" : "Show"}
                     </Button>
                   </div>
+                  <p className="text-sm text-text-muted">
+                    It is applied when you press Save.
+                  </p>
                 </form>
               )}
             </div>
@@ -325,14 +345,14 @@ export default function UsersPage() {
               </Button>
               <Button
                 variant="secondary"
-                onClick={() => setEditUser(null)}
+                onClick={closeEdit}
               >
                 Cancel
               </Button>
               <Button
                 variant="danger"
                 onClick={() => {
-                  setEditUser(null);
+                  closeEdit();
                   setConfirmDeleteUser(editUser);
                 }}
               >

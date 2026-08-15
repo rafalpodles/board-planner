@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
-import { getAuthUser, PASSWORD_COST_FACTOR } from "@/lib/auth";
+import { getAuthUser, MIN_PASSWORD_LENGTH, PASSWORD_COST_FACTOR } from "@/lib/auth";
 import { ProvenanceError, provenanceRefusal } from "@/lib/session";
 import { withAdmin } from "@/lib/middleware";
 import { User } from "@/models/user";
@@ -24,6 +24,13 @@ export async function POST(request: Request) {
   if (!username || !password || !fullName) {
     return NextResponse.json(
       { error: "username, password, and fullName are required" },
+      { status: 400 }
+    );
+  }
+  // The two places a password is chosen have to agree, or the shorter one is the one that matters
+  if (typeof password !== "string" || password.length < MIN_PASSWORD_LENGTH) {
+    return NextResponse.json(
+      { error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters` },
       { status: 400 }
     );
   }

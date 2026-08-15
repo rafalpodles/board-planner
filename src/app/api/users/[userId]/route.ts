@@ -23,14 +23,23 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
   const { userId } = await params;
   await connectDB();
 
-  // +password because the hash is select:false and a path the document never loaded is a path
-  // save() has no reason to write. The response is unaffected: toJSON strips it.
-  const target = await User.findById(userId).select("+password");
+  // Deliberately without +password: save() writes a modified path whether or not it was selected,
+  // and selecting it makes `required` validate on a legacy row that has no hash — turning a
+  // role-only edit into a 500 about a password nobody touched.
+  const target = await User.findById(userId);
   if (!target) {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
 
-  const body = await request.json();
+  let body: { role?: unknown; password?: unknown };
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+  if (typeof body !== "object" || body === null) {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
 
   // Update role
   if (body.role !== undefined) {
@@ -42,7 +51,7 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
         { status: 403 }
       );
     }
-    if (!["admin", "member"].includes(body.role)) {
+    if (typeof body.role !== "string" || !["admin", "member"].includes(body.role)) {
       return NextResponse.json({ error: "Invalid role" }, { status: 400 });
     }
     // Prevent admin from demoting themselves
@@ -62,7 +71,7 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
         );
       }
     }
-    target.role = body.role;
+    target.role = body.role as "admin" | "member";
   }
 
   let passwordWasSet = false;
@@ -74,17 +83,26 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
         { status: 403 }
       );
     }
-    // Otherwise this endpoint is the way around the current-password check on Settings → Security,
-    // which is the only thing standing between a borrowed admin session and a locked-out owner.
+    if (typeof body.password !== "string" || body.password.length < MIN_PASSWORD_LENGTH) {
+      return NextResponse.json(
+        { error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters` },
+        { status: 400 }
+      );
+    }
+    // An ergonomics guard, not a containment boundary — a second admin can still take this account
+    // over. It keeps the one-click self-lockout away from a screen whose other buttons are routine.
     if (target._id.toString() === admin._id.toString()) {
       return NextResponse.json(
         { error: "Change your own password under Settings → Security" },
         { status: 400 }
       );
     }
-    if (typeof body.password !== "string" || body.password.length < MIN_PASSWORD_LENGTH) {
+    // A worker's account is deliberately un-loginable — its credential is a token, and its hash is
+    // random precisely so nobody can sign in as it. Giving it a password undoes that, and the
+    // account it produces is invisible in Settings → Users, which filters machines out.
+    if (target.kind === "machine") {
       return NextResponse.json(
-        { error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters` },
+        { error: "A machine account signs in with a token, not a password" },
         { status: 400 }
       );
     }
@@ -92,13 +110,17 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
     passwordWasSet = true;
   }
 
+  if (passwordWasSet) {
+    // Before the save, not after: a revoke that throws here leaves the account exactly as it was,
+    // and the admin retries. The other order commits the new password, answers 500, and leaves the
+    // old holder signed in — a failure that reads to the admin as "nothing happened".
+    await revokeUserSessions(target._id);
+  }
+
   await target.save();
 
   if (passwordWasSet) {
-    // Every session, with no exception: the admin is not one of them, and whoever was signed in as
-    // this account under the old password must not stay signed in under it.
-    await revokeUserSessions(target._id);
-    await logInstanceAudit({
+    void logInstanceAudit({
       action: "user_password_reset",
       user: admin._id,
       target: target.username,
