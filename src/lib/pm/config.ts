@@ -8,6 +8,7 @@ import {
 } from "@/types";
 import { encryptSecret, decryptSecret, isEncryptionConfigured } from "@/lib/encryption";
 import { isAllowedMcpServerUrl } from "@/lib/url-validation";
+import { sameEndpoint } from "@/lib/host-bound-secrets";
 import { isValidTimezone } from "./autonomy";
 
 const MAX_MODEL_LENGTH = 100;
@@ -209,27 +210,38 @@ export function mergeMcpServerTokens(
   const merged: IPmMcpServer[] = [];
   for (const server of incoming) {
     const prior = stored.get(server.name);
-    const authToken = server.authToken
-      ? encryptSecret(server.authToken)
-      : prior?.authToken ?? "";
+    // Carried forward only while the URL is unchanged. A credential is issued for one server, so
+    // moving the URL and keeping it pointed the stored secret at the new address (BP-315). The
+    // comparison normalises a trailing slash and case, because a hard 400 on a cosmetic retype is
+    // paid for by re-entering a token the admin may not hold.
+    const sameServer = !!prior && sameEndpoint(prior.url, server.url);
+    const carriedOver = sameServer ? prior.authToken ?? "" : "";
+    const authToken = server.authToken ? encryptSecret(server.authToken) : carriedOver;
     if (server.authType === "bearer" && !authToken) {
       return {
         valid: false,
-        error: `MCP server "${server.name}" uses bearer auth but has no token — provide one (renaming a server requires re-entering its token)`,
+        error: `MCP server "${server.name}" uses bearer auth but has no token — provide one (renaming a server, or changing its URL, requires re-entering its token)`,
       };
     }
 
-    // OAuth state is server-managed: preserve it across saves, but drop tokens
-    // when the URL changes (they were issued for a different resource).
+    // OAuth state is server-managed: preserve it across saves, but never across a move. The drop
+    // has to happen outside the authType branch, or a save that also flips authType away from
+    // "oauth" carries a live access token to the new URL and a second save flips it back with the
+    // URLs now equal. The client registration goes too: it was issued by the old provider, and
+    // keeping it means the next Connect skips re-registration and sends that client secret to
+    // whatever token endpoint the new server advertises (BP-315 review).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const transient = server as any;
-    let oauth = prior?.oauth ? { ...prior.oauth } : undefined;
+    let oauth = prior?.oauth && sameServer ? { ...prior.oauth } : undefined;
     if (server.authType === "oauth") {
       oauth = oauth ?? { ...EMPTY_OAUTH };
-      if (prior && prior.url !== server.url) {
-        oauth = { ...EMPTY_OAUTH, clientId: oauth.clientId, clientSecret: oauth.clientSecret };
-      }
-      if (transient.oauthClientId) {
+      // `oauthClientId` is not a secret, so sanitizeMcpServers returns it and the settings page
+      // posts it back on every save — which put the old registration straight back after the reset
+      // above dropped it, leaving the next Connect to skip re-registration and send the old
+      // client_id to the new server. An echo of what was stored is not an admin typing a new one.
+      const echoesPriorClientId =
+        !sameServer && transient.oauthClientId === prior?.oauth?.clientId;
+      if (transient.oauthClientId && !echoesPriorClientId) {
         oauth.clientId = transient.oauthClientId;
       }
       if (transient.oauthClientSecret) {
