@@ -88,7 +88,7 @@ beforeEach(() => {
     {
       _id: "p1",
       githubRepo: "owner/repo",
-      worker: { enabled: true, policy: { autoMerge: true }, policyOverrides: ["autoMerge"] },
+      worker: { enabled: true, policy: { model: "sonnet" }, policyOverrides: ["model"] },
     },
   ]);
 });
@@ -204,7 +204,7 @@ describe("PATCH /api/workers/:workerId", () => {
 
     // Work policy belongs to the project; accepting it here would leave two places to set it
     it("ignores a field that moved to the project", async () => {
-      const response = await PATCH(patchRequest({ autoMerge: true, baseBranch: "develop" }), ctx());
+      const response = await PATCH(patchRequest({ baseBranch: "develop" }), ctx());
 
       expect(response.status).toBe(400);
       expect(workerFindByIdAndUpdate).not.toHaveBeenCalled();
@@ -261,7 +261,7 @@ describe("GET /api/workers/:workerId", () => {
     const json = await (await GET(getRequest(), ctx())).json();
 
     expect(json.assignments).toEqual([
-      { project: "p1", remote: "git@github.com:owner/repo.git", policy: { autoMerge: true } },
+      { project: "p1", remote: "git@github.com:owner/repo.git", policy: { model: "sonnet" } },
     ]);
   });
 

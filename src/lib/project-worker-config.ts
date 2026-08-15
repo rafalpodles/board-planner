@@ -6,7 +6,7 @@ import {
   isProjectPolicyField,
 } from "@/lib/worker-policy";
 
-const BOOLEAN_FIELDS: ReadonlySet<string> = new Set(["autoMerge", "reviewGate"]);
+const BOOLEAN_FIELDS: ReadonlySet<string> = new Set<string>();
 const STRING_FIELDS: ReadonlySet<string> = new Set([
   "baseBranch",
   "model",
@@ -124,22 +124,9 @@ export function parseProjectWorkerConfig(
     return { ok: false, error: "worker had nothing to update" };
   }
 
-  // The one rule no per-field validator could hold: every field above is checked in isolation, so
-  // nothing would stop merging without review — the single safety property worker/README.md
-  // asserts outright. Judged on the resulting state, never on the patch.
-  const effective = (field: "autoMerge" | "reviewGate"): boolean => {
-    const key = `worker.policy.${field}`;
-    if (key in update) return update[key] as boolean;
-    const stored = existingPolicy[field];
-    return typeof stored === "boolean" ? stored : PROJECT_POLICY_DEFAULTS[field];
-  };
-
-  if (effective("autoMerge") && !effective("reviewGate")) {
-    return {
-      ok: false,
-      error: "autoMerge cannot be on while the review gate is off — that would merge unreviewed code",
-    };
-  }
+  // A cross-field rule used to live here, refusing autoMerge while the review gate was off. Both
+  // fields are retired: an agent merges if its composition carries a Merge step, and whether the
+  // change was reviewed is read off the same sequence by src/lib/agent-rules.ts.
 
   return { ok: true, update };
 }
