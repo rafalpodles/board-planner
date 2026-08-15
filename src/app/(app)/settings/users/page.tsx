@@ -301,9 +301,8 @@ export default function UsersPage() {
                     Set a new password
                   </label>
                   <p id="newUserPasswordHelp" className="text-sm text-text-muted">
-                    Board Planner will not send this to {editUser.fullName} — tell them yourself,
-                    somewhere other than this app. Setting it signs them out of every browser they
-                    are logged in on. Their API tokens keep working.
+                    Nothing is sent — tell {editUser.fullName} yourself. Saving signs them out
+                    everywhere.
                   </p>
                   <div className="flex items-start gap-2">
                     <Input
@@ -328,9 +327,6 @@ export default function UsersPage() {
                       {showPassword ? "Hide" : "Show"}
                     </Button>
                   </div>
-                  <p className="text-sm text-text-muted">
-                    It is applied when you press Save.
-                  </p>
                 </form>
               )}
             </div>
