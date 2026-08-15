@@ -9,8 +9,26 @@ import { gitArgs } from "./git-safety.js";
 import { Reporter } from "./reporter.js";
 import { createTelemetry, isOutcome, isQuota, Progress, TelemetryUpdate } from "./telemetry.js";
 import { Workspace } from "./workspace.js";
-import { ClaimedTask, DiffStats, ExecutionResult, Gate } from "./types.js";
+import { ClaimedTask, DiffStats, ExecutionResult, Gate, SnapshotEntry } from "./types.js";
 import { PipelineDeps, resolveStatusIds, runTask } from "./pipeline.js";
+
+// Exactly today's pipeline, expressed as an agent — the composition every existing project is
+// backfilled with, so a task claimed here means what it has always meant.
+const DEFAULT_SEQUENCE: SnapshotEntry[] = [
+  { key: "implement", kind: "step", name: "Implement", prompt: "make the change", capability: "edit" },
+  { key: "protected-paths", kind: "gate", name: "Protected files", gateKind: "protected-paths" },
+  { key: "diff-size", kind: "gate", name: "Size", gateKind: "diff-size" },
+  { key: "test-presence", kind: "gate", name: "Test written", gateKind: "test-presence" },
+  { key: "build", kind: "gate", name: "Builds", gateKind: "build" },
+  { key: "test-run", kind: "gate", name: "Tests pass", gateKind: "test-run" },
+  { key: "review", kind: "gate", name: "Reviewed", gateKind: "review" },
+  { key: "push", kind: "step", name: "Push", deterministic: true },
+  { key: "pull-request", kind: "step", name: "Pull request", deterministic: true },
+];
+
+function agentOf(sequence: SnapshotEntry[]) {
+  return { agentId: "a1", name: "Default", sequence };
+}
 
 const task: ClaimedTask = {
   taskId: "t1",
@@ -21,6 +39,7 @@ const task: ClaimedTask = {
   description: "body",
   acceptanceCriteria: [],
   attempts: 1,
+  agent: agentOf(DEFAULT_SEQUENCE),
 };
 
 const completed: ExecutionResult = {
@@ -493,8 +512,11 @@ describe("runTask", () => {
 
     await runTask(h.deps, task);
 
-    // The trailing undefined is the stream listener: this harness attaches no telemetry bus
-    expect(execute).toHaveBeenCalledWith(task, "/wt", controller.signal, undefined);
+    expect(execute.mock.calls[0][0]).toMatchObject({
+      task,
+      worktreePath: "/wt",
+      signal: controller.signal,
+    });
   });
 
   it("gives every gate the signal, so a build or review gate can honour a stop", async () => {
@@ -789,7 +811,7 @@ describe("what the run says it is doing", () => {
   // The run's only agent-authored input, and the only route it may take: summarise() bounds it into
   // a name and a path. Handing the raw event to a sink instead would put file bodies on the board.
   it("puts the agent's own stream on the bus through the summarising entry point", async () => {
-    const execute = vi.fn<Executor["execute"]>(async (_task, _worktree, _signal, onEvent) => {
+    const execute = vi.fn<Executor["execute"]>(async ({ onEvent }) => {
       onEvent?.({
         type: "assistant",
         message: {
