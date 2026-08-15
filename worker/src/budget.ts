@@ -17,11 +17,13 @@ export function clampCeiling(value: number): number {
   return Math.min(value, LEASE_MS - MARGIN_MS);
 }
 
-export function createBudget(ceilingMs: number, perEntryMs: number, now: () => number = Date.now) {
+export function createBudget(ceilingMs: number, now: () => number = Date.now) {
   const deadline = now() + ceilingMs;
   return {
     remaining: () => deadline - now(),
-    forEntry: () => Math.max(0, Math.min(perEntryMs, deadline - now())),
+    // The cap is the caller's, because a model step and a gate are bounded by different settings.
+    // Whichever is smaller wins: the ceiling is what the whole run may take.
+    forEntry: (capMs: number) => Math.max(0, Math.min(capMs, deadline - now())),
     exhausted: () => now() >= deadline,
   };
 }

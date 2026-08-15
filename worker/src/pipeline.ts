@@ -2,6 +2,7 @@ import { ApiClient, StatusIds } from "./api.js";
 import { createBudget } from "./budget.js";
 import { commitAll } from "./commit.js";
 import { WorkerConfig } from "./config.js";
+import { GateFallbacks } from "./gates/from-entry.js";
 import { RunState, runStep } from "./steps.js";
 import { recordFor, RunRecord } from "./run-record.js";
 import { isResultEvent, StreamEvent } from "./stream.js";
@@ -32,7 +33,7 @@ export interface PipelineDeps {
     entry: SnapshotEntry,
     runner: Runner,
     timeoutMs: number,
-    fallbackReviewModel: string
+    fallbacks: GateFallbacks
   ) => Gate | null;
   runner: Runner;
   // Fire and forget, onto the outbox: a record that fails to post must not turn a delivered run
@@ -72,9 +73,11 @@ function hitUsageLimit(verdict: GateResult): boolean {
   return /could not be completed/i.test(verdict.reason) && /usage limit reached/i.test(verdict.reason);
 }
 
-// The per-timed-gate cap buildGates used to apply. Kept: it bounds one npm install regardless of
-// how large the run ceiling is.
-const PER_ENTRY_CAP_MS = 600_000;
+// A gate is bounded by the cap buildGates always applied — it bounds one npm install however large
+// the run ceiling is. A model step is bounded by taskTimeoutMs, which is what bounded it before the
+// sequence existed and what the project's "Timeout for one step" setting still means. Folding both
+// into the gate cap silently cut every step from thirty minutes to ten.
+const GATE_CAP_MS = 600_000;
 
 const EMPTY_RESULT: ExecutionResult = {
   status: "completed",
@@ -248,7 +251,7 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
   };
 
   try {
-    const budget = createBudget(config.runCeilingMs, PER_ENTRY_CAP_MS, now);
+    const budget = createBudget(config.runCeilingMs, now);
 
     for (const entry of task.agent.sequence) {
       if (await releaseIfAborted(deps, reporter, task)) return;
@@ -275,7 +278,7 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
           delivery,
           commit: (message) => commitAll(runner, worktreePath, message),
           state,
-          timeoutMs: budget.forEntry(),
+          timeoutMs: budget.forEntry(config.taskTimeoutMs),
           signal: deps.signal,
           onEvent,
         });
@@ -306,7 +309,11 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
           return;
         }
       } else {
-        const gate = deps.gateFor(entry, runner, budget.forEntry(), config.reviewModel ?? "");
+        const gate = deps.gateFor(entry, runner, budget.forEntry(GATE_CAP_MS), {
+          maxDiffLines: config.maxDiffLines,
+          maxDiffFiles: config.maxDiffFiles,
+          reviewModel: config.reviewModel ?? "",
+        });
         // Not skipped: skipping runs a shorter agent than the one somebody composed, and a missing
         // check looks exactly like a check that passed.
         if (!gate) {
