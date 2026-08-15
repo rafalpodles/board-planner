@@ -66,3 +66,30 @@ export async function visibleAgents(user: IUser, projectIds: string[]) {
 export async function allBlocks() {
   return AgentBlock.find({}).sort({ kind: -1, builtIn: -1, name: 1 }).lean();
 }
+
+const SLUG_MAX = 48;
+
+function slugify(name: string): string {
+  return (
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, SLUG_MAX) || "block"
+  );
+}
+
+/**
+ * The client used to derive this and hand it over, which meant two different names could arrive as
+ * the same key and come back as a bare 409. Only the server knows what is taken, so only the server
+ * can settle it.
+ */
+export async function freeBlockKey(name: string): Promise<string> {
+  const base = slugify(name);
+  if (!(await AgentBlock.exists({ key: base }))) return base;
+  for (let n = 2; n < 100; n++) {
+    const candidate = `${base.slice(0, SLUG_MAX - 3)}-${n}`;
+    if (!(await AgentBlock.exists({ key: candidate }))) return candidate;
+  }
+  throw new Error(`no free key for ${JSON.stringify(name)}`);
+}
