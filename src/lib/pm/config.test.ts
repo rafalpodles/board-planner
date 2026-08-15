@@ -157,6 +157,28 @@ describe("mergeMcpServerTokens and moved OAuth credentials", () => {
     if (second.valid) expect(second.value[0].oauth?.accessToken ?? "").toBe("");
   });
 
+  // sanitizeMcpServers returns oauthClientId (it is not a secret) and the settings page posts it
+  // back on every save, which put the old registration straight back after the reset dropped it
+  it("does not let the settings page put the dropped client id back", () => {
+    const result = mergeMcpServerTokens(
+      [server({ authType: "oauth", ...moved, oauthClientId: "client-1" })],
+      oauthStored()
+    );
+
+    expect(result.valid).toBe(true);
+    if (result.valid) expect(result.value[0].oauth?.clientId).toBe("");
+  });
+
+  it("still takes a client id the admin actually typed for the new server", () => {
+    const result = mergeMcpServerTokens(
+      [server({ authType: "oauth", ...moved, oauthClientId: "client-2" })],
+      oauthStored()
+    );
+
+    expect(result.valid).toBe(true);
+    if (result.valid) expect(result.value[0].oauth?.clientId).toBe("client-2");
+  });
+
   it("keeps the whole OAuth connection while the URL is unchanged", () => {
     const result = mergeMcpServerTokens([server({ authType: "oauth" })], oauthStored());
 

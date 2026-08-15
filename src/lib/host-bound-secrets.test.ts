@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { tokensInvalidatedByHostChange, sameOrigin, sameEndpoint } from "./host-bound-secrets";
+import {
+  tokensInvalidatedByHostChange,
+  sameOrigin,
+  sameEndpoint,
+  clearsStoredToken,
+} from "./host-bound-secrets";
 
 const stored = {
   gitlabHost: "https://gitlab.example.com",
@@ -48,8 +53,10 @@ describe("tokensInvalidatedByHostChange", () => {
     expect(labels({ gitlabHost: host })).toEqual([]);
   });
 
-  it("treats a path change on the same origin as the same host", () => {
-    expect(labels({ gitlabHost: "https://gitlab.example.com/subpath" })).toEqual([]);
+  // The stored value is a base URL that both callers append to verbatim, so a self-hosted instance
+  // moved from /gitlab to /apps/x is a new destination for the PAT — not the same host (review)
+  it("treats a path change on the same origin as a move", () => {
+    expect(labels({ gitlabHost: "https://gitlab.example.com/subpath" })).toEqual(["GitLab"]);
   });
 
   it("does nothing when the host is not part of the update at all", () => {
@@ -94,6 +101,43 @@ describe("tokensInvalidatedByHostChange", () => {
   it("treats a Coda save that only edits the doc id as no move at all", () => {
     const before = { ...stored, codaHost: undefined as unknown as string };
     expect(labels({ codaHost: "https://coda.io", codaDocId: "d2" }, before)).toEqual([]);
+  });
+});
+
+// The warning the settings form shows before the save, which used to answer a different question
+// from the rule it warns about — in both directions, and with no test at all
+describe("clearsStoredToken", () => {
+  const GL = "https://gitlab.com";
+
+  it("says yes for a genuine move with no replacement token", () => {
+    expect(clearsStoredToken("https://gitlab.acme.com", GL, "", GL)).toBe(true);
+  });
+
+  it.each(["https://gitlab.com/", "https://GitLab.com", " https://gitlab.com "])(
+    "stays quiet for the cosmetic edit %o",
+    (typed) => {
+      expect(clearsStoredToken(typed, GL, "", GL)).toBe(false);
+    }
+  );
+
+  it("stays quiet when the field is cleared back to the default", () => {
+    expect(clearsStoredToken("", GL, "", GL)).toBe(false);
+  });
+
+  it("stays quiet when a replacement token comes with the move", () => {
+    expect(clearsStoredToken("https://gitlab.acme.com", GL, "glpat-fresh", GL)).toBe(false);
+  });
+
+  // The save posts the token only when it is non-empty after trimming, so whitespace is no token —
+  // and reading the box untrimmed silenced the warning on exactly the edit that clears it
+  it("does not count whitespace as a replacement token", () => {
+    expect(clearsStoredToken("https://gitlab.acme.com", GL, "   ", GL)).toBe(true);
+  });
+
+  it("counts a path change, like the rule it mirrors", () => {
+    expect(
+      clearsStoredToken("https://intra.example.com/apps", "https://intra.example.com/gitlab", "", GL)
+    ).toBe(true);
   });
 });
 

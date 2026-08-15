@@ -63,6 +63,12 @@ function originOf(value: unknown): string | null {
  * has no value where the schema default would put one, and the form posts that default on every
  * save. Comparing the two literally made an edit to the doc id look like a repointed host and threw
  * away a working token (BP-315 review).
+ *
+ * A path change IS a move. The stored value is a base URL, not an origin — a self-hosted GitLab at
+ * `https://intra.example.com/gitlab` is ordinary, and both callers append to it verbatim
+ * (`${base}/api/v4/…`, `${host}/apis/v1/…`). Comparing origins let the destination of a cleartext
+ * PAT be re-chosen within one origin; the trailing-slash and case tolerance that comparison was
+ * there for is what `sameEndpoint` already provides.
  */
 export function tokensInvalidatedByHostChange(
   updates: Record<string, unknown>,
@@ -72,7 +78,7 @@ export function tokensInvalidatedByHostChange(
     if (updates[pair.host] === undefined) return false;
     const next = configuredHost(updates[pair.host], pair);
     const stored = configuredHost(before?.[pair.host], pair);
-    if (sameOrigin(next, stored)) return false;
+    if (sameEndpoint(next, stored)) return false;
     if (typeof updates[pair.token] === "string" && updates[pair.token]) return false;
     return Boolean(before?.[pair.token]);
   });
@@ -80,4 +86,22 @@ export function tokensInvalidatedByHostChange(
 
 function configuredHost(value: unknown, pair: HostBoundSecret): unknown {
   return typeof value === "string" && value.trim() ? value : pair.fallback;
+}
+
+/**
+ * The same question the settings form has to answer before the save: will this edit throw the
+ * stored token away? It lives here so the warning and the rule cannot drift — they had, in both
+ * directions. The warning keyed on plain string dirtiness, so it cried wolf on a retyped case and
+ * on clearing the field back to the default, and it read the token box untrimmed while the save
+ * posts the token only when it is non-empty after trimming — so a stray space silenced the warning
+ * on the one edit that really does clear the token (BP-315 review).
+ */
+export function clearsStoredToken(
+  nextHost: string,
+  storedHost: string,
+  typedToken: string,
+  fallback: string
+): boolean {
+  if (typedToken.trim()) return false;
+  return !sameEndpoint(nextHost.trim() || fallback, storedHost.trim() || fallback);
 }

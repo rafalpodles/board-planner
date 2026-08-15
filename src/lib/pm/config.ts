@@ -235,7 +235,13 @@ export function mergeMcpServerTokens(
     let oauth = prior?.oauth && sameServer ? { ...prior.oauth } : undefined;
     if (server.authType === "oauth") {
       oauth = oauth ?? { ...EMPTY_OAUTH };
-      if (transient.oauthClientId) {
+      // `oauthClientId` is not a secret, so sanitizeMcpServers returns it and the settings page
+      // posts it back on every save — which put the old registration straight back after the reset
+      // above dropped it, leaving the next Connect to skip re-registration and send the old
+      // client_id to the new server. An echo of what was stored is not an admin typing a new one.
+      const echoesPriorClientId =
+        !sameServer && transient.oauthClientId === prior?.oauth?.clientId;
+      if (transient.oauthClientId && !echoesPriorClientId) {
         oauth.clientId = transient.oauthClientId;
       }
       if (transient.oauthClientSecret) {
