@@ -217,12 +217,18 @@ describe("TaskCard copy link", () => {
     expect(copy.closest("a")).toBeNull();
   });
 
+  // The corner is set on the wrapper: Tailwind orders `relative` after `absolute`, so a
+  // position passed to the button itself loses to the one it carries for its touch target
   it("clears the checkbox's corner rather than sitting under it", () => {
+    const corner = () =>
+      screen.getByRole("button", { name: "Copy link to TP-7" }).parentElement!.className;
     renderCard({ onSelect: vi.fn(), selectionActive: true });
-    expect(screen.getByRole("button", { name: "Copy link to TP-7" }).className).toContain("right-9");
+    expect(corner()).toContain("absolute");
+    expect(corner()).toContain("right-9");
     cleanup();
     renderCard();
-    expect(screen.getByRole("button", { name: "Copy link to TP-7" }).className).toContain("right-2");
+    expect(corner()).toContain("absolute");
+    expect(corner()).toContain("right-2");
   });
 });
 

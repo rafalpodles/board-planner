@@ -292,13 +292,17 @@ export function TaskCard({
     </a>
 
     {/* Outside the link, like the checkbox: a button inside an anchor is not a link
-        the browser can offer its own actions on */}
-    <CopyTaskLink
-      projectRef={projectKey}
-      taskNumber={task.taskNumber}
-      taskKey={`${projectKey}-${task.taskNumber}`}
-      className={`absolute top-2 bg-bg ${checkboxShown ? "right-9" : "right-2"}`}
-    />
+        the browser can offer its own actions on. The corner is a wrapper's job —
+        the button carries `relative` for its own touch target, and Tailwind's
+        position utilities are ordered so `relative` would win over an `absolute`
+        passed in here */}
+    <span className={`absolute top-2 ${checkboxShown ? "right-9" : "right-2"}`}>
+      <CopyTaskLink
+        projectRef={projectKey}
+        taskNumber={task.taskNumber}
+        taskKey={`${projectKey}-${task.taskNumber}`}
+      />
+    </span>
 
     {checkboxShown && (
       <button
