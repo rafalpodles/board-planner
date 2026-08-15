@@ -4,6 +4,7 @@ import { dirname, isAbsolute, join, sep } from "path";
 import { childEnv } from "./env.js";
 import { RepoInventory } from "./config.js";
 import { Runner } from "./exec.js";
+import { gitArgs, GIT_SAFE_ENV } from "./git-safety.js";
 
 // A repository path is a capability grant, not configuration: a .git/config the operator didn't
 // write can make `git status` alone run an attacker's command via core.fsmonitor, core.pager,
@@ -121,14 +122,24 @@ function dangerousConfigEntry(listOutput: string): string | null {
   return null;
 }
 
-// Neutralises a hostile system or repository gitconfig on every call this module makes, the same
-// way GIT_CONFIG_NOSYSTEM does for the environment.
 function git(runner: Runner, cwd: string, args: string[]) {
-  return runner.run("git", ["-c", "core.fsmonitor=false", "-c", "core.pager=cat", ...args], {
+  return runner.run("git", gitArgs(args), {
     cwd,
     timeoutMs: GIT_TIMEOUT_MS,
-    env: { ...childEnv(), GIT_CONFIG_NOSYSTEM: "1" },
+    env: { ...childEnv(), ...GIT_SAFE_ENV },
   });
+}
+
+/**
+ * The key the agent planted, or "" if it planted none. The same scan bindRepository runs, against
+ * the config as it stands *after* the agent has had the checkout — which is the version that
+ * matters for a call carrying GH_TOKEN and SSH_AUTH_SOCK.
+ */
+export async function plantedConfig(runner: Runner, cwd: string): Promise<string> {
+  const result = await git(runner, cwd, ["config", "--local", "--list"]);
+  // Unreadable is not the same as clean: a config this cannot read is one it cannot clear either.
+  if (result.code !== 0 || result.timedOut) return "an unreadable git config";
+  return dangerousConfigEntry(result.stdout) ?? "";
 }
 
 export async function bindRepository(deps: RepoDeps, proposedPath: string): Promise<BindResult> {
