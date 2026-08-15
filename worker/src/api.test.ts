@@ -14,6 +14,16 @@ const config = {
 // method that needs one) can authenticate without touching the filesystem
 const identityStore = { read: () => JSON.stringify({ workerId: "w1", credential: "cpw_secret" }) };
 
+// Every claim now carries the agent the server resolved; a claim without one is not runnable and
+// is handed straight back, so a fixture that omits it tests the refusal rather than the mapping.
+const agent = {
+  agentId: "a1",
+  name: "Default",
+  sequence: [
+    { key: "implement", kind: "step", name: "Implement", prompt: "do it", capability: "edit" },
+  ],
+};
+
 describe("createApiClient", () => {
   it("returns null when the claim endpoint reports an empty queue", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 204 });
@@ -27,6 +37,7 @@ describe("createApiClient", () => {
       status: 200,
       json: async () => ({
         _id: "t1",
+        agent,
         project: "CP",
         taskNumber: 158,
         title: "Do the thing",
@@ -39,8 +50,23 @@ describe("createApiClient", () => {
 
     const task = await api.claim("CP", "run-1");
 
+    // Every optional field of an entry is filled in, so nothing downstream has to decide what an
+    // absent capability or model means
+    expect(task?.agent.sequence[0]).toEqual({
+      key: "implement",
+      kind: "step",
+      name: "Implement",
+      prompt: "do it",
+      capability: "edit",
+      model: "",
+      fallbackModel: "",
+      deterministic: false,
+      gateKind: "",
+      params: {},
+    });
     expect(task).toEqual({
       taskId: "t1",
+      agent: task?.agent,
       projectId: "CP",
       taskKey: "CP-158",
       taskNumber: 158,
@@ -56,7 +82,7 @@ describe("createApiClient", () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
-      json: async () => ({ _id: "t1", taskNumber: 158, title: "Do the thing", description: "" }),
+      json: async () => ({ _id: "t1", agent, taskNumber: 158, title: "Do the thing", description: "" }),
     });
     const api = createApiClient(config, fetchMock as never, identityStore);
 
@@ -67,13 +93,86 @@ describe("createApiClient", () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
-      json: async () => ({ _id: "t1", taskNumber: 158, title: "Do the thing", description: "" }),
+      json: async () => ({ _id: "t1", agent, taskNumber: 158, title: "Do the thing", description: "" }),
     });
     const api = createApiClient(config, fetchMock as never, identityStore);
 
     const task = await api.claim("CP", "run-1");
 
     expect(task?.projectId).toBe("CP");
+  });
+
+  it("reads the agent the claim resolved, in order and with its parameters", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        _id: "t1",
+        taskNumber: 1,
+        title: "t",
+        description: "",
+        agent: {
+          agentId: "a1",
+          name: "Default",
+          sequence: [
+            { key: "implement", kind: "step", name: "Implement", capability: "edit" },
+            {
+              key: "size-strict",
+              kind: "gate",
+              name: "Size",
+              gateKind: "diff-size",
+              params: { maxLines: "400" },
+            },
+          ],
+        },
+      }),
+    });
+    const api = createApiClient(config, fetchMock as never, identityStore);
+
+    const task = await api.claim("CP", "run-1");
+
+    expect(task?.agent.sequence.map((entry) => entry.key)).toEqual(["implement", "size-strict"]);
+    expect(task?.agent.sequence[1].params).toEqual({ maxLines: "400" });
+  });
+
+  // A claim that cannot be run must be handed back. Returning null alone holds the task until
+  // EXECUTION_LEASE_MS expires — two hours in the active column with nothing to say why.
+  it("releases the task when the claim carries no agent", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ _id: "t1", taskNumber: 1, title: "t", description: "" }),
+    });
+    const api = createApiClient(config, fetchMock as never, identityStore);
+
+    await expect(api.claim("CP", "run-1")).resolves.toBeNull();
+    expect(String(fetchMock.mock.calls.at(-1)?.[0])).toContain("/tasks/t1/release");
+  });
+
+  // Skipping the bad entry would run a shorter agent than the one somebody composed, and a missing
+  // check looks exactly like a check that passed
+  it("refuses the whole agent when one entry is malformed, rather than dropping it", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        _id: "t1",
+        taskNumber: 1,
+        title: "t",
+        description: "",
+        agent: {
+          agentId: "a1",
+          name: "Default",
+          sequence: [
+            { key: "implement", kind: "step", name: "Implement" },
+            { key: "diff-size", kind: "checkpoint", name: "Size" },
+          ],
+        },
+      }),
+    });
+    const api = createApiClient(config, fetchMock as never, identityStore);
+
+    await expect(api.claim("CP", "run-1")).resolves.toBeNull();
   });
 
   it("claims against the project-scoped url", async () => {
@@ -178,6 +277,7 @@ describe("createApiClient", () => {
       status: 200,
       json: async () => ({
         _id: "t1",
+        agent,
         taskNumber: 158,
         title: "Do the thing",
         description: "body",
@@ -533,6 +633,7 @@ describe("createApiClient — more than one project", () => {
           status: 200,
           json: async () => ({
             _id: `t-${projectId}`,
+            agent,
             project: projectId,
             taskNumber: 1,
             title: "Do the thing",
@@ -566,7 +667,7 @@ describe("createApiClient — more than one project", () => {
         return {
           ok: true,
           status: 200,
-          json: async () => ({ _id: "t1", taskNumber: 158, title: "Do the thing", description: "" }),
+          json: async () => ({ _id: "t1", agent, taskNumber: 158, title: "Do the thing", description: "" }),
         };
       }
       return { ok: false, status: 503, text: async () => "down" };
@@ -656,6 +757,7 @@ describe("the run identity, from claim through to postEvent", () => {
           status: 200,
           json: async () => ({
             _id: "t1",
+        agent,
             taskNumber: 158,
             title: "Do the thing",
             description: "",
@@ -685,7 +787,7 @@ describe("task keys the worker cannot name safely", () => {
         return {
           ok: true,
           status: 200,
-          json: async () => ({ _id: "t1", taskNumber: 1, title: "Do the thing", description: "" }),
+          json: async () => ({ _id: "t1", agent, taskNumber: 1, title: "Do the thing", description: "" }),
         };
       }
       return { ok: true, status: 200, json: async () => ({ key: projectKey }) };
