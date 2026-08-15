@@ -11,6 +11,8 @@ export type StepOutcome =
   | { kind: "error"; message: string };
 
 export interface RunState {
+  /** Whether any step has committed yet — an exit after one must not destroy the worktree. */
+  committed: boolean;
   /** What has already reached the remote, so an interrupted run can say where the work is. */
   pushed: boolean;
   prUrl: string;
@@ -103,6 +105,7 @@ export async function runStep(entry: SnapshotEntry, ctx: StepContext): Promise<S
   if (entry.capability === "edit") {
     try {
       await ctx.commit(`${ctx.task.taskKey}: ${entry.name.toLowerCase()}`);
+      ctx.state.committed = true;
     } catch (error) {
       return { kind: "error", message: String(error) };
     }
