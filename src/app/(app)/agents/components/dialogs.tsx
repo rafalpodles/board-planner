@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { Input } from "@/components/ui/Input";
@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/Textarea";
 import { Select } from "@/components/ui/Select";
 import { CAPABILITIES, GATE_KINDS, MODELS, gateKindByKey } from "../catalog";
 import { NewAgent, NewBlock } from "../store";
+import { ApiAgentBlock } from "@/types";
 
 const MINE = "mine";
 
@@ -269,6 +270,118 @@ export function NewStepDialog({
             close();
           }}
         />
+      </div>
+    </Modal>
+  );
+}
+
+/**
+ * Editing never touches the key. The key is what an agent's composition names and what the worker
+ * resolves against its own source, so a rename here changes the label and nothing else.
+ */
+export function EditBlockDialog({
+  block,
+  onClose,
+  onSave,
+}: {
+  block: ApiAgentBlock | null;
+  onClose: () => void;
+  onSave: (blockId: string, patch: Partial<NewBlock>) => Promise<void>;
+}) {
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [prompt, setPrompt] = useState("");
+  const [params, setParams] = useState<Record<string, string>>({});
+  const [error, setError] = useState("");
+
+  // A dialog keyed on the row it edits: the fields reset when a different block opens it
+  useEffect(() => {
+    if (!block) return;
+    setName(block.name);
+    setDescription(block.description);
+    setPrompt(block.prompt);
+    setParams(block.params ?? {});
+    setError("");
+  }, [block]);
+
+  if (!block) return null;
+  const kind = block.gateKind ? gateKindByKey(block.gateKind) : undefined;
+
+  return (
+    <Modal open onClose={onClose} title={block.builtIn ? `${block.name} (default)` : block.name}>
+      <div className="flex flex-col gap-4">
+        <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} required />
+        <Textarea
+          label="Description"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          rows={2}
+        />
+
+        {block.kind === "step" && !block.deterministic && (
+          <Textarea
+            label="What it should do"
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            rows={4}
+          />
+        )}
+
+        {block.kind === "step" && block.deterministic && (
+          <p className="text-[12px] text-text-muted">
+            This one is an action the worker takes. It has no prompt and calls no model.
+          </p>
+        )}
+
+        {block.kind === "gate" &&
+          kind?.params.map((param) =>
+            param.type === "select" ? (
+              <Select
+                key={param.key}
+                label={param.label}
+                value={params[param.key] ?? param.options?.[0]?.value ?? ""}
+                onChange={(e) => setParams((v) => ({ ...v, [param.key]: e.target.value }))}
+                options={param.options ?? []}
+              />
+            ) : (
+              <div key={param.key}>
+                <Input
+                  label={param.label}
+                  type={param.type === "number" ? "number" : "text"}
+                  value={params[param.key] ?? ""}
+                  placeholder={param.placeholder}
+                  onChange={(e) => setParams((v) => ({ ...v, [param.key]: e.target.value }))}
+                />
+                {param.hint && <p className="mt-1 text-[12px] text-text-muted">{param.hint}</p>}
+              </div>
+            )
+          )}
+
+        {error && <p className="text-[13px] text-danger">{error}</p>}
+
+        <div className="mt-2 flex justify-end gap-2">
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            disabled={!name.trim()}
+            onClick={async () => {
+              setError("");
+              try {
+                await onSave(block._id, {
+                  name: name.trim(),
+                  description: description.trim(),
+                  ...(block.kind === "step" ? { prompt: prompt.trim() } : { params }),
+                });
+                onClose();
+              } catch (err) {
+                setError(err instanceof Error ? err.message : "Could not save");
+              }
+            }}
+          >
+            Save
+          </Button>
+        </div>
       </div>
     </Modal>
   );

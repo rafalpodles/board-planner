@@ -62,6 +62,11 @@ export function useStore() {
       await load();
     },
 
+    updateBlock: async (blockId: string, patch: Partial<NewBlock>) => {
+      await api.put(`/api/agent-blocks/${blockId}`, patch);
+      await load();
+    },
+
     removeAgent: async (agentId: string) => {
       await api.del(`/api/agents/${agentId}`);
       await load();

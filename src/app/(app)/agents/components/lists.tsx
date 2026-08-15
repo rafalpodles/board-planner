@@ -71,18 +71,25 @@ function DeleteButton({ label, onDelete }: { label: string; onDelete: () => Prom
 export function BlockList({
   rows,
   onDelete,
+  onEdit,
 }: {
   rows: ApiAgentBlock[];
   onDelete: (blockId: string) => Promise<void>;
+  onEdit: (block: ApiAgentBlock) => void;
 }) {
   return (
     <ul className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-bg-card">
       {rows.map((row) => {
         const summary = blockSummary(row);
         return (
-          <li key={row.key} className="px-3.5 py-3">
+          <li key={row.key} className="px-3.5 py-3 transition-colors hover:bg-bg-hover">
             <div className="flex flex-wrap items-baseline gap-2">
-              <span className="text-[14px] font-medium">{row.name}</span>
+              <button
+                onClick={() => onEdit(row)}
+                className="focus-ring rounded text-left text-[14px] font-medium hover:underline"
+              >
+                {row.name}
+              </button>
               {row.builtIn && <DefaultBadge />}
               {summary && (
                 <span className="ml-auto shrink-0 text-[11px] text-text-muted">{summary}</span>
