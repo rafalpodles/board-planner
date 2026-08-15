@@ -12,6 +12,7 @@ import {
   RecurrenceFrequency,
 } from "@/types";
 import { activeFields, orderedOptions, sortedFields } from "@/lib/custom-fields";
+import { roundForDisplay } from "@/lib/estimates";
 import { Avatar, PriorityBars, SectionLabel } from "./atoms";
 import { EmptyValue, FieldRow, OptionItem, OptionList, PickerRow } from "./FieldRow";
 import type { TaskDraft } from "./useTaskEditor";
@@ -475,6 +476,8 @@ function CustomFieldRow({ field, value, onChange, touch }: CustomFieldRowProps) 
       value={
         value === undefined || value === "" ? (
           <EmptyValue>Empty</EmptyValue>
+        ) : field.fieldType === "number" ? (
+          String(roundForDisplay(Number(value)))
         ) : (
           String(value)
         )

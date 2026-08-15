@@ -60,6 +60,12 @@ export const PATCH = withProjectAccess(async (request, { params }) => {
     field.order = Number(body.order);
   }
 
+  // An archived field vanishes from every picker while the designation would survive,
+  // so archiving strands the pointer exactly like deleting the field does.
+  if (field.archived && project.estimateFieldId === fieldId) {
+    project.estimateFieldId = "";
+  }
+
   project.markModified("customFields");
   await project.save();
 
@@ -78,6 +84,9 @@ export const DELETE = withProjectOwner(async (_request, { params }) => {
   project.customFields = (project.customFields || []).filter(
     (f) => f._id.toString() !== fieldId
   );
+  if (project.estimateFieldId === fieldId) {
+    project.estimateFieldId = "";
+  }
   await project.save();
 
   // Clean up orphaned values from all tasks in this project

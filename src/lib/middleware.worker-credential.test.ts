@@ -4,6 +4,7 @@ const verifyWorkerCredential = vi.fn();
 const getAuthUser = vi.fn();
 const projectFindById = vi.fn();
 const userFindById = vi.fn();
+const check = vi.fn();
 
 vi.mock("./db", () => ({ connectDB: vi.fn() }));
 vi.mock("./worker-service", async (importOriginal) => {
@@ -11,6 +12,8 @@ vi.mock("./worker-service", async (importOriginal) => {
   return { ...actual, verifyWorkerCredential };
 });
 vi.mock("./auth", () => ({ getAuthUser, RateLimitError: class extends Error {} }));
+// Only the person branch consults it; the worker branch in this file never reaches it
+vi.mock("./grants", () => ({ check, accessibleProjectIds: vi.fn() }));
 vi.mock("@/models/project", () => ({
   Project: { findById: projectFindById, findOne: vi.fn() },
 }));
@@ -96,6 +99,38 @@ describe("a worker reporting with its own credential", () => {
     await withProjectAccessOrWorker(handler)(workerRequest(), context());
 
     expect(handler.mock.calls[0][1].user.viaMachineCredential).toBe(true);
+  });
+
+  // BP-335/BP-336: handlers must never read x-worker-id themselves — a session cookie with no
+  // Bearer takes the person branch, where that header is attacker-set and unverified. So the
+  // middleware hands down the id it actually verified, and the route tests that mock this away
+  // cannot prove it does.
+  it("hands the handler the worker id it verified the credential against", async () => {
+    const handler = vi.fn().mockResolvedValue(new Response("ok"));
+
+    await withProjectAccessOrWorker(handler)(workerRequest(), context());
+
+    expect(handler.mock.calls[0][1].workerId).toBe("w1");
+  });
+
+  it("gives the person branch no worker id, whatever header the request carries", async () => {
+    const handler = vi.fn().mockResolvedValue(new Response("ok"));
+    getAuthUser.mockResolvedValue({ _id: "u1", role: "member" });
+    check.mockResolvedValue(true);
+    projectFindById.mockReturnValue({ select: () => ({ _id: PROJECT_ID }) });
+
+    // A cookie session — no Bearer — carrying a forged x-worker-id
+    const forged = new Request(`https://example.com/api/projects/${PROJECT_ID}/tasks/t1/comments`, {
+      method: "POST",
+      headers: { "x-worker-id": "w1" },
+    });
+
+    await withProjectAccessOrWorker(handler)(forged, context());
+
+    // Without this the two `?.` below short-circuit to undefined when the handler was never
+    // reached, so the assertion would pass for the wrong reason if any gate above it changed
+    expect(handler).toHaveBeenCalled();
+    expect(handler.mock.calls[0]?.[1]?.workerId).toBeUndefined();
   });
 
   it("never consults the person path when a worker credential is presented", async () => {

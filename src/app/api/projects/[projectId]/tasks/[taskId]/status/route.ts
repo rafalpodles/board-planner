@@ -2,8 +2,9 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withProjectAccessOrWorker } from "@/lib/middleware";
 import { changeStatus } from "@/lib/task-service";
+import { machineMayNotForce, MACHINE_FORCE_REFUSAL } from "@/lib/force-guard";
 
-export const PATCH = withProjectAccessOrWorker(async (request, { params, user }) => {
+export const PATCH = withProjectAccessOrWorker(async (request, { params, user, workerId }) => {
   const { projectId, taskId } = await params;
   await connectDB();
 
@@ -13,15 +14,16 @@ export const PATCH = withProjectAccessOrWorker(async (request, { params, user })
 
   // Never for a machine credential. CLAUDE.md already records that the PM agent gets no force
   // because "an unattended agent must not take work off a machine"; a worker is exactly such an
-  // agent, and force here took a task off another worker mid-run (BP-305).
-  if (force === true && user.viaMachineCredential) {
-    return NextResponse.json(
-      { error: "force is not available to a machine credential" },
-      { status: 403 }
-    );
+  // agent, and force here took a task off another worker mid-run (BP-305). The rule moved into
+  // one named place once BP-320 found the sibling route missing it.
+  if (machineMayNotForce(user, force)) {
+    return NextResponse.json({ error: MACHINE_FORCE_REFUSAL }, { status: 403 });
   }
 
-  const result = await changeStatus(projectId, taskId, status, String(user._id), force === true);
+  const result = await changeStatus(projectId, taskId, status, String(user._id), {
+    force: force === true,
+    workerId,
+  });
   if (!result.ok) {
     return NextResponse.json(
       { error: result.error, ...(result.runConflict ? { runConflict: result.runConflict } : {}) },
