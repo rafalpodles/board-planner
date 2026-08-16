@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { createDelivery } from "./delivery.js";
-import { CommandResult } from "./exec.js";
+import { CommandResult, RunOpts } from "./exec.js";
 import { ClaimedTask } from "./types.js";
 import { claimedTask } from "./__fixtures__/task.js";
 
@@ -18,7 +18,11 @@ function withoutConfigFlags(args: string[]): string[] {
 }
 
 function fakeCli(responses: Record<string, Partial<CommandResult>>) {
-  const run = vi.fn(async (command: string, args: string[]): Promise<CommandResult> => {
+  const run = vi.fn(async (
+    command: string,
+    args: string[],
+    _opts?: RunOpts
+  ): Promise<CommandResult> => {
     const line = `${command} ${withoutConfigFlags(args).join(" ")}`;
     const key = Object.keys(responses).find((prefix) => line.startsWith(prefix));
     return { ...ok, ...(key ? responses[key] : {}) };
