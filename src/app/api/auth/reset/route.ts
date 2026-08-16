@@ -1,11 +1,23 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
-import { MIN_PASSWORD_LENGTH, PASSWORD_COST_FACTOR } from "@/lib/auth";
+import { getClientIp, MIN_PASSWORD_LENGTH, PASSWORD_COST_FACTOR } from "@/lib/auth";
+import {
+  anonymousMultiplier,
+  isRateLimited,
+  recordFailedAttempt,
+  sourceKey,
+} from "@/lib/rate-limit";
 import { logInstanceAudit } from "@/lib/instanceAudit";
-import { consumeResetToken } from "@/lib/password-reset";
+import {
+  consumeResetToken,
+  invalidateResetTokens,
+  releaseResetToken,
+} from "@/lib/password-reset";
 import { provenanceRefusal, revokeUserSessions } from "@/lib/session";
 import { User } from "@/models/user";
+
+const ATTEMPTS_PER_SOURCE = 20;
 
 const REFUSALS: Record<string, string> = {
   unknown: "This link is not valid. Ask for a new one.",
@@ -37,7 +49,23 @@ export async function POST(request: Request) {
     );
   }
 
+  // Guessing 32 random bytes is not the worry; unmetered work is. Two indexed reads and a bcrypt
+  // per anonymous request is a bill anybody can run up.
+  const clientIp = getClientIp(request);
+  const throttleKey = sourceKey(clientIp ?? "-", "password-reset-use");
+  if (await isRateLimited(throttleKey, anonymousMultiplier(clientIp, ATTEMPTS_PER_SOURCE))) {
+    return NextResponse.json(
+      { error: "Too many attempts. Try again in 15 minutes." },
+      { status: 429 }
+    );
+  }
+  await recordFailedAttempt(throttleKey);
+
   await connectDB();
+
+  // Hashed before the token is spent, for the same reason the length is checked first: bcrypt
+  // throwing after the claim would leave the person with a dead link and their old password
+  const hashed = await bcrypt.hash(newPassword, PASSWORD_COST_FACTOR);
 
   const outcome = await consumeResetToken(token);
   if (!outcome.ok) {
@@ -58,15 +86,28 @@ export async function POST(request: Request) {
   // resetting a password they believe was stolen is trying to end
   await revokeUserSessions(user._id);
 
-  await User.updateOne(
-    { _id: user._id },
-    { $set: { password: await bcrypt.hash(newPassword, PASSWORD_COST_FACTOR) } }
-  );
+  try {
+    await User.updateOne({ _id: user._id }, { $set: { password: hashed } });
+  } catch (err) {
+    // The claim is one-shot, so a write that fails here would otherwise leave somebody signed out
+    // of everything, holding a dead link, with their old password still in force and no way back
+    await releaseResetToken(token).catch(() => {});
+    throw err;
+  }
+
+  // Every other link too, and only once the password is safely written. Issuing is a delete
+  // followed by a create, so two requests racing leave two live links; without this, resetting
+  // with the second leaves the first able to set the password again, in an inbox the person may
+  // not control.
+  await invalidateResetTokens(user._id);
 
   void logInstanceAudit({
-    action: "password_reset_completed",
+    action: "user_password_reset_by_email",
     user: user._id,
     target: user.username,
+    // The address, because "was that me?" is the whole question this row exists to answer, and a
+    // row saying only that it happened cannot answer it
+    detail: clientIp ? `from ${clientIp}` : "from an unknown address",
   });
 
   return NextResponse.json({ ok: true });

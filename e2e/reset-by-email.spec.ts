@@ -52,11 +52,9 @@ async function signIn(page: Page, username: string, password: string) {
   await page.getByRole("button", { name: "Sign In" }).click();
 }
 
+// seed() empties every collection, tokens and audit rows included
 test.beforeEach(async () => {
   await seed();
-  const handle = await db();
-  await handle.collection("passwordresettokens").deleteMany({});
-  await handle.collection("instanceauditlogs").deleteMany({});
 });
 
 test.afterEach(async () => {
@@ -74,17 +72,22 @@ test("a link sets a new password, and the account signs in with it", async ({ pa
 
   const rows = await (await db()).collection("instanceauditlogs").find({}).toArray();
   expect(rows).toHaveLength(1);
-  expect(rows[0]).toMatchObject({ action: "password_reset_completed", target: MEMBER_USERNAME });
+  expect(rows[0]).toMatchObject({ action: "user_password_reset_by_email", target: MEMBER_USERNAME });
 });
 
-test("the old password stops working once the link is used", async ({ page }) => {
+test("the old password stops working once the link is used", async ({ page, request }) => {
   const token = await plantLink();
   await setNewPassword(page, token, "chosen-after-the-email");
   await expect(page.getByText("Your password is set")).toBeVisible();
 
-  await signIn(page, MEMBER_USERNAME, MEMBER_PASSWORD);
+  // The status, not the words: the sign-in screen prints "Invalid credentials" for any failed
+  // response, so asserting the text would pass just as happily on a 500
+  const refused = await request.post("/api/auth/login", {
+    headers: { "Sec-Fetch-Site": "same-origin" },
+    data: { username: MEMBER_USERNAME, password: MEMBER_PASSWORD },
+  });
 
-  await expect(page.getByText("Invalid credentials")).toBeVisible();
+  expect(refused.status()).toBe(401);
 });
 
 // The headline criterion. A link that still works after it has been spent is a spare key left in
@@ -150,12 +153,30 @@ test("the sign-in screen offers the way in when a password is forgotten", async 
 // CI has no mail server, which is the state a self-hosted instance starts in. Somebody left
 // waiting for a message that was never coming is the failure this wording exists to prevent.
 test("an instance with no mail server says so instead of promising a link", async ({ page }) => {
+  // Stated rather than assumed: a developer with SMTP_HOST in their shell would otherwise see this
+  // fail for a reason that has nothing to do with the code
+  test.skip(!!process.env.SMTP_HOST, "this asserts the unconfigured state");
+
   await page.goto("/forgot");
   await page.getByLabel("Username or email").fill(MEMBER_USERNAME);
   await page.getByRole("button", { name: "Send the link" }).click();
 
   await expect(page.getByText(/cannot send email/)).toBeVisible();
-  await expect(page.getByText(/a link is on its way/)).toBeHidden();
+  // The heading only changes on success, so this is what proves nothing was promised
+  await expect(page.getByRole("heading", { name: "Forgot your password?" })).toBeVisible();
+});
+
+test("a mistyped confirmation is caught before anything is spent", async ({ page }) => {
+  const token = await plantLink();
+  await page.goto(`/reset?token=${token}`);
+  await page.getByLabel("New password", { exact: true }).fill("first-attempt-typed");
+  await page.getByLabel("Confirm new password").fill("second-attempt-typed");
+  await page.getByRole("button", { name: "Set the password" }).click();
+
+  await expect(page.getByText("The passwords do not match")).toBeVisible();
+  // And the link is still good afterwards, which is the part worth proving
+  await setNewPassword(page, token, "the-password-that-sticks");
+  await expect(page.getByText("Your password is set")).toBeVisible();
 });
 
 // Not about the reset, but it is what this slice tripped over and nothing else guards it. The

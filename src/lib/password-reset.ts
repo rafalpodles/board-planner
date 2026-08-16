@@ -58,6 +58,15 @@ export async function consumeResetToken(token: string): Promise<ResetTokenOutcom
   return { ok: false, reason: existing.usedAt ? "used" : "expired" };
 }
 
+/**
+ * Puts a claimed token back, for the one caller that spent it and then could not finish. Without
+ * this a failed write costs somebody their only link as well as every session they had.
+ */
+export async function releaseResetToken(token: string): Promise<void> {
+  await connectDB();
+  await PasswordResetToken.updateOne({ tokenHash: sha256(token) }, { $set: { usedAt: null } });
+}
+
 /** Every outstanding link for this account stops working. */
 export async function invalidateResetTokens(userId: Types.ObjectId | string): Promise<void> {
   await connectDB();

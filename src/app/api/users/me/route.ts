@@ -3,6 +3,7 @@ import { connectDB } from "@/lib/db";
 import { isValidEmail, normaliseEmail } from "@/lib/email";
 import { withAuth } from "@/lib/middleware";
 import { duplicateKeyField } from "@/lib/mongo-errors";
+import { invalidateResetTokens } from "@/lib/password-reset";
 import { User } from "@/models/user";
 
 export const PUT = withAuth(async (request, { user }) => {
@@ -44,6 +45,13 @@ export const PUT = withAuth(async (request, { user }) => {
 
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ error: "No valid fields to update" }, { status: 400 });
+  }
+
+  // Moving your own address away from an inbox leaves any link already sent to it live for the
+  // rest of its hour, which is the wrong answer if you are moving it because that inbox is not
+  // yours any more
+  if (typeof updates.email === "string") {
+    await invalidateResetTokens(user._id);
   }
 
   let updated;

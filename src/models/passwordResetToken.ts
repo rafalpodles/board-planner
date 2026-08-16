@@ -23,3 +23,11 @@ passwordResetTokenSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 60 * 60 *
 export const PasswordResetToken: Model<IPasswordResetToken> =
   mongoose.models.PasswordResetToken ||
   mongoose.model<IPasswordResetToken>("PasswordResetToken", passwordResetTokenSchema);
+
+// Same guard as the user model: mongoose builds indexes in the background and keeps a failure to
+// itself, which is how a TTL that never took hold would go unnoticed until links outlived their day
+if (!mongoose.models.PasswordResetToken || PasswordResetToken.listenerCount("index") === 0) {
+  PasswordResetToken.on("index", (err: Error | undefined) => {
+    if (err) console.error("Failed to build an index on passwordresettokens:", err.message);
+  });
+}

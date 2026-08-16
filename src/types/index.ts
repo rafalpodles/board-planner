@@ -1228,7 +1228,7 @@ export const INSTANCE_AUDIT_ACTIONS = [
   "worker_command_sent",
   "user_password_reset",
   "user_email_changed",
-  "password_reset_completed",
+  "user_password_reset_by_email",
 ] as const;
 
 export type InstanceAuditAction = (typeof INSTANCE_AUDIT_ACTIONS)[number];

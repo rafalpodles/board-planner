@@ -77,9 +77,10 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
     target.role = body.role as "admin" | "member";
   }
 
-  // A worker's or the PM's account is deliberately un-loginable, and both halves of that promise
-  // live here: a password makes it loginable, and an address makes it resettable. Refusing one and
-  // not the other only moves the escape a slice later.
+  // A worker's account is deliberately un-loginable, and both halves of that promise live here: a
+  // password makes it loginable, and an address makes it resettable. Refusing one and not the other
+  // only moves the escape a slice later. Note this keys on `kind`, so it does not cover the `pm`
+  // identity, which is stored as a person — BP-348.
   const wantsCredentialChange = body.email !== undefined || body.password !== undefined;
   if (wantsCredentialChange && target.kind === "machine") {
     return NextResponse.json(
@@ -181,6 +182,12 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
       user: admin._id,
       target: target.username,
     });
+  }
+
+  if (emailWasChanged) {
+    // A link already sent to the old address would otherwise keep working for its hour — which is
+    // exactly the address this change is moving away from
+    await invalidateResetTokens(target._id);
   }
 
   // The quieter half of the same takeover: repointing an address takes an account over at the next

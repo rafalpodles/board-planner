@@ -94,13 +94,17 @@ describe("POST /api/auth/forgot", () => {
     );
   });
 
-  it("accepts an email address as well as a username", async () => {
+  // Both lookups run every time, in parallel: doing the second only on a miss makes the miss path
+  // slower than the hit path, which is the enumeration oracle read backwards
+  it("looks for the address and the username, always, and normalises both", async () => {
     await POST(post("  Rafal@Example.COM "));
 
+    expect(userFindOne).toHaveBeenCalledTimes(2);
     expect(userFindOne).toHaveBeenCalledWith(
-      expect.objectContaining({
-        $or: [{ username: "rafal@example.com" }, { email: "rafal@example.com" }],
-      })
+      expect.objectContaining({ email: "rafal@example.com" })
+    );
+    expect(userFindOne).toHaveBeenCalledWith(
+      expect.objectContaining({ username: "rafal@example.com" })
     );
   });
 

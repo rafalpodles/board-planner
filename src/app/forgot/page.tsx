@@ -38,26 +38,33 @@ export default function ForgotPasswordPage() {
   return (
     <div className="min-h-screen flex items-center justify-center px-4">
       <div className="w-full max-w-sm">
-        <h1 className="text-2xl font-bold text-center mb-2">Forgot your password?</h1>
+        <h1 className="text-2xl font-bold text-center mb-2">
+          {sent ? "Check your email" : "Forgot your password?"}
+        </h1>
 
         {sent ? (
-          <>
+          <div role="status">
             {/* Deliberately says nothing about whether the account exists — a sign-in screen that
                 refuses to confirm an account would be pointless if this screen confirmed it */}
             <p className="text-sm text-text-muted text-center mb-6">
-              If that account exists and has an email address, a link is on its way. It works once,
-              and for an hour.
+              If that account exists and has an email address, a link is on its way. The link works
+              once and expires in an hour.
+            </p>
+            {/* The one dead end the uniform answer creates: an account with no address waits for a
+                message that is never coming, and must not be told why. This is the way out. */}
+            <p className="text-sm text-text-muted text-center mb-6">
+              Nothing arrived? Ask an administrator to set a password for you.
             </p>
             <p className="text-sm text-text-muted text-center">
               <Link href="/login" className="underline">
                 Back to sign in
               </Link>
             </p>
-          </>
+          </div>
         ) : (
           <>
             <p className="text-sm text-text-muted text-center mb-6">
-              Enter your username or email address and {APP_NAME} will send you a link.
+              {APP_NAME} will email you a link to set a new password.
             </p>
             <form onSubmit={handleSubmit} className="space-y-4">
               <Input

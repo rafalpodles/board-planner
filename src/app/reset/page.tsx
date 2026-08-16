@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, Suspense, useState } from "react";
+import { FormEvent, Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/Button";
@@ -10,7 +10,15 @@ const MIN_PASSWORD_LENGTH = 8;
 
 function ResetForm() {
   const router = useRouter();
-  const token = useSearchParams().get("token") ?? "";
+  const fromUrl = useSearchParams().get("token") ?? "";
+  const [token] = useState(fromUrl);
+
+  // Off the address bar as soon as it is held: same-origin requests send the full URL in Referer
+  // under this app's referrer policy, so the token would reach the proxy's access log, and it
+  // would sit in browser history and on screen during a screen share.
+  useEffect(() => {
+    if (fromUrl) window.history.replaceState(null, "", "/reset");
+  }, [fromUrl]);
 
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -67,15 +75,17 @@ function ResetForm() {
 
   if (done) {
     return (
-      <div className="w-full max-w-sm text-center">
+      <div role="status" className="w-full max-w-sm text-center">
         <h1 className="text-2xl font-bold mb-2">Your password is set</h1>
-        {/* Said because it is surprising otherwise: everything else was signed out, including the
-            person who knew the old password, which is usually why somebody is on this screen */}
+        {/* "Every other session" would be wrong here — nobody is signed in on this screen, and
+            whoever knew the old password has just been signed out too, which is usually the point */}
+        {/* "Signed out on every device" and not "everywhere": API tokens are a separate credential
+            and survive this, which the documentation says plainly rather than this screen */}
         <p className="text-sm text-text-muted mb-6">
-          Every other session was signed out. Your API tokens keep working.
+          You have been signed out on every device. Sign in with your new password.
         </p>
         <Button onClick={() => router.push("/login")} className="w-full">
-          Sign in
+          Sign In
         </Button>
       </div>
     );

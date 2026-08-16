@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const consumeResetToken = vi.fn();
+const invalidateResetTokens = vi.fn();
+const releaseResetToken = vi.fn();
 const revokeUserSessions = vi.fn();
 const logInstanceAudit = vi.fn();
 const userFindById = vi.fn();
@@ -8,8 +10,20 @@ const userUpdateOne = vi.fn();
 const hash = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
-vi.mock("@/lib/auth", () => ({ MIN_PASSWORD_LENGTH: 8, PASSWORD_COST_FACTOR: 10 }));
-vi.mock("@/lib/password-reset", () => ({ consumeResetToken }));
+vi.mock("@/lib/auth", () => ({
+  MIN_PASSWORD_LENGTH: 8,
+  PASSWORD_COST_FACTOR: 10,
+  getClientIp: () => "203.0.113.9",
+}));
+vi.mock("@/models/rateLimit", async () => {
+  const { inMemoryRateLimitModel } = await import("@/lib/rate-limit-test-store");
+  return { RateLimit: inMemoryRateLimitModel() };
+});
+vi.mock("@/lib/password-reset", () => ({
+  consumeResetToken,
+  invalidateResetTokens,
+  releaseResetToken,
+}));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 vi.mock("@/lib/session", () => ({ provenanceRefusal: () => null, revokeUserSessions }));
 vi.mock("bcryptjs", () => ({ default: { hash } }));
@@ -18,6 +32,7 @@ vi.mock("@/models/user", () => ({
 }));
 
 const { POST } = await import("./route");
+const { resetRateLimits } = await import("@/lib/rate-limit");
 
 function post(body: unknown = { token: "cpr_good", newPassword: "a-brand-new-password" }) {
   return new Request("http://x/api/auth/reset", {
@@ -31,8 +46,9 @@ function accountIs(user: unknown) {
   userFindById.mockReturnValue({ select: () => Promise.resolve(user) });
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.clearAllMocks();
+  await resetRateLimits();
   consumeResetToken.mockResolvedValue({ ok: true, userId: "u1" });
   accountIs({ _id: "u1", username: "rafal", kind: "human" });
   hash.mockResolvedValue("new-hash");
@@ -52,7 +68,7 @@ describe("POST /api/auth/reset", () => {
     // Whoever knew the old password is signed out — usually the reason somebody is resetting
     expect(revokeUserSessions).toHaveBeenCalledWith("u1");
     expect(logInstanceAudit).toHaveBeenCalledWith(
-      expect.objectContaining({ action: "password_reset_completed", target: "rafal" })
+      expect.objectContaining({ action: "user_password_reset_by_email", target: "rafal" })
     );
   });
 
