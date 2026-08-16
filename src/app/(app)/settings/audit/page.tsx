@@ -22,6 +22,7 @@ const LABELS: Record<string, string> = {
   project_workers_disabled: "Workers disabled for project",
   user_password_reset: "Password set by an admin",
   user_email_changed: "Address changed by an admin",
+  user_password_reset_by_email: "Password reset by email",
 };
 
 // The actions worth spotting at a glance: one stops a machine, one hands out the credential that
@@ -32,6 +33,7 @@ const NOTABLE = new Set([
   "enrolment_token_spent",
   "user_password_reset",
   "user_email_changed",
+  "user_password_reset_by_email",
 ]);
 
 export default function InstanceAuditPage() {

@@ -9,6 +9,7 @@ import {
   sourceKey,
   withLockout,
 } from "@/lib/rate-limit";
+import { invalidateResetTokens } from "@/lib/password-reset";
 import { revokeUserSessions } from "@/lib/session";
 import { User } from "@/models/user";
 
@@ -67,6 +68,9 @@ export const PUT = withAuth(async (request, { user }) => {
   record.password = await bcrypt.hash(newPassword, PASSWORD_COST_FACTOR);
   await record.save();
 
+  // Somebody who changes their password after asking for a reset link has answered the question
+  // themselves; the link in their inbox must not still be able to overwrite this
+  await invalidateResetTokens(user._id);
   await revokeUserSessions(user._id, user.sessionId);
 
   return NextResponse.json({ ok: true });
