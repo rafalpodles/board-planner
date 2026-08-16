@@ -7,7 +7,7 @@ import { createServer as tcpServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createDelivery, hardenedGitConfig } from "./delivery.js";
-import { createRunner } from "./exec.js";
+import { CommandResult, createRunner, Runner } from "./exec.js";
 
 /**
  * Delivery carries the operator's credentials and runs `git push` inside the worktree the agent
@@ -27,6 +27,22 @@ import { createRunner } from "./exec.js";
 // Refuses the push as well as marking that it ran: with `exit 0` an unhardened push still reaches
 // the remote, so an assertion that the branch landed could not tell the two apart
 const HOOK = (marker: string) => `#!/bin/sh\ntouch ${JSON.stringify(marker)}\nexit 1\n`;
+
+// refuseIfPlanted reads `git config --local --list` through the runner before the push. Where the
+// subject is an override rather than the guard, that one read is blinded: the planted key stays on
+// disk, so the real git still meets it, and only delivery's own look at the config comes back
+// empty. Without this the guard fires first, the push never runs, and every assertion below would
+// be green whether the overrides worked or not.
+function pastTheGuard(): Runner {
+  const real = createRunner();
+  const clean: CommandResult = { code: 0, stdout: "", stderr: "", timedOut: false };
+  return {
+    run: (command, args, opts) =>
+      args.includes("config") && args.includes("--local")
+        ? Promise.resolve(clean)
+        : real.run(command, args, opts),
+  };
+}
 
 function git(cwd: string, ...args: string[]): void {
   execFileSync("git", args, { cwd, stdio: "pipe" });
@@ -138,7 +154,7 @@ describe("delivery does not execute what the agent left in the repository", () =
     plantHook(join(dir, "elsewhere", "pre-push"));
     git(work, "config", "core.hooksPath", join(dir, "elsewhere"));
 
-    await createDelivery(createRunner()).push(work, "feature");
+    await createDelivery(pastTheGuard()).push(work, "feature");
 
     expect(existsSync(marker)).toBe(false);
     expect(pushedRefs()).toContain("refs/heads/feature");
@@ -167,7 +183,7 @@ describe("delivery does not execute what the agent left in the repository", () =
     );
     git(work, "config", "remote.origin.receivepack", planted);
 
-    await createDelivery(createRunner()).push(work, "feature");
+    await createDelivery(pastTheGuard()).push(work, "feature");
 
     expect(existsSync(marker)).toBe(false);
     expect(pushedRefs()).toContain("refs/heads/feature");
@@ -177,7 +193,7 @@ describe("delivery does not execute what the agent left in the repository", () =
     git(work, "config", "credential.helper", `!${plantProgram("planted-credential")}`);
     git(work, "remote", "set-url", "origin", unauthorized);
 
-    await createDelivery(createRunner())
+    await createDelivery(pastTheGuard())
       .push(work, "feature")
       .catch(() => undefined);
 
@@ -188,7 +204,7 @@ describe("delivery does not execute what the agent left in the repository", () =
     git(work, "config", "core.askPass", plantProgram("planted-askpass"));
     git(work, "remote", "set-url", "origin", unauthorized);
 
-    await createDelivery(createRunner())
+    await createDelivery(pastTheGuard())
       .push(work, "feature")
       .catch(() => undefined);
 
@@ -206,7 +222,7 @@ describe("delivery does not execute what the agent left in the repository", () =
     git(work, "config", "protocol.ext.allow", "always");
     git(work, ...configure(payload));
 
-    await createDelivery(createRunner())
+    await createDelivery(pastTheGuard())
       .push(work, "feature")
       .catch(() => undefined);
 
@@ -221,7 +237,7 @@ describe("delivery does not execute what the agent left in the repository", () =
   it("does not run a proxy command the agent set, and still pushes over it", async () => {
     git(work, "config", "core.gitProxy", plantProgram("planted-proxy"));
 
-    await createDelivery(createRunner()).push(work, "feature");
+    await createDelivery(pastTheGuard()).push(work, "feature");
 
     expect(existsSync(marker)).toBe(false);
     expect(pushedRefs()).toContain("refs/heads/feature");
@@ -230,13 +246,50 @@ describe("delivery does not execute what the agent left in the repository", () =
   // A local push runs git-receive-pack as delivery's own child, so the destination's post-receive
   // hook would hold delivery's credentials. Refusing the transport is what stops it — asserted,
   // because the first version of this fix assumed the hooksPath override covered it, and it does not.
+  // The guard standing in front of all of the above: delivery reads the checkout's config before it
+  // pushes and refuses outright if the agent wrote an executable key at all — including one the
+  // override list never named. This is the only place it is the subject; everywhere else it is
+  // blinded, or nothing above would be testing an override.
+  describe("and refuses the push outright when it can see one", () => {
+    it.each([
+      ["core.hooksPath", () => git(work, "config", "core.hooksPath", join(dir, "elsewhere"))],
+      [
+        "remote.origin.receivepack",
+        () => git(work, "config", "remote.origin.receivepack", "/bin/true"),
+      ],
+      ["core.gitProxy", () => git(work, "config", "core.gitProxy", "/bin/true")],
+    ])("names %s, and the remote never hears from it", async (key, plant) => {
+      plant();
+
+      await expect(createDelivery(createRunner()).push(work, "feature")).rejects.toThrow(
+        new RegExp(key.toLowerCase().replace(/\./g, "\\."))
+      );
+
+      expect(pushedRefs()).not.toContain("refs/heads/feature");
+    });
+
+    // An unreadable config is not a clean one: it is a config this cannot clear either
+    it("refuses when it cannot read the config at all", async () => {
+      const runner: Runner = {
+        run: (command, args, opts) =>
+          args.includes("config") && args.includes("--local")
+            ? Promise.resolve({ code: 128, stdout: "", stderr: "boom", timedOut: false })
+            : createRunner().run(command, args, opts),
+      };
+
+      await expect(createDelivery(runner).push(work, "feature")).rejects.toThrow(/unreadable/);
+
+      expect(pushedRefs()).not.toContain("refs/heads/feature");
+    });
+  });
+
   it("refuses to push to a local path, where a post-receive hook would hold its credentials", async () => {
     const destination = join(dir, "agents-own.git");
     execFileSync("git", ["init", "--bare", "-b", "main", destination], { stdio: "pipe" });
     plantHook(join(destination, "hooks", "post-receive"));
     git(work, "config", "remote.origin.pushurl", destination);
 
-    await createDelivery(createRunner())
+    await createDelivery(pastTheGuard())
       .push(work, "feature")
       .catch(() => undefined);
 
