@@ -101,6 +101,15 @@ const HARDENED_CONFIG: ReadonlyArray<readonly [string, string]> = [
 // The command line is the only place it can be won, so push passes it as a flag.
 const RECEIVE_PACK = "--receive-pack=git-receive-pack";
 
+// `core.gitProxy` is the receivepack quirk a second time: git keeps the **first** proxy entry it
+// finds, so the repository's outranks anything the list above could say. Measured on git 2.50.1 —
+// `none`, `none for *` and the empty string were each tried as an override and each lost, while a
+// `git://` pushurl plus a planted proxy ran the agent's program holding GH_TOKEN, GITHUB_TOKEN and
+// SSH_AUTH_SOCK. The environment is the one layer that wins, and an empty value there means "no
+// proxy" rather than "fall through to the config", which is what makes it the fix. Refusing
+// protocol.git would also work and costs the transport: with no proxy of the agent's choosing left
+// to run, git:// is no more dangerous than https, and it is what the integration suite pushes over.
+//
 // NOSYSTEM drops /etc/gitconfig; GLOBAL=/dev/null drops ~/.gitconfig, which is as reachable to the
 // agent as the repository's own — it holds HOME. The repository config cannot be pointed elsewhere,
 // so the keys above override it instead, at the highest precedence git has.
@@ -108,6 +117,7 @@ export function hardenedGitConfig(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     GIT_CONFIG_NOSYSTEM: "1",
     GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_PROXY_COMMAND: "",
     GIT_CONFIG_COUNT: String(HARDENED_CONFIG.length),
   };
   HARDENED_CONFIG.forEach(([key, value], index) => {
