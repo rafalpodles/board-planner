@@ -28,12 +28,16 @@ cp "$BIN" "$APP/Contents/MacOS/CPMenubar"
 # checkout — that checkout is their project, and only a Board Planner clone has worker/ in it.
 # Zero runtime dependencies, so this is about 200 KB of JavaScript and no node.
 WORKER_DIST="$ROOT/../worker/dist"
-if [ -d "$WORKER_DIST" ]; then
-  mkdir -p "$APP/Contents/Resources/worker"
-  cp -R "$WORKER_DIST"/* "$APP/Contents/Resources/worker/"
-else
-  echo "warning: no worker build at $WORKER_DIST — run npm run build in worker/ first" >&2
+# Refused rather than warned. A warning on stderr scrolls past, and what it leaves behind is an app
+# that installs, onboards, reaches "Connect" and only then says it has nothing to run — by which
+# point the build that produced it is long out of sight.
+if [ ! -f "$WORKER_DIST/main.js" ]; then
+  echo "error: no worker build at $WORKER_DIST — run 'npm run build' in worker/ first," >&2
+  echo "       or use 'make app', which does it for you. The app is not usable without it." >&2
+  exit 1
 fi
+mkdir -p "$APP/Contents/Resources/worker"
+cp -R "$WORKER_DIST"/* "$APP/Contents/Resources/worker/"
 
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
