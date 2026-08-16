@@ -4,6 +4,7 @@ import { connectDB } from "@/lib/db";
 import { MIN_PASSWORD_LENGTH, PASSWORD_COST_FACTOR } from "@/lib/auth";
 import { isValidEmail, normaliseEmail } from "@/lib/email";
 import { logInstanceAudit } from "@/lib/instanceAudit";
+import { invalidateResetTokens } from "@/lib/password-reset";
 import { duplicateKeyField } from "@/lib/mongo-errors";
 import { withAdmin } from "@/lib/middleware";
 import { revokeUserSessions } from "@/lib/session";
@@ -153,6 +154,9 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
   }
 
   if (passwordWasSet) {
+    // A link already in the target's inbox would otherwise still work, and overwrite the password
+    // the admin has just handed them
+    await invalidateResetTokens(target._id);
     // Before the save, not after: a revoke that throws here leaves the account exactly as it was,
     // and the admin retries. The other order commits the new password, answers 500, and leaves the
     // old holder signed in — a failure that reads to the admin as "nothing happened".

@@ -22,6 +22,7 @@ const LABELS: Record<string, string> = {
   project_workers_disabled: "Workers disabled for project",
   user_password_reset: "Password set by an admin",
   user_email_changed: "Address changed by an admin",
+  password_reset_completed: "Password reset by email",
 };
 
 // The actions worth spotting at a glance: one stops a machine, one hands out the credential that
