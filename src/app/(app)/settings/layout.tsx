@@ -27,6 +27,7 @@ const GROUPS: SettingsGroup[] = [
     adminOnly: true,
     sections: [
       { id: "users", label: "Users" },
+      { id: "email", label: "Email" },
       { id: "agents", label: "PM Agents" },
       { id: "workers", label: "Workers" },
       { id: "audit", label: "Audit log" },

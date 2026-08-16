@@ -4,6 +4,7 @@ const getAuthUser = vi.fn();
 const check = vi.fn();
 const userFindById = vi.fn();
 const userCountDocuments = vi.fn();
+const userExists = vi.fn();
 const revokeUserSessions = vi.fn();
 const logInstanceAudit = vi.fn();
 const hash = vi.fn();
@@ -23,6 +24,7 @@ vi.mock("@/models/user", () => ({
   User: {
     findById: userFindById,
     countDocuments: userCountDocuments,
+    exists: userExists,
     findByIdAndDelete: vi.fn(),
   },
 }));
@@ -61,27 +63,113 @@ beforeEach(() => {
   vi.clearAllMocks();
   getAuthUser.mockResolvedValue(ADMIN);
   userCountDocuments.mockResolvedValue(2);
+  userExists.mockResolvedValue(null);
   hash.mockResolvedValue("new-hash");
 });
 
 describe("PUT /api/users/:id", () => {
-  // Board access lives entirely in the grants collection now, so this endpoint's whole job is the
-  // role. Anything else a client sends — an old build, a stale bookmarklet, a hostile caller —
-  // must not reach the document.
-  it("writes the role and nothing else the body carries", async () => {
+  // Board access lives entirely in the grants collection now, so this endpoint writes the role,
+  // the address and the password — and nothing else a client sends. BP-281 added the address on
+  // purpose: an account whose owner cannot sign in has no other way to be given one, and without
+  // an address there is nowhere to send a reset. `kind` is not on that list, and a request that
+  // carries it — an old build, a stale bookmarklet, a hostile caller — must still be ignored.
+  it("writes the role and the address, and nothing else the body carries", async () => {
     const target = targetDoc();
     found(target);
 
     const res = await PUT(
-      put({ role: "member", email: "hijack@example.com", kind: "machine" }),
+      put({ role: "member", email: "New.Address@Example.com", kind: "machine" }),
       ctx()
     );
 
     expect(res.status).toBe(200);
     expect(target.role).toBe("member");
-    expect(target.email).toBe("target@example.com");
+    expect(target.email).toBe("new.address@example.com");
     expect(target.kind).toBe("human");
     expect(target.save).toHaveBeenCalled();
+  });
+
+  it("leaves the address alone when the body does not carry one", async () => {
+    const target = targetDoc();
+    found(target);
+
+    await PUT(put({ role: "member" }), ctx());
+
+    expect(target.email).toBe("target@example.com");
+  });
+
+  // The only way to undo a typo that took an address somebody else needs
+  it("clears the address when sent an empty one", async () => {
+    const target = targetDoc();
+    found(target);
+
+    const res = await PUT(put({ email: "" }), ctx());
+
+    expect(res.status).toBe(200);
+    expect(target.email).toBe("");
+  });
+
+  it("refuses an address that could never receive anything", async () => {
+    const target = targetDoc();
+    found(target);
+
+    const res = await PUT(put({ email: "not-an-address" }), ctx());
+
+    expect(res.status).toBe(400);
+    expect(target.email).toBe("target@example.com");
+    expect(target.save).not.toHaveBeenCalled();
+  });
+
+  // Whoever writes this field decides where a reset link lands, so it is gated like the password
+  it("refuses an address change from an admin API token", async () => {
+    const target = targetDoc();
+    found(target);
+    getAuthUser.mockResolvedValue({ ...ADMIN, viaMachineCredential: true });
+
+    const res = await PUT(put({ email: "attacker@example.com" }), ctx());
+
+    expect(res.status).toBe(403);
+    expect(target.save).not.toHaveBeenCalled();
+  });
+
+  // Asked before anything is touched, because a password change in the same request revokes the
+  // target's sessions before the save: learning of the collision from the index would sign
+  // somebody out of everything over an address that was never stored
+  it("answers 409 before revoking anything when the address is taken", async () => {
+    const target = targetDoc();
+    found(target);
+    userExists.mockResolvedValue({ _id: "someone-else" });
+
+    const res = await PUT(put({ email: "taken@example.com", password: "a-fresh-password" }), ctx());
+
+    expect(res.status).toBe(409);
+    expect(revokeUserSessions).not.toHaveBeenCalled();
+    expect(target.save).not.toHaveBeenCalled();
+  });
+
+  // The pre-check races a concurrent write, so the index stays the final arbiter
+  it("still answers 409 when the index is the one that catches it", async () => {
+    const target = targetDoc();
+    found(target);
+    target.save.mockRejectedValueOnce(
+      Object.assign(new Error("E11000 duplicate key"), {
+        code: 11000,
+        keyPattern: { email: 1 },
+      })
+    );
+
+    const res = await PUT(put({ email: "taken@example.com" }), ctx());
+
+    expect(res.status).toBe(409);
+  });
+
+  it("does not ask whether an unchanged address is taken", async () => {
+    const target = targetDoc();
+    found(target);
+
+    await PUT(put({ email: "target@example.com" }), ctx());
+
+    expect(userExists).not.toHaveBeenCalled();
   });
 });
 
@@ -196,6 +284,18 @@ describe("PUT /api/users/:id — an admin sets a password", () => {
 
     expect(res.status).toBe(400);
     expect(hash).not.toHaveBeenCalled();
+    expect(target.save).not.toHaveBeenCalled();
+  });
+
+  // The other half of the same promise: an address is what a reset link follows, so refusing the
+  // password and allowing the address only moves the escape one slice later
+  it("refuses to give a machine account an address", async () => {
+    const target = targetDoc({ role: "member", kind: "machine" });
+    found(target);
+
+    const res = await PUT(put({ email: "attacker@example.com" }), ctx());
+
+    expect(res.status).toBe(400);
     expect(target.save).not.toHaveBeenCalled();
   });
 

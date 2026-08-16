@@ -21,6 +21,7 @@ const LABELS: Record<string, string> = {
   project_workers_enabled: "Workers enabled for project",
   project_workers_disabled: "Workers disabled for project",
   user_password_reset: "Password set by an admin",
+  user_email_changed: "Address changed by an admin",
 };
 
 // The actions worth spotting at a glance: one stops a machine, one hands out the credential that
@@ -30,6 +31,7 @@ const NOTABLE = new Set([
   "enrolment_token_minted",
   "enrolment_token_spent",
   "user_password_reset",
+  "user_email_changed",
 ]);
 
 export default function InstanceAuditPage() {
@@ -74,8 +76,8 @@ export default function InstanceAuditPage() {
         <h2 className="text-lg font-semibold mb-1">Instance audit log</h2>
         <p className="text-sm text-text-muted">
           Instance-wide actions: stopping a machine, enrolling one, committing a project to
-          workers, and setting somebody else&apos;s password. Each project keeps its own log of its
-          own settings, under that project.
+          workers, and setting somebody else&apos;s password or address. Each project keeps its own
+          log of its own settings, under that project.
         </p>
       </div>
 
