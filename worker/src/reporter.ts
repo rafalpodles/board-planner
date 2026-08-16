@@ -107,10 +107,13 @@ export function createReporter(
     },
 
     async gateRejected(task, gate, reason, branch) {
+      // Conditional: a protected-paths refusal deliberately does not push, and the reason already
+      // says where the work is. Promising a branch that is not on the remote sends a human looking.
+      const where = branch ? `\n\nThe work is pushed to \`${branch}\` for inspection.` : "";
       await report(
         task,
         statusIds.review,
-        `The execution worker blocked the merge at the **${gate}** gate.\n\n${safeText(reason)}\n\nThe work is pushed to \`${branch}\` for inspection.`
+        `The execution worker blocked the merge at the **${gate}** gate.\n\n${safeText(reason)}${where}`
       );
     },
 
@@ -137,8 +140,8 @@ export function createReporter(
       await report(task, statusIds.done, `Merged ${scrub(prUrl)}\n\n${safeText(summary)}`);
     },
 
-    // autoMerge off: the branch is pushed and a pull request is open, so the work is safe and a
-    // human decides. Review, not done — nothing has landed on the base branch.
+    // The agent carried no Merge step: the branch is pushed and a pull request is open, so the
+    // work is safe and a human decides. Review, not done — nothing has landed on the base branch.
     async delivered(task, prUrl, summary) {
       await report(
         task,

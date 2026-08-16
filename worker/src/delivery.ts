@@ -1,5 +1,7 @@
 import { childEnv } from "./env.js";
 import { CommandResult, Runner } from "./exec.js";
+import { GIT_SAFE_ENV } from "./git-safety.js";
+import { plantedConfig } from "./repos.js";
 import { ClaimedTask } from "./types.js";
 import { scrub } from "./scrub.js";
 
@@ -115,7 +117,7 @@ const RECEIVE_PACK = "--receive-pack=git-receive-pack";
 // so the keys above override it instead, at the highest precedence git has.
 export function hardenedGitConfig(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
-    GIT_CONFIG_NOSYSTEM: "1",
+    ...GIT_SAFE_ENV,
     GIT_CONFIG_GLOBAL: "/dev/null",
     GIT_PROXY_COMMAND: "",
     GIT_CONFIG_COUNT: String(HARDENED_CONFIG.length),
@@ -137,7 +139,9 @@ export function createDelivery(runner: Runner, baseBranch?: string): Delivery {
   // worktree shares with the main clone, so what it plants outlives the run.
   //
   // Through GIT_CONFIG_* rather than `-c`, because the environment reaches the git that `gh`
-  // shells out to; `-c` covers only the process we spawn ourselves.
+  // shells out to; `-c` covers only the process we spawn ourselves. That is also why delivery does
+  // not use git-safety's gitArgs like every other call site: HARDENED_CONFIG carries the same keys
+  // and more, at the same precedence, and reaches gh's inner invocations as well.
   function run(command: string, args: string[], cwd: string): Promise<CommandResult> {
     return runner.run(command, args, {
       cwd,
@@ -147,6 +151,19 @@ export function createDelivery(runner: Runner, baseBranch?: string): Delivery {
         ...hardenedGitConfig(),
       },
     });
+  }
+
+  // A second line, not the first: HARDENED_CONFIG overrides the keys it names, and this refuses
+  // the push outright if the agent wrote an executable key at all — including one the list does
+  // not name. Push is where it is worth paying for, being the call that hands the checkout's own
+  // config a credential; gh carries its token in the environment, so openPr and merge do not.
+  async function refuseIfPlanted(worktreePath: string): Promise<void> {
+    const planted = await plantedConfig(runner, worktreePath);
+    if (planted) {
+      throw new Error(
+        `refusing to push: the checkout's git config sets ${planted}, which was not there when the repository was approved`
+      );
+    }
   }
 
   async function mergeState(worktreePath: string, prUrl: string): Promise<MergeState> {
@@ -174,6 +191,7 @@ export function createDelivery(runner: Runner, baseBranch?: string): Delivery {
       // read as an option, and --receive-pack=<cmd> would run that command on the remote
       // --no-verify says the same thing as core.hooksPath above, in the one place it matters most:
       // two independent ways for a planted pre-push to be skipped, rather than one
+      await refuseIfPlanted(worktreePath);
       const result = await run(
         "git",
         ["push", "--no-verify", RECEIVE_PACK, "--force-with-lease", "-u", "origin", "--", branch],

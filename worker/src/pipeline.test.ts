@@ -5,11 +5,30 @@ import { WorkerConfig } from "./config.js";
 import { Delivery } from "./delivery.js";
 import { CommandResult, Runner } from "./exec.js";
 import { Executor } from "./executor.js";
+import { gitArgs } from "./git-safety.js";
 import { Reporter } from "./reporter.js";
 import { createTelemetry, isOutcome, isQuota, Progress, TelemetryUpdate } from "./telemetry.js";
 import { Workspace } from "./workspace.js";
-import { ClaimedTask, DiffStats, ExecutionResult, Gate } from "./types.js";
+import { ClaimedTask, DiffStats, ExecutionResult, Gate, SnapshotEntry } from "./types.js";
 import { PipelineDeps, resolveStatusIds, runTask } from "./pipeline.js";
+
+// Exactly today's pipeline, expressed as an agent — the composition every existing project is
+// backfilled with, so a task claimed here means what it has always meant.
+const DEFAULT_SEQUENCE: SnapshotEntry[] = [
+  { key: "implement", kind: "step", name: "Implement", prompt: "make the change", capability: "edit" },
+  { key: "protected-paths", kind: "gate", name: "Protected files", gateKind: "protected-paths" },
+  { key: "diff-size", kind: "gate", name: "Size", gateKind: "diff-size" },
+  { key: "test-presence", kind: "gate", name: "Test written", gateKind: "test-presence" },
+  { key: "build", kind: "gate", name: "Builds", gateKind: "build" },
+  { key: "test-run", kind: "gate", name: "Tests pass", gateKind: "test-run" },
+  { key: "review", kind: "gate", name: "Reviewed", gateKind: "review" },
+  { key: "push", kind: "step", name: "Push", deterministic: true },
+  { key: "pull-request", kind: "step", name: "Pull request", deterministic: true },
+];
+
+function agentOf(sequence: SnapshotEntry[]) {
+  return { agentId: "a1", name: "Default", sequence };
+}
 
 const task: ClaimedTask = {
   taskId: "t1",
@@ -20,7 +39,24 @@ const task: ClaimedTask = {
   description: "body",
   acceptanceCriteria: [],
   attempts: 1,
+  runId: "run-1",
+  agent: agentOf(DEFAULT_SEQUENCE),
 };
+
+const MERGE: SnapshotEntry = { key: "merge", kind: "step", name: "Merge", deterministic: true };
+
+const KNOWN = new Map([...DEFAULT_SEQUENCE, MERGE].map((entry) => [entry.key, entry]));
+
+/** The same task, running a different agent. An unknown key is a gate of its own kind. */
+function running(...keys: string[]): ClaimedTask {
+  return {
+    ...task,
+    agent: agentOf(keys.map((key) => KNOWN.get(key) ?? { key, kind: "gate", name: key, gateKind: key })),
+  };
+}
+
+/** Everything the default does, and merges. What the "Merges its own work" agent is. */
+const merging = running(...DEFAULT_SEQUENCE.map((entry) => entry.key), "merge");
 
 const completed: ExecutionResult = {
   status: "completed",
@@ -37,7 +73,6 @@ const board = ["ready", "doing", "checking", "shipped"];
 const diff: DiffStats = { changedLines: 10, changedFiles: ["a.ts"], patch: "d", truncated: false };
 
 const config: WorkerConfig = {
-  autoMerge: true,
   apiBaseUrl: "http://localhost:3000",
   apiToken: "token",
   repoPath: "/repo",
@@ -46,6 +81,7 @@ const config: WorkerConfig = {
   baseBranch: "main",
   pollIntervalMs: 1000,
   taskTimeoutMs: 900_000,
+  runCeilingMs: 5_400_000,
   maxDiffLines: 400,
   maxDiffFiles: 10,
   workerId: "worker-test",
@@ -80,6 +116,8 @@ function harness(overrides: Partial<PipelineDeps> = {}) {
     release: vi.fn<ApiClient["release"]>().mockResolvedValue(undefined),
     statusIds: vi.fn<ApiClient["statusIds"]>().mockResolvedValue(statuses),
     columnIds: vi.fn<ApiClient["columnIds"]>().mockResolvedValue(board),
+    postEvent: vi.fn<ApiClient["postEvent"]>().mockResolvedValue({ applied: true }),
+    postRun: vi.fn<ApiClient["postRun"]>().mockResolvedValue(undefined),
   };
   const columnIds = vi.fn<PipelineDeps["columnIds"]>().mockResolvedValue(board);
   const reporter = {
@@ -106,6 +144,10 @@ function harness(overrides: Partial<PipelineDeps> = {}) {
   };
   const collectDiff = vi.fn<PipelineDeps["collectDiff"]>().mockResolvedValue(diff);
   const runner = { run: vi.fn<Runner["run"]>().mockResolvedValue(shell()) };
+  // Every gate passes unless a test says otherwise. What each kind actually does is
+  // gates/from-entry.test.ts's subject; this file is about the order they run in.
+  const gateFor = vi.fn<PipelineDeps["gateFor"]>((entry) => passingGate(entry.key));
+  const recordRun = vi.fn<PipelineDeps["recordRun"]>();
 
   const deps: PipelineDeps = {
     config,
@@ -116,8 +158,9 @@ function harness(overrides: Partial<PipelineDeps> = {}) {
     workspace,
     executor,
     collectDiff,
+    gateFor,
+    recordRun,
     runner,
-    gates: [],
     ...overrides,
   };
 
@@ -132,8 +175,15 @@ function harness(overrides: Partial<PipelineDeps> = {}) {
     workspace,
     executor,
     collectDiff,
+    gateFor,
+    recordRun,
     runner,
   };
+}
+
+/** A gateFor that answers with the given gate for one key, and passes everything else. */
+function gateForOnly(key: string, gate: Gate): PipelineDeps["gateFor"] {
+  return (entry) => (entry.key === key ? gate : passingGate(entry.key));
 }
 
 describe("resolveStatusIds", () => {
@@ -162,12 +212,12 @@ describe("resolveStatusIds", () => {
 describe("runTask", () => {
   it("merges and reports done on the happy path", async () => {
     const h = harness();
-    await runTask(h.deps, task);
+    await runTask(h.deps, merging);
 
     expect(h.delivery.push).toHaveBeenCalledWith("/wt", "cp-158/worker");
-    expect(h.delivery.openPr).toHaveBeenCalledWith("/wt", task, "did it");
+    expect(h.delivery.openPr).toHaveBeenCalledWith("/wt", merging, "did it");
     expect(h.delivery.merge).toHaveBeenCalledWith("/wt", "https://x/pull/7");
-    expect(h.reporter.merged).toHaveBeenCalledWith(task, "https://x/pull/7", "did it");
+    expect(h.reporter.merged).toHaveBeenCalledWith(merging, "https://x/pull/7", "did it");
     expect(h.workspace.destroy).toHaveBeenCalledWith("CP-158");
   });
 
@@ -251,7 +301,8 @@ describe("runTask", () => {
     const h = harness({ executor: { execute } });
     await runTask(h.deps, task);
 
-    expect(h.reporter.requeued).toHaveBeenCalledWith(task, "could not parse claude output");
+    expect(h.reporter.requeued.mock.calls[0][1]).toMatch(/could not parse claude output/);
+    expect(h.reporter.failed).not.toHaveBeenCalled();
     expect(h.reporter.released).not.toHaveBeenCalled();
   });
 
@@ -282,12 +333,12 @@ describe("runTask", () => {
       run: vi.fn<Runner["run"]>().mockResolvedValue(shell("?? .claude/settings.json\n")),
     };
     const gate = passingGate("diff-size");
-    const h = harness({ runner, gates: [gate] });
-    await runTask(h.deps, task);
+    const h = harness({ runner, gateFor: () => gate });
+    await runTask(h.deps, running("implement", "diff-size"));
 
     expect(runner.run).toHaveBeenCalledWith(
       "git",
-      ["-c", "core.fsmonitor=false", "-c", "core.pager=cat", "status", "--porcelain"],
+      gitArgs(["status", "--porcelain"]),
       expect.objectContaining({
         cwd: "/wt",
         env: expect.objectContaining({ GIT_CONFIG_NOSYSTEM: "1" }),
@@ -300,28 +351,59 @@ describe("runTask", () => {
     expect(h.workspace.destroy).not.toHaveBeenCalled();
   });
 
+  // The commit's own status has to succeed first, or commitAll fails and this never reaches the
+  // check it is named after — which is exactly how it passed while asserting nothing
   it("treats a worktree whose state cannot be read as dirty", async () => {
+    let calls = 0;
     const runner = {
-      run: vi
-        .fn<Runner["run"]>()
-        .mockResolvedValue(shell("", { code: 128, stderr: "not a git repository" })),
+      run: vi.fn<Runner["run"]>(async () => {
+        calls += 1;
+        return calls === 1
+          ? shell("")
+          : shell("", { code: 128, stderr: "not a git repository" });
+      }),
     };
-    const h = harness({ runner, gates: [passingGate("diff-size")] });
-    await runTask(h.deps, task);
+    const h = harness({ runner });
+    await runTask(h.deps, running("implement", "diff-size"));
 
     expect(h.collectDiff).not.toHaveBeenCalled();
     expect(h.reporter.failed.mock.calls[0][1]).toMatch(/not a git repository/);
     expect(h.workspace.destroy).not.toHaveBeenCalled();
   });
 
+  // The agent has no Bash any more, so nothing but this puts its work in a commit
+  it("commits what the agent wrote, under the task key", async () => {
+    const runner = { run: vi.fn<Runner["run"]>().mockResolvedValue(shell(" M src/a.ts\n")) };
+    const h = harness({ runner });
+    await runTask(h.deps, running("implement"));
+
+    const commit = runner.run.mock.calls.find(([, args]) => args.includes("commit"));
+    expect(commit).toBeDefined();
+    expect(commit![1][commit![1].indexOf("-m") + 1]).toMatch(/^CP-158: /);
+  });
+
+  it("does not commit a run the agent reported blocked", async () => {
+    const runner = { run: vi.fn<Runner["run"]>().mockResolvedValue(shell(" M src/a.ts\n")) };
+    const executor = {
+      execute: vi.fn<Executor["execute"]>().mockResolvedValue({
+        kind: "result",
+        result: { ...completed, status: "blocked", blockedReason: "unclear" },
+      }),
+    };
+    const h = harness({ runner, executor });
+    await runTask(h.deps, running("implement"));
+
+    expect(runner.run.mock.calls.some(([, args]) => args.includes("commit"))).toBe(false);
+  });
+
   it("runs the gates on a clean worktree", async () => {
     const gate = passingGate("diff-size");
-    const h = harness({ gates: [gate] });
-    await runTask(h.deps, task);
+    const h = harness({ gateFor: gateForOnly("diff-size", gate) });
+    await runTask(h.deps, merging);
 
     expect(gate.run).toHaveBeenCalledWith({
       worktreePath: "/wt",
-      task,
+      task: merging,
       result: completed,
       diff,
     });
@@ -331,11 +413,13 @@ describe("runTask", () => {
   it("stops at the first failing gate and names it", async () => {
     const failing = rejectingGate("diff-size", "too big");
     const later = passingGate("review");
-    const h = harness({ gates: [failing, later] });
-    await runTask(h.deps, task);
+    const h = harness({
+      gateFor: (entry) => (entry.key === "diff-size" ? failing : later),
+    });
+    await runTask(h.deps, running("implement", "diff-size", "review"));
 
     expect(h.reporter.gateRejected).toHaveBeenCalledWith(
-      task,
+      running("implement", "diff-size", "review"),
       "diff-size",
       "too big",
       "cp-158/worker"
@@ -354,9 +438,12 @@ describe("runTask", () => {
         return { ok: true, reason: "" };
       }),
     };
-    const h = harness({ gates: [first, later], signal: controller.signal });
+    const h = harness({
+      gateFor: (entry) => (entry.key === "diff-size" ? first : later),
+      signal: controller.signal,
+    });
 
-    await runTask(h.deps, task);
+    await runTask(h.deps, running("implement", "diff-size", "build"));
 
     expect(later.run).not.toHaveBeenCalled();
     expect(h.reporter.released).toHaveBeenCalled();
@@ -410,9 +497,9 @@ describe("runTask", () => {
         return { ok: false, reason: "build failed (exit -1)" };
       }),
     };
-    const h = harness({ gates: [gate], signal: controller.signal });
+    const h = harness({ gateFor: () => gate, signal: controller.signal });
 
-    await runTask(h.deps, task);
+    await runTask(h.deps, running("implement", "build"));
 
     expect(h.reporter.released).toHaveBeenCalled();
     expect(h.reporter.gateRejected).not.toHaveBeenCalled();
@@ -431,7 +518,7 @@ describe("runTask", () => {
       signal: controller.signal,
     });
 
-    await runTask(h.deps, task);
+    await runTask(h.deps, merging);
 
     expect(h.reporter.released.mock.calls[0][1]).toMatch(/cp-158\/worker/);
     expect(delivery.openPr).not.toHaveBeenCalled();
@@ -450,7 +537,7 @@ describe("runTask", () => {
       signal: controller.signal,
     });
 
-    await runTask(h.deps, task);
+    await runTask(h.deps, merging);
 
     const reason = h.reporter.released.mock.calls[0][1];
     expect(reason).toMatch(/cp-158\/worker/);
@@ -467,16 +554,19 @@ describe("runTask", () => {
 
     await runTask(h.deps, task);
 
-    // The trailing undefined is the stream listener: this harness attaches no telemetry bus
-    expect(execute).toHaveBeenCalledWith(task, "/wt", controller.signal, undefined);
+    expect(execute.mock.calls[0][0]).toMatchObject({
+      task,
+      worktreePath: "/wt",
+      signal: controller.signal,
+    });
   });
 
   it("gives every gate the signal, so a build or review gate can honour a stop", async () => {
     const controller = new AbortController();
     const gate = passingGate("build");
-    const h = harness({ gates: [gate], signal: controller.signal });
+    const h = harness({ gateFor: () => gate, signal: controller.signal });
 
-    await runTask(h.deps, task);
+    await runTask(h.deps, running("implement", "build"));
 
     expect(gate.run).toHaveBeenCalledWith(expect.objectContaining({ signal: controller.signal }));
   });
@@ -490,9 +580,9 @@ describe("runTask", () => {
         return { ok: true, reason: "" };
       }),
     };
-    const h = harness({ gates: [gate], signal: controller.signal });
+    const h = harness({ gateFor: () => gate, signal: controller.signal });
 
-    await runTask(h.deps, task);
+    await runTask(h.deps, running("implement", "review", "push"));
 
     expect(h.delivery.push).not.toHaveBeenCalled();
     expect(h.reporter.released).toHaveBeenCalled();
@@ -501,8 +591,8 @@ describe("runTask", () => {
   });
 
   it("pushes the rejected branch before discarding the worktree", async () => {
-    const h = harness({ gates: [rejectingGate("diff-size", "too big")] });
-    await runTask(h.deps, task);
+    const h = harness({ gateFor: () => rejectingGate("diff-size", "too big") });
+    await runTask(h.deps, running("implement", "diff-size"));
 
     expect(h.delivery.push).toHaveBeenCalledWith("/wt", "cp-158/worker");
     expect(h.workspace.destroy).toHaveBeenCalledWith("CP-158");
@@ -514,9 +604,9 @@ describe("runTask", () => {
     });
     const h = harness({
       createDelivery: vi.fn<PipelineDeps["createDelivery"]>(() => delivery),
-      gates: [rejectingGate("diff-size", "too big")],
+      gateFor: () => rejectingGate("diff-size", "too big"),
     });
-    await runTask(h.deps, task);
+    await runTask(h.deps, running("implement", "diff-size"));
 
     const reason = h.reporter.gateRejected.mock.calls[0][2];
     expect(reason).toMatch(/too big/);
@@ -530,8 +620,8 @@ describe("runTask", () => {
       "review",
       "the review could not be completed: claude exited 1\nClaude AI usage limit reached|1754006400"
     );
-    const h = harness({ gates: [gate] });
-    await runTask(h.deps, task);
+    const h = harness({ gateFor: () => gate });
+    await runTask(h.deps, running("implement", "review"));
 
     expect(h.reporter.released).toHaveBeenCalled();
     expect(h.reporter.gateRejected).not.toHaveBeenCalled();
@@ -543,8 +633,8 @@ describe("runTask", () => {
       "review",
       "the reviewer rejected the change: it deletes the usage limit reached branch"
     );
-    const h = harness({ gates: [gate] });
-    await runTask(h.deps, task);
+    const h = harness({ gateFor: () => gate });
+    await runTask(h.deps, running("implement", "review"));
 
     expect(h.reporter.gateRejected).toHaveBeenCalled();
     expect(h.reporter.released).not.toHaveBeenCalled();
@@ -552,8 +642,8 @@ describe("runTask", () => {
 
   it("destroys the worktree and requeues when a gate throws", async () => {
     const exploding = { name: "build", run: vi.fn<Gate["run"]>().mockRejectedValue(new Error("boom")) };
-    const h = harness({ gates: [exploding] });
-    await runTask(h.deps, task);
+    const h = harness({ gateFor: () => exploding });
+    await runTask(h.deps, running("implement", "build"));
 
     expect(h.reporter.requeued.mock.calls[0][1]).toMatch(/boom/);
     expect(h.workspace.destroy).toHaveBeenCalledWith("CP-158");
@@ -564,12 +654,11 @@ describe("runTask", () => {
       merge: vi.fn<Delivery["merge"]>().mockRejectedValue(new Error("not mergeable")),
     });
     const h = harness({ createDelivery: vi.fn<PipelineDeps["createDelivery"]>(() => delivery) });
-    await runTask(h.deps, task);
+    await runTask(h.deps, merging);
 
     const reason = h.reporter.failed.mock.calls[0][1];
     expect(reason).toMatch(/not mergeable/);
-    expect(reason).toMatch(/cp-158\/worker/);
-    expect(reason).toMatch(/https:\/\/x\/pull\/7/);
+    expect(reason).toMatch(/Merge failed/);
     expect(h.workspace.destroy).not.toHaveBeenCalled();
   });
 
@@ -578,12 +667,11 @@ describe("runTask", () => {
       push: vi.fn<Delivery["push"]>().mockRejectedValue(new Error("permission denied")),
     });
     const h = harness({ createDelivery: vi.fn<PipelineDeps["createDelivery"]>(() => delivery) });
-    await runTask(h.deps, task);
+    await runTask(h.deps, merging);
 
     const reason = h.reporter.failed.mock.calls[0][1];
     expect(reason).toMatch(/permission denied/);
-    expect(reason).toMatch(/cp-158\/worker/);
-    expect(reason).not.toMatch(/pull/);
+    expect(reason).toMatch(/Push failed/);
     expect(delivery.openPr).not.toHaveBeenCalled();
     expect(h.workspace.destroy).not.toHaveBeenCalled();
   });
@@ -598,8 +686,300 @@ describe("runTask", () => {
     };
     const h = harness({ workspace });
 
-    await expect(runTask(h.deps, task)).resolves.toBeUndefined();
+    await expect(runTask(h.deps, merging)).resolves.toBeUndefined();
     expect(h.reporter.merged).toHaveBeenCalled();
+  });
+
+  it("runs the entries in the order the agent lists them", async () => {
+    const seen: string[] = [];
+    const h = harness({
+      gateFor: (entry) => ({
+        name: entry.key,
+        run: vi.fn(async () => {
+          seen.push(`gate:${entry.key}`);
+          return { ok: true, reason: "" };
+        }),
+      }),
+      executor: {
+        execute: vi.fn<Executor["execute"]>(async () => {
+          seen.push("step:implement");
+          return { kind: "result", result: completed };
+        }),
+      },
+    });
+
+    await runTask(h.deps, running("review", "implement", "diff-size"));
+
+    expect(seen).toEqual(["gate:review", "step:implement", "gate:diff-size"]);
+  });
+
+  // Skipping it would run a shorter agent than the one somebody composed, and a missing check looks
+  // exactly like a check that passed
+  it("refuses a gate kind this worker does not implement, naming it", async () => {
+    const h = harness({ gateFor: () => null });
+    await runTask(h.deps, running("implement", "invented"));
+
+    expect(h.reporter.failed.mock.calls[0][1]).toMatch(/invented/);
+    expect(h.delivery.push).not.toHaveBeenCalled();
+    expect(h.workspace.destroy).not.toHaveBeenCalled();
+  });
+
+  // With several writing steps an unclean tree poisons everything after it, so the check runs after
+  // each of them rather than once after the first
+  it("ends the run when a later writing step leaves the tree unclean", async () => {
+    let calls = 0;
+    const runner = {
+      run: vi.fn<Runner["run"]>(async () => {
+        calls += 1;
+        // 1: the first commit's status, 2: the check after step one, 3: the second commit's status,
+        // 4: the check after step two — the one that only exists because steps can follow steps
+        return shell(calls >= 4 ? " M src/a.ts\n" : "");
+      }),
+    };
+    const second: SnapshotEntry = {
+      key: "polish",
+      kind: "step",
+      name: "Polish",
+      prompt: "tidy it",
+      capability: "edit",
+    };
+    const h = harness({ runner });
+    const twoWrites = { ...task, agent: agentOf([KNOWN.get("implement")!, second, MERGE]) };
+
+    await runTask(h.deps, twoWrites);
+
+    expect(h.reporter.failed.mock.calls[0][1]).toMatch(/Polish left the worktree unclean/);
+    expect(h.delivery.merge).not.toHaveBeenCalled();
+  });
+
+  // A gate that runs npm ci or the project's suite leaves build output behind; failing the run over
+  // an artifact the target repo does not gitignore would be a refusal of nothing
+  it("does not judge the tree after a gate, only after a step that could write", async () => {
+    let calls = 0;
+    const runner = {
+      run: vi.fn<Runner["run"]>(async () => {
+        calls += 1;
+        return shell(calls > 2 ? "?? dist/main.js\n" : "");
+      }),
+    };
+    const h = harness({ runner });
+
+    await runTask(h.deps, running("implement", "build", "push", "pull-request"));
+
+    expect(h.reporter.failed).not.toHaveBeenCalled();
+    expect(h.delivery.push).toHaveBeenCalled();
+  });
+
+  // A pushed branch carrying .github/workflows/*.yml runs in Actions with the repository's secrets,
+  // whatever the verdict said
+  it("does not push when protected-paths refuses, and says where the work is", async () => {
+    const h = harness({
+      gateFor: () => rejectingGate("protected-paths", "it edits .github/workflows/ci.yml"),
+    });
+
+    await runTask(h.deps, running("implement", "protected-paths"));
+
+    expect(h.delivery.push).not.toHaveBeenCalled();
+    expect(h.reporter.gateRejected.mock.calls[0][2]).toMatch(/on purpose/);
+    // No branch, so the comment cannot promise one that is not on the remote
+    expect(h.reporter.gateRejected.mock.calls[0][3]).toBe("");
+    expect(h.workspace.destroy).not.toHaveBeenCalled();
+  });
+
+  // Nothing read the timeout a step or a gate was handed, so folding both onto the gate's cap cut
+  // every model step from thirty minutes to ten without a single test noticing
+  it("bounds a model step by the project's step timeout, and a gate by the gate cap", async () => {
+    const h = harness({ config: { ...config, taskTimeoutMs: 1_800_000 } });
+
+    await runTask(h.deps, running("implement", "build"));
+
+    expect(h.executor.execute.mock.calls[0][0].brief.timeoutMs).toBe(1_800_000);
+    expect(h.gateFor.mock.calls[0][2]).toBe(600_000);
+  });
+
+  it("gives an entry only what is left of the ceiling when that is less than its cap", async () => {
+    let now = 0;
+    const h = harness({
+      config: { ...config, taskTimeoutMs: 1_800_000, runCeilingMs: 900_000 },
+      now: () => now,
+      executor: {
+        execute: vi.fn<Executor["execute"]>(async () => {
+          now = 600_000;
+          return { kind: "result", result: completed };
+        }),
+      },
+    });
+
+    await runTask(h.deps, running("implement", "build"));
+
+    expect(h.gateFor.mock.calls[0][2]).toBe(300_000);
+  });
+
+  it("requeues when the run's ceiling passes mid-sequence", async () => {
+    let now = 0;
+    const h = harness({
+      config: { ...config, runCeilingMs: 1000 },
+      now: () => now,
+      executor: {
+        execute: vi.fn<Executor["execute"]>(async () => {
+          now = 5000;
+          return { kind: "result", result: completed };
+        }),
+      },
+    });
+
+    await runTask(h.deps, running("implement", "build"));
+
+    expect(h.reporter.requeued.mock.calls[0][1]).toMatch(/ceiling/);
+    expect(h.gateFor).not.toHaveBeenCalled();
+  });
+
+  // execution.runId lives on the task and every exit clears it, so without this a finished run is
+  // one nobody can ask about afterwards
+  it("leaves a record on a delivered run, naming the agent that ran", async () => {
+    const h = harness();
+    await runTask(h.deps, task);
+
+    expect(h.recordRun).toHaveBeenCalledWith(
+      "CP",
+      expect.objectContaining({ taskKey: "CP-158", agentName: "Default", outcome: "delivered" })
+    );
+  });
+
+  it("leaves one on every other exit too, naming the block that refused", async () => {
+    const h = harness({ gateFor: () => rejectingGate("diff-size", "too big") });
+    await runTask(h.deps, running("implement", "diff-size"));
+
+    expect(h.recordRun.mock.calls[0][1]).toMatchObject({
+      outcome: "refused",
+      refusedBy: "diff-size",
+    });
+  });
+
+  // Every other exit settles; this one returned bare, so the menubar showed the run parked in
+  // "claiming" for ever and no record was written for a task that was claimed and handed back
+  it("leaves a record when the board cannot route the outcome", async () => {
+    const columnIds = vi
+      .fn<PipelineDeps["columnIds"]>()
+      .mockResolvedValue(["ready", "doing", "checking"]);
+    const h = harness({ columnIds });
+
+    await runTask(h.deps, task);
+
+    expect(h.recordRun).toHaveBeenCalledWith("CP", expect.objectContaining({ taskKey: "CP-158" }));
+  });
+
+  // A gate handed the last few seconds fails on the clock and is reported as its own refusal —
+  // "blocked the merge at the build gate" for a build that never ran
+  it("calls the ceiling rather than starting an entry that cannot finish", async () => {
+    let now = 0;
+    const h = harness({
+      config: { ...config, runCeilingMs: 600_000 },
+      now: () => now,
+      executor: {
+        execute: vi.fn<Executor["execute"]>(async () => {
+          now = 599_000;
+          return { kind: "result", result: completed };
+        }),
+      },
+    });
+
+    await runTask(h.deps, running("implement", "build"));
+
+    expect(h.gateFor).not.toHaveBeenCalled();
+    expect(h.reporter.gateRejected).not.toHaveBeenCalled();
+    expect(h.reporter.requeued.mock.calls[0][1]).toMatch(/ceiling/);
+  });
+
+  // The record is a durable sink and the detail is model-authored prose, the same as a comment
+  it("redacts a credential in the detail it records", async () => {
+    const credential = `cpw_${"9f3c".repeat(16)}`;
+    const executor = {
+      execute: vi.fn<Executor["execute"]>().mockResolvedValue({
+        kind: "result",
+        result: { ...completed, status: "blocked", blockedReason: `no token like ${credential}` },
+      }),
+    };
+    const h = harness({ executor });
+
+    await runTask(h.deps, running("implement"));
+
+    expect(h.recordRun.mock.calls[0][1].detail).not.toContain("cpw_");
+  });
+
+  it("counts what the agent's own stream said the run cost", async () => {
+    const executor = {
+      execute: vi.fn<Executor["execute"]>(async ({ onEvent }) => {
+        onEvent?.({ type: "result", subtype: "success", is_error: false, total_cost_usd: 0.25 });
+        return { kind: "result", result: completed };
+      }),
+    };
+    const h = harness({ executor });
+
+    await runTask(h.deps, running("implement"));
+
+    expect(h.recordRun.mock.calls[0][1].costUsd).toBe(0.25);
+  });
+
+  // With one step this could not happen — a step that blocks never reaches its commit. With two,
+  // the first one's work is committed and only the worktree holds it: nothing is pushed, and the
+  // branch ref the parent clone keeps is reset by the next attempt's `git worktree add -B`.
+  it("keeps the worktree when a later step blocks after an earlier one committed", async () => {
+    let calls = 0;
+    const runner = {
+      run: vi.fn<Runner["run"]>(async () => {
+        calls += 1;
+        // 1: the commit's status, dirty so a commit happens; the rest clean
+        return calls === 1 ? shell(" M src/a.ts\n") : shell("");
+      }),
+    };
+    const second: SnapshotEntry = {
+      key: "polish",
+      kind: "step",
+      name: "Polish",
+      capability: "edit",
+    };
+    let step = 0;
+    const executor = {
+      execute: vi.fn<Executor["execute"]>(async () => {
+        step += 1;
+        return step === 1
+          ? { kind: "result", result: completed }
+          : {
+              kind: "result",
+              result: { ...completed, status: "blocked", blockedReason: "unclear" },
+            };
+      }),
+    };
+    const h = harness({ runner, executor });
+
+    await runTask(h.deps, { ...task, agent: agentOf([KNOWN.get("implement")!, second]) });
+
+    expect(h.reporter.blocked).toHaveBeenCalled();
+    expect(h.workspace.destroy).not.toHaveBeenCalled();
+    expect(h.reporter.blocked.mock.calls[0][1]).toMatch(/not pushed/);
+  });
+
+  // gh pr merge deliberately runs with no signal, so a stop pressed during it is only observed
+  // afterwards. Releasing there puts a task whose change is already on the base branch back in the
+  // queue, and the next claim runs the whole agent again over work that has landed.
+  it("reports a merged run as merged even when the stop lands during the merge", async () => {
+    const controller = new AbortController();
+    const delivery = deliverySpy({
+      merge: vi.fn<Delivery["merge"]>(async () => {
+        controller.abort();
+      }),
+    });
+    const h = harness({
+      createDelivery: vi.fn<PipelineDeps["createDelivery"]>(() => delivery),
+      signal: controller.signal,
+    });
+
+    await runTask(h.deps, merging);
+
+    expect(h.reporter.merged).toHaveBeenCalled();
+    expect(h.reporter.released).not.toHaveBeenCalled();
+    expect(h.reporter.requeued).not.toHaveBeenCalled();
   });
 
   it("requeues and runs no executor when the worktree cannot be created", async () => {
@@ -633,14 +1013,14 @@ describe("what the run says it is doing", () => {
   }
 
   it("names every stage boundary, in order, all the way through a merge", async () => {
-    const { h, phases } = watched({ gates: [passingGate("build"), passingGate("review")] });
+    const { h, phases } = watched();
 
-    await runTask(h.deps, task);
+    await runTask(h.deps, running("implement", "build", "review", "push", "pull-request", "merge"));
 
     expect(phases()).toEqual([
       "claiming",
       "worktree",
-      "agent",
+      "step:implement",
       "gates:build",
       "gates:review",
       "push",
@@ -652,26 +1032,26 @@ describe("what the run says it is doing", () => {
   it("names the task on every phase, so a panel can say what is running", async () => {
     const { h, seen } = watched();
 
-    await runTask(h.deps, task);
+    await runTask(h.deps, merging);
 
     expect(seen).toContainEqual({ phase: "claiming", taskKey: "CP-158" });
     expect(seen).toContainEqual({ phase: "merge", taskKey: "CP-158" });
   });
 
   it("emits exactly one merged outcome when the run completes", async () => {
-    const { h, outcomes } = watched({ gates: [passingGate("build")] });
+    const { h, outcomes } = watched();
 
-    await runTask(h.deps, task);
+    await runTask(h.deps, merging);
 
     expect(outcomes()).toEqual([{ outcome: "merged", taskKey: "CP-158" }]);
   });
 
   it("emits a gateRejected outcome that names the gate", async () => {
     const { h, outcomes } = watched({
-      gates: [rejectingGate("test-presence", "no test file was added")],
+      gateFor: () => rejectingGate("test-presence", "no test file was added"),
     });
 
-    await runTask(h.deps, task);
+    await runTask(h.deps, running("implement", "test-presence"));
 
     expect(outcomes()).toEqual([
       { outcome: "gateRejected", taskKey: "CP-158", detail: "test-presence" },
@@ -730,18 +1110,26 @@ describe("what the run says it is doing", () => {
     expect(JSON.stringify(outcomes())).not.toContain("cpw_deadbeef");
   });
 
-  it("emits no outcome at all when no bus is attached", async () => {
-    const h = harness();
+  // Asserted only that runTask resolved, with no bus attached to count outcomes on — it could not
+  // fail for the property it names. Counting them on a bus that IS attached is the real question.
+  it("emits exactly one outcome for a run, never a second after it settles", async () => {
+    const { h, outcomes } = watched({ gateFor: () => rejectingGate("build", "it does not build") });
 
-    await expect(runTask(h.deps, task)).resolves.toBeUndefined();
+    await runTask(h.deps, running("implement", "build"));
+
+    expect(outcomes()).toHaveLength(1);
+    expect(outcomes()[0]).toMatchObject({ outcome: "gateRejected" });
   });
 
   it("stops at the gate that rejected, which is the phase a human needs to see", async () => {
     const { h, phases } = watched({
-      gates: [passingGate("diff-size"), rejectingGate("test-presence", "no test file was added")],
+      gateFor: (entry) =>
+        entry.key === "test-presence"
+          ? rejectingGate("test-presence", "no test file was added")
+          : passingGate(entry.key),
     });
 
-    await runTask(h.deps, task);
+    await runTask(h.deps, running("implement", "diff-size", "test-presence", "push"));
 
     expect(h.reporter.gateRejected).toHaveBeenCalled();
     expect(phases().at(-1)).toBe("gates:test-presence");
@@ -763,7 +1151,7 @@ describe("what the run says it is doing", () => {
   // The run's only agent-authored input, and the only route it may take: summarise() bounds it into
   // a name and a path. Handing the raw event to a sink instead would put file bodies on the board.
   it("puts the agent's own stream on the bus through the summarising entry point", async () => {
-    const execute = vi.fn<Executor["execute"]>(async (_task, _worktree, _signal, onEvent) => {
+    const execute = vi.fn<Executor["execute"]>(async ({ onEvent }) => {
       onEvent?.({
         type: "assistant",
         message: {
@@ -788,22 +1176,23 @@ describe("what the run says it is doing", () => {
     expect(JSON.stringify(seen)).not.toContain("cpw_deadbeef");
   });
 
-  it("hands the executor no listener at all when no bus is attached", async () => {
+  // It used to hand the executor nothing when no bus was attached. Cost is read off the same
+  // stream, and a run record with costUsd permanently 0 is worse than a listener nobody watches.
+  it("listens to the agent's stream even with no bus attached, because cost is measured there", async () => {
     const h = harness();
 
     await runTask(h.deps, task);
 
-    expect(h.executor.execute.mock.calls[0][3]).toBeUndefined();
-    expect(h.reporter.merged).toHaveBeenCalled();
+    expect(h.executor.execute.mock.calls[0][0].onEvent).toBeTypeOf("function");
+    expect(h.reporter.delivered).toHaveBeenCalled();
   });
 });
 
-// Off by default: a worker nobody configured pushes a branch, opens a pull request and stops.
-describe("autoMerge", () => {
-  const manual = { ...config, autoMerge: false };
-
-  it("opens the pull request and stops, without merging", async () => {
-    const h = harness({ config: manual });
+// Merging is a property of the composition now: the default agent pushes and opens a pull request,
+// and only an agent carrying a Merge step merges. There is no flag to turn on.
+describe("whether a run merges", () => {
+  it("opens the pull request and stops when the agent carries no merge step", async () => {
+    const h = harness();
 
     await runTask(h.deps, task);
 
@@ -813,7 +1202,7 @@ describe("autoMerge", () => {
   });
 
   it("reports it as delivered for review, never as merged", async () => {
-    const h = harness({ config: manual });
+    const h = harness();
 
     await runTask(h.deps, task);
 
@@ -825,7 +1214,7 @@ describe("autoMerge", () => {
     const telemetry = createTelemetry();
     const seen: TelemetryUpdate[] = [];
     telemetry.subscribe((u) => seen.push(u));
-    const h = harness({ config: manual, telemetry });
+    const h = harness({ telemetry });
 
     await runTask(h.deps, task);
 
@@ -838,7 +1227,7 @@ describe("autoMerge", () => {
     const telemetry = createTelemetry();
     const seen: TelemetryUpdate[] = [];
     telemetry.subscribe((u) => seen.push(u));
-    const h = harness({ config: manual, telemetry });
+    const h = harness({ telemetry });
 
     await runTask(h.deps, task);
 
@@ -847,10 +1236,10 @@ describe("autoMerge", () => {
     ]);
   });
 
-  it("still merges when the operator has turned it on", async () => {
-    const h = harness({ config: { ...config, autoMerge: true } });
+  it("merges when the agent carries the step", async () => {
+    const h = harness();
 
-    await runTask(h.deps, task);
+    await runTask(h.deps, merging);
 
     expect(h.delivery.merge).toHaveBeenCalled();
     expect(h.reporter.merged).toHaveBeenCalled();

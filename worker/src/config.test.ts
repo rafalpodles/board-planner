@@ -109,12 +109,25 @@ describe("the legacy api token", () => {
 });
 
 describe("applyPolicy", () => {
+  // The one field the worker recomputes rather than adopts: a ceiling past the server's own lease
+  // gets the task reclaimed under a running worker
+  it("clamps a run ceiling that would outlive the server's lease", () => {
+    expect(applyPolicy(DEFAULT_POLICY, { runCeilingMs: 8 * 60 * 60_000 }).runCeilingMs).toBeLessThan(
+      2 * 60 * 60_000
+    );
+  });
+
+  it("keeps the run ceiling it already had when a patch does not mention one", () => {
+    const first = applyPolicy(DEFAULT_POLICY, { runCeilingMs: 3_600_000 });
+    expect(applyPolicy(first, { baseBranch: "develop" }).runCeilingMs).toBe(3_600_000);
+  });
+
   it("adopts every known field from a well-formed patch", () => {
     const next = applyPolicy(DEFAULT_POLICY, {
-      autoMerge: true,
       baseBranch: "develop",
       pollIntervalMs: 5_000,
       taskTimeoutMs: 60_000,
+      runCeilingMs: 3_600_000,
       maxDiffLines: 100,
       maxDiffFiles: 3,
       model: "sonnet",
@@ -123,11 +136,10 @@ describe("applyPolicy", () => {
     });
 
     expect(next).toEqual({
-      autoMerge: true,
-      reviewGate: true,
       baseBranch: "develop",
       pollIntervalMs: 5_000,
       taskTimeoutMs: 60_000,
+      runCeilingMs: 3_600_000,
       maxDiffLines: 100,
       maxDiffFiles: 3,
       model: "sonnet",
@@ -214,57 +226,6 @@ describe("parseAssignments", () => {
   });
 });
 
-describe("autoMerge", () => {
-  // A worker nobody has configured must not merge to a base branch on its own.
-  it("is off unless the server says otherwise", () => {
-    expect(DEFAULT_POLICY.autoMerge).toBe(false);
-    expect(applyPolicy(DEFAULT_POLICY, {}).autoMerge).toBe(false);
-  });
-
-  it("is turned on by the server's policy", () => {
-    expect(applyPolicy(DEFAULT_POLICY, { autoMerge: true }).autoMerge).toBe(true);
-  });
-
-  it("can be turned back off", () => {
-    const on = applyPolicy(DEFAULT_POLICY, { autoMerge: true });
-
-    expect(applyPolicy(on, { autoMerge: false }).autoMerge).toBe(false);
-  });
-
-  // Anything but a boolean is ignored rather than coerced: "false" and 0 are both truthy-adjacent
-  // mistakes that would silently flip a safety default.
-  it("ignores a value that is not a boolean", () => {
-    for (const bad of ["true", "false", 1, 0, null, "yes"]) {
-      expect(applyPolicy(DEFAULT_POLICY, { autoMerge: bad }).autoMerge).toBe(false);
-    }
-  });
-});
-
-// The worker does not trust a policy it was handed. "Nothing merges unreviewed" is the one safety
-// property the README asserts outright, so a server that sends the pair — through a bug, or a
-// rollback to a validator that did not know the rule — must not be able to talk the worker into it.
-describe("refusing to merge unreviewed, whatever the server says", () => {
-  it("turns autoMerge off when the same patch disables the review gate", () => {
-    const next = applyPolicy(DEFAULT_POLICY, { autoMerge: true, reviewGate: false });
-
-    expect(next.autoMerge).toBe(false);
-    expect(next.reviewGate).toBe(false);
-  });
-
-  it("turns autoMerge off when the review gate was already disabled", () => {
-    const without = applyPolicy(DEFAULT_POLICY, { reviewGate: false });
-
-    expect(applyPolicy(without, { autoMerge: true }).autoMerge).toBe(false);
-  });
-
-  it("turns autoMerge off when a later patch removes the review it was allowed under", () => {
-    const merging = applyPolicy(DEFAULT_POLICY, { autoMerge: true });
-    expect(merging.autoMerge).toBe(true);
-
-    expect(applyPolicy(merging, { reviewGate: false }).autoMerge).toBe(false);
-  });
-
-  it("leaves autoMerge alone while the review gate stands", () => {
-    expect(applyPolicy(DEFAULT_POLICY, { autoMerge: true, reviewGate: true }).autoMerge).toBe(true);
-  });
-});
+// The autoMerge and reviewGate describes stood here. Both flags are retired: an agent merges
+// because its sequence carries a Merge step, and is reviewed because a Reviewed gate stands after
+// the last step that writes. agent-rules.test.ts is where those two rules are asserted now.

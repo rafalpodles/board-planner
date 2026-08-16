@@ -21,7 +21,12 @@ vi.mock("@/lib/worker-service", () => ({
   verdictFor,
   PROTOCOL_VERSION: 1,
 }));
-vi.mock("@/lib/task-service", () => ({ claimNextTask, releaseExpiredTasks }));
+const releaseTask = vi.fn();
+vi.mock("@/lib/task-service", () => ({ claimNextTask, releaseExpiredTasks, releaseTask }));
+// Which agent a project resolves to is agent-snapshot.test.ts's subject. What matters here is the
+// branch where it resolves to none, which no test reached while this always succeeded.
+const snapshotFor = vi.fn(async () => ({ agentId: "a1", name: "Default", sequence: [] }));
+vi.mock("@/lib/agent-snapshot", () => ({ snapshotFor }));
 vi.mock("@/lib/middleware", () => ({
   resolveProjectId,
   protocolOf: (r: Request) => Number(r.headers.get("x-cp-protocol") ?? NaN),
@@ -57,6 +62,23 @@ const authed = {
   "x-cp-protocol": "1",
 };
 
+// What claimNextTask actually returns: a hydrated Mongoose document. Its fields are prototype
+// getters, so a property read finds them and a spread does not — which is precisely the difference
+// that let this route ship a body with every field one level down under `_doc`. A plain object
+// here cannot catch that, so this fixture mimics the real shape rather than the convenient one.
+function hydrated(fields: Record<string, unknown>) {
+  const doc: Record<string, unknown> = {
+    $__: {},
+    $isNew: false,
+    _doc: fields,
+    toJSON: () => ({ ...fields }),
+  };
+  for (const [key, value] of Object.entries(fields)) {
+    Object.defineProperty(doc, key, { get: () => value, enumerable: false });
+  }
+  return doc;
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   projectFindById.mockResolvedValue({ _id: "p1", githubRepo: "owner/repo", worker: { enabled: true } });
@@ -64,8 +86,10 @@ beforeEach(() => {
   resolveProjectId.mockResolvedValue(OID);
   verifyWorkerCredential.mockResolvedValue({ _id: OID, assignments: [] });
   verdictFor.mockReturnValue({ ok: true });
-  claimNextTask.mockResolvedValue({ _id: "t1", taskNumber: 1 });
+  claimNextTask.mockResolvedValue(hydrated({ _id: "t1", taskNumber: 1 }));
+  snapshotFor.mockResolvedValue({ agentId: "a1", name: "Default", sequence: [] });
   releaseExpiredTasks.mockResolvedValue(0);
+  releaseTask.mockResolvedValue(undefined);
 });
 
 describe("POST /tasks/claim", () => {
@@ -110,6 +134,29 @@ describe("POST /tasks/claim", () => {
     await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
     expect(releaseExpiredTasks).toHaveBeenCalledWith(OID);
+  });
+
+  // The worker reads taskNumber, _id and checklist off the top level of this body. Nothing asserted
+  // the body's shape, so the route could — and did — nest every field under `_doc` unnoticed.
+  it("sends the task's own fields at the top level, beside the agent", async () => {
+    const response = await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
+    const body = await response.json();
+
+    expect(body).toMatchObject({ _id: "t1", taskNumber: 1 });
+    expect(body.agent).toMatchObject({ agentId: "a1", name: "Default" });
+    expect(body._doc).toBeUndefined();
+  });
+
+  // Holding a task no machine can run parks it behind the two-hour lease. 204 rather than an error
+  // because the worker's loop treats a failed claim as a cycle failure and retries every poll —
+  // nothing here is claimable until somebody fixes the project, which is what 204 means.
+  it("hands the task back and reports an empty queue when no agent resolves", async () => {
+    snapshotFor.mockResolvedValue(null as never);
+
+    const response = await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
+
+    expect(response.status).toBe(204);
+    expect(releaseTask).toHaveBeenCalledWith(OID, "t1", { refund: true });
   });
 
   it("reports an empty queue as 204", async () => {
@@ -175,7 +222,7 @@ describe("POST /tasks/claim", () => {
 describe("the worker's identity travels with the claim", () => {
   it("passes the identity the worker registered with", async () => {
     verifyWorkerCredential.mockResolvedValue({ _id: OID, assignments: [], identity: "u-worker" });
-    claimNextTask.mockResolvedValue({ _id: "t1" });
+    claimNextTask.mockResolvedValue(hydrated({ _id: "t1" }));
 
     await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 

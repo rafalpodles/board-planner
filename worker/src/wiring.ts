@@ -28,9 +28,9 @@ import {
 import { connectControl, ControlDeps } from "./control.js";
 import { createDelivery } from "./delivery.js";
 import { collectDiff } from "./diff.js";
+import { gateFromEntry } from "./gates/from-entry.js";
 import { createRunner, Runner } from "./exec.js";
 import { createExecutor } from "./executor.js";
-import { buildGates } from "./gates/index.js";
 import { LocalServer, LocalServerDeps, startLocalServer } from "./local-server.js";
 import { createLoop } from "./loop.js";
 import { createOutbox, Store } from "./outbox.js";
@@ -187,11 +187,10 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       repoPath: repo.path,
       worktreeRoot: repo.worktreeRoot,
       workerId: identity.workerId,
-      autoMerge: repo.config.autoMerge,
-      reviewGate: repo.config.reviewGate,
       baseBranch: repo.config.baseBranch,
       pollIntervalMs: repo.config.pollIntervalMs,
       taskTimeoutMs: repo.config.taskTimeoutMs,
+      runCeilingMs: repo.config.runCeilingMs,
       maxDiffLines: repo.config.maxDiffLines,
       maxDiffFiles: repo.config.maxDiffFiles,
       model: repo.config.model,
@@ -419,8 +418,9 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
           workspace: createWorkspace(taskConfig, deps.runner),
           executor: createExecutor(taskConfig, deps.runner),
           collectDiff,
+          gateFor: gateFromEntry,
+          recordRun: (project, record) => outbox.add({ kind: "run", projectId: project, record }),
           runner: deps.runner,
-          gates: buildGates(taskConfig, deps.runner),
           signal,
           telemetry,
         };
@@ -506,7 +506,6 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       pollIntervalMs: policy.pollIntervalMs,
       projects: [...bound.entries()].map(([project, repo]) => ({
         project,
-        autoMerge: repo.config.autoMerge,
         baseBranch: repo.config.baseBranch,
         model: repo.config.model,
         reviewModel: repo.config.reviewModel,
