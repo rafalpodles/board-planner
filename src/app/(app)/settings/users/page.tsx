@@ -23,12 +23,15 @@ export default function UsersPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
+  const [newUserEmail, setNewUserEmail] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
   // Edit user state
   const [editUser, setEditUser] = useState<ApiUser | null>(null);
   const [editRole, setEditRole] = useState<"admin" | "member">("member");
+  const [editEmail, setEditEmail] = useState("");
+  const [emailError, setEmailError] = useState("");
   const [editSaving, setEditSaving] = useState(false);
   const [newPassword, setNewPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -64,11 +67,8 @@ export default function UsersPage() {
     setSaving(true);
 
     try {
-      await api.post("/api/users", { username, password, fullName });
-      setShowNew(false);
-      setUsername("");
-      setPassword("");
-      setFullName("");
+      await api.post("/api/users", { username, password, fullName, email: newUserEmail });
+      closeNew();
       const data = await api.get("/api/users");
       setUsers(data);
     } catch (err) {
@@ -81,7 +81,20 @@ export default function UsersPage() {
   function openEdit(user: ApiUser) {
     setEditUser(user);
     setEditRole(user.role || "member");
+    setEditEmail(user.email || "");
+    setEmailError("");
     closePasswordField();
+  }
+
+  function closeNew() {
+    setShowNew(false);
+    setUsername("");
+    setPassword("");
+    setFullName("");
+    // Cleared on cancel too, not only on success: an address typed for one person and abandoned
+    // would otherwise sit four fields down, optional and unnoticed, when the form is next opened
+    setNewUserEmail("");
+    setError("");
   }
 
   function closePasswordField() {
@@ -92,12 +105,14 @@ export default function UsersPage() {
 
   function closeEdit() {
     setEditUser(null);
+    setEmailError("");
     closePasswordField();
   }
 
   async function handleEditSave() {
     if (!editUser) return;
     setPasswordError("");
+    setEmailError("");
 
     if (newPassword && newPassword.length < MIN_PASSWORD_LENGTH) {
       setPasswordError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters`);
@@ -111,6 +126,9 @@ export default function UsersPage() {
     try {
       await api.put(`/api/users/${editUser._id}`, {
         role: editRole,
+        // Only when it actually changed: the value was read when the list loaded, and sending it
+        // back on every save would quietly undo an address its owner edited in the meantime
+        ...(editEmail !== (editUser.email ?? "") ? { email: editEmail } : {}),
         ...(passwordWasSet ? { password: newPassword } : {}),
       });
       closeEdit();
@@ -119,11 +137,19 @@ export default function UsersPage() {
       toast(
         passwordWasSet
           ? `Password set for ${username}. They were signed out everywhere.`
-          : "User updated",
+          : "Saved",
         "success"
       );
     } catch (err) {
-      toast(err instanceof Error ? err.message : "Failed to update user", "error");
+      const status = (err as { status?: number })?.status;
+      const message = err instanceof Error ? err.message : "Failed to update user";
+      // Beside the field it belongs to, not in a toast that clears after three seconds and leaves
+      // the offending address sitting there unmarked
+      if (status === 409 || message.includes("email address")) {
+        setEmailError(message);
+      } else {
+        toast(message, "error");
+      }
     } finally {
       setEditSaving(false);
     }
@@ -197,7 +223,7 @@ export default function UsersPage() {
       {/* Create User Modal */}
       <Modal
         open={showNew}
-        onClose={() => setShowNew(false)}
+        onClose={closeNew}
         title="New User"
       >
         <form onSubmit={handleCreate} className="space-y-4">
@@ -223,6 +249,20 @@ export default function UsersPage() {
             onChange={(e) => setFullName(e.target.value)}
             required
           />
+          <div>
+            <Input
+              id="newUserEmail"
+              label="Email"
+              type="email"
+              autoComplete="off"
+              aria-describedby="newUserEmailHelp"
+              value={newUserEmail}
+              onChange={(e) => setNewUserEmail(e.target.value)}
+            />
+            <p id="newUserEmailHelp" className="mt-1 text-sm text-text-muted">
+              Optional. Used for email notifications.
+            </p>
+          </div>
 
           {error && <p className="text-sm text-danger">{error}</p>}
 
@@ -233,7 +273,7 @@ export default function UsersPage() {
             <Button
               type="button"
               variant="secondary"
-              onClick={() => setShowNew(false)}
+              onClick={closeNew}
             >
               Cancel
             </Button>
@@ -275,6 +315,22 @@ export default function UsersPage() {
                   Member
                 </button>
               </div>
+            </div>
+
+            <div className="border-t border-border pt-4">
+              <Input
+                id="editUserEmail"
+                label="Email"
+                type="email"
+                autoComplete="off"
+                aria-describedby="editUserEmailHelp"
+                value={editEmail}
+                error={emailError}
+                onChange={(e) => setEditEmail(e.target.value)}
+              />
+              <p id="editUserEmailHelp" className="mt-1 text-sm text-text-muted">
+                Used for email notifications.
+              </p>
             </div>
 
             <div className="border-t border-border pt-4">
