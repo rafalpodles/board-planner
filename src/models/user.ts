@@ -51,11 +51,11 @@ const userSchema = new Schema<IUser>({
   },
 });
 
-// Ensure email uniqueness (but allow multiple empty strings)
-userSchema.index(
-  { email: 1 },
-  { unique: true, sparse: true, partialFilterExpression: { email: { $ne: "" } } }
-);
+// Unique among the accounts that have one, and many may have none. `$gt: ""` rather than the
+// `$ne: ""` this carried until BP-281: MongoDB refuses $ne in a partial index, Mongoose swallows
+// the CannotCreateIndex, and the index nobody built enforced nothing — two accounts could hold one
+// address, which is the lookup a password reset by email depends on.
+userSchema.index({ email: 1 }, { unique: true, partialFilterExpression: { email: { $gt: "" } } });
 
 // Remove password from JSON output
 userSchema.set("toJSON", {
@@ -67,3 +67,9 @@ userSchema.set("toJSON", {
 
 export const User: Model<IUser> =
   mongoose.models.User || mongoose.model<IUser>("User", userSchema);
+
+// Mongoose builds indexes in the background and keeps the failure to itself, which is how a
+// uniqueness rule can be declared here and enforce nothing for months. Say so instead.
+User.on("index", (err: Error | undefined) => {
+  if (err) console.error("Failed to build an index on users:", err.message);
+});

@@ -23,12 +23,14 @@ export default function UsersPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
+  const [newUserEmail, setNewUserEmail] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
   // Edit user state
   const [editUser, setEditUser] = useState<ApiUser | null>(null);
   const [editRole, setEditRole] = useState<"admin" | "member">("member");
+  const [editEmail, setEditEmail] = useState("");
   const [editSaving, setEditSaving] = useState(false);
   const [newPassword, setNewPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -64,11 +66,12 @@ export default function UsersPage() {
     setSaving(true);
 
     try {
-      await api.post("/api/users", { username, password, fullName });
+      await api.post("/api/users", { username, password, fullName, email: newUserEmail });
       setShowNew(false);
       setUsername("");
       setPassword("");
       setFullName("");
+      setNewUserEmail("");
       const data = await api.get("/api/users");
       setUsers(data);
     } catch (err) {
@@ -81,6 +84,7 @@ export default function UsersPage() {
   function openEdit(user: ApiUser) {
     setEditUser(user);
     setEditRole(user.role || "member");
+    setEditEmail(user.email || "");
     closePasswordField();
   }
 
@@ -111,6 +115,7 @@ export default function UsersPage() {
     try {
       await api.put(`/api/users/${editUser._id}`, {
         role: editRole,
+        email: editEmail,
         ...(passwordWasSet ? { password: newPassword } : {}),
       });
       closeEdit();
@@ -223,6 +228,19 @@ export default function UsersPage() {
             onChange={(e) => setFullName(e.target.value)}
             required
           />
+          <div>
+            <Input
+              label="Email (optional)"
+              type="email"
+              autoComplete="off"
+              value={newUserEmail}
+              onChange={(e) => setNewUserEmail(e.target.value)}
+            />
+            <p className="mt-1 text-sm text-text-muted">
+              Without one, this account cannot reset its own password — an admin has to set a new
+              one by hand.
+            </p>
+          </div>
 
           {error && <p className="text-sm text-danger">{error}</p>}
 
@@ -275,6 +293,20 @@ export default function UsersPage() {
                   Member
                 </button>
               </div>
+            </div>
+
+            <div className="border-t border-border pt-4">
+              <Input
+                label="Email"
+                type="email"
+                autoComplete="off"
+                value={editEmail}
+                onChange={(e) => setEditEmail(e.target.value)}
+              />
+              <p className="mt-1 text-sm text-text-muted">
+                Where a password reset would be sent. Leave it empty and there is nowhere to send
+                one.
+              </p>
             </div>
 
             <div className="border-t border-border pt-4">

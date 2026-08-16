@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
 import { MIN_PASSWORD_LENGTH, PASSWORD_COST_FACTOR } from "@/lib/auth";
+import { isValidEmail, normaliseEmail } from "@/lib/email";
 import { logInstanceAudit } from "@/lib/instanceAudit";
+import { duplicateKeyField } from "@/lib/mongo-errors";
 import { withAdmin } from "@/lib/middleware";
 import { revokeUserSessions } from "@/lib/session";
 import { User } from "@/models/user";
@@ -31,7 +33,7 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
 
-  let body: { role?: unknown; password?: unknown };
+  let body: { role?: unknown; password?: unknown; email?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -72,6 +74,29 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
       }
     }
     target.role = body.role as "admin" | "member";
+  }
+
+  if (body.email !== undefined) {
+    // Gated like the password, and for the sharper reason: once a reset can be requested by email,
+    // whoever writes this field decides where that link lands. An account's address is the account.
+    if (admin.viaMachineCredential) {
+      return NextResponse.json(
+        { error: "This action requires an interactive session" },
+        { status: 403 }
+      );
+    }
+    if (typeof body.email !== "string") {
+      return NextResponse.json({ error: "Invalid email" }, { status: 400 });
+    }
+    const email = normaliseEmail(body.email);
+    // Empty clears it, which is the only way to undo a typo that took somebody else's address
+    if (email && !isValidEmail(email)) {
+      return NextResponse.json(
+        { error: "That does not look like an email address" },
+        { status: 400 }
+      );
+    }
+    target.email = email;
   }
 
   let passwordWasSet = false;
@@ -117,7 +142,17 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
     await revokeUserSessions(target._id);
   }
 
-  await target.save();
+  try {
+    await target.save();
+  } catch (err) {
+    if (duplicateKeyField(err) === "email") {
+      return NextResponse.json(
+        { error: "That email is already on another account" },
+        { status: 409 }
+      );
+    }
+    throw err;
+  }
 
   if (passwordWasSet) {
     void logInstanceAudit({

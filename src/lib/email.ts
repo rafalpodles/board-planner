@@ -29,6 +29,16 @@ export function isEmailConfigured(): boolean {
   return !!(SMTP_HOST && SMTP_USER && SMTP_PASS);
 }
 
+export function normaliseEmail(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+// Deliberately not RFC 5322: the address is proven by a message arriving at it, and a stricter
+// pattern only turns valid addresses away. This catches the typo that has no @ or no domain.
+export function isValidEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
 interface SendEmailParams {
   to: string;
   subject: string;
@@ -36,21 +46,57 @@ interface SendEmailParams {
   html?: string;
 }
 
-export async function sendEmail({ to, subject, text, html }: SendEmailParams): Promise<boolean> {
-  const t = getTransporter();
-  if (!t) return false;
+export class EmailNotConfiguredError extends Error {
+  constructor() {
+    super("No mail server is configured");
+  }
+}
 
+/**
+ * Throws whatever the mail server said. The only caller that wants this is the one a person is
+ * watching — everywhere else a delivery failure must not take the request down with it.
+ */
+export async function sendEmailOrThrow({
+  to,
+  subject,
+  text,
+  html,
+}: SendEmailParams): Promise<void> {
+  const t = getTransporter();
+  if (!t) throw new EmailNotConfiguredError();
+
+  await t.sendMail({
+    from: SMTP_FROM,
+    to,
+    subject,
+    text,
+    html: html || text,
+  });
+}
+
+export async function sendEmail(params: SendEmailParams): Promise<boolean> {
   try {
-    await t.sendMail({
-      from: SMTP_FROM,
-      to,
-      subject,
-      text,
-      html: html || text,
-    });
+    await sendEmailOrThrow(params);
     return true;
   } catch (err) {
     console.error("Failed to send email:", err);
     return false;
   }
+}
+
+/** What an instance admin may see about the mail server. Never the password. */
+export function emailSettingsSummary(): {
+  configured: boolean;
+  host: string;
+  port: number;
+  user: string;
+  from: string;
+} {
+  return {
+    configured: isEmailConfigured(),
+    host: SMTP_HOST ?? "",
+    port: SMTP_PORT,
+    user: SMTP_USER ?? "",
+    from: SMTP_FROM,
+  };
 }

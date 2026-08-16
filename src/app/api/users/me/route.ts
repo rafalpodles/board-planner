@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
+import { isValidEmail, normaliseEmail } from "@/lib/email";
 import { withAuth } from "@/lib/middleware";
+import { duplicateKeyField } from "@/lib/mongo-errors";
 import { User } from "@/models/user";
 
 export const PUT = withAuth(async (request, { user }) => {
@@ -10,7 +12,16 @@ export const PUT = withAuth(async (request, { user }) => {
   const updates: Record<string, unknown> = {};
 
   if (typeof body.email === "string") {
-    updates.email = body.email.trim().toLowerCase();
+    const email = normaliseEmail(body.email);
+    // Same rule as the admin path: an address nobody can deliver to is worse than none, because
+    // the reset it is meant to receive will look like it was sent
+    if (email && !isValidEmail(email)) {
+      return NextResponse.json(
+        { error: "That does not look like an email address" },
+        { status: 400 }
+      );
+    }
+    updates.email = email;
   }
   if (typeof body.emailNotifications === "boolean") {
     updates.emailNotifications = body.emailNotifications;
@@ -23,11 +34,22 @@ export const PUT = withAuth(async (request, { user }) => {
     return NextResponse.json({ error: "No valid fields to update" }, { status: 400 });
   }
 
-  const updated = await User.findByIdAndUpdate(
-    user._id,
-    { $set: updates },
-    { returnDocument: "after" }
-  );
+  let updated;
+  try {
+    updated = await User.findByIdAndUpdate(
+      user._id,
+      { $set: updates },
+      { returnDocument: "after" }
+    );
+  } catch (err) {
+    if (duplicateKeyField(err) === "email") {
+      return NextResponse.json(
+        { error: "That email is already on another account" },
+        { status: 409 }
+      );
+    }
+    throw err;
+  }
 
   return NextResponse.json(updated);
 });
