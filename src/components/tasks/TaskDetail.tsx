@@ -267,7 +267,9 @@ function TaskDetailView({
     <div className="flex min-h-0 flex-col">
       <TaskTopBar
         projectName={project.name}
+        projectRef={project.key}
         taskKey={taskKey}
+        taskNumber={task.taskNumber}
         columns={columns}
         status={task.status}
         onStatusChange={handleStatusChange}
@@ -324,6 +326,7 @@ function TaskDetailView({
           <MobileSummary
             draft={draft}
             assignee={assignee}
+            categories={project.categories || []}
             onOpenDetails={() => setDetailsOpen(true)}
           />
 
@@ -373,7 +376,7 @@ function TaskDetailView({
             users={users}
             sprints={sprints}
             agents={agents}
-            categories={(project.categories || []).map((c) => c.name)}
+            categories={project.categories || []}
             customFields={project.customFields || []}
             reporter={reporter}
             onDelete={requestDelete}
@@ -400,7 +403,7 @@ function TaskDetailView({
           users={users}
           sprints={sprints}
           agents={agents}
-          categories={(project.categories || []).map((c) => c.name)}
+          categories={project.categories || []}
           customFields={project.customFields || []}
           reporter={reporter}
           onDelete={requestDelete}

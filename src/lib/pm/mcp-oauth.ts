@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { isAllowedMcpServerUrl } from "@/lib/url-validation";
-import { safeFetch } from "@/lib/safe-fetch";
+import { safeFetch, readBoundedJson, MAX_RESPONSE_BYTES, readBoundedText } from "@/lib/safe-fetch";
+import { selfOrigin, ORIGIN_REQUIRED } from "@/lib/session";
 
 // Mirrors the carve-out isAllowedMcpServerUrl makes for local MCP servers outside production
 const MCP_DESTINATION = { allowLoopback: process.env.NODE_ENV !== "production" };
@@ -34,7 +35,7 @@ async function fetchJson(url: string, init?: RequestInit): Promise<Record<string
   try {
     const res = await safeFetch(url, { ...init, signal: controller.signal }, MCP_DESTINATION);
     if (!res.ok) return null;
-    return (await res.json()) as Record<string, unknown>;
+    return await readBoundedJson<Record<string, unknown>>(res, MAX_RESPONSE_BYTES);
   } catch {
     return null;
   } finally {
@@ -151,11 +152,11 @@ export async function registerClient(
       signal: controller.signal,
     }, MCP_DESTINATION);
     if (!res.ok) {
-      const body = await res.text().catch(() => "");
+      const body = await readBoundedText(res, 4096);
       throw new Error(`Dynamic client registration failed (${res.status}): ${body.slice(0, 200)}`);
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const data = (await res.json()) as any;
+    const data = (await readBoundedJson(res, MAX_RESPONSE_BYTES)) as any;
     if (!data.client_id) throw new Error("Registration response has no client_id");
     return { clientId: String(data.client_id), clientSecret: String(data.client_secret ?? "") };
   } finally {
@@ -222,7 +223,7 @@ async function tokenRequest(opts: TokenRequestOpts): Promise<TokenSet> {
       signal: controller.signal,
     }, MCP_DESTINATION);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const data = (await res.json().catch(() => ({}))) as any;
+    const data = (await readBoundedJson(res, MAX_RESPONSE_BYTES).catch(() => ({}))) as any;
     if (!res.ok || !data.access_token) {
       throw new Error(
         `Token request failed (${res.status}): ${String(data.error ?? "no access_token")}`
@@ -285,17 +286,17 @@ export function refreshTokens(opts: {
   });
 }
 
-export function requestBaseUrl(request?: Request): string | null {
-  if (!request) return null;
-  const host = request.headers.get("x-forwarded-host") || request.headers.get("host");
-  if (!host) return null;
-  const proto =
-    request.headers.get("x-forwarded-proto") || (host.startsWith("localhost") ? "http" : "https");
-  return `${proto}://${host}`;
-}
+// requestBaseUrl is gone: it derived this app's own origin from x-forwarded-host, which is
+// client-supplied on a proxy-less deployment. The redirect_uri built from it was registered with
+// a third-party authorization server, and the unauthenticated callback redirected to it (BP-316).
 
-export function getPmOauthRedirectUri(request?: Request): string {
-  const base =
-    requestBaseUrl(request) || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-  return `${base.replace(/\/$/, "")}/api/pm/oauth/callback`;
+/**
+ * The address a third-party authorization server sends the user back to. It is registered with
+ * that server and must be stable, so it comes from configuration — never from the request that
+ * happens to be starting the flow.
+ */
+export function getPmOauthRedirectUri(): string {
+  const base = selfOrigin();
+  if (!base) throw new Error(ORIGIN_REQUIRED);
+  return `${base}/api/pm/oauth/callback`;
 }

@@ -1,6 +1,6 @@
 import { childEnv } from "./env.js";
 import { CommandResult, Runner } from "./exec.js";
-import { deliveryGitArgs, GIT_SAFE_ENV } from "./git-safety.js";
+import { GIT_SAFE_ENV } from "./git-safety.js";
 import { plantedConfig } from "./repos.js";
 import { ClaimedTask } from "./types.js";
 import { scrub } from "./scrub.js";
@@ -71,29 +71,92 @@ function repoArgs(prUrl: string): string[] {
 
 type MergeState = "merged" | "unmerged" | "unknown";
 
+// Order matters for credential.helper: the empty value clears whatever the repository or a global
+// file configured, and the entry after it names the one helper we trust. Clearing alone would be a
+// regression — GIT_CONFIG_GLOBAL below also hides the helper `gh auth setup-git` installs, so an
+// https remote would stop authenticating.
+const HARDENED_CONFIG: ReadonlyArray<readonly [string, string]> = [
+  ["core.hooksPath", "/dev/null"],
+  ["core.fsmonitor", "false"],
+  ["core.pager", "cat"],
+  ["core.sshCommand", "ssh"],
+  // Named by git when it wants a password and no helper answered. Empty disables it.
+  ["core.askPass", ""],
+  ["credential.helper", ""],
+  ["credential.helper", "!gh auth git-credential"],
+  // The transport, not the configuration, was the way through: `ext::` hands the URL to a program.
+  // The agent cannot set our environment, but it can rewrite where the push goes —
+  // `remote.origin.pushurl`, `remote.origin.url`, or `url.<ext::…>.insteadOf` — and the transport
+  // is the one chokepoint that catches all three at once.
+  //
+  // `file` is refused for the same reason. It looks harmless — no program in the URL — but a local
+  // push runs git-receive-pack against the destination, and that repository's own post-receive
+  // hook then runs holding this environment. It does NOT inherit the hooksPath above; that was
+  // assumed here once and the test written to confirm it failed instead.
+  ["protocol.ext.allow", "never"],
+  ["protocol.file.allow", "never"],
+];
+
+// `remote.<name>.receivepack` is deliberately not in the list above: git keeps the **first** value
+// it is given for it rather than the last, so a repository setting wins over any override — with
+// "more than one receivepack given, using the first" on stderr and exit 0, which nothing reads.
+// The command line is the only place it can be won, so push passes it as a flag.
+const RECEIVE_PACK = "--receive-pack=git-receive-pack";
+
+// `core.gitProxy` is the receivepack quirk a second time: git keeps the **first** proxy entry it
+// finds, so the repository's outranks anything the list above could say. Measured on git 2.50.1 —
+// `none`, `none for *` and the empty string were each tried as an override and each lost, while a
+// `git://` pushurl plus a planted proxy ran the agent's program holding GH_TOKEN, GITHUB_TOKEN and
+// SSH_AUTH_SOCK. The environment is the one layer that wins, and an empty value there means "no
+// proxy" rather than "fall through to the config", which is what makes it the fix. Refusing
+// protocol.git would also work and costs the transport: with no proxy of the agent's choosing left
+// to run, git:// is no more dangerous than https, and it is what the integration suite pushes over.
+//
+// NOSYSTEM drops /etc/gitconfig; GLOBAL=/dev/null drops ~/.gitconfig, which is as reachable to the
+// agent as the repository's own — it holds HOME. The repository config cannot be pointed elsewhere,
+// so the keys above override it instead, at the highest precedence git has.
+export function hardenedGitConfig(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
+    ...GIT_SAFE_ENV,
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_PROXY_COMMAND: "",
+    GIT_CONFIG_COUNT: String(HARDENED_CONFIG.length),
+  };
+  HARDENED_CONFIG.forEach(([key, value], index) => {
+    env[`GIT_CONFIG_KEY_${index}`] = key;
+    env[`GIT_CONFIG_VALUE_${index}`] = value;
+  });
+  return env;
+}
+
 export function createDelivery(runner: Runner, baseBranch?: string): Delivery {
   const baseArgs = baseBranch?.trim() ? ["--base", baseBranch.trim()] : [];
 
-  // Delivery runs our own commands, never agent-authored ones, so it is the one place that may
-  // carry the credentials git and gh need to reach the remote. gh does not understand git's -c
-  // flag, so only git invocations get it; GIT_CONFIG_NOSYSTEM is harmless for gh.
+  // Delivery is the one place that may carry the credentials git and gh need for the remote — and
+  // it runs inside the worktree the agent just wrote. The command is ours; what git *executes* on
+  // our behalf is not. Every key below is a "run this program" hook, and the agent holds
+  // `Bash(git *)` plus Write, so it can set any of them in the repository config — which a linked
+  // worktree shares with the main clone, so what it plants outlives the run.
+  //
+  // Through GIT_CONFIG_* rather than `-c`, because the environment reaches the git that `gh`
+  // shells out to; `-c` covers only the process we spawn ourselves. That is also why delivery does
+  // not use git-safety's gitArgs like every other call site: HARDENED_CONFIG carries the same keys
+  // and more, at the same precedence, and reaches gh's inner invocations as well.
   function run(command: string, args: string[], cwd: string): Promise<CommandResult> {
-    return runner.run(command, command === "git" ? deliveryGitArgs(args) : args, {
+    return runner.run(command, args, {
       cwd,
       timeoutMs: TIMEOUT_MS,
       env: {
         ...childEnv(["SSH_AUTH_SOCK", "GH_TOKEN", "GITHUB_TOKEN", "GH_CONFIG_DIR", "XDG_CONFIG_HOME"]),
-        ...GIT_SAFE_ENV,
+        ...hardenedGitConfig(),
       },
     });
   }
 
-  // deliveryGitArgs is the only wrapper that keeps credential.helper, because gh auth setup-git
-  // puts its helper in the operator's global config and clearing it breaks every HTTPS push. The
-  // price is paid here instead: push is the one call that hands the checkout's own config a
-  // credential (credential.helper on HTTPS, core.sshCommand on SSH), and the agent has had write
-  // access to .git since bindRepository scanned it. gh carries its token in the environment and
-  // reads neither key, so openPr and merge do not need this.
+  // A second line, not the first: HARDENED_CONFIG overrides the keys it names, and this refuses
+  // the push outright if the agent wrote an executable key at all — including one the list does
+  // not name. Push is where it is worth paying for, being the call that hands the checkout's own
+  // config a credential; gh carries its token in the environment, so openPr and merge do not.
   async function refuseIfPlanted(worktreePath: string): Promise<void> {
     const planted = await plantedConfig(runner, worktreePath);
     if (planted) {
@@ -126,10 +189,12 @@ export function createDelivery(runner: Runner, baseBranch?: string): Delivery {
       // clone has never seen
       // -- keeps the branch in git's positional slot: without it a name beginning with a dash is
       // read as an option, and --receive-pack=<cmd> would run that command on the remote
+      // --no-verify says the same thing as core.hooksPath above, in the one place it matters most:
+      // two independent ways for a planted pre-push to be skipped, rather than one
       await refuseIfPlanted(worktreePath);
       const result = await run(
         "git",
-        ["push", "--no-verify", "--force-with-lease", "-u", "origin", "--", branch],
+        ["push", "--no-verify", RECEIVE_PACK, "--force-with-lease", "-u", "origin", "--", branch],
         worktreePath
       );
       if (result.code !== 0) throw failure("git push", result);

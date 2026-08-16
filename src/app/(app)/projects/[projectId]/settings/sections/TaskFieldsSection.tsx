@@ -1,29 +1,34 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import { useApi } from "@/hooks/use-api";
 import { useToast } from "@/components/ui/Toast";
 import {
   ApiCustomField,
+  ApiProjectCategory,
   ApiTaskTemplate,
   CATEGORIES,
   Category,
 } from "@/types";
+import { categoryColor } from "@/lib/category-colors";
 import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
 import { Button } from "@/components/ui/Button";
+import { Select } from "@/components/ui/Select";
+import { Combobox } from "@/components/ui/Combobox";
 import { CustomFieldEditor } from "./CustomFieldEditor";
 import {
   CustomFieldForm,
   FieldDraft,
 } from "@/components/settings/CustomFieldForm";
-import { sortedFields } from "@/lib/custom-fields";
+import { activeFields, sortedFields } from "@/lib/custom-fields";
 import {
   SettingsCard,
   EmptyState,
   ListRow,
 } from "@/components/settings/SettingsCard";
 import { ListEditor } from "@/components/settings/ListEditor";
+import { SettingRow } from "@/components/settings/SettingRow";
 import { useDirtyGroup } from "@/components/settings/settings-context";
 import { useDraft } from "@/hooks/use-draft";
 import { Popover } from "@/components/ui/Popover";
@@ -32,6 +37,18 @@ import { categoryDiff, CategoryDraft } from "@/lib/category-diff";
 import { diffById } from "@/lib/row-diff";
 import { nextColour } from "@/lib/palette";
 import { SectionProps } from "./types";
+
+const ESTIMATE_FIELD_NAME = "Story points";
+
+function estimateFieldHint(canAdmin: boolean, hasNumericField: boolean): string {
+  const base = "Summed for sprint progress and velocity";
+  if (hasNumericField) {
+    return canAdmin ? base : `${base}. Only a project owner can change this.`;
+  }
+  return canAdmin
+    ? `${base}. This project has no numeric field yet.`
+    : `${base}. Only a project owner can create one.`;
+}
 
 export function TaskFieldsSection({
   projectId,
@@ -44,6 +61,11 @@ export function TaskFieldsSection({
   const canDelete = !!project.canAdmin;
   const api = useApi();
   const { toast } = useToast();
+
+  const numericFields = sortedFields(
+    activeFields(project.customFields || []).filter((f) => f.fieldType === "number"),
+  );
+  const [creatingEstimateField, setCreatingEstimateField] = useState(false);
 
   // Explicit, because a row added here has no _id until it is saved
   const categories = useDraft<{ categories: CategoryDraft[] }>({
@@ -98,6 +120,18 @@ export function TaskFieldsSection({
               name,
             });
           }
+          // commit, not rebase: on success the server's answer is the whole truth, and the
+          // rows it just created carry ids the draft has never seen. Moving the baseline
+          // alone would leave those as a difference, so the save bar would never close and
+          // the next Save would re-issue a diff that had already been applied.
+          patchProject({ categories: saved });
+          categories.commit({
+            categories: saved.map((c) => ({
+              _id: c._id,
+              name: c.name,
+              color: c.color,
+            })),
+          });
           toast("Categories saved", "success");
         } catch (err) {
           fail(err, "Failed to save categories");
@@ -162,6 +196,8 @@ export function TaskFieldsSection({
               templateId,
             });
           }
+          patchProject({ taskTemplates: saved });
+          templates.commit({ templates: saved });
           toast("Templates saved", "success");
         } catch (err) {
           fail(err, "Failed to save templates");
@@ -188,24 +224,59 @@ export function TaskFieldsSection({
     fieldId: string,
     patch: FieldDraft | Record<string, unknown>,
   ) {
-    patchProject({
-      customFields: await api.patch(
-        `/api/projects/${projectId}/custom-fields/${fieldId}`,
-        patch,
-      ),
-    });
+    const customFields: ApiCustomField[] = await api.patch(
+      `/api/projects/${projectId}/custom-fields/${fieldId}`,
+      patch,
+    );
+    const nowArchived = customFields.find((f) => f._id === fieldId)?.archived;
+    patchProject(
+      nowArchived && project.estimateFieldId === fieldId
+        ? { customFields, estimateFieldId: "" }
+        : { customFields },
+    );
     setFieldForm(null);
   }
 
   async function removeCustomField(fieldId: string) {
     try {
-      patchProject({
-        customFields: await api.del(
-          `/api/projects/${projectId}/custom-fields/${fieldId}`,
-        ),
-      });
+      const customFields: ApiCustomField[] = await api.del(
+        `/api/projects/${projectId}/custom-fields/${fieldId}`,
+      );
+      patchProject(
+        project.estimateFieldId === fieldId
+          ? { customFields, estimateFieldId: "" }
+          : { customFields },
+      );
     } catch (err) {
       fail(err, "Failed to remove custom field");
+    }
+  }
+
+  async function designateEstimateField(fieldId: string) {
+    try {
+      await api.put(`/api/projects/${projectId}`, { estimateFieldId: fieldId });
+      patchProject({ estimateFieldId: fieldId });
+    } catch (err) {
+      fail(err, "Failed to save estimate field");
+    }
+  }
+
+  async function createEstimateField() {
+    setCreatingEstimateField(true);
+    try {
+      const fields: ApiCustomField[] = await api.post(
+        `/api/projects/${projectId}/custom-fields`,
+        { name: ESTIMATE_FIELD_NAME, fieldType: "number" },
+      );
+      patchProject({ customFields: fields });
+      const created = fields.find(
+        (f) => f.fieldType === "number" && f.name === ESTIMATE_FIELD_NAME,
+      );
+      if (created) await designateEstimateField(created._id);
+    } catch (err) {
+      fail(err, `Failed to create "${ESTIMATE_FIELD_NAME}"`);
+    } finally {
+      setCreatingEstimateField(false);
     }
   }
 
@@ -358,6 +429,43 @@ export function TaskFieldsSection({
       </SettingsCard>
 
       <SettingsCard
+        title="Sprint estimates"
+        description="Which field on a task is its size."
+      >
+        {numericFields.length === 0 ? (
+          <SettingRow
+            label="Estimate field"
+            hint={estimateFieldHint(!!project.canAdmin, false)}
+          >
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={!project.canAdmin || creatingEstimateField}
+              onClick={createEstimateField}
+            >
+              {creatingEstimateField ? "Creating..." : `Create "${ESTIMATE_FIELD_NAME}"`}
+            </Button>
+          </SettingRow>
+        ) : (
+          <SettingRow
+            label="Estimate field"
+            hint={estimateFieldHint(!!project.canAdmin, true)}
+          >
+            <Select
+              aria-label="Estimate field"
+              value={project.estimateFieldId}
+              disabled={!project.canAdmin}
+              options={[
+                { value: "", label: "None" },
+                ...numericFields.map((f) => ({ value: f._id, label: f.name })),
+              ]}
+              onChange={(e) => designateEstimateField(e.target.value)}
+            />
+          </SettingRow>
+        )}
+      </SettingsCard>
+
+      <SettingsCard
         title="Task templates"
         description="Pre-filled starting points for tasks people create often."
       >
@@ -401,7 +509,22 @@ export function TaskFieldsSection({
                     onChange={(e) => editTemplate(i, { name: e.target.value })}
                   />
                 </div>
-                <span className="text-xs text-text-muted">{tpl.category}</span>
+                {tpl.category && (
+                  <span
+                    className="chip chip-custom rounded px-2 py-0.5 text-xs"
+                    style={
+                      {
+                        "--chip":
+                          categoryColor(
+                            categories.value.categories as ApiProjectCategory[],
+                            tpl.category,
+                          ) || "var(--color-text-muted)",
+                      } as CSSProperties
+                    }
+                  >
+                    {tpl.category}
+                  </span>
+                )}
                 <Button
                   variant="ghost"
                   size="sm"
@@ -423,24 +546,39 @@ export function TaskFieldsSection({
                       <label className="mb-1 block text-sm font-medium text-text-muted">
                         Category
                       </label>
-                      <select
+                      {/* The draft, not the project: a rename staged in the categories
+                          group above has not reached `project` yet, and the save sends
+                          whatever this picker holds */}
+                      <Combobox
+                        label="Template category"
                         value={tpl.category}
-                        aria-label="Template category"
-                        onChange={(e) =>
-                          editTemplate(i, {
-                            category: e.target.value as Category,
-                          })
+                        options={
+                          categories.value.categories.length > 0
+                            ? categories.value.categories.map((c) => ({
+                                value: c.name,
+                                label: c.name,
+                                color: c.color,
+                              }))
+                            : CATEGORIES.map((c) => ({ value: c, label: c }))
                         }
-                        className="focus-ring w-full rounded-lg border border-border bg-bg-input px-3 py-2 text-sm"
+                        onChange={(value) =>
+                          editTemplate(i, { category: value as Category })
+                        }
+                        triggerClassName="w-full rounded-lg border border-border bg-bg-input px-3 py-2 text-left text-sm"
                       >
-                        {(
-                          project.categories?.map((x) => x.name) || CATEGORIES
-                        ).map((c) => (
-                          <option key={c} value={c}>
-                            {c}
-                          </option>
-                        ))}
-                      </select>
+                        {(selected) => (
+                          <span className="flex items-center gap-2">
+                            {selected?.color && (
+                              <span
+                                aria-hidden
+                                className="h-2 w-2 shrink-0 rounded-full"
+                                style={{ backgroundColor: selected.color }}
+                              />
+                            )}
+                            {selected?.label || tpl.category}
+                          </span>
+                        )}
+                      </Combobox>
                     </div>
                     <Textarea
                       label="Description"

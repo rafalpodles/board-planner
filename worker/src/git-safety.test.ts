@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { deliveryGitArgs, gitArgs, GIT_SAFE_ENV } from "./git-safety.js";
+import { gitArgs, GIT_SAFE_ENV } from "./git-safety.js";
 
 describe("gitArgs", () => {
   it("disables the hook path, so a hook the agent wrote never runs", () => {
@@ -29,18 +29,6 @@ describe("gitArgs", () => {
 
   it("refuses the system config", () => {
     expect(GIT_SAFE_ENV.GIT_CONFIG_NOSYSTEM).toBe("1");
-  });
-});
-
-describe("deliveryGitArgs", () => {
-  it("disables the hook path too", () => {
-    expect(deliveryGitArgs(["push"])).toContain("core.hooksPath=/dev/null");
-  });
-
-  // gh auth setup-git puts its helper in the operator's global config, and delivery is the one call
-  // that has to reach the remote; clearing it would break every HTTPS push
-  it("leaves the credential helper alone", () => {
-    expect(deliveryGitArgs(["push"]).join(" ")).not.toContain("credential.helper");
   });
 });
 

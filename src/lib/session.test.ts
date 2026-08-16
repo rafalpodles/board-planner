@@ -14,6 +14,7 @@ vi.mock("@/models/session", () => ({
 const {
   allowsInsecureCookie,
   appOrigins,
+  selfOrigin,
   assertSessionConfig,
   buildSessionCookie,
   checkProvenance,
@@ -453,5 +454,90 @@ describe("buildSessionCookie — Max-Age follows the absolute cap", () => {
 
     expect(maxAge).toBeGreaterThan(SESSION_IDLE_TTL_MS / 1000);
     expect(maxAge).toBeLessThanOrEqual(SESSION_ABSOLUTE_TTL_MS / 1000);
+  });
+});
+
+// BP-316: this app's own origin used to be read off x-forwarded-host in two places — the MCP tool
+// client's base URL and the PM OAuth redirect_uri. On a deployment with no proxy in front that
+// header is whatever the caller sends.
+describe("selfOrigin", () => {
+  const ORIGINAL = { ...process.env };
+
+  beforeEach(() => {
+    delete process.env.APP_ORIGIN;
+    delete process.env.NEXT_PUBLIC_APP_URL;
+    delete process.env.PUBLIC_ORIGIN;
+  });
+
+  afterEach(() => {
+    process.env = { ...ORIGINAL };
+  });
+
+  it("prefers the configured APP_ORIGIN", () => {
+    process.env.APP_ORIGIN = "https://board.example.com";
+    process.env.NEXT_PUBLIC_APP_URL = "https://stale.example.com";
+
+    expect(selfOrigin()).toBe("https://board.example.com");
+  });
+
+  // APP_ORIGIN is an allowlist. Nothing orders it, the compose file's own default is localhost,
+  // and listing the LAN origin first is the natural thing to do — so a list is not an address, and
+  // taking [0] published localhost as this instance's issuer (BP-316 review).
+  it("refuses to pick an address out of a multi-origin allowlist", () => {
+    process.env.APP_ORIGIN = "http://localhost:3000,https://board.example.com";
+
+    expect(selfOrigin()).toBeNull();
+  });
+
+  it("takes PUBLIC_ORIGIN over an allowlist of any length", () => {
+    process.env.PUBLIC_ORIGIN = "https://board.example.com";
+    process.env.APP_ORIGIN = "http://localhost:3000,https://board.example.com";
+
+    expect(selfOrigin()).toBe("https://board.example.com");
+  });
+
+  // NEXT_PUBLIC_* is inlined at build time, so in the shipped bundle this leg is a literal from the
+  // build machine — and the Dockerfile defaults it to http://localhost:3000. As a fallback it was
+  // always truthy, which turned the intended 500 into a discovery document advertising localhost,
+  // cached for an hour. It is not a source at all now, and this test would have been green either
+  // way under vitest, which does no build-time substitution (BP-316 review).
+  it("does not use the build-time app URL, which cannot be corrected at runtime", () => {
+    process.env.NEXT_PUBLIC_APP_URL = "http://localhost:3000";
+
+    expect(selfOrigin()).toBeNull();
+  });
+
+  // The point of the whole change: no header, no guess, no default that happens to work in dev
+  it("returns null rather than guessing when nothing is configured", () => {
+    expect(selfOrigin()).toBeNull();
+  });
+
+  // This value used to feed an equality test, where a schemeless origin failed safe. It is now
+  // interpolated into discovery endpoints and into a redirect_uri registered with third parties.
+  it.each(["PUBLIC_ORIGIN", "APP_ORIGIN"])("returns null for a schemeless %s", (variable) => {
+    process.env[variable] = "app.example.com";
+
+    expect(selfOrigin()).toBeNull();
+  });
+
+  // new URL() takes these without throwing and reports origin === "null" — a truthy string, so
+  // every "not configured" guard passes and the endpoints come out as `null/oauth/token`
+  it.each([
+    "board.example.com:8443",
+    "localhost:3000",
+    "javascript:alert(1)",
+    "ws://board.example.com",
+    "file:///etc/passwd",
+  ])("returns null for %s, which new URL() accepts", (value) => {
+    process.env.PUBLIC_ORIGIN = value;
+
+    expect(selfOrigin()).toBeNull();
+  });
+
+  it("moves on to the allowlist when PUBLIC_ORIGIN is unusable", () => {
+    process.env.PUBLIC_ORIGIN = "app.example.com";
+    process.env.APP_ORIGIN = "https://board.example.com";
+
+    expect(selfOrigin()).toBe("https://board.example.com");
   });
 });

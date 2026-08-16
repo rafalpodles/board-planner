@@ -5,6 +5,34 @@ export interface McpProject {
   customFields?: ApiCustomField[];
 }
 
+/**
+ * A tool argument becomes a path segment, so it has to be encoded: the WHATWG parser normalises
+ * `..` away, which let a tool argument choose the path the server fetched rather than the
+ * resource it named (BP-316).
+ *
+ * Encoding alone does not do it. `encodeURIComponent` escapes `/` but leaves dots untouched, so a
+ * bare `..` — the exact input this guard is named after — passed through and dropped the
+ * `projects/<id>` segment, and with it the per-project scoping (BP-339).
+ *
+ * An allowlist rather than the three values that turned out to be dangerous: enumerating those is
+ * the shape that failed here once already. Everything that reaches this is a Mongo ObjectId or a
+ * project key, and `get_project` — the one tool taking a free-form identifier — already falls back
+ * to a key lookup when this throws.
+ *
+ * The `typeof` is a boundary check, not part of the guard: values arrive from JSON despite the
+ * signature, and `RegExp.test` would coerce them. It carries no security weight on its own — the
+ * allowlist already refuses anything a coerced value could stringify into — and removing it leaves
+ * the suite green. It stays so a `Symbol` reports this error instead of a coercion TypeError.
+ */
+const SAFE_SEGMENT = /^[A-Za-z0-9_-]+$/;
+
+const seg = (value: string) => {
+  if (typeof value !== "string" || !SAFE_SEGMENT.test(value)) {
+    throw new Error(`Invalid path segment: "${value}"`);
+  }
+  return encodeURIComponent(value);
+};
+
 export class PlannerClient {
   private baseUrl: string;
   private token: string;
@@ -37,7 +65,7 @@ export class PlannerClient {
   }
 
   async getProject(id: string): Promise<McpProject> {
-    return (await this.request("GET", `/api/projects/${id}`)) as McpProject;
+    return (await this.request("GET", `/api/projects/${seg(id)}`)) as McpProject;
   }
 
   async getProjectByKey(key: string): Promise<McpProject> {
@@ -50,43 +78,43 @@ export class PlannerClient {
   async listTasks(projectId: string, filters?: Record<string, string>): Promise<unknown[]> {
     const params = new URLSearchParams(filters || {}).toString();
     const query = params ? `?${params}` : "";
-    return this.request("GET", `/api/projects/${projectId}/tasks${query}`) as Promise<unknown[]>;
+    return this.request("GET", `/api/projects/${seg(projectId)}/tasks${query}`) as Promise<unknown[]>;
   }
 
   async getTask(projectId: string, taskId: string): Promise<unknown> {
-    return this.request("GET", `/api/projects/${projectId}/tasks/${taskId}`);
+    return this.request("GET", `/api/projects/${seg(projectId)}/tasks/${seg(taskId)}`);
   }
 
   async createTask(projectId: string, data: Record<string, unknown>): Promise<unknown> {
-    return this.request("POST", `/api/projects/${projectId}/tasks`, data);
+    return this.request("POST", `/api/projects/${seg(projectId)}/tasks`, data);
   }
 
   async updateTask(projectId: string, taskId: string, data: Record<string, unknown>): Promise<unknown> {
-    return this.request("PUT", `/api/projects/${projectId}/tasks/${taskId}`, data);
+    return this.request("PUT", `/api/projects/${seg(projectId)}/tasks/${seg(taskId)}`, data);
   }
 
   async changeTaskStatus(projectId: string, taskId: string, status: string): Promise<unknown> {
-    return this.request("PATCH", `/api/projects/${projectId}/tasks/${taskId}/status`, { status });
+    return this.request("PATCH", `/api/projects/${seg(projectId)}/tasks/${seg(taskId)}/status`, { status });
   }
 
   async listComments(projectId: string, taskId: string): Promise<unknown[]> {
-    return this.request("GET", `/api/projects/${projectId}/tasks/${taskId}/comments`) as Promise<unknown[]>;
+    return this.request("GET", `/api/projects/${seg(projectId)}/tasks/${seg(taskId)}/comments`) as Promise<unknown[]>;
   }
 
   async addComment(projectId: string, taskId: string, body: string): Promise<unknown> {
-    return this.request("POST", `/api/projects/${projectId}/tasks/${taskId}/comments`, { body });
+    return this.request("POST", `/api/projects/${seg(projectId)}/tasks/${seg(taskId)}/comments`, { body });
   }
 
   async listSprints(projectId: string): Promise<unknown[]> {
-    return this.request("GET", `/api/projects/${projectId}/sprints`) as Promise<unknown[]>;
+    return this.request("GET", `/api/projects/${seg(projectId)}/sprints`) as Promise<unknown[]>;
   }
 
   async createSprint(projectId: string, data: Record<string, unknown>): Promise<unknown> {
-    return this.request("POST", `/api/projects/${projectId}/sprints`, data);
+    return this.request("POST", `/api/projects/${seg(projectId)}/sprints`, data);
   }
 
   async updateSprint(projectId: string, sprintId: string, data: Record<string, unknown>): Promise<unknown> {
-    return this.request("PUT", `/api/projects/${projectId}/sprints/${sprintId}`, data);
+    return this.request("PUT", `/api/projects/${seg(projectId)}/sprints/${seg(sprintId)}`, data);
   }
 
   async listUsers(): Promise<unknown[]> {

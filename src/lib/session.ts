@@ -34,6 +34,52 @@ export function appOrigins(): string[] {
     .filter((origin) => origin.length > 0);
 }
 
+/**
+ * This instance's own origin, from configuration only.
+ *
+ * Never from a request header. `x-forwarded-host` is client-supplied on a deployment with no
+ * proxy in front, and reading it turned the MCP tool client into a reader of whatever address a
+ * token holder named, and the PM OAuth callback into an open redirect (BP-316). Returns null
+ * rather than guessing, so every caller has to decide what "not configured" means for it.
+ *
+ * `APP_ORIGIN` is an allowlist rather than an address — the compose file's own default lists
+ * localhost, and a deployment that accepts both a LAN and a public origin has no reason to order
+ * them. So it is a source only when it names exactly one origin; anything else needs
+ * `PUBLIC_ORIGIN`, which is a single value and settable at runtime.
+ *
+ * `NEXT_PUBLIC_APP_URL` is deliberately NOT a source. Next.js inlines it at build time, so in the
+ * shipped bundle it is a literal from the build machine — the Dockerfile defaults it to
+ * `http://localhost:3000`, which made it always truthy and turned the intended fail-closed 500
+ * into a discovery document advertising localhost, cached for an hour. A value that cannot be
+ * corrected at runtime cannot be this one (BP-316 review).
+ *
+ * Every candidate is parsed, and the scheme is checked. `new URL()` accepts `board.example.com:8443`
+ * as an opaque URL whose `.origin` is the string "null" — truthy, so every "not configured" guard
+ * would pass and the endpoints would read `null/oauth/token`.
+ */
+export const ORIGIN_REQUIRED =
+  "This instance's own origin is not configured. Set PUBLIC_ORIGIN to an http(s) URL (or give APP_ORIGIN exactly one origin): the MCP endpoint publishes it to clients and calls this instance's own API with it, so it must not come from a request header.";
+
+export function selfOrigin(): string | null {
+  const allowlist = appOrigins();
+  return (
+    parseOrigin(process.env.PUBLIC_ORIGIN) ??
+    (allowlist.length === 1 ? parseOrigin(allowlist[0]) : null)
+  );
+}
+
+function parseOrigin(value: string | undefined): string | null {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    return normaliseOrigin(url.origin);
+  } catch {
+    return null;
+  }
+}
+
 export function assertSessionConfig(): void {
   if (!allowsInsecureCookie()) return;
 

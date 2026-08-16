@@ -1,18 +1,27 @@
 # Board Planner
 
-## Documentation — Notion
+## Documentation — two homes, one rule each
 
-All project documentation is stored in **Notion**. Use the Notion MCP tools to read and write docs.
+**Product documentation** — anything a user reads — lives in the `board-planner-site` repo as Markdown under
+`src/content/docs/docs/**` and is published at https://board-planner.com/docs. That repo is the single source
+of truth: edit the page there and open a pull request. Notion keeps no copy of it. Railway deploys that repo
+**automatically from `main`**, so merging publishes — verify with `railway deployment list` rather than
+assuming either way.
 
-### After completing a new feature
+**Project documentation** — architecture, decisions, implementation notes, anything a user never sees — lives
+in **Notion** under the `🗂️ Board Planner` root. Use the Notion MCP tools, and search first so an existing
+page is updated rather than duplicated.
 
-After every completed feature, create or update documentation in Notion:
-- What the feature does (user-facing description)
-- Key implementation details (architecture decisions, services involved)
-- Any API changes or new endpoints
-- Configuration or environment changes required
+The split is the outcome of BP-234. The two copies of the product docs had already drifted on five of
+twenty-seven pages within eleven days, and a sync script would have been a machine maintaining a mirror for
+readers who do not exist.
 
-Search Notion first to check if a relevant page already exists before creating a new one.
+### After completing a feature
+
+Ask which of the two homes it touches — often both:
+- **Changed what a user sees or does?** Update the page under `src/content/docs/docs/**` in `board-planner-site`
+  and open a pull request there. A new endpoint belongs in `reference/rest-api.md`.
+- **Made an architectural decision, added a service, changed configuration?** Write it up in Notion.
 
 ---
 
@@ -201,6 +210,15 @@ ENCRYPTION_KEY=           # 32 bytes (hex or base64) — without it integration 
                           # a wrong-length key stops the app from starting
 ENCRYPTION_KEYS_OLD=      # Optional — comma-separated retired keys, so a rotation can still decrypt
 NEXT_PUBLIC_APP_URL=      # Frontend URL for links — read at BUILD time, not runtime
+APP_ORIGIN=               # Comma-separated origins allowed to write — the CSRF allowlist
+TRUSTED_PROXY_HOPS=       # Proxies appending to X-Forwarded-For in front of the app; default 0,
+                          # which ignores the header. The login throttle keys on it, so on a
+                          # proxy-less deployment a forged header used to reset every counter (BP-318)
+PUBLIC_ORIGIN=            # This instance's own address, at runtime. Required for /api/mcp, both
+                          # /.well-known documents and the PM OAuth redirect_uri, which answer 500
+                          # without it rather than falling back to a request header (BP-316).
+                          # Falls back to APP_ORIGIN only when that names exactly one origin —
+                          # never to NEXT_PUBLIC_APP_URL, which is a build-machine literal
 ```
 
 ## Build

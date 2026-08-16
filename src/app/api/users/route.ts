@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
-import { getAuthUser } from "@/lib/auth";
+import { getAuthUser, MIN_PASSWORD_LENGTH, PASSWORD_COST_FACTOR } from "@/lib/auth";
+import { isValidEmail, normaliseEmail } from "@/lib/email";
+import { duplicateKeyField } from "@/lib/mongo-errors";
 import { ProvenanceError, provenanceRefusal } from "@/lib/session";
 import { withAdmin } from "@/lib/middleware";
 import { User } from "@/models/user";
@@ -24,6 +26,23 @@ export async function POST(request: Request) {
   if (!username || !password || !fullName) {
     return NextResponse.json(
       { error: "username, password, and fullName are required" },
+      { status: 400 }
+    );
+  }
+  // Optional: an instance with no mail server has no use for it, and demanding one would mean
+  // inventing addresses. The cost of leaving it out is stated on the form — that account cannot
+  // recover its own password.
+  if (body.email !== undefined && typeof body.email !== "string") {
+    return NextResponse.json({ error: "Invalid email" }, { status: 400 });
+  }
+  const email = typeof body.email === "string" ? normaliseEmail(body.email) : "";
+  if (email && !isValidEmail(email)) {
+    return NextResponse.json({ error: "That does not look like an email address" }, { status: 400 });
+  }
+  // The two places a password is chosen have to agree, or the shorter one is the one that matters
+  if (typeof password !== "string" || password.length < MIN_PASSWORD_LENGTH) {
+    return NextResponse.json(
+      { error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters` },
       { status: 400 }
     );
   }
@@ -58,25 +77,29 @@ export async function POST(request: Request) {
     }
   }
 
-  const hashedPassword = await bcrypt.hash(password, 10);
+  const hashedPassword = await bcrypt.hash(password, PASSWORD_COST_FACTOR);
 
   try {
     const user = await User.create({
       username: username.toLowerCase(),
       password: hashedPassword,
       fullName,
+      email,
       role: isBootstrap ? "admin" : "member",
     });
     return NextResponse.json(user, { status: 201 });
   } catch (err: unknown) {
-    if (
-      err &&
-      typeof err === "object" &&
-      "code" in err &&
-      (err as { code: number }).code === 11000
-    ) {
+    const conflict = duplicateKeyField(err);
+    if (conflict) {
+      // Two unique indexes reach this line now. Saying "username" for an address already on
+      // another account would send the admin to change the one field that was fine.
       return NextResponse.json(
-        { error: "Username already exists" },
+        {
+          error:
+            conflict === "email"
+              ? "That email is already on another account"
+              : "Username already exists",
+        },
         { status: 409 }
       );
     }

@@ -1,3 +1,22 @@
+// A tool argument becomes a path segment, so it has to be encoded: the WHATWG parser normalises
+// `..` before the request goes out, so an id of `p1/../../admin/users` would otherwise fetch a
+// route the tool never named. Kept identical to src/lib/mcp/planner-client.ts, which this file is
+// a copy of — CI builds the two packages separately, so nothing flags a divergence (BP-316 review).
+//
+// Encoding is not enough on its own: it escapes `/` and leaves dots alone, so a bare `..` walked
+// through and dropped the `projects/<id>` segment (BP-339). An allowlist rather than a list of the
+// values that turned out to be dangerous — every id here is an ObjectId or a project key. The
+// typeof is a boundary check rather than part of the guard: the allowlist already refuses anything
+// a coerced value could stringify into, so it only buys a legible error for a Symbol.
+const SAFE_SEGMENT = /^[A-Za-z0-9_-]+$/;
+
+const seg = (value: string) => {
+  if (typeof value !== "string" || !SAFE_SEGMENT.test(value)) {
+    throw new Error(`Invalid path segment: "${value}"`);
+  }
+  return encodeURIComponent(value);
+};
+
 export class ApiClient {
   private baseUrl: string;
   private authHeader: string;
@@ -34,7 +53,7 @@ export class ApiClient {
   }
 
   async getProject(id: string): Promise<unknown> {
-    return this.request("GET", `/api/projects/${id}`);
+    return this.request("GET", `/api/projects/${seg(id)}`);
   }
 
   async getProjectByKey(key: string): Promise<unknown> {
@@ -50,45 +69,45 @@ export class ApiClient {
   async listTasks(projectId: string, filters?: Record<string, string>): Promise<unknown[]> {
     const params = new URLSearchParams(filters || {}).toString();
     const query = params ? `?${params}` : "";
-    return this.request("GET", `/api/projects/${projectId}/tasks${query}`) as Promise<unknown[]>;
+    return this.request("GET", `/api/projects/${seg(projectId)}/tasks${query}`) as Promise<unknown[]>;
   }
 
   async getTask(projectId: string, taskId: string): Promise<unknown> {
-    return this.request("GET", `/api/projects/${projectId}/tasks/${taskId}`);
+    return this.request("GET", `/api/projects/${seg(projectId)}/tasks/${seg(taskId)}`);
   }
 
   async createTask(projectId: string, data: Record<string, unknown>): Promise<unknown> {
-    return this.request("POST", `/api/projects/${projectId}/tasks`, data);
+    return this.request("POST", `/api/projects/${seg(projectId)}/tasks`, data);
   }
 
   async updateTask(projectId: string, taskId: string, data: Record<string, unknown>): Promise<unknown> {
-    return this.request("PUT", `/api/projects/${projectId}/tasks/${taskId}`, data);
+    return this.request("PUT", `/api/projects/${seg(projectId)}/tasks/${seg(taskId)}`, data);
   }
 
   async changeTaskStatus(projectId: string, taskId: string, status: string): Promise<unknown> {
-    return this.request("PATCH", `/api/projects/${projectId}/tasks/${taskId}/status`, { status });
+    return this.request("PATCH", `/api/projects/${seg(projectId)}/tasks/${seg(taskId)}/status`, { status });
   }
 
   // Comments
   async listComments(projectId: string, taskId: string): Promise<unknown[]> {
-    return this.request("GET", `/api/projects/${projectId}/tasks/${taskId}/comments`) as Promise<unknown[]>;
+    return this.request("GET", `/api/projects/${seg(projectId)}/tasks/${seg(taskId)}/comments`) as Promise<unknown[]>;
   }
 
   async addComment(projectId: string, taskId: string, body: string): Promise<unknown> {
-    return this.request("POST", `/api/projects/${projectId}/tasks/${taskId}/comments`, { body });
+    return this.request("POST", `/api/projects/${seg(projectId)}/tasks/${seg(taskId)}/comments`, { body });
   }
 
   // Sprints
   async listSprints(projectId: string): Promise<unknown[]> {
-    return this.request("GET", `/api/projects/${projectId}/sprints`) as Promise<unknown[]>;
+    return this.request("GET", `/api/projects/${seg(projectId)}/sprints`) as Promise<unknown[]>;
   }
 
   async createSprint(projectId: string, data: Record<string, unknown>): Promise<unknown> {
-    return this.request("POST", `/api/projects/${projectId}/sprints`, data);
+    return this.request("POST", `/api/projects/${seg(projectId)}/sprints`, data);
   }
 
   async updateSprint(projectId: string, sprintId: string, data: Record<string, unknown>): Promise<unknown> {
-    return this.request("PUT", `/api/projects/${projectId}/sprints/${sprintId}`, data);
+    return this.request("PUT", `/api/projects/${seg(projectId)}/sprints/${seg(sprintId)}`, data);
   }
 
   // Users

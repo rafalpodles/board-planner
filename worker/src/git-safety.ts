@@ -9,12 +9,9 @@ const SAFE_CONFIG = [
   "credential.helper=",
 ];
 
-// Measured on this machine, 2026-08-15: `gh auth setup-git` installs its helper in the operator's
-// GLOBAL config, so clearing credential.helper would break `git push` on an HTTPS remote — and
-// delivery is the one call that has to reach the remote. It keeps the helper and pays for it with
-// plantedConfig() below, which refuses to run at all if the agent wrote an executable key.
-const DELIVERY_CONFIG = SAFE_CONFIG.filter((entry) => !entry.startsWith("credential."));
-
+// Delivery does not go through here: it carries GH_TOKEN and has to reach the remote, so it
+// hardens in the environment instead (GIT_CONFIG_* in delivery.ts), which also covers the git that
+// `gh` shells out to and can clear credential.helper without losing the one `gh` installs.
 export const GIT_SAFE_ENV: Record<string, string> = { GIT_CONFIG_NOSYSTEM: "1" };
 
 function withConfig(config: string[], args: string[]): string[] {
@@ -23,8 +20,4 @@ function withConfig(config: string[], args: string[]): string[] {
 
 export function gitArgs(args: string[]): string[] {
   return withConfig(SAFE_CONFIG, args);
-}
-
-export function deliveryGitArgs(args: string[]): string[] {
-  return withConfig(DELIVERY_CONFIG, args);
 }

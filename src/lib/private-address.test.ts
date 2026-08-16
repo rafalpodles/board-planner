@@ -93,3 +93,77 @@ describe("unbracket", () => {
     expect(unbracket("127.0.0.1")).toBe("127.0.0.1");
   });
 });
+
+// The table the BP-317 audit measured against the shipped module. Every row here was *allowed*
+// before the fix, so this is the regression rather than a restatement of the rule.
+describe("the forms the first table missed", () => {
+  it.each([
+    ["::127.0.0.1", "IPv4-compatible, deprecated but still routed to loopback by some stacks"],
+    ["::7f00:1", "the same address as WHATWG URL normalises it"],
+    ["fec0::1", "site-local"],
+    ["64:ff9b:1::7f00:1", "NAT64 local-use prefix"],
+    ["2001:db8::1", "documentation"],
+    ["2001::1", "Teredo, which tunnels to an arbitrary IPv4"],
+    ["100::1", "discard-only"],
+    ["192.0.2.5", "TEST-NET-1"],
+    ["198.51.100.4", "TEST-NET-2"],
+    ["203.0.113.9", "TEST-NET-3"],
+    ["192.88.99.1", "6to4 relay anycast, deprecated"],
+  ])("refuses %s — %s", (host) => {
+    expect(isPrivateAddress(host)).toBe(true);
+  });
+
+  // The whole ::/96 range goes, not only the embedded-private part: RFC 4291 deprecated the form,
+  // so a public-looking address inside it is not a destination anybody legitimately configures
+  it("refuses an IPv4-compatible address even when the embedded v4 is public", () => {
+    expect(isPrivateAddress("::93.184.216.34")).toBe(true);
+  });
+
+  // Every row above probes the base of its range, so a mask narrowed to an exact match keeps them
+  // all green. These sit inside the range but away from its base, which is what pins the width.
+  it.each([
+    ["2001:1ff::1", "the far end of 2001::/23"],
+    ["2001:2::1", "inside 2001::/23, not the base"],
+    ["2001:db8:ffff:ffff::1", "the far end of the documentation prefix"],
+    ["feff::1", "the far end of fec0::/10"],
+    ["febf::1", "the far end of fe80::/10"],
+    ["64:ff9b:1:ffff::1", "the far end of the local-use NAT64 /48"],
+    ["100::ffff:0:0:1", "inside the discard prefix"],
+    ["fdff:ffff::1", "the far end of fc00::/7"],
+    ["3fff:0fff::1", "the far end of 3fff::/20"],
+    ["5f00:ffff::1", "inside 5f00::/16"],
+    ["2620:4f:8000:ffff::1", "inside the AS112-v6 /48"],
+    ["192.31.196.7", "AS112-v4"],
+    ["192.52.193.7", "AMT"],
+    ["192.175.48.7", "direct-delegation AS112"],
+  ])("refuses %s — %s", (host) => {
+    expect(isPrivateAddress(host)).toBe(true);
+  });
+
+  // And these sit just outside, so a mask widened the other way fails too
+  it.each([
+    ["2001:200::1", "just past 2001::/23"],
+    ["2001:db9::1", "just past the documentation prefix"],
+    ["100:0:0:1::1", "just past 100::/64"],
+    ["fe00::1", "below fc00::/7"],
+    ["3ffe::1", "just below 3fff::/20"],
+    ["3fff:1000::1", "just past the /20 inside 3fff::"],
+    ["5f01::1", "just past 5f00::/16"],
+    ["2620:4f:8001::1", "just past the AS112-v6 /48"],
+    ["192.31.197.1", "just past AS112-v4"],
+  ])("still allows %s — %s", (host) => {
+    expect(isPrivateAddress(host)).toBe(false);
+  });
+
+  // Without this the additions above could be a blanket "refuse IPv6" and every test would pass
+  it.each([
+    "2606:4700:4700::1111",
+    "2a00:1450:4001:80f::200e",
+    "2001:4860:4860::8888",
+    "::ffff:8.8.8.8",
+    "64:ff9b::8.8.8.8",
+    "2002:5db8:d822::1",
+  ])("still allows the public address %s", (host) => {
+    expect(isPrivateAddress(host)).toBe(false);
+  });
+});

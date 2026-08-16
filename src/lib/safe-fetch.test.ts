@@ -4,7 +4,8 @@ const lookup = vi.fn();
 
 vi.mock("node:dns/promises", () => ({ lookup }));
 
-const { assertPublicDestination, safeFetch, BlockedDestinationError } = await import("./safe-fetch");
+const { assertPublicDestination, safeFetch, BlockedDestinationError, readBoundedText, logUpstreamFailure } =
+  await import("./safe-fetch");
 
 const fetchMock = vi.fn();
 
@@ -131,9 +132,203 @@ describe("safeFetch", () => {
     expect(forwarded.get("content-type")).toBe("application/json");
   });
 
+  // BP-317: the drop was a denylist of this app's own two headers, so GitLab's PRIVATE-TOKEN — the
+  // one caller in the repo that authenticates with anything else — was replayed to the new origin.
+  it.each([
+    ["authorization", "Bearer secret"],
+    ["private-token", "glpat-secret"],
+    ["cookie", "session=secret"],
+    ["x-api-key", "secret"],
+    ["proxy-authorization", "Basic secret"],
+    ["x-auth-token", "secret"],
+  ])("drops %s when a redirect crosses origins", async (name, value) => {
+    fetchMock.mockResolvedValueOnce(redirect("https://elsewhere.example/y"));
+
+    await safeFetch("https://hooks.slack.com/x", { headers: { [name]: value } });
+
+    const forwarded = new Headers(fetchMock.mock.calls[1][1].headers);
+    expect(forwarded.get(name)).toBeNull();
+    expect(JSON.stringify([...forwarded])).not.toContain("secret");
+  });
+
+  it("keeps the headers that describe the request rather than the caller", async () => {
+    fetchMock.mockResolvedValueOnce(redirect("https://elsewhere.example/y"));
+
+    await safeFetch("https://hooks.slack.com/x", {
+      headers: { "content-type": "application/json", accept: "application/json", "user-agent": "bp" },
+    });
+
+    const forwarded = new Headers(fetchMock.mock.calls[1][1].headers);
+    expect(forwarded.get("content-type")).toBe("application/json");
+    expect(forwarded.get("accept")).toBe("application/json");
+    expect(forwarded.get("user-agent")).toBe("bp");
+  });
+
+  // origin carries the scheme, so this is the same host and still a different origin — the
+  // credential would otherwise go out in clear text
+  it("drops credentials on an https to http downgrade to the same host", async () => {
+    fetchMock.mockResolvedValueOnce(redirect("http://hooks.slack.com/x"));
+
+    await safeFetch("https://hooks.slack.com/x", { headers: { authorization: "Bearer secret" } });
+
+    expect(new Headers(fetchMock.mock.calls[1][1].headers).get("authorization")).toBeNull();
+  });
+
+  it("keeps credentials on a same-origin redirect, which is the point of following it", async () => {
+    fetchMock.mockResolvedValueOnce(redirect("https://hooks.slack.com/y"));
+
+    await safeFetch("https://hooks.slack.com/x", { headers: { authorization: "Bearer secret" } });
+
+    expect(new Headers(fetchMock.mock.calls[1][1].headers).get("authorization")).toBe("Bearer secret");
+  });
+
+  // 307 and 308 preserve the method and the body, so stripping headers alone let the body cross
+  // intact — and these bodies are refresh_token=…, client_secret=… and webhook payloads
+  it.each([307, 308])("refuses to replay a %i body to another origin", async (status) => {
+    fetchMock.mockResolvedValueOnce(redirect("https://collector.example/", status));
+
+    await expect(
+      safeFetch("https://mcp.example.com/token", {
+        method: "POST",
+        body: "grant_type=refresh_token&refresh_token=secret",
+      })
+    ).rejects.toThrow(/Refusing to replay/);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("follows a 307 to the same origin, body and all", async () => {
+    fetchMock.mockResolvedValueOnce(redirect("https://mcp.example.com/other", 307));
+
+    await safeFetch("https://mcp.example.com/token", { method: "POST", body: "grant_type=x" });
+
+    expect(fetchMock.mock.calls[1][1].method).toBe("POST");
+    expect(fetchMock.mock.calls[1][1].body).toBe("grant_type=x");
+  });
+
+  // A cross-origin 302 on a POST becomes a GET with no body, which is the existing rule and is
+  // still fine — nothing is replayed
+  it("still follows a cross-origin 302 by dropping the method and body", async () => {
+    fetchMock.mockResolvedValueOnce(redirect("https://elsewhere.example/y", 302));
+
+    await safeFetch("https://hooks.slack.com/x", { method: "POST", body: "payload=1" });
+
+    expect(fetchMock.mock.calls[1][1].method).toBe("GET");
+    expect(fetchMock.mock.calls[1][1].body).toBeUndefined();
+  });
+
   it("gives up rather than following redirects forever", async () => {
     fetchMock.mockResolvedValue(redirect("https://elsewhere.example/loop"));
 
     await expect(safeFetch("https://hooks.slack.com/x")).rejects.toThrow(/redirects/);
+  });
+});
+
+// BP-317: the 500 characters that reach the log were sliced off a string the process had already
+// materialised in full, so an integration host answering an error with a huge body could exhaust
+// the container while being politely refused.
+describe("reading an upstream error body", () => {
+  // Large but finite on purpose: an endless stream would make an unbounded read hang rather than
+  // fail, and a test that hangs is a worse signal than one that fails
+  function countedStream(chunkCount: number, onCancel?: () => void) {
+    const encoder = new TextEncoder();
+    const pulled = { count: 0 };
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (pulled.count >= chunkCount) return controller.close();
+        pulled.count += 1;
+        controller.enqueue(encoder.encode("x".repeat(1024)));
+      },
+      cancel: onCancel,
+    });
+    return { pulled, response: new Response(body, { status: 500, statusText: "Server Error" }) };
+  }
+
+  it("reads only as far as its bound, however much the host is willing to send", async () => {
+    const { pulled, response } = countedStream(10_000);
+
+    const text = await readBoundedText(response, 4096);
+
+    expect(text).toBe("x".repeat(4096));
+    expect(pulled.count).toBeLessThanOrEqual(5);
+  });
+
+  it("cancels the rest of the stream so the connection is not left draining", async () => {
+    const cancelled = vi.fn();
+    const { response } = countedStream(100, cancelled);
+
+    await readBoundedText(response, 2048);
+
+    expect(cancelled).toHaveBeenCalled();
+  });
+
+  // The budget was tested before each read, so the last chunk was taken whole and the allocation
+  // bound was maxBytes plus one chunk. Both existing cases used 1 KB chunks against a 4 KB budget,
+  // so total landed exactly on the bound and the final trim was a no-op (BP-317 review).
+  it("cuts a chunk that is larger than the whole budget", async () => {
+    const oversized = new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("z".repeat(1_000_000)));
+          controller.close();
+        },
+      }),
+      { status: 500 }
+    );
+
+    expect((await readBoundedText(oversized, 4096)).length).toBe(4096);
+  });
+
+  // A character split by the cut is dropped rather than becoming U+FFFD in the log
+  it("does not leave a replacement character where it stopped", async () => {
+    const multibyte = new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("ą".repeat(100)));
+          controller.close();
+        },
+      }),
+      { status: 500 }
+    );
+
+    // 5 bytes is two whole two-byte characters and half of a third
+    expect(await readBoundedText(multibyte, 5)).toBe("ąą");
+  });
+
+  it("does not throw when the body cannot be read at all", async () => {
+    const response = new Response("something", { status: 500 });
+    response.body!.getReader(); // locks it
+
+    await expect(readBoundedText(response, 4096)).resolves.toBe("");
+  });
+
+  it("returns a short body whole", async () => {
+    const short = new Response("not found", { status: 500 });
+
+    expect(await readBoundedText(short, 4096)).toBe("not found");
+  });
+
+  it("survives a body that is missing or breaks mid-read", async () => {
+    expect(await readBoundedText(new Response(null, { status: 500 }), 4096)).toBe("");
+
+    const broken = new Response(
+      new ReadableStream({ pull: (c) => c.error(new Error("upstream went away")) }),
+      { status: 500 }
+    );
+    expect(await readBoundedText(broken, 4096)).toBe("");
+  });
+
+  // The bound has to be on what is allocated, not on what is printed — slicing after the fact is
+  // what this replaced, and it logs an identical line
+  it("does not materialise the whole body just to log 500 characters of it", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { pulled, response } = countedStream(10_000);
+
+    await logUpstreamFailure("GitLab", response);
+
+    expect(error).toHaveBeenCalled();
+    expect(String(error.mock.calls[0][0]).length).toBeLessThan(600);
+    expect(pulled.count).toBeLessThanOrEqual(5);
+    error.mockRestore();
   });
 });

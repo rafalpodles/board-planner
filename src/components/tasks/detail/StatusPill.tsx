@@ -1,8 +1,7 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import { Popover } from "@/components/ui/Popover";
-import { OptionItem, OptionList } from "./FieldRow";
+import { Combobox } from "@/components/ui/Combobox";
 
 interface Column {
   id: string;
@@ -21,16 +20,24 @@ export function StatusPill({ columns, status, onChange }: StatusPillProps) {
   const accent = current?.color || "var(--color-primary)";
 
   return (
-    <Popover
+    <Combobox
       label="Status"
-      width="w-52"
-      trigger={({ toggle, open }) => (
-        <button
-          type="button"
-          onClick={toggle}
-          aria-haspopup="listbox"
-          aria-expanded={open}
-          className="focus-ring chip flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-semibold"
+      value={status}
+      options={columns.map((column) => ({
+        value: column.id,
+        label: column.label,
+        color: column.color,
+      }))}
+      onChange={(next) => {
+        if (next !== status) onChange(next);
+      }}
+      triggerClassName="rounded-lg"
+    >
+      {() => (
+        // The tint lives here rather than on the trigger: `.chip` resolves `--chip` on
+        // its own element, and Combobox owns the trigger's class list
+        <span
+          className="chip flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-semibold"
           style={{ "--chip": accent } as CSSProperties}
         >
           <span
@@ -42,30 +49,8 @@ export function StatusPill({ columns, status, onChange }: StatusPillProps) {
           <span aria-hidden className="text-[10px] opacity-60">
             ▾
           </span>
-        </button>
+        </span>
       )}
-    >
-      {({ close }) => (
-        <OptionList label="Status">
-          {columns.map((column) => (
-            <OptionItem
-              key={column.id}
-              selected={column.id === status}
-              onClick={() => {
-                if (column.id !== status) onChange(column.id);
-                close();
-              }}
-            >
-              <span
-                aria-hidden
-                className="h-[7px] w-[7px] shrink-0 rounded-full"
-                style={{ background: column.color }}
-              />
-              {column.label}
-            </OptionItem>
-          ))}
-        </OptionList>
-      )}
-    </Popover>
+    </Combobox>
   );
 }

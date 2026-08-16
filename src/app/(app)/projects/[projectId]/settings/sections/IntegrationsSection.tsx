@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { useDraft } from "@/hooks/use-draft";
 import { CODA_COLUMNS, CODA_KEY_COLUMN } from "@/lib/coda";
+import { clearsStoredToken } from "@/lib/host-bound-secrets";
 import { useToast } from "@/components/ui/Toast";
 import {
   ApiWebhook,
@@ -551,6 +552,19 @@ export function IntegrationsSection({
                       placeholder="https://gitlab.com (or your self-hosted instance)"
                     />
                   </div>
+                  {project.gitlabTokenSet &&
+                    clearsStoredToken(
+                      gitlab.value.gitlabHost,
+                      gitlab.baseline.gitlabHost,
+                      gitlab.value.gitlabToken,
+                      "https://gitlab.com"
+                    ) && (
+                      <p className="text-sm text-warning">
+                        The stored token was issued for the old host. Saving a new host clears it —
+                        enter the token for the new host below, or it will have to be re-entered
+                        before the next sync.
+                      </p>
+                    )}
                   <Input
                     label="Access token"
                     type="password"
@@ -655,6 +669,19 @@ export function IntegrationsSection({
                     onChange={(e) => coda.set("codaHost", e.target.value)}
                     placeholder="https://coda.io"
                   />
+                  {project.codaTokenSet &&
+                    clearsStoredToken(
+                      coda.value.codaHost,
+                      coda.baseline.codaHost,
+                      coda.value.codaToken,
+                      "https://coda.io"
+                    ) && (
+                      <p className="text-sm text-warning">
+                        The stored token was issued for the old host. Saving a new host clears it —
+                        enter the token for the new host below, or it will have to be re-entered
+                        before the next sync.
+                      </p>
+                    )}
                   <Input
                     label="API token"
                     type="password"

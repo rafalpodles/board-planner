@@ -395,7 +395,7 @@ export function BoardFilters({
           <div
             role="dialog"
             aria-label="Filters"
-            className="absolute left-0 top-full z-40 mt-1 w-[340px] rounded-xl border border-border bg-bg-card p-3 shadow-lg"
+            className="absolute right-0 top-full z-40 mt-1 w-[340px] max-w-[calc(100vw-1.5rem)] rounded-xl border border-border bg-bg-card p-3 shadow-lg sm:left-0 sm:right-auto"
           >
             {chips.length > 0 && (
               <>
