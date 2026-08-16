@@ -1,4 +1,4 @@
-import { Types } from "mongoose";
+import { HydratedDocument, Types } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { Task } from "@/models/task";
 import { Project } from "@/models/project";
@@ -138,6 +138,27 @@ type Body = Record<string, any>;
  * routes then read and sweep by sprint id, so a cross-project reference lets one board's task
  * appear in another board's counts and be moved by its sprint completion (BP-314).
  */
+/**
+ * A project agent belongs to one project and must not be borrowed by another's task — the same
+ * shape of cross-project reference BP-314 closed for sprints. Global and personal agents run
+ * anywhere their owner can reach.
+ */
+async function agentUsableOnProject(
+  projectId: string,
+  agent: unknown,
+  actingUserId: unknown
+): Promise<boolean> {
+  if (typeof agent !== "string" || !Types.ObjectId.isValid(agent)) return false;
+  const { Agent } = await import("@/models/agent");
+  const found = await Agent.findById(agent, "scope project owner").lean();
+  if (!found) return false;
+  if (found.scope === "project") return String(found.project) === String(projectId);
+  // A personal agent is somebody's own; pointing a task at another person's would run their
+  // prompts, with write access, on this project's checkout.
+  if (found.scope === "user") return String(found.owner) === String(actingUserId);
+  return true;
+}
+
 async function sprintBelongsToProject(projectId: string, sprint: unknown): Promise<boolean> {
   if (typeof sprint !== "string" || !Types.ObjectId.isValid(sprint)) return false;
   return (await Sprint.exists({ _id: sprint, project: projectId })) !== null;
@@ -407,7 +428,7 @@ export async function updateTask(
   // Whitelist allowed fields to prevent overwriting protected fields
   const allowed = [
     "title", "description", "priority", "category",
-    "status", "assignee", "dueDate", "checklist", "order", "sprint", "customFieldValues", "recurrence",
+    "status", "assignee", "dueDate", "checklist", "order", "sprint", "agent", "customFieldValues", "recurrence",
   ];
   const updates: Record<string, unknown> = {};
   for (const field of allowed) {
@@ -423,6 +444,13 @@ export async function updateTask(
   if (updates.sprint !== undefined && updates.sprint !== null) {
     if (!(await sprintBelongsToProject(projectId, updates.sprint))) {
       return { ok: false, error: "Sprint not found in this project", status: 400 };
+    }
+  }
+
+  if (updates.agent === "") updates.agent = null;
+  if (updates.agent !== undefined && updates.agent !== null) {
+    if (!(await agentUsableOnProject(projectId, updates.agent, actorId))) {
+      return { ok: false, error: "That agent cannot run on this project", status: 400 };
     }
   }
 
@@ -843,7 +871,9 @@ export async function claimNextTask(
   // The worker's own identity user. A claim is an assignment, which is what stops two machines
   // converging on one task and what makes a task parked for a colleague untouchable.
   identity?: string | null
-): Promise<ITask | null> {
+  // A document, not a plain ITask: the caller has to know, because spreading one silently yields
+  // Mongoose internals with every real field a level down.
+): Promise<HydratedDocument<ITask> | null> {
   await connectDB();
 
   const project = await Project.findById(

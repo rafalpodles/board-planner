@@ -26,6 +26,7 @@ import {
   PickerRow,
 } from "./FieldRow";
 import type { TaskDraft } from "./useTaskEditor";
+import type { ApiAgent } from "@/types";
 
 const RECURRENCE_UNITS: Record<RecurrenceFrequency, string> = {
   daily: "day",
@@ -54,6 +55,7 @@ interface PropertyRailProps {
   set: <K extends keyof TaskDraft>(key: K, value: TaskDraft[K]) => void;
   users: ApiUser[];
   sprints: ApiSprint[];
+  agents: ApiAgent[];
   /** Full rows, not names: the chip and the picker dot are tinted by the project's colour */
   categories: ApiProjectCategory[];
   customFields: ApiCustomField[];
@@ -68,6 +70,7 @@ export function PropertyRail({
   set,
   users,
   sprints,
+  agents,
   categories,
   customFields,
   reporter,
@@ -104,6 +107,23 @@ export function PropertyRail({
               {selected ? selected.label : <EmptyValue>Unassigned</EmptyValue>}
             </span>
           )}
+        </ComboboxRow>
+
+        <ComboboxRow
+          label="Agent"
+          touch={touch}
+          value={draft.agent || ""}
+          options={agents.map((a) => ({ value: a._id, label: a.name }))}
+          emptyOption="Project default"
+          onChange={(id) => set("agent", id || null)}
+        >
+          {(selected) =>
+            selected ? (
+              <span className="truncate">{selected.label}</span>
+            ) : (
+              <EmptyValue>Project default</EmptyValue>
+            )
+          }
         </ComboboxRow>
 
         <ComboboxRow

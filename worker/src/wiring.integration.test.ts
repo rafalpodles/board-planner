@@ -26,6 +26,20 @@ const REPO = "/repos/demo";
 const REMOTE = "git@github.com:owner/repo.git";
 const TOOL_DIR = "/opt/cp-integration-bin";
 
+// What the board resolves the project's default agent into, and sends whole on the claim
+const CLAIMED_AGENT = {
+  agentId: "6512f0a1b2c3d4e5f6a70003",
+  name: "Default",
+  sequence: [
+    { key: "implement", kind: "step", name: "Implement", prompt: "do it", capability: "edit" },
+    { key: "protected-paths", kind: "gate", name: "Protected files", gateKind: "protected-paths" },
+    { key: "diff-size", kind: "gate", name: "Size", gateKind: "diff-size" },
+    { key: "test-presence", kind: "gate", name: "Test written", gateKind: "test-presence" },
+    { key: "push", kind: "step", name: "Push", deterministic: true },
+    { key: "pull-request", kind: "step", name: "Pull request", deterministic: true },
+  ],
+};
+
 const SEEDED_COLUMNS = [
   { id: "todo", role: "approved", order: 1, triggersPmReview: false },
   { id: "in_progress", role: "active", order: 2, triggersPmReview: false },
@@ -206,6 +220,7 @@ function startBoard() {
           description: "body",
           checklist: [{ text: "it works" }],
           execution: { attempts: execution.attempts, runId: execution.runId },
+          agent: CLAIMED_AGENT,
         });
         return;
       }

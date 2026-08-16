@@ -2,7 +2,8 @@ import { existsSync, readFileSync, statSync } from "fs";
 import { join } from "path";
 import { Bootstrap } from "./config.js";
 import { Identity, loadIdentity, PROTOCOL_VERSION, Store } from "./registration.js";
-import { ClaimedTask } from "./types.js";
+import { RunRecord } from "./run-record.js";
+import { AgentSnapshot, ClaimedTask, SnapshotEntry } from "./types.js";
 
 type Fetch = typeof globalThis.fetch;
 
@@ -33,6 +34,8 @@ export interface ApiClient {
   // `applied` is the server's answer to "did this land": false when it wrote nothing, because the
   // run no longer holds the task or a newer event got there first
   postEvent(event: PhaseEvent): Promise<{ applied: boolean }>;
+  /** What a run leaves behind once execution.runId is cleared and nothing else remembers it. */
+  postRun(projectId: string, record: RunRecord): Promise<void>;
 }
 
 // A task key is server-controlled text that the worker turns into a directory name under its own
@@ -52,6 +55,52 @@ interface RawTask {
   description: string;
   checklist?: Array<{ text?: unknown }>;
   execution?: { attempts?: number; runId?: unknown };
+  agent?: unknown;
+}
+
+function parseEntry(value: unknown): SnapshotEntry | null {
+  if (typeof value !== "object" || value === null) return null;
+  const raw = value as Record<string, unknown>;
+  const key = typeof raw.key === "string" ? raw.key : "";
+  const kind = raw.kind === "step" || raw.kind === "gate" ? raw.kind : null;
+  if (!key || !kind) return null;
+
+  const params: Record<string, string> = {};
+  if (typeof raw.params === "object" && raw.params !== null) {
+    for (const [name, value] of Object.entries(raw.params as Record<string, unknown>)) {
+      if (typeof value === "string") params[name] = value;
+    }
+  }
+
+  return {
+    key,
+    kind,
+    name: typeof raw.name === "string" ? raw.name : key,
+    prompt: typeof raw.prompt === "string" ? raw.prompt : "",
+    capability: raw.capability === "edit" ? "edit" : "read-only",
+    model: typeof raw.model === "string" ? raw.model : "",
+    fallbackModel: typeof raw.fallbackModel === "string" ? raw.fallbackModel : "",
+    deterministic: raw.deterministic === true,
+    gateKind: typeof raw.gateKind === "string" ? raw.gateKind : "",
+    params,
+  };
+}
+
+// A malformed entry fails the whole snapshot rather than being dropped: dropping one runs a shorter
+// agent than the one somebody composed, and a missing check looks exactly like a check that passed.
+function parseAgent(value: unknown): AgentSnapshot | null {
+  if (typeof value !== "object" || value === null) return null;
+  const raw = value as Record<string, unknown>;
+  if (!Array.isArray(raw.sequence) || raw.sequence.length === 0) return null;
+
+  const sequence = raw.sequence.map(parseEntry);
+  if (sequence.some((entry) => entry === null)) return null;
+
+  return {
+    agentId: typeof raw.agentId === "string" ? raw.agentId : "",
+    name: typeof raw.name === "string" ? raw.name : "",
+    sequence: sequence as SnapshotEntry[],
+  };
 }
 
 interface BoardColumn {
@@ -237,8 +286,18 @@ export function createApiClient(
         );
       }
 
+      const agent = parseAgent(raw.agent);
+      if (!agent) {
+        // Returning null alone would hold the task for the full EXECUTION_LEASE_MS — two hours in
+        // the active column with nothing on the board to say why. The attempt is refunded: no
+        // attempt was made, and the project's agent is what has to change.
+        await send(projectId, `/tasks/${raw._id}/release`, "POST").catch(() => {});
+        return null;
+      }
+
       return {
         taskId: raw._id,
+        agent,
         projectId: typeof raw.project === "string" && raw.project ? raw.project : projectId,
         taskKey,
         taskNumber: raw.taskNumber,
@@ -255,6 +314,15 @@ export function createApiClient(
             ? raw.execution.runId
             : runId,
       };
+    },
+
+    async postRun(projectId, record) {
+      // The machine is added here rather than travelling in the record: this is where the identity
+      // already is, and "which machine ran this" is the first question a bad run raises.
+      await send(projectId, "/runs", "POST", {
+        ...record,
+        workerId: identityOrThrow().workerId,
+      });
     },
 
     async setStatus(projectId, taskId, status) {

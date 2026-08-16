@@ -22,20 +22,20 @@ describe("parseProjectWorkerConfig", () => {
   });
 
   it("records which fields an operator set, merging with what was set before", () => {
-    const result = parseProjectWorkerConfig({ policy: { autoMerge: true } }, ["baseBranch"]);
+    const result = parseProjectWorkerConfig({ policy: { model: "sonnet" } }, ["baseBranch"]);
 
     expect((result as { update: Record<string, unknown> }).update["worker.policyOverrides"]).toEqual([
       "baseBranch",
-      "autoMerge",
+      "model",
     ]);
   });
 
   // Turning merging off explicitly is a decision, and must not read as inherited afterwards
   it("records a value equal to the default as deliberately set", () => {
-    const result = parseProjectWorkerConfig({ policy: { autoMerge: false } });
+    const result = parseProjectWorkerConfig({ policy: { model: "opus" } });
 
     expect((result as { update: Record<string, unknown> }).update["worker.policyOverrides"]).toEqual([
-      "autoMerge",
+      "model",
     ]);
   });
 
@@ -48,15 +48,6 @@ describe("parseProjectWorkerConfig", () => {
   });
 
   describe("refusals", () => {
-    // "false" is truthy in JavaScript; a project that starts merging because someone sent the
-    // string is exactly the failure this prevents.
-    it("refuses a non-boolean autoMerge", () => {
-      for (const bad of ["true", "false", 1, 0, null]) {
-        expect(parseProjectWorkerConfig({ policy: { autoMerge: bad } })).toMatchObject({
-          ok: false,
-        });
-      }
-    });
 
     // A closed set, so anything else stores a scope claimNextTask matches against nothing — and a
     // worker that claims nothing is indistinguishable from a project with no approved work
@@ -145,10 +136,10 @@ describe("parseProjectWorkerConfig", () => {
 // ever grew, and the UI showed "set" with no route back.
 describe("resetting a field to the default", () => {
   it("removes the field from the override list", () => {
-    const result = parseProjectWorkerConfig({ reset: ["autoMerge"] }, ["autoMerge", "model"]);
+    const result = parseProjectWorkerConfig({ reset: ["model"] }, ["model", "baseBranch"]);
 
     expect((result as { update: Record<string, unknown> }).update["worker.policyOverrides"]).toEqual([
-      "model",
+      "baseBranch",
     ]);
   });
 
@@ -162,8 +153,8 @@ describe("resetting a field to the default", () => {
   });
 
   it("resets several fields at once", () => {
-    const result = parseProjectWorkerConfig({ reset: ["autoMerge", "model"] }, [
-      "autoMerge",
+    const result = parseProjectWorkerConfig({ reset: ["model", "model"] }, [
+      "model",
       "model",
       "baseBranch",
     ]);
@@ -181,19 +172,19 @@ describe("resetting a field to the default", () => {
 
   it("can reset one field while setting another", () => {
     const result = parseProjectWorkerConfig(
-      { reset: ["model"], policy: { autoMerge: true } },
+      { reset: ["baseBranch"], policy: { model: "sonnet" } },
       ["model"]
     );
     const update = (result as { update: Record<string, unknown> }).update;
 
-    expect(update["worker.policyOverrides"]).toEqual(["autoMerge"]);
-    expect(update["worker.policy.autoMerge"]).toBe(true);
+    expect(update["worker.policyOverrides"]).toEqual(["model"]);
+    expect(update["worker.policy.model"]).toBe("sonnet");
   });
 
   // Otherwise the outcome would depend on which branch ran last
   it("refuses to set and reset the same field in one request", () => {
     expect(
-      parseProjectWorkerConfig({ reset: ["autoMerge"], policy: { autoMerge: true } })
+      parseProjectWorkerConfig({ reset: ["model"], policy: { model: "sonnet" } })
     ).toMatchObject({ ok: false });
   });
 
@@ -208,52 +199,7 @@ describe("resetting a field to the default", () => {
 // stopped a project from merging without review — the one safety property worker/README.md
 // asserts outright. It has to be judged on the resulting state, because a partial patch cannot be
 // read on its own: setting autoMerge alone is fine or fatal depending on a field it never mentions.
-describe("autoMerge cannot outlive the review gate", () => {
-  it("refuses the pair in one request", () => {
-    const result = parseProjectWorkerConfig({ policy: { autoMerge: true, reviewGate: false } });
-
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toMatch(/merge unreviewed/);
-  });
-
-  it("refuses turning autoMerge on when review is already off in the stored policy", () => {
-    const result = parseProjectWorkerConfig({ policy: { autoMerge: true } }, [], {
-      reviewGate: false,
-    });
-
-    expect(result.ok).toBe(false);
-  });
-
-  it("refuses turning review off when autoMerge is already on in the stored policy", () => {
-    const result = parseProjectWorkerConfig({ policy: { reviewGate: false } }, [], {
-      autoMerge: true,
-    });
-
-    expect(result.ok).toBe(false);
-  });
-
-  it("allows turning review off on a project that does not merge", () => {
-    const result = parseProjectWorkerConfig({ policy: { reviewGate: false } }, [], {
-      autoMerge: false,
-    });
-
-    expect(result.ok).toBe(true);
-  });
-
-  it("allows both on together", () => {
-    const result = parseProjectWorkerConfig({ policy: { autoMerge: true, reviewGate: true } });
-
-    expect(result.ok).toBe(true);
-  });
-
-  // Resetting is the other way to reach the pair, and it lands on the default rather than on
-  // whatever was stored
-  it("refuses a reset that would leave autoMerge on with review off", () => {
-    const result = parseProjectWorkerConfig({ policy: { reviewGate: false }, reset: ["autoMerge"] }, [], {
-      autoMerge: true,
-    });
-
-    // autoMerge resets to its default of false, so this pair is safe
-    expect(result.ok).toBe(true);
-  });
-});
+// The rule that lived here — autoMerge may not outlive the review gate — is retired with both
+// fields. Merging is now a Merge step in a composition, and whether the change was reviewed is read
+// off the same sequence: see "refuses a review that ran before the last thing that wrote" in
+// agent-rules.test.ts.

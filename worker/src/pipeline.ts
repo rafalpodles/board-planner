@@ -1,15 +1,22 @@
 import { ApiClient, StatusIds } from "./api.js";
+import { createBudget } from "./budget.js";
+import { commitAll } from "./commit.js";
 import { WorkerConfig } from "./config.js";
+import { GateFallbacks } from "./gates/from-entry.js";
+import { RunState, runStep } from "./steps.js";
+import { recordFor, RunRecord } from "./run-record.js";
+import { isResultEvent, StreamEvent } from "./stream.js";
 import { Delivery } from "./delivery.js";
 import { childEnv } from "./env.js";
 import { Runner } from "./exec.js";
 import { Executor } from "./executor.js";
+import { gitArgs, GIT_SAFE_ENV } from "./git-safety.js";
 import { Reporter } from "./reporter.js";
 import { SHUTDOWN_SIGNAL } from "./commands.js";
 import { scrub } from "./scrub.js";
 import { OutcomeKind, Phase, Telemetry } from "./telemetry.js";
 import { Workspace } from "./workspace.js";
-import { ClaimedTask, DiffStats, Gate, GateContext, GateResult } from "./types.js";
+import { ClaimedTask, DiffStats, ExecutionResult, Gate, GateResult, SnapshotEntry } from "./types.js";
 
 export interface PipelineDeps {
   config: WorkerConfig;
@@ -20,9 +27,21 @@ export interface PipelineDeps {
   workspace: Workspace;
   executor: Executor;
   collectDiff: (runner: Runner, worktreePath: string, baseBranch: string) => Promise<DiffStats>;
+  // Injected like every other collaborator here, so a test can watch what a gate was given without
+  // standing up the gate itself. wiring.ts supplies the real one.
+  gateFor: (
+    entry: SnapshotEntry,
+    runner: Runner,
+    timeoutMs: number,
+    fallbacks: GateFallbacks
+  ) => Gate | null;
   runner: Runner;
-  gates: Gate[];
+  // Fire and forget, onto the outbox: a record that fails to post must not turn a delivered run
+  // into a failed one, and must not be lost to the redeploy a merge triggers either.
+  recordRun: (projectId: string, record: RunRecord) => void;
   signal?: AbortSignal;
+  /** Injected only so a test can move the run's clock; the run itself reads the wall clock. */
+  now?: () => number;
   // Where the run says what it is doing. Left out entirely, the run behaves exactly as it did
   // before there was anything to say it to.
   telemetry?: Pick<Telemetry, "emit" | "emitEvent">;
@@ -54,14 +73,58 @@ function hitUsageLimit(verdict: GateResult): boolean {
   return /could not be completed/i.test(verdict.reason) && /usage limit reached/i.test(verdict.reason);
 }
 
-// Same neutralisation as diff.ts and delivery.ts: this worktree comes from a server-proposed,
-// locally-approved repository, but the approval happens once at bind time — its gitconfig still
-// fires on every git call unless each one, not just the one at bind time, is protected too.
+// A gate is bounded by the cap buildGates always applied — it bounds one npm install however large
+// the run ceiling is. A model step is bounded by taskTimeoutMs, which is what bounded it before the
+// sequence existed and what the project's "Timeout for one step" setting still means. Folding both
+// into the gate cap silently cut every step from thirty minutes to ten.
+const GATE_CAP_MS = 600_000;
+
+// Below this there is no point starting anything: whatever it is would fail on the clock and be
+// reported as its own verdict rather than as the ceiling.
+const MIN_ENTRY_MS = 30_000;
+
+const EMPTY_RESULT: ExecutionResult = {
+  status: "completed",
+  summary: "",
+  filesChanged: [],
+  testsAdded: [],
+  blockedReason: "",
+};
+
+// The delivery steps keep the phase names the board and the menubar already know; only a model step
+// names its own block, because that is the one an operator cannot otherwise see the shape of.
+const DELIVERY_PHASES: Record<string, Phase> = {
+  push: "push",
+  "pull-request": "pr",
+  merge: "merge",
+};
+
+function phaseFor(entry: SnapshotEntry): Phase {
+  if (entry.kind === "gate") return `gates:${entry.key}`;
+  return DELIVERY_PHASES[entry.key] ?? `step:${entry.key}`;
+}
+
+// Committed but unpushed work is invisible from the board, so an exit that leaves some has to say
+// where it is — the branch ref alone does not survive the next attempt's `git worktree add -B`.
+function unpushedWork(state: RunState, worktreePath: string): string {
+  if (!state.committed || state.pushed) return "";
+  return `\n\nAn earlier step had already committed. That work is not pushed; the worktree is kept at \`${worktreePath}\` on the worker host.`;
+}
+
+// A stop between the push and the merge leaves work on the remote, and the release comment is the
+// only place that says so.
+function whatLanded(state: RunState, branch: string): string {
+  if (state.merged) return "";
+  if (state.prUrl) return `: \`${branch}\` is pushed and ${state.prUrl} is open, but it was not merged`;
+  if (state.pushed) return `: \`${branch}\` is pushed, but no pull request was opened for it`;
+  return "";
+}
+
 async function unfinishedWork(runner: Runner, worktreePath: string): Promise<string | null> {
-  const result = await runner.run("git", ["-c", "core.fsmonitor=false", "-c", "core.pager=cat", "status", "--porcelain"], {
+  const result = await runner.run("git", gitArgs(["status", "--porcelain"]), {
     cwd: worktreePath,
     timeoutMs: GIT_TIMEOUT_MS,
-    env: { ...childEnv(), GIT_CONFIG_NOSYSTEM: "1" },
+    env: { ...childEnv(), ...GIT_SAFE_ENV },
   });
   if (result.timedOut) return `\`git status\` timed out after ${GIT_TIMEOUT_MS}ms`;
   if (result.code !== 0) return `\`git status\` failed: ${result.stderr || result.stdout}`;
@@ -114,7 +177,8 @@ async function releaseIfAborted(
 }
 
 export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<void> {
-  const { config, workspace, executor, gates, runner, telemetry } = deps;
+  const { config, workspace, executor, runner, telemetry } = deps;
+  const now = deps.now ?? Date.now;
   const branch = `${task.taskKey.toLowerCase()}/${SLUG}`;
 
   // Coarse on purpose: a phase names the stage a run is in, and every stage below either finishes
@@ -124,12 +188,31 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
   // Emitted before the matching reporter call, so a reporter that throws cannot swallow the
   // operator's only local sign that the run ended. Detail takes the same redaction as board-bound
   // text: it reaches a Notification Center database that outlives the run.
-  const settle = (outcome: OutcomeKind, detail?: string): void =>
+  const startedAt = now();
+  let costUsd = 0;
+
+  // Every exit goes through here, which is what makes it the one place a run can be recorded from.
+  const settle = (outcome: OutcomeKind, detail?: string): void => {
     telemetry?.emit(
       detail === undefined
         ? { outcome, taskKey: task.taskKey }
         : { outcome, taskKey: task.taskKey, detail: scrub(detail).slice(0, MAX_DETAIL_CHARS) }
     );
+    deps.recordRun(
+      task.projectId,
+      recordFor(task, outcome, scrub(detail ?? ""), startedAt, now(), costUsd)
+    );
+  };
+
+  // The CLI reports cost once per call, so a composed agent's cost is the sum across its steps.
+  // Attached whether or not a bus is: this is the only place cost is measured. Gate cost is still
+  // missed — review.ts runs with --output-format json and parseVerdict discards the envelope.
+  const onEvent = (event: StreamEvent): void => {
+    if (isResultEvent(event) && typeof event.total_cost_usd === "number") {
+      costUsd += event.total_cost_usd;
+    }
+    telemetry?.emitEvent(event);
+  };
 
   enter("claiming");
 
@@ -143,6 +226,9 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
       deps.api.comment(task.projectId, task.taskId, scrub(`Returned to the queue: ${String(error)}`))
     );
     await quietly(() => deps.api.release(task.projectId, task.taskId));
+    // settle, like every other exit: without it the menubar shows the run parked in "claiming"
+    // for ever and no AgentRun is written for a task that was genuinely claimed and handed back.
+    settle("released", "the board could not route the outcome");
     return;
   }
 
@@ -161,134 +247,188 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
   }
 
   let keepWorktree = false;
+  const state: RunState = {
+    committed: false,
+    pushed: false,
+    prUrl: "",
+    merged: false,
+    summary: "",
+    lastResult: EMPTY_RESULT,
+  };
+
   try {
-    enter("agent");
-    // The only agent-authored material that reaches a sink, and it reaches one only through
-    // summarise(), whose result type cannot hold a file body, a prompt or a diff
-    const outcome = await executor.execute(
-      task,
-      worktreePath,
-      deps.signal,
-      telemetry && ((event) => telemetry.emitEvent(event))
-    );
-    if (await releaseIfAborted(deps, reporter, task)) return;
+    const budget = createBudget(config.runCeilingMs, now);
 
-    if (outcome.kind === "usage_limit") {
-      settle("released", "usage limit reached");
-      await reporter.released(task, "usage limit reached");
-      return;
-    }
-    if (outcome.kind === "timeout") {
-      settle("requeued", "the run timed out");
-      await reporter.requeued(task, `the run timed out after ${config.taskTimeoutMs}ms`);
-      return;
-    }
-    if (outcome.kind === "error") {
-      settle("requeued", outcome.message);
-      await reporter.requeued(task, outcome.message);
-      return;
-    }
-    if (outcome.result.status === "blocked") {
-      settle("blocked", outcome.result.blockedReason);
-      await reporter.blocked(task, outcome.result.blockedReason);
-      return;
-    }
+    for (const entry of task.agent.sequence) {
+      if (await releaseIfAborted(deps, reporter, task, whatLanded(state, branch))) return;
 
-    const leftover = await unfinishedWork(runner, worktreePath);
-    if (leftover) {
-      keepWorktree = true;
-      settle("failed", "the executor left the worktree unclean");
-      await reporter.failed(
-        task,
-        `the executor left the worktree unclean, so the gates would judge a diff that is not what is on disk — and the reviewer would load whatever was never committed:\n\n${leftover}\n\nNothing was pushed; the worktree is kept at \`${worktreePath}\` on the worker host.`
-      );
-      return;
-    }
-
-    const diff = await deps.collectDiff(runner, worktreePath, config.baseBranch);
-    const context: GateContext = { worktreePath, task, result: outcome.result, diff, signal: deps.signal };
-
-    for (const gate of gates) {
-      if (await releaseIfAborted(deps, reporter, task)) return;
-
-      enter(`gates:${gate.name}`);
-      const verdict = await gate.run(context);
-      if (await releaseIfAborted(deps, reporter, task)) return;
-      if (verdict.ok) continue;
-
-      if (hitUsageLimit(verdict)) {
-        settle("released", `the ${gate.name} gate could not run`);
-        await reporter.released(task, `the ${gate.name} gate could not run: ${verdict.reason}`);
-        return;
-      }
-
-      // The worktree goes next, so the pushed branch is the only copy a human can reach
-      const failure = await pushFailure(delivery, worktreePath, branch);
-      if (failure) keepWorktree = true;
-      settle("gateRejected", gate.name);
-      await reporter.gateRejected(
-        task,
-        gate.name,
-        failure
-          ? `${verdict.reason}\n\n**The branch was not pushed**: ${failure}. \`${branch}\` is not on the remote — this work exists only in the worktree at \`${worktreePath}\` on the worker host.`
-          : verdict.reason,
-        branch
-      );
-      return;
-    }
-
-    if (await releaseIfAborted(deps, reporter, task)) return;
-
-    let prUrl = "";
-    try {
-      enter("push");
-      await delivery.push(worktreePath, branch);
-      if (
-        await releaseIfAborted(
-          deps,
-          reporter,
+      // Not just exhausted: an entry handed the few seconds left would fail on the clock and be
+      // reported as its own refusal — "blocked the merge at the build gate" for a build that never
+      // ran. Below the floor the run is over, and the reason says so.
+      if (budget.exhausted() || budget.remaining() < MIN_ENTRY_MS) {
+        settle("requeued", "the run hit its ceiling");
+        await reporter.requeued(
           task,
-          `: \`${branch}\` is pushed, but no pull request was opened for it`
-        )
-      ) {
+          `the run hit its ceiling of ${config.runCeilingMs}ms before reaching ${entry.name}`
+        );
         return;
       }
 
-      enter("pr");
-      prUrl = await delivery.openPr(worktreePath, task, outcome.result.summary);
-      if (
-        await releaseIfAborted(
-          deps,
-          reporter,
+      enter(phaseFor(entry));
+
+      if (entry.kind === "step") {
+        // The only agent-authored material that reaches a sink, and it reaches one only through
+        // summarise(), whose result type cannot hold a file body, a prompt or a diff
+        const outcome = await runStep(entry, {
+          worktreePath,
+          branch,
           task,
-          `: \`${branch}\` is pushed and ${prUrl} is open, but it was not merged`
-        )
-      ) {
-        return;
+          executor,
+          delivery,
+          commit: (message) => commitAll(runner, worktreePath, message),
+          state,
+          timeoutMs: budget.forEntry(config.taskTimeoutMs),
+          signal: deps.signal,
+          onEvent,
+        });
+        // Never once the merge has landed — see the same guard after the loop. gh pr merge runs
+        // without a signal, so the stop is only ever observed after the change is on the base
+        // branch, and releasing there queues a second full run over work that has already landed.
+        if (!state.merged && (await releaseIfAborted(deps, reporter, task, whatLanded(state, branch)))) {
+          return;
+        }
+
+        // Only when this step ends the run. An earlier step may already have committed, and exiting
+        // without keeping the worktree destroys the only copy of that work: nothing is pushed, and
+        // the branch ref the parent clone holds is reset by the next attempt's `git worktree add -B`.
+        if (outcome.kind !== "ok" && state.committed) keepWorktree = true;
+
+        if (outcome.kind === "usage_limit") {
+          settle("released", "usage limit reached");
+          await reporter.released(task, `usage limit reached${unpushedWork(state, worktreePath)}`);
+          return;
+        }
+        if (outcome.kind === "timeout") {
+          settle("requeued", `${entry.name} timed out`);
+          await reporter.requeued(task, `${entry.name} timed out`);
+          return;
+        }
+        if (outcome.kind === "blocked") {
+          settle("blocked", outcome.reason);
+          await reporter.blocked(task, `${outcome.reason}${unpushedWork(state, worktreePath)}`);
+          return;
+        }
+        if (outcome.kind === "error") {
+          // A delivery step failing is the run's failure — a human has to look at the remote. A
+          // model step failing is usually the CLI flaking ("could not parse claude output"), which
+          // main retried inside the attempt budget; parking the task on one flake wastes a human.
+          if (entry.deterministic) {
+            keepWorktree = true;
+            settle("failed", outcome.message);
+            await reporter.failed(
+              task,
+              `${entry.name} failed${whatLanded(state, branch)}: ${outcome.message}\n\nThe worktree is kept at \`${worktreePath}\` on the worker host, with the branch checked out.`
+            );
+          } else {
+            settle("requeued", outcome.message);
+            await reporter.requeued(task, `${entry.name} failed: ${outcome.message}`);
+          }
+          return;
+        }
+      } else {
+        const gate = deps.gateFor(entry, runner, budget.forEntry(GATE_CAP_MS), {
+          maxDiffLines: config.maxDiffLines,
+          maxDiffFiles: config.maxDiffFiles,
+          reviewModel: config.reviewModel ?? "",
+        });
+        // Not skipped: skipping runs a shorter agent than the one somebody composed, and a missing
+        // check looks exactly like a check that passed.
+        if (!gate) {
+          keepWorktree = true;
+          settle("failed", `no gate named ${entry.key}`);
+          await reporter.failed(
+            task,
+            `this worker implements no gate of kind ${JSON.stringify(entry.gateKind ?? "")} (${entry.key}), so the agent could not be run as it was composed. Nothing was pushed; the worktree is kept at \`${worktreePath}\` on the worker host.`
+          );
+          return;
+        }
+
+        const diff = await deps.collectDiff(runner, worktreePath, config.baseBranch);
+        const verdict = await gate.run({
+          worktreePath,
+          task,
+          result: state.lastResult,
+          diff,
+          signal: deps.signal,
+        });
+        if (await releaseIfAborted(deps, reporter, task)) return;
+
+        if (!verdict.ok) {
+          if (hitUsageLimit(verdict)) {
+            settle("released", `the ${gate.name} gate could not run`);
+            await reporter.released(task, `the ${gate.name} gate could not run: ${verdict.reason}`);
+            return;
+          }
+
+          // The one refusal that must not push: a pushed branch carrying .github/workflows/*.yml
+          // runs in Actions with the repository's secrets, whatever this verdict said.
+          const withholdsPush = entry.gateKind === "protected-paths";
+          // Otherwise the worktree goes next, so the pushed branch is the only copy a human reaches
+          const pushFailed = withholdsPush
+            ? null
+            : await pushFailure(delivery, worktreePath, branch);
+          if (withholdsPush || pushFailed) keepWorktree = true;
+
+          settle("gateRejected", gate.name);
+          await reporter.gateRejected(
+            task,
+            gate.name,
+            withholdsPush
+              ? `${verdict.reason}\n\n**The branch was not pushed**, on purpose: what it carries is exactly what this gate refused. The work is in the worktree at \`${worktreePath}\` on the worker host.`
+              : pushFailed
+                ? `${verdict.reason}\n\n**The branch was not pushed**: ${pushFailed}. \`${branch}\` is not on the remote — this work exists only in the worktree at \`${worktreePath}\` on the worker host.`
+                : verdict.reason,
+            withholdsPush ? "" : branch
+          );
+          return;
+        }
       }
 
-      if (!config.autoMerge) {
-        settle("delivered", prUrl);
-        await reporter.delivered(task, prUrl, outcome.result.summary);
+      // After every step that could write — not after a gate. With several steps an unclean tree
+      // poisons everything after it, and a gate would judge a diff that is not what was committed.
+      // Gates are the wrong place to ask: `build` runs npm ci and `test-run` runs the suite, so any
+      // artifact the target repo does not gitignore would fail a run that did nothing wrong.
+      if (entry.kind !== "step" || entry.capability !== "edit") continue;
+
+      const leftover = await unfinishedWork(runner, worktreePath);
+      if (leftover) {
+        keepWorktree = true;
+        settle("failed", `${entry.name} left the worktree unclean`);
+        await reporter.failed(
+          task,
+          `${entry.name} left the worktree unclean, so anything after it would judge a tree that is not what was committed:\n\n${leftover}\n\nNothing was pushed; the worktree is kept at \`${worktreePath}\` on the worker host.`
+        );
         return;
       }
+    }
 
-      // No signal on the merge call itself: killing "gh pr merge" mid-flight leaves ambiguous
-      // remote state that only mergeState() can untangle — better not to create it
-      enter("merge");
-      await delivery.merge(worktreePath, prUrl);
-    } catch (error) {
-      keepWorktree = true;
-      settle("failed", "the delivery did not land");
-      await reporter.failed(
-        task,
-        `could not deliver \`${branch}\`${prUrl ? ` (${prUrl})` : ""}: ${String(error)}\n\nThe worktree is kept at \`${worktreePath}\` on the worker host, with the branch checked out.`
-      );
+    // Not checked once the merge landed: gh pr merge deliberately runs without a signal, so a stop
+    // pressed during it is only seen afterwards — and releasing there would put a task whose change
+    // is already on the base branch back in the queue for another full run.
+    if (!state.merged && (await releaseIfAborted(deps, reporter, task, whatLanded(state, branch)))) {
       return;
     }
 
-    settle("merged");
-    await reporter.merged(task, prUrl, outcome.result.summary);
+    // Merged because the sequence carried a Merge step, not because a flag beside it said so.
+    // Branching on the pull request url instead would call every merge a delivery: the url is set
+    // either way, and only the step knows whether anything was merged.
+    if (state.merged) {
+      settle("merged");
+      await reporter.merged(task, state.prUrl, state.summary);
+    } else {
+      settle("delivered", state.prUrl);
+      await reporter.delivered(task, state.prUrl, state.summary);
+    }
   } catch (error) {
     settle("requeued", "the worker hit an unexpected error");
     await reporter.requeued(task, `the worker hit an unexpected error: ${String(error)}`);

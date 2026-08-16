@@ -11,7 +11,7 @@ import {
   denyDeviceEnrolment,
   findPendingByUserCode,
   isWorkerPreset,
-  PRESET_POLICY,
+  PRESET_AGENT,
 } from "@/lib/device-enrolment";
 import { projectRepositoryUrl } from "@/lib/repository";
 
@@ -61,17 +61,16 @@ export const POST = withAdmin(async (request, { params, user }) => {
     );
   }
 
-  const policy = PRESET_POLICY[preset];
+  const { Agent } = await import("@/models/agent");
+  const agent = await Agent.findOne({ scope: "global", name: PRESET_AGENT[preset] }, "_id").lean();
+
   await Project.updateOne(
     { _id: project._id },
     {
       $set: {
         "worker.enabled": true,
-        "worker.policy.reviewGate": policy.reviewGate,
-        "worker.policy.autoMerge": policy.autoMerge,
-        "worker.policyOverrides": [
-          ...new Set([...(project.worker?.policyOverrides ?? []), "reviewGate", "autoMerge"]),
-        ],
+        // The preset picks the agent; how much the machine may do is what that agent is composed of
+        ...(agent ? { "worker.agent": agent._id } : {}),
       },
     }
   );
@@ -92,9 +91,7 @@ export const POST = withAdmin(async (request, { params, user }) => {
     action: "project_worker_policy_changed",
     target: key,
     user: String(user._id),
-    detail: `${preset} preset: autoMerge ${policy.autoMerge ? "on" : "off"}, reviewGate ${
-      policy.reviewGate ? "on" : "off"
-    }`,
+    detail: `${preset} preset: agent ${PRESET_AGENT[preset]}`,
   });
 
   // Registration mints the credential and the machine's identity. Re-registering the same
