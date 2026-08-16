@@ -213,6 +213,20 @@ describe("delivery does not execute what the agent left in the repository", () =
     expect(existsSync(marker)).toBe(false);
   });
 
+  // The receivepack quirk one layer along: git keeps the *first* gitProxy entry it finds, so the
+  // repository's outranks any config override — `none`, `none for *` and the empty string were
+  // each tried and each lost. The environment is where it is won. Both assertions bite: the proxy
+  // is what carries this transport, so emptying it wrongly would stop the branch as surely as
+  // running the planted program would.
+  it("does not run a proxy command the agent set, and still pushes over it", async () => {
+    git(work, "config", "core.gitProxy", plantProgram("planted-proxy"));
+
+    await createDelivery(createRunner()).push(work, "feature");
+
+    expect(existsSync(marker)).toBe(false);
+    expect(pushedRefs()).toContain("refs/heads/feature");
+  });
+
   // A local push runs git-receive-pack as delivery's own child, so the destination's post-receive
   // hook would hold delivery's credentials. Refusing the transport is what stops it — asserted,
   // because the first version of this fix assumed the hooksPath override covered it, and it does not.

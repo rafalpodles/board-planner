@@ -163,10 +163,18 @@ and `SIGINT` both finish the task in flight before the loop exits.
   an allowlist, so the worker's credential reaches neither the agent nor any dependency's install
   script. Only delivery carries what `git` and `gh` need for the remote — and it runs inside the
   worktree the agent just wrote, so running "our own commands" there is not by itself a guarantee.
-  Every key git treats as *run this program* — hooks, `credential.helper`, `core.sshCommand`,
-  `core.pager`, `core.fsmonitor`, `receivepack` — is overridden on those calls, `/etc/gitconfig` and
-  `~/.gitconfig` are taken out of the picture, and the push adds `--no-verify`. It travels in
-  `GIT_CONFIG_*` rather than `-c` so it also reaches the `git` that `gh` shells out to.
+  Every key git treats as *run this program* — hooks, `credential.helper`, `core.askPass`,
+  `core.sshCommand`, `core.pager`, `core.fsmonitor`, `receivepack`, `core.gitProxy` — is overridden
+  on those calls, `/etc/gitconfig` and `~/.gitconfig` are taken out of the picture, and the push
+  adds `--no-verify`. It travels in `GIT_CONFIG_*` rather than `-c` so it also reaches the `git`
+  that `gh` shells out to.
+
+  Two of those keys cannot be won in the config at all, because git keeps the **first** value it is
+  given for them rather than the last: `receivepack` is passed on the command line and
+  `core.gitProxy` is emptied in the environment. Each was measured losing as an ordinary override
+  first. Enumerating this list is not a converging exercise — three passes over the same code each
+  found another key — which is why **BP-330**, pushing from a checkout the agent never touched, is
+  the fix that ends the question rather than answering it again.
 
   The transport is fixed on those calls too, because the way in was not always a program named in
   the config: `ext::` hands the URL to one, and a local push runs `git-receive-pack` as delivery's

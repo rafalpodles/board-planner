@@ -125,6 +125,18 @@ describe("push", () => {
     expect(configuredBy(envOf(run))).toContainEqual([key, value]);
   });
 
+  // Also not in the config list, and for the same reason one layer along: git keeps the first
+  // gitProxy entry it finds, so the repository's wins over any override the list could carry.
+  // The environment is where it is won, and empty there means no proxy rather than fall through.
+  it("empties the proxy command in the environment, where config cannot outrank it", async () => {
+    const run = vi.fn().mockResolvedValue(ok);
+    await createDelivery({ run }).push("/wt", "cp-158/worker");
+
+    const env = envOf(run);
+    expect(env.GIT_PROXY_COMMAND).toBe("");
+    expect(configuredBy(env).map(([key]) => key)).not.toContain("core.gitProxy");
+  });
+
   // Not in the config list on purpose: git keeps the first receivepack it is given, so a repository
   // setting outranks any override and only the command line wins
   it("names the receive-pack on the command line, where config cannot outrank it", async () => {
@@ -159,6 +171,7 @@ describe("push", () => {
     const ghCall = run.mock.calls.find((call) => call[0] === "gh");
     const env = (ghCall?.[2] as { env: Record<string, string> }).env;
     expect(env.GIT_CONFIG_GLOBAL).toBe("/dev/null");
+    expect(env.GIT_PROXY_COMMAND).toBe("");
     expect(configuredBy(env)).toContainEqual(["core.hooksPath", "/dev/null"]);
   });
 });
