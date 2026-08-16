@@ -1,9 +1,16 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { emailSettingsSummary, sendEmailOrThrow } from "@/lib/email";
+import { EmailNotConfiguredError, emailSettingsSummary, sendEmailOrThrow } from "@/lib/email";
 import { withAdmin } from "@/lib/middleware";
 import { APP_NAME } from "@/lib/brand";
 import { User } from "@/models/user";
+
+// A mail server refusing AUTH sometimes quotes the offending command back, and that command
+// carries SMTP_PASS. One line, capped, keeps the diagnosis without the credential.
+function firstLine(err: unknown): string {
+  const message = err instanceof Error ? err.message : "The mail server refused the message";
+  return message.split("\n")[0].slice(0, 200);
+}
 
 export const GET = withAdmin(async (_request, { user }) => {
   if (user.viaMachineCredential) {
@@ -37,13 +44,21 @@ export const POST = withAdmin(async (_request, { user }) => {
     await sendEmailOrThrow({
       to,
       subject: `${APP_NAME} test message`,
-      text: `Your mail server accepted a message from ${APP_NAME}. Password reset emails will reach this address.`,
+      text: `Your mail server accepted a message from ${APP_NAME}.`,
     });
   } catch (err) {
+    // Nothing was contacted, so this is not the mail server's answer. The screen reads the status
+    // to decide which of the two it says, and 502 here would blame a server that never heard us.
+    if (err instanceof EmailNotConfiguredError) {
+      return NextResponse.json({ error: err.message }, { status: 409 });
+    }
     // The whole point of the endpoint: what the mail server actually said. Everywhere else this
     // is swallowed, which is why a misconfigured deployment looks exactly like a working one.
+    // Trimmed, because a server rejecting AUTH sometimes echoes the offending command back — and
+    // that command carries SMTP_PASS, which this screen deliberately never shows.
+    console.error("Test email failed:", err);
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "The mail server refused the message" },
+      { error: firstLine(err) },
       { status: 502 }
     );
   }

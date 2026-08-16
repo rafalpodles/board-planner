@@ -11,7 +11,19 @@ export const PUT = withAuth(async (request, { user }) => {
   const body = await request.json();
   const updates: Record<string, unknown> = {};
 
-  if (typeof body.email === "string") {
+  if (body.email !== undefined) {
+    // The address is where a reset link will land, so a machine credential must not be able to
+    // move it — not even on its own account. A stolen `cpat_` that can repoint the owner's address
+    // is a stolen token that becomes a password, which is the escape every other gate refuses.
+    if (user.viaMachineCredential) {
+      return NextResponse.json(
+        { error: "This action requires an interactive session" },
+        { status: 403 }
+      );
+    }
+    if (typeof body.email !== "string") {
+      return NextResponse.json({ error: "Invalid email" }, { status: 400 });
+    }
     const email = normaliseEmail(body.email);
     // Same rule as the admin path: an address nobody can deliver to is worse than none, because
     // the reset it is meant to receive will look like it was sent

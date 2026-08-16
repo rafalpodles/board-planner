@@ -14,7 +14,11 @@ vi.mock("@/lib/grants", () => ({ check: vi.fn(), accessibleProjectIds: vi.fn() }
 vi.mock("@/lib/email", () => ({
   sendEmailOrThrow,
   emailSettingsSummary,
-  EmailNotConfiguredError: class EmailNotConfiguredError extends Error {},
+  EmailNotConfiguredError: class EmailNotConfiguredError extends Error {
+    constructor() {
+      super("No mail server is configured");
+    }
+  },
 }));
 vi.mock("@/models/user", () => ({ User: { findById: userFindById } }));
 
@@ -93,6 +97,17 @@ describe("POST /api/admin/email", () => {
     expect((await res.json()).error).toContain("STARTTLS");
   });
 
+  // Not 502: nothing was contacted, and the screen reads the status to decide whether to blame a
+  // mail server. "The mail server refused it" above "No mail server is configured" is nonsense.
+  it("separates having no mail server from a mail server saying no", async () => {
+    const { EmailNotConfiguredError } = await import("@/lib/email");
+    sendEmailOrThrow.mockRejectedValueOnce(new EmailNotConfiguredError());
+
+    const res = await POST(req(), ctx());
+
+    expect(res.status).toBe(409);
+  });
+
   it("refuses a machine credential", async () => {
     getAuthUser.mockResolvedValue({ ...ADMIN, viaMachineCredential: true });
 
@@ -104,13 +119,36 @@ describe("POST /api/admin/email", () => {
 });
 
 describe("GET /api/admin/email", () => {
-  it("reports the settings without the password", async () => {
+  it("reports what the summary says", async () => {
     const res = await GET(new Request("http://x/api/admin/email"), ctx());
     const body = await res.json();
 
     expect(res.status).toBe(200);
     expect(body.host).toBe("smtp.example.com");
-    // Not merely absent from the summary — absent from what reaches the client
-    expect(JSON.stringify(body)).not.toContain("pass");
+  });
+
+  // The route forwards whatever the summary returns, so it cannot be the thing that keeps the
+  // password out — that guarantee belongs to emailSettingsSummary and is asserted in email.test.ts
+  // against the real function. What this proves is that the route adds nothing of its own.
+  it("adds nothing to what the summary returned", async () => {
+    emailSettingsSummary.mockReturnValueOnce({
+      configured: true,
+      host: "smtp.example.com",
+      port: 587,
+      user: "mailer",
+      from: "x@example.com",
+    });
+
+    const body = await (await GET(new Request("http://x/api/admin/email"), ctx())).json();
+
+    expect(Object.keys(body).sort()).toEqual(["configured", "from", "host", "port", "user"]);
+  });
+
+  it("refuses a machine credential", async () => {
+    getAuthUser.mockResolvedValue({ ...ADMIN, viaMachineCredential: true });
+
+    const res = await GET(new Request("http://x/api/admin/email"), ctx());
+
+    expect(res.status).toBe(403);
   });
 });

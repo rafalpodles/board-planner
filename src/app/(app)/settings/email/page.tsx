@@ -19,7 +19,7 @@ interface EmailSettings {
 export default function EmailSettingsPage() {
   const api = useApi();
   const router = useRouter();
-  const { isAdmin, isLoading: authLoading } = useAuth();
+  const { user: currentUser, isAdmin, isLoading: authLoading } = useAuth();
   const { toast } = useToast();
 
   const [settings, setSettings] = useState<EmailSettings | null>(null);
@@ -35,6 +35,9 @@ export default function EmailSettingsPage() {
       setSettings(await api.get("/api/admin/email"));
     } catch {
       toast("Failed to read the mail settings", "error");
+      // Otherwise the page spins for ever: the toast clears after three seconds and leaves an
+      // admin watching an animation with nothing to click
+      setSettings({ configured: false, host: "", port: 0, user: "", from: "" });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -53,15 +56,11 @@ export default function EmailSettingsPage() {
     setResult(null);
     try {
       const res: { to: string } = await api.post("/api/admin/email", {});
-      setResult({
-        ok: true,
-        heading: "The mail server accepted it",
-        message: `Accepted for delivery to ${res.to}.`,
-      });
+      setResult({ ok: true, heading: `Accepted for delivery to ${res.to}`, message: "" });
     } catch (err) {
       // A refusal by the mail server and a refusal by us are different answers to the question the
       // admin asked, and saying the server refused when it was never contacted sends them to the
-      // wrong place to look
+      // wrong place to look. Only 502 is the server's own answer.
       const status = (err as { status?: number })?.status;
       setResult({
         ok: false,
@@ -86,8 +85,7 @@ export default function EmailSettingsPage() {
     <div className="max-w-2xl">
       <h2 className="text-lg font-semibold mb-1">Email</h2>
       <p className="text-sm text-text-muted mb-6">
-        Set from the environment, not from here — a deployment&apos;s mail server is a deployment
-        decision. This screen says whether it works.
+        Configured in the environment, not here. This screen shows whether it works.
       </p>
 
       {settings.configured ? (
@@ -95,7 +93,7 @@ export default function EmailSettingsPage() {
           {[
             ["Server", `${settings.host}:${settings.port}`],
             ["Username", settings.user],
-            ["Messages come from", settings.from],
+            ["From", settings.from],
           ].map(([label, value]) => (
             <div key={label} className="flex gap-4 px-4 py-2">
               <dt className="w-48 shrink-0 text-text-muted">{label}</dt>
@@ -108,35 +106,47 @@ export default function EmailSettingsPage() {
           <p className="font-medium">No mail server is configured.</p>
           <p className="mt-1 text-text-muted">
             Set <code>SMTP_HOST</code>, <code>SMTP_USER</code> and <code>SMTP_PASS</code> in the
-            environment and restart. Until then nobody can be sent a password reset, and email
-            notifications are silently skipped.
+            environment, then restart. Until then no email is sent.
           </p>
         </div>
       )}
 
-      <Button onClick={handleTest} disabled={sending || !settings.configured}>
+      <Button
+        onClick={handleTest}
+        disabled={sending || !settings.configured || !currentUser?.email}
+      >
         {sending ? "Sending…" : "Send a test message"}
       </Button>
+      {/* Naming the address is also how the page stops offering a button that can only fail:
+          without one the server refuses, and a round trip to learn that is a round trip wasted */}
       <p className="mt-2 text-sm text-text-muted">
-        It goes to the address on{" "}
-        <Link href="/settings/profile" className="underline">
-          your own profile
-        </Link>{" "}
-        and nowhere else.
+        {currentUser?.email ? (
+          `It goes to ${currentUser.email}, the address on your profile.`
+        ) : (
+          <>
+            Add an address to{" "}
+            <Link href="/settings/profile" className="underline">
+              your profile
+            </Link>{" "}
+            first — the test goes there and nowhere else.
+          </>
+        )}
       </p>
 
       {result && (
         <div
+          role={result.ok ? "status" : "alert"}
           className={`mt-4 rounded-lg border p-4 text-sm ${
             result.ok ? "border-border" : "border-danger"
           }`}
         >
           <p className={result.ok ? "font-medium" : "font-medium text-danger"}>{result.heading}</p>
-          <p className="mt-1 break-words text-text-muted">{result.message}</p>
+          {result.message && (
+            <p className="mt-1 break-words text-text-muted">{result.message}</p>
+          )}
           {result.ok && (
             <p className="mt-1 text-text-muted">
-              Accepted is not delivered — if it does not arrive, the rejection happened after the
-              handover and will be in your provider&apos;s own log.
+              If it does not arrive, check the spam folder and your mail provider&apos;s logs.
             </p>
           )}
         </div>

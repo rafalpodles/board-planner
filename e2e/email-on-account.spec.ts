@@ -40,7 +40,7 @@ async function createUser(page: Page, username: string, email: string) {
   await page.getByLabel("Username").fill(username);
   await page.getByLabel("Password", { exact: true }).fill("a-starting-password");
   await page.getByLabel("Full Name").fill(username.toUpperCase());
-  await page.getByLabel("Email (optional)").fill(email);
+  await page.getByRole("dialog").getByLabel("Email").fill(email);
   await page.getByRole("button", { name: "Create User" }).click();
 }
 
@@ -52,7 +52,7 @@ test.afterEach(async () => {
   if (mongoose.connection.readyState !== 0) await mongoose.disconnect();
 });
 
-test("an admin gives a new account an address, and it is stored as typed but tidied", async ({
+test("an admin gives a new account an address, and it is stored trimmed and lower-cased", async ({
   page,
 }) => {
   await signInAsAdmin(page);
@@ -106,9 +106,14 @@ test("many accounts may have no address at all", async ({ page }) => {
   await createUser(page, "second", "");
   await expect(page.getByText("@second", { exact: true })).toBeVisible();
 
-  // The seeded accounts have none either, so the partial filter has to tolerate a crowd of them
+  // Named, not counted: the seeded accounts already have no address, so a count would be satisfied
+  // before this test did anything at all
   const handle = await db();
-  expect(await handle.collection("users").countDocuments({ email: "" })).toBeGreaterThan(1);
+  const withoutAddress = await handle
+    .collection("users")
+    .find({ username: { $in: ["first", "second"] }, email: "" })
+    .toArray();
+  expect(withoutAddress).toHaveLength(2);
 });
 
 test("an admin can give an existing account an address", async ({ page }) => {
@@ -116,32 +121,55 @@ test("an admin can give an existing account an address", async ({ page }) => {
   await page.goto("/settings/users");
   await page.getByText(`@${MEMBER_USERNAME}`, { exact: true }).first().click();
 
-  await page.getByLabel("Email", { exact: true }).fill("member@example.com");
+  await page.getByRole("dialog").getByLabel("Email").fill("member@example.com");
   await Promise.all([
     page.waitForResponse(
       (r) => /\/api\/users\/\w+$/.test(new URL(r.url()).pathname) && r.request().method() === "PUT"
     ),
     page.getByRole("button", { name: "Save", exact: true }).click(),
   ]);
-  await expect(page.getByText("User updated")).toBeVisible();
+  await expect(page.getByText("Saved")).toBeVisible();
 
   const handle = await db();
   const member = await handle.collection("users").findOne({ _id: MEMBER_ID });
   expect(member?.email).toBe("member@example.com");
 });
 
-test("an address that could never receive anything is refused", async ({ page }) => {
+// What the admin is left looking at, not merely what the server answers: the refusal has to land
+// beside the field, because a toast is gone in three seconds and the bad address stays on screen
+test("a rejected address is reported next to the field", async ({ page }) => {
   await signInAsAdmin(page);
   await page.goto("/settings/users");
   await page.getByText(`@${MEMBER_USERNAME}`, { exact: true }).first().click();
 
-  // type="email" would let the browser refuse this before the server ever sees it, so the check
-  // goes through the API — the server is what a reset will depend on
-  const response = await page.request.put(`/api/users/${MEMBER_ID.toString()}`, {
-    headers: { "Sec-Fetch-Site": "same-origin" },
-    data: { email: "not-an-address" },
-  });
-  expect(response.status()).toBe(400);
+  const dialog = page.getByRole("dialog");
+  // Passes the browser's own type="email" check, so the server's answer is what this exercises.
+  // Note `someone@nodomain` would NOT do: a single-label domain is deliberately allowed, because
+  // an intranet deployment has addresses like admin@intranet and nothing else.
+  await dialog.getByLabel("Email").fill("someone@corp..com");
+  await dialog.getByRole("button", { name: "Save", exact: true }).click();
+
+  await expect(dialog.getByText("That does not look like an email address")).toBeVisible();
+  // Still open, still holding what was typed — nothing was saved behind the admin's back
+  await expect(dialog.getByLabel("Email")).toHaveValue("someone@corp..com");
+
+  const handle = await db();
+  const member = await handle.collection("users").findOne({ _id: MEMBER_ID });
+  expect(member?.email).toBe("");
+});
+
+test("an address already on another account is reported next to the field", async ({ page }) => {
+  await signInAsAdmin(page);
+  await page.goto("/settings/users");
+  await createUser(page, "nowak", "anna.nowak@example.com");
+  await expect(page.getByText("@nowak", { exact: true })).toBeVisible();
+
+  await page.getByText(`@${MEMBER_USERNAME}`, { exact: true }).first().click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Email").fill("anna.nowak@example.com");
+  await dialog.getByRole("button", { name: "Save", exact: true }).click();
+
+  await expect(dialog.getByText("That email is already on another account")).toBeVisible();
 });
 
 // Whoever writes this field chooses where a reset link lands, so it is gated like the password

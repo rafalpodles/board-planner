@@ -32,6 +32,9 @@ export async function POST(request: Request) {
   // Optional: an instance with no mail server has no use for it, and demanding one would mean
   // inventing addresses. The cost of leaving it out is stated on the form — that account cannot
   // recover its own password.
+  if (body.email !== undefined && typeof body.email !== "string") {
+    return NextResponse.json({ error: "Invalid email" }, { status: 400 });
+  }
   const email = typeof body.email === "string" ? normaliseEmail(body.email) : "";
   if (email && !isValidEmail(email)) {
     return NextResponse.json({ error: "That does not look like an email address" }, { status: 400 });

@@ -76,6 +76,19 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
     target.role = body.role as "admin" | "member";
   }
 
+  // A worker's or the PM's account is deliberately un-loginable, and both halves of that promise
+  // live here: a password makes it loginable, and an address makes it resettable. Refusing one and
+  // not the other only moves the escape a slice later.
+  const wantsCredentialChange = body.email !== undefined || body.password !== undefined;
+  if (wantsCredentialChange && target.kind === "machine") {
+    return NextResponse.json(
+      { error: "A machine account signs in with a token, not a password" },
+      { status: 400 }
+    );
+  }
+
+  let emailWasChanged = false;
+  const previousEmail = target.email ?? "";
   if (body.email !== undefined) {
     // Gated like the password, and for the sharper reason: once a reset can be requested by email,
     // whoever writes this field decides where that link lands. An account's address is the account.
@@ -96,6 +109,19 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
         { status: 400 }
       );
     }
+    // Asked before anything is touched, because the session revoke below happens before the save:
+    // learning about the collision from the index would leave the target signed out of everything
+    // over an address that was never stored. The index stays the final arbiter for the race.
+    if (email && email !== previousEmail) {
+      const taken = await User.exists({ email, _id: { $ne: target._id } });
+      if (taken) {
+        return NextResponse.json(
+          { error: "That email is already on another account" },
+          { status: 409 }
+        );
+      }
+    }
+    emailWasChanged = email !== previousEmail;
     target.email = email;
   }
 
@@ -119,15 +145,6 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
     if (target._id.toString() === admin._id.toString()) {
       return NextResponse.json(
         { error: "Change your own password under Settings → Security" },
-        { status: 400 }
-      );
-    }
-    // A worker's account is deliberately un-loginable — its credential is a token, and its hash is
-    // random precisely so nobody can sign in as it. Giving it a password undoes that, and the
-    // account it produces is invisible in Settings → Users, which filters machines out.
-    if (target.kind === "machine") {
-      return NextResponse.json(
-        { error: "A machine account signs in with a token, not a password" },
         { status: 400 }
       );
     }
@@ -159,6 +176,17 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
       action: "user_password_reset",
       user: admin._id,
       target: target.username,
+    });
+  }
+
+  // The quieter half of the same takeover: repointing an address takes an account over at the next
+  // reset, and unlike a password change it signs nobody out, so this row is the only trace there is
+  if (emailWasChanged) {
+    void logInstanceAudit({
+      action: "user_email_changed",
+      user: admin._id,
+      target: target.username,
+      detail: `${previousEmail || "none"} → ${target.email || "none"}`,
     });
   }
 

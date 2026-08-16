@@ -4,6 +4,7 @@ const getAuthUser = vi.fn();
 const check = vi.fn();
 const userFindById = vi.fn();
 const userCountDocuments = vi.fn();
+const userExists = vi.fn();
 const revokeUserSessions = vi.fn();
 const logInstanceAudit = vi.fn();
 const hash = vi.fn();
@@ -23,6 +24,7 @@ vi.mock("@/models/user", () => ({
   User: {
     findById: userFindById,
     countDocuments: userCountDocuments,
+    exists: userExists,
     findByIdAndDelete: vi.fn(),
   },
 }));
@@ -61,6 +63,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   getAuthUser.mockResolvedValue(ADMIN);
   userCountDocuments.mockResolvedValue(2);
+  userExists.mockResolvedValue(null);
   hash.mockResolvedValue("new-hash");
 });
 
@@ -129,7 +132,23 @@ describe("PUT /api/users/:id", () => {
     expect(target.save).not.toHaveBeenCalled();
   });
 
-  it("answers 409 when the address is already on another account", async () => {
+  // Asked before anything is touched, because a password change in the same request revokes the
+  // target's sessions before the save: learning of the collision from the index would sign
+  // somebody out of everything over an address that was never stored
+  it("answers 409 before revoking anything when the address is taken", async () => {
+    const target = targetDoc();
+    found(target);
+    userExists.mockResolvedValue({ _id: "someone-else" });
+
+    const res = await PUT(put({ email: "taken@example.com", password: "a-fresh-password" }), ctx());
+
+    expect(res.status).toBe(409);
+    expect(revokeUserSessions).not.toHaveBeenCalled();
+    expect(target.save).not.toHaveBeenCalled();
+  });
+
+  // The pre-check races a concurrent write, so the index stays the final arbiter
+  it("still answers 409 when the index is the one that catches it", async () => {
     const target = targetDoc();
     found(target);
     target.save.mockRejectedValueOnce(
@@ -142,6 +161,15 @@ describe("PUT /api/users/:id", () => {
     const res = await PUT(put({ email: "taken@example.com" }), ctx());
 
     expect(res.status).toBe(409);
+  });
+
+  it("does not ask whether an unchanged address is taken", async () => {
+    const target = targetDoc();
+    found(target);
+
+    await PUT(put({ email: "target@example.com" }), ctx());
+
+    expect(userExists).not.toHaveBeenCalled();
   });
 });
 
@@ -256,6 +284,18 @@ describe("PUT /api/users/:id — an admin sets a password", () => {
 
     expect(res.status).toBe(400);
     expect(hash).not.toHaveBeenCalled();
+    expect(target.save).not.toHaveBeenCalled();
+  });
+
+  // The other half of the same promise: an address is what a reset link follows, so refusing the
+  // password and allowing the address only moves the escape one slice later
+  it("refuses to give a machine account an address", async () => {
+    const target = targetDoc({ role: "member", kind: "machine" });
+    found(target);
+
+    const res = await PUT(put({ email: "attacker@example.com" }), ctx());
+
+    expect(res.status).toBe(400);
     expect(target.save).not.toHaveBeenCalled();
   });
 
