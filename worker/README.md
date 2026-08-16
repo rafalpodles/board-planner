@@ -159,9 +159,37 @@ and `SIGINT` both finish the task in flight before the loop exits.
   changes to `package.json`, lockfiles, `.npmrc`, hooks and workflows *before* the build gate runs
   npm on the worktree, and installs run with `--ignore-scripts`. Cost ordering alone would have
   executed agent-written lifecycle scripts first.
-- **No subprocess inherits the worker's secrets.** The child environment is an allowlist, so
-  the worker's credential reaches neither the agent nor any dependency's install script. Only delivery,
-  which runs our own commands, carries what `git` and `gh` need for the remote.
+- **No subprocess inherits the worker's secrets through its environment.** The child environment is
+  an allowlist, so the worker's credential reaches neither the agent nor any dependency's install
+  script. Only delivery carries what `git` and `gh` need for the remote — and it runs inside the
+  worktree the agent just wrote, so running "our own commands" there is not by itself a guarantee.
+  Every key git treats as *run this program* — hooks, `credential.helper`, `core.askPass`,
+  `core.sshCommand`, `core.pager`, `core.fsmonitor`, `receivepack`, `core.gitProxy` — is overridden
+  on those calls, `/etc/gitconfig` and `~/.gitconfig` are taken out of the picture, and the push
+  adds `--no-verify`. It travels in `GIT_CONFIG_*` rather than `-c` so it also reaches the `git`
+  that `gh` shells out to.
+
+  Two of those keys cannot be won in the config at all, because git keeps the **first** value it is
+  given for them rather than the last: `receivepack` is passed on the command line and
+  `core.gitProxy` is emptied in the environment. Each was measured losing as an ordinary override
+  first. Enumerating this list is not a converging exercise — three passes over the same code each
+  found another key — which is why **BP-330**, pushing from a checkout the agent never touched, is
+  the fix that ends the question rather than answering it again.
+
+  The transport is fixed on those calls too, because the way in was not always a program named in
+  the config: `ext::` hands the URL to one, and a local push runs `git-receive-pack` as delivery's
+  own child, so the destination's `post-receive` would hold the credentials. Both are refused.
+
+  What this does **not** claim: the allowlist includes `HOME`, because the CLI authenticates from
+  its logged-in session there. An agent that goes looking can read what is under it — the
+  environment is the boundary, the filesystem is not.
+
+  **What it costs.** `~/.gitconfig` is not read on those calls, so anything an operator keeps there
+  no longer applies to delivery: a deploy key set through `core.sshCommand`, a `url.*.insteadOf`
+  rewrite pointing at a mirror, or an https credential helper other than `gh`'s. Delivery
+  authenticates over ssh with the agent socket, or over https through `gh auth git-credential`.
+  Nothing here touches the agent's own commits, which are made in a different environment that does
+  read your config.
 - **The executor runs with `bypassPermissions` inside the worktree**, so the worktree is checked
   for uncommitted files before the gates run — an agent cannot hide a change from the gates by
   never staging it.
