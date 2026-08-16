@@ -80,7 +80,7 @@ export default function ProfilePage() {
             id="emailNotifs"
             checked={emailNotifications}
             onChange={(e) => setEmailNotifications(e.target.checked)}
-            className="rounded border-border"
+            className="focus-ring rounded border-border"
           />
           <label htmlFor="emailNotifs" className="text-sm cursor-pointer">
             Receive email notifications

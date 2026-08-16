@@ -1,8 +1,9 @@
 "use client";
 
-import type { CSSProperties } from "react";
+import { useState, type CSSProperties } from "react";
 import {
   ApiCustomField,
+  ApiProjectCategory,
   ApiSprint,
   ApiUser,
   Category,
@@ -12,8 +13,18 @@ import {
   RecurrenceFrequency,
 } from "@/types";
 import { activeFields, orderedOptions, sortedFields } from "@/lib/custom-fields";
+import { categoryColor } from "@/lib/category-colors";
+import { roundForDisplay } from "@/lib/estimates";
+import { Switch } from "@/components/ui/Switch";
 import { Avatar, PriorityBars, SectionLabel } from "./atoms";
-import { EmptyValue, FieldRow, OptionItem, OptionList, PickerRow } from "./FieldRow";
+import {
+  ComboboxRow,
+  EmptyValue,
+  FieldRow,
+  OptionItem,
+  OptionList,
+  PickerRow,
+} from "./FieldRow";
 import type { TaskDraft } from "./useTaskEditor";
 import type { ApiAgent } from "@/types";
 
@@ -45,7 +56,8 @@ interface PropertyRailProps {
   users: ApiUser[];
   sprints: ApiSprint[];
   agents: ApiAgent[];
-  categories: string[];
+  /** Full rows, not names: the chip and the picker dot are tinted by the project's colour */
+  categories: ApiProjectCategory[];
   customFields: ApiCustomField[];
   reporter: string | null;
   onDelete: () => void;
@@ -69,7 +81,6 @@ export function PropertyRail({
   const sprint = sprints.find((s) => s._id === draft.sprint);
   const fields = sortedFields(activeFields(customFields));
   const selectableSprints = sprints.filter((s) => s.status !== "completed");
-  const agentName = agents.find((a) => a._id === draft.agent)?.name ?? "Project default";
 
   return (
     <div className="flex h-full flex-col gap-6">
@@ -78,135 +89,88 @@ export function PropertyRail({
           <SectionLabel>Details</SectionLabel>
         </div>
 
-        <PickerRow
+        <ComboboxRow
           label="Assignee"
           touch={touch}
-          value={
+          value={draft.assignee || ""}
+          options={users.map((user) => ({
+            value: user.username,
+            label: user.fullName,
+            adornment: <Avatar name={user.fullName} size={20} />,
+          }))}
+          emptyOption="Unassigned"
+          onChange={(username) => set("assignee", username || null)}
+        >
+          {(selected) => (
             <span className="flex items-center gap-2">
-              <Avatar name={assignedUser?.fullName} size={20} />
-              {assignedUser ? (
-                assignedUser.fullName
-              ) : (
-                <EmptyValue>Unassigned</EmptyValue>
-              )}
+              <Avatar name={selected?.label} size={20} />
+              {selected ? selected.label : <EmptyValue>Unassigned</EmptyValue>}
             </span>
-          }
-          panel={(close) => (
-            <OptionList label="Assignee">
-              <OptionItem
-                selected={!draft.assignee}
-                onClick={() => {
-                  set("assignee", null);
-                  close();
-                }}
-              >
-                <Avatar size={20} />
-                Unassigned
-              </OptionItem>
-              {users.map((user) => (
-                <OptionItem
-                  key={user._id}
-                  selected={user.username === draft.assignee}
-                  onClick={() => {
-                    set("assignee", user.username);
-                    close();
-                  }}
-                >
-                  <Avatar name={user.fullName} size={20} />
-                  <span className="truncate">{user.fullName}</span>
-                </OptionItem>
-              ))}
-            </OptionList>
           )}
-        />
+        </ComboboxRow>
 
-        <PickerRow
+        <ComboboxRow
           label="Agent"
           touch={touch}
-          value={<span className="truncate">{agentName}</span>}
-          panel={(close) => (
-            <OptionList label="Agent">
-              <OptionItem
-                selected={!draft.agent}
-                onClick={() => {
-                  set("agent", null);
-                  close();
-                }}
-              >
-                <span className="truncate">Project default</span>
-              </OptionItem>
-              {agents.map((a) => (
-                <OptionItem
-                  key={a._id}
-                  selected={a._id === draft.agent}
-                  onClick={() => {
-                    set("agent", a._id);
-                    close();
-                  }}
-                >
-                  <span className="truncate">{a.name}</span>
-                </OptionItem>
-              ))}
-            </OptionList>
-          )}
-        />
+          value={draft.agent || ""}
+          options={agents.map((a) => ({ value: a._id, label: a.name }))}
+          emptyOption="Project default"
+          onChange={(id) => set("agent", id || null)}
+        >
+          {(selected) =>
+            selected ? (
+              <span className="truncate">{selected.label}</span>
+            ) : (
+              <EmptyValue>Project default</EmptyValue>
+            )
+          }
+        </ComboboxRow>
 
-        <PickerRow
+        <ComboboxRow
           label="Priority"
           touch={touch}
-          value={
+          value={draft.priority}
+          options={PRIORITIES.map((priority) => ({
+            value: priority,
+            label: PRIORITY_LABELS[priority],
+            adornment: <PriorityBars priority={priority} />,
+          }))}
+          onChange={(priority) => set("priority", priority as Priority)}
+        >
+          {() => (
             <span className="flex items-center gap-2">
               <PriorityBars priority={draft.priority} />
               {PRIORITY_LABELS[draft.priority]}
             </span>
-          }
-          panel={(close) => (
-            <OptionList label="Priority">
-              {PRIORITIES.map((priority) => (
-                <OptionItem
-                  key={priority}
-                  selected={priority === draft.priority}
-                  onClick={() => {
-                    set("priority", priority as Priority);
-                    close();
-                  }}
-                >
-                  <PriorityBars priority={priority} />
-                  {PRIORITY_LABELS[priority]}
-                </OptionItem>
-              ))}
-            </OptionList>
           )}
-        />
+        </ComboboxRow>
 
-        <PickerRow
+        <ComboboxRow
           label="Type"
           touch={touch}
-          value={
+          value={draft.category}
+          options={categories.map((category) => ({
+            value: category.name,
+            label: category.name,
+            color: category.color,
+          }))}
+          onChange={(category) => set("category", category as Category)}
+        >
+          {(selected) => (
             <span
-              className="chip inline-flex rounded px-2 py-0.5 text-xs"
-              style={{ "--chip": "var(--color-primary)" } as CSSProperties}
+              className="chip chip-custom inline-flex rounded px-2 py-0.5 text-xs"
+              style={
+                {
+                  "--chip":
+                    categoryColor(categories, draft.category) ||
+                    "var(--color-text-muted)",
+                } as CSSProperties
+              }
             >
-              {draft.category}
+              {selected?.label || draft.category}
             </span>
-          }
-          panel={(close) => (
-            <OptionList label="Type">
-              {categories.map((category) => (
-                <OptionItem
-                  key={category}
-                  selected={category === draft.category}
-                  onClick={() => {
-                    set("category", category as Category);
-                    close();
-                  }}
-                >
-                  {category}
-                </OptionItem>
-              ))}
-            </OptionList>
           )}
-        />
+        </ComboboxRow>
 
         <PickerRow
           label="Due date"
@@ -220,7 +184,7 @@ export function PropertyRail({
                 type="date"
                 value={draft.dueDate || ""}
                 onChange={(e) => set("dueDate", e.target.value || null)}
-                className="w-full rounded-lg border border-border bg-bg-input px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                className="focus-ring w-full rounded-lg border border-border bg-bg-input px-3 py-2 text-sm"
               />
               {draft.dueDate && (
                 <button
@@ -236,39 +200,19 @@ export function PropertyRail({
         />
 
         {sprints.length > 0 && (
-          <PickerRow
+          <ComboboxRow
             label="Sprint"
             touch={touch}
-            value={sprint ? sprint.name : <EmptyValue>Backlog</EmptyValue>}
-            panel={(close) => (
-              <OptionList label="Sprint">
-                <OptionItem
-                  selected={!draft.sprint}
-                  onClick={() => {
-                    set("sprint", null);
-                    close();
-                  }}
-                >
-                  No sprint (backlog)
-                </OptionItem>
-                {selectableSprints.map((s) => (
-                  <OptionItem
-                    key={s._id}
-                    selected={s._id === draft.sprint}
-                    onClick={() => {
-                      set("sprint", s._id);
-                      close();
-                    }}
-                  >
-                    {s.name}
-                    {s.status === "active" && (
-                      <span className="text-xs text-text-muted">active</span>
-                    )}
-                  </OptionItem>
-                ))}
-              </OptionList>
-            )}
-          />
+            value={draft.sprint || ""}
+            options={selectableSprints.map((s) => ({
+              value: s._id,
+              label: s.status === "active" ? `${s.name} · active` : s.name,
+            }))}
+            emptyOption="No sprint (backlog)"
+            onChange={(sprintId) => set("sprint", sprintId || null)}
+          >
+            {() => (sprint ? sprint.name : <EmptyValue>Backlog</EmptyValue>)}
+          </ComboboxRow>
         )}
 
         <PickerRow
@@ -313,7 +257,7 @@ export function PropertyRail({
                         interval: Math.max(1, parseInt(e.target.value) || 1),
                       })
                     }
-                    className="w-16 rounded-lg border border-border bg-bg-input px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                    className="focus-ring w-16 rounded-lg border border-border bg-bg-input px-2 py-1 text-sm"
                   />
                   {RECURRENCE_UNITS[draft.recurrence.frequency]}s
                 </label>
@@ -372,6 +316,7 @@ interface CustomFieldRowProps {
 }
 
 function CustomFieldRow({ field, value, onChange, touch }: CustomFieldRowProps) {
+  const [editing, setEditing] = useState(false);
   const options = orderedOptions(field);
   // The form marked required fields; losing the marker with the form would make a
   // required field indistinguishable from an optional one
@@ -380,159 +325,128 @@ function CustomFieldRow({ field, value, onChange, touch }: CustomFieldRowProps) 
   if (field.fieldType === "checkbox") {
     return (
       <FieldRow label={label} touch={touch}>
-        <label className="flex cursor-pointer items-center gap-2">
-          <input
-            type="checkbox"
-            checked={!!value}
-            onChange={(e) => onChange(e.target.checked)}
-            className="rounded border-border"
-          />
-          <span className="text-text-muted">{value ? "Yes" : "No"}</span>
-        </label>
+        {/* The row already names the field on its left, so the switch carries the name
+            for a screen reader and nothing visible */}
+        <Switch
+          labelHidden
+          label={label}
+          checked={!!value}
+          onChange={onChange}
+        />
       </FieldRow>
     );
   }
 
-  if (field.fieldType === "dropdown") {
-    const selected = options.find((o) => o.id === value);
-    return (
-      <PickerRow
-        label={label}
-        touch={touch}
-        value={
-          selected ? (
-            <span
-              className="chip chip-custom inline-flex rounded px-2 py-0.5 text-xs"
-              style={{ "--chip": selected.color } as CSSProperties}
-            >
-              {selected.value}
-            </span>
-          ) : (
-            <EmptyValue>Empty</EmptyValue>
-          )
-        }
-        panel={(close) => (
-          <OptionList label={label}>
-            <OptionItem
-              selected={!selected}
-              onClick={() => {
-                onChange("");
-                close();
-              }}
-            >
-              Empty
-            </OptionItem>
-            {options.map((option) => (
-              <OptionItem
-                key={option.id}
-                selected={option.id === value}
-                onClick={() => {
-                  onChange(option.id);
-                  close();
-                }}
-              >
-                <span
-                  aria-hidden
-                  className="h-[7px] w-[7px] shrink-0 rounded-full"
-                  style={{ background: option.color }}
-                />
-                {option.value}
-              </OptionItem>
-            ))}
-          </OptionList>
-        )}
-      />
-    );
-  }
+  if (field.fieldType === "dropdown" || field.fieldType === "multiselect") {
+    const choices = options.map((option) => ({
+      value: option.id,
+      label: option.value,
+      color: option.color,
+    }));
 
-  if (field.fieldType === "multiselect") {
+    if (field.fieldType === "dropdown") {
+      const selected = options.find((o) => o.id === value);
+      return (
+        <ComboboxRow
+          label={label}
+          touch={touch}
+          value={typeof value === "string" ? value : ""}
+          options={choices}
+          emptyOption="Empty"
+          onChange={onChange}
+        >
+          {() =>
+            selected ? (
+              <span
+                className="chip chip-custom inline-flex rounded px-2 py-0.5 text-xs"
+                style={{ "--chip": selected.color } as CSSProperties}
+              >
+                {selected.value}
+              </span>
+            ) : (
+              <EmptyValue>Empty</EmptyValue>
+            )
+          }
+        </ComboboxRow>
+      );
+    }
+
     const picked = Array.isArray(value) ? (value as string[]) : [];
     return (
-      <PickerRow
+      <ComboboxRow
+        multiple
         label={label}
         touch={touch}
         align="start"
-        value={
-          picked.length === 0 ? (
+        value={picked}
+        options={choices}
+        emptyOption="Clear all"
+        onChange={onChange}
+      >
+        {(selected) =>
+          selected.length === 0 ? (
             <EmptyValue>Empty</EmptyValue>
           ) : (
             <span className="flex flex-wrap gap-1.5">
-              {options
-                .filter((o) => picked.includes(o.id))
-                .map((option) => (
-                  <span
-                    key={option.id}
-                    className="chip chip-custom rounded px-2 py-0.5 text-xs"
-                    style={{ "--chip": option.color } as CSSProperties}
-                  >
-                    {option.value}
-                  </span>
-                ))}
+              {selected.map((option) => (
+                <span
+                  key={option.value}
+                  className="chip chip-custom rounded px-2 py-0.5 text-xs"
+                  style={{ "--chip": option.color } as CSSProperties}
+                >
+                  {option.label}
+                </span>
+              ))}
             </span>
           )
         }
-        panel={() => (
-          <div className="flex flex-wrap gap-1.5 p-1.5">
-            {options.map((option) => {
-              const on = picked.includes(option.id);
-              return (
-                <button
-                  key={option.id}
-                  type="button"
-                  aria-pressed={on}
-                  onClick={() =>
-                    onChange(
-                      on ? picked.filter((id) => id !== option.id) : [...picked, option.id]
-                    )
-                  }
-                  className={`focus-ring chip chip-custom rounded-full px-2.5 py-1 text-xs transition-opacity ${
-                    on ? "" : "opacity-40"
-                  }`}
-                  style={{ "--chip": option.color } as CSSProperties}
-                >
-                  {option.value}
-                </button>
-              );
-            })}
-          </div>
-        )}
-      />
+      </ComboboxRow>
     );
   }
 
   const inputType =
     field.fieldType === "number" ? "number" : field.fieldType === "date" ? "date" : "text";
 
+  // Typed in the row rather than in a popup: there is nothing to choose from, so a panel
+  // only put a second box on top of the one you were already looking at. Chromeless until
+  // hovered or focused, so a column of values does not read as a column of form fields.
+  //
+  // Rounded only while it is not being edited. roundForDisplay says never to feed its
+  // result back into anything that stores, and an editable control does exactly that —
+  // one keystroke on a field holding 1.005 would commit the 1.01 it was showing.
+  const shown =
+    value === undefined || value === ""
+      ? ""
+      : field.fieldType === "number" && !editing
+        ? String(roundForDisplay(Number(value)))
+        : String(value);
+
   return (
-    <PickerRow
-      label={label}
-      touch={touch}
-      value={
-        value === undefined || value === "" ? (
-          <EmptyValue>Empty</EmptyValue>
-        ) : (
-          String(value)
-        )
-      }
-      panel={() => (
-        <div className="p-1">
-          <input
-            type={inputType}
-            value={(value as string) ?? ""}
-            autoFocus
-            onChange={(e) =>
-              onChange(
-                field.fieldType === "number"
-                  ? e.target.value
-                    ? Number(e.target.value)
-                    : ""
-                  : e.target.value
-              )
-            }
-            className="w-full rounded-lg border border-border bg-bg-input px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
-          />
-        </div>
-      )}
-    />
+    <FieldRow label={label} touch={touch}>
+      <input
+        type={inputType}
+        aria-label={label}
+        value={shown}
+        placeholder="Empty"
+        onFocus={() => setEditing(true)}
+        onBlur={() => setEditing(false)}
+        // A number input takes the wheel while focused, so scrolling the rail past a
+        // field you had just clicked silently rewrote it
+        onWheel={(e) => e.currentTarget.blur()}
+        onChange={(e) =>
+          onChange(
+            field.fieldType === "number"
+              ? e.target.value
+                ? Number(e.target.value)
+                : ""
+              : e.target.value,
+          )
+        }
+        className={`focus-ring -mx-2 w-[calc(100%+1rem)] rounded-lg border border-transparent
+          bg-transparent px-2 text-sm transition-colors placeholder:text-text-muted
+          hover:border-border hover:bg-bg-input focus:border-border focus:bg-bg-input
+          ${touch ? "min-h-[36px]" : "py-1"}`}
+      />
+    </FieldRow>
   );
 }

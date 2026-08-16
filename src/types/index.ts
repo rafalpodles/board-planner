@@ -672,6 +672,10 @@ export interface IProject {
   columns: IProjectColumn[];
   taskTemplates: ITaskTemplate[];
   customFields: ICustomField[];
+  // Which custom field's numeric value sums as this project's estimate. "" means the
+  // project does not estimate. Must always name a live number field — cleared by the
+  // custom-fields route the moment that field is archived or deleted.
+  estimateFieldId: string;
   webhooks: IWebhook[];
   notificationChannels: INotificationChannel[];
   worker: ProjectWorkerConfig;
@@ -806,6 +810,9 @@ export interface ApiSprint {
   status: SprintStatus;
   taskCount?: number;
   doneCount?: number;
+  // Present only when the project designates an estimate field
+  estimateTotal?: number;
+  estimateDone?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -909,6 +916,7 @@ export interface ApiProject {
   columns?: ApiProjectColumn[];
   taskTemplates: ApiTaskTemplate[];
   customFields: ApiCustomField[];
+  estimateFieldId: string;
   webhooks: ApiWebhook[];
   notificationChannels: ApiNotificationChannel[];
   repositoryUrl: string;
@@ -1213,6 +1221,8 @@ export const INSTANCE_AUDIT_ACTIONS = [
   "project_workers_disabled",
   "project_worker_policy_changed",
   "worker_command_sent",
+  "user_password_reset",
+  "user_email_changed",
 ] as const;
 
 export type InstanceAuditAction = (typeof INSTANCE_AUDIT_ACTIONS)[number];

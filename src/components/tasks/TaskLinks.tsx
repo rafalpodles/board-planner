@@ -234,7 +234,7 @@ export function TaskLinks({
           <select
             value={pickerType}
             onChange={(e) => setPickerType(e.target.value as DependencyType)}
-            className="w-full bg-bg-input border border-border rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+            className="focus-ring w-full bg-bg-input border border-border rounded px-2 py-1 text-sm cursor-pointer"
           >
             {DEPENDENCY_LABELS.map((d) => (
               <option key={d.value} value={d.value}>
@@ -247,7 +247,7 @@ export function TaskLinks({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search tasks..."
-            className="w-full bg-bg-input border border-border rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+            className="focus-ring w-full bg-bg-input border border-border rounded px-2 py-1 text-sm"
             autoFocus
           />
           <div className="max-h-40 overflow-y-auto space-y-1">

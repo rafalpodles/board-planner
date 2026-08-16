@@ -1,5 +1,16 @@
 export async function register() {
   if (process.env.NEXT_RUNTIME === "nodejs") {
+    // Read here so a fumbled value is one startup failure naming the variable, and so an operator
+    // can see which answer the instance settled on — the throttle keys on it, and getting it wrong
+    // is silent in both directions (BP-318)
+    const { trustedProxyHops } = await import("@/lib/client-ip");
+    const hops = trustedProxyHops();
+    console.log(
+      hops === 0
+        ? "TRUSTED_PROXY_HOPS=0 — X-Forwarded-For is ignored and anonymous callers share one throttle bucket"
+        : `TRUSTED_PROXY_HOPS=${hops} — the client address is taken ${hops} entries from the right of X-Forwarded-For`
+    );
+
     const { connectDB } = await import("@/lib/db");
     try {
       const mongoose = await connectDB();

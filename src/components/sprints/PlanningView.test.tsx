@@ -57,6 +57,12 @@ const sprintTasks = [
   },
 ] as ApiTask[];
 
+const projectWithEstimate = {
+  ...project,
+  estimateFieldId: "f1",
+  customFields: [{ _id: "f1", name: "Story points", fieldType: "number" }],
+} as unknown as ApiProject;
+
 // One of the three sits in the done-role column; while the filter box is empty it is the
 // difference between this list's length and the "Backlog (2)" count the pane shows
 const backlogTasks = [
@@ -388,5 +394,77 @@ describe("PlanningView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
 
     expect(await screen.findByText("Backlog (2)")).toBeTruthy();
+  });
+});
+
+describe("PlanningView estimate", () => {
+  it("shows nothing about the estimate when the project designates no field", async () => {
+    await renderPlanning();
+    expect(screen.getByText("Sprint 12 (1)")).toBeTruthy();
+    expect(screen.queryByText(/Story points/)).toBeNull();
+  });
+
+  it("shows the scope pane's estimate total beside its count, labelled with the designated field's own name, and leaves the backlog pane alone", async () => {
+    const tasksWithEstimate = [{ ...sprintTasks[0], customFieldValues: { f1: 5 } }] as ApiTask[];
+    await renderPlanning({ project: projectWithEstimate, tasks: tasksWithEstimate });
+    expect(screen.getByText("Sprint 12 (1) · 5 Story points")).toBeTruthy();
+    expect(screen.getByText("Backlog (2)")).toBeTruthy();
+  });
+
+  it("shows a designated field's zero total on the scope pane rather than hiding it", async () => {
+    const tasksWithoutValue = [sprintTasks[0]] as ApiTask[];
+    await renderPlanning({ project: projectWithEstimate, tasks: tasksWithoutValue });
+    expect(screen.getByText("Sprint 12 (1) · 0 Story points")).toBeTruthy();
+  });
+
+  // Reachable through a migration, a bulk import, or a direct database edit — never through
+  // the API, which clears estimateFieldId along with the field — but a task can still carry
+  // a leftover value under the dangling id. That must not paint a blank-labelled total.
+  it("shows nothing about the estimate when the designated field no longer exists on the project", async () => {
+    const projectWithDanglingEstimate = {
+      ...project,
+      estimateFieldId: "gone",
+      customFields: [],
+    } as unknown as ApiProject;
+    const tasksWithLeftoverValue = [
+      { ...sprintTasks[0], customFieldValues: { gone: 5 } },
+    ] as ApiTask[];
+    await renderPlanning({ project: projectWithDanglingEstimate, tasks: tasksWithLeftoverValue });
+    expect(screen.getByText("Sprint 12 (1)")).toBeTruthy();
+    expect(screen.queryByText(/Sprint 12 \(1\) ·/)).toBeNull();
+  });
+
+  it("moves the scope pane's estimate total the instant a task is added or removed, before the server answers", async () => {
+    const backlogWithEstimate = [{ ...backlogTasks[0], customFieldValues: { f1: 3 } }] as ApiTask[];
+    api.get.mockImplementation((url: string) => {
+      if (url === "/api/projects/p1/tasks?sprint=backlog") {
+        return Promise.resolve(backlogWithEstimate.map((t) => ({ ...t })));
+      }
+      return Promise.reject(new Error(`unexpected GET ${url}`));
+    });
+    let settle: (v: unknown) => void = () => {};
+    api.put.mockImplementation(() => new Promise((r) => { settle = r; }));
+
+    const tasksWithEstimate = [{ ...sprintTasks[0], customFieldValues: { f1: 5 } }] as ApiTask[];
+    const board = makeBoard({ project: projectWithEstimate, tasks: tasksWithEstimate });
+    render(<PlanningView projectId="p1" board={board} sprintId="s1" />);
+    await screen.findByText("Sprint 12 (1) · 5 Story points");
+
+    const addButton = await screen.findByRole("button", {
+      name: "Add Fix the login redirect to the sprint",
+    });
+    fireEvent.click(addButton);
+
+    expect(screen.getByText("Sprint 12 (2) · 8 Story points")).toBeTruthy();
+
+    // "Fix the login redirect" now lives in PlanningView's own sprintOverlay state (it was
+    // never part of the static board.tasks fixture), so removing it here is real local state
+    // changing, not the mocked board.applySprintChange no-op the removal-only case would hit
+    fireEvent.click(
+      screen.getByRole("button", { name: "Remove Fix the login redirect from the sprint" })
+    );
+
+    expect(screen.getByText("Sprint 12 (1) · 5 Story points")).toBeTruthy();
+    settle({});
   });
 });

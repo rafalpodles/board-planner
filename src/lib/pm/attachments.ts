@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { projectForUpload, UPLOAD_BUCKET } from "@/lib/upload-ownership";
 import { connectDB } from "@/lib/db";
 import { PmAttachment } from "@/types";
 
@@ -40,9 +41,18 @@ export async function loadAttachmentDataUri(
     return null;
   }
 
-  const bucket = new mongoose.mongo.GridFSBucket(db, { bucketName: "uploads" });
+  const bucket = new mongoose.mongo.GridFSBucket(db, { bucketName: UPLOAD_BUCKET });
   const found = await bucket.find({ _id: objectId }).toArray();
   if (found.length === 0) return null;
+
+  // Before the bytes are read, not after. The route beside this one refuses first and streams
+  // second; here the whole file was drained and only then compared, which let a caller from
+  // another board spend the server's memory on files it could never see — and left a gap where
+  // any log line or cache write added between the two would leak them (BP-290 review).
+  //
+  // `projectForUpload` rather than an open-coded read of the metadata, so one rule — and one set
+  // of tests — serves both paths.
+  if (projectForUpload(found[0]) !== String(projectId)) return null;
 
   const chunks: Buffer[] = [];
   try {
@@ -52,8 +62,6 @@ export async function loadAttachmentDataUri(
   } catch {
     return null;
   }
-
-  if (String(found[0].metadata?.project || "") !== String(projectId)) return null;
 
   const mime = (found[0].metadata?.contentType as string) || a.mimeType;
   if (!IMAGE_MIME_TYPES.has(mime)) return null;

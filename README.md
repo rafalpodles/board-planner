@@ -28,6 +28,8 @@ Everything is optional. Put overrides in a `.env` file next to `docker-compose.y
 | `MONGODB_URI` | `mongodb://mongo:27017/boardplanner` | Point the app at your own MongoDB instead of the bundled one |
 | `COOKIE_ALLOW_INSECURE` | `1` (compose only) | Set to `1` to issue the session cookie without `Secure` and without the `__Host-` prefix, for an instance served over plain HTTP |
 | `APP_ORIGIN` | `http://localhost:${APP_PORT}` | Comma-separated list of origins the app is served from, used to reject cross-site writes |
+| `PUBLIC_ORIGIN` | `http://localhost:${APP_PORT}` (compose); otherwise `APP_ORIGIN` when it names exactly one origin | The one address this instance calls its own. Required for the MCP endpoint and PM OAuth |
+| `TRUSTED_PROXY_HOPS` | `0` | How many proxies append to `X-Forwarded-For` in front of this app. At `0` the header is ignored and the login throttle counts every anonymous caller together |
 | `OPENAI_API_KEY` | — | AI task generation |
 | `OPENROUTER_API_KEY`, `PM_MODEL`, `PM_MAX_TOKENS`, `PM_DAILY_TURN_CAP`, `PM_SCHEDULER_TICK_MS` | — | PM agent |
 | `ENCRYPTION_KEY` | — | 32 bytes (hex or base64) encrypting stored integration tokens at rest. Without it those tokens cannot be saved at all |
@@ -48,6 +50,21 @@ so the only remaining proof is `Origin` matching this list. Set it to the URL us
 `https://board.example.com`, or `http://192.168.1.10:3000` for a LAN self-host — with no trailing
 path.
 
+`TRUSTED_PROXY_HOPS` decides whether `X-Forwarded-For` means anything here. It is the only thing
+the failed-login throttle can key on, and the header is a header: with nothing in front of the app,
+a caller who varies it gets a fresh counter every request and the throttle never bites. So the
+default is `0` — the header is not read at all, and anonymous callers share one bucket at a raised
+threshold. **Behind a reverse proxy, set it to the number of proxies that append to that header**
+(`1` for a single nginx or Caddy in front, `2` if there is a CDN in front of that).
+
+Getting the number wrong has consequences in both directions, so it is worth being right. Set it
+**too high** and the header is refused as not matching what you described — every caller then shares
+the anonymous bucket, which is bounded but shared. Set it **too low** and the address counted is one
+your proxy chain writes rather than the client's, so every request on earth may land in the same
+bucket. The anonymous and shared buckets carry much larger ceilings than the per-address ones for
+exactly this reason, but a badly-set value still degrades the throttle rather than merely blunting
+it.
+
 `ENCRYPTION_KEY` encrypts the GitHub, GitLab, Coda and MCP credentials the app stores. Generate one
 with `openssl rand -hex 32`. Without it those fields simply cannot be saved — the app answers the
 save with an error rather than writing the token in cleartext, and says so at startup. A key that is
@@ -64,6 +81,20 @@ when it meets one it cannot read.
 it is passed as a build argument and baked into the image. Changing it means rebuilding —
 `docker compose up -d --build`. The image is therefore built per deployment, which is what the
 compose file does; there is no runtime override.
+
+`PUBLIC_ORIGIN` exists because the other two cannot answer "what is this instance's own address".
+`APP_ORIGIN` is a list, and nothing says which entry is the public one — the compose default lists
+`localhost`, and a deployment that also accepts a LAN origin has no reason to put the public one
+first. `NEXT_PUBLIC_APP_URL` is baked into the image, so in the running container it is whatever the
+*build machine* had, which is why it is not consulted at all: as a fallback it was always set and
+always wrong, and it silently replaced the intended failure with a discovery document naming
+`localhost`.
+
+So **an instance reachable at anything other than the compose default must set `PUBLIC_ORIGIN`.**
+The MCP endpoint, both `/.well-known` documents and the PM agent's OAuth `redirect_uri` are built
+from it and answer **500** when it resolves to nothing — deliberately, because the value they used
+to fall back to was a request header (BP-316). It must be an `http`/`https` URL; `board.example.com:8443`
+is not one, however much it looks like it.
 
 MongoDB is pinned to **4.4** and is not published on a host port — only the app container reaches it.
 The aggregations deliberately avoid operators that only exist from 5.0, and pinning the version is

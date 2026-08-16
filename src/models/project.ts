@@ -95,6 +95,12 @@ const projectSchema = new Schema<IProject>(
       type: [customFieldSchema],
       default: [],
     },
+    // Which custom field's numeric value sums as this project's estimate; "" means it
+    // doesn't. Kept in sync by the custom-fields route when that field is archived or deleted.
+    estimateFieldId: {
+      type: String,
+      default: "",
+    },
     webhooks: {
       type: [{
         url: { type: String, required: true, trim: true },

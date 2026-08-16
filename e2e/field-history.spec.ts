@@ -54,16 +54,16 @@ async function entriesAfterSave(expected: number, name?: string): Promise<Entry[
   return fieldEntries(name);
 }
 
-/** The rail's row for one field. Every row but the checkbox opens a popup. */
-function pickerRow(page: Page, name: string): Locator {
-  return page.locator('button[aria-haspopup="dialog"]').filter({ hasText: name });
-}
-
-/** The row itself, whichever shape it has — the picker button, or the checkbox's own container. */
+/** The row itself, whichever shape it has — the picker button, or the field's own container. */
 function fieldRow(page: Page, name: string): Locator {
   return page
     .getByText(name, { exact: true })
     .locator("xpath=ancestor::*[self::button or self::div][1]");
+}
+
+/** The rows a value is typed into rather than chosen from: text, number, date. */
+function fieldInput(page: Page, name: string): Locator {
+  return page.locator(`input[aria-label="${name}"]`);
 }
 
 /**
@@ -72,7 +72,19 @@ function fieldRow(page: Page, name: string): Locator {
  * selection lands on top of a value that has been rolled back — which is how "iOS, Web" became
  * "iOS" on a CI runner while passing on a faster laptop every time.
  */
-async function expectRailShows(page: Page, name: string, text: string) {
+async function expectRailShows(page: Page, name: string, text: string, type: string) {
+  // A yes/no field is a switch, so its state is the checked flag rather than any text — the
+  // "Yes"/"No" here is what the history entry says, which the caller asserts separately
+  if (type === "checkbox") {
+    await expect(page.getByRole("switch", { name })).toBeChecked({ checked: text === "Yes" });
+    return;
+  }
+  // Text, number and date are typed in the row: the value lives in the input, not in the
+  // row's text, and an empty one shows its placeholder
+  if (type === "text" || type === "number" || type === "date") {
+    await expect(fieldInput(page, name)).toHaveValue(text);
+    return;
+  }
   const row = fieldRow(page, name);
   // Compared piece by piece: a multiselect draws one chip per option, so the row reads "iOSWeb"
   // where the history entry reads "iOS, Web". Same value, two renderings — the ordering guarantee
@@ -83,8 +95,8 @@ async function expectRailShows(page: Page, name: string, text: string) {
 }
 
 async function openPicker(page: Page, name: string): Promise<Locator> {
-  await pickerRow(page, name).click();
-  return page.getByLabel(name, { exact: true });
+  await page.getByRole("combobox", { name, exact: true }).click();
+  return page.getByRole("listbox", { name, exact: true });
 }
 
 async function chooseOption(page: Page, field: string, option: string) {
@@ -94,25 +106,25 @@ async function chooseOption(page: Page, field: string, option: string) {
 
 async function toggleChip(page: Page, field: string, option: string) {
   const panel = await openPicker(page, field);
-  await panel.getByRole("button", { name: option, exact: true }).click();
+  await panel.getByRole("option", { name: option, exact: true }).click();
   // The panel stays open for a second pick; close it so the next row is clickable
   await page.keyboard.press("Escape");
 }
 
-/** The one row that is not a picker: the rail draws a checkbox inline. */
+/** The switch: its own input is sr-only, so the click goes to the label wrapping it. */
 async function setCheckbox(page: Page, field: string, on: boolean) {
-  const box = page
-    .getByText(field, { exact: true })
-    .locator("xpath=ancestor::div[1]")
-    .locator('input[type="checkbox"]');
-  if (on) await box.check();
-  else await box.uncheck();
+  const toggle = page.getByRole("switch", { name: field, exact: true });
+  if ((await toggle.isChecked()) !== on) {
+    await toggle.locator("xpath=ancestor::label[1]").click();
+  }
 }
 
 async function typeValue(page: Page, field: string, value: string) {
-  const panel = await openPicker(page, field);
-  await panel.locator("input").fill(value);
-  await page.keyboard.press("Escape");
+  const input = fieldInput(page, field);
+  await input.fill(value);
+  // Blurring commits it the way leaving the field does, and returns a number row to the
+  // rounded reading it shows when it is not being edited
+  await input.blur();
 }
 
 async function openHistory(page: Page): Promise<Locator> {
@@ -224,7 +236,7 @@ for (const { type, name, steps } of LIFECYCLES) {
         oldValue: step.from,
         newValue: step.to,
       });
-      await expectRailShows(page, name, step.to);
+      await expectRailShows(page, name, step.to, type);
     }
 
     // Nothing else moved: a field no lifecycle touches must stay silent throughout

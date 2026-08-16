@@ -87,7 +87,9 @@ export function Modal({
             </button>
           </div>
         )}
-        <div className={`min-h-0 overflow-y-auto ${bare ? "flex-1" : ""}`}>{children}</div>
+        <div className={`min-h-0 overflow-y-auto scroll-ring-room ${bare ? "flex-1" : ""}`}>
+          {children}
+        </div>
       </div>
     </div>
   );

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
-import { getClientIp } from "@/lib/auth";
+import { getClientIp, MIN_PASSWORD_LENGTH, PASSWORD_COST_FACTOR } from "@/lib/auth";
 import { withAuth } from "@/lib/middleware";
 import {
   EXCLUSIVE_SOURCE_ATTEMPTS,
@@ -11,8 +11,6 @@ import {
 } from "@/lib/rate-limit";
 import { revokeUserSessions } from "@/lib/session";
 import { User } from "@/models/user";
-
-const MIN_PASSWORD_LENGTH = 8;
 
 export const PUT = withAuth(async (request, { user }) => {
   await connectDB();
@@ -66,7 +64,7 @@ export const PUT = withAuth(async (request, { user }) => {
     return NextResponse.json({ error: "Current password is incorrect" }, { status: 400 });
   }
 
-  record.password = await bcrypt.hash(newPassword, 10);
+  record.password = await bcrypt.hash(newPassword, PASSWORD_COST_FACTOR);
   await record.save();
 
   await revokeUserSessions(user._id, user.sessionId);

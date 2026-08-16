@@ -82,7 +82,7 @@ const SECTIONS: SectionMeta[] = [
     blurb:
       "The vocabulary tasks are described with: what they are, what part of the product they touch, and any extra fields you need.",
     keywords:
-      "categories custom fields templates tags dropdown required",
+      "categories custom fields templates tags dropdown required estimate velocity story points size sprint",
     access: "member",
     icon: (
       <Icon d="M20.6 13.4L12 22l-9-9V3h10l7.6 7.6a2 2 0 010 2.8zM7.5 7.5h.01" />
@@ -344,7 +344,7 @@ export default function ProjectSettingsPage() {
                 }}
                 placeholder="Search settings..."
                 aria-label="Search settings"
-                className="w-full rounded-lg border border-border bg-bg-input px-3 py-2 text-sm placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary"
+                className="focus-ring w-full rounded-lg border border-border bg-bg-input px-3 py-2 text-sm placeholder:text-text-muted"
               />
             </div>
 

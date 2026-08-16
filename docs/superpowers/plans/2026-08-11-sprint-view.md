@@ -1098,6 +1098,35 @@ it("disables the row for somebody who does not own the project", () => {
   render(<TaskFieldsSection {...props} project={{ ...project, canAdmin: false }} />);
   expect((screen.getByLabelText("Estimate field") as HTMLSelectElement).disabled).toBe(true);
 });
+
+it("offers to create a field when the project has no numeric one", () => {
+  render(<TaskFieldsSection {...props} project={{ ...project, customFields: noNumericFields }} />);
+  expect(screen.queryByLabelText("Estimate field")).toBeNull();
+  expect(screen.getByRole("button", { name: /Create .Story points./ })).toBeTruthy();
+});
+
+it("creates the field and designates it in one action", async () => {
+  api.post.mockResolvedValue([{ _id: "f-new", name: "Story points", fieldType: "number" }]);
+  render(<TaskFieldsSection {...props} project={{ ...project, customFields: noNumericFields }} />);
+  fireEvent.click(screen.getByRole("button", { name: /Create .Story points./ }));
+  await waitFor(() =>
+    expect(api.post).toHaveBeenCalledWith("/api/projects/p1/custom-fields", {
+      name: "Story points",
+      fieldType: "number",
+    })
+  );
+  await waitFor(() =>
+    expect(api.put).toHaveBeenCalledWith("/api/projects/p1", { estimateFieldId: "f-new" })
+  );
+});
+
+it("does not designate anything when creating the field fails", async () => {
+  api.post.mockRejectedValue({ status: 409 });
+  render(<TaskFieldsSection {...props} project={{ ...project, customFields: noNumericFields }} />);
+  fireEvent.click(screen.getByRole("button", { name: /Create .Story points./ }));
+  await waitFor(() => expect(toast).toHaveBeenCalled());
+  expect(api.put).not.toHaveBeenCalled();
+});
 ```
 
 - [ ] **Step 2: Run and watch them fail**
@@ -1112,7 +1141,13 @@ Expected: FAIL.
 
 A `SettingRow` labelled "Estimate field", hint "Summed for sprint progress and velocity", holding a `Select` over `activeFields(project.customFields).filter(f => f.fieldType === "number")` plus a "None" option. Saving goes through `PUT /api/projects/:id`, then `patchProject({ estimateFieldId })`.
 
-The row is disabled when `!project.canAdmin`, unlike its neighbours in this section: the project `PUT` is `withProjectOwner` (`route.ts:48`) while the custom-field writes beside it are `withProjectAccess` (`custom-fields/[fieldId]/route.ts:13`). The hint says so, rather than letting a member discover it on save.
+**When the project has no numeric field at all, the row shows a create button instead of the picker.** This is not polish — without it the whole task ships dark. Checked against the development database on 2026-08-12: `TP`, `MOB` and `ORB` between them have dropdowns, multiselects and a checkbox, and **not one field of type `number`**. A picker whose only option is "None" would leave every existing project with no estimates, no header figures and no chart, and no hint as to why.
+
+So: no numeric fields → the row reads that there are none and offers `Create "Story points"`, which POSTs a `number` field of that name to `/api/projects/:id/custom-fields` and, on success, designates the id it gets back. One action, from the place the person is already looking. If the create fails — a name clash returns 409, since a project may already have a "Story points" dropdown — nothing is designated and the error is surfaced; a half-done setup that silently points at nothing is worse than a refusal.
+
+Once the project has at least one numeric field the shortcut disappears and the picker takes over. Creating a second one belongs to the custom-field editor in this same section, which already does it properly.
+
+The row is disabled when `!project.canAdmin`, unlike its neighbours in this section: the project `PUT` is `withProjectOwner` (`route.ts:48`) while the custom-field writes beside it are `withProjectAccess` (`custom-fields/[fieldId]/route.ts:13`). The hint says so, rather than letting a member discover it on save. Note this means a member may create a custom field but not designate it — deliberate, and the reason the create button is gated on the same `canAdmin` as the picker.
 
 - [ ] **Step 4: Run the tests**
 

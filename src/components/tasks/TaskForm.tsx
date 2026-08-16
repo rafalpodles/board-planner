@@ -4,6 +4,8 @@ import { useState, useCallback, FormEvent, useEffect, type CSSProperties } from 
 import { useApi } from "@/hooks/use-api";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
+import { MultiSelect } from "@/components/ui/MultiSelect";
+import { Switch } from "@/components/ui/Switch";
 import { MarkdownEditor } from "@/components/ui/MarkdownEditor";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
@@ -204,7 +206,7 @@ export function TaskForm({
               value={aiPrompt}
               onChange={(e) => setAiPrompt(e.target.value)}
               placeholder="Describe what you need, e.g. 'add dark mode toggle'"
-              className="flex-1 bg-bg border border-border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+              className="focus-ring flex-1 bg-bg border border-border rounded px-3 py-1.5 text-sm"
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   e.preventDefault();
@@ -326,7 +328,7 @@ export function TaskForm({
             type="date"
             value={dueDate}
             onChange={(e) => setDueDate(e.target.value)}
-            className="w-full bg-bg-input border border-border rounded px-3 py-1.5 text-sm min-h-[44px] focus:outline-none focus:ring-1 focus:ring-primary"
+            className="focus-ring w-full bg-bg-input border border-border rounded px-3 py-1.5 text-sm min-h-[44px]"
           />
         </div>
       </div>
@@ -353,7 +355,7 @@ export function TaskForm({
                 max={365}
                 value={recurrenceInterval}
                 onChange={(e) => setRecurrenceInterval(Math.max(1, parseInt(e.target.value) || 1))}
-                className="w-16 sm:w-20 bg-bg-input border border-border rounded px-3 py-1.5 text-sm min-h-[44px] focus:outline-none focus:ring-1 focus:ring-primary"
+                className="focus-ring w-16 sm:w-20 bg-bg-input border border-border rounded px-3 py-1.5 text-sm min-h-[44px]"
               />
               <span className="text-sm text-text-muted">
                 {recurrenceFreq === "daily" ? "day(s)" : recurrenceFreq === "weekly" ? "week(s)" : "month(s)"}
@@ -382,18 +384,14 @@ export function TaskForm({
             const val = customFieldValues[field._id];
             if (field.fieldType === "checkbox") {
               return (
-                <label key={field._id} className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={!!val}
-                    onChange={(e) =>
-                      setCustomFieldValues((prev) => ({ ...prev, [field._id]: e.target.checked }))
-                    }
-                    className="rounded border-border"
-                  />
-                  {field.name}
-                  {field.required && <span className="text-danger">*</span>}
-                </label>
+                <Switch
+                  key={field._id}
+                  label={field.required ? `${field.name} *` : field.name}
+                  checked={!!val}
+                  onChange={(checked) =>
+                    setCustomFieldValues((prev) => ({ ...prev, [field._id]: checked }))
+                  }
+                />
               );
             }
             if (field.fieldType === "dropdown") {
@@ -412,40 +410,21 @@ export function TaskForm({
               );
             }
             if (field.fieldType === "multiselect") {
-              const picked = Array.isArray(val) ? (val as string[]) : [];
               return (
-                <div key={field._id}>
-                  <label className="block text-sm font-medium mb-1">
-                    {field.name}
-                    {field.required && <span className="text-danger">*</span>}
-                  </label>
-                  <div className="flex flex-wrap gap-2">
-                    {orderedOptions(field).map((option) => {
-                      const on = picked.includes(option.id);
-                      return (
-                        <button
-                          key={option.id}
-                          type="button"
-                          onClick={() =>
-                            setCustomFieldValues((prev) => ({
-                              ...prev,
-                              [field._id]: on
-                                ? picked.filter((id) => id !== option.id)
-                                : [...picked, option.id],
-                            }))
-                          }
-                          aria-pressed={on}
-                          className={`focus-ring chip chip-custom rounded-full px-2.5 py-1 text-xs transition-opacity ${
-                            on ? "" : "opacity-40"
-                          }`}
-                          style={{ "--chip": option.color } as CSSProperties}
-                        >
-                          {option.value}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
+                <MultiSelect
+                  key={field._id}
+                  label={field.name}
+                  required={field.required}
+                  value={Array.isArray(val) ? (val as string[]) : []}
+                  options={orderedOptions(field).map((o) => ({
+                    value: o.id,
+                    label: o.value,
+                    color: o.color,
+                  }))}
+                  onChange={(next) =>
+                    setCustomFieldValues((prev) => ({ ...prev, [field._id]: next }))
+                  }
+                />
               );
             }
             return (
@@ -491,7 +470,7 @@ export function TaskForm({
                     )
                   )
                 }
-                className="rounded border-border"
+                className="focus-ring rounded border-border"
               />
               <input
                 type="text"
@@ -503,7 +482,7 @@ export function TaskForm({
                     )
                   )
                 }
-                className="flex-1 bg-transparent border-b border-transparent focus:border-border text-sm py-0.5 focus:outline-none"
+                className="focus-ring flex-1 bg-transparent border-b border-transparent focus:border-border text-sm py-0.5"
               />
               <button
                 type="button"
@@ -523,7 +502,7 @@ export function TaskForm({
             value={newChecklistItem}
             onChange={(e) => setNewChecklistItem(e.target.value)}
             placeholder="Add checklist item..."
-            className="flex-1 bg-bg-input border border-border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+            className="focus-ring flex-1 bg-bg-input border border-border rounded px-3 py-1.5 text-sm"
             onKeyDown={(e) => {
               if (e.key === "Enter" && newChecklistItem.trim()) {
                 e.preventDefault();

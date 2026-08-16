@@ -1,13 +1,15 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import { ApiUser, PRIORITY_LABELS } from "@/types";
+import { ApiProjectCategory, ApiUser, PRIORITY_LABELS } from "@/types";
+import { categoryColor } from "@/lib/category-colors";
 import { Avatar, PriorityBars } from "./atoms";
 import type { TaskDraft } from "./useTaskEditor";
 
 interface MobileSummaryProps {
   draft: TaskDraft;
   assignee: ApiUser | undefined;
+  categories: ApiProjectCategory[];
   onOpenDetails: () => void;
 }
 
@@ -15,7 +17,12 @@ const CHIP =
   "inline-flex items-center gap-1.5 rounded-full border border-border px-2.5 py-1.5 text-xs";
 
 /** The handful of fields worth seeing without opening the sheet */
-export function MobileSummary({ draft, assignee, onOpenDetails }: MobileSummaryProps) {
+export function MobileSummary({
+  draft,
+  assignee,
+  categories,
+  onOpenDetails,
+}: MobileSummaryProps) {
   return (
     <div className="flex flex-wrap gap-2 lg:hidden">
       <span className={CHIP}>
@@ -23,8 +30,13 @@ export function MobileSummary({ draft, assignee, onOpenDetails }: MobileSummaryP
         {PRIORITY_LABELS[draft.priority]}
       </span>
       <span
-        className={`${CHIP} chip border-transparent`}
-        style={{ "--chip": "var(--color-primary)" } as CSSProperties}
+        className={`${CHIP} chip chip-custom border-transparent`}
+        style={
+          {
+            "--chip":
+              categoryColor(categories, draft.category) || "var(--color-text-muted)",
+          } as CSSProperties
+        }
       >
         {draft.category}
       </span>

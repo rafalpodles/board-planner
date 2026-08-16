@@ -561,7 +561,7 @@ export function PmChat({
             rows={2}
             disabled={working}
             style={{ maxHeight: MAX_INPUT_HEIGHT }}
-            className="block w-full overflow-y-auto bg-bg-input border border-border rounded py-2 pl-10 pr-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary resize-none disabled:opacity-60"
+            className="focus-ring block w-full overflow-y-auto bg-bg-input border border-border rounded py-2 pl-10 pr-3 text-sm resize-none disabled:opacity-60"
           />
         </div>
         {working ? (
