@@ -28,7 +28,12 @@ enum WorkerProcessError: LocalizedError {
         case .noNode:
             return "Could not find node on this machine. Install Node, then try again."
         case .noWorkerBuild(let path):
-            return "This app has no worker to run, and there is none in \(path) either. Reinstall the app."
+            // "Reinstall" was the advice here once, and it never helped: an app assembled without
+            // the worker has none to reinstall, and the same build produces the same bundle again.
+            return """
+                This build of the app carries no worker, and there is none in \(path) either. \
+                Rebuild it with menubar/bundle.sh, which is what puts the worker inside the app.
+                """
         case .preflightUnreadable(let output):
             return "Could not read the preflight result: \(output)"
         }

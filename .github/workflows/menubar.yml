@@ -26,3 +26,13 @@ jobs:
         run: swift build
       - name: Tests
         run: swift test
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # Building and testing the Swift never saw the defect this covers: `make app` assembled a
+      # bundle with no worker in it, which fails at the end of onboarding rather than at build time.
+      # Assembling it here is the only place that difference shows.
+      - name: The assembled app carries a worker
+        run: |
+          make app
+          test -f .build/CPMenubar.app/Contents/Resources/worker/main.js
