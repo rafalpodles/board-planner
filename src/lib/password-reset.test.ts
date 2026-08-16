@@ -97,9 +97,13 @@ describe("spending a link", () => {
 });
 
 describe("invalidating", () => {
-  it("drops every link for the account, spent or not", async () => {
+  // A spent link is already unspendable, and its row is the only thing that can tell somebody
+  // clicking a second time that they used it rather than that it was never real. Dropping it turns
+  // "This link has already been used" into "This link is not valid" for everyone who double-clicks
+  // their own email.
+  it("drops the links that could still be spent, and leaves the spent one behind", async () => {
     await invalidateResetTokens("u1");
 
-    expect(deleteMany).toHaveBeenCalledWith({ user: "u1" });
+    expect(deleteMany).toHaveBeenCalledWith({ user: "u1", usedAt: null });
   });
 });

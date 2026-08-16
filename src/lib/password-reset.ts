@@ -67,8 +67,13 @@ export async function releaseResetToken(token: string): Promise<void> {
   await PasswordResetToken.updateOne({ tokenHash: sha256(token) }, { $set: { usedAt: null } });
 }
 
-/** Every outstanding link for this account stops working. */
+/**
+ * Every outstanding link for this account stops working. A link already spent is left where it is,
+ * because it is already unspendable and its row is the only thing that can tell somebody clicking a
+ * second time that they have used it, rather than that it was never real. The TTL sweeps it a day
+ * after expiry, which is the same reason the index waits.
+ */
 export async function invalidateResetTokens(userId: Types.ObjectId | string): Promise<void> {
   await connectDB();
-  await PasswordResetToken.deleteMany({ user: userId });
+  await PasswordResetToken.deleteMany({ user: userId, usedAt: null });
 }
