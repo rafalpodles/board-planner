@@ -95,7 +95,11 @@ export async function recordFailedAttempt(key: string): Promise<void> {
         },
       },
     ],
-    { upsert: true }
+    // updatePipeline, because the update above is an aggregation pipeline and mongoose 9 refuses an
+    // array without it. Without this every failed login threw, answered 500, and recorded nothing —
+    // the counter BP-318 exists to keep. The in-memory model the unit tests use never runs this
+    // call, so only a request against a real database shows it.
+    { upsert: true, updatePipeline: true }
   );
 }
 

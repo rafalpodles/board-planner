@@ -6,6 +6,7 @@ const userFindById = vi.fn();
 const userCountDocuments = vi.fn();
 const userExists = vi.fn();
 const revokeUserSessions = vi.fn();
+const invalidateResetTokens = vi.fn();
 const logInstanceAudit = vi.fn();
 const hash = vi.fn();
 
@@ -18,6 +19,7 @@ vi.mock("@/lib/auth", () => ({
 }));
 vi.mock("@/lib/grants", () => ({ check, accessibleProjectIds: vi.fn() }));
 vi.mock("@/lib/session", () => ({ revokeUserSessions }));
+vi.mock("@/lib/password-reset", () => ({ invalidateResetTokens }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 vi.mock("bcryptjs", () => ({ default: { hash } }));
 vi.mock("@/models/user", () => ({
@@ -215,6 +217,8 @@ describe("PUT /api/users/:id — an admin sets a password", () => {
     // No exception argument: the admin holds none of the target's sessions, and whoever knew the
     // old password must not stay signed in on one
     expect(revokeUserSessions).toHaveBeenCalledWith("target-1");
+    // A reset link already in their inbox would otherwise still overwrite what the admin just set
+    expect(invalidateResetTokens).toHaveBeenCalledWith("target-1");
     // The actor, not just the subject: a log naming the target as the one who acted is worse than
     // no log, because it reads as a confession by the wrong person
     expect(logInstanceAudit).toHaveBeenCalledWith(

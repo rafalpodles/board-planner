@@ -4,6 +4,7 @@ import { connectDB } from "@/lib/db";
 import { MIN_PASSWORD_LENGTH, PASSWORD_COST_FACTOR } from "@/lib/auth";
 import { isValidEmail, normaliseEmail } from "@/lib/email";
 import { logInstanceAudit } from "@/lib/instanceAudit";
+import { invalidateResetTokens } from "@/lib/password-reset";
 import { duplicateKeyField } from "@/lib/mongo-errors";
 import { withAdmin } from "@/lib/middleware";
 import { revokeUserSessions } from "@/lib/session";
@@ -76,9 +77,10 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
     target.role = body.role as "admin" | "member";
   }
 
-  // A worker's or the PM's account is deliberately un-loginable, and both halves of that promise
-  // live here: a password makes it loginable, and an address makes it resettable. Refusing one and
-  // not the other only moves the escape a slice later.
+  // A worker's account is deliberately un-loginable, and both halves of that promise live here: a
+  // password makes it loginable, and an address makes it resettable. Refusing one and not the other
+  // only moves the escape a slice later. Note this keys on `kind`, so it does not cover the `pm`
+  // identity, which is stored as a person — BP-348.
   const wantsCredentialChange = body.email !== undefined || body.password !== undefined;
   if (wantsCredentialChange && target.kind === "machine") {
     return NextResponse.json(
@@ -153,6 +155,9 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
   }
 
   if (passwordWasSet) {
+    // A link already in the target's inbox would otherwise still work, and overwrite the password
+    // the admin has just handed them
+    await invalidateResetTokens(target._id);
     // Before the save, not after: a revoke that throws here leaves the account exactly as it was,
     // and the admin retries. The other order commits the new password, answers 500, and leaves the
     // old holder signed in — a failure that reads to the admin as "nothing happened".
@@ -177,6 +182,12 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
       user: admin._id,
       target: target.username,
     });
+  }
+
+  if (emailWasChanged) {
+    // A link already sent to the old address would otherwise keep working for its hour — which is
+    // exactly the address this change is moving away from
+    await invalidateResetTokens(target._id);
   }
 
   // The quieter half of the same takeover: repointing an address takes an account over at the next
