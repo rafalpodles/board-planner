@@ -181,6 +181,15 @@ export interface ISession {
   createdAt: Date;
 }
 
+export interface IPasswordResetToken {
+  _id: Types.ObjectId;
+  tokenHash: string;
+  user: Types.ObjectId | IUser;
+  expiresAt: Date;
+  usedAt: Date | null;
+  createdAt: Date;
+}
+
 export interface IApiToken {
   _id: Types.ObjectId;
   user: Types.ObjectId | IUser;
@@ -1219,6 +1228,7 @@ export const INSTANCE_AUDIT_ACTIONS = [
   "worker_command_sent",
   "user_password_reset",
   "user_email_changed",
+  "user_password_reset_by_email",
 ] as const;
 
 export type InstanceAuditAction = (typeof INSTANCE_AUDIT_ACTIONS)[number];

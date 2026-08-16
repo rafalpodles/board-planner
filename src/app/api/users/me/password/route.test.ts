@@ -4,6 +4,7 @@ const getAuthUser = vi.fn();
 const compare = vi.fn();
 const userFindById = vi.fn();
 const revokeUserSessions = vi.fn();
+const invalidateResetTokens = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/rateLimit", async () => {
@@ -21,6 +22,7 @@ vi.mock("@/lib/session", () => ({
   revokeUserSessions,
   ProvenanceError: class ProvenanceError extends Error {},
 }));
+vi.mock("@/lib/password-reset", () => ({ invalidateResetTokens }));
 vi.mock("@/lib/grants", () => ({ check: vi.fn(), accessibleProjectIds: vi.fn() }));
 vi.mock("bcryptjs", () => ({ default: { compare, hash: vi.fn().mockResolvedValue("new-hash") } }));
 vi.mock("@/models/user", () => ({ User: { findById: userFindById } }));

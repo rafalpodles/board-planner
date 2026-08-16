@@ -4,6 +4,7 @@ import { useState, FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { safeNextPath } from "@/lib/next-path";
 import Image from "next/image";
+import Link from "next/link";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { useAuth } from "@/hooks/use-auth";
@@ -96,6 +97,15 @@ export default function LoginPage() {
                 : "Sign In"}
           </Button>
         </form>
+
+        {/* Only when signing in: it answers nothing on a form that is creating an account */}
+        {!isRegister && (
+          <p className="mt-4 text-center text-sm">
+            <Link href="/forgot" className="text-text-muted underline hover:text-text">
+              Forgot your password?
+            </Link>
+          </p>
+        )}
 
         <button
           onClick={() => setIsRegister(!isRegister)}
