@@ -24,7 +24,7 @@ function ctx(over: Partial<StepContext> = {}) {
       merge: vi.fn(async () => {}),
     },
     commit: vi.fn(async () => {}),
-    state: { prUrl: "", merged: false, summary: "", lastResult: completed },
+    state: { committed: false, pushed: false, prUrl: "", merged: false, summary: "", lastResult: completed },
     timeoutMs: 1000,
     onEvent: vi.fn(),
     ...over,
@@ -102,6 +102,29 @@ describe("runStep — a model step", () => {
       const c = ctx({ executor: { execute: vi.fn(async () => ({ kind })) } as never });
       expect(await runStep(entry({ capability: "edit" }), c)).toEqual({ kind });
     }
+  });
+
+  // The comment on that try/catch says letting it throw would destroy the only copy of the work,
+  // and nothing exercised it: the commit spy in this file could not reject
+  it("turns a failed commit into the step's own error rather than letting it throw", async () => {
+    const c = ctx({
+      commit: vi.fn(async () => {
+        throw new Error("git commit failed: pre-commit hook");
+      }),
+    });
+
+    const outcome = await runStep(entry({ capability: "edit" }), c);
+
+    expect(outcome).toEqual({ kind: "error", message: expect.stringContaining("pre-commit hook") });
+    expect(c.state.committed).toBe(false);
+  });
+
+  it("records that it committed, so an exit after it keeps the worktree", async () => {
+    const c = ctx();
+
+    await runStep(entry({ capability: "edit" }), c);
+
+    expect(c.state.committed).toBe(true);
   });
 
   // The gate context takes one result and a composed agent produces several

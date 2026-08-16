@@ -175,6 +175,8 @@ describe("createApiClient", () => {
     const api = createApiClient(config, fetchMock as never, identityStore);
 
     await expect(api.claim("CP", "run-1")).resolves.toBeNull();
+    // Handed back, like the no-agent case: returning null alone holds it for the whole lease
+    expect(String(fetchMock.mock.calls.at(-1)?.[0])).toContain("/tasks/t1/release");
   });
 
   // The route is src/app/api/projects/[projectId]/runs; it takes the worker from the body

@@ -38,8 +38,11 @@ describe("createBudget", () => {
 
 describe("clampCeiling", () => {
   // The same trust applyPolicy withholds over the rest of the policy: the worker recomputes
-  it("refuses a ceiling that would outlive the lease, whatever the server said", () => {
-    expect(clampCeiling(4 * 60 * 60_000)).toBeLessThan(LEASE_MS);
+  // Not merely "under the lease": the server's clock starts at the claim and the worker's at the
+  // run, and the claim round trip and the worktree sit between them. toBeLessThan(LEASE_MS) passes
+  // for any margin at all, including a margin of one millisecond.
+  it("keeps a quarter hour under the lease, so the gap between the two clocks fits", () => {
+    expect(clampCeiling(4 * 60 * 60_000)).toBe(LEASE_MS - 15 * 60_000);
   });
 
   it("keeps a sane one", () => {

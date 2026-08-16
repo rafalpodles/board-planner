@@ -21,12 +21,12 @@ vi.mock("@/lib/worker-service", () => ({
   verdictFor,
   PROTOCOL_VERSION: 1,
 }));
-vi.mock("@/lib/task-service", () => ({ claimNextTask, releaseExpiredTasks, releaseTask: vi.fn() }));
-// Resolving an agent is tested in agent-snapshot.test.ts; here it only has to succeed so the route
-// gets past it
-vi.mock("@/lib/agent-snapshot", () => ({
-  snapshotFor: vi.fn(async () => ({ agentId: "a1", name: "Default", sequence: [] })),
-}));
+const releaseTask = vi.fn();
+vi.mock("@/lib/task-service", () => ({ claimNextTask, releaseExpiredTasks, releaseTask }));
+// Which agent a project resolves to is agent-snapshot.test.ts's subject. What matters here is the
+// branch where it resolves to none, which no test reached while this always succeeded.
+const snapshotFor = vi.fn(async () => ({ agentId: "a1", name: "Default", sequence: [] }));
+vi.mock("@/lib/agent-snapshot", () => ({ snapshotFor }));
 vi.mock("@/lib/middleware", () => ({
   resolveProjectId,
   protocolOf: (r: Request) => Number(r.headers.get("x-cp-protocol") ?? NaN),
@@ -87,7 +87,9 @@ beforeEach(() => {
   verifyWorkerCredential.mockResolvedValue({ _id: OID, assignments: [] });
   verdictFor.mockReturnValue({ ok: true });
   claimNextTask.mockResolvedValue(hydrated({ _id: "t1", taskNumber: 1 }));
+  snapshotFor.mockResolvedValue({ agentId: "a1", name: "Default", sequence: [] });
   releaseExpiredTasks.mockResolvedValue(0);
+  releaseTask.mockResolvedValue(undefined);
 });
 
 describe("POST /tasks/claim", () => {
@@ -143,6 +145,18 @@ describe("POST /tasks/claim", () => {
     expect(body).toMatchObject({ _id: "t1", taskNumber: 1 });
     expect(body.agent).toMatchObject({ agentId: "a1", name: "Default" });
     expect(body._doc).toBeUndefined();
+  });
+
+  // Holding a task no machine can run parks it behind the two-hour lease. 204 rather than an error
+  // because the worker's loop treats a failed claim as a cycle failure and retries every poll —
+  // nothing here is claimable until somebody fixes the project, which is what 204 means.
+  it("hands the task back and reports an empty queue when no agent resolves", async () => {
+    snapshotFor.mockResolvedValue(null as never);
+
+    const response = await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
+
+    expect(response.status).toBe(204);
+    expect(releaseTask).toHaveBeenCalledWith(OID, "t1", { refund: true });
   });
 
   it("reports an empty queue as 204", async () => {

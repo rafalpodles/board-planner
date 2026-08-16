@@ -540,6 +540,7 @@ describe("runTask", () => {
     await runTask(h.deps, merging);
 
     const reason = h.reporter.released.mock.calls[0][1];
+    expect(reason).toMatch(/cp-158\/worker/);
     expect(reason).toMatch(/https:\/\/x\/pull\/7/);
     expect(delivery.merge).not.toHaveBeenCalled();
   });
@@ -1242,5 +1243,6 @@ describe("whether a run merges", () => {
 
     expect(h.delivery.merge).toHaveBeenCalled();
     expect(h.reporter.merged).toHaveBeenCalled();
+    expect(h.reporter.delivered).not.toHaveBeenCalled();
   });
 });
