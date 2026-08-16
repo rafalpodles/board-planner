@@ -90,8 +90,17 @@ describe("GET /api/uploads/[fileId]", () => {
     bucketHas();
     const missing = await GET(request(), ctx());
 
-    expect(refused.status).toBe(missing.status);
-    expect(await refused.text()).toBe(await missing.text());
+    bucketHas(storedFile({}));
+    const unstamped = await GET(request(), ctx());
+
+    // All three arms, byte for byte: an attacker enumerating ids must not be able to tell "exists
+    // but not yours" from "exists but has no owner" from "no such file" (BP-290 review)
+    const answers = [refused, missing, unstamped];
+    const statuses = new Set(answers.map((r) => r.status));
+    const bodies = new Set(await Promise.all(answers.map((r) => r.text())));
+
+    expect(statuses).toEqual(new Set([404]));
+    expect(bodies.size).toBe(1);
   });
 
   it("refuses an unauthenticated caller before looking at the bucket", async () => {
@@ -116,6 +125,7 @@ describe("GET /api/uploads/[fileId]", () => {
     const response = await GET(request(), ctx());
 
     expect(response.status).toBe(404);
+    expect(await response.text()).toBe("File not found");
     expect(check).not.toHaveBeenCalled();
     expect(openDownloadStream).not.toHaveBeenCalled();
   });
