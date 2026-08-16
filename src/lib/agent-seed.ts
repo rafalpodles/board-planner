@@ -1,4 +1,5 @@
 import { Agent } from "@/models/agent";
+import { Project } from "@/models/project";
 import { AgentBlock } from "@/models/agentBlock";
 import { AgentComposition, IAgentBlock } from "@/types";
 import { GATE_KINDS } from "./agent-kinds";
@@ -59,6 +60,9 @@ export const BUILT_IN_BLOCKS: SeedBlock[] = [
 
 /** The agent a project that names none falls back to. snapshotFor depends on this name. */
 export const SEEDED_DEFAULT_NAME = "Default";
+
+/** The one that carries a Merge step; projects that used to merge automatically adopt it. */
+export const MERGING_AGENT_NAME = "Merges its own work";
 
 // Exactly today's pipeline. Adopting agents has to be a no-op for a project that never touches one,
 // so this is what a project naming no agent of its own runs.
@@ -141,10 +145,10 @@ export async function seedAgents() {
   );
 
   await Agent.updateOne(
-    { scope: "global", name: "Merges its own work" },
+    { scope: "global", name: MERGING_AGENT_NAME },
     {
       $setOnInsert: {
-        name: "Merges its own work",
+        name: MERGING_AGENT_NAME,
         description:
           "Everything the default does, and merges the pull request once every check has passed.",
         scope: "global",
@@ -167,5 +171,26 @@ export async function seedAgents() {
       },
     },
     { upsert: true }
+  );
+
+  await adoptTheMergingAgent();
+}
+
+/**
+ * A project that merged its own work did so through `worker.policy.autoMerge`, and that flag is
+ * gone: merging is a Merge step now. Without this, every such project silently falls back to the
+ * Default agent, which stops at the pull request — the worker would keep running and quietly stop
+ * doing the last thing the project asked of it.
+ *
+ * Only where no agent has been chosen, so it never overrides a decision somebody has since made,
+ * and it matches nothing on the next boot.
+ */
+async function adoptTheMergingAgent() {
+  const merging = await Agent.findOne({ scope: "global", name: MERGING_AGENT_NAME }, "_id").lean();
+  if (!merging) return;
+
+  await Project.updateMany(
+    { "worker.policy.autoMerge": true, "worker.agent": { $in: [null, undefined] } },
+    { $set: { "worker.agent": merging._id } }
   );
 }
