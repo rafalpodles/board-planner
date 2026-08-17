@@ -34,6 +34,19 @@ jobs:
         env:
           MONGODB_URI: mongodb://127.0.0.1:1/build-does-not-connect
 
+      # The Dockerfile copies only .next/standalone, and whether the instrumentation hook gets
+      # packaged into it is decided by a non-recursive scan of the app directory's parent — so a
+      # file one directory too high builds cleanly, emits its chunk, and is simply absent from the
+      # image, taking the PM scheduler and all seeding with it. The ordinary build above cannot see
+      # that: it passed while the image was broken (BP-356).
+      - name: Standalone output carries the instrumentation hook
+        run: |
+          BUILD_STANDALONE=1 npm run build
+          test -f .next/standalone/.next/server/instrumentation.js \
+            || { echo "::error::instrumentation.js is missing from .next/standalone — register() will not run in the Docker image"; exit 1; }
+        env:
+          MONGODB_URI: mongodb://127.0.0.1:1/build-does-not-connect
+
   worker:
     name: Worker — the package npm test never reaches
     runs-on: ubuntu-latest

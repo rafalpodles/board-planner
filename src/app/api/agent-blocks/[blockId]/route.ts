@@ -23,10 +23,15 @@ export const PUT = withAuth(async (request, { params, user }) => {
       { status: 403 }
     );
   }
-  // A block's prompt is instructions a worker executes on somebody's checkout, so editing one is
-  // the author's call. DELETE already said so; this said nothing.
-  if (block.createdBy && String(block.createdBy) !== String(user._id) && user.role !== "admin") {
-    return NextResponse.json({ error: "Not yours to change" }, { status: 403 });
+  // Authoring a block became instance-admin in BP-345, and editing one is authoring its prompt
+  // again — the field the worker executes. Ownership is no longer enough on its own: blocks created
+  // by ordinary members before that change still name them as `createdBy`, and a `createdBy` that
+  // is empty for any reason used to leave the block editable by anyone at all.
+  if (user.role !== "admin") {
+    return NextResponse.json(
+      { error: "Only an instance admin can change a block" },
+      { status: 403 }
+    );
   }
 
   const body = await request.json();
@@ -60,8 +65,13 @@ export const DELETE = withAuth(async (_request, { params, user }) => {
       { status: 400 }
     );
   }
-  if (block.createdBy && String(block.createdBy) !== String(user._id) && user.role !== "admin") {
-    return NextResponse.json({ error: "Not yours to delete" }, { status: 403 });
+  // Same bar as authoring and editing, and for the same reason as PUT above: ownership alone left
+  // pre-BP-345 member-authored blocks, and any block with an empty createdBy, open to anyone.
+  if (user.role !== "admin") {
+    return NextResponse.json(
+      { error: "Only an instance admin can delete a block" },
+      { status: 403 }
+    );
   }
 
   // Deleting a block an agent still names would leave that agent referring to nothing, and the

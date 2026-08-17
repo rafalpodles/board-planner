@@ -4,6 +4,7 @@ import { connectDB } from "@/lib/db";
 import { getClientIp, MIN_PASSWORD_LENGTH, PASSWORD_COST_FACTOR } from "@/lib/auth";
 import { withAuth } from "@/lib/middleware";
 import {
+  clearAccountAttempts,
   EXCLUSIVE_SOURCE_ATTEMPTS,
   lockoutKey,
   sourceKey,
@@ -67,6 +68,11 @@ export const PUT = withAuth(async (request, { user }) => {
 
   record.password = await bcrypt.hash(newPassword, PASSWORD_COST_FACTOR);
   await record.save();
+
+  // Immediately after the write, for the same reason the reset route does it there: the two calls
+  // below can reject, and a throw between them would leave the password changed and the lockout
+  // standing (BP-353)
+  await clearAccountAttempts(user.username).catch(() => {});
 
   // Somebody who changes their password after asking for a reset link has answered the question
   // themselves; the link in their inbox must not still be able to overwrite this

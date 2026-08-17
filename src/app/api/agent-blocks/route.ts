@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { withAuth } from "@/lib/middleware";
+import { withAdmin, withAuth } from "@/lib/middleware";
 import { AgentBlock } from "@/models/agentBlock";
 import { allBlocks, freeBlockKey, toApiBlock } from "@/lib/agent-service";
 import { BLOCK_KINDS, STEP_CAPABILITIES, StepCapability } from "@/types";
@@ -11,7 +11,12 @@ export const GET = withAuth(async () => {
   return NextResponse.json(blocks.map(toApiBlock));
 });
 
-export const POST = withAuth(async (request, { user }) => {
+// A step block is a prompt the worker runs on the operator's machine with writes allowed, so
+// authoring one is an instance-level act, not something any account on the board may do. Composing
+// an agent out of existing blocks stays open (POST /api/agents), and choosing which agent a task
+// runs under is a project-admin act (updateTask) — those three together are what stop an ordinary
+// member reaching the machine. BP-345.
+export const POST = withAdmin(async (request, { user }) => {
   await connectDB();
   const body = await request.json();
 

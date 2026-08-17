@@ -1,5 +1,6 @@
 import { connectDB } from "@/lib/db";
 import { getClientIp, verifyCredentials } from "@/lib/auth";
+import { checkProvenance } from "@/lib/session";
 import { lockoutKey, sourceKey, withLockout } from "@/lib/rate-limit";
 import { accessibleProjectIds } from "@/lib/grants";
 import { User } from "@/models/user";
@@ -86,8 +87,8 @@ function htmlPage(body: string, status = 200): Response {
   );
 }
 
-function errorPage(message: string): Response {
-  return htmlPage(`<h1>Authorization error</h1><p class="sub">${escapeHtml(message)}</p>`, 400);
+function errorPage(message: string, status = 400): Response {
+  return htmlPage(`<h1>Authorization error</h1><p class="sub">${escapeHtml(message)}</p>`, status);
 }
 
 function hiddenFields(p: AuthParams): string {
@@ -206,6 +207,30 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  // What this closes is CSRF from somebody's browser: a page on another origin auto-submitting this
+  // form, where the victim's cookies ride along and `Sec-Fetch-Site` is a forbidden header the page
+  // cannot forge. The login route has refused that for a while; this endpoint verifies a credential
+  // and grants a consent, and did not.
+  //
+  // What it does NOT close, despite reaching the same throttle counters as the login route under the
+  // same keys: a script spending somebody else's lockout budget. A script sets `Sec-Fetch-Site`
+  // itself, so the refusal costs it one header — the same reasoning /oauth/register already records
+  // about its own guard. The aimable lockout is answered in rate-limit.ts, by giving it an exit.
+  //
+  // The consent and login forms are served by the GET above, from this instance's own origin, so a
+  // genuine submission is same-origin — verified in a real browser across all three entry paths.
+  // The cross-site step of the flow is that initial GET, which checkProvenance ignores because it
+  // only inspects mutating methods.
+  if (!checkProvenance(req).ok) {
+    // 403, matching provenanceRefusal everywhere else: a 400 here is indistinguishable from
+    // "Unknown client" and "PKCE required", which makes cross-site attempts unalertable in an
+    // access log.
+    return errorPage(
+      "This form was submitted from another site, so it was refused. Start again from this instance.",
+      403
+    );
+  }
+
   await connectDB();
   const form = await req.formData();
   const phase = String(form.get("phase") || "login");
