@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
 import { getClientIp } from "@/lib/auth";
 import { isEmailConfigured, isValidEmail, normaliseEmail, sendEmail } from "@/lib/email";
+import { renderEmail } from "@/lib/email-template";
 import { APP_NAME } from "@/lib/brand";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { withAuth } from "@/lib/middleware";
@@ -184,25 +185,50 @@ export const PUT = withAuth(async (request, { user }) => {
     });
     // Told to the address losing the ability to recover the account, not the one gaining it: the
     // person who needs to hear about this is the one who did not do it.
-    void notifyPreviousAddress(previousEmail, user.username);
+    void notifyPreviousAddress(previousEmail, user.username, updates.email);
   }
 
   return NextResponse.json(updated);
 });
 
-async function notifyPreviousAddress(previousEmail: string, username: string): Promise<void> {
+/** Enough of the new address to recognise it, not enough to hand it to whoever reads the old inbox. */
+function maskAddress(address: string): string {
+  const [local, domain] = address.split("@");
+  if (!local || !domain) return "•••";
+  return `${local.slice(0, 1)}•••@•••.${domain.split(".").pop()}`;
+}
+
+async function notifyPreviousAddress(
+  previousEmail: string,
+  username: string,
+  newEmail: string
+): Promise<void> {
   if (!previousEmail || !isEmailConfigured()) return;
   try {
+    const { html, text } = renderEmail({
+      preheader: `This address no longer resets the password for ${username}.`,
+      kicker: "Account security",
+      heading: `This address no longer recovers the account ${username}`,
+      alert: {
+        tone: "warning",
+        lines: [
+          "If this wasn't you, whoever made the change can now request a reset link to their own inbox.",
+          "Ask an instance administrator to set a password on the account — that is the only step that locks them out.",
+        ],
+      },
+      rows: [
+        { label: "Account", value: username },
+        { label: "Changed", value: new Date().toUTCString() },
+        { label: "New address", value: maskAddress(newEmail) },
+      ],
+      outro: ["If you made this change yourself, there's nothing to do."],
+      footer: ["Sent once, to the previous address on the account. This notice cannot be turned off."],
+    });
     await sendEmail({
       to: previousEmail,
       subject: `The email address on your ${APP_NAME} account changed`,
-      text: [
-        `The email address for ${username} was changed, so this address can no longer be used to`,
-        "reset that account's password.",
-        "",
-        "If that was not you, ask an administrator to set a password for the account — whoever made",
-        "this change can otherwise request a reset link to their own inbox.",
-      ].join("\n"),
+      text,
+      html,
     });
   } catch (err) {
     // Nobody is waiting on this, so an unhandled rejection here would take the process down over a
