@@ -5,7 +5,15 @@ import { PropertyRail } from "./PropertyRail";
 import type { TaskDraft } from "./useTaskEditor";
 import { ApiCustomField, ApiSprint, ApiUser } from "@/types";
 
-afterEach(cleanup);
+// The Agent row is the only one whose editability depends on the viewer (BP-345), so the rail now
+// reads auth. Default to admin, which is what every other test here assumes it can click.
+const isAdmin = vi.hoisted(() => ({ value: true }));
+vi.mock("@/hooks/use-auth", () => ({ useAuth: () => ({ isAdmin: isAdmin.value }) }));
+
+afterEach(() => {
+  cleanup();
+  isAdmin.value = true;
+});
 
 const draft: TaskDraft = {
   title: "A task",
@@ -270,5 +278,46 @@ describe("PropertyRail", () => {
     expect(screen.getByText(/Reported by Claude Code/)).toBeTruthy();
     screen.getByRole("button", { name: "Delete task" }).click();
     expect(onDelete).toHaveBeenCalled();
+  });
+});
+
+/**
+ * The agent decides what runs on the operator's machine, so the server refuses the write from
+ * anyone below project admin. A picker that 403s on click would be the worse half of both — the
+ * value stays readable, the control goes away.
+ */
+describe("the Agent row and who may change it", () => {
+  const AGENTS = [
+    { _id: "a1", name: "Default", scope: "global", description: "" },
+    { _id: "a2", name: "With security review", scope: "global", description: "" },
+  ] as never;
+
+  function agentRow() {
+    return [...screen.getAllByRole("combobox"), ...screen.getAllByRole("button")].find((el) =>
+      (el.textContent || "").startsWith("Agent")
+    );
+  }
+
+  it("is a picker for an admin", () => {
+    renderRail({ agents: AGENTS, draft: { ...draft, agent: "a2" } });
+
+    expect(agentRow()?.getAttribute("role")).toBe("combobox");
+    expect(agentRow()?.textContent).toContain("With security review");
+  });
+
+  it("shows the name but offers no control to anyone else", () => {
+    isAdmin.value = false;
+    renderRail({ agents: AGENTS, draft: { ...draft, agent: "a2" } });
+
+    const row = screen.getByText("Agent").closest("div");
+    expect(row?.textContent).toContain("With security review");
+    expect(agentRow()).toBeUndefined();
+  });
+
+  it("says Project default to a non-admin when the task names no agent", () => {
+    isAdmin.value = false;
+    renderRail({ agents: AGENTS });
+
+    expect(screen.getByText("Agent").closest("div")?.textContent).toContain("Project default");
   });
 });

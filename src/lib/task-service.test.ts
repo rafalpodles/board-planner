@@ -78,7 +78,12 @@ vi.mock("@/models/task", () => ({
   Task: { findOneAndUpdate, updateMany, updateOne, findOne, find, findByIdAndUpdate, findById: taskFindById, create: taskCreate },
 }));
 vi.mock("@/models/project", () => ({ Project: { findById, findOneAndUpdate: projectFindOneAndUpdate } }));
-vi.mock("@/models/user", () => ({ User: { findOne: userFindOne } }));
+const userFindById = vi.fn();
+vi.mock("@/models/user", () => ({ User: { findOne: userFindOne, findById: userFindById } }));
+const grantsCheck = vi.fn();
+vi.mock("@/lib/grants", () => ({ check: grantsCheck }));
+const agentFindById = vi.fn();
+vi.mock("@/models/agent", () => ({ Agent: { findById: agentFindById } }));
 vi.mock("@/models/comment", () => ({ Comment: {} }));
 const sprintExists = vi.fn();
 vi.mock("@/models/sprint", () => ({ Sprint: { exists: sprintExists } }));
@@ -1597,5 +1602,69 @@ describe("createTask and a foreign sprint", () => {
     await createTask("p1", "actor", { title: "x", sprint: OURS });
 
     expect(taskCreate.mock.calls.at(-1)?.[0].sprint).toBe(OURS);
+  });
+});
+
+/**
+ * Choosing the agent chooses what runs on the operator's machine, under bypassPermissions, in
+ * their own checkout. Before BP-345 this field sat on updateTask's ordinary whitelist behind
+ * withProjectAccess, so any member of a worker-enabled project could point a task at a
+ * composition of their own and hand it to the worker.
+ */
+describe("who may choose a task's agent", () => {
+  const AGENT = "69a52e3b399b27d3cbb2c5a5";
+
+  beforeEach(() => {
+    findOneAndUpdate.mockReset();
+    findOneAndUpdate.mockReturnValue({
+      populate: () => Promise.resolve({ _id: "t1", taskNumber: 1, title: "x", execution: {} }),
+    });
+    findById.mockReset();
+    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    grantsCheck.mockClear();
+    userFindById.mockReturnValue({ lean: () => Promise.resolve({ _id: "actor", role: "member" }) });
+    agentFindById.mockReturnValue({
+      lean: () => Promise.resolve({ _id: AGENT, scope: "global" }),
+    });
+  });
+
+  it("refuses a member, and writes nothing", async () => {
+    grantsCheck.mockResolvedValue(false);
+
+    const result = await updateTask("p1", "t1", { agent: AGENT }, "actor");
+
+    expect(result).toMatchObject({ ok: false, status: 403 });
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  // Reverting to the project default still changes what the machine will run, so the bar is the
+  // same. "" is what a cleared picker sends.
+  it("refuses a member clearing it back to the project default", async () => {
+    grantsCheck.mockResolvedValue(false);
+
+    const result = await updateTask("p1", "t1", { agent: "" }, "actor");
+
+    expect(result).toMatchObject({ ok: false, status: 403 });
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  // Without this the two refusals above would pass just as well on a route that refuses everyone
+  it("lets a project admin choose one", async () => {
+    grantsCheck.mockResolvedValue(true);
+
+    const result = await updateTask("p1", "t1", { agent: AGENT }, "actor");
+
+    expect(result.ok).toBe(true);
+    expect(setStage(findOneAndUpdate.mock.calls[0][1]).agent).toBe(AGENT);
+  });
+
+  // The gate is on the field, not on the request: an ordinary edit must not start needing admin
+  it("leaves an edit that names no agent alone", async () => {
+    grantsCheck.mockResolvedValue(false);
+
+    const result = await updateTask("p1", "t1", { title: "renamed" }, "actor");
+
+    expect(result.ok).toBe(true);
+    expect(grantsCheck).not.toHaveBeenCalled();
   });
 });
