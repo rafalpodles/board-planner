@@ -1,16 +1,7 @@
 import { test, expect } from "@playwright/test";
 import mongoose from "mongoose";
 import { changeStatus, claimNextTask, releaseTask, updateTask } from "@/lib/task-service";
-import {
-  ADMIN_ID,
-  ADMIN_PASSWORD,
-  ADMIN_USERNAME,
-  E2E_MONGODB_URI,
-  MEMBER_ID,
-  PROJECT_ID,
-  PROJECT_KEY,
-  seed,
-} from "./seed";
+import { ADMIN_ID, E2E_MONGODB_URI, MEMBER_ID, PROJECT_ID, seed } from "./seed";
 
 /**
  * BP-240. These run against a real MongoDB rather than through a browser, because what is under
@@ -27,10 +18,12 @@ import {
  * BP-358 renamed this file from claim-scope.spec.ts: the claim no longer reads a project-wide
  * scope/nominee pair, so there is nothing left called "claim scope" to be a spec about. What
  * decides a claim now is the machine's owner — `{ assignee: ownerId, assignedBy: ownerId }` — or
- * the identity of a run it is resuming, and an agent naming the hand-over. The settings-screen
- * describe at the bottom is the one part left untouched: that UI and the schema field behind it
- * still exist, unread by anything now, until the settings-removal task deletes them — this file
- * only rewrites what actually changed.
+ * the identity of a run it is resuming, and an agent naming the hand-over.
+ *
+ * The settings screen that used to configure the scope and the nominee is gone with them —
+ * WorkersSection.test.tsx pins what replaced it (the enable switch and its hint), and
+ * e2e/instance-audit.spec.ts already drives that same switch through a real page and a real save.
+ * Nothing project-wide is left here to be a settings spec about either.
  */
 
 const APPROVED = "todo";
@@ -383,73 +376,5 @@ test.describe("releasing gives back exactly what the claim took", () => {
     expect(moved.ok).toBe(true);
 
     expect((await read(free)).assignee).toBe(String(OWNER));
-  });
-});
-
-/**
- * The setting also has to be reachable, because a safe default nobody can widen is a broken
- * product rather than a safe one — and a route that moved role while its component still gated on
- * `isAdmin` is a mistake this repo has made more than once.
- *
- * Untouched by BP-358: claimNextTask stopped reading this setting, but the schema field and this
- * screen are both still live until the settings-removal task deletes them, so an admin toggling
- * this control today still gets the persistence this describe verifies.
- */
-test.describe("through the settings screen", () => {
-  const SETTINGS = `/projects/${PROJECT_KEY}/settings`;
-
-  async function openWorkers(page: import("@playwright/test").Page) {
-    // Without one the card refuses to offer the toggle at all — no machine can be matched to a
-    // project that names no repository, and the hint under test lives on that toggle
-    const handle = await db();
-    await handle
-      .collection("projects")
-      .updateOne(
-        { _id: PROJECT_ID },
-        { $set: { repositoryUrl: "git@github.com:rafalpodles/board-planner.git" } }
-      );
-
-    await page.goto("/login");
-    await page.getByLabel("Username").fill(ADMIN_USERNAME);
-    await page.getByLabel("Password").fill(ADMIN_PASSWORD);
-    await page.getByRole("button", { name: "Sign In" }).click();
-    await expect(page).toHaveURL(/\/projects/);
-    await page.goto(SETTINGS);
-    await page.getByRole("button", { name: "Workers", exact: true }).first().click();
-    // By an option it contains, not by its text: a <select> renders no text of its own, so
-    // hasText matches nothing however plainly the control reads on screen
-    return page
-      .getByRole("combobox")
-      .filter({ has: page.getByRole("option", { name: "Only tasks assigned to the worker" }) });
-  }
-
-  test("an admin can read the scope and widen it, and the board keeps the choice", async ({
-    page,
-  }) => {
-    const select = await openWorkers(page);
-    await expect(select).toBeVisible();
-
-    // The enable toggle's hint has to describe the scope, or it promises work will be picked up
-    // that never will be
-    await expect(page.getByText("Only tasks handed over below are picked up")).toBeVisible();
-
-    await select.selectOption("any");
-    await expect(page.getByText(/Any unassigned task in an approved column/)).toBeVisible();
-    // Awaited, not merely clicked: the save bar closes on the committed draft, and reading the
-    // collection off that alone raced the write and failed on a fix that was already correct
-    await Promise.all([
-      page.waitForResponse(
-        (r) => r.url().includes("/api/projects/") && r.request().method() === "PUT"
-      ),
-      page.getByRole("button", { name: "Save changes" }).click(),
-    ]);
-    await expect(page.getByRole("button", { name: "Save changes" })).toBeHidden();
-
-    // Pinned, not merely equal to a default: a value that happens to match one cannot be told
-    // apart from a value nobody chose
-    const handle = await db();
-    const project = await handle.collection("projects").findOne({ _id: PROJECT_ID });
-    expect(project?.worker?.policy?.claimScope).toBe("any");
-    expect(project?.worker?.policyOverrides).toContain("claimScope");
   });
 });

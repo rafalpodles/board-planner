@@ -959,7 +959,7 @@ describe("every way back to the board clears the assignment", () => {
   //
   // Compared by shape, which proves every exit path applies the same rule and nothing about what
   // the rule means — a shape assertion is how the `""`-is-truthy bug shipped. The meaning is
-  // e2e/claim-scope.spec.ts, which runs these updates against a real MongoDB.
+  // e2e/claim-ownership.spec.ts, which runs these updates against a real MongoDB.
   const CLEARED = CLEAR_WORKER_ASSIGNEE.assignee;
   // Same shape check, same reason, for the field that has to clear alongside it: an assignedBy
   // left behind here would go on describing a person who has nothing to do with the empty assignee.

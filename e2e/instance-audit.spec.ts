@@ -126,10 +126,12 @@ test("changing worker policy without changing whether they run records nothing",
   await page.goto(SETTINGS);
   await page.getByRole("button", { name: "Workers", exact: true }).first().click();
 
+  // Any policy field does: the row has no label association, so it is found by the row it shares
+  // with its own text rather than by an accessible label
   await page
-    .getByRole("combobox")
-    .filter({ has: page.getByRole("option", { name: "Only tasks assigned to the worker" }) })
-    .selectOption("any");
+    .locator("xpath=//span[normalize-space()='Base branch']/..")
+    .getByRole("textbox")
+    .fill("develop");
   await Promise.all([
     page.waitForResponse(
       (r) => r.url().includes("/api/projects/") && r.request().method() === "PUT"

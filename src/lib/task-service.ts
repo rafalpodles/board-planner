@@ -46,8 +46,8 @@ const UNSET_RUN = Object.fromEntries(RUN_FIELDS.map((field) => [field, ""]));
 // `runId`, not `workerId`: workerId is deliberately left behind when a run ends — every reader
 // pairs it with runId to tell a live run from a memory of one. Keying on it here meant an ordinary
 // status change on a long-finished task still cleared its assignee, so "assign it to claude, then
-// drag it to To Do" quietly undid the assignment. Under claimScope "assigned" that is the whole
-// hand-over, and the worker would simply never pick the task up.
+// drag it to To Do" quietly undid the assignment — assignment is still central to the hand-over,
+// and the worker would simply never pick the task up.
 //
 // `assignedByRun` says the claim is what put the assignee there. A claim may now land on a task a
 // person assigned, and releasing it must give the task back to that person rather than blank the

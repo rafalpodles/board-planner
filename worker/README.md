@@ -135,15 +135,17 @@ and `SIGINT` both finish the task in flight before the loop exits.
 
 ## Safety
 
-- **Nothing is claimed that was not offered.** A project's `claimScope` decides what the approved
-  column actually hands over. On `assigned`, the default, a worker takes only tasks assigned to the
-  user that project nominates — so enabling a project claims nothing until somebody hands a task
-  over, one at a time. `any` adds unassigned tasks, which is the whole column. A task assigned to
-  anyone else is never taken under either scope.
+- **Nothing is claimed that was not offered.** A machine takes only a task its own owner assigned
+  to themselves — `{ assignee: ownerId, assignedBy: ownerId }` — and only once that task names an
+  agent, which is the hand-over gesture. A task with no agent is one a person is doing by hand, and
+  no machine looks at it. A task assigned by anyone else is never taken: the approval surface for
+  work somebody *else* hands you is a separate, later change.
 
-  The nominee is an ordinary user a person picks, deliberately not the worker's own identity: that
-  is an auto-created `worker-<id>` account with kind `machine`, excluded from every list the
-  product offers. Keying the predicate on it would have described a hand-over nobody could perform.
+  The owner is the account that approved this machine's enrolment, deliberately not the worker's
+  own identity: that is an auto-created `worker-<id>` account with kind `machine`, excluded from
+  every list the product offers. Keying the predicate on it would have described a hand-over nobody
+  could perform. The one exception is a run this worker already holds — its own claim also matches
+  by identity, so a released task it started is the task it picks back up.
 - **Nothing starts before its blockers finish.** A task whose `blockedBy` still names an unfinished
   task is passed over, and the claim takes the next one that is free instead. Finished means the
   blocker sits in a column with the `done` role, so a board that renamed its last column is read
