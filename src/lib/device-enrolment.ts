@@ -187,12 +187,13 @@ export async function denyDeviceEnrolment(userCode: string): Promise<boolean> {
   return result.modifiedCount > 0;
 }
 
-// Two booleans, worded as autonomy. The pair the validator refuses — merging without review — is
-// unreachable from here by construction, which is the point of offering presets rather than gates.
-export const PRESET_POLICY: Record<WorkerPreset, { reviewGate: boolean; autoMerge: boolean }> = {
-  write: { reviewGate: false, autoMerge: false },
-  review: { reviewGate: true, autoMerge: false },
-  merge: { reviewGate: true, autoMerge: true },
+// A preset names a seeded agent. Reviewing and merging are properties of a composition — whether it
+// carries a Reviewed gate, whether it carries a Merge step — so a preset that set two booleans
+// beside the composition would describe the same decision twice and lose the argument.
+export const PRESET_AGENT: Record<WorkerPreset, string> = {
+  write: "Default",
+  review: "With security review",
+  merge: "Merges its own work",
 };
 
 export function isWorkerPreset(value: unknown): value is WorkerPreset {

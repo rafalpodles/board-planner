@@ -74,6 +74,7 @@ beforeEach(() => {
   api.put.mockResolvedValue({});
   api.get.mockImplementation((url: string) => {
     if (url === "/api/users") return Promise.resolve([]);
+    if (url.startsWith("/api/agent")) return Promise.resolve([]);
     if (url.includes("/tasks/")) return Promise.resolve(task);
     if (url.includes("/sprints")) return Promise.resolve([]);
     return Promise.resolve(project);
@@ -105,6 +106,7 @@ describe("TaskDetail", () => {
   it("renders a task whose creator was deleted", async () => {
     api.get.mockImplementation((url: string) => {
       if (url === "/api/users") return Promise.resolve([]);
+    if (url.startsWith("/api/agent")) return Promise.resolve([]);
       if (url.includes("/tasks/")) return Promise.resolve({ ...task, createdBy: null });
       if (url.includes("/sprints")) return Promise.resolve([]);
       return Promise.resolve(project);

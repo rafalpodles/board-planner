@@ -34,6 +34,29 @@ export async function register() {
         console.log(`Seeded default columns on ${seededColumns.modifiedCount} project(s)`);
       }
 
+      // Caught here rather than left to the outer handler, which the deleted src/ copy of this
+      // file did and this one did not: an instance without the catalog cannot run a worker but is
+      // otherwise usable, and letting the failure through would skip the backfill and the PM
+      // scheduler below it (BP-356).
+      const { seedAgents } = await import("@/lib/agent-seed");
+      await seedAgents().catch((error) => {
+        console.error("Failed to seed the agent catalog:", error);
+      });
+
+      const { Agent } = await import("@/models/agent");
+      const fallback = await Agent.findOne({ scope: "global", name: "Default" }, "_id").lean();
+      if (fallback) {
+        // A worker-enabled project with no agent would claim a task and then have nothing to run,
+        // so the backfill has to reach every one of them, not only newly created ones.
+        const backfilled = await Project.updateMany(
+          { "worker.agent": { $in: [null, undefined] } },
+          { $set: { "worker.agent": fallback._id } }
+        );
+        if (backfilled.modifiedCount > 0) {
+          console.log(`Backfilled the default agent on ${backfilled.modifiedCount} project(s)`);
+        }
+      }
+
       const { startPmScheduler } = await import("@/lib/pm/scheduler");
       startPmScheduler();
       console.log("PM scheduler started");

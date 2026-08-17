@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { reviewGate } from "./review.js";
 import { CommandResult, Runner } from "../exec.js";
 import { ClaimedTask, DiffStats, GateContext } from "../types.js";
+import { claimedTask } from "../__fixtures__/task.js";
 
 const TIMEOUT_MS = 5000;
 
@@ -18,16 +19,7 @@ const patch = [
 function context(diff: Partial<DiffStats> = {}, task: Partial<ClaimedTask> = {}): GateContext {
   return {
     worktreePath: "/wt",
-    task: {
-      taskId: "1",
-      taskKey: "CP-158",
-      taskNumber: 158,
-      title: "Add a thing",
-      description: "body",
-      acceptanceCriteria: [],
-      attempts: 0,
-      ...task,
-    },
+    task: claimedTask(task),
     result: {
       status: "completed",
       summary: "I did exactly what the task asked",
@@ -143,7 +135,11 @@ describe("reviewGate", () => {
     await reviewGate(runner, TIMEOUT_MS).run(context());
 
     const args = run.mock.calls[0][1];
-    expect(args[args.indexOf("--allowedTools") + 1]).toBe("Read Grep Glob");
+    // --tools, not --allowedTools: the latter only skips the permission prompt, so it left the
+    // reviewer able to write while this test said otherwise
+    expect(args[args.indexOf("--tools") + 1]).toBe("Read Grep Glob");
+    expect(args).not.toContain("--allowedTools");
+    expect(args).toContain("--strict-mcp-config");
     expect(args).not.toContain("--permission-mode");
     expect(args[args.indexOf("--model") + 1]).toBe("opus");
   });

@@ -7,7 +7,8 @@ import { subscribeBoardRefresh } from "@/lib/board-refresh";
 import { taskPath } from "@/lib/urls";
 import { timeAgo } from "@/lib/time";
 import { useAuth } from "@/hooks/use-auth";
-import { ApiProject, ApiSprint, ApiTask, ApiUser, RunConflict } from "@/types";
+import { ApiAgent, ApiProject, ApiSprint, ApiTask, ApiUser, RunConflict } from "@/types";
+import { useStore } from "@/app/(app)/agents/store";
 import { effectiveColumns } from "@/lib/columns";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Modal } from "@/components/ui/Modal";
@@ -43,6 +44,7 @@ export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailP
   const [task, setTask] = useState<ApiTask | null>(null);
   const [project, setProject] = useState<ApiProject | null>(null);
   const [sprints, setSprints] = useState<ApiSprint[]>([]);
+  const { allAgents: agents } = useStore();
   const [users, setUsers] = useState<ApiUser[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -97,6 +99,7 @@ export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailP
       task={task}
       project={project}
       sprints={sprints}
+      agents={agents}
       users={users}
       onClose={onClose}
       onReload={loadData}
@@ -110,6 +113,7 @@ interface TaskDetailViewProps {
   task: ApiTask;
   project: ApiProject;
   sprints: ApiSprint[];
+  agents: ApiAgent[];
   users: ApiUser[];
   onClose: () => void;
   onReload: () => void;
@@ -121,6 +125,7 @@ function TaskDetailView({
   task,
   project,
   sprints,
+  agents,
   users,
   onClose,
   onReload,
@@ -370,6 +375,7 @@ function TaskDetailView({
             set={set}
             users={users}
             sprints={sprints}
+            agents={agents}
             categories={project.categories || []}
             customFields={project.customFields || []}
             reporter={reporter}
@@ -396,6 +402,7 @@ function TaskDetailView({
           set={set}
           users={users}
           sprints={sprints}
+          agents={agents}
           categories={project.categories || []}
           customFields={project.customFields || []}
           reporter={reporter}

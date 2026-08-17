@@ -1,17 +1,15 @@
 import { childEnv } from "./env.js";
 import { Runner, RunOpts } from "./exec.js";
+import { gitArgs, GIT_SAFE_ENV } from "./git-safety.js";
 import { DiffStats } from "./types.js";
 
 const GIT_TIMEOUT_MS = 60_000;
 const MAX_PATCH_CHARS = 200_000;
 
-// Same neutralisation as repos.ts: this runs against a repository the operator already approved,
-// but an accepted repository's own gitconfig (diff.*.textconv, filter.*.clean, ...) still fires on
-// the next `git diff` unless every invocation, not just the one at bind time, is protected.
 async function git(runner: Runner, args: string[], opts: RunOpts): Promise<string> {
-  const result = await runner.run("git", ["-c", "core.fsmonitor=false", "-c", "core.pager=cat", ...args], {
+  const result = await runner.run("git", gitArgs(args), {
     ...opts,
-    env: { ...childEnv(), ...opts.env, GIT_CONFIG_NOSYSTEM: "1" },
+    env: { ...childEnv(), ...opts.env, ...GIT_SAFE_ENV },
   });
   if (result.timedOut) {
     throw new Error(`git ${args[0]} timed out after ${opts.timeoutMs}ms`);

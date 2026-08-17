@@ -16,6 +16,7 @@ const draft: TaskDraft = {
   dueDate: null,
   checklist: [],
   sprint: null,
+  agent: null,
   recurrence: null,
   customFieldValues: {},
 };
@@ -54,6 +55,7 @@ function renderRail(over: Partial<React.ComponentProps<typeof PropertyRail>> = {
       set={set}
       users={users}
       sprints={sprints}
+      agents={[]}
       categories={[
         { _id: "c1", name: "user-story", color: "#3b82f6" },
         { _id: "c2", name: "bug", color: "#ef4444" },

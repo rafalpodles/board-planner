@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { createWorkspace, reapOrphans, Workspace } from "./workspace.js";
 import { CommandResult } from "./exec.js";
+import { gitArgs } from "./git-safety.js";
 
 const config = {
   repoPath: "/repo",
@@ -12,9 +13,10 @@ function runnerReturning(stdout = "") {
   return { runner: { run }, run };
 }
 
-// Every call now carries the fixed "-c core.fsmonitor=false -c core.pager=cat" prefix (see
-// createWorkspace's git()) — strip it so response maps keep naming the real git subcommand
-const HARDENING_PREFIX = ["-c", "core.fsmonitor=false", "-c", "core.pager=cat"];
+// Every call carries the hardening flags gitArgs prepends — stripped here so the response maps
+// below keep naming the real git subcommand. What those flags ARE is git-safety.test.ts's subject;
+// taking them from the same source is what stops this file breaking every time one is added.
+const HARDENING_PREFIX = gitArgs([]);
 
 function fakeGit(responses: Record<string, Partial<CommandResult>>) {
   const run = vi.fn(async (_command: string, args: string[]): Promise<CommandResult> => {

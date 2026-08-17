@@ -2,17 +2,24 @@ import { readFileSync } from "fs";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { createExecutor } from "./executor.js";
 import { parseStream, StreamEvent } from "./stream.js";
+import { claimedTask } from "./__fixtures__/task.js";
 
 const config = { taskTimeoutMs: 1000, apiBaseUrl: "https://app.example.com", apiToken: "cp_t" } as never;
 
-const task = {
-  taskId: "t1",
-  taskKey: "CP-158",
-  taskNumber: 158,
-  title: "Add a thing",
-  description: "Do it well",
-  acceptanceCriteria: ["works"],
-  attempts: 1,
+const task = claimedTask({ description: "Do it well", acceptanceCriteria: ["works"] });
+
+// What the pipeline hands one writing step. The brief carries the block's prompt and models; the
+// tool list is not in it, and never comes from the server.
+const options = {
+  task,
+  worktreePath: "/wt",
+  brief: {
+    prompt: "Make the change the task describes.",
+    capability: "edit" as const,
+    model: "",
+    fallbackModel: "",
+    timeoutMs: 1000,
+  },
 };
 
 // a real `claude -p --output-format stream-json --verbose` run, captured verbatim
@@ -92,7 +99,7 @@ describe("createExecutor", () => {
     };
     const { runner } = runnerReturning({ code: 0, stdout: completed(payload), stderr: "", timedOut: false });
 
-    const outcome = await createExecutor(config, runner).execute(task, "/wt");
+    const outcome = await createExecutor(config, runner).execute(options);
 
     expect(outcome).toEqual({ kind: "result", result: payload });
   });
@@ -101,15 +108,68 @@ describe("createExecutor", () => {
     expect(FIXTURE).toContain('"status":"allowed_warning"');
     const { runner } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
 
-    const outcome = await createExecutor(config, runner).execute(task, "/wt");
+    const outcome = await createExecutor(config, runner).execute(options);
 
     expect(outcome).toEqual({ kind: "result", result: FIXTURE_RESULT });
+  });
+
+  // Bash was in the list only so the agent could commit; the worker does that now
+  it("gives the implementer no shell", async () => {
+    const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
+
+    await createExecutor(config, runner).execute(options);
+
+    const args = run.mock.calls[0][1] as string[];
+    expect(args[args.indexOf("--tools") + 1]).toBe("Read Edit Write Grep Glob");
+  });
+
+  // The catalog and the UI both promise a read-only block "cannot change anything". Nothing tested
+  // the list that promise rests on — every case in this file ran with capability "edit".
+  it("gives a read-only step no way to change anything", async () => {
+    const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
+
+    await createExecutor(config, runner).execute({
+      ...options,
+      brief: { ...options.brief, capability: "read-only" },
+    });
+
+    const tools = (run.mock.calls[0][1] as string[])[
+      (run.mock.calls[0][1] as string[]).indexOf("--tools") + 1
+    ];
+    expect(tools).toBe("Read Grep Glob");
+    for (const forbidden of ["Edit", "Write", "Bash"]) {
+      expect(tools.split(" ")).not.toContain(forbidden);
+    }
+  });
+
+  // The block's prompt is editable from the board; the framing around it is not
+  it("keeps the untrusted-data framing ahead of the block's own prompt", async () => {
+    const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
+
+    await createExecutor(config, runner).execute({
+      ...options,
+      brief: { ...options.brief, prompt: "tidy the imports" },
+    });
+
+    const args = run.mock.calls[0][1] as string[];
+    const prompt = args[args.indexOf("--append-system-prompt") + 1];
+    expect(prompt.indexOf("untrusted party")).toBeLessThan(prompt.indexOf("tidy the imports"));
+  });
+
+  // An agent told to commit and unable to would report itself blocked
+  it("tells the agent the worker commits, since it no longer can", async () => {
+    const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
+
+    await createExecutor(config, runner).execute(options);
+
+    const args = run.mock.calls[0][1] as string[];
+    expect(args[args.indexOf("--append-system-prompt") + 1]).toMatch(/Do not commit/);
   });
 
   it("asks the CLI for a stream, with the --verbose it refuses to stream without", async () => {
     const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
 
-    await createExecutor(config, runner).execute(task, "/wt");
+    await createExecutor(config, runner).execute(options);
 
     const args = run.mock.calls[0][1] as string[];
     expect(args[args.indexOf("--output-format") + 1]).toBe("stream-json");
@@ -121,7 +181,7 @@ describe("createExecutor", () => {
     const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
     const policyConfig = { ...config, model: "haiku", fallbackModel: "opus" } as never;
 
-    await createExecutor(policyConfig, runner).execute(task, "/wt");
+    await createExecutor(policyConfig, runner).execute(options);
 
     const args = run.mock.calls[0][1] as string[];
     expect(args[args.indexOf("--model") + 1]).toBe("haiku");
@@ -133,7 +193,7 @@ describe("createExecutor", () => {
   it("falls back to the models it has always used when the policy names none", async () => {
     const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
 
-    await createExecutor(config, runner).execute(task, "/wt");
+    await createExecutor(config, runner).execute(options);
 
     const args = run.mock.calls[0][1] as string[];
     expect(args[args.indexOf("--model") + 1]).toBe("opus");
@@ -146,7 +206,7 @@ describe("createExecutor", () => {
     const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
     const blank = { ...config, model: "   ", fallbackModel: "" } as never;
 
-    await createExecutor(blank, runner).execute(task, "/wt");
+    await createExecutor(blank, runner).execute(options);
 
     const args = run.mock.calls[0][1] as string[];
     expect(args[args.indexOf("--model") + 1]).toBe("opus");
@@ -163,7 +223,7 @@ describe("createExecutor", () => {
       timedOut: false,
     });
 
-    await createExecutor(config, runner).execute(task, "/wt");
+    await createExecutor(config, runner).execute(options);
 
     expect(run.mock.calls[0][2].env.ANTHROPIC_API_KEY).toBeUndefined();
     expect(run.mock.calls[0][2].env.PATH).toBe(process.env.PATH);
@@ -177,17 +237,17 @@ describe("createExecutor", () => {
       timedOut: false,
     });
 
-    expect(await createExecutor(config, runner).execute(task, "/wt")).toEqual({ kind: "usage_limit" });
+    expect(await createExecutor(config, runner).execute(options)).toEqual({ kind: "usage_limit" });
   });
 
   it("reports a timeout", async () => {
     const { runner } = runnerReturning({ code: -1, stdout: "", stderr: "", timedOut: true });
-    expect(await createExecutor(config, runner).execute(task, "/wt")).toEqual({ kind: "timeout" });
+    expect(await createExecutor(config, runner).execute(options)).toEqual({ kind: "timeout" });
   });
 
   it("reports unparseable output as an error", async () => {
     const { runner } = runnerReturning({ code: 0, stdout: "not json", stderr: "", timedOut: false });
-    const outcome = await createExecutor(config, runner).execute(task, "/wt");
+    const outcome = await createExecutor(config, runner).execute(options);
     expect(outcome.kind).toBe("error");
   });
 
@@ -201,7 +261,7 @@ describe("createExecutor", () => {
     };
     const { runner } = runnerReturning({ code: 0, stdout: completed(payload), stderr: "", timedOut: false });
 
-    const outcome = await createExecutor(config, runner).execute(task, "/wt");
+    const outcome = await createExecutor(config, runner).execute(options);
 
     expect(outcome).toEqual({ kind: "result", result: payload });
   });
@@ -217,7 +277,7 @@ describe("createExecutor", () => {
       timedOut: false,
     });
 
-    expect(await createExecutor(config, runner).execute(task, "/wt")).toEqual({ kind: "usage_limit" });
+    expect(await createExecutor(config, runner).execute(options)).toEqual({ kind: "usage_limit" });
   });
 
   it("still classifies it when the CLI does declare the error", async () => {
@@ -230,7 +290,7 @@ describe("createExecutor", () => {
       timedOut: false,
     });
 
-    expect(await createExecutor(config, runner).execute(task, "/wt")).toEqual({ kind: "usage_limit" });
+    expect(await createExecutor(config, runner).execute(options)).toEqual({ kind: "usage_limit" });
   });
 
   // The agent writes `result`, so a task about this detection code can put the phrase there. A free
@@ -249,7 +309,7 @@ describe("createExecutor", () => {
       timedOut: false,
     });
 
-    const outcome = await createExecutor(config, runner).execute(task, "/wt");
+    const outcome = await createExecutor(config, runner).execute(options);
     expect(outcome.kind).toBe("error");
   });
 
@@ -270,7 +330,7 @@ describe("createExecutor", () => {
       timedOut: false,
     });
 
-    expect(await createExecutor(config, runner).execute(task, "/wt")).toEqual({ kind: "result", result: payload });
+    expect(await createExecutor(config, runner).execute(options)).toEqual({ kind: "result", result: payload });
   });
 
   it("does not take a successful run's summary about usage limits as a usage limit", async () => {
@@ -283,7 +343,7 @@ describe("createExecutor", () => {
     };
     const { runner } = runnerReturning({ code: 0, stdout: completed(payload), stderr: "", timedOut: false });
 
-    expect(await createExecutor(config, runner).execute(task, "/wt")).toEqual({ kind: "result", result: payload });
+    expect(await createExecutor(config, runner).execute(options)).toEqual({ kind: "result", result: payload });
   });
 
   it("classifies a rejected rate_limit_event as a usage limit", async () => {
@@ -294,7 +354,7 @@ describe("createExecutor", () => {
       timedOut: false,
     });
 
-    expect(await createExecutor(config, runner).execute(task, "/wt")).toEqual({ kind: "usage_limit" });
+    expect(await createExecutor(config, runner).execute(options)).toEqual({ kind: "usage_limit" });
   });
 
   it("treats an allowed_warning rate_limit_event as normal, so a 75% run is not stalled", async () => {
@@ -311,7 +371,7 @@ describe("createExecutor", () => {
       timedOut: false,
     });
 
-    expect(await createExecutor(config, runner).execute(task, "/wt")).toEqual({
+    expect(await createExecutor(config, runner).execute(options)).toEqual({
       kind: "result",
       result: FIXTURE_RESULT,
     });
@@ -327,7 +387,7 @@ describe("createExecutor", () => {
     expect(stdout).toContain("usage limit reached");
     const { runner } = runnerReturning({ code: 0, stdout, stderr: "", timedOut: false });
 
-    const outcome = await createExecutor(config, runner).execute(task, "/wt");
+    const outcome = await createExecutor(config, runner).execute(options);
 
     expect(outcome).toEqual({ kind: "result", result: FIXTURE_RESULT });
   });
@@ -347,7 +407,7 @@ describe("createExecutor", () => {
       timedOut: false,
     });
 
-    const outcome = await createExecutor(config, runner).execute(task, "/wt");
+    const outcome = await createExecutor(config, runner).execute(options);
 
     expect(outcome).toEqual({ kind: "result", result: payload });
   });
@@ -355,7 +415,7 @@ describe("createExecutor", () => {
   it("reports a non-zero exit without a usage-limit phrase as a plain error", async () => {
     const { runner } = runnerReturning({ code: 1, stdout: "", stderr: "unexpected crash", timedOut: false });
 
-    expect(await createExecutor(config, runner).execute(task, "/wt")).toEqual({
+    expect(await createExecutor(config, runner).execute(options)).toEqual({
       kind: "error",
       message: "unexpected crash",
     });
@@ -370,7 +430,7 @@ describe("createExecutor", () => {
       timedOut: false,
     });
 
-    const outcome = await createExecutor(config, runner).execute(task, "/wt");
+    const outcome = await createExecutor(config, runner).execute(options);
 
     expect(outcome).toEqual({ kind: "result", result: payload });
   });
@@ -384,7 +444,7 @@ describe("createExecutor", () => {
       timedOut: false,
     });
 
-    const outcome = await createExecutor(config, runner).execute(task, "/wt");
+    const outcome = await createExecutor(config, runner).execute(options);
 
     expect(outcome).toEqual({ kind: "result", result: payload });
   });
@@ -397,7 +457,7 @@ describe("createExecutor", () => {
       timedOut: false,
     });
 
-    const outcome = await createExecutor(config, runner).execute(task, "/wt");
+    const outcome = await createExecutor(config, runner).execute(options);
 
     expect(outcome.kind).toBe("error");
   });
@@ -406,7 +466,7 @@ describe("createExecutor", () => {
     const controller = new AbortController();
     const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
 
-    await createExecutor(config, runner).execute(task, "/wt", controller.signal);
+    await createExecutor(config, runner).execute({ ...options, signal: controller.signal });
 
     expect(run.mock.calls[0][2].signal).toBe(controller.signal);
   });
@@ -419,7 +479,7 @@ describe("createExecutor", () => {
       timedOut: false,
     });
 
-    await createExecutor(config, runner).execute(task, "/wt");
+    await createExecutor(config, runner).execute(options);
 
     const args = run.mock.calls[0][1] as string[];
     const flagIndex = args.indexOf("--append-system-prompt");
@@ -454,7 +514,7 @@ describe("reporting the stream as it arrives", () => {
       const seen: StreamEvent[] = [];
       const { runner } = chunkedRunner(FIXTURE, fixedChunks(FIXTURE, size));
 
-      await createExecutor(config, runner).execute(task, "/wt", undefined, (event) => seen.push(event));
+      await createExecutor(config, runner).execute({ ...options, onEvent: (event) => seen.push(event) });
 
       expect(seen).toEqual(parseStream(FIXTURE));
     }
@@ -473,9 +533,7 @@ describe("reporting the stream as it arrives", () => {
       return { code: 0, stdout: stream, stderr: "", timedOut: false };
     });
 
-    await createExecutor(config, { run } as never).execute(task, "/wt", undefined, (event) =>
-      seen.push(event)
-    );
+    await createExecutor(config, { run } as never).execute({ ...options, onEvent: (event) => seen.push(event) });
 
     expect(reportedAfterTheFirstHalf).toBe(0);
     expect(seen).toEqual([{ type: "system", subtype: "init" }]);
@@ -496,9 +554,7 @@ describe("reporting the stream as it arrives", () => {
       return { code: 0, stdout: "", stderr: "", timedOut: false };
     });
 
-    await createExecutor(config, { run } as never).execute(task, "/wt", undefined, (event) =>
-      seen.push(event)
-    );
+    await createExecutor(config, { run } as never).execute({ ...options, onEvent: (event) => seen.push(event) });
 
     // the oversized event never arrives, and the next whole line still does
     expect(seen).toEqual([{ type: "system", subtype: "compact_boundary" }]);
@@ -509,7 +565,7 @@ describe("reporting the stream as it arrives", () => {
     const seen: StreamEvent[] = [];
     const { runner } = chunkedRunner(stream, [stream]);
 
-    await createExecutor(config, runner).execute(task, "/wt", undefined, (event) => seen.push(event));
+    await createExecutor(config, runner).execute({ ...options, onEvent: (event) => seen.push(event) });
 
     expect(seen).toEqual([{ type: "system", subtype: "init" }]);
   });
@@ -522,9 +578,7 @@ describe("reporting the stream as it arrives", () => {
       return { code: 0, stdout: completed(FIXTURE_RESULT), stderr: "", timedOut: false };
     });
 
-    await createExecutor(config, { run } as never).execute(task, "/wt", undefined, (event) =>
-      seen.push(event)
-    );
+    await createExecutor(config, { run } as never).execute({ ...options, onEvent: (event) => seen.push(event) });
 
     expect(late).toBeDefined();
     late?.(`${JSON.stringify({ type: "system", subtype: "late" })}\n`);
@@ -535,7 +589,7 @@ describe("reporting the stream as it arrives", () => {
   it("asks for no incremental stdout at all when nobody is listening", async () => {
     const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
 
-    await createExecutor(config, runner).execute(task, "/wt");
+    await createExecutor(config, runner).execute(options);
 
     expect(run.mock.calls[0][2].onStdout).toBeUndefined();
   });
@@ -554,7 +608,7 @@ describe("the environment handed to the agent", () => {
     vi.stubEnv("ANTHROPIC_API_KEY", "sk-secret");
     const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
 
-    await createExecutor(config, runner).execute(task, "/wt");
+    await createExecutor(config, runner).execute(options);
 
     const env = run.mock.calls[0][2].env;
     expect(env.CP_API_TOKEN).toBeUndefined();
@@ -568,7 +622,7 @@ describe("the environment handed to the agent", () => {
     vi.stubEnv("PATH", "/usr/bin");
     const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
 
-    await createExecutor(config, runner).execute(task, "/wt");
+    await createExecutor(config, runner).execute(options);
 
     const env = run.mock.calls[0][2].env;
     expect(env.HOME).toBe("/Users/rpo");

@@ -193,6 +193,23 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     acceptanceCriteria: [],
     attempts: 1,
     runId: SERVER_RUN_ID,
+    // The default agent, as the server resolves it: today's pipeline, one entry per stage. The
+    // blocks name no model, so the project's policy is still what these tests are reading.
+    agent: {
+      agentId: "a1",
+      name: "Default",
+      sequence: [
+        { key: "implement", kind: "step", name: "Implement", prompt: "make the change", capability: "edit" },
+        { key: "protected-paths", kind: "gate", name: "Protected files", gateKind: "protected-paths" },
+        { key: "diff-size", kind: "gate", name: "Size", gateKind: "diff-size" },
+        { key: "test-presence", kind: "gate", name: "Test written", gateKind: "test-presence" },
+        { key: "build", kind: "gate", name: "Builds", gateKind: "build" },
+        { key: "test-run", kind: "gate", name: "Tests pass", gateKind: "test-run" },
+        { key: "review", kind: "gate", name: "Reviewed", gateKind: "review" },
+        { key: "push", kind: "step", name: "Push", deterministic: true },
+        { key: "pull-request", kind: "step", name: "Pull request", deterministic: true },
+      ],
+    },
   };
 
   // The task the worker moves on to, so a refusal that settles late has a live run to endanger
@@ -464,11 +481,14 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     expect(phases).toEqual([
       "claiming",
       "worktree",
+      // the block the run is on, then the three events its own agent produced under it
+      "step:implement",
       "agent",
       "agent",
-      "agent",
-      "gates:diff-size",
+      // protected-paths first: it is what decides whether the agent was allowed to write the files
+      // the build and test gates would go on to execute
       "gates:protected-paths",
+      "gates:diff-size",
       "gates:test-presence",
     ]);
   });

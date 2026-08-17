@@ -89,7 +89,13 @@ public struct WorkerState: Equatable, Sendable {
     }
 
     public func stepperRows() -> [StepRow] {
-        let normalised = currentPhase.map { $0.hasPrefix("gates:") ? "gates" : $0 }
+        // A composed agent names the block it is on — "step:implement", "gates:diff-size". The
+        // stepper shows the fixed stages, so every block folds back onto the stage it belongs to.
+        let normalised = currentPhase.map { phase -> String in
+            if phase.hasPrefix("gates:") { return "gates" }
+            if phase.hasPrefix("step:") { return "agent" }
+            return phase
+        }
         guard let current = normalised, let index = Self.pipeline.firstIndex(of: current) else {
             return Self.pipeline.map { StepRow(phase: $0, state: .pending) }
         }

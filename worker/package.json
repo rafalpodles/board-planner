@@ -7,7 +7,8 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/main.js",
-    "test": "vitest run"
+    "test": "vitest run",
+    "typecheck:tests": "tsc -p tsconfig.test.json"
   },
   "devDependencies": {
     "@types/node": "^26.1.0",

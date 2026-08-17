@@ -18,24 +18,33 @@ is no reason for a second process to hold a copy.
 
 ```
 make test      # swift test
-make app       # test, build release, assemble CPMenubar.app, ad-hoc sign
+make app       # test, build the worker, assemble the app through bundle.sh, ad-hoc sign
 make clean
 ```
 
-`make app` produces `CPMenubar.app`. `LSUIElement` keeps it out of the Dock and ⌘-Tab, so the menu
-bar icon and ⌘, from the panel are the only ways in.
+`make app` produces `.build/CPMenubar.app`. `LSUIElement` keeps it out of the Dock and ⌘-Tab, so
+the menu bar icon and ⌘, from the panel are the only ways in.
+
+**The worker ships inside the app**, at `Contents/Resources/worker` — about 200 KB of JavaScript
+with no runtime dependencies. `bundle.sh` is what puts it there, so an app assembled any other way
+launches and onboards and then has nothing to run. That is why `make app` delegates to it rather
+than assembling the bundle itself, and why it builds `worker/` first.
+
+The app falls back to `<the folder chosen at onboarding>/worker/dist/main.js` when its own bundle
+carries none. That is for running from a Board Planner clone during development — an operator's
+folder holds *their* project, which has no `worker/` in it.
 
 ## Run
 
 ```
-open CPMenubar.app
+open .build/CPMenubar.app
 ```
 
 Against a rig whose state directory is not the default, pass it through — the app reads the same
 variable the worker does:
 
 ```
-CP_STATE_DIR=$HOME/cp-rig/state CPMenubar.app/Contents/MacOS/CPMenubar
+CP_STATE_DIR=$HOME/cp-rig/state .build/CPMenubar.app/Contents/MacOS/CPMenubar
 ```
 
 ## Layout

@@ -23,7 +23,7 @@ const {
   denyDeviceEnrolment,
   formatUserCode,
   normaliseUserCode,
-  PRESET_POLICY,
+  PRESET_AGENT,
   isWorkerPreset,
 } = await import("./device-enrolment");
 
@@ -215,24 +215,16 @@ describe("refusing an enrolment", () => {
 });
 
 describe("the presets", () => {
-  // Merging without review is the pair the validator refuses. Offering presets rather than gates
-  // means it is unreachable here by construction, not merely rejected later.
-  it("cannot express merging without review", () => {
-    for (const policy of Object.values(PRESET_POLICY)) {
-      expect(policy.autoMerge && !policy.reviewGate).toBe(false);
-    }
+  // Reviewing and merging are properties of a composition, so a preset names the agent that has
+  // them rather than restating them as flags beside it.
+  it("names a seeded agent for each level of autonomy", () => {
+    expect(PRESET_AGENT.write).toBe("Default");
+    expect(PRESET_AGENT.review).toBe("With security review");
+    expect(PRESET_AGENT.merge).toBe("Merges its own work");
   });
 
-  it("maps each preset to the two booleans it means", () => {
-    expect(PRESET_POLICY.write).toEqual({ reviewGate: false, autoMerge: false });
-    expect(PRESET_POLICY.review).toEqual({ reviewGate: true, autoMerge: false });
-    expect(PRESET_POLICY.merge).toEqual({ reviewGate: true, autoMerge: true });
-  });
-
-  it("refuses anything that is not one of the three", () => {
-    expect(isWorkerPreset("write")).toBe(true);
-    expect(isWorkerPreset("merge-without-review")).toBe(false);
-    expect(isWorkerPreset(undefined)).toBe(false);
+  it("offers exactly the three levels the enrolment screen shows", () => {
+    expect(Object.keys(PRESET_AGENT).sort()).toEqual(["merge", "review", "write"]);
   });
 });
 

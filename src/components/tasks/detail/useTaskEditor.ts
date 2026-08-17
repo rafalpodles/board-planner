@@ -35,6 +35,7 @@ export interface TaskDraft {
   dueDate: string | null;
   checklist: ChecklistDraftItem[];
   sprint: string | null;
+  agent: string | null;
   recurrence: { frequency: RecurrenceFrequency; interval: number } | null;
   customFieldValues: Record<string, unknown>;
 }
@@ -50,6 +51,7 @@ export function draftFromTask(task: ApiTask): TaskDraft {
       (task.assignee && typeof task.assignee === "object" ? task.assignee.username : "") || null,
     dueDate: (task.dueDate ? task.dueDate.substring(0, 10) : "") || null,
     checklist: task.checklist || [],
+    agent: task.agent ?? null,
     sprint: task.sprint || null,
     recurrence: task.recurrence
       ? { frequency: task.recurrence.frequency, interval: task.recurrence.interval }
