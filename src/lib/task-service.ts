@@ -159,6 +159,16 @@ async function agentUsableOnProject(
   return true;
 }
 
+// Choosing the agent is choosing what runs on the machine serving this project, so it takes the
+// same bar as the project's other worker settings rather than ordinary edit access. Enforced here
+// rather than in the route because the PM agent reaches updateTask too. BP-345.
+async function mayChooseAgent(projectId: string, actorId: string): Promise<boolean> {
+  const actor = await User.findById(actorId).lean();
+  if (!actor) return false;
+  const { check } = await import("@/lib/grants");
+  return check(actor as never, projectId, "admin");
+}
+
 async function sprintBelongsToProject(projectId: string, sprint: unknown): Promise<boolean> {
   if (typeof sprint !== "string" || !Types.ObjectId.isValid(sprint)) return false;
   return (await Sprint.exists({ _id: sprint, project: projectId })) !== null;
@@ -448,6 +458,18 @@ export async function updateTask(
   }
 
   if (updates.agent === "") updates.agent = null;
+  // Touching the field at all, clearing included: reverting to the project default still changes
+  // what the machine will run. The rail sends only edited fields, so an ordinary member editing a
+  // title never reaches this.
+  if (updates.agent !== undefined) {
+    if (!(await mayChooseAgent(projectId, actorId))) {
+      return {
+        ok: false,
+        error: "Only a project admin can choose which agent runs a task",
+        status: 403,
+      };
+    }
+  }
   if (updates.agent !== undefined && updates.agent !== null) {
     if (!(await agentUsableOnProject(projectId, updates.agent, actorId))) {
       return { ok: false, error: "That agent cannot run on this project", status: 400 };
