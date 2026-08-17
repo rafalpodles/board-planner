@@ -251,6 +251,19 @@ describe("PUT /api/users/:id — an admin sets a password", () => {
     expect(JSON.stringify(notifyPasswordChanged.mock.calls)).not.toContain("a-fresh-password");
   });
 
+  // One PUT can set a password and repoint the address. Telling the address the request just
+  // installed would send the warning to whoever took the account over.
+  it("warns the address the account had on the way in, not the one it was just given", async () => {
+    const target = targetDoc({ role: "member" });
+    found(target);
+
+    await PUT(put({ password: "a-fresh-password", email: "attacker@evil.test" }), ctx());
+
+    expect(notifyPasswordChanged).toHaveBeenCalledWith(
+      expect.objectContaining({ email: "target@example.com" })
+    );
+  });
+
   // The hash must never be loaded, so it can never be serialised back to the caller
   it("does not pull the hash out of the database", async () => {
     const target = targetDoc({ role: "member" });

@@ -43,6 +43,7 @@ export default function UsersPage() {
     null
   );
   const [deleting, setDeleting] = useState(false);
+  const [mailWorks, setMailWorks] = useState(false);
 
   const api = useApi();
   const { toast } = useToast();
@@ -59,6 +60,13 @@ export default function UsersPage() {
       .then(setUsers)
       .catch(() => toast("Failed to load data", "error"))
       .finally(() => setLoading(false));
+
+    // Whether the notice below the password field is a promise or a lie: an instance with no mail
+    // server sends nothing, and the admin has to know that before they walk away from the screen
+    api
+      .get("/api/admin/email")
+      .then((settings: { configured?: boolean }) => setMailWorks(!!settings.configured))
+      .catch(() => setMailWorks(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdmin, authLoading]);
 
@@ -359,9 +367,9 @@ export default function UsersPage() {
                   </label>
                   <p id="newUserPasswordHelp" className="text-sm text-text-muted">
                     The password itself is never emailed — tell {editUser.fullName} yourself.{" "}
-                    {editUser.email
+                    {mailWorks && editUser.email
                       ? `${editUser.email} is told that it changed, and saving signs them out everywhere.`
-                      : "This account has no address, so nothing reaches them. Saving signs them out everywhere."}
+                      : "Nothing reaches them either, so this is the only way they will know. Saving signs them out everywhere."}
                   </p>
                   <div className="flex items-start gap-2">
                     <Input
