@@ -174,14 +174,28 @@ describe("withLockout", () => {
     expect(await isRateLimited(source, 1)).toBe(true);
   });
 
-  it("refuses without calling verify once the account key is spent", async () => {
+  it("refuses further guessing once the account key is spent", async () => {
     for (let i = 0; i < 10; i++) await recordFailedAttempt(key);
-    const verify = vi.fn();
+    const verify = vi.fn().mockResolvedValue(null);
 
-    const { lockedOut } = await withLockout(key, verify, source);
+    const { lockedOut, result } = await withLockout(key, verify, source);
 
     expect(lockedOut).toBe(true);
-    expect(verify).not.toHaveBeenCalled();
+    expect(result).toBeNull();
+  });
+
+  // BP-353. The account key is a caller-supplied username, and where there is no client address to
+  // put beside it every caller shares one. Refusing on it before the credential was read let anyone
+  // lock a named person out of their own account; the source key is what bounds the bcrypt work.
+  it("lets a correct credential through however full the account key is", async () => {
+    for (let i = 0; i < 10; i++) await recordFailedAttempt(key);
+    const verify = vi.fn().mockResolvedValue({ _id: "u1" });
+
+    const { lockedOut, result } = await withLockout(key, verify, source);
+
+    expect(lockedOut).toBe(false);
+    expect(result).toEqual({ _id: "u1" });
+    expect(verify).toHaveBeenCalled();
   });
 
   it("refuses on the source dimension even when no account counter has climbed", async () => {

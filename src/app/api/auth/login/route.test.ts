@@ -22,7 +22,9 @@ vi.mock("@/lib/session", async (importOriginal) => {
 });
 
 const { POST } = await import("./route");
-const { resetRateLimits, ANONYMOUS_ACCOUNT_ATTEMPTS } = await import("@/lib/rate-limit");
+const { resetRateLimits, ANONYMOUS_ACCOUNT_ATTEMPTS, ANONYMOUS_GLOBAL_ATTEMPTS } = await import(
+  "@/lib/rate-limit"
+);
 const { SESSION_IDLE_TTL_MS, SESSION_ABSOLUTE_TTL_MS } = await import("@/lib/session");
 
 const USER = {
@@ -151,17 +153,51 @@ describe("POST /api/auth/login — credentials", () => {
     expect(setCookies(response)).toEqual([]);
   });
 
-  it("bounds guessing even with no client identity, and a success does not reopen the budget", async () => {
+  it("bounds guessing even with no client identity", async () => {
     verifyCredentials.mockResolvedValue(null);
     for (let attempt = 0; attempt < ANONYMOUS_ACCOUNT_ATTEMPTS; attempt++) {
       await POST(request());
     }
 
+    expect((await POST(request())).status).toBe(429);
+  });
+
+  // BP-353. Where there is no client address every caller shares one key per account, so an
+  // account counter that could refuse before the credential was read handed anyone who could name
+  // a username the power to lock that person out. Guessing is still bounded — the test above — but
+  // the owner arriving with the right password is not guessing.
+  it("never refuses the owner their own correct password, however full the account counter is", async () => {
+    verifyCredentials.mockResolvedValue(null);
+    for (let attempt = 0; attempt < ANONYMOUS_ACCOUNT_ATTEMPTS * 2; attempt++) {
+      await POST(request());
+    }
+
     verifyCredentials.mockClear();
     verifyCredentials.mockResolvedValue(USER);
-    const refused = await POST(request());
+    const response = await POST(request());
 
-    expect(refused.status).toBe(429);
+    expect(response.status).toBe(200);
+    expect(verifyCredentials).toHaveBeenCalled();
+  });
+
+  // The counter that stands before the credential is the one bounding bcrypt, and it must still
+  // stand: a correct password winning past the account counter must not mean unbounded hashing.
+  it("still refuses everyone once the anonymous work budget is spent", async () => {
+    verifyCredentials.mockResolvedValue(null);
+    for (let attempt = 0; attempt < ANONYMOUS_GLOBAL_ATTEMPTS; attempt++) {
+      await POST(
+        request({ "sec-fetch-site": "same-origin" }, {
+          username: `victim-${attempt}`,
+          password: "guess",
+        })
+      );
+    }
+
+    verifyCredentials.mockClear();
+    verifyCredentials.mockResolvedValue(USER);
+    const response = await POST(request());
+
+    expect(response.status).toBe(429);
     expect(verifyCredentials).not.toHaveBeenCalled();
   });
 

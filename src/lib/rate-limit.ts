@@ -1,18 +1,25 @@
 /**
  * The throttle for the endpoints that verify a password.
  *
- * Two dimensions. The account key — caller identity plus username — is refused *before* the
- * credential is read, which is what bounds the work an attacker can make the server do. The source
- * key counts failures from one address across *all* usernames, so spraying one password at fifty
- * accounts is caught even though no account counter ever climbs.
+ * Two dimensions, on opposite sides of the credential check. The source key — one address across
+ * *all* usernames — is refused *before* the credential is read, which is what bounds the work an
+ * attacker can make the server do, and it catches spraying one password at fifty accounts even
+ * though no account counter ever climbs. The account key is consulted only after a verification
+ * has already failed, so it throttles guessing without ever refusing the owner their own password.
+ *
+ * That ordering is the whole point and it was the other way round until BP-353. The account key
+ * contains a caller-supplied username, so where there is no client identity to put beside it —
+ * the documented docker-compose deployment, where the app port is published directly — every
+ * caller shares one key per account. Consulting it before the credential meant fifty requests
+ * could deny a named person their own correct password for a quarter of an hour, renewably, with
+ * no way for an administrator to lift it.
  *
  * Two rules the obvious implementation gets wrong, both found in review:
  *
  * - A success clears only the account key, never the source. Clearing the source would let anyone
  *   holding one valid login reset the budget and guess forever, fifty tries per own login.
- * - With no client identity available the account key still applies, at a higher threshold. Skipping
- *   the check there leaves login entirely unthrottled, which is the shape the documented
- *   docker-compose deployment runs in.
+ * - The source key applies even with no client identity, under a shared name at a far higher
+ *   threshold. Skipping it there leaves the work bound with nothing holding it at all.
  *
  * The counters live in Mongo. In a module-scope Map they were per-replica, they were wiped by every
  * deploy, and they grew by one entry for every key anybody asked about — and since the key contains
@@ -30,9 +37,10 @@ const MAX_ATTEMPTS = 10;
 // is not, so it can be refused as tightly as the account dimension without hitting a bystander.
 export const SHARED_SOURCE_ATTEMPTS = 50;
 export const EXCLUSIVE_SOURCE_ATTEMPTS = MAX_ATTEMPTS;
-// Without a client identity every caller shares the account key, so a refusal there can be aimed at
-// somebody else. Bounding the work still matters more than the denial: the threshold is raised so
-// aiming it costs five times what it did, and it lapses with the window.
+// Without a client identity every caller shares the account key, so what it counts is "failures
+// against this username from anywhere". Since BP-353 it can no longer refuse a correct password,
+// so sharing it costs an attacker's guesses rather than the owner's access; the raised threshold
+// remains because the shared key aggregates honest typos from every caller too.
 export const ANONYMOUS_ACCOUNT_ATTEMPTS = 50;
 /**
  * The ceiling on failed credential checks from callers with no identity at all, across every
@@ -167,6 +175,15 @@ export function anonymousMultiplier(clientIp: string | null, perAddress: number)
  * account counter is consulted only after a *failed* verification, so it can throttle guessing
  * without ever denying the real owner their login — which is what an account-keyed refusal becomes
  * the moment an attacker can aim it, and on a proxy-less deployment every caller can.
+ *
+ * The two counters answer different questions and therefore sit on different sides of verify().
+ * The source counter bounds the *work*: it stands before the credential is read, because the miss
+ * path pays for bcrypt and an unbounded stream of attempts is an unbounded stream of ~100 ms of
+ * CPU. The account counter bounds the *guessing*, and guessing is only established by a failed
+ * verification — so consulting it first bought a per-account slice of the same CPU bound at the
+ * price of letting anyone who can name a username deny that person their own password. The source
+ * counter still bounds the CPU; what an attacker gains is the ability to spend the shared budget
+ * against one account instead of being cut off sooner, and what the owner gains is their login.
  */
 export async function withLockout<T>(
   key: string,
@@ -180,9 +197,6 @@ export async function withLockout<T>(
   const effectiveSource = source ?? ANONYMOUS_GLOBAL_KEY;
   const effectiveSourceThreshold = source ? sourceThreshold : ANONYMOUS_GLOBAL_ATTEMPTS;
 
-  if (await isRateLimited(key, accountThreshold)) return { lockedOut: true, result: null };
-  // Before verify(), so it bounds the work as well as the guessing: since the miss path pays for
-  // bcrypt, an unbounded stream of unknown usernames is an unbounded stream of ~100 ms of CPU.
   if (await isRateLimited(effectiveSource, effectiveSourceThreshold)) {
     return { lockedOut: true, result: null };
   }
