@@ -475,7 +475,7 @@ export async function updateTask(
         status: 403,
       };
     }
-    // Clearing counts as changing: reverting to the project default still changes what runs.
+    // Clearing counts as changing: null now means nobody runs the task, as real a choice as naming one.
     if (updates.agent !== null && !(await agentUsableOnProject(projectId, updates.agent, actorId))) {
       return { ok: false, error: "That agent cannot run on this project", status: 400 };
     }

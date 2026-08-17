@@ -58,7 +58,7 @@ export const BUILT_IN_BLOCKS: SeedBlock[] = [
   ...gateSeeds(),
 ];
 
-/** The agent a project that names none falls back to. snapshotFor depends on this name. */
+/** The seeded "Default" agent's name. Not a fallback — a project or task still has to choose it. */
 export const SEEDED_DEFAULT_NAME = "Default";
 
 /** The one that carries a Merge step; projects that used to merge automatically adopt it. */
