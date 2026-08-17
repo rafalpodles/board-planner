@@ -69,6 +69,13 @@ const find = vi.fn();
 const findByIdAndUpdate = vi.fn();
 const findById = vi.fn();
 const userFindOne = vi.fn();
+// The notification mails name the person who moved the task, so every announcing path resolves
+// the actor's username now
+const userFindById = vi.fn(() => ({ lean: async () => ({ username: "actor" }) }));
+const commentCreate = vi.fn(async () => ({ _id: "c1" }));
+const createNotificationsMock = vi.fn();
+const collectRecipientsMock = vi.fn((_task?: unknown): string[] => []);
+const resolveMentionsMock = vi.fn(async (_body?: string): Promise<string[]> => []);
 const workerFindById = vi.fn();
 const taskFindById = vi.fn();
 
@@ -78,17 +85,23 @@ vi.mock("@/models/task", () => ({
   Task: { findOneAndUpdate, updateMany, updateOne, findOne, find, findByIdAndUpdate, findById: taskFindById, create: taskCreate },
 }));
 vi.mock("@/models/project", () => ({ Project: { findById, findOneAndUpdate: projectFindOneAndUpdate } }));
-vi.mock("@/models/user", () => ({ User: { findOne: userFindOne } }));
-vi.mock("@/models/comment", () => ({ Comment: {} }));
+vi.mock("@/models/user", () => ({ User: { findOne: userFindOne, findById: userFindById } }));
+vi.mock("@/models/comment", () => ({
+  Comment: {
+    create: commentCreate,
+    findById: () => ({ populate: async () => ({ _id: "c1" }) }),
+  },
+}));
 const sprintExists = vi.fn();
 vi.mock("@/models/sprint", () => ({ Sprint: { exists: sprintExists } }));
 vi.mock("@/lib/activity", () => ({ logActivity: vi.fn() }));
 vi.mock("@/lib/webhooks", () => ({ dispatchWebhooks: vi.fn() }));
 vi.mock("@/lib/notifications", () => ({ dispatchNotifications: vi.fn() }));
 vi.mock("@/lib/in-app-notifications", () => ({
-  createNotifications: vi.fn(),
-  collectRecipients: () => [],
-  resolveMentions: async () => [],
+  createNotifications: createNotificationsMock,
+  collectRecipients: (task: { watchers?: string[] }) => collectRecipientsMock(task),
+  resolveMentions: (body: string) => resolveMentionsMock(body),
+  assigneeIdOf: () => undefined,
 }));
 vi.mock("@/lib/pm/triggers", () => ({ onTaskStatusChanged: vi.fn().mockResolvedValue(undefined) }));
 
@@ -103,6 +116,7 @@ const {
   changeStatus,
   updateTask,
   createTask,
+  addComment,
   MAX_EXECUTION_ATTEMPTS,
   MAX_PHASE_LENGTH,
   EXECUTION_LEASE_MS,
@@ -1597,5 +1611,57 @@ describe("createTask and a foreign sprint", () => {
     await createTask("p1", "actor", { title: "x", sprint: OURS });
 
     expect(taskCreate.mock.calls.at(-1)?.[0].sprint).toBe(OURS);
+  });
+});
+
+// One comment used to raise two notifications for the same person: the watcher list and the
+// mention list overlap, and each one sent its own mail carrying the identical excerpt.
+describe("a comment mentioning a watcher", () => {
+  const WATCHER = "507f1f77bcf86cd799439031";
+  const MENTIONED_WATCHER = "507f1f77bcf86cd799439032";
+  const board = {
+    key: "TP",
+    name: "Test Project",
+    columns: [{ id: "doing", label: "Doing", role: "active", order: 1 }],
+  };
+
+  function setup(mentions: string[], watchers: string[]) {
+    vi.clearAllMocks();
+    findOne.mockReturnValue({ _id: "t1", taskNumber: 7, title: "x", status: "doing" });
+    findById.mockReturnValue({ lean: () => Promise.resolve(board) });
+    collectRecipientsMock.mockReturnValue(watchers);
+    resolveMentionsMock.mockResolvedValue(mentions);
+  }
+
+  const notificationsByType = (): Record<string, Record<string, unknown>> =>
+    Object.fromEntries(createNotificationsMock.mock.calls.map(([n]) => [n.type, n]));
+
+  it("writes to a mentioned watcher once, as a mention", async () => {
+    setup([MENTIONED_WATCHER], [MENTIONED_WATCHER]);
+    await addComment("p1", "t1", "@bob look at this", { id: "actor", username: "rafal" });
+
+    const byType = notificationsByType();
+    expect(byType.comment_added, "the same person got both mails").toBeUndefined();
+    expect(byType.mentioned.recipientIds).toEqual([MENTIONED_WATCHER]);
+  });
+
+  it("still tells the watchers who were not mentioned", async () => {
+    setup([MENTIONED_WATCHER], [WATCHER, MENTIONED_WATCHER]);
+    await addComment("p1", "t1", "@bob look at this", { id: "actor", username: "rafal" });
+
+    const byType = notificationsByType();
+    expect(byType.comment_added.recipientIds).toEqual([WATCHER]);
+    expect(byType.mentioned.recipientIds).toEqual([MENTIONED_WATCHER]);
+  });
+
+  it("gives the mail the column's label and a link, not the raw status id", async () => {
+    setup([], [WATCHER]);
+    await addComment("p1", "t1", "no mentions here", { id: "actor", username: "rafal" });
+
+    const email = notificationsByType().comment_added.email as Record<string, unknown>;
+    expect(email.taskPills).toEqual([{ label: "Doing", tone: "progress" }]);
+    expect(email.projectRef).toBe("TP");
+    expect(email.taskNumber).toBe(7);
+    expect(email.quote).toEqual({ who: "rafal", text: "no mentions here" });
   });
 });

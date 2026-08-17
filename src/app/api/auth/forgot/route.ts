@@ -3,6 +3,7 @@ import { connectDB } from "@/lib/db";
 import { getClientIp } from "@/lib/auth";
 import { APP_NAME } from "@/lib/brand";
 import { isEmailConfigured, normaliseEmail, sendEmail } from "@/lib/email";
+import { renderEmail } from "@/lib/email-template";
 import { issueResetToken } from "@/lib/password-reset";
 import {
   anonymousMultiplier,
@@ -25,10 +26,6 @@ const UNIFORM_ANSWER = {
 // the limit is per source, to stop one caller filling somebody's inbox or burning the instance's
 // sending reputation, rather than per account.
 const REQUESTS_PER_SOURCE = 10;
-
-function escapeHtml(value: string): string {
-  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
 
 export async function POST(request: Request) {
   const refusal = provenanceRefusal(request);
@@ -121,26 +118,28 @@ async function deliverLink(
   try {
     const token = await issueResetToken(user._id as Parameters<typeof issueResetToken>[0]);
     const link = `${origin}/reset?token=${encodeURIComponent(token)}`;
-    const name = escapeHtml(user.username);
+    const { html, text } = renderEmail({
+      preheader: `The link works once and expires in an hour.`,
+      kicker: "Password reset",
+      heading: `Set a new password for ${user.username}`,
+      intro: [
+        "Somebody asked to reset the password for this account. The link below works once and expires an hour after it was sent.",
+      ],
+      button: { label: "Choose a new password", url: link },
+      showButtonUrl: true,
+      outro: [
+        "If it wasn't you, nothing has changed and you can ignore this message. Your current password still works.",
+      ],
+      footer: [
+        `Sent because a reset was requested for ${user.username}.`,
+        "This is the only email in this thread — we won't send a reminder.",
+      ],
+    });
     const sent = await sendEmail({
       to: user.email,
       subject: `Reset your ${APP_NAME} password`,
-      text: [
-        `Somebody asked to reset the ${APP_NAME} password for ${user.username}.`,
-        "",
-        "This link works once and expires in an hour:",
-        link,
-        "",
-        "If it was not you, nothing has changed and you can ignore this message.",
-      ].join("\n"),
-      // Given explicitly, because sendEmail falls back to `html: text` and a mail client renders
-      // that with every newline collapsed — which glues the link into the middle of a sentence
-      html: [
-        `<p>Somebody asked to reset the ${APP_NAME} password for ${name}.</p>`,
-        `<p>This link works once and expires in an hour:</p>`,
-        `<p><a href="${link}">${link}</a></p>`,
-        `<p>If it was not you, nothing has changed and you can ignore this message.</p>`,
-      ].join(""),
+      text,
+      html,
     });
     if (!sent) console.error(`Password reset email could not be sent for ${user.username}`);
   } catch (err) {
