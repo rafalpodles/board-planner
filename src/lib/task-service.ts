@@ -926,6 +926,9 @@ export async function claimNextTask(
   if (identity && !Types.ObjectId.isValid(identity)) return null;
   const assignTo = identity ? new Types.ObjectId(identity) : null;
 
+  // Explicit about presence, not just format: isValid(null | undefined | "") already happens to
+  // return false in this bson version, but that is the library's choice, not a guarantee — a
+  // missing owner should not depend on it staying that way.
   if (!ownerId || !Types.ObjectId.isValid(ownerId)) return null;
 
   // Assigned to the owner *by* the owner. Somebody else assigning you work is a proposal, and the

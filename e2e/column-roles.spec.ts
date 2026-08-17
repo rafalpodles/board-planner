@@ -223,25 +223,28 @@ test.describe("a worker claiming on a board with no column called done", () => {
   test.beforeEach(async () => {
     // connectDB reads this when it is called, not when the module loads
     process.env.MONGODB_URI = E2E_MONGODB_URI;
-    const handle = await db();
-    await handle
-      .collection("projects")
-      .updateOne(
-        { _id: PROJECT_ID },
-        { $set: { "worker.policy.claimScope": "any", "worker.claimAssignee": null } }
-      );
   });
 
   test("waits for its blocker until that blocker reaches Shipped", async () => {
     const blocker = await addTask("checking", { order: 1 });
-    const blocked = await addTask("ready", { blockedBy: [blocker], order: 2 });
+    // BP-358: claimable only once it is already the owner's own self-assignment, and only once it
+    // names an agent — neither of which this blocker test is about, so both are just fixed givens
+    const blocked = await addTask("ready", {
+      blockedBy: [blocker],
+      order: 2,
+      assignee: ADMIN_ID,
+      assignedBy: ADMIN_ID,
+      agent: new mongoose.Types.ObjectId(),
+    });
 
-    expect(await claimNextTask(String(PROJECT_ID), WORKER, "run-1")).toBeNull();
+    expect(
+      await claimNextTask(String(PROJECT_ID), WORKER, "run-1", null, String(ADMIN_ID))
+    ).toBeNull();
 
     const handle = await db();
     await handle.collection("tasks").updateOne({ _id: blocker }, { $set: { status: "shipped" } });
 
-    const claimed = await claimNextTask(String(PROJECT_ID), WORKER, "run-2");
+    const claimed = await claimNextTask(String(PROJECT_ID), WORKER, "run-2", null, String(ADMIN_ID));
     expect(String(claimed?._id)).toBe(String(blocked));
   });
 });

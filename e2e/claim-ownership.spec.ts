@@ -23,16 +23,28 @@ import {
  * `$cond`, and a suite full of shape assertions never noticed.
  *
  * So: real documents, real updates, and assertions on what is in the collection afterwards.
+ *
+ * BP-358 renamed this file from claim-scope.spec.ts: the claim no longer reads a project-wide
+ * scope/nominee pair, so there is nothing left called "claim scope" to be a spec about. What
+ * decides a claim now is the machine's owner — `{ assignee: ownerId, assignedBy: ownerId }` — or
+ * the identity of a run it is resuming, and an agent naming the hand-over. The settings-screen
+ * describe at the bottom is the one part left untouched: that UI and the schema field behind it
+ * still exist, unread by anything now, until the settings-removal task deletes them — this file
+ * only rewrites what actually changed.
  */
 
 const APPROVED = "todo";
 const ACTIVE = "in_progress";
-// Two different accounts on purpose, because they are two different things in production and
-// conflating them hides the bug this design already made once: NOMINEE is an ordinary user a
-// person picks, IDENTITY is the worker's own `worker-<id>` machine account that no list shows.
-const NOMINEE = ADMIN_ID;
+// Two different accounts on purpose, because they are two different things in production: OWNER is
+// the person this machine belongs to — a claim only ever takes a task that person assigned to
+// themselves — IDENTITY is the worker's own `worker-<id>` machine account, which a resumed run's
+// own claim still has to find again.
+const OWNER = ADMIN_ID;
 const IDENTITY = "6a70afff45d39cd9bc8bb5ff";
-const WORKER = "w-claim-scope";
+const WORKER = "w-claim-ownership";
+// Claim nothing but agent presence, and never resolved — snapshotFor's job starts one layer up, at
+// the route this file does not go through
+const AGENT_ID = new mongoose.Types.ObjectId();
 
 // The worker's own connection, kept apart from the one connectDB caches for the service under test
 async function db() {
@@ -40,16 +52,6 @@ async function db() {
   const handle = mongoose.connection.db;
   if (!handle) throw new Error("no database handle");
   return handle;
-}
-
-async function setScope(scope: "assigned" | "any", nominee: mongoose.Types.ObjectId | null = NOMINEE) {
-  const handle = await db();
-  await handle
-    .collection("projects")
-    .updateOne(
-      { _id: PROJECT_ID },
-      { $set: { "worker.policy.claimScope": scope, "worker.claimAssignee": nominee } }
-    );
 }
 
 let nextNumber = 900;
@@ -61,12 +63,17 @@ async function addTask(over: Record<string, unknown> = {}): Promise<mongoose.Typ
     _id,
     project: PROJECT_ID,
     taskNumber: nextNumber++,
-    title: `claim scope ${nextNumber}`,
+    title: `claim ownership ${nextNumber}`,
     description: "",
     priority: "medium",
     category: "user-story",
     status: APPROVED,
-    assignee: null,
+    // Satisfies every clause of the claim filter by default, so a test that overrides one field is
+    // about that field and nothing else — same reasoning as task-service.test.ts's task() fixture,
+    // now checked against a real query engine instead of sift.
+    assignee: OWNER,
+    assignedBy: OWNER,
+    agent: AGENT_ID,
     checklist: [],
     linkedPRs: [],
     blockedBy: [],
@@ -113,88 +120,73 @@ test.afterEach(async () => {
   if (mongoose.connection.readyState !== 0) await mongoose.disconnect();
 });
 
-test.describe("claimScope: assigned", () => {
+test.describe("what a claim requires", () => {
   test("an approved column full of unassigned work is left alone", async () => {
-    await setScope("assigned");
-    const untouched = await addTask();
-    await addTask();
-    await addTask();
+    const untouched = await addTask({ assignee: null, assignedBy: null, agent: null });
+    await addTask({ assignee: null, assignedBy: null, agent: null });
+    await addTask({ assignee: null, assignedBy: null, agent: null });
 
-    expect(await claimNextTask(String(PROJECT_ID), WORKER, "run-1", IDENTITY)).toBeNull();
+    expect(
+      await claimNextTask(String(PROJECT_ID), WORKER, "run-1", IDENTITY, String(OWNER))
+    ).toBeNull();
     expect((await read(untouched)).status).toBe(APPROVED);
   });
 
-  test("a task handed to the worker is taken, and stays handed to it", async () => {
-    await setScope("assigned");
-    const handed = await addTask({ assignee: NOMINEE });
+  test("a task the owner assigned to themselves is taken, and stays assigned to them", async () => {
+    const handed = await addTask();
 
-    const claimed = await claimNextTask(String(PROJECT_ID), WORKER, "run-1", IDENTITY);
+    const claimed = await claimNextTask(
+      String(PROJECT_ID),
+      WORKER,
+      "run-1",
+      IDENTITY,
+      String(OWNER)
+    );
     expect(String(claimed?._id)).toBe(String(handed));
 
     const after = await read(handed);
     expect(after.status).toBe(ACTIVE);
-    // The nominee keeps it: the claim did not assign this, and the release depends on knowing that
-    expect(after.assignee).toBe(String(NOMINEE));
-    // The claim did not put it there, and the release is about to depend on knowing that
+    // Kept, not overwritten: the claim did not put this assignment there, so releasing it must not
+    // take it away either
+    expect(after.assignee).toBe(String(OWNER));
     expect(after.execution.assignedByRun).toBe(false);
   });
 
-  test("a task parked for somebody else is not taken", async () => {
-    await setScope("assigned");
-    await addTask({ assignee: MEMBER_ID });
+  test("a task assigned to somebody else is not taken", async () => {
+    await addTask({ assignee: MEMBER_ID, assignedBy: MEMBER_ID });
 
-    expect(await claimNextTask(String(PROJECT_ID), WORKER, "run-1", IDENTITY)).toBeNull();
+    expect(
+      await claimNextTask(String(PROJECT_ID), WORKER, "run-1", IDENTITY, String(OWNER))
+    ).toBeNull();
   });
 
-  test("a worker with no identity user still takes what the project nominated", async () => {
-    await setScope("assigned");
-    await addTask();
-    const handed = await addTask({ assignee: NOMINEE, order: 5 });
+  // Somebody else assigning you work is a proposal, and the surface for accepting one does not
+  // exist yet — refused rather than run unattended, even though the assignee names the right person
+  test("a task assigned to the owner by somebody else is not taken", async () => {
+    await addTask({ assignee: OWNER, assignedBy: MEMBER_ID });
 
-    const claimed = await claimNextTask(String(PROJECT_ID), WORKER, "run-1", null);
+    expect(
+      await claimNextTask(String(PROJECT_ID), WORKER, "run-1", IDENTITY, String(OWNER))
+    ).toBeNull();
+  });
+
+  test("a worker with no identity user still takes what its owner assigned to themselves", async () => {
+    await addTask({ assignee: null, assignedBy: null, agent: null });
+    const handed = await addTask({ order: 5 });
+
+    const claimed = await claimNextTask(String(PROJECT_ID), WORKER, "run-1", null, String(OWNER));
     expect(String(claimed?._id)).toBe(String(handed));
   });
 
-  // The failure this whole design got wrong once: keying on the worker's own identity made the
-  // hand-over impossible, because that account is a machine user no list will show
-  test("nominating nobody means nothing qualifies", async () => {
-    await setScope("assigned", null);
-    await addTask();
-    await addTask({ assignee: NOMINEE });
+  // The guard this whole task adds: real ids, a real query, and a real assertion that nothing in
+  // the collection moved — not a mock recording whether it was asked to write. Genuinely unassigned,
+  // not owner-assigned like the default: an owner-assigned fixture here would pass for the wrong
+  // reason, since it could not match a wide-open filter either way.
+  test("claims nothing for a machine whose owner is unset", async () => {
+    const untouched = await addTask({ assignee: null, assignedBy: null });
 
-    expect(await claimNextTask(String(PROJECT_ID), WORKER, "run-1", IDENTITY)).toBeNull();
-  });
-});
-
-test.describe("claimScope: any", () => {
-  test("an unassigned task is taken and assigned to the worker", async () => {
-    await setScope("any");
-    const free = await addTask();
-
-    const claimed = await claimNextTask(String(PROJECT_ID), WORKER, "run-1", IDENTITY);
-    expect(String(claimed?._id)).toBe(String(free));
-
-    const after = await read(free);
-    expect(after.assignee).toBe(IDENTITY);
-    expect(after.assigneeType).toBe("ObjectId");
-    expect(after.execution.assignedByRun).toBe(true);
-  });
-
-  // What CLAUDE.md has always described — "assigned to claude or unassigned" — and what the code
-  // did not do: before this, an explicit hand-over was the one thing a worker would not pick up
-  test("a task handed to the worker is taken too", async () => {
-    await setScope("any");
-    const handed = await addTask({ assignee: NOMINEE, order: 5 });
-
-    const claimed = await claimNextTask(String(PROJECT_ID), WORKER, "run-1", IDENTITY);
-    expect(String(claimed?._id)).toBe(String(handed));
-  });
-
-  test("a task parked for a person is still not taken", async () => {
-    await setScope("any");
-    await addTask({ assignee: MEMBER_ID });
-
-    expect(await claimNextTask(String(PROJECT_ID), WORKER, "run-1", IDENTITY)).toBeNull();
+    expect(await claimNextTask(String(PROJECT_ID), WORKER, "run-1", IDENTITY, null)).toBeNull();
+    expect((await read(untouched)).status).toBe(APPROVED);
   });
 });
 
@@ -207,24 +199,30 @@ test.describe("blockers", () => {
   const DONE = "done";
 
   test("a task whose blocker is still open is passed over", async () => {
-    await setScope("any");
     // The blocker sits outside the approved column, so the only thing the claim could take is the
     // blocked task — anything but null here means it took work that cannot start
     const blocker = await addTask({ status: "in_review", order: 1 });
     const blocked = await addTask({ blockedBy: [blocker], order: 2 });
 
-    expect(await claimNextTask(String(PROJECT_ID), WORKER, "run-1", IDENTITY)).toBeNull();
+    expect(
+      await claimNextTask(String(PROJECT_ID), WORKER, "run-1", IDENTITY, String(OWNER))
+    ).toBeNull();
     expect((await read(blocked)).status).toBe(APPROVED);
   });
 
   // The everyday shape this exists for: two cards in the approved column, one waiting on the other.
   // Here the guard has to beat the board order — the blocked card is the one the claim reaches first
   test("the blocker is taken first, against board order", async () => {
-    await setScope("any");
     const blocker = await addTask({ order: 2 });
     const blocked = await addTask({ blockedBy: [blocker], order: 1 });
 
-    const claimed = await claimNextTask(String(PROJECT_ID), WORKER, "run-1", IDENTITY);
+    const claimed = await claimNextTask(
+      String(PROJECT_ID),
+      WORKER,
+      "run-1",
+      IDENTITY,
+      String(OWNER)
+    );
 
     expect(String(claimed?._id)).toBe(String(blocker));
     expect((await read(blocked)).status).toBe(APPROVED);
@@ -233,38 +231,51 @@ test.describe("blockers", () => {
   // A deleted column leaves its tasks naming no column at all. That is not "finished", and reading
   // it as finished would start work on a promise nothing can confirm
   test("a blocker orphaned by a deleted column still counts as unfinished", async () => {
-    await setScope("any");
     const blocker = await addTask({ status: "column_since_deleted", order: 1 });
     await addTask({ blockedBy: [blocker], order: 2 });
 
-    expect(await claimNextTask(String(PROJECT_ID), WORKER, "run-1", IDENTITY)).toBeNull();
+    expect(
+      await claimNextTask(String(PROJECT_ID), WORKER, "run-1", IDENTITY, String(OWNER))
+    ).toBeNull();
   });
 
   test("the unblocked sibling behind it is claimed instead", async () => {
-    await setScope("any");
     // Ordered ahead of the sibling, so claiming the sibling can only mean the blocked one was
     // skipped rather than merely sorted second
     const blocker = await addTask({ status: "in_review", order: 1 });
     const blocked = await addTask({ blockedBy: [blocker], order: 2 });
     const free = await addTask({ order: 3 });
 
-    const claimed = await claimNextTask(String(PROJECT_ID), WORKER, "run-1", IDENTITY);
+    const claimed = await claimNextTask(
+      String(PROJECT_ID),
+      WORKER,
+      "run-1",
+      IDENTITY,
+      String(OWNER)
+    );
 
     expect(String(claimed?._id)).toBe(String(free));
     expect((await read(blocked)).status).toBe(APPROVED);
   });
 
   test("finishing the blocker makes the task claimable", async () => {
-    await setScope("any");
     const blocker = await addTask({ status: "in_review", order: 1 });
     const blocked = await addTask({ blockedBy: [blocker], order: 2 });
 
-    expect(await claimNextTask(String(PROJECT_ID), WORKER, "run-1", IDENTITY)).toBeNull();
+    expect(
+      await claimNextTask(String(PROJECT_ID), WORKER, "run-1", IDENTITY, String(OWNER))
+    ).toBeNull();
 
     const handle = await db();
     await handle.collection("tasks").updateOne({ _id: blocker }, { $set: { status: DONE } });
 
-    const claimed = await claimNextTask(String(PROJECT_ID), WORKER, "run-2", IDENTITY);
+    const claimed = await claimNextTask(
+      String(PROJECT_ID),
+      WORKER,
+      "run-2",
+      IDENTITY,
+      String(OWNER)
+    );
     expect(String(claimed?._id)).toBe(String(blocked));
     expect((await read(blocked)).status).toBe(ACTIVE);
   });
@@ -272,27 +283,34 @@ test.describe("blockers", () => {
 
 test.describe("releasing gives back exactly what the claim took", () => {
   test("a hand-over survives the release, so the task can be retried", async () => {
-    await setScope("assigned");
-    const handed = await addTask({ assignee: NOMINEE });
+    const handed = await addTask();
 
-    await claimNextTask(String(PROJECT_ID), WORKER, "run-1", IDENTITY);
+    await claimNextTask(String(PROJECT_ID), WORKER, "run-1", IDENTITY, String(OWNER));
     await releaseTask(String(PROJECT_ID), String(handed));
 
     const after = await read(handed);
     expect(after.status).toBe(APPROVED);
     // The whole point. Blanking this would drop the task out of what the worker may claim, and
     // nothing would ever pick it up again — a silent loss of work rather than a failure.
-    expect(after.assignee).toBe(String(NOMINEE));
+    expect(after.assignee).toBe(String(OWNER));
 
-    const again = await claimNextTask(String(PROJECT_ID), WORKER, "run-2", IDENTITY);
+    const again = await claimNextTask(String(PROJECT_ID), WORKER, "run-2", IDENTITY, String(OWNER));
     expect(String(again?._id)).toBe(String(handed));
   });
 
+  // A claim can no longer invent an assignment — it only ever matches a task already self-assigned
+  // by its owner — so this precondition has no live path through claimNextTask any more. Seeded
+  // directly in the exact shape a claim used to leave one in: releaseTask's own logic reads the
+  // flag on the document, not how the document got that way, so this is still the real thing under
+  // test, only reached differently.
   test("an assignment the claim invented does not survive it", async () => {
-    await setScope("any");
-    const free = await addTask();
+    const free = await addTask({
+      status: ACTIVE,
+      assignee: IDENTITY,
+      assignedBy: IDENTITY,
+      execution: { workerId: WORKER, runId: "run-1", assignedByRun: true, attempts: 1 },
+    });
 
-    await claimNextTask(String(PROJECT_ID), WORKER, "run-1", IDENTITY);
     await releaseTask(String(PROJECT_ID), String(free));
 
     const after = await read(free);
@@ -305,13 +323,12 @@ test.describe("releasing gives back exactly what the claim took", () => {
   // "moving a card" to the person doing it, and only one of them was fixed — a mutation reverting
   // updateTask passed the whole suite until this existed.
   test("dragging a finished task on the board keeps a fresh assignment", async () => {
-    await setScope("assigned");
-    const free = await addTask({ assignee: NOMINEE });
-    await claimNextTask(String(PROJECT_ID), WORKER, "run-1", IDENTITY);
+    const free = await addTask();
+    await claimNextTask(String(PROJECT_ID), WORKER, "run-1", IDENTITY, String(OWNER));
     await releaseTask(String(PROJECT_ID), String(free));
 
     const handle = await db();
-    await handle.collection("tasks").updateOne({ _id: free }, { $set: { assignee: NOMINEE } });
+    await handle.collection("tasks").updateOne({ _id: free }, { $set: { assignee: OWNER } });
 
     // What handleTaskDrop sends: a status and a position, never a status alone
     const moved = await updateTask(
@@ -322,15 +339,14 @@ test.describe("releasing gives back exactly what the claim took", () => {
     );
     expect(moved.ok).toBe(true);
 
-    expect((await read(free)).assignee).toBe(String(NOMINEE));
+    expect((await read(free)).assignee).toBe(String(OWNER));
   });
 
   // Taking a task off a live worker is a person's decision, and it must give back exactly what the
   // claim took: the hand-over stays, so the task is still claimable and gets retried
   test("forcing a held task off a worker keeps the hand-over", async () => {
-    await setScope("assigned");
-    const handed = await addTask({ assignee: NOMINEE });
-    await claimNextTask(String(PROJECT_ID), WORKER, "run-1", IDENTITY);
+    const handed = await addTask();
+    await claimNextTask(String(PROJECT_ID), WORKER, "run-1", IDENTITY, String(OWNER));
 
     const forced = await updateTask(
       String(PROJECT_ID),
@@ -342,26 +358,31 @@ test.describe("releasing gives back exactly what the claim took", () => {
     expect(forced.ok).toBe(true);
 
     const after = await read(handed);
-    expect(after.assignee).toBe(String(NOMINEE));
-    expect(await claimNextTask(String(PROJECT_ID), WORKER, "run-2", IDENTITY)).not.toBeNull();
+    expect(after.assignee).toBe(String(OWNER));
+    expect(
+      await claimNextTask(String(PROJECT_ID), WORKER, "run-2", IDENTITY, String(OWNER))
+    ).not.toBeNull();
   });
 
+  // workerId as history with no live run: what a task looks like the moment after its run ends,
+  // reached directly rather than through claim-then-release. A claim can no longer invent an
+  // assignment, so a release can no longer take one away either, and this file has no other tool
+  // left that reaches this precondition.
   test("assigning a finished task and then moving it keeps the assignment", async () => {
-    await setScope("any");
-    const free = await addTask();
-    await claimNextTask(String(PROJECT_ID), WORKER, "run-1", IDENTITY);
-    await releaseTask(String(PROJECT_ID), String(free));
+    const free = await addTask({
+      assignee: null,
+      assignedBy: null,
+      execution: { workerId: WORKER, runId: "", attempts: 1 },
+    });
 
-    // workerId is deliberately left behind as history, so this is a task that looks worked-on and
-    // is not. Assign it, move it: the ordinary path a person takes.
     const handle = await db();
-    await handle.collection("tasks").updateOne({ _id: free }, { $set: { assignee: NOMINEE } });
+    await handle.collection("tasks").updateOne({ _id: free }, { $set: { assignee: OWNER } });
     expect((await read(free)).execution.workerId).toBe(WORKER);
 
     const moved = await changeStatus(String(PROJECT_ID), String(free), ACTIVE, String(ADMIN_ID));
     expect(moved.ok).toBe(true);
 
-    expect((await read(free)).assignee).toBe(String(NOMINEE));
+    expect((await read(free)).assignee).toBe(String(OWNER));
   });
 });
 
@@ -369,6 +390,10 @@ test.describe("releasing gives back exactly what the claim took", () => {
  * The setting also has to be reachable, because a safe default nobody can widen is a broken
  * product rather than a safe one — and a route that moved role while its component still gated on
  * `isAdmin` is a mistake this repo has made more than once.
+ *
+ * Untouched by BP-358: claimNextTask stopped reading this setting, but the schema field and this
+ * screen are both still live until the settings-removal task deletes them, so an admin toggling
+ * this control today still gets the persistence this describe verifies.
  */
 test.describe("through the settings screen", () => {
   const SETTINGS = `/projects/${PROJECT_KEY}/settings`;
@@ -427,4 +452,4 @@ test.describe("through the settings screen", () => {
     expect(project?.worker?.policy?.claimScope).toBe("any");
     expect(project?.worker?.policyOverrides).toContain("claimScope");
   });
-})
+});
