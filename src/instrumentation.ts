@@ -1,3 +1,9 @@
+// Must live under src/, not at the repo root, even though Turbopack accepts either. The check that
+// decides whether `standalone` output *packages* this file enumerates the app directory's parent —
+// `src/` here — without recursing, so a root-level copy is invisible to it: the build succeeds, the
+// chunk is emitted, and `.next/standalone` simply has no instrumentation.js. `next start` (Railway)
+// still runs it; the Dockerfile, which copies only `.next/standalone`, silently boots without the
+// PM scheduler or any seeding (BP-356).
 export async function register() {
   if (process.env.NEXT_RUNTIME === "nodejs") {
     // Read here so a fumbled value is one startup failure naming the variable, and so an operator
