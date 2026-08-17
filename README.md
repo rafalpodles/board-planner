@@ -36,6 +36,7 @@ Everything is optional. Put overrides in a `.env` file next to `docker-compose.y
 | `ENCRYPTION_KEYS_OLD` | — | Comma-separated retired encryption keys, kept so a rotation can still read what they wrote |
 | `WEBHOOK_SIGNING_SECRET` | — | Signs outgoing webhook deliveries so a receiver can tell them from anyone else who learned the URL |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | — | Email notifications |
+| `DIGEST_HOUR`, `DIGEST_TIMEZONE`, `DIGEST_TICK_MS` | `7`, `Europe/Warsaw`, `300000` | When the opt-in daily digest goes out, for the people who chose one message a morning over a mail per event |
 
 `COOKIE_ALLOW_INSECURE` and `APP_ORIGIN` are **runtime** values, read on every request. The compose
 file turns `COOKIE_ALLOW_INSECURE` on because it publishes the app on `http://localhost`, where a

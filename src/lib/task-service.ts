@@ -27,6 +27,7 @@ import {
 } from "@/lib/custom-fields";
 import { onTaskStatusChanged } from "@/lib/pm/triggers";
 import { PROJECT_POLICY_DEFAULTS, isClaimScope } from "@/lib/worker-policy";
+import { workerUsername } from "@/lib/worker-user";
 
 export const MAX_EXECUTION_ATTEMPTS = 3;
 
@@ -264,6 +265,37 @@ export async function createTask(
   };
   dispatchWebhooks(projectId, "task_created", eventPayload);
   dispatchNotifications(projectId, "task_created", eventPayload);
+
+  // Assigning an existing task told the assignee; creating one already assigned to them said
+  // nothing, which is how the MCP, the PM agent and a worker all hand work over.
+  if (assigneeId) {
+    const taskKey = `${project.key}-${task.taskNumber}`;
+    const column = getProjectColumns(project).find((c) => c.id === status);
+    createNotifications({
+      type: "task_assigned",
+      taskId: String(task._id),
+      projectId,
+      actorId,
+      title: `${taskKey} assigned to you`,
+      body: task.title,
+      recipientIds: [String(assigneeId)],
+      email: {
+        kicker: "Assigned to you",
+        taskKey,
+        taskTitle: task.title,
+        taskPills: [
+          { label: column?.label ?? status, tone: pillToneForRole(column?.role) },
+          { label: capitalise(String(task.priority ?? DEFAULT_PRIORITY)), tone: "neutral" },
+        ],
+        taskMeta: [project.name, `created by ${await usernameOf(actorId)}`]
+          .filter(Boolean)
+          .join(" · "),
+        projectRef: project.key,
+        taskNumber: task.taskNumber,
+        assigneeId: String(assigneeId),
+      },
+    });
+  }
 
   return { ok: true, data: populated as ITask };
 }
@@ -877,7 +909,7 @@ async function createNextRecurrence(
 export async function releaseExpiredTasks(projectId: string, now = new Date()): Promise<number> {
   await connectDB();
 
-  const project = await Project.findById(projectId, "columns").lean();
+  const project = await Project.findById(projectId, "columns key name").lean();
   const columns = getProjectColumns(project);
   const approved = columns.find((c) => c.role === "approved")?.id;
   const active = columns.filter((c) => c.role === "active").map((c) => c.id);
@@ -889,12 +921,21 @@ export async function releaseExpiredTasks(projectId: string, now = new Date()): 
     status: { $in: active },
     "execution.startedAt": { $lt: new Date(now.getTime() - EXECUTION_LEASE_MS) },
   };
+  const outOfAttempts = { ...expired, "execution.attempts": { $gte: MAX_EXECUTION_ATTEMPTS } };
+
+  // Read before the update, not after: the move clears an assignee the run put there, so afterwards
+  // there is nobody left on the task to tell. A task out of attempts is rare, so this normally
+  // costs one query that matches nothing.
+  const abandoned = await Task.find(
+    outOfAttempts,
+    "taskNumber title assignee watchers execution.workerId"
+  ).lean();
 
   // The attempt is not refunded: a task that repeatedly outlives its worker has to run out of
   // attempts and reach a human, rather than cycling through the queue forever
   const [spent, retryable] = await Promise.all([
     Task.updateMany(
-      { ...expired, "execution.attempts": { $gte: MAX_EXECUTION_ATTEMPTS } },
+      outOfAttempts,
       [{ $set: { status: exhausted, ...CLEAR_WORKER_ASSIGNEE } }, { $unset: RUN_FIELDS }],
       { updatePipeline: true }
     ),
@@ -905,7 +946,66 @@ export async function releaseExpiredTasks(projectId: string, now = new Date()): 
     ),
   ]);
 
+  // Only what this call actually moved: two workers polling at once both read the list, and the
+  // one whose update matched nothing must not announce the other's work a second time.
+  if (spent.modifiedCount > 0) {
+    announceAbandonedRuns(projectId, project, abandoned, exhausted, columns).catch((err) =>
+      console.error("Failed to announce an abandoned run:", err)
+    );
+  }
+
   return spent.modifiedCount + retryable.modifiedCount;
+}
+
+/**
+ * A run reaching its attempt limit is the one thing on a board that happens with nobody watching:
+ * the lease expires on a machine that is already gone, so the move has no actor and went through
+ * updateMany, which fires no webhook and no notification.
+ */
+async function announceAbandonedRuns(
+  projectId: string,
+  project: { key?: string; name?: string } | null,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tasks: any[],
+  exhausted: string,
+  columns: ReturnType<typeof getProjectColumns>
+): Promise<void> {
+  const column = columns.find((c) => c.id === exhausted);
+  for (const task of tasks) {
+    const taskKey = project?.key ? `${project.key}-${task.taskNumber}` : `#${task.taskNumber}`;
+    const recipients = collectRecipients(task);
+    if (recipients.length === 0) continue;
+    // The machine that stopped answering is the actor, because that is what happened — and the
+    // notification row needs one. Without its identity there is nothing truthful to put there.
+    const workerId = task.execution?.workerId;
+    const actor = workerId
+      ? await User.findOne({ username: workerUsername(String(workerId)) }, "_id").lean()
+      : null;
+    if (!actor) continue;
+    createNotifications({
+      type: "status_changed",
+      taskId: String(task._id),
+      projectId,
+      actorId: String(actor._id),
+      title: `${taskKey} needs a human — the run was abandoned`,
+      body: task.title,
+      recipientIds: recipients,
+      email: {
+        kicker: "Run abandoned",
+        taskKey,
+        taskTitle: task.title,
+        taskPills: [
+          { label: column?.label ?? exhausted, tone: pillToneForRole(column?.role) },
+        ],
+        taskMeta: [project?.name, `no worker report in ${EXECUTION_LEASE_MS / 3_600_000} h`]
+          .filter(Boolean)
+          .join(" · "),
+        projectRef: project?.key,
+        taskNumber: task.taskNumber,
+        assigneeId: assigneeIdOf(task),
+      },
+    });
+  }
 }
 
 // The blockers that tasks waiting in the approved column actually name, narrowed to those that have

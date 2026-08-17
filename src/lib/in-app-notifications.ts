@@ -110,6 +110,9 @@ async function sendEmailNotifications(n: {
     {
       _id: { $in: n.recipientIds.map((id) => new Types.ObjectId(id)) },
       emailNotifications: true,
+      // Somebody on the digest hears about this tomorrow morning, in one message. Sending both
+      // would make the digest a duplicate rather than a replacement.
+      emailDigest: { $ne: true },
       email: { $ne: "" },
     },
     "email fullName"

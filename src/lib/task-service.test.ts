@@ -532,10 +532,12 @@ describe("releaseTask charging the attempt", () => {
 
 describe("releaseExpiredTasks", () => {
   const board = {
+    key: "TP",
+    name: "Test Project",
     columns: [
       { id: "ready", role: "approved", order: 1 },
       { id: "doing", role: "active", order: 2 },
-      { id: "escalated", role: "review", order: 3, triggersPmReview: true },
+      { id: "escalated", label: "Escalated", role: "review", order: 3, triggersPmReview: true },
     ],
   };
   const now = new Date("2026-07-31T12:00:00.000Z");
@@ -543,7 +545,11 @@ describe("releaseExpiredTasks", () => {
   beforeEach(() => {
     updateMany.mockReset();
     findById.mockReset();
+    find.mockReset();
+    createNotificationsMock.mockClear();
+    collectRecipientsMock.mockReturnValue([]);
     findById.mockReturnValue({ lean: () => Promise.resolve(board) });
+    find.mockReturnValue({ lean: () => Promise.resolve([]) });
     updateMany.mockResolvedValue({ modifiedCount: 0 });
   });
 
@@ -617,6 +623,80 @@ describe("releaseExpiredTasks", () => {
 
     expect(await releaseExpiredTasks("p1", now)).toBe(0);
     expect(updateMany).not.toHaveBeenCalled();
+  });
+
+  // The move has no actor — the worker that held it is gone — so nothing else on this path says
+  // it happened: updateMany fires no webhook and no notification
+  describe("telling somebody the machine gave up", () => {
+    const WATCHER = "507f1f77bcf86cd799439051";
+
+    function abandoned() {
+      find.mockReturnValue({
+        lean: async () => [
+          {
+            _id: "t9",
+            taskNumber: 9,
+            title: "Split the worker lease",
+            watchers: [WATCHER],
+            execution: { workerId: "w1" },
+          },
+        ],
+      });
+      // The machine that stopped answering owns the notification row
+      userFindOne.mockReturnValue({ lean: async () => ({ _id: "worker-user-1" }) });
+      collectRecipientsMock.mockReturnValue([WATCHER]);
+      updateMany.mockImplementation(async (filter: Record<string, { $gte?: number }>) =>
+        filter["execution.attempts"]?.$gte === MAX_EXECUTION_ATTEMPTS
+          ? { modifiedCount: 1 }
+          : { modifiedCount: 0 }
+      );
+    }
+
+    it("names the task, the column it landed in and who it is for", async () => {
+      abandoned();
+
+      await releaseExpiredTasks("p1", now);
+
+      const [notification] = createNotificationsMock.mock.calls.at(-1) ?? [];
+      expect(notification.title).toBe("TP-9 needs a human — the run was abandoned");
+      expect(notification.recipientIds).toEqual([WATCHER]);
+      expect(notification.email.kicker).toBe("Run abandoned");
+      expect(notification.email.taskPills).toEqual([{ label: "Escalated", tone: "review" }]);
+      expect(notification.email.projectRef).toBe("TP");
+      expect(userFindOne).toHaveBeenCalledWith({ username: "worker-w1" }, "_id");
+      expect(notification.actorId).toBe("worker-user-1");
+    });
+
+    // The row's actor is a required reference; a machine whose identity has gone leaves nothing
+    // truthful to put in it, and a half-written notification is worse than none
+    it("says nothing when the worker's identity cannot be resolved", async () => {
+      abandoned();
+      userFindOne.mockReturnValue({ lean: async () => null });
+
+      await releaseExpiredTasks("p1", now);
+
+      expect(createNotificationsMock).not.toHaveBeenCalled();
+    });
+
+    // The list is read before the update, so a poll that lost the race holds tasks somebody else
+    // already moved and announced
+    it("stays quiet when its own update moved nothing", async () => {
+      abandoned();
+      updateMany.mockResolvedValue({ modifiedCount: 0 });
+
+      await releaseExpiredTasks("p1", now);
+
+      expect(createNotificationsMock).not.toHaveBeenCalled();
+    });
+
+    it("says nothing about a task nobody is assigned to or watching", async () => {
+      abandoned();
+      collectRecipientsMock.mockReturnValue([]);
+
+      await releaseExpiredTasks("p1", now);
+
+      expect(createNotificationsMock).not.toHaveBeenCalled();
+    });
   });
 });
 
@@ -1611,6 +1691,45 @@ describe("createTask and a foreign sprint", () => {
     await createTask("p1", "actor", { title: "x", sprint: OURS });
 
     expect(taskCreate.mock.calls.at(-1)?.[0].sprint).toBe(OURS);
+  });
+});
+
+// Handing work over by creating the task — how the MCP, the PM agent and a worker all do it —
+// used to tell the assignee nothing. Only reassigning an existing task did.
+describe("createTask handing the task to somebody", () => {
+  const ASSIGNEE = "507f1f77bcf86cd799439041";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    sprintExists.mockResolvedValue(null);
+    projectFindOneAndUpdate.mockResolvedValue({
+      _id: "p1",
+      taskCounter: 7,
+      key: "BP",
+      name: "Board Planner",
+      ...customBoard,
+    });
+    taskCreate.mockImplementation(async (doc: Record<string, unknown>) => ({ ...doc, _id: "new" }));
+    taskFindById.mockReturnValue({ populate: () => ({ lean: async () => ({ _id: "new" }) }) });
+    userFindOne.mockResolvedValue({ _id: ASSIGNEE, username: "rpo" });
+  });
+
+  it("tells the assignee, with the column's label and a link", async () => {
+    await createTask("p1", "actor", { title: "Session cookie survives a change", assignee: "rpo" });
+
+    const [notification] = createNotificationsMock.mock.calls.at(-1) ?? [];
+    expect(notification.type).toBe("task_assigned");
+    expect(notification.recipientIds).toEqual([ASSIGNEE]);
+    expect(notification.title).toBe("BP-7 assigned to you");
+    expect(notification.email.taskPills[0]).toEqual({ label: "Ready", tone: "todo" });
+    expect(notification.email.projectRef).toBe("BP");
+    expect(notification.email.taskNumber).toBe(7);
+  });
+
+  it("stays quiet when the task is created for nobody", async () => {
+    await createTask("p1", "actor", { title: "x" });
+
+    expect(createNotificationsMock).not.toHaveBeenCalled();
   });
 });
 

@@ -9,6 +9,7 @@ import {
   sourceKey,
 } from "@/lib/rate-limit";
 import { logInstanceAudit } from "@/lib/instanceAudit";
+import { notifyPasswordChanged } from "@/lib/security-mail";
 import {
   consumeResetToken,
   invalidateResetTokens,
@@ -72,7 +73,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: REFUSALS[outcome.reason] }, { status: 400 });
   }
 
-  const user = await User.findById(outcome.userId).select("username kind");
+  const user = await User.findById(outcome.userId).select("username kind email");
   if (!user) {
     // The account was deleted between the link being sent and used. The token is spent either way.
     return NextResponse.json({ error: REFUSALS.unknown }, { status: 400 });
@@ -108,6 +109,15 @@ export async function POST(request: Request) {
     // The address, because "was that me?" is the whole question this row exists to answer, and a
     // row saying only that it happened cannot answer it
     detail: clientIp ? `from ${clientIp}` : "from an unknown address",
+  });
+
+  // The other half of "was that me?": the audit row answers it for an administrator reading the
+  // log, and this answers it for the person whose account it is.
+  void notifyPasswordChanged({
+    email: user.email,
+    username: user.username,
+    how: "reset_link",
+    from: clientIp ? `from ${clientIp}` : "from an unknown address",
   });
 
   return NextResponse.json({ ok: true });

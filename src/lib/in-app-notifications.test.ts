@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const sendEmail = vi.fn().mockResolvedValue(true);
 const selfOrigin = vi.fn<() => string | null>(() => "https://app.example.com");
 const insertMany = vi.fn().mockResolvedValue([]);
+const userFind = vi.fn();
 
 const ASSIGNEE = "507f1f77bcf86cd799439011";
 const WATCHER = "507f1f77bcf86cd799439012";
@@ -11,7 +12,7 @@ const ACTOR = "507f1f77bcf86cd799439013";
 vi.mock("@/models/notification", () => ({ Notification: { insertMany: (...a: unknown[]) => insertMany(...a) } }));
 vi.mock("@/models/user", () => ({
   User: {
-    find: () => ({
+    find: (...a: unknown[]) => (userFind(...a), {
       lean: async () => [
         { _id: ASSIGNEE, email: "assignee@example.com", fullName: "Ann" },
         { _id: WATCHER, email: "watcher@example.com", fullName: "Wes" },
@@ -113,6 +114,17 @@ describe("notification emails", () => {
     expect(mail.html).not.toContain("href=\"http");
     expect(mail.headers).toBeUndefined();
     expect(mail.html).toContain("Session cookie survives a password change");
+  });
+
+  // Somebody on the digest hears about this in one message tomorrow morning; sending both would
+  // make the digest a duplicate rather than a replacement
+  it("skips the people who chose the daily digest", async () => {
+    await createNotifications(NOTIFICATION);
+    await sentMails();
+
+    const [filter] = userFind.mock.calls.at(-1) ?? [];
+    expect(filter.emailNotifications).toBe(true);
+    expect(filter.emailDigest).toEqual({ $ne: true });
   });
 
   it("never writes to the person who caused the notification", async () => {

@@ -3,6 +3,7 @@ import { getClientIp, verifyCredentials } from "@/lib/auth";
 import { checkProvenance } from "@/lib/session";
 import { lockoutKey, sourceKey, withLockout } from "@/lib/rate-limit";
 import { accessibleProjectIds } from "@/lib/grants";
+import { notifyCredentialCreated } from "@/lib/security-mail";
 import { User } from "@/models/user";
 import { OAuthClient } from "@/models/oauthClient";
 import { OAuthCode } from "@/models/oauthCode";
@@ -288,10 +289,15 @@ async function handleConsent(form: FormData): Promise<Response> {
   }
 
   let allowedProjects: string[] = [];
+  let scopeLabel = "every board this account can reach";
   if (access === "limited") {
     const accessible = await accessibleProjects(user);
     const accessibleIds = new Set(accessible.map((p) => p._id));
     allowedProjects = [...new Set(selected)].filter((id) => accessibleIds.has(id));
+    scopeLabel = accessible
+      .filter((p) => allowedProjects.includes(p._id))
+      .map((p) => p.key)
+      .join(", ");
     if (allowedProjects.length === 0) {
       return consentForm(
         ticket,
@@ -315,6 +321,16 @@ async function handleConsent(form: FormData): Promise<Response> {
     scope: consent.scope,
     allowedProjects,
     expiresAt: new Date(Date.now() + AUTH_CODE_TTL_SECONDS * 1000),
+  });
+
+  // The grant outlives this browser window, so it is worth a line in an inbox the account holder
+  // reads even when the authorization happened somewhere they were not looking.
+  void notifyCredentialCreated({
+    email: user.email,
+    username: user.username,
+    kind: "oauth",
+    name: client.clientName,
+    scope: scopeLabel,
   });
 
   const url = new URL(consent.redirectUri);

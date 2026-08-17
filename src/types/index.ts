@@ -146,6 +146,8 @@ export interface IUser {
   fullName: string;
   email: string;
   emailNotifications: boolean;
+  emailDigest: boolean;
+  lastDigestDay: string;
   collapseEmptyColumns: boolean;
   role: UserRole;
   // A worker's identity is a user record so authorship, mentions, avatars and history keep
@@ -883,6 +885,7 @@ export interface ApiUser {
   fullName: string;
   email: string;
   emailNotifications: boolean;
+  emailDigest?: boolean;
   collapseEmptyColumns?: boolean;
   role: UserRole;
   createdAt: string;
