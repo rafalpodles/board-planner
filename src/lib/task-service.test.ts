@@ -97,6 +97,7 @@ vi.mock("@/lib/pm/triggers", () => ({ onTaskStatusChanged: vi.fn().mockResolvedV
 
 const {
   CLEAR_WORKER_ASSIGNEE,
+  WAS_UNASSIGNED,
   claimNextTask,
   releaseTask,
   releaseExpiredTasks,
@@ -912,6 +913,16 @@ describe("claiming by assignment", () => {
     });
   });
 
+  it("records itself as the assigner exactly when the claim is what assigned it", async () => {
+    await claimNextTask("p1", "w1", "run-1", IDENTITY);
+
+    // Same signal as execution.assignedByRun: the claim is the assigner only when the claim is
+    // what set the assignee, so a resumed run keeps whatever assignedBy already recorded.
+    expect(claimSet(findOneAndUpdate.mock.calls[0]).assignedBy).toEqual({
+      $cond: [WAS_UNASSIGNED, new Types.ObjectId(IDENTITY), "$assignedBy"],
+    });
+  });
+
   it("takes nothing assigned to anybody but itself", async () => {
     await claimNextTask("p1", "w1", "run-1", IDENTITY);
 
@@ -956,6 +967,7 @@ describe("claiming by assignment", () => {
     await claimNextTask("p1", "w1", "run-1", null);
 
     expect(claimSet(findOneAndUpdate.mock.calls[0])).not.toHaveProperty("assignee");
+    expect(claimSet(findOneAndUpdate.mock.calls[0])).not.toHaveProperty("assignedBy");
     expect(claimSet(findOneAndUpdate.mock.calls[0]).status).toBe("doing");
   });
 });
@@ -977,6 +989,9 @@ describe("every way back to the board clears the assignment", () => {
   // the rule means — a shape assertion is how the `""`-is-truthy bug shipped. The meaning is
   // e2e/claim-scope.spec.ts, which runs these updates against a real MongoDB.
   const CLEARED = CLEAR_WORKER_ASSIGNEE.assignee;
+  // Same shape check, same reason, for the field that has to clear alongside it: an assignedBy
+  // left behind here would go on describing a person who has nothing to do with the empty assignee.
+  const CLEARED_BY = CLEAR_WORKER_ASSIGNEE.assignedBy;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -997,6 +1012,7 @@ describe("every way back to the board clears the assignment", () => {
     await changeStatus("p1", "t1", "checking", "actor");
 
     expect(setStage(findOneAndUpdate.mock.calls[0][1]).assignee).toEqual(CLEARED);
+    expect(setStage(findOneAndUpdate.mock.calls[0][1]).assignedBy).toEqual(CLEARED_BY);
   });
 
   it("clears it when the run is released with the attempt refunded", async () => {
@@ -1005,6 +1021,7 @@ describe("every way back to the board clears the assignment", () => {
     await releaseTask("p1", "t1");
 
     expect(setStage(findOneAndUpdate.mock.calls[0][1]).assignee).toEqual(CLEARED);
+    expect(setStage(findOneAndUpdate.mock.calls[0][1]).assignedBy).toEqual(CLEARED_BY);
   });
 
   it("clears it when the release charges the attempt", async () => {
@@ -1013,6 +1030,7 @@ describe("every way back to the board clears the assignment", () => {
     await releaseTask("p1", "t1", { refund: false });
 
     expect(setStage(findOneAndUpdate.mock.calls[0][1]).assignee).toEqual(CLEARED);
+    expect(setStage(findOneAndUpdate.mock.calls[0][1]).assignedBy).toEqual(CLEARED_BY);
   });
 
   it("clears it on both lease-expiry branches, crashed and exhausted alike", async () => {
@@ -1021,6 +1039,7 @@ describe("every way back to the board clears the assignment", () => {
     expect(updateMany.mock.calls).toHaveLength(2);
     for (const [, update] of updateMany.mock.calls) {
       expect(setStage(update).assignee).toEqual(CLEARED);
+      expect(setStage(update).assignedBy).toEqual(CLEARED_BY);
     }
   });
 
@@ -1051,6 +1070,7 @@ describe("every way back to the board clears the assignment", () => {
     await updateTask("p1", "t1", { status: "checking" }, "actor");
 
     expect(findOneAndUpdate.mock.calls[0][1].$set).not.toHaveProperty("assignee");
+    expect(findOneAndUpdate.mock.calls[0][1].$set).not.toHaveProperty("assignedBy");
   });
 
   it("clears it when the edit form moves a task a worker is running", async () => {
@@ -1078,6 +1098,7 @@ describe("every way back to the board clears the assignment", () => {
     await updateTask("p1", "t1", { status: "checking" }, "actor", true);
 
     expect(findOneAndUpdate.mock.calls[0][1].$set.assignee).toBeNull();
+    expect(findOneAndUpdate.mock.calls[0][1].$set.assignedBy).toBeNull();
   });
 });
 
@@ -1133,6 +1154,30 @@ describe("what the clearing expression actually evaluates to", () => {
     const doc = { assignee: "USER-A", execution: { workerId: "" } };
 
     expect(evaluateExpr(naive, doc)).toBeNull();
+  });
+
+  // assignedBy on its own condition, not assignee's: a doc where the two differ is what would
+  // catch a copy-paste that left assignedBy reading $assignee instead of $assignedBy.
+  const CLEARING_BY = CLEAR_WORKER_ASSIGNEE.assignedBy;
+
+  it("clears assignedBy exactly when it clears assignee", () => {
+    const doc = {
+      assignee: "USER-A",
+      assignedBy: "USER-B",
+      execution: { runId: "r1", workerId: "w1" },
+    };
+
+    expect(evaluateExpr(CLEARING_BY, doc)).toBeNull();
+  });
+
+  it("keeps assignedBy exactly when it keeps assignee, and keeps assignedBy's own value", () => {
+    const doc = {
+      assignee: "USER-A",
+      assignedBy: "USER-B",
+      execution: { runId: "", workerId: "w1" },
+    };
+
+    expect(evaluateExpr(CLEARING_BY, doc)).toBe("USER-B");
   });
 });
 
@@ -1484,6 +1529,16 @@ describe("a status change announces the same things whichever path made it", () 
     await updateTask("p1", "t1", { status: "shipped" }, "actor");
 
     expect(taskCreate, "no next occurrence was created").toHaveBeenCalled();
+  });
+
+  // userId (here "actor") is whoever/whatever closed this occurrence — often the worker's own
+  // identity finishing its run, not the person who owns the recurring series. The next occurrence
+  // must keep the series' own assigner, not read as though the machine assigned it to itself.
+  it("carries the original assigner into the next occurrence, not whoever closed this one", async () => {
+    setup({ recurrence: { frequency: "weekly", interval: 1 }, assignee: "u9", assignedBy: "u9" });
+    await updateTask("p1", "t1", { status: "shipped" }, "actor");
+
+    expect(taskCreate.mock.calls[0]?.[0].assignedBy).toBe("u9");
   });
 
   // Asserting only on Task.create is too weak: without the recurrence guard the helper still

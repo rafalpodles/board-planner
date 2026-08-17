@@ -60,19 +60,18 @@ const UNSET_RUN = Object.fromEntries(RUN_FIELDS.map((field) => [field, ""]));
 // an empty string is TRUTHY in MongoDB's `$cond` — unlike in JavaScript. So every ordinary status
 // change cleared the assignee of every task that had ever been near the execution subdocument.
 // Compare explicitly; do not lean on truthiness across that boundary.
+const RUN_RELEASES_ASSIGNEE = {
+  $and: [
+    { $ne: [{ $ifNull: ["$execution.runId", ""] }, ""] },
+    { $eq: [{ $ifNull: ["$execution.assignedByRun", true] }, true] },
+  ],
+};
+
+// assignedBy mirrors assignee on the same condition: a clear that leaves no assignee must leave no
+// assignedBy either, or it goes on describing a person who has nothing to do with the empty field.
 export const CLEAR_WORKER_ASSIGNEE = {
-  assignee: {
-    $cond: [
-      {
-        $and: [
-          { $ne: [{ $ifNull: ["$execution.runId", ""] }, ""] },
-          { $eq: [{ $ifNull: ["$execution.assignedByRun", true] }, true] },
-        ],
-      },
-      null,
-      "$assignee",
-    ],
-  },
+  assignee: { $cond: [RUN_RELEASES_ASSIGNEE, null, "$assignee"] },
+  assignedBy: { $cond: [RUN_RELEASES_ASSIGNEE, null, "$assignedBy"] },
 };
 
 // A release only applies to a task the run still holds. Status alone is not enough: a board may
@@ -80,6 +79,11 @@ export const CLEAR_WORKER_ASSIGNEE = {
 // while the run is already gone — the release would then pull it back to the approved column and
 // spend an attempt for a move somebody made deliberately.
 const STILL_HELD = { "execution.runId": { $nin: ["", null] } };
+
+// claimNextTask's own signal for whether the task had no assignee before the claim — reused for
+// both execution.assignedByRun and assignedBy, so a claim that is not what assigned the task
+// changes neither field.
+export const WAS_UNASSIGNED = { $eq: [{ $ifNull: ["$assignee", null] }, null] };
 
 // Four times the worker's default task timeout. A worker killed mid-run leaves its task in the
 // active column, where claimNextTask can never see it again — nothing else reclaims it.
@@ -575,7 +579,7 @@ export async function updateTask(
   const heldByRun = !!oldTask.execution?.runId;
   const claimAssigned = oldTask.execution?.assignedByRun !== false;
   const releasesWorker = leavesColumn && heldByRun && claimAssigned;
-  const setFields = releasesWorker ? { assignee: null, ...updates } : updates;
+  const setFields = releasesWorker ? { assignee: null, assignedBy: null, ...updates } : updates;
 
   const task = await Task.findOneAndUpdate(
     { _id: taskId, project: projectId },
@@ -802,6 +806,10 @@ async function createNextRecurrence(
     category: oldTask.category || "user-story",
     status: defaultStatusFor(project),
     assignee: oldTask.assignee,
+    // Inherited, not stamped with userId: userId is whoever/whatever closed this occurrence, which
+    // may be the worker's own identity finishing its run, not the person who owns the series. The
+    // next occurrence continues the same standing assignment, so it carries the same assigner.
+    assignedBy: oldTask.assignedBy,
     dueDate: nextDue,
     checklist,
     recurrence: oldTask.recurrence,
@@ -999,9 +1007,17 @@ export async function claimNextTask(
         $set: {
           status: activeStatus,
           // Kept, not overwritten: under "assigned" the assignee is the hand-over itself, and
-          // whether the claim is what set it decides whether releasing may clear it again
-          ...(assignTo ? { assignee: { $ifNull: ["$assignee", assignTo] } } : {}),
-          "execution.assignedByRun": { $eq: [{ $ifNull: ["$assignee", null] }, null] },
+          // whether the claim is what set it decides whether releasing may clear it again.
+          // assignedBy follows the same rule on the same signal — the claim is the assigner only
+          // when the claim is what set the assignee; a resumed or already-assigned task keeps
+          // whatever assignedBy already recorded, same as it keeps assignee.
+          ...(assignTo
+            ? {
+                assignee: { $ifNull: ["$assignee", assignTo] },
+                assignedBy: { $cond: [WAS_UNASSIGNED, assignTo, "$assignedBy"] },
+              }
+            : {}),
+          "execution.assignedByRun": WAS_UNASSIGNED,
           "execution.workerId": workerId,
           "execution.runId": runId,
           "execution.startedAt": new Date(),
