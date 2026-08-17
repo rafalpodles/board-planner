@@ -4,6 +4,7 @@ const getAuthUser = vi.fn();
 const compare = vi.fn();
 const userFindById = vi.fn();
 const userFindByIdAndUpdate = vi.fn();
+const userExists = vi.fn();
 const invalidateResetTokens = vi.fn();
 const logInstanceAudit = vi.fn();
 const sendEmail = vi.fn();
@@ -33,7 +34,7 @@ vi.mock("@/lib/email", async () => {
 vi.mock("@/lib/grants", () => ({ check: vi.fn(), accessibleProjectIds: vi.fn() }));
 vi.mock("bcryptjs", () => ({ default: { compare } }));
 vi.mock("@/models/user", () => ({
-  User: { findById: userFindById, findByIdAndUpdate: userFindByIdAndUpdate },
+  User: { findById: userFindById, findByIdAndUpdate: userFindByIdAndUpdate, exists: userExists },
 }));
 
 const { PUT } = await import("./route");
@@ -65,9 +66,11 @@ beforeEach(async () => {
   vi.clearAllMocks();
   await resetRateLimits();
   getAuthUser.mockResolvedValue(signedIn());
-  userFindById.mockReturnValue({
-    select: () => Promise.resolve({ _id: "u1", password: "stored-hash" }),
-  });
+  const record = { _id: "u1", username: "rafal", email: "old@example.com", password: "stored-hash" };
+  userFindById.mockReturnValue(
+    Object.assign(Promise.resolve(record), { select: () => Promise.resolve(record) })
+  );
+  userExists.mockResolvedValue(null);
   userFindByIdAndUpdate.mockResolvedValue({ _id: "u1", email: "new@example.com" });
   compare.mockResolvedValue(true);
   isEmailConfigured.mockReturnValue(true);
@@ -175,6 +178,12 @@ describe("PUT /api/users/me — changing the address that can reset the password
 
     expect(response.status).toBe(200);
     expect(userFindByIdAndUpdate).not.toHaveBeenCalled();
+    // The body is the account, not an empty object: the shipped version of this test could not see
+    // the difference, because the findById mock was not a thenable
+    expect(await response.json()).toMatchObject({ _id: "u1", email: "old@example.com" });
+    // And nothing was destroyed on the way to doing nothing
+    expect(invalidateResetTokens).not.toHaveBeenCalled();
+    expect(compare).not.toHaveBeenCalled();
   });
 
   it("leaves the notification toggle alone — no password needed for a preference", async () => {
@@ -205,5 +214,60 @@ describe("PUT /api/users/me — changing the address that can reset the password
 
     expect(response.status).toBe(429);
     expect(userFindByIdAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("answers 400 for a body that is not JSON, rather than throwing a 500", async () => {
+    const response = await PUT(
+      new Request("https://app.example.com/api/users/me", {
+        method: "PUT",
+        headers: { "content-type": "application/json", "sec-fetch-site": "same-origin" },
+        body: "{ not json",
+      }),
+      context
+    );
+
+    expect(response.status).toBe(400);
+  });
+
+  // The admin path refuses this on `kind` and says why: an address makes an un-loginable account
+  // resettable. viaMachineCredential alone does not cover a machine row signed in by cookie.
+  it("refuses a machine account moving its own address", async () => {
+    getAuthUser.mockResolvedValue(signedIn({ kind: "machine" }));
+
+    const response = await PUT(
+      put({ email: "new@example.com", currentPassword: "right" }),
+      context
+    );
+
+    expect(response.status).toBe(400);
+    expect(userFindByIdAndUpdate).not.toHaveBeenCalled();
+  });
+
+  // The purge of outstanding reset links runs before the write, so a collision learned from the
+  // index alone would destroy them over an address that was never stored
+  it("answers 409 before purging anything when the address is taken", async () => {
+    userExists.mockResolvedValue({ _id: "somebody-else" });
+
+    const response = await PUT(
+      put({ email: "taken@example.com", currentPassword: "right" }),
+      context
+    );
+
+    expect(response.status).toBe(409);
+    expect(invalidateResetTokens).not.toHaveBeenCalled();
+    expect(userFindByIdAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("answers 404 when the account was deleted mid-request, and audits nothing", async () => {
+    userFindByIdAndUpdate.mockResolvedValue(null);
+
+    const response = await PUT(
+      put({ email: "new@example.com", currentPassword: "right" }),
+      context
+    );
+
+    expect(response.status).toBe(404);
+    expect(logInstanceAudit).not.toHaveBeenCalled();
+    expect(sendEmail).not.toHaveBeenCalled();
   });
 });

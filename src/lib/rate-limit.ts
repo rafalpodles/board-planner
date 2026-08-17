@@ -168,9 +168,13 @@ function accountPrefix(username: string, scope: string): string {
 export async function clearAccountAttempts(username: string, scope = "login"): Promise<void> {
   await connectDB();
   const prefix = accountPrefix(username, scope);
-  // The prefix ends in ":", so the range ends at the next code point after it. Bounding with a high
-  // sentinel character instead would depend on how the comparison orders it.
-  const afterPrefix = `${prefix.slice(0, -1)};`;
+  // Derived from the prefix's own last character rather than hard-coding the one that follows ":".
+  // Written as a literal, a separator later changed to anything ordering above it would make the
+  // lower bound exceed the upper, and an empty range clears nothing — leaving everybody locked out,
+  // silently. Bounding with a high sentinel character instead would depend on how the comparison
+  // orders it, which differs between JavaScript and MongoDB.
+  const last = prefix.codePointAt(prefix.length - 1)!;
+  const afterPrefix = prefix.slice(0, -1) + String.fromCodePoint(last + 1);
   await RateLimit.deleteMany({ _id: { $gte: prefix, $lt: afterPrefix } });
 }
 

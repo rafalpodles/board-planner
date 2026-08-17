@@ -20,7 +20,18 @@ import { User } from "@/models/user";
 export const PUT = withAuth(async (request, { user }) => {
   await connectDB();
 
-  const body = await request.json();
+  // Both siblings answer 400 here rather than throwing a 500 at whoever sent it, and this route
+  // now handles a password too
+  let body: Record<string, unknown>;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+  if (typeof body !== "object" || body === null) {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
   const updates: Record<string, unknown> = {};
   const previousEmail = user.email ?? "";
 
@@ -32,6 +43,15 @@ export const PUT = withAuth(async (request, { user }) => {
       return NextResponse.json(
         { error: "This action requires an interactive session" },
         { status: 403 }
+      );
+    }
+    // The admin path refuses this on `kind` and states why: a worker's account is deliberately
+    // un-loginable, and an address makes it resettable. `viaMachineCredential` alone does not cover
+    // a machine row signed into by cookie, so key on both — defence in depth, not a live hole.
+    if (user.kind === "machine") {
+      return NextResponse.json(
+        { error: "A machine account signs in with a token, not a password" },
+        { status: 400 }
       );
     }
     if (typeof body.email !== "string") {
@@ -87,6 +107,21 @@ export const PUT = withAuth(async (request, { user }) => {
       // their own correct password for the rest of the window, which clearAccountAttempts cannot
       // lift because the block sits outside the account dimension it sweeps (BP-354 review).
       await clearAttempts(sourceKey(String(user._id), "email-change")).catch(() => {});
+
+      // Asked before anything is touched, exactly as the admin path does it: the purge below runs
+      // before the write, so learning of the collision from the index alone would destroy the
+      // account's outstanding reset links over an address that was never stored — and leave no
+      // audit row saying anything happened. The index stays the final arbiter for a concurrent
+      // write; this only stops the common case from being destructive (BP-354 review).
+      if (email) {
+        const taken = await User.exists({ email, _id: { $ne: user._id } });
+        if (taken) {
+          return NextResponse.json(
+            { error: "That email is already on another account" },
+            { status: 409 }
+          );
+        }
+      }
       updates.email = email;
     }
   }
@@ -128,6 +163,12 @@ export const PUT = withAuth(async (request, { user }) => {
       );
     }
     throw err;
+  }
+
+  // Deleted between the credential check and the write. Answering 200 with a null body told the
+  // caller it worked, and would have audited and mailed about a write that matched nothing.
+  if (!updated) {
+    return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
 
   if (typeof updates.email === "string" && updates.email !== previousEmail) {

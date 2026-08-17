@@ -40,10 +40,10 @@ export async function register() {
         console.log(`Seeded default columns on ${seededColumns.modifiedCount} project(s)`);
       }
 
-      // Caught here rather than left to the outer handler, which the deleted src/ copy of this
-      // file did and this one did not: an instance without the catalog cannot run a worker but is
-      // otherwise usable, and letting the failure through would skip the backfill and the PM
-      // scheduler below it (BP-356).
+      // Caught here rather than left to the outer handler: the backfill and the PM scheduler are
+      // below this line, so an unhandled seed failure would skip both — and be logged as a
+      // connection problem, which it is not. An instance without the catalog cannot run a worker
+      // but is otherwise usable.
       const { seedAgents } = await import("@/lib/agent-seed");
       await seedAgents().catch((error) => {
         console.error("Failed to seed the agent catalog:", error);

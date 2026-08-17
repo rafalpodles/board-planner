@@ -18,10 +18,11 @@ export default function ProfilePage() {
   const [emailNotifications, setEmailNotifications] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
 
   // Trimmed and lowercased the way the server normalises it, so the password prompt does not
   // appear for a stray capital that will not change anything
-  const emailChanged = email.trim().toLowerCase() !== savedEmail;
+  const emailChanged = loadFailed ? false : email.trim().toLowerCase() !== savedEmail;
 
   useEffect(() => {
     if (!user) return;
@@ -34,7 +35,13 @@ export default function ProfilePage() {
         setEmailNotifications(data.emailNotifications || false);
         setLoaded(true);
       })
-      .catch(() => setLoaded(true));
+      .catch(() => {
+        // Without the stored address there is no way to tell a real change from a no-op, and the
+        // old behaviour offered Save anyway — which the server refuses, asking for a password
+        // there is no field for
+        setLoadFailed(true);
+        setLoaded(true);
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -70,6 +77,13 @@ export default function ProfilePage() {
   return (
     <div className="w-full max-w-md mx-auto">
       <h2 className="text-lg font-semibold mb-6">Profile</h2>
+
+      {loadFailed && (
+        <p className="mb-4 rounded-lg border border-danger/40 bg-danger/10 p-3 text-sm">
+          Your profile could not be loaded, so it cannot be saved from here right now. Reload the
+          page to try again.
+        </p>
+      )}
 
       <div className="space-y-4">
         <div>
@@ -124,7 +138,7 @@ export default function ProfilePage() {
           and status changes on tasks you&apos;re watching.
         </p>
 
-        <Button onClick={handleSave} disabled={saving || (emailChanged && !currentPassword)}>
+        <Button onClick={handleSave} disabled={saving || loadFailed || (emailChanged && !currentPassword.trim())}>
           {saving ? "Saving..." : "Save"}
         </Button>
       </div>
