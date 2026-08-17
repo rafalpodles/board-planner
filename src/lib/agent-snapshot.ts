@@ -1,8 +1,6 @@
 import { Agent } from "@/models/agent";
 import { AgentBlock } from "@/models/agentBlock";
-import { Project } from "@/models/project";
 import { normaliseComposition, sequenceOf } from "./agent-rules";
-import { SEEDED_DEFAULT_NAME } from "./agent-seed";
 import { StepCapability } from "@/types";
 
 /**
@@ -35,28 +33,19 @@ export interface AgentSnapshot {
 }
 
 /**
- * The task's own agent wins, then the project's default, then the seeded "Default" agent.
- *
- * That last fallback is what makes adopting this a no-op: every project that had a worker before
- * the catalog existed names no agent, and without it each of them would stop dead — the claim
- * releasing every task with nothing on the board to say why. The seeded Default is exactly the
- * pipeline those projects were already running.
+ * The task's own agent, and nothing else. Choosing one is how a task is handed to a machine, so a
+ * task naming none is a task a person is doing — the claim skips it rather than resolving a default
+ * on its behalf. Before BP-358 this fell through the project default to the seeded "Default", which
+ * is what made an empty field mean "whatever the project says" instead of "nobody".
  */
 export async function snapshotFor(
   projectId: string,
   taskAgentId?: unknown
 ): Promise<AgentSnapshot | null> {
-  let agentId = taskAgentId ? String(taskAgentId) : "";
+  const agentId = taskAgentId ? String(taskAgentId) : "";
+  if (!agentId) return null;
 
-  if (!agentId) {
-    const project = await Project.findById(projectId, "worker.agent").lean();
-    const fallback = (project as { worker?: { agent?: unknown } } | null)?.worker?.agent;
-    agentId = fallback ? String(fallback) : "";
-  }
-
-  const agent = agentId
-    ? await Agent.findById(agentId).lean()
-    : await Agent.findOne({ scope: "global", name: SEEDED_DEFAULT_NAME }).lean();
+  const agent = await Agent.findById(agentId).lean();
   if (!agent) return null;
 
   // A project agent must not run on another project's task, whichever way it was chosen
