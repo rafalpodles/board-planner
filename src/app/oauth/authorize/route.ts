@@ -87,8 +87,8 @@ function htmlPage(body: string, status = 200): Response {
   );
 }
 
-function errorPage(message: string): Response {
-  return htmlPage(`<h1>Authorization error</h1><p class="sub">${escapeHtml(message)}</p>`, 400);
+function errorPage(message: string, status = 400): Response {
+  return htmlPage(`<h1>Authorization error</h1><p class="sub">${escapeHtml(message)}</p>`, status);
 }
 
 function hiddenFields(p: AuthParams): string {
@@ -207,17 +207,28 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  // Both phases below verify a credential or grant a consent, and both reach the same throttle
-  // counters the login route uses — under the same keys, so attempts here spend that budget too.
-  // The login route refuses a cross-site post before reading anything; without the same refusal
-  // here, this is the quieter way to the same counters, reachable by anyone who registers a client
-  // at the deliberately unauthenticated /oauth/register.
+  // What this closes is CSRF from somebody's browser: a page on another origin auto-submitting this
+  // form, where the victim's cookies ride along and `Sec-Fetch-Site` is a forbidden header the page
+  // cannot forge. The login route has refused that for a while; this endpoint verifies a credential
+  // and grants a consent, and did not.
+  //
+  // What it does NOT close, despite reaching the same throttle counters as the login route under the
+  // same keys: a script spending somebody else's lockout budget. A script sets `Sec-Fetch-Site`
+  // itself, so the refusal costs it one header — the same reasoning /oauth/register already records
+  // about its own guard. The aimable lockout is answered in rate-limit.ts, by giving it an exit.
   //
   // The consent and login forms are served by the GET above, from this instance's own origin, so a
-  // genuine submission is same-origin. The cross-site step of the flow is that initial GET, which
-  // checkProvenance ignores because it only inspects mutating methods.
+  // genuine submission is same-origin — verified in a real browser across all three entry paths.
+  // The cross-site step of the flow is that initial GET, which checkProvenance ignores because it
+  // only inspects mutating methods.
   if (!checkProvenance(req).ok) {
-    return errorPage("This request did not come from this instance's own sign-in form.");
+    // 403, matching provenanceRefusal everywhere else: a 400 here is indistinguishable from
+    // "Unknown client" and "PKCE required", which makes cross-site attempts unalertable in an
+    // access log.
+    return errorPage(
+      "This form was submitted from another site, so it was refused. Start again from this instance.",
+      403
+    );
   }
 
   await connectDB();

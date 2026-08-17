@@ -96,17 +96,21 @@ export async function POST(request: Request) {
     throw err;
   }
 
+  // "I could not get in, so I reset it" has to end with getting in. The login throttle refuses on
+  // the account key before reading the credential, and that key is shared by every caller where
+  // there is no client address — so without this, the correct new password is refused for the rest
+  // of the window and the link that was just spent looks broken (BP-347).
+  //
+  // Immediately after the write and before anything else, because everything below can reject: a
+  // throw between the two would leave the password changed, the link spent, and the lockout
+  // standing — the exact state this call exists to prevent (BP-353 review).
+  await clearAccountAttempts(user.username).catch(() => {});
+
   // Every other link too, and only once the password is safely written. Issuing is a delete
   // followed by a create, so two requests racing leave two live links; without this, resetting
   // with the second leaves the first able to set the password again, in an inbox the person may
   // not control.
   await invalidateResetTokens(user._id);
-
-  // "I could not get in, so I reset it" has to end with getting in. The login throttle refuses on
-  // the account key before reading the credential, and that key is shared by every caller where
-  // there is no client address — so without this, the correct new password is refused for the rest
-  // of the window and the link that was just spent looks broken (BP-347).
-  await clearAccountAttempts(user.username).catch(() => {});
 
   void logInstanceAudit({
     action: "user_password_reset_by_email",

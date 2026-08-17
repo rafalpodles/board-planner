@@ -9,6 +9,7 @@ import { withAuth } from "@/lib/middleware";
 import { duplicateKeyField } from "@/lib/mongo-errors";
 import { invalidateResetTokens } from "@/lib/password-reset";
 import {
+  clearAttempts,
   EXCLUSIVE_SOURCE_ATTEMPTS,
   lockoutKey,
   sourceKey,
@@ -79,6 +80,13 @@ export const PUT = withAuth(async (request, { user }) => {
       if (!passwordMatches) {
         return NextResponse.json({ error: "Current password is incorrect" }, { status: 400 });
       }
+      // Unlike the login throttle, this gate's source key *is* the account — it is the signed-in
+      // user's own id — so the rule that a success must never clear the source dimension does not
+      // apply: there is no other account whose guessing budget this could refund. Without it the
+      // gate has no exit at all, and ten wrong guesses from a borrowed session refuse the owner
+      // their own correct password for the rest of the window, which clearAccountAttempts cannot
+      // lift because the block sits outside the account dimension it sweeps (BP-354 review).
+      await clearAttempts(sourceKey(String(user._id), "email-change")).catch(() => {});
       updates.email = email;
     }
   }
@@ -128,10 +136,10 @@ export const PUT = withAuth(async (request, { user }) => {
     // It was audited when somebody else did it and silent when the account itself did — which is
     // the case a borrowed session produces.
     void logInstanceAudit({
-      action: "user_email_changed",
+      action: "user_email_changed_self",
       user: user._id,
       target: user.username,
-      detail: `${previousEmail || "none"} → ${updates.email || "none"} (self)`,
+      detail: `${previousEmail || "none"} → ${updates.email || "none"}`,
     });
     // Told to the address losing the ability to recover the account, not the one gaining it: the
     // person who needs to hear about this is the one who did not do it.

@@ -37,6 +37,8 @@ vi.mock("@/models/user", () => ({
 }));
 
 const { PUT } = await import("./route");
+const { resetRateLimits, lockoutKey, recordFailedAttempt, isRateLimited, ANONYMOUS_ACCOUNT_ATTEMPTS } =
+  await import("@/lib/rate-limit");
 
 const ADMIN = { _id: "admin-1", role: "admin" };
 
@@ -66,7 +68,8 @@ function found(target: unknown) {
   userFindById.mockResolvedValue(target);
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  await resetRateLimits();
   vi.clearAllMocks();
   getAuthUser.mockResolvedValue(ADMIN);
   userCountDocuments.mockResolvedValue(2);
@@ -208,6 +211,37 @@ describe("PUT /api/users/:id — machine credentials cannot promote", () => {
 });
 
 describe("PUT /api/users/:id — an admin sets a password", () => {
+  // BP-353. Handing somebody a password is the administrator's answer to "I cannot get in", so it
+  // has to lift a login lockout as well — including one an attacker aimed at them, which on a
+  // deployment with no client address anybody can fill. The mock alone proved nothing.
+  it("lifts the target's login lockout, from every address it was filled from", async () => {
+    const shared = lockoutKey("-", "target");
+    const fromElsewhere = lockoutKey("203.0.113.9", "target");
+    for (let i = 0; i < ANONYMOUS_ACCOUNT_ATTEMPTS; i++) {
+      await recordFailedAttempt(shared);
+      await recordFailedAttempt(fromElsewhere);
+    }
+    const target = targetDoc({ role: "member" });
+    found(target);
+
+    const response = await PUT(put({ password: "a-brand-new-password" }), ctx());
+
+    expect(response.status).toBe(200);
+    expect(await isRateLimited(shared, ANONYMOUS_ACCOUNT_ATTEMPTS)).toBe(false);
+    expect(await isRateLimited(fromElsewhere, ANONYMOUS_ACCOUNT_ATTEMPTS)).toBe(false);
+  });
+
+  it("leaves the lockout alone when no password was set", async () => {
+    const shared = lockoutKey("-", "target");
+    for (let i = 0; i < ANONYMOUS_ACCOUNT_ATTEMPTS; i++) await recordFailedAttempt(shared);
+    const target = targetDoc({ role: "member" });
+    found(target);
+
+    await PUT(put({ role: "admin" }), ctx());
+
+    expect(await isRateLimited(shared, ANONYMOUS_ACCOUNT_ATTEMPTS)).toBe(true);
+  });
+
   it("hashes it, signs the target out everywhere, and leaves a trace", async () => {
     const target = targetDoc({ role: "member" });
     found(target);

@@ -37,7 +37,8 @@ vi.mock("@/models/user", () => ({
 }));
 
 const { PUT } = await import("./route");
-const { resetRateLimits } = await import("@/lib/rate-limit");
+const { resetRateLimits, sourceKey, recordFailedAttempt, isRateLimited, EXCLUSIVE_SOURCE_ATTEMPTS } =
+  await import("@/lib/rate-limit");
 
 function signedIn(overrides: Record<string, unknown> = {}) {
   return {
@@ -114,7 +115,7 @@ describe("PUT /api/users/me — changing the address that can reset the password
 
     expect(logInstanceAudit).toHaveBeenCalledWith(
       expect.objectContaining({
-        action: "user_email_changed",
+        action: "user_email_changed_self",
         target: "rafal",
         detail: expect.stringContaining("old@example.com"),
       })
@@ -181,5 +182,28 @@ describe("PUT /api/users/me — changing the address that can reset the password
 
     expect(response.status).toBe(200);
     expect(compare).not.toHaveBeenCalled();
+  });
+
+  // This gate's source key IS the account, so a success must clear it — otherwise ten wrong guesses
+  // from a borrowed session refuse the owner their own correct password for the rest of the window,
+  // and clearAccountAttempts cannot lift it because the block sits outside the account dimension.
+  it("gives its own lockout an exit, so a correct password is never refused twice", async () => {
+    const gate = sourceKey("u1", "email-change");
+    for (let i = 0; i < EXCLUSIVE_SOURCE_ATTEMPTS - 1; i++) await recordFailedAttempt(gate);
+
+    const response = await PUT(put({ email: "new@example.com", currentPassword: "right" }), context);
+
+    expect(response.status).toBe(200);
+    expect(await isRateLimited(gate, EXCLUSIVE_SOURCE_ATTEMPTS)).toBe(false);
+  });
+
+  it("still refuses once that budget is spent", async () => {
+    const gate = sourceKey("u1", "email-change");
+    for (let i = 0; i < EXCLUSIVE_SOURCE_ATTEMPTS; i++) await recordFailedAttempt(gate);
+
+    const response = await PUT(put({ email: "new@example.com", currentPassword: "right" }), context);
+
+    expect(response.status).toBe(429);
+    expect(userFindByIdAndUpdate).not.toHaveBeenCalled();
   });
 });

@@ -31,7 +31,7 @@ import { connectDB } from "./db";
 import { sha256 } from "./oauth";
 import { RateLimit } from "@/models/rateLimit";
 
-export const MAX_ATTEMPTS = 10;
+const MAX_ATTEMPTS = 10;
 // A source key aggregates every account tried from one address, and addresses are shared — office
 // NAT, mobile carrier. At the per-account threshold one colleague's ten typos would refuse the
 // whole building, so the source dimension needs room for honest traffic before it bites.
@@ -210,9 +210,13 @@ export function anonymousMultiplier(clientIp: string | null, perAddress: number)
  * The cost of that ordering is real and was measured (BP-353). Where no client address is available
  * the account key is shared by every caller, so filling it denies the owner their own correct
  * password: it is a refusal that can be aimed. Moving the check after a failed verification was
- * tried and was worse — it handed a single account ten times the guessing budget, made the 429 a
- * status that had already paid for its own hash, and turned a successful login into an observable
- * event, because clearing the shared counter flipped an attacker's probe from 429 to 401.
+ * tried and was worse — it handed a single account ten times the guessing budget, and made the 429
+ * a status that had already paid for its own hash.
+ *
+ * One thing that ordering does NOT fix, so nobody reads this and assumes it does: because a success
+ * clears the account key and that key is shared, a caller who parks the counter one short of the
+ * threshold can tell whether the owner has since signed in — 429 if not, 401 if so. Closing that
+ * needs the key not to be shared, which means an address to put beside the username.
  *
  * So the bound stays in front, and the denial gets an exit instead: `clearAccountAttempts` lets a
  * password change lift the lockout. Somebody aimed at pays for it once and recovers deliberately,

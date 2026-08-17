@@ -1232,6 +1232,10 @@ export const INSTANCE_AUDIT_ACTIONS = [
   "worker_command_sent",
   "user_password_reset",
   "user_email_changed",
+  // Distinct from the admin action above, because the audit page has to name the right actor: an
+  // account moving its own recovery address is the borrowed-session case, and a row reading
+  // "changed by an admin" would send an investigator looking at the wrong person (BP-354)
+  "user_email_changed_self",
   "user_password_reset_by_email",
 ] as const;
 

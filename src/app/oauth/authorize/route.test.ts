@@ -152,8 +152,27 @@ describe("POST /oauth/authorize login phase", () => {
 
       const response = await POST(crossSite({ "sec-fetch-site": "cross-site" }));
 
-      expect(response.status).toBe(400);
+      expect(response.status).toBe(403);
       expect(verifyCredentials).not.toHaveBeenCalled();
+    });
+
+    // The gate has to cover BOTH phases. Neither shipped test set `phase`, so both landed on the
+    // login branch and consent was never exercised (BP-355 review).
+    it("refuses a cross-site consent submission too", async () => {
+      const body = new URLSearchParams({ phase: "consent", ticket: "t1", decision: "allow" });
+      const response = await POST(
+        new Request("http://localhost/oauth/authorize", {
+          method: "POST",
+          headers: {
+            "content-type": "application/x-www-form-urlencoded",
+            "sec-fetch-site": "cross-site",
+          },
+          body,
+        })
+      );
+
+      expect(response.status).toBe(403);
+      expect(oauthConsentCreate).not.toHaveBeenCalled();
     });
 
     it("refuses a post carrying neither Sec-Fetch-Site nor Origin", async () => {
@@ -161,7 +180,7 @@ describe("POST /oauth/authorize login phase", () => {
 
       const response = await POST(crossSite({}));
 
-      expect(response.status).toBe(400);
+      expect(response.status).toBe(403);
       expect(verifyCredentials).not.toHaveBeenCalled();
     });
   });
