@@ -6,6 +6,7 @@ const selfOrigin = vi.fn<() => string | null>(() => "https://app.example.com");
 const userFind = vi.fn();
 const userFindOneAndUpdate = vi.fn();
 const notificationFind = vi.fn();
+const notificationCount = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/email", () => ({
@@ -17,7 +18,10 @@ vi.mock("@/models/user", () => ({
   User: { find: (...a: unknown[]) => userFind(...a), findOneAndUpdate: (...a: unknown[]) => userFindOneAndUpdate(...a) },
 }));
 vi.mock("@/models/notification", () => ({
-  Notification: { find: (...a: unknown[]) => notificationFind(...a) },
+  Notification: {
+    find: (...a: unknown[]) => notificationFind(...a),
+    countDocuments: (...a: unknown[]) => notificationCount(...a),
+  },
 }));
 
 const { digestTick, dueDigestDay, digestHour, digestTimezone, DIGEST_ROW_LIMIT } = await import(
@@ -26,8 +30,9 @@ const { digestTick, dueDigestDay, digestHour, digestTimezone, DIGEST_ROW_LIMIT }
 
 const WAITING = [{ _id: "u1", email: "rpo@example.com", username: "rpo" }];
 
-function notifications(count: number) {
-  const rows = Array.from({ length: count }, (_, i) => ({
+/** `shown` rows come back from the page; `total` is what the count says is really waiting. */
+function notifications(shown: number, total = shown) {
+  const rows = Array.from({ length: shown }, (_, i) => ({
     title: `BP-${i + 1} moved to In Review`,
     task: { taskNumber: i + 1 },
     project: { key: "BP" },
@@ -39,6 +44,7 @@ function notifications(count: number) {
       }),
     }),
   });
+  notificationCount.mockResolvedValue(total);
 }
 
 const sent = () => sendEmail.mock.calls.at(-1)?.[0] as {
@@ -97,7 +103,11 @@ describe("digestTick", () => {
     expect(await digestTick(morning)).toBe(1);
 
     expect(sent().subject).toBe("[Board Planner] 3 updates on your tasks");
-    expect(sent().text).toContain("BP-1: BP-1 moved to In Review");
+    // The key labels the row, so the title does not repeat it
+    expect(sent().text).toContain("BP-1: moved to In Review");
+    // Each line keeps the link the per-event mail would have carried
+    expect(sent().text).toContain("https://app.example.com/projects/BP/tasks/1");
+    expect(sent().html).toContain('href="https://app.example.com/projects/BP/tasks/2"');
     expect(sent().text).toContain("Open my tasks: https://app.example.com/my-tasks");
     expect(sent().headers?.["List-Unsubscribe"]).toBe(
       "<https://app.example.com/settings/profile>"
@@ -133,12 +143,15 @@ describe("digestTick", () => {
     expect(sendEmail).not.toHaveBeenCalled();
   });
 
+  // The page stops at the row limit; the number in the mail must be what is really waiting, not
+  // what one page happened to hold
   it("counts what it could not fit instead of dropping it silently", async () => {
-    notifications(DIGEST_ROW_LIMIT + 1);
+    notifications(DIGEST_ROW_LIMIT, DIGEST_ROW_LIMIT + 40);
 
     await digestTick(morning);
 
-    expect(sent().text).toContain(`And 1 more waiting on the board`);
+    expect(sent().subject).toContain(`${DIGEST_ROW_LIMIT + 40} updates`);
+    expect(sent().text).toContain("And 40 more waiting on the board");
   });
 
   it("does nothing before the hour, and nothing without a mail server", async () => {
@@ -154,6 +167,8 @@ describe("digestTick", () => {
 
     const [filter] = userFind.mock.calls.at(-1) ?? [];
     expect(filter).toEqual({
+      // Turning email notifications off means no email, digest included
+      emailNotifications: true,
       emailDigest: true,
       email: { $ne: "" },
       lastDigestDay: { $ne: "2026-08-17" },

@@ -39,13 +39,18 @@ interface DigestLine {
 function lineFor(notification: any, origin: string | null): DigestLine {
   const task = notification.task;
   const project = notification.project;
-  const key =
-    project?.key && task?.taskNumber ? `${project.key}-${task.taskNumber}` : notification.title;
-  const url =
-    origin && project?.key && task?.taskNumber
-      ? `${origin}${taskPath(project.key, task.taskNumber)}`
-      : undefined;
-  return { key, title: notification.title, url };
+  const hasRef = Boolean(project?.key && task?.taskNumber);
+  const key = hasRef ? `${project.key}-${task.taskNumber}` : "";
+  // The notification title leads with the same key the row is labelled with, so "TP-2 assigned to
+  // you" would print the key twice on one line
+  const title = key && notification.title.startsWith(`${key} `)
+    ? notification.title.slice(key.length + 1)
+    : notification.title;
+  return {
+    key: key || "—",
+    title,
+    url: origin && hasRef ? `${origin}${taskPath(project.key, task.taskNumber)}` : undefined,
+  };
 }
 
 /**
@@ -54,36 +59,43 @@ function lineFor(notification: any, origin: string | null): DigestLine {
  * Unread only: an in-app notification they have already opened is not news by morning, and a
  * digest that repeats it teaches people to skip the digest.
  */
-export async function buildDigestFor(userId: string, since: Date): Promise<DigestLine[]> {
-  const notifications = await Notification.find({
-    recipient: userId,
-    read: false,
-    createdAt: { $gte: since },
-  })
-    .sort({ createdAt: 1 })
-    .limit(DIGEST_ROW_LIMIT + 1)
-    .populate("task", "taskNumber")
-    .populate("project", "key")
-    .lean();
+export async function buildDigestFor(
+  userId: string,
+  since: Date
+): Promise<{ lines: DigestLine[]; total: number }> {
+  const filter = { recipient: userId, read: false, createdAt: { $gte: since } };
+  // Counted rather than inferred from the page: a digest that lists 25 and says "and 1 more" when
+  // 40 are waiting is a silent cap wearing a number
+  const [notifications, total] = await Promise.all([
+    Notification.find(filter)
+      .sort({ createdAt: 1 })
+      .limit(DIGEST_ROW_LIMIT)
+      .populate("task", "taskNumber")
+      .populate("project", "key")
+      .lean(),
+    Notification.countDocuments(filter),
+  ]);
 
   const origin = selfOrigin();
-  return notifications.map((n) => lineFor(n, origin));
+  return { lines: notifications.map((n) => lineFor(n, origin)), total };
 }
 
 async function sendDigest(
   user: { _id: unknown; email: string; username: string },
-  lines: DigestLine[]
+  lines: DigestLine[],
+  total: number
 ): Promise<void> {
   const origin = selfOrigin();
   const settingsUrl = origin ? `${origin}/settings/profile` : undefined;
-  const shown = lines.slice(0, DIGEST_ROW_LIMIT);
-  const hidden = lines.length - shown.length;
+  const hidden = total - lines.length;
+  const count = `${total} update${total === 1 ? "" : "s"}`;
 
   const { html, text } = renderEmail({
-    preheader: `${lines.length} update${lines.length === 1 ? "" : "s"} on your tasks.`,
+    preheader: `${count} on your tasks.`,
     kicker: "Daily digest",
-    heading: `${lines.length} update${lines.length === 1 ? "" : "s"} on your tasks`,
-    rows: shown.map((line) => ({ label: line.key, value: line.title })),
+    heading: `${count} on your tasks`,
+    rows: lines.map((line) => ({ label: line.key, value: line.title, url: line.url })),
+    proseRows: true,
     outro: hidden > 0 ? [`And ${hidden} more waiting on the board.`] : undefined,
     button: origin ? { label: "Open my tasks", url: `${origin}/my-tasks` } : undefined,
     footer: [
@@ -96,7 +108,7 @@ async function sendDigest(
 
   await sendEmail({
     to: user.email,
-    subject: `[${APP_NAME}] ${lines.length} update${lines.length === 1 ? "" : "s"} on your tasks`,
+    subject: `[${APP_NAME}] ${count} on your tasks`,
     text,
     html,
     headers: settingsUrl ? { "List-Unsubscribe": `<${settingsUrl}>` } : undefined,
@@ -109,8 +121,15 @@ export async function digestTick(now = new Date()): Promise<number> {
   if (!day) return 0;
 
   await connectDB();
+  // Both switches, not just the digest one: turning email notifications off has to mean no email,
+  // and the API accepts the two fields independently even though the screen ties them together
   const waiting = await User.find(
-    { emailDigest: true, email: { $ne: "" }, lastDigestDay: { $ne: day } },
+    {
+      emailNotifications: true,
+      emailDigest: true,
+      email: { $ne: "" },
+      lastDigestDay: { $ne: day },
+    },
     "email username"
   ).lean();
   if (waiting.length === 0) return 0;
@@ -128,10 +147,10 @@ export async function digestTick(now = new Date()): Promise<number> {
     if (!claimed) continue;
 
     try {
-      const lines = await buildDigestFor(String(user._id), since);
+      const { lines, total } = await buildDigestFor(String(user._id), since);
       // A quiet day is not worth a mail saying so
       if (lines.length === 0) continue;
-      await sendDigest(user, lines);
+      await sendDigest(user, lines, total);
       sent++;
     } catch (err) {
       console.error(`Digest failed for ${user.username}:`, err);

@@ -22,7 +22,10 @@ export interface EmailContent {
   alert?: { tone: "warning" | "success"; lines: string[] };
   taskCard?: EmailTaskCard;
   quote?: { who: string; text: string };
-  rows?: { label: string; value: string }[];
+  /** A label/value table. A row carrying a url turns its label into the link to that thing. */
+  rows?: { label: string; value: string; url?: string }[];
+  /** Values are monospace by default, which suits a host or an address and not a sentence. */
+  proseRows?: boolean;
   outro?: string[];
   button?: { label: string; url: string };
   secondaryButton?: { label: string; url: string };
@@ -192,11 +195,16 @@ function renderHtml(c: EmailContent): string {
     body.push(
       [
         `<table role="presentation" class="rowtable" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 18px;font-family:${MONO};font-size:13px">`,
-        ...c.rows.map(
-          (row) =>
-            `<tr><td class="rowlabel" style="padding:6px 0;border-bottom:1px solid #eef1f6;color:#7b8698;width:34%;vertical-align:top">${escapeHtml(row.label)}</td>` +
-            `<td class="rowvalue" style="padding:6px 0;border-bottom:1px solid #eef1f6;color:#26324a;vertical-align:top;word-break:break-word">${escapeHtml(row.value)}</td></tr>`
-        ),
+        ...c.rows.map((row) => {
+          const url = safeUrl(row.url);
+          const label = escapeHtml(row.label);
+          return (
+            `<tr><td class="rowlabel" style="padding:6px 0;border-bottom:1px solid #eef1f6;color:#7b8698;width:34%;vertical-align:top">` +
+            (url ? `<a href="${escapeHtml(url)}" style="color:#1d4ed8">${label}</a>` : label) +
+            `</td>` +
+            `<td class="rowvalue" style="padding:6px 0;border-bottom:1px solid #eef1f6;color:#26324a;vertical-align:top;word-break:break-word${c.proseRows ? `;font-family:${FONT};font-size:14.5px` : ""}">${escapeHtml(row.value)}</td></tr>`
+          );
+        }),
         `</table>`,
       ].join("")
     );
@@ -291,7 +299,14 @@ function renderText(c: EmailContent): string {
   }
 
   if (c.rows?.length) {
-    blocks.push(c.rows.map((row) => `${row.label}: ${row.value}`).join("\n"));
+    blocks.push(
+      c.rows
+        .map((row) => {
+          const url = safeUrl(row.url);
+          return `${row.label}: ${row.value}${url ? `\n  ${url}` : ""}`;
+        })
+        .join("\n")
+    );
   }
 
   const primary = buttonUrl;
