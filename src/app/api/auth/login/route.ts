@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { getClientIp, verifyCredentials } from "@/lib/auth";
+import { DatabaseUnavailableError } from "@/lib/db";
+import { databaseUnavailable } from "@/lib/middleware";
 import { lockoutKey, sourceKey, withLockout } from "@/lib/rate-limit";
 import {
   buildSessionCookie,
@@ -28,11 +30,21 @@ export async function POST(request: Request) {
   }
 
   const clientIp = getClientIp(request);
-  const { lockedOut, result: user } = await withLockout(
-    lockoutKey(clientIp ?? "-", username),
-    () => verifyCredentials(username, password),
-    clientIp ? sourceKey(clientIp) : undefined
-  );
+  let lockedOut: boolean;
+  let user: Awaited<ReturnType<typeof verifyCredentials>>;
+  try {
+    ({ lockedOut, result: user } = await withLockout(
+      lockoutKey(clientIp ?? "-", username),
+      () => verifyCredentials(username, password),
+      clientIp ? sourceKey(clientIp) : undefined
+    ));
+  } catch (e) {
+    // Both the throttle counters and the credential check read the database, so an outage lands
+    // here — and "Invalid credentials" is exactly the wrong thing to tell somebody who was just
+    // signed out by that same outage, on the page it sent them to (BP-362)
+    if (e instanceof DatabaseUnavailableError) return databaseUnavailable();
+    throw e;
+  }
 
   if (lockedOut) {
     return NextResponse.json(

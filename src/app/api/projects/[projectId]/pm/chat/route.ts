@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { connectDB } from "@/lib/db";
+import { connectDB, DatabaseUnavailableError } from "@/lib/db";
 import { getAuthUser } from "@/lib/auth";
 import { ProvenanceError } from "@/lib/session";
 import { Project } from "@/models/project";
@@ -13,7 +13,7 @@ import {
   MAX_ATTACHMENTS_PER_MESSAGE,
   modelAcceptsImages,
 } from "@/lib/pm/attachments";
-import { resolveProjectId } from "@/lib/middleware";
+import { databaseUnavailable, resolveProjectId } from "@/lib/middleware";
 import { check } from "@/lib/grants";
 import { PmAttachment } from "@/types";
 
@@ -29,6 +29,7 @@ export async function POST(
   try {
     user = await getAuthUser(request);
   } catch (e) {
+    if (e instanceof DatabaseUnavailableError) return databaseUnavailable();
     if (e instanceof ProvenanceError) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }

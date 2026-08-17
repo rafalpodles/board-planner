@@ -1,11 +1,17 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+const connectDB = vi.fn();
 const verifyCredentials = vi.fn();
 const createSession = vi.fn();
 const revokeSession = vi.fn();
 const revokeUserSessions = vi.fn();
 
-vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
+// The real module, so DatabaseUnavailableError is the class the route checks against — a bare
+// stub makes `instanceof` throw inside the catch instead of answering
+vi.mock("@/lib/db", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/db")>()),
+  connectDB,
+}));
 vi.mock("@/models/rateLimit", async () => {
   const { inMemoryRateLimitModel } = await import("@/lib/rate-limit-test-store");
   return { RateLimit: inMemoryRateLimitModel() };
@@ -22,6 +28,7 @@ vi.mock("@/lib/session", async (importOriginal) => {
 });
 
 const { POST } = await import("./route");
+const { DatabaseUnavailableError } = await import("@/lib/db");
 const { resetRateLimits, ANONYMOUS_ACCOUNT_ATTEMPTS, ANONYMOUS_GLOBAL_ATTEMPTS } = await import(
   "@/lib/rate-limit"
 );
@@ -61,6 +68,7 @@ function sessionCookie(response: Response): string | undefined {
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  connectDB.mockResolvedValue(undefined);
   await resetRateLimits();
   // The per-address cases below send X-Forwarded-For, which counts only where the operator says a
   // proxy writes it. The unconfigured case has its own tests further down (BP-318).
@@ -373,5 +381,61 @@ describe("POST /api/auth/login — cookie", () => {
     expect(createSession).toHaveBeenCalledTimes(2);
     expect(revokeSession).not.toHaveBeenCalled();
     expect(revokeUserSessions).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/auth/login — the database is unreachable", () => {
+  // Reaching for the throttle counters is the first thing the route does that needs the database,
+  // so an outage lands before any credential is looked at
+  function databaseIsDown() {
+    connectDB.mockImplementation(async () => {
+      throw new DatabaseUnavailableError(new Error("connect ECONNREFUSED 127.0.0.1:27017"));
+    });
+  }
+
+  it("answers 503, not 401", async () => {
+    databaseIsDown();
+
+    const response = await POST(request());
+
+    expect(response.status).toBe(503);
+  });
+
+  // This is the page somebody was sent to *by* the outage. Telling them their password is wrong is
+  // how a database restart turned into a support request about lost accounts (BP-362).
+  it("does not tell anyone their credentials were rejected", async () => {
+    databaseIsDown();
+
+    const body = await (await POST(request())).json();
+
+    expect(body.error).not.toMatch(/invalid credentials/i);
+    expect(body.error).toMatch(/database is unreachable/i);
+  });
+
+  it("issues no session cookie", async () => {
+    databaseIsDown();
+
+    const response = await POST(request());
+
+    expect(setCookies(response)).toEqual([]);
+    expect(createSession).not.toHaveBeenCalled();
+  });
+
+  it("keeps refusing a wrong password with 401 while the database is up", async () => {
+    verifyCredentials.mockResolvedValue(null);
+
+    const response = await POST(request());
+    const body = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(body.error).toMatch(/invalid credentials/i);
+  });
+
+  it("still rejects a malformed body before it needs the database at all", async () => {
+    databaseIsDown();
+
+    const response = await POST(request({ "sec-fetch-site": "same-origin" }, "not json"));
+
+    expect(response.status).toBe(400);
   });
 });

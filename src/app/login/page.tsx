@@ -39,11 +39,11 @@ export default function LoginPage() {
         }
       }
 
-      const success = await login(username, password);
-      if (success) {
+      const result = await login(username, password);
+      if (result.ok) {
         router.replace(safeNextPath(new URLSearchParams(window.location.search).get("next")));
       } else {
-        setError("Invalid credentials");
+        setError(result.reason);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");

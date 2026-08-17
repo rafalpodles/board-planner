@@ -10,12 +10,24 @@ import {
 } from "react";
 import { ApiUser } from "@/types";
 
+export type LoginResult = { ok: true } | { ok: false; reason: string };
+
+const UNREACHABLE =
+  "Cannot reach the server right now. Your account is fine — try again in a moment.";
+
 interface AuthState {
   user: ApiUser | null;
   isAdmin: boolean;
   isLoading: boolean;
-  error: string | null;
-  login: (username: string, password: string) => Promise<boolean>;
+  /**
+   * The server could not answer, which is not the same as nobody being signed in.
+   *
+   * Kept apart from `user` because the guard redirects on `!user`, and the sign-in page it
+   * redirects to is served by the same instance that just failed — so folding the two together
+   * turned a database outage into a logout nobody could undo (BP-362).
+   */
+  outage: boolean;
+  login: (username: string, password: string) => Promise<LoginResult>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
   onUnauthorized: () => void;
@@ -34,19 +46,22 @@ function dropStoredCredentials() {
 export function useAuthProvider(): AuthState {
   const [user, setUser] = useState<ApiUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [outage, setOutage] = useState(false);
 
-  const fetchUser = useCallback(async (): Promise<boolean> => {
+  const fetchUser = useCallback(async (): Promise<void> => {
     try {
       const res = await fetch("/api/auth/me");
       if (res.ok) {
-        const data = await res.json();
-        setUser(data);
-        return true;
+        setUser(await res.json());
+        setOutage(false);
+        return;
       }
-      return false;
+      // Only a 401 is evidence about the session. A 5xx says the answer never arrived.
+      setOutage(res.status >= 500);
     } catch {
-      return false;
+      // The request did not complete at all — the same class of thing as a 503, and equally not
+      // a signed-out state
+      setOutage(true);
     }
   }, []);
 
@@ -56,23 +71,38 @@ export function useAuthProvider(): AuthState {
   }, [fetchUser]);
 
   const login = useCallback(
-    async (username: string, password: string): Promise<boolean> => {
-      setError(null);
-
-      const res = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        setUser(data);
-        return true;
+    async (username: string, password: string): Promise<LoginResult> => {
+      let res: Response;
+      try {
+        res = await fetch("/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username, password }),
+        });
+      } catch {
+        setOutage(true);
+        return { ok: false, reason: UNREACHABLE };
       }
 
-      setError("Invalid credentials");
-      return false;
+      if (res.ok) {
+        setUser(await res.json());
+        setOutage(false);
+        return { ok: true };
+      }
+
+      const body = await res.json().catch(() => null);
+      const reason = typeof body?.error === "string" ? body.error : null;
+
+      // The server's own words, so a locked-out account and an unreachable database each say what
+      // they are. Flattening every failure to "Invalid credentials" is what made an outage look
+      // like a bad password.
+      if (res.status >= 500) {
+        setOutage(true);
+        return { ok: false, reason: reason ?? UNREACHABLE };
+      }
+
+      setOutage(false);
+      return { ok: false, reason: reason ?? "Invalid credentials" };
     },
     []
   );
@@ -80,6 +110,7 @@ export function useAuthProvider(): AuthState {
   const logout = useCallback(async () => {
     await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
     setUser(null);
+    setOutage(false);
   }, []);
 
   const onUnauthorized = useCallback(() => setUser(null), []);
@@ -93,8 +124,8 @@ export function useAuthProvider(): AuthState {
   const isAdmin = user?.role === "admin";
 
   return useMemo(
-    () => ({ user, isAdmin, isLoading, error, login, logout, refreshUser, onUnauthorized }),
-    [user, isAdmin, isLoading, error, login, logout, refreshUser, onUnauthorized]
+    () => ({ user, isAdmin, isLoading, outage, login, logout, refreshUser, onUnauthorized }),
+    [user, isAdmin, isLoading, outage, login, logout, refreshUser, onUnauthorized]
   );
 }
 

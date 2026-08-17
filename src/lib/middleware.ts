@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { isValidObjectId } from "mongoose";
 import { getAuthUser } from "./auth";
 import { ProvenanceError } from "./session";
-import { connectDB } from "./db";
+import { connectDB, DatabaseUnavailableError } from "./db";
 import { check } from "./grants";
 import { verifyWorkerCredential, isApprovedFor } from "./worker-service";
 import { Project } from "@/models/project";
@@ -27,6 +27,21 @@ type AuthenticatedHandler = (
   }
 ) => Promise<NextResponse | Response>;
 
+/**
+ * The database could not be answered from, which is not the caller's fault and must not read as one.
+ *
+ * 503 rather than 401, because the browser client treats a 401 as "your session is gone" and clears
+ * it — so an outage used to sign everybody out, and the sign-in they were sent to failed too, with
+ * nothing anywhere naming the real cause (BP-362). Retry-After is short: the connection is retried
+ * on the next request now that a failed one is no longer cached.
+ */
+export function databaseUnavailable(): NextResponse {
+  return NextResponse.json(
+    { error: "The database is unreachable. This is not a problem with your session." },
+    { status: 503, headers: { "Retry-After": "5" } }
+  );
+}
+
 export function withAuth(handler: AuthenticatedHandler) {
   return async (
     request: Request,
@@ -39,6 +54,7 @@ export function withAuth(handler: AuthenticatedHandler) {
       if (e instanceof ProvenanceError) {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
+      if (e instanceof DatabaseUnavailableError) return databaseUnavailable();
       throw e;
     }
 
