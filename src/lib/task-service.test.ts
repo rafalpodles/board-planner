@@ -80,8 +80,6 @@ vi.mock("@/models/task", () => ({
 vi.mock("@/models/project", () => ({ Project: { findById, findOneAndUpdate: projectFindOneAndUpdate } }));
 const userFindById = vi.fn();
 vi.mock("@/models/user", () => ({ User: { findOne: userFindOne, findById: userFindById } }));
-const grantsCheck = vi.fn();
-vi.mock("@/lib/grants", () => ({ check: grantsCheck }));
 const agentFindById = vi.fn();
 vi.mock("@/models/agent", () => ({ Agent: { findById: agentFindById } }));
 vi.mock("@/models/comment", () => ({ Comment: {} }));
@@ -1521,6 +1519,16 @@ describe("a task's sprint has to belong to the task's project", () => {
   beforeEach(() => {
     sprintExists.mockClear();
     sprintExists.mockResolvedValue(null);
+    // Set here rather than inherited from whichever describe ran last: the three tests that reach
+    // the write were passing on a mock configured elsewhere in this file, and failed under
+    // --sequence.shuffle.tests roughly one run in four.
+    const task = { _id: "t1", taskNumber: 1, status: "doing", title: "x" };
+    findOne.mockReturnValue({
+      lean: () => Promise.resolve(task),
+      populate: () => ({ lean: () => Promise.resolve(task) }),
+    });
+    findOneAndUpdate.mockReturnValue({ populate: () => Promise.resolve(task) });
+    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
   });
 
   it("refuses a sprint this project does not have", async () => {
@@ -1610,9 +1618,26 @@ describe("createTask and a foreign sprint", () => {
  * their own checkout. Before BP-345 this field sat on updateTask's ordinary whitelist behind
  * withProjectAccess, so any member of a worker-enabled project could point a task at a
  * composition of their own and hand it to the worker.
+ *
+ * The capability arrives as an argument rather than being recomputed here. Reviewers found the
+ * first version reloading the actor from Mongo, which drops tokenScoped/tokenScope and the role a
+ * scoped token was degraded to — all attached in memory by getAuthUser and none of them schema
+ * fields — so an admin's project-scoped CI token was handed the one capability its scope existed
+ * to withhold. The route holds the live principal; it decides.
  */
 describe("who may choose a task's agent", () => {
   const AGENT = "69a52e3b399b27d3cbb2c5a5";
+  const OTHER = "69a52e3b399b27d3cbb2c5b7";
+
+  // updateTask reads this task twice: once bare for the agent it currently carries, once populated
+  // for the before-image the activity log needs. One mock has to answer both.
+  function storedAgent(agent: string | null) {
+    const task = { _id: "t1", taskNumber: 1, status: "doing", title: "x", agent };
+    findOne.mockReturnValue({
+      lean: () => Promise.resolve(task),
+      populate: () => ({ lean: () => Promise.resolve(task) }),
+    });
+  }
 
   beforeEach(() => {
     findOneAndUpdate.mockReset();
@@ -1621,50 +1646,136 @@ describe("who may choose a task's agent", () => {
     });
     findById.mockReset();
     findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
-    grantsCheck.mockClear();
-    userFindById.mockReturnValue({ lean: () => Promise.resolve({ _id: "actor", role: "member" }) });
+    // The stored value the no-op comparison reads. Its own describe sets this, rather than
+    // inheriting a mock from the block above — under --sequence.shuffle that inheritance made two
+    // of these pass by accident.
+    findOne.mockReset();
+    storedAgent(null);
     agentFindById.mockReturnValue({
       lean: () => Promise.resolve({ _id: AGENT, scope: "global" }),
     });
   });
 
-  it("refuses a member, and writes nothing", async () => {
-    grantsCheck.mockResolvedValue(false);
+  it("refuses a caller without the capability, and writes nothing", async () => {
+    const result = await updateTask("p1", "t1", { agent: AGENT }, "actor", false, false);
 
+    expect(result).toMatchObject({ ok: false, status: 403 });
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  // Omitting it entirely must not be read as permission — the PM agent calls updateTask and passes
+  // nothing, and a future caller will too
+  it("refuses when the capability is not passed at all", async () => {
     const result = await updateTask("p1", "t1", { agent: AGENT }, "actor");
 
     expect(result).toMatchObject({ ok: false, status: 403 });
     expect(findOneAndUpdate).not.toHaveBeenCalled();
   });
 
-  // Reverting to the project default still changes what the machine will run, so the bar is the
-  // same. "" is what a cleared picker sends.
-  it("refuses a member clearing it back to the project default", async () => {
-    grantsCheck.mockResolvedValue(false);
+  it("refuses clearing it back to the project default", async () => {
+    storedAgent(AGENT);
 
-    const result = await updateTask("p1", "t1", { agent: "" }, "actor");
+    const result = await updateTask("p1", "t1", { agent: "" }, "actor", false, false);
 
     expect(result).toMatchObject({ ok: false, status: 403 });
     expect(findOneAndUpdate).not.toHaveBeenCalled();
   });
 
-  // Without this the two refusals above would pass just as well on a route that refuses everyone
-  it("lets a project admin choose one", async () => {
-    grantsCheck.mockResolvedValue(true);
-
-    const result = await updateTask("p1", "t1", { agent: AGENT }, "actor");
+  // Without this the refusals above would pass just as well on a field nobody can ever set
+  it("lets a caller with the capability choose one", async () => {
+    const result = await updateTask("p1", "t1", { agent: AGENT }, "actor", false, true);
 
     expect(result.ok).toBe(true);
     expect(setStage(findOneAndUpdate.mock.calls[0][1]).agent).toBe(AGENT);
   });
 
-  // The gate is on the field, not on the request: an ordinary edit must not start needing admin
-  it("leaves an edit that names no agent alone", async () => {
-    grantsCheck.mockResolvedValue(false);
+  // "" is what a cleared picker sends, and it is not a value an ObjectId ref can hold. Without the
+  // normalisation it reaches agentUsableOnProject and comes back as "that agent cannot run here" —
+  // a 400 about a foreign agent, for the act of choosing none.
+  it("stores null, not an empty string, when an admin clears it", async () => {
+    storedAgent(AGENT);
 
-    const result = await updateTask("p1", "t1", { title: "renamed" }, "actor");
+    const result = await updateTask("p1", "t1", { agent: "" }, "actor", false, true);
 
     expect(result.ok).toBe(true);
-    expect(grantsCheck).not.toHaveBeenCalled();
+    expect(setStage(findOneAndUpdate.mock.calls[0][1]).agent).toBeNull();
+  });
+
+  // The gate is on the field, not on the request: an ordinary edit must not start needing admin
+  it("leaves an edit that names no agent alone", async () => {
+    agentFindById.mockClear();
+
+    const result = await updateTask("p1", "t1", { title: "renamed" }, "actor", false, false);
+
+    expect(result.ok).toBe(true);
+    expect(setStage(findOneAndUpdate.mock.calls[0][1])).not.toHaveProperty("agent");
+    expect(agentFindById).not.toHaveBeenCalled();
+  });
+
+  // BP-354 made the same call for the stored address: a REST consumer that GETs, edits one field
+  // and PUTs the whole object must not fail on a field it never touched. Writing an unchanged
+  // value changes nothing, so permitting it costs nothing.
+  it("treats resending the stored agent as a no-op rather than a refusal", async () => {
+    storedAgent(AGENT);
+
+    const result = await updateTask("p1", "t1", { agent: AGENT, title: "t" }, "actor", false, false);
+
+    expect(result.ok).toBe(true);
+  });
+
+  describe("and which agents may run here at all", () => {
+    it("refuses a project agent belonging to another project", async () => {
+      agentFindById.mockReturnValue({
+        lean: () => Promise.resolve({ _id: AGENT, scope: "project", project: "p2" }),
+      });
+
+      const result = await updateTask("p1", "t1", { agent: AGENT }, "actor", false, true);
+
+      expect(result).toMatchObject({ ok: false, status: 400 });
+      expect(findOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it("accepts a project agent belonging to this one", async () => {
+      agentFindById.mockReturnValue({
+        lean: () => Promise.resolve({ _id: AGENT, scope: "project", project: "p1" }),
+      });
+
+      expect((await updateTask("p1", "t1", { agent: AGENT }, "actor", false, true)).ok).toBe(true);
+    });
+
+    // Pointing a task at somebody else's personal agent would run their prompts, with write
+    // access, on this project's checkout
+    it("refuses another person's personal agent", async () => {
+      agentFindById.mockReturnValue({
+        lean: () => Promise.resolve({ _id: AGENT, scope: "user", owner: OTHER }),
+      });
+
+      const result = await updateTask("p1", "t1", { agent: AGENT }, "actor", false, true);
+
+      expect(result).toMatchObject({ ok: false, status: 400 });
+    });
+
+    it("accepts the caller's own personal agent", async () => {
+      agentFindById.mockReturnValue({
+        lean: () => Promise.resolve({ _id: AGENT, scope: "user", owner: "actor" }),
+      });
+
+      expect((await updateTask("p1", "t1", { agent: AGENT }, "actor", false, true)).ok).toBe(true);
+    });
+
+    it("refuses an id that is not an object id, without querying for it", async () => {
+      agentFindById.mockClear();
+
+      const result = await updateTask("p1", "t1", { agent: "nonsense" }, "actor", false, true);
+
+      expect(result).toMatchObject({ ok: false, status: 400 });
+      expect(agentFindById).not.toHaveBeenCalled();
+    });
+
+    it("refuses an agent that does not exist", async () => {
+      agentFindById.mockReturnValue({ lean: () => Promise.resolve(null) });
+
+      expect((await updateTask("p1", "t1", { agent: AGENT }, "actor", false, true)).ok).toBe(false);
+    });
   });
 });
