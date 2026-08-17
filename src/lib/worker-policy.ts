@@ -10,15 +10,6 @@ export const WORKER_POLICY_DEFAULTS = {
   pollIntervalMs: 30_000,
 } as const;
 
-// "assigned" — only tasks already assigned to the worker's own identity user.
-// "any"      — unassigned tasks as well, i.e. the whole approved column.
-export const CLAIM_SCOPES = ["assigned", "any"] as const;
-export type ClaimScope = (typeof CLAIM_SCOPES)[number];
-
-export function isClaimScope(value: unknown): value is ClaimScope {
-  return typeof value === "string" && (CLAIM_SCOPES as readonly string[]).includes(value);
-}
-
 // Facts about a repository and the work done in it. Set per project; every worker serving that
 // project resolves against the same values.
 //
@@ -27,10 +18,6 @@ export function isClaimScope(value: unknown): value is ClaimScope {
 // is reviewed if a Reviewed gate stands after the last step that writes. A flag beside the
 // composition would describe the same decision twice, and the flag would win silently.
 export const PROJECT_POLICY_DEFAULTS = {
-  // Which tasks in an approved column a worker may take. "assigned" by default for the same
-  // reason autoMerge is off: enabling a project should not, by itself, set an agent on a backlog
-  // somebody has not offered it. Until a task is handed over, an enabled project claims nothing.
-  claimScope: "assigned" as ClaimScope,
   baseBranch: "main",
   taskTimeoutMs: 1_800_000,
   runCeilingMs: 5_400_000,

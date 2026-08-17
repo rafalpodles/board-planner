@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
 import { parseProjectWorkerConfig } from "./project-worker-config";
-import { CLAIM_SCOPES } from "@/lib/worker-policy";
 
 describe("parseProjectWorkerConfig", () => {
   it("enables workers for the project", () => {
@@ -49,44 +48,21 @@ describe("parseProjectWorkerConfig", () => {
 
   describe("refusals", () => {
 
-    // A closed set, so anything else stores a scope claimNextTask matches against nothing — and a
-    // worker that claims nothing is indistinguishable from a project with no approved work
-    it("refuses a claimScope outside the enumerated set", () => {
-      for (const bad of ["Assigned", "all", "", "none", true, 1, null]) {
-        expect(parseProjectWorkerConfig({ policy: { claimScope: bad } })).toMatchObject({
-          ok: false,
-        });
-      }
-    });
-
-    it("accepts each scope the claim can actually read", () => {
-      for (const scope of CLAIM_SCOPES) {
-        expect(parseProjectWorkerConfig({ policy: { claimScope: scope } })).toEqual({
-          ok: true,
-          update: {
-            "worker.policy.claimScope": scope,
-            "worker.policyOverrides": ["claimScope"],
-          },
-        });
-      }
-    });
-
-    it("refuses a claimAssignee that is not a user id", () => {
-      for (const bad of ["claude", "", 1, true, {}, "not-an-objectid"]) {
-        expect(parseProjectWorkerConfig({ claimAssignee: bad })).toMatchObject({ ok: false });
-      }
-    });
-
-    // Null is how a project says it has nominated nobody, which under claimScope "assigned" means
-    // nothing qualifies — a state the settings screen names rather than leaving to be discovered
-    it("accepts a user id, and null for nobody", () => {
-      expect(parseProjectWorkerConfig({ claimAssignee: "6a70afff45d39cd9bc8bb600" })).toEqual({
-        ok: true,
-        update: { "worker.claimAssignee": "6a70afff45d39cd9bc8bb600" },
+    // BP-358: claimScope no longer names a policy field. It is refused exactly like any other
+    // name nobody defined, not validated as a scope.
+    it("refuses claimScope, which is no longer a recognised field", () => {
+      expect(parseProjectWorkerConfig({ policy: { claimScope: "any" } })).toEqual({
+        ok: false,
+        error: "claimScope is not a worker policy field",
       });
-      expect(parseProjectWorkerConfig({ claimAssignee: null })).toEqual({
-        ok: true,
-        update: { "worker.claimAssignee": null },
+    });
+
+    // BP-358: the project-wide nominee is gone. Nothing reads claimAssignee any more, so it is
+    // silently dropped rather than validated — and alone, that leaves nothing to update.
+    it("ignores a claimAssignee, which no longer routes anything", () => {
+      expect(parseProjectWorkerConfig({ claimAssignee: "6a70afff45d39cd9bc8bb600" })).toEqual({
+        ok: false,
+        error: "worker had nothing to update",
       });
     });
 
