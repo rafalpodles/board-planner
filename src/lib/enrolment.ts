@@ -45,6 +45,13 @@ export async function enrolmentTokenOwner(tokenId: string): Promise<string> {
   return owner?.fullName?.trim() || owner?.username?.trim() || "";
 }
 
+// Who enrolled this machine, as the id the owner claim keys on — not the display name above.
+export async function enrolmentTokenOwnerId(tokenId: string): Promise<string | null> {
+  await connectDB();
+  const token = await EnrolmentToken.findById(tokenId).select("createdBy").lean();
+  return token?.createdBy ? String(token.createdBy) : null;
+}
+
 // Spending is a single conditional update, not read-then-write: two workers handed the same string
 // would both pass a read check and both register, which is exactly the second live worker this
 // credential exists to prevent.
