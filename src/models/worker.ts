@@ -22,6 +22,9 @@ const workerSchema = new Schema<IWorker>(
     // repos the worker reports narrow this set, they do not define it. A worker with none claims
     // nothing, which is what an enrolment predating BP-305 means.
     approvedProjects: { type: [{ type: Schema.Types.ObjectId, ref: "Project" }], default: [] },
+    // The person this machine belongs to, set from the account that approved its enrolment. Distinct
+    // from `identity` below: identity is which machine acted, owner is whose machine it is.
+    owner: { type: Schema.Types.ObjectId, ref: "User", default: null },
     policy: {
       pollIntervalMs: { type: Number, default: 30_000 },
     },

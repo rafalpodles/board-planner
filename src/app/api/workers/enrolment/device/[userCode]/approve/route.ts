@@ -102,6 +102,7 @@ export const POST = withAdmin(async (request, { params, user }) => {
     platform: typeof body.platform === "string" ? body.platform : "",
     version: "",
     owner: user.fullName || user.username,
+    ownerId: String(user._id),
   });
 
   // The device flow's equivalent of spending an enrolment token: a machine gains a credential.

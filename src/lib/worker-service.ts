@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
-import { isValidObjectId } from "mongoose";
+import { isValidObjectId, Types } from "mongoose";
 import { connectDB } from "./db";
 import { Worker } from "@/models/worker";
 import { ApiWorker, ApiWorkerTask, IWorker } from "@/types";
@@ -59,6 +59,9 @@ export function verdictFor(
   // only narrow what an admin approved — never stand in for it (BP-305)
   if (!isApprovedFor(worker, String(project._id))) {
     return { ok: false, reason: "this worker was not approved for this project" };
+  }
+  if (!worker.owner) {
+    return { ok: false, reason: "this machine has no owner — re-approve it from the board" };
   }
   const usable = usableRepos(worker as unknown as CheckoutClaimant, others, now);
   if (!matchRepo(project, usable)) {
@@ -210,10 +213,12 @@ export async function registerWorker(input: {
   version: string;
   // Whoever minted the enrolment token. Only used to name the machine's identity.
   owner?: string;
+  // The account the machine belongs to, which is what the claim keys on.
+  ownerId?: string;
 }): Promise<{ worker: IWorker; credential: string }> {
   await connectDB();
   const credential = `cpw_${crypto.randomBytes(32).toString("hex")}`;
-  const { owner, ...fields } = input;
+  const { owner, ownerId, ...fields } = input;
 
   // Re-registration reclaims the identity rather than creating a ghost that holds the
   // assignments while the live worker sits idle with none
@@ -222,6 +227,7 @@ export async function registerWorker(input: {
     {
       $set: {
         ...fields,
+        ...(ownerId ? { owner: new Types.ObjectId(ownerId) } : {}),
         protocolVersion: PROTOCOL_VERSION,
         credentialHash: await bcrypt.hash(credential, 10),
         lastSeenAt: new Date(),
