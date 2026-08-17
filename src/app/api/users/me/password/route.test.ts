@@ -28,7 +28,8 @@ vi.mock("bcryptjs", () => ({ default: { compare, hash: vi.fn().mockResolvedValue
 vi.mock("@/models/user", () => ({ User: { findById: userFindById } }));
 
 const { PUT } = await import("./route");
-const { resetRateLimits } = await import("@/lib/rate-limit");
+const { resetRateLimits, lockoutKey, recordFailedAttempt, isRateLimited, ANONYMOUS_ACCOUNT_ATTEMPTS } =
+  await import("@/lib/rate-limit");
 
 const SESSION_ID = "sess-1";
 
@@ -115,5 +116,23 @@ describe("PUT /api/users/me/password", () => {
     expect(compare).not.toHaveBeenCalled();
     expect(record.save).not.toHaveBeenCalled();
     expect(revokeUserSessions).not.toHaveBeenCalled();
+  });
+
+  // BP-353. Not the exit for somebody already locked out — a lockout means no session — but it is
+  // one of the three password paths, and the sweep has to work from here too or the rule is only
+  // partly true.
+  it("lifts the account's login lockout, from every address it was filled from", async () => {
+    const shared = lockoutKey("-", "changer");
+    const fromElsewhere = lockoutKey("203.0.113.9", "changer");
+    for (let i = 0; i < ANONYMOUS_ACCOUNT_ATTEMPTS; i++) {
+      await recordFailedAttempt(shared);
+      await recordFailedAttempt(fromElsewhere);
+    }
+
+    const response = await PUT(put(), ctx());
+
+    expect(response.status).toBe(200);
+    expect(await isRateLimited(shared, ANONYMOUS_ACCOUNT_ATTEMPTS)).toBe(false);
+    expect(await isRateLimited(fromElsewhere, ANONYMOUS_ACCOUNT_ATTEMPTS)).toBe(false);
   });
 });

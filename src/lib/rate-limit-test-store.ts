@@ -98,9 +98,31 @@ export function inMemoryRateLimitModel() {
       if (filter._id !== undefined) rows.delete(filter._id);
       return { deletedCount: 1 };
     },
-    async deleteMany() {
+    // Honours an `_id` range, because `clearAccountAttempts` deletes by prefix and a fake that
+    // cleared everything regardless of the filter could not fail the case that matters: clearing one
+    // account's counters must leave another account's, the source dimension's and other scopes'
+    // alone. An empty filter still means everything, which is what resetRateLimits asks for.
+    async deleteMany(filter?: Filter) {
+      const range = filter?._id as { $gte?: string; $lt?: string } | string | undefined;
+      if (range && typeof range === "object" && ("$gte" in range || "$lt" in range)) {
+        let deleted = 0;
+        for (const id of [...rows.keys()]) {
+          const atOrAfterStart = range.$gte === undefined || id >= range.$gte;
+          const beforeEnd = range.$lt === undefined || id < range.$lt;
+          if (atOrAfterStart && beforeEnd) {
+            rows.delete(id);
+            deleted++;
+          }
+        }
+        return { deletedCount: deleted };
+      }
+      if (typeof range === "string") {
+        const deleted = rows.delete(range) ? 1 : 0;
+        return { deletedCount: deleted };
+      }
+      const all = rows.size;
       rows.clear();
-      return { deletedCount: 0 };
+      return { deletedCount: all };
     },
   };
 }
