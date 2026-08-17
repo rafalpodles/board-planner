@@ -1,8 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+const connectDB = vi.fn();
 const getAuthUser = vi.fn();
 
-vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
+// The real module, so DatabaseUnavailableError is the class the route checks against
+vi.mock("@/lib/db", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/db")>()),
+  connectDB,
+}));
 vi.mock("@/models/session", () => ({ Session: {} }));
 vi.mock("@/lib/auth", () => ({
   getAuthUser,
@@ -21,6 +26,7 @@ vi.mock("mcp-handler", async (importOriginal) => {
 });
 
 const { POST } = await import("./route");
+const { DatabaseUnavailableError } = await import("@/lib/db");
 
 const ORIGINAL = { ...process.env };
 
@@ -34,6 +40,7 @@ beforeEach(() => {
   delete process.env.NEXT_PUBLIC_APP_URL;
   delete process.env.PUBLIC_ORIGIN;
   process.env.PUBLIC_ORIGIN = "https://board.example.com";
+  connectDB.mockResolvedValue(undefined);
   getAuthUser.mockResolvedValue({ username: "rpo" });
 });
 
@@ -86,5 +93,51 @@ describe("POST /api/mcp", () => {
     expect(body.error_description).toMatch(/PUBLIC_ORIGIN/);
     // Not "unconfigured, so fall back to what the caller says" — that was the shape of the bug
     expect(JSON.stringify(body)).not.toContain("evil.example");
+  });
+});
+
+describe("POST /api/mcp when the database is unreachable", () => {
+  function databaseIsDown() {
+    connectDB.mockImplementation(async () => {
+      throw new DatabaseUnavailableError(new Error("connect ECONNREFUSED"));
+    });
+  }
+
+  // withMcpAuth's catch-all turns any throw from verifyToken into `invalid_token`, and a client that
+  // reads that discards a perfectly good OAuth token and walks the whole flow again for another one
+  // that fails the same way — so this has to be answered before it gets there (BP-362)
+  it("answers 503 rather than letting it read as invalid_token", async () => {
+    databaseIsDown();
+
+    const response = await POST(request({ authorization: "Bearer cpat_x" }));
+    const body = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(body.error).toBe("temporarily_unavailable");
+    expect(JSON.stringify(body)).not.toContain("invalid_token");
+    expect(response.headers.get("Retry-After")).toBe("5");
+  });
+
+  it("says the credential was not the problem", async () => {
+    databaseIsDown();
+
+    const body = await (await POST(request({ authorization: "Bearer cpat_x" }))).json();
+
+    expect(body.error_description).toMatch(/credential was not the problem/i);
+  });
+
+  it("never reaches the tools", async () => {
+    databaseIsDown();
+
+    const body = await (await POST(request({ authorization: "Bearer cpat_x" }))).json();
+
+    expect(body.auth).toBeUndefined();
+    expect(getAuthUser).not.toHaveBeenCalled();
+  });
+
+  it("still answers 401 to a missing credential while the database is up", async () => {
+    const response = await POST(request());
+
+    expect(response.status).toBe(401);
   });
 });

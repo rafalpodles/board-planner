@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createMcpHandler, withMcpAuth } from "mcp-handler";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { getAuthUser } from "@/lib/auth";
+import { connectDB, DatabaseUnavailableError } from "@/lib/db";
 import { ProvenanceError, selfOrigin, ORIGIN_REQUIRED } from "@/lib/session";
 import { registerPlannerTools } from "@/lib/mcp/tools";
 
@@ -74,6 +75,25 @@ const handler = async (req: Request) => {
       { status: 500 }
     );
   }
+  // Asked here rather than left to verifyToken, because withMcpAuth's catch-all turns any throw
+  // from it into `invalid_token` — so an unreachable database would tell a client its credential
+  // had gone bad and send it back through the whole OAuth flow to get another one that also fails
+  // (BP-362). connectDB is cached, so this costs nothing while the database is up.
+  try {
+    await connectDB();
+  } catch (e) {
+    if (e instanceof DatabaseUnavailableError) {
+      return NextResponse.json(
+        {
+          error: "temporarily_unavailable",
+          error_description: "The database is unreachable. The credential was not the problem.",
+        },
+        { status: 503, headers: { "Retry-After": "5" } }
+      );
+    }
+    throw e;
+  }
+
   return withMcpAuth(baseHandler, verifyToken, { required: true, resourceUrl: origin })(req);
 };
 
