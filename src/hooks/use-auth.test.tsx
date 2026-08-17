@@ -16,7 +16,8 @@ function jsonResponse(status: number, body: unknown): Response {
 let attempt: { username: string; password: string } = { username: "rpo", password: "pw" };
 
 function Probe() {
-  const { user, isLoading, outage, login } = useAuth();
+  const { user, isLoading, outage, login, logout, refreshUser, onUnauthorized, noteApiStatus } =
+    useAuth();
   return (
     <div>
       <span data-testid="user">{user?.username ?? "-"}</span>
@@ -32,6 +33,11 @@ function Probe() {
       >
         sign in
       </button>
+      <button onClick={() => void logout()}>sign out</button>
+      <button onClick={() => void refreshUser()}>refresh</button>
+      <button onClick={() => onUnauthorized()}>rejected</button>
+      <button onClick={() => noteApiStatus(503)}>saw 503</button>
+      <button onClick={() => noteApiStatus(200)}>saw 200</button>
     </div>
   );
 }
@@ -177,3 +183,104 @@ describe("useAuthProvider — what a failed sign-in says", () => {
     expect(screen.getByTestId("user").textContent).toBe("rpo");
   });
 });
+
+describe("useAuthProvider — what the rest of the app reports back", () => {
+  beforeEach(() => {
+    attempt = { username: "rpo", password: "pw" };
+    vi.stubGlobal("fetch", vi.fn());
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  async function signedIn() {
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse(200, USER));
+    await renderSettled();
+    expect(screen.getByTestId("user").textContent).toBe("rpo");
+  }
+
+  // The only way the shell learns about an outage for somebody already signed in: they are never
+  // sent back through /api/auth/me, so each screen used to invent its own explanation
+  it("takes an outage from any 5xx the app receives, and clears it on the next answer", async () => {
+    await signedIn();
+
+    await act(async () => {
+      screen.getByText("saw 503").click();
+    });
+    expect(screen.getByTestId("outage").textContent).toBe("true");
+    // Still signed in — an outage is not a logout, which is the whole point
+    expect(screen.getByTestId("user").textContent).toBe("rpo");
+
+    await act(async () => {
+      screen.getByText("saw 200").click();
+    });
+    expect(screen.getByTestId("outage").textContent).toBe("false");
+  });
+
+  it("clears a stale outage when a request comes back genuinely unauthorized", async () => {
+    await signedIn();
+    await act(async () => {
+      screen.getByText("saw 503").click();
+    });
+    expect(screen.getByTestId("outage").textContent).toBe("true");
+
+    await act(async () => {
+      screen.getByText("rejected").click();
+    });
+
+    // The server answered, so it is reachable: showing "having trouble" on the way to a sign-in
+    // page that works would be the same lie in the other direction
+    expect(screen.getByTestId("outage").textContent).toBe("false");
+    expect(screen.getByTestId("user").textContent).toBe("-");
+  });
+
+  it("clears the outage on signing out", async () => {
+    await signedIn();
+    await act(async () => {
+      screen.getByText("saw 503").click();
+    });
+
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse(200, { ok: true }));
+    await act(async () => {
+      screen.getByText("sign out").click();
+    });
+
+    expect(screen.getByTestId("outage").textContent).toBe("false");
+    expect(screen.getByTestId("user").textContent).toBe("-");
+  });
+
+  it("drops the cached user when a refresh says the session is gone", async () => {
+    await signedIn();
+
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse(401, { error: "Unauthorized" }));
+    await act(async () => {
+      screen.getByText("refresh").click();
+    });
+
+    // Before, a revoked session left the app rendering as signed in until a reload
+    expect(screen.getByTestId("user").textContent).toBe("-");
+    expect(screen.getByTestId("outage").textContent).toBe("false");
+  });
+
+  it("gives up on a request that never answers, rather than spinning on it", async () => {
+    // mongoose waits on server selection, so /api/auth/me can hang for tens of seconds; the abort
+    // is what turns that into a panel instead of an unlabelled spinner
+    vi.mocked(fetch).mockImplementation((_url, init?: RequestInit) => {
+      return new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+      });
+    });
+
+    render(
+      <AuthProvider>
+        <Probe />
+      </AuthProvider>
+    );
+
+    const signal = vi.mocked(fetch).mock.calls[0][1]?.signal;
+    expect(signal).toBeInstanceOf(AbortSignal);
+  });
+});
+

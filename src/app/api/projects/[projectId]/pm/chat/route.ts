@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { connectDB, DatabaseUnavailableError } from "@/lib/db";
+import { connectDB } from "@/lib/db";
+import { isDatabaseUnreachable } from "@/lib/db-errors";
 import { getAuthUser } from "@/lib/auth";
 import { ProvenanceError } from "@/lib/session";
 import { Project } from "@/models/project";
@@ -29,10 +30,10 @@ export async function POST(
   try {
     user = await getAuthUser(request);
   } catch (e) {
-    if (e instanceof DatabaseUnavailableError) return databaseUnavailable();
     if (e instanceof ProvenanceError) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
+    if (isDatabaseUnreachable(e)) return databaseUnavailable();
     throw e;
   }
   if (!user) {

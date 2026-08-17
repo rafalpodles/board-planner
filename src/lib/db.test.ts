@@ -7,6 +7,22 @@ vi.mock("mongoose", () => ({ default: { connect, connection } }));
 
 type Db = typeof import("./db");
 
+// The shapes the driver really produces. A plain `new Error("ECONNREFUSED")` is not one of them, and
+// a fixture the system never builds cannot tell an outage from a misconfiguration — which is the
+// only distinction this file exists to check.
+function named(name: string, message: string): Error {
+  const error = new Error(message);
+  error.name = name;
+  return error;
+}
+
+const refused = () =>
+  named("MongooseServerSelectionError", "connect ECONNREFUSED 127.0.0.1:27017");
+const misconfigured = () =>
+  named("MongoParseError", 'tls/ssl must be either "true" or "false"');
+const bufferingTimedOut = () =>
+  named("MongooseError", "Operation `sessions.findOne()` buffering timed out after 10000ms");
+
 async function freshModule(): Promise<Db> {
   vi.resetModules();
   return import("./db");
@@ -34,7 +50,7 @@ describe("connectDB", () => {
 
   it("reports an unreachable database as its own failure, carrying the cause", async () => {
     const { connectDB, DatabaseUnavailableError } = await freshModule();
-    const cause = new Error("connect ECONNREFUSED 127.0.0.1:27017");
+    const cause = refused();
     connect.mockRejectedValue(cause);
     vi.spyOn(console, "error").mockImplementation(() => {});
 
@@ -50,36 +66,49 @@ describe("connectDB", () => {
   // left the instance permanently unable to reach a database that had already come back, and only
   // a redeploy fixed it.
   it("retries after a failure instead of serving the rejection forever", async () => {
+    vi.useFakeTimers();
     const { connectDB } = await freshModule();
     vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(console, "log").mockImplementation(() => {});
-    connect.mockRejectedValueOnce(new Error("down")).mockResolvedValue({ ok: true });
+    connect.mockRejectedValueOnce(refused()).mockResolvedValue({ ok: true });
 
     await expect(connectDB()).rejects.toThrow();
+    // Past the burst cooldown: within it the answer comes from the last failure by design, which is
+    // a different thing from the rejected promise being cached forever
+    vi.advanceTimersByTime(1_500);
     await expect(connectDB()).resolves.toEqual({ ok: true });
 
     expect(connect).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
   });
 
   it("names the cause once per outage, not once per request", async () => {
+    vi.useFakeTimers();
     const { connectDB } = await freshModule();
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
-    connect.mockRejectedValue(new Error("down"));
+    connect.mockRejectedValue(refused());
 
-    for (let i = 0; i < 5; i++) await connectDB().catch(() => {});
+    // Spread across the cooldown so these are genuine attempts rather than the burst absorber
+    for (let i = 0; i < 5; i++) {
+      await connectDB().catch(() => {});
+      vi.advanceTimersByTime(1_500);
+    }
 
     expect(error).toHaveBeenCalledTimes(1);
     expect(String(error.mock.calls[0][0])).toContain("MongoDB is unreachable");
     expect(connect).toHaveBeenCalledTimes(5);
+    vi.useRealTimers();
   });
 
   it("says so once when the database comes back", async () => {
+    vi.useFakeTimers();
     const { connectDB } = await freshModule();
     vi.spyOn(console, "error").mockImplementation(() => {});
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    connect.mockRejectedValueOnce(new Error("down")).mockResolvedValue({ ok: true });
+    connect.mockRejectedValueOnce(refused()).mockResolvedValue({ ok: true });
 
     await connectDB().catch(() => {});
+    vi.advanceTimersByTime(1_500);
     await connectDB();
     await connectDB();
 
@@ -109,5 +138,219 @@ describe("connectDB", () => {
     expect(thrown).not.toBeInstanceOf(DatabaseUnavailableError);
     expect(thrown.message).toContain("MONGODB_URI");
     expect(connect).not.toHaveBeenCalled();
+  });
+});
+
+describe("connectDB — a wrong deployment is not an outage", () => {
+  beforeEach(() => {
+    process.env.MONGODB_URI = "mongodb://127.0.0.1:27017/test";
+    connect.mockReset();
+    connection.readyState = 1;
+    delete (globalThis as { mongooseCache?: unknown }).mongooseCache;
+  });
+
+  afterEach(() => vi.restoreAllMocks());
+
+  // Wrapping every rejection made a config typo present as a transient outage: the client retries
+  // every few seconds forever, and the one line naming the cause had scrolled away
+  it("leaves a configuration fault as itself, so it answers 500 rather than 'retry'", async () => {
+    const { connectDB, DatabaseUnavailableError } = await freshModule();
+    const cause = misconfigured();
+    connect.mockRejectedValue(cause);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const thrown = await connectDB().catch((e) => e);
+
+    expect(thrown).toBe(cause);
+    expect(thrown).not.toBeInstanceOf(DatabaseUnavailableError);
+  });
+
+  it("says a configuration fault every time, because nothing will fix it by waiting", async () => {
+    const { connectDB } = await freshModule();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    connect.mockRejectedValue(misconfigured());
+
+    for (let i = 0; i < 3; i++) await connectDB().catch(() => {});
+
+    expect(error).toHaveBeenCalledTimes(3);
+    expect(String(error.mock.calls[0][0])).toContain("refused the connection as configured");
+  });
+
+  it("still retries after one, rather than serving it forever", async () => {
+    const { connectDB } = await freshModule();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    connect.mockRejectedValueOnce(misconfigured()).mockResolvedValue({ ok: true });
+
+    await expect(connectDB()).rejects.toThrow();
+    await expect(connectDB()).resolves.toEqual({ ok: true });
+  });
+
+  // Latched, an operator who started reading the log after the first request saw an endless stream
+  // of 503s with no cause anywhere
+  it("repeats the outage line once the throttle window has passed", async () => {
+    vi.useFakeTimers();
+    const { connectDB } = await freshModule();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    connect.mockRejectedValue(refused());
+
+    await connectDB().catch(() => {});
+    await connectDB().catch(() => {});
+    expect(error).toHaveBeenCalledTimes(1);
+
+    vi.advanceTimersByTime(61_000);
+    await connectDB().catch(() => {});
+
+    expect(error).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+});
+
+describe("isDatabaseUnreachable", () => {
+  it("recognises the failure a database that died mid-connection produces", async () => {
+    const { isDatabaseUnreachable } = await freshModule();
+
+    // The common shape, and the one connectDB never sees: mongoose reports readyState 2 while it
+    // reconnects, so the cached connection is handed back and the *query* is what fails
+    expect(isDatabaseUnreachable(bufferingTimedOut())).toBe(true);
+  });
+
+  it("recognises the driver's network and selection errors", async () => {
+    const { isDatabaseUnreachable } = await freshModule();
+
+    for (const name of [
+      "MongooseServerSelectionError",
+      "MongoServerSelectionError",
+      "MongoNetworkError",
+      "MongoNetworkTimeoutError",
+      "MongoNotConnectedError",
+      "MongoTopologyClosedError",
+    ]) {
+      expect(isDatabaseUnreachable(named(name, "boom"))).toBe(true);
+    }
+  });
+
+  it("recognises its own wrapper", async () => {
+    const { isDatabaseUnreachable, DatabaseUnavailableError } = await freshModule();
+
+    expect(isDatabaseUnreachable(new DatabaseUnavailableError(refused()))).toBe(true);
+  });
+
+  it("does not answer for a misconfiguration, a bug, or a non-error", async () => {
+    const { isDatabaseUnreachable } = await freshModule();
+
+    expect(isDatabaseUnreachable(misconfigured())).toBe(false);
+    expect(isDatabaseUnreachable(named("MongoServerError", "Authentication failed."))).toBe(false);
+    expect(isDatabaseUnreachable(new TypeError("cannot read properties of undefined"))).toBe(false);
+    expect(isDatabaseUnreachable(named("MongooseError", "Cast to ObjectId failed"))).toBe(false);
+    expect(isDatabaseUnreachable("a string")).toBe(false);
+    expect(isDatabaseUnreachable(undefined)).toBe(false);
+  });
+});
+
+describe("connectDB — the state the tests could not see", () => {
+  beforeEach(() => {
+    process.env.MONGODB_URI = "mongodb://127.0.0.1:27017/test";
+    connect.mockReset();
+    connection.readyState = 1;
+    delete (globalThis as { mongooseCache?: unknown }).mongooseCache;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  // Never once executed by a test before: readyState was pinned to 1 in every setup, so the branch
+  // that throws away a cached connection was dead code as far as the suite was concerned
+  it("drops a cached connection the driver has given up on, and connects again", async () => {
+    const { connectDB } = await freshModule();
+    connect.mockResolvedValue({ ok: true });
+
+    await connectDB();
+    expect(connect).toHaveBeenCalledTimes(1);
+
+    connection.readyState = 0;
+    await connectDB();
+
+    expect(connect).toHaveBeenCalledTimes(2);
+  });
+
+  it("bounds the wait instead of taking the driver's 30 s default", async () => {
+    const { connectDB } = await freshModule();
+    connect.mockResolvedValue({ ok: true });
+
+    await connectDB();
+
+    expect(connect).toHaveBeenCalledWith(
+      "mongodb://127.0.0.1:27017/test",
+      expect.objectContaining({ serverSelectionTimeoutMS: 5_000 })
+    );
+  });
+
+  // Without the cooldown each request in a burst pays the connect timeout in full — the price of no
+  // longer serving a cached rejection, which is worth paying once and not eight times
+  it("answers a burst from one attempt rather than attempting per request", async () => {
+    vi.useFakeTimers();
+    const { connectDB } = await freshModule();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    connect.mockRejectedValue(refused());
+
+    await connectDB().catch(() => {});
+    await Promise.all([connectDB().catch(() => {}), connectDB().catch(() => {})]);
+
+    expect(connect).toHaveBeenCalledTimes(1);
+  });
+
+  it("tries again once the cooldown has passed", async () => {
+    vi.useFakeTimers();
+    const { connectDB } = await freshModule();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    connect.mockRejectedValue(refused());
+
+    await connectDB().catch(() => {});
+    vi.advanceTimersByTime(1_500);
+    await connectDB().catch(() => {});
+
+    expect(connect).toHaveBeenCalledTimes(2);
+  });
+
+  it("still reports the cooldown refusal as an outage, not as a bad credential", async () => {
+    vi.useFakeTimers();
+    const { connectDB, DatabaseUnavailableError, isDatabaseUnreachable } = await freshModule();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    connect.mockRejectedValue(refused());
+
+    await connectDB().catch(() => {});
+    const thrown = await connectDB().catch((e) => e);
+
+    expect(thrown).toBeInstanceOf(DatabaseUnavailableError);
+    expect(isDatabaseUnreachable(thrown)).toBe(true);
+  });
+
+  // The flag used to be module-local while the cache it describes was on global, so one outage was
+  // announced twice and the next went unlogged from the instance that saw it
+  it("keeps its outage bookkeeping with the connection, across module instances", async () => {
+    const first = await freshModule();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    connect.mockRejectedValue(refused());
+
+    await first.connectDB().catch(() => {});
+    expect(error).toHaveBeenCalledTimes(1);
+
+    // A second instance of the module — instrumentation's graph is not a route's, and a dev reload
+    // makes a third — sharing the one cache on global
+    const second = await freshModule();
+    await second.connectDB().catch(() => {});
+    expect(error).toHaveBeenCalledTimes(1);
+
+    connect.mockReset();
+    connect.mockResolvedValue({ ok: true });
+    connection.readyState = 1;
+    vi.useFakeTimers();
+    vi.advanceTimersByTime(1_500);
+    await second.connectDB();
+
+    expect(log.mock.calls.filter((c) => String(c[0]).includes("reachable again"))).toHaveLength(1);
   });
 });

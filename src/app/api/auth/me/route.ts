@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getAuthUser } from "@/lib/auth";
 import { ProvenanceError } from "@/lib/session";
-import { DatabaseUnavailableError } from "@/lib/db";
+import { isDatabaseUnreachable } from "@/lib/db-errors";
 import { databaseUnavailable } from "@/lib/middleware";
 
 export async function GET(request: Request) {
@@ -14,7 +14,7 @@ export async function GET(request: Request) {
     }
     // This route decides whether the app thinks anyone is signed in, so a 401 here is the one that
     // sends somebody to a sign-in screen they cannot get past either (BP-362)
-    if (e instanceof DatabaseUnavailableError) return databaseUnavailable();
+    if (isDatabaseUnreachable(e)) return databaseUnavailable();
     throw e;
   }
 

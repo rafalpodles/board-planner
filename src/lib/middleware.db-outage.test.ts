@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { NextResponse } from "next/server";
 
 const getAuthUser = vi.fn();
 
@@ -109,3 +110,76 @@ describe("withAuth when the database is unreachable", () => {
     expect(handler).not.toHaveBeenCalled();
   });
 });
+
+describe("withAuth beyond the credential", () => {
+  beforeEach(() => {
+    getAuthUser.mockReset();
+    getAuthUser.mockImplementation(async () => ({ _id: "u1", role: "member" }));
+  });
+
+  function driverError(name: string, message = "connect ECONNREFUSED"): Error {
+    const error = new Error(message);
+    error.name = name;
+    return error;
+  }
+
+  // Credential resolution is one of many database touches behind withAuth. resolveProjectId, the
+  // grant check and every route body come after it, and those answered 500 with no Retry-After.
+  it("answers 503 when the handler itself cannot reach the database", async () => {
+    const handler = vi.fn(async () => {
+      throw driverError("MongoServerSelectionError");
+    });
+
+    const res = await withAuth(handler)(request(), { params: params() });
+
+    expect(res.status).toBe(503);
+    expect(res.headers.get("Retry-After")).toBe("5");
+  });
+
+  it("answers 503 for a query that timed out against the command buffer", async () => {
+    const handler = vi.fn(async () => {
+      throw driverError("MongooseError", "Operation `tasks.find()` buffering timed out after 10000ms");
+    });
+
+    expect((await withAuth(handler)(request(), { params: params() })).status).toBe(503);
+  });
+
+  it("lets an ordinary bug in a handler through, rather than calling it an outage", async () => {
+    const handler = vi.fn(async () => {
+      throw new TypeError("cannot read properties of undefined");
+    });
+
+    await expect(withAuth(handler)(request(), { params: params() })).rejects.toThrow(
+      "cannot read properties of undefined"
+    );
+  });
+
+  it("does not touch a handler's own response", async () => {
+    const handler = vi.fn(async () => NextResponse.json({ ok: true }, { status: 201 }));
+
+    const res = await withAuth(handler)(request(), { params: params() });
+
+    expect(res.status).toBe(201);
+    expect(await res.json()).toEqual({ ok: true });
+  });
+});
+
+describe("withAuth and the failure a live connection produces", () => {
+  beforeEach(() => {
+    getAuthUser.mockReset();
+  });
+
+  // For the first seconds after a database goes away mongoose still reports the connection as live,
+  // so connectDB never sees it and the error is the driver's own class rather than the wrapper. An
+  // instanceof check answered 401 for exactly the window a restart actually occupies.
+  it("answers 503 to a raw driver error, not only to its own wrapper", async () => {
+    const error = new Error("connect ECONNREFUSED 127.0.0.1:27017");
+    error.name = "MongooseServerSelectionError";
+    getAuthUser.mockImplementation(async () => {
+      throw error;
+    });
+
+    expect((await withAuth(vi.fn())(request(), { params: params() })).status).toBe(503);
+  });
+});
+

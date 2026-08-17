@@ -97,17 +97,24 @@ describe("POST /api/mcp", () => {
 });
 
 describe("POST /api/mcp when the database is unreachable", () => {
-  function databaseIsDown() {
-    connectDB.mockImplementation(async () => {
-      throw new DatabaseUnavailableError(new Error("connect ECONNREFUSED"));
+  function failsWith(error: unknown) {
+    getAuthUser.mockImplementation(async () => {
+      throw error;
     });
   }
 
-  // withMcpAuth's catch-all turns any throw from verifyToken into `invalid_token`, and a client that
-  // reads that discards a perfectly good OAuth token and walks the whole flow again for another one
-  // that fails the same way — so this has to be answered before it gets there (BP-362)
-  it("answers 503 rather than letting it read as invalid_token", async () => {
-    databaseIsDown();
+  function driverError(name: string, message = "connect ECONNREFUSED 127.0.0.1:27017"): Error {
+    const error = new Error(message);
+    error.name = name;
+    return error;
+  }
+
+  // The shape a real restart takes. For the first seconds mongoose still reports the connection as
+  // live, so nothing can be checked beforehand — the query inside verifyToken is what fails, and
+  // withMcpAuth's catch-all called that `invalid_token`: a client then discards a working OAuth
+  // token and walks the whole flow again for one that fails the same way (BP-362 review).
+  it("answers 503, not invalid_token, when the query fails mid-request", async () => {
+    failsWith(driverError("MongoServerSelectionError"));
 
     const response = await POST(request({ authorization: "Bearer cpat_x" }));
     const body = await response.json();
@@ -118,26 +125,54 @@ describe("POST /api/mcp when the database is unreachable", () => {
     expect(response.headers.get("Retry-After")).toBe("5");
   });
 
+  it("answers 503 for a connection that could not be established either", async () => {
+    const { DatabaseUnavailableError } = await import("@/lib/db");
+    failsWith(new DatabaseUnavailableError(driverError("MongooseServerSelectionError")));
+
+    expect((await POST(request({ authorization: "Bearer cpat_x" }))).status).toBe(503);
+  });
+
+  it("answers 503 for a query that timed out against the command buffer", async () => {
+    failsWith(
+      driverError("MongooseError", "Operation `sessions.findOne()` buffering timed out after 10000ms")
+    );
+
+    expect((await POST(request({ authorization: "Bearer cpat_x" }))).status).toBe(503);
+  });
+
   it("says the credential was not the problem", async () => {
-    databaseIsDown();
+    failsWith(driverError("MongoNetworkError"));
 
     const body = await (await POST(request({ authorization: "Bearer cpat_x" }))).json();
 
     expect(body.error_description).toMatch(/credential was not the problem/i);
   });
 
-  it("never reaches the tools", async () => {
-    databaseIsDown();
-
-    const body = await (await POST(request({ authorization: "Bearer cpat_x" }))).json();
-
-    expect(body.auth).toBeUndefined();
-    expect(getAuthUser).not.toHaveBeenCalled();
-  });
-
-  it("still answers 401 to a missing credential while the database is up", async () => {
+  it("still answers 401 to a missing credential, and asks the database nothing", async () => {
     const response = await POST(request());
 
     expect(response.status).toBe(401);
+    expect(getAuthUser).not.toHaveBeenCalled();
+  });
+
+  it("still answers 401 to a credential that genuinely resolved to nobody", async () => {
+    getAuthUser.mockImplementation(async () => null);
+
+    expect((await POST(request({ authorization: "Bearer cpat_x" }))).status).toBe(401);
+  });
+
+  it("does not dress an unrelated failure up as an outage", async () => {
+    failsWith(new TypeError("something else entirely"));
+
+    const response = await POST(request({ authorization: "Bearer cpat_x" }));
+
+    // withMcpAuth owns whatever this is; what matters is that it is not reported as a 503
+    expect(response.status).not.toBe(503);
+  });
+
+  it("still serves a healthy request", async () => {
+    const body = await (await POST(request({ authorization: "Bearer cpat_x" }))).json();
+
+    expect(body.auth.clientId).toBe("rpo");
   });
 });

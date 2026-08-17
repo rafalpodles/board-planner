@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { isValidObjectId } from "mongoose";
 import { getAuthUser } from "./auth";
 import { ProvenanceError } from "./session";
-import { connectDB, DatabaseUnavailableError } from "./db";
+import { connectDB } from "./db";
+import { isDatabaseUnreachable } from "./db-errors";
 import { check } from "./grants";
 import { verifyWorkerCredential, isApprovedFor } from "./worker-service";
 import { Project } from "@/models/project";
@@ -54,7 +55,10 @@ export function withAuth(handler: AuthenticatedHandler) {
       if (e instanceof ProvenanceError) {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
-      if (e instanceof DatabaseUnavailableError) return databaseUnavailable();
+      // isDatabaseUnreachable, not an instanceof: a database that dies while the app is
+      // connected fails from the query rather than from connectDB, and that error is the
+      // driver's own class (BP-362 review)
+      if (isDatabaseUnreachable(e)) return databaseUnavailable();
       throw e;
     }
 
@@ -62,7 +66,15 @@ export function withAuth(handler: AuthenticatedHandler) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    return handler(request, { ...context, user });
+    // The handler too, not only the credential: resolveProjectId, the grant check and every route
+    // body reach the database after this point, and a 500 there withholds the Retry-After a machine
+    // client needs — while the middleware's own comment promised a 503 (BP-362 review)
+    try {
+      return await handler(request, { ...context, user });
+    } catch (e) {
+      if (isDatabaseUnreachable(e)) return databaseUnavailable();
+      throw e;
+    }
   };
 }
 

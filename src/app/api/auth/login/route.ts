@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getClientIp, verifyCredentials } from "@/lib/auth";
-import { DatabaseUnavailableError } from "@/lib/db";
+import { isDatabaseUnreachable } from "@/lib/db-errors";
 import { databaseUnavailable } from "@/lib/middleware";
 import { lockoutKey, sourceKey, withLockout } from "@/lib/rate-limit";
 import {
@@ -42,7 +42,7 @@ export async function POST(request: Request) {
     // Both the throttle counters and the credential check read the database, so an outage lands
     // here — and "Invalid credentials" is exactly the wrong thing to tell somebody who was just
     // signed out by that same outage, on the page it sent them to (BP-362)
-    if (e instanceof DatabaseUnavailableError) return databaseUnavailable();
+    if (isDatabaseUnreachable(e)) return databaseUnavailable();
     throw e;
   }
 

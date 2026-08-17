@@ -86,7 +86,9 @@ export default function LoginPage() {
           )}
 
           {error && (
-            <p className="text-sm text-danger text-center">{error}</p>
+            <p role="alert" className="text-sm text-danger text-center">
+              {error}
+            </p>
           )}
 
           <Button type="submit" className="w-full" disabled={loading}>
