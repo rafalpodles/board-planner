@@ -47,9 +47,7 @@ Since CP-128, statuses are project-defined **board columns** mapped to semantic 
 ### Autonomous task processing
 Claude automatically picks up tasks in `todo` status and processes them through the pipeline. No user confirmation needed for `todo` tasks.
 
-Which of them an autonomous worker may take is the project's `claimScope` (Settings → Workers), because enabling a project should not by itself offer a machine the whole To Do list. The hand-over is an ordinary assignment to the user the project nominates there — `claude` on this board:
-- `assigned` (default) — only tasks assigned to that user. An enabled project claims nothing until somebody hands a task over, and nominating nobody means nothing qualifies.
-- `any` — unassigned tasks as well. A task parked for anyone else is never taken under either scope.
+Which of them a project's autonomous worker (Settings → Workers) may take follows the task's assignee, not a project-wide setting: a machine takes only a task its own owner assigned to themselves, and only once that task also names an agent — naming one is the hand-over. A task assigned to `claude` with no agent chosen is not touched by any machine; enabling a project offers it nothing until then.
 
 #### Size-based approach
 Size comes from the project's **Difficulty** field — an ordinary project-defined field since CP-213, not a column on the task. Read it from `customFieldValues`; a project that renamed or removed it has no size, and those tasks are treated as S/M.
@@ -235,3 +233,13 @@ does — `next start` refuses standalone output, and Railway deploys with `next 
 ## Deploy
 Railway auto-deploys from `main` branch.
 App: https://app.board-planner.com
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->
