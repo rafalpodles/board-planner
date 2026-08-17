@@ -3,8 +3,16 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { createExecutor } from "./executor.js";
 import { parseStream, StreamEvent } from "./stream.js";
 import { claimedTask } from "./__fixtures__/task.js";
+import { WorkerConfig } from "./config.js";
 
-const config = { taskTimeoutMs: 1000, apiBaseUrl: "https://app.example.com", apiToken: "cp_t" } as never;
+// Deliberately partial: the tests below check what the executor does when a policy field is unset,
+// which is what an older worker build or a hand-assembled config really produces. Cast through
+// unknown rather than to never, so the object stays an object and can be spread.
+const config = {
+  taskTimeoutMs: 1000,
+  apiBaseUrl: "https://app.example.com",
+  apiToken: "cp_t",
+} as unknown as WorkerConfig;
 
 const task = claimedTask({ description: "Do it well", acceptanceCriteria: ["works"] });
 
@@ -179,7 +187,7 @@ describe("createExecutor", () => {
   // policy.model / policy.fallbackModel, all the way down to the argv the CLI is actually given
   it("runs the model the policy names, not a hardcoded one", async () => {
     const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
-    const policyConfig = { ...config, model: "haiku", fallbackModel: "opus" } as never;
+    const policyConfig = { ...config, model: "haiku", fallbackModel: "opus" };
 
     await createExecutor(policyConfig, runner).execute(options);
 
@@ -204,7 +212,7 @@ describe("createExecutor", () => {
   // so a blank policy field would fail every task this worker claims
   it("never hands the CLI an empty model flag", async () => {
     const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
-    const blank = { ...config, model: "   ", fallbackModel: "" } as never;
+    const blank = { ...config, model: "   ", fallbackModel: "" };
 
     await createExecutor(blank, runner).execute(options);
 

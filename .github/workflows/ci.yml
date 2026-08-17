@@ -62,6 +62,12 @@ jobs:
           cache: npm
           cache-dependency-path: worker/package-lock.json
       - run: npm ci
+      # `npm run build` compiles src/ with the tests excluded, and vitest does not type-check at
+      # all, so nothing here had ever read a worker test file's types. The script existed and was
+      # called by no one; 27 errors had collected behind it, including a test asserting a config
+      # shape the worker never serves (BP-334).
+      - name: Types (tests)
+        run: npm run typecheck:tests
       - name: Tests
         run: npm test
       - name: Build

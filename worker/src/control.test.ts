@@ -149,7 +149,15 @@ describe("connectControl — frame parsing", () => {
   });
 
   it("sends the worker credential, X-Worker-Id and X-CP-Protocol headers", async () => {
-    const fetchImpl = vi.fn(async () => ({ ok: true, status: 200, body: openStream([]) }));
+    // Declared with the arguments it is called with, not none: this is the one test that reads
+    // mock.calls, and a zero-argument stub gives an empty tuple to destructure
+    const fetchImpl = vi.fn(
+      async (_url: string, _init: { headers: Record<string, string> }) => ({
+        ok: true,
+        status: 200,
+        body: openStream([]),
+      })
+    );
 
     const control = connectControl(depsWith({ fetchImpl: fetchImpl as unknown as typeof fetch }));
 

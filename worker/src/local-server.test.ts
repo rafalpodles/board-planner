@@ -39,16 +39,15 @@ const SOME_CONFIG: LocalConfigView = {
   apiUrl: "http://localhost:3000",
   workerName: "test-worker",
   projectCount: 0,
-  model: "opus",
-  reviewModel: "sonnet",
-  maxDiffLines: 400,
-  taskTimeoutMs: 900_000,
+  pollIntervalMs: 30_000,
+  projects: [],
 };
 
 async function serve(
   opts: {
     handlers?: CommandChannels;
-    telemetry?: Pick<Telemetry, "subscribe" | "recent">;
+    // /status reads current() too, so a stub standing in for the real telemetry has to have it
+    telemetry?: Pick<Telemetry, "subscribe" | "recent" | "current">;
     socketPath?: string;
     config?: () => LocalConfigView;
   } = {}
@@ -341,15 +340,26 @@ describe("the progress stream", () => {
   });
 
   it("serves the effective config the worker is actually running under", async () => {
+    // The shape wiring.ts really serves: the per-run settings live under each project, because a
+    // worker binds several and they do not share a model. Asserted here in that shape after this
+    // test spent its life checking that a top-level `model` — which nothing ever produces — came
+    // back out of the object it had just put in (BP-334).
     const { socketPath } = await serve({
       config: () => ({
         apiUrl: "http://localhost:3991",
         workerName: "rig-laptop",
         projectCount: 1,
-        model: "opus",
-        reviewModel: "sonnet",
-        maxDiffLines: 400,
-        taskTimeoutMs: 900_000,
+        pollIntervalMs: 30_000,
+        projects: [
+          {
+            project: "BP",
+            baseBranch: "main",
+            model: "opus",
+            reviewModel: "sonnet",
+            maxDiffLines: 400,
+            taskTimeoutMs: 900_000,
+          },
+        ],
       }),
     });
 
@@ -360,10 +370,17 @@ describe("the progress stream", () => {
       apiUrl: "http://localhost:3991",
       workerName: "rig-laptop",
       projectCount: 1,
-      model: "opus",
-      reviewModel: "sonnet",
-      maxDiffLines: 400,
-      taskTimeoutMs: 900_000,
+      pollIntervalMs: 30_000,
+      projects: [
+        {
+          project: "BP",
+          baseBranch: "main",
+          model: "opus",
+          reviewModel: "sonnet",
+          maxDiffLines: 400,
+          taskTimeoutMs: 900_000,
+        },
+      ],
     });
   });
 
@@ -385,17 +402,27 @@ describe("the progress stream", () => {
       config: () => ({
         apiUrl: "http://x",
         workerName: "w",
-        projectCount: 0,
-        model,
-        reviewModel: "sonnet",
-        maxDiffLines: 400,
-        taskTimeoutMs: 1,
+        projectCount: 1,
+        pollIntervalMs: 30_000,
+        projects: [
+          {
+            project: "BP",
+            baseBranch: "main",
+            model,
+            reviewModel: "sonnet",
+            maxDiffLines: 400,
+            taskTimeoutMs: 1,
+          },
+        ],
       }),
     });
 
-    expect(JSON.parse((await call(socketPath, "GET", "/config")).body).model).toBe("opus");
+    const modelNow = async () =>
+      JSON.parse((await call(socketPath, "GET", "/config")).body).projects[0].model;
+
+    expect(await modelNow()).toBe("opus");
     model = "haiku";
-    expect(JSON.parse((await call(socketPath, "GET", "/config")).body).model).toBe("haiku");
+    expect(await modelNow()).toBe("haiku");
   });
 
   it("lets go of its subscription when the client disconnects", async () => {
@@ -404,6 +431,9 @@ describe("the progress stream", () => {
     const { socketPath } = await serve({
       telemetry: {
         recent: telemetry.recent,
+        // Passed through: this test counts subscriptions, and wrapping only subscribe would leave
+        // /status unable to answer while the stream is open
+        current: telemetry.current,
         subscribe: (listener) => {
           live += 1;
           const unsubscribe = telemetry.subscribe(listener);
