@@ -191,9 +191,11 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
       target: target.username,
     });
     // The account holder is the one person this happens to who was not in the room for it. Sent to
-    // the address now on the account: a password change does not move the address.
+    // the address the account had on the way in, which is the same one in the ordinary case — and
+    // in the case that matters, one PUT setting a password AND repointing the address, it is the
+    // victim's inbox rather than the inbox the change just handed the account to.
     void notifyPasswordChanged({
-      email: target.email,
+      email: previousEmail || target.email,
       username: target.username,
       how: "admin",
       actor: admin.username,
