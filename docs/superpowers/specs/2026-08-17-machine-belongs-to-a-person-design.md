@@ -48,10 +48,36 @@ An `ObjectId` ref to `User`, written whenever `assignee` changes. Without it the
 "I assigned this to myself" from "somebody assigned this to me", and that distinction is the whole
 consent model.
 
+### An agent is the hand-over
+
+Assigning a task to yourself means *I am working on this* — it does in every tracker, and it has to
+keep meaning that. So it cannot also mean *my computer is working on this*. The gesture that hands
+work to a machine is **choosing an agent**:
+
+- **no agent** — a person does it. No machine touches it. This is the ordinary case and the default.
+- **an agent** — the owner's machine takes it, and runs that agent.
+
+The field stops answering *how* and starts answering *whether, and how*.
+
+Three consequences, all of them required rather than optional:
+
+1. **The empty option has to be renamed.** It reads "Project default" today, which is honest about
+   what it does — clearing the field falls back. Under this model it means *nobody*, and the label
+   has to say so ("No agent — I'll do it myself"). Renaming it before the behaviour changes would
+   make it a lie.
+2. **The project's default agent changes role**, from the thing that runs when a task names none to
+   the thing the picker offers first. It stops being a mechanism and becomes a convenience.
+3. **The fallback chain in `snapshotFor` goes.** Today it is task agent → project default → the
+   seeded "Default", and the comment explains why: without it, projects that had a worker before
+   the catalog existed would stop dead. That concern is answered by this change rather than
+   surviving it — routing is being replaced anyway — but it has to be struck deliberately, because
+   projects rely on it now.
+
 ## The two paths, one action each
 
-**I assigned it to myself** — `assignee === owner` and `assignedBy === owner`. The worker takes it
-and starts. No prompt, no menubar. One action.
+**I assigned it to myself, and chose an agent** — `assignee === owner` and `assignedBy === owner`.
+The worker takes it and starts. No prompt, no menubar. One action. Without an agent it is simply a
+task I am doing by hand, and no machine looks at it.
 
 **Somebody else assigned it to me** — a request appears in the menubar app. It shows the task and
 the agent that was chosen, expanded into its steps and gates. I can approve it as it stands, or
