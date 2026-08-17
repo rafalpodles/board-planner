@@ -316,18 +316,45 @@ describe("the Agent row and who may change it", () => {
     expect(agentRow()).toBeUndefined();
   });
 
-  // The first version of this asserted only the words "Project default", which ComboboxRow renders
+  // The first version of this asserted only the words "No agent", which ComboboxRow renders
   // too via emptyOption — so it passed with the admin picker on screen and could not fail. What
   // distinguishes the two is the control, not the label.
-  it("says Project default to a non-admin, with no control to open", () => {
+  it("says No agent to a non-admin, with no control to open", () => {
     isAdmin.value = false;
     renderRail({ agents: AGENTS });
 
     const row = screen.getByText("Agent").closest("div");
-    expect(row?.textContent).toContain("Project default");
+    expect(row?.textContent).toContain("No agent");
     expect(row?.querySelector("[role='combobox']")).toBeNull();
     expect(screen.queryAllByRole("combobox").some((el) => el.textContent?.startsWith("Agent"))).toBe(
       false
     );
+  });
+
+  // "Project default" was honest while an empty field fell back to the project's agent. Since BP-358
+  // it means nobody takes the task, and the label has to say so — this is the only signal that a task
+  // is one a person is doing.
+  it("names the empty option for what it now means", async () => {
+    renderRail({ agents: AGENTS });
+
+    expect(screen.getByText("Agent").closest("div")?.textContent).toContain("No agent");
+  });
+
+  it("offers it as the first choice, so handing work to a machine stays deliberate", async () => {
+    renderRail({ agents: AGENTS });
+    await openRow("Agent");
+
+    expect(screen.getAllByRole("option")[0].textContent).toContain("No agent");
+  });
+
+  // The project's default stops being what runs and becomes what is offered first. Without this the
+  // setting has no job at all once the fallback is gone.
+  it("offers the project's default ahead of the other agents", async () => {
+    renderRail({ agents: AGENTS, projectDefaultAgent: "a2" });
+    await openRow("Agent");
+
+    const options = screen.getAllByRole("option").map((o) => o.textContent);
+    expect(options[0]).toContain("No agent");
+    expect(options[1]).toContain("With security review");
   });
 });
