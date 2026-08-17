@@ -421,7 +421,14 @@ export async function updateTask(
   taskId: string,
   body: Body,
   actorId: string,
-  force = false
+  force = false,
+  // Whether this caller may choose the task's agent. A boolean rather than a user, because the
+  // answer is a property of the *request's* principal: `tokenScoped`, `tokenScope` and the role a
+  // scoped token was degraded to are attached in memory by getAuthUser and are not schema fields,
+  // so re-loading the actor here would silently promote a scoped token back to admin. The route
+  // holds the live principal; it decides. Defaults to false so a caller that says nothing is
+  // refused rather than trusted (BP-345).
+  mayChooseAgent = false
 ): Promise<TaskServiceResult> {
   await connectDB();
 
@@ -448,8 +455,22 @@ export async function updateTask(
   }
 
   if (updates.agent === "") updates.agent = null;
-  if (updates.agent !== undefined && updates.agent !== null) {
-    if (!(await agentUsableOnProject(projectId, updates.agent, actorId))) {
+  if (updates.agent !== undefined) {
+    // Compared against what is stored, so re-sending the value a task already carries is a no-op
+    // rather than a refusal. A REST consumer that GETs, edits a title and PUTs the whole object
+    // would otherwise start failing on a field it never touched — the same call BP-354 made for
+    // the stored address. Writing an unchanged value changes nothing, so permitting it is safe.
+    const stored = await Task.findOne({ _id: taskId, project: projectId }, "agent").lean();
+    const changes = String(stored?.agent ?? "") !== String(updates.agent ?? "");
+    if (changes && !mayChooseAgent) {
+      return {
+        ok: false,
+        error: "Only an instance admin can choose which agent runs a task",
+        status: 403,
+      };
+    }
+    // Clearing counts as changing: reverting to the project default still changes what runs.
+    if (updates.agent !== null && !(await agentUsableOnProject(projectId, updates.agent, actorId))) {
       return { ok: false, error: "That agent cannot run on this project", status: 400 };
     }
   }
@@ -566,7 +587,9 @@ export async function updateTask(
 
   // Log field changes (parallel)
   const activities: Promise<void>[] = [];
-  const trackFields = ["title", "priority", "category", "status"];
+  // "agent" is on this list because it is the field that decides what runs on somebody's machine.
+  // Without it there is no answer to "who pointed the machine at that prompt" (BP-345).
+  const trackFields = ["title", "priority", "category", "status", "agent"];
   for (const field of trackFields) {
     const oldVal = String(oldTask[field as keyof typeof oldTask] ?? "");
     const newVal = String(task[field as keyof typeof task] ?? "");

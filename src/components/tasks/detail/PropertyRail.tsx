@@ -27,6 +27,7 @@ import {
 } from "./FieldRow";
 import type { TaskDraft } from "./useTaskEditor";
 import type { ApiAgent } from "@/types";
+import { useAuth } from "@/hooks/use-auth";
 
 const RECURRENCE_UNITS: Record<RecurrenceFrequency, string> = {
   daily: "day",
@@ -81,6 +82,9 @@ export function PropertyRail({
   const sprint = sprints.find((s) => s._id === draft.sprint);
   const fields = sortedFields(activeFields(customFields));
   const selectableSprints = sprints.filter((s) => s.status !== "completed");
+  // Instance admin, which is what every other admin-only surface in this app keys on
+  const { isAdmin } = useAuth();
+  const agentName = agents.find((a) => a._id === draft.agent)?.name ?? "";
 
   return (
     <div className="flex h-full flex-col gap-6">
@@ -109,22 +113,35 @@ export function PropertyRail({
           )}
         </ComboboxRow>
 
-        <ComboboxRow
-          label="Agent"
-          touch={touch}
-          value={draft.agent || ""}
-          options={agents.map((a) => ({ value: a._id, label: a.name }))}
-          emptyOption="Project default"
-          onChange={(id) => set("agent", id || null)}
-        >
-          {(selected) =>
-            selected ? (
-              <span className="truncate">{selected.label}</span>
+        {/* Readable by everyone, changeable by an admin: the agent decides what runs on the
+            machine serving this project, and the server refuses the write either way (BP-345).
+            Offering a picker that 403s would be the worse half of both. */}
+        {isAdmin ? (
+          <ComboboxRow
+            label="Agent"
+            touch={touch}
+            value={draft.agent || ""}
+            options={agents.map((a) => ({ value: a._id, label: a.name }))}
+            emptyOption="Project default"
+            onChange={(id) => set("agent", id || null)}
+          >
+            {(selected) =>
+              selected ? (
+                <span className="truncate">{selected.label}</span>
+              ) : (
+                <EmptyValue>Project default</EmptyValue>
+              )
+            }
+          </ComboboxRow>
+        ) : (
+          <FieldRow label="Agent" touch={touch}>
+            {agentName ? (
+              <span className="truncate">{agentName}</span>
             ) : (
               <EmptyValue>Project default</EmptyValue>
-            )
-          }
-        </ComboboxRow>
+            )}
+          </FieldRow>
+        )}
 
         <ComboboxRow
           label="Priority"
