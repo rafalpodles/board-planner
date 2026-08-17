@@ -20,7 +20,6 @@ import {
   customFieldActivityChanges,
 } from "@/lib/custom-fields";
 import { onTaskStatusChanged } from "@/lib/pm/triggers";
-import { PROJECT_POLICY_DEFAULTS, isClaimScope } from "@/lib/worker-policy";
 
 export const MAX_EXECUTION_ATTEMPTS = 3;
 
@@ -903,16 +902,15 @@ export async function claimNextTask(
   runId: string,
   // The worker's own identity user. A claim is an assignment, which is what stops two machines
   // converging on one task and what makes a task parked for a colleague untouchable.
-  identity?: string | null
+  identity?: string | null,
+  // The machine's owner. A machine takes the work this person handed it, and nothing else.
+  ownerId?: string | null
   // A document, not a plain ITask: the caller has to know, because spreading one silently yields
   // Mongoose internals with every real field a level down.
 ): Promise<HydratedDocument<ITask> | null> {
   await connectDB();
 
-  const project = await Project.findById(
-    projectId,
-    "columns worker.policy.claimScope worker.claimAssignee"
-  ).lean();
+  const project = await Project.findById(projectId, "columns").lean();
   const columns = getProjectColumns(project);
   const approved = columns.filter((c) => c.role === "approved").map((c) => c.id);
   const activeStatus = columns.find((c) => c.role === "active")?.id;
@@ -928,35 +926,16 @@ export async function claimNextTask(
   if (identity && !Types.ObjectId.isValid(identity)) return null;
   const assignTo = identity ? new Types.ObjectId(identity) : null;
 
-  const worker = (
-    project as {
-      worker?: { policy?: { claimScope?: unknown }; claimAssignee?: unknown };
-    } | null
-  )?.worker;
-  const scope = isClaimScope(worker?.policy?.claimScope)
-    ? worker.policy.claimScope
-    : PROJECT_POLICY_DEFAULTS.claimScope;
-  const nominee = worker?.claimAssignee ? String(worker.claimAssignee) : null;
+  if (!ownerId || !Types.ObjectId.isValid(ownerId)) return null;
 
-  // What "enabled" is allowed to mean. Under "assigned" a worker only takes tasks handed to the
-  // user this project nominates, so connecting one to a project full of To Do does nothing until
-  // somebody offers it work — the task is the unit of consent, not the project. Under "any" an
-  // unassigned task is fair game too.
-  //
-  // The nominee is an ordinary user a person picks, deliberately not the worker's own identity:
-  // that is an auto-created `worker-<id>` account with kind "machine", excluded from every list
-  // the product offers, so keying on it would make the hand-over impossible to perform.
-  //
-  // A task the run is resuming is already assigned to the worker's identity, so that matches too;
-  // without it a release would hand back a task no scope could pick up again.
-  const handed = [
-    ...(nominee ? [{ assignee: nominee }] : []),
+  // Assigned to the owner *by* the owner. Somebody else assigning you work is a proposal, and the
+  // surface for accepting one does not exist yet — so it is refused rather than run unattended.
+  // A task the run is resuming is already assigned to the machine's identity, and without it a
+  // release would hand back a task nothing could pick up again.
+  const claimable = [
+    { assignee: ownerId, assignedBy: ownerId },
     ...(identity ? [{ assignee: identity }] : []),
   ];
-  const claimable = scope === "assigned" ? handed : [{ assignee: null }, ...handed];
-  // Nominating nobody under "assigned" means nothing qualifies. Failing closed is the point of the
-  // setting, and the settings screen says so rather than leaving it to be discovered.
-  if (claimable.length === 0) return null;
 
   // Finished is the done role, not a status called "done": a board that renamed its last column
   // would otherwise read every shipped blocker as still open. A board with NO done-role column
@@ -986,6 +965,8 @@ export async function claimNextTask(
     {
       project: projectId,
       status: { $in: approved },
+      // Choosing an agent is the hand-over; a task naming none is one a person is doing
+      agent: { $ne: null },
       // On an array field this means "holds none of them", so a task with no blockers, one whose
       // blockers have all finished, and one written before the field existed all still qualify
       blockedBy: { $nin: openBlockers },
@@ -1006,8 +987,8 @@ export async function claimNextTask(
       {
         $set: {
           status: activeStatus,
-          // Kept, not overwritten: under "assigned" the assignee is the hand-over itself, and
-          // whether the claim is what set it decides whether releasing may clear it again.
+          // Kept, not overwritten: the assignee is the hand-over itself, and whether the claim is
+          // what set it decides whether releasing may clear it again.
           // assignedBy follows the same rule on the same signal — the claim is the assigner only
           // when the claim is what set the assignee; a resumed or already-assigned task keeps
           // whatever assignedBy already recorded, same as it keeps assignee.
