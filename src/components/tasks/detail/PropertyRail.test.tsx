@@ -292,8 +292,10 @@ describe("the Agent row and who may change it", () => {
     { _id: "a2", name: "With security review", scope: "global", description: "" },
   ] as never;
 
+  // queryAllByRole, not getAllByRole: the latter throws on zero matches, which made this helper
+  // depend on unrelated rows being present
   function agentRow() {
-    return [...screen.getAllByRole("combobox"), ...screen.getAllByRole("button")].find((el) =>
+    return [...screen.queryAllByRole("combobox"), ...screen.queryAllByRole("button")].find((el) =>
       (el.textContent || "").startsWith("Agent")
     );
   }
@@ -314,10 +316,18 @@ describe("the Agent row and who may change it", () => {
     expect(agentRow()).toBeUndefined();
   });
 
-  it("says Project default to a non-admin when the task names no agent", () => {
+  // The first version of this asserted only the words "Project default", which ComboboxRow renders
+  // too via emptyOption — so it passed with the admin picker on screen and could not fail. What
+  // distinguishes the two is the control, not the label.
+  it("says Project default to a non-admin, with no control to open", () => {
     isAdmin.value = false;
     renderRail({ agents: AGENTS });
 
-    expect(screen.getByText("Agent").closest("div")?.textContent).toContain("Project default");
+    const row = screen.getByText("Agent").closest("div");
+    expect(row?.textContent).toContain("Project default");
+    expect(row?.querySelector("[role='combobox']")).toBeNull();
+    expect(screen.queryAllByRole("combobox").some((el) => el.textContent?.startsWith("Agent"))).toBe(
+      false
+    );
   });
 });

@@ -12,24 +12,46 @@ import { ApiAgentBlock } from "@/types";
 
 const MINE = "mine";
 
+// Owns the failure, so every dialog that uses it gets one. Each onCreate awaits a write and then
+// closes; without a catch here a refusal was an unhandled rejection — the dialog stayed open with
+// the typed prompt still in it, the button re-enabled, and nothing said why (BP-345 review).
 function Footer({
   onCancel,
   onCreate,
   disabled,
 }: {
   onCancel: () => void;
-  onCreate: () => void;
+  onCreate: () => Promise<void> | void;
   disabled: boolean;
 }) {
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
   return (
-    <div className="mt-2 flex justify-end gap-2">
-      <Button variant="secondary" onClick={onCancel}>
-        Cancel
-      </Button>
-      <Button onClick={onCreate} disabled={disabled}>
-        Create
-      </Button>
-    </div>
+    <>
+      {error && <p className="mt-2 text-[13px] text-danger">{error}</p>}
+      <div className="mt-2 flex justify-end gap-2">
+        <Button variant="secondary" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button
+          disabled={disabled || busy}
+          onClick={async () => {
+            setError("");
+            setBusy(true);
+            try {
+              await onCreate();
+            } catch (err) {
+              setError(err instanceof Error ? err.message : "Could not create");
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          Create
+        </Button>
+      </div>
+    </>
   );
 }
 
