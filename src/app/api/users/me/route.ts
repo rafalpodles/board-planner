@@ -1,9 +1,19 @@
 import { NextResponse } from "next/server";
+import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
-import { isValidEmail, normaliseEmail } from "@/lib/email";
+import { getClientIp } from "@/lib/auth";
+import { isEmailConfigured, isValidEmail, normaliseEmail, sendEmail } from "@/lib/email";
+import { APP_NAME } from "@/lib/brand";
+import { logInstanceAudit } from "@/lib/instanceAudit";
 import { withAuth } from "@/lib/middleware";
 import { duplicateKeyField } from "@/lib/mongo-errors";
 import { invalidateResetTokens } from "@/lib/password-reset";
+import {
+  EXCLUSIVE_SOURCE_ATTEMPTS,
+  lockoutKey,
+  sourceKey,
+  withLockout,
+} from "@/lib/rate-limit";
 import { User } from "@/models/user";
 
 export const PUT = withAuth(async (request, { user }) => {
@@ -11,6 +21,7 @@ export const PUT = withAuth(async (request, { user }) => {
 
   const body = await request.json();
   const updates: Record<string, unknown> = {};
+  const previousEmail = user.email ?? "";
 
   if (body.email !== undefined) {
     // The address is where a reset link will land, so a machine credential must not be able to
@@ -34,7 +45,42 @@ export const PUT = withAuth(async (request, { user }) => {
         { status: 400 }
       );
     }
-    updates.email = email;
+
+    // Resending the address already on the account is not a change, and must not demand a
+    // password: the profile form submits this field alongside the notification toggle, so
+    // treating an unchanged value as a change would put a password prompt in front of a checkbox.
+    if (email !== previousEmail) {
+      // The same proof the password change asks for, because this field can obtain a password.
+      // Repointing it takes the account over at the next reset and — unlike a password change —
+      // signs nobody out, so a borrowed session was otherwise enough to keep the account for good.
+      if (typeof body.currentPassword !== "string" || !body.currentPassword) {
+        return NextResponse.json(
+          { error: "Your current password is required to change your email address" },
+          { status: 400 }
+        );
+      }
+      const record = await User.findById(user._id).select("+password");
+      if (!record) {
+        return NextResponse.json({ error: "User not found" }, { status: 404 });
+      }
+      const currentPassword = body.currentPassword;
+      const { lockedOut, result: passwordMatches } = await withLockout(
+        lockoutKey(getClientIp(request) ?? "-", user.username, "email-change"),
+        async () => ((await bcrypt.compare(currentPassword, record.password)) ? true : null),
+        sourceKey(String(user._id), "email-change"),
+        EXCLUSIVE_SOURCE_ATTEMPTS
+      );
+      if (lockedOut) {
+        return NextResponse.json(
+          { error: "Too many failed attempts. Try again later." },
+          { status: 429 }
+        );
+      }
+      if (!passwordMatches) {
+        return NextResponse.json({ error: "Current password is incorrect" }, { status: 400 });
+      }
+      updates.email = email;
+    }
   }
   if (typeof body.emailNotifications === "boolean") {
     updates.emailNotifications = body.emailNotifications;
@@ -71,5 +117,42 @@ export const PUT = withAuth(async (request, { user }) => {
     throw err;
   }
 
+  if (typeof updates.email === "string" && updates.email !== previousEmail) {
+    // The admin path audits the same change for the same reason: repointing an address takes the
+    // account over at the next reset and signs nobody out, so the row is the only trace there is.
+    // It was audited when somebody else did it and silent when the account itself did — which is
+    // the case a borrowed session produces.
+    void logInstanceAudit({
+      action: "user_email_changed",
+      user: user._id,
+      target: user.username,
+      detail: `${previousEmail || "none"} → ${updates.email || "none"} (self)`,
+    });
+    // Told to the address losing the ability to recover the account, not the one gaining it: the
+    // person who needs to hear about this is the one who did not do it.
+    void notifyPreviousAddress(previousEmail, user.username);
+  }
+
   return NextResponse.json(updated);
 });
+
+async function notifyPreviousAddress(previousEmail: string, username: string): Promise<void> {
+  if (!previousEmail || !isEmailConfigured()) return;
+  try {
+    await sendEmail({
+      to: previousEmail,
+      subject: `The email address on your ${APP_NAME} account changed`,
+      text: [
+        `The email address for ${username} was changed, so this address can no longer be used to`,
+        "reset that account's password.",
+        "",
+        "If that was not you, ask an administrator to set a password for the account — whoever made",
+        "this change can otherwise request a reset link to their own inbox.",
+      ].join("\n"),
+    });
+  } catch (err) {
+    // Nobody is waiting on this, so an unhandled rejection here would take the process down over a
+    // mail server having a bad afternoon
+    console.error("Could not tell the previous address it was replaced:", err);
+  }
+}

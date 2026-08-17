@@ -13,9 +13,15 @@ export default function ProfilePage() {
   const { toast } = useToast();
 
   const [email, setEmail] = useState("");
+  const [savedEmail, setSavedEmail] = useState("");
+  const [currentPassword, setCurrentPassword] = useState("");
   const [emailNotifications, setEmailNotifications] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
+
+  // Trimmed and lowercased the way the server normalises it, so the password prompt does not
+  // appear for a stray capital that will not change anything
+  const emailChanged = email.trim().toLowerCase() !== savedEmail;
 
   useEffect(() => {
     if (!user) return;
@@ -24,6 +30,7 @@ export default function ProfilePage() {
       .get("/api/auth/me")
       .then((data: { email?: string; emailNotifications?: boolean }) => {
         setEmail(data.email || "");
+        setSavedEmail(data.email || "");
         setEmailNotifications(data.emailNotifications || false);
         setLoaded(true);
       })
@@ -34,10 +41,19 @@ export default function ProfilePage() {
   async function handleSave() {
     setSaving(true);
     try {
-      await api.put("/api/users/me", { email, emailNotifications });
+      await api.put("/api/users/me", {
+        email,
+        emailNotifications,
+        ...(emailChanged ? { currentPassword } : {}),
+      });
+      setSavedEmail(email.trim().toLowerCase());
+      setCurrentPassword("");
       toast("Profile updated", "success");
-    } catch {
-      toast("Failed to update profile", "error");
+    } catch (err) {
+      // The server's own words: "Current password is incorrect" is worth reading, where a generic
+      // failure leaves somebody retyping a password that was right
+      const message = err instanceof Error ? err.message : "";
+      toast(message || "Failed to update profile", "error");
     } finally {
       setSaving(false);
     }
@@ -74,6 +90,22 @@ export default function ProfilePage() {
           placeholder="your@email.com"
         />
 
+        {emailChanged && (
+          <div className="space-y-2 rounded-lg border border-border bg-surface-muted p-3">
+            <Input
+              label="Current password"
+              type="password"
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              autoComplete="current-password"
+            />
+            <p className="text-xs text-text-muted">
+              This address is where a password reset link is sent, so changing it needs your
+              password. The old address will be told it is no longer the recovery address.
+            </p>
+          </div>
+        )}
+
         <div className="flex items-center gap-3">
           <input
             type="checkbox"
@@ -92,7 +124,7 @@ export default function ProfilePage() {
           and status changes on tasks you&apos;re watching.
         </p>
 
-        <Button onClick={handleSave} disabled={saving}>
+        <Button onClick={handleSave} disabled={saving || (emailChanged && !currentPassword)}>
           {saving ? "Saving..." : "Save"}
         </Button>
       </div>
