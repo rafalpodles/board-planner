@@ -1,11 +1,11 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, waitFor, act } from "@testing-library/react";
+import { render, screen, cleanup, waitFor, act, within } from "@testing-library/react";
 import { TaskDetail } from "./TaskDetail";
 
 const { api, auth } = vi.hoisted(() => ({
   api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), del: vi.fn() },
-  auth: { user: { _id: "u1", username: "rpo", fullName: "Rafal Podles" } },
+  auth: { user: { _id: "u1", username: "rpo", fullName: "Rafal Podles" }, isAdmin: false },
 }));
 
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
@@ -274,5 +274,59 @@ describe("TaskDetail, moving a task a worker is running", () => {
     await act(async () => screen.getByRole("option", { name: /In Progress/i }).click());
 
     expect(screen.queryByText("This task is being executed")).toBeNull();
+  });
+});
+
+// BP-358 review round 1: PropertyRail's `projectDefaultAgent` sort is unit-tested in isolation, but
+// nothing pinned TaskDetail actually carrying it to either call site — removing the prop from either
+// the desktop aside or the mobile sheet left every test above green, because the shared `auth` mock
+// never set `isAdmin` (so the Agent row took the read-only branch, which ignores the prop) and the
+// shared `/api/agent*` mock returned `[]` (nothing to order even if it hadn't). Scoped to its own
+// describe rather than changed file-wide, so the other 19 tests keep their current, unrelated shape.
+describe("TaskDetail, the agent picker's project default", () => {
+  const AGENTS = [
+    { _id: "ag1", name: "Default", scope: "global", description: "" },
+    { _id: "ag2", name: "With security review", scope: "global", description: "" },
+  ];
+
+  beforeEach(() => {
+    auth.isAdmin = true;
+    api.get.mockImplementation((url: string) => {
+      if (url === "/api/users") return Promise.resolve([]);
+      if (url === "/api/agents") return Promise.resolve(AGENTS);
+      if (url.startsWith("/api/agent")) return Promise.resolve([]);
+      if (url.includes("/tasks/")) return Promise.resolve(task);
+      if (url.includes("/sprints")) return Promise.resolve([]);
+      return Promise.resolve({ ...project, worker: { agent: "ag2" } });
+    });
+  });
+
+  afterEach(() => {
+    auth.isAdmin = false;
+  });
+
+  it("offers it first on the desktop rail", async () => {
+    renderDetail();
+    await loaded();
+
+    const aside = within(screen.getByRole("complementary"));
+    await act(async () => aside.getByRole("combobox", { name: "Agent" }).click());
+
+    const options = screen.getAllByRole("option").map((o) => o.textContent);
+    expect(options[0]).toContain("No agent");
+    expect(options[1]).toContain("With security review");
+  });
+
+  it("offers it first on the mobile sheet too", async () => {
+    renderDetail();
+    await loaded();
+    await act(async () => screen.getByRole("button", { name: "All details" }).click());
+
+    const dialog = within(screen.getByRole("dialog"));
+    await act(async () => dialog.getByRole("combobox", { name: "Agent" }).click());
+
+    const options = screen.getAllByRole("option").map((o) => o.textContent);
+    expect(options[0]).toContain("No agent");
+    expect(options[1]).toContain("With security review");
   });
 });
