@@ -115,7 +115,7 @@ describe("POST /tasks/claim", () => {
       params: Promise.resolve({ projectId: "CP" }),
     });
 
-    expect(claimNextTask).toHaveBeenCalledWith(OID, OID, "run-1", null);
+    expect(claimNextTask).toHaveBeenCalledWith(OID, OID, "run-1", null, null);
   });
 
   it("resolves a project key before asking the verdict or the claim", async () => {
@@ -226,6 +226,19 @@ describe("the worker's identity travels with the claim", () => {
 
     await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
-    expect(claimNextTask).toHaveBeenCalledWith(OID, OID, "run-1", "u-worker");
+    expect(claimNextTask).toHaveBeenCalledWith(OID, OID, "run-1", "u-worker", null);
+  });
+});
+
+// BP-358: a machine claims its owner's work, so the owner set at approval has to reach
+// task-service too — without it every claim is refused, owner or not.
+describe("the worker's owner travels with the claim", () => {
+  it("passes the owner set at approval", async () => {
+    verifyWorkerCredential.mockResolvedValue({ _id: OID, assignments: [], owner: "u-owner" });
+    claimNextTask.mockResolvedValue(hydrated({ _id: "t1" }));
+
+    await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
+
+    expect(claimNextTask).toHaveBeenCalledWith(OID, OID, "run-1", null, "u-owner");
   });
 });
