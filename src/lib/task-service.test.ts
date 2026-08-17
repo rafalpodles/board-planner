@@ -1779,3 +1779,71 @@ describe("who may choose a task's agent", () => {
     });
   });
 });
+
+/**
+ * Assigning a task to yourself means "I am working on this" in every tracker. Under BP-358 a
+ * machine takes its owner's work, so without recording who did the assigning there is no way to
+ * tell that from "somebody handed this to my machine".
+ */
+describe("a task records who assigned it", () => {
+  beforeEach(() => {
+    findOneAndUpdate.mockReset();
+    findOneAndUpdate.mockReturnValue({
+      populate: () => Promise.resolve({ _id: "t1", taskNumber: 1, title: "x", execution: {} }),
+    });
+    findById.mockReset();
+    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    const task = { _id: "t1", taskNumber: 1, status: "doing", title: "x" };
+    findOne.mockReturnValue({
+      lean: () => Promise.resolve(task),
+      populate: () => ({ lean: () => Promise.resolve(task) }),
+    });
+    userFindOne.mockReturnValue({ lean: () => Promise.resolve({ _id: "u2", username: "kuba" }) });
+  });
+
+  it("stamps the actor when the assignee changes", async () => {
+    await updateTask("p1", "t1", { assignee: "kuba" }, "actor");
+
+    expect(setStage(findOneAndUpdate.mock.calls[0][1]).assignedBy).toBe("actor");
+  });
+
+  it("stamps it when a task is unassigned, so the field never describes an older assignee", async () => {
+    await updateTask("p1", "t1", { assignee: null }, "actor");
+
+    expect(setStage(findOneAndUpdate.mock.calls[0][1]).assignedBy).toBe("actor");
+  });
+
+  it("leaves it alone when the edit touches no assignee", async () => {
+    await updateTask("p1", "t1", { title: "renamed" }, "actor");
+
+    expect(setStage(findOneAndUpdate.mock.calls[0][1])).not.toHaveProperty("assignedBy");
+  });
+});
+
+// createTask writes assignedBy too, and none of the tests above exercise that path
+describe("createTask stamps who assigned it", () => {
+  beforeEach(() => {
+    taskCreate.mockClear();
+    projectFindOneAndUpdate.mockResolvedValue({
+      _id: "p1",
+      taskCounter: 1,
+      key: "BP",
+      ...customBoard,
+    });
+    taskCreate.mockResolvedValue({ _id: "new" });
+    taskFindById.mockReturnValue({ populate: () => ({ lean: async () => ({ _id: "new" }) }) });
+    userFindOne.mockReturnValue({ _id: "u2", username: "kuba" });
+  });
+
+  it("stamps the actor when a new task is created already assigned", async () => {
+    await createTask("p1", "actor", { title: "x", assignee: "kuba" });
+
+    expect(taskCreate.mock.calls[0][0].assignedBy).toBe("actor");
+  });
+
+  it("leaves it null when a new task starts unassigned", async () => {
+    await createTask("p1", "actor", { title: "x" });
+
+    expect(taskCreate.mock.calls[0][0].assignedBy).toBeNull();
+  });
+});

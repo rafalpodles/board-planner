@@ -845,6 +845,8 @@ export interface ITask {
   category: Category;
   status: TaskStatus;
   assignee: Types.ObjectId | IUser | null;
+  // Who set assignee; absent on a task assigned before BP-358
+  assignedBy?: Types.ObjectId | null;
   dueDate: Date | null;
   checklist: IChecklistItem[];
   linkedPRs: ILinkedPR[];
