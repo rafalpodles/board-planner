@@ -1,21 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const agentFindById = vi.fn();
-const agentFindOne = vi.fn();
 const blockFind = vi.fn();
-const projectFindById = vi.fn();
 
 vi.mock("@/models/agent", () => ({
-  Agent: {
-    findById: (...a: unknown[]) => agentFindById(...a),
-    findOne: (...a: unknown[]) => agentFindOne(...a),
-  },
+  Agent: { findById: (...a: unknown[]) => agentFindById(...a) },
 }));
 vi.mock("@/models/agentBlock", () => ({
   AgentBlock: { find: (...a: unknown[]) => blockFind(...a) },
-}));
-vi.mock("@/models/project", () => ({
-  Project: { findById: (...a: unknown[]) => projectFindById(...a) },
 }));
 
 const { snapshotFor } = await import("./agent-snapshot");
@@ -34,6 +26,7 @@ const AGENT = {
     delivery: ["push"],
   },
 };
+const AGENT_ID = AGENT._id;
 
 const BLOCKS = [
   { key: "implement", kind: "step", name: "Implement", prompt: "do it", capability: "edit", model: "opus", fallbackModel: "sonnet", deterministic: false },
@@ -43,11 +36,7 @@ const BLOCKS = [
 
 beforeEach(() => {
   agentFindById.mockReset();
-  agentFindOne.mockReset();
-  // Nothing seeded unless a test says so, so the old "neither names one" case still means nothing
-  agentFindOne.mockReturnValue(lean(null));
   blockFind.mockReset();
-  projectFindById.mockReset();
   blockFind.mockReturnValue(lean(BLOCKS));
 });
 
@@ -68,30 +57,19 @@ describe("snapshotFor", () => {
     expect(snapshot!.sequence[1].params).toEqual({ maxLines: "400" });
   });
 
-  it("falls back to the project's default when the task names no agent", async () => {
-    projectFindById.mockReturnValue(lean({ worker: { agent: "a1" } }));
-    agentFindById.mockReturnValue(lean(AGENT));
-    const snapshot = await snapshotFor("p1", null);
-    expect(snapshot?.name).toBe("Default");
-  });
-
-  // Every project that had a worker before the catalog existed names no agent. Without this each
-  // of them would stop dead on the first claim after the deploy.
-  it("falls back to the seeded Default when neither the task nor the project names one", async () => {
-    projectFindById.mockReturnValue(lean({ worker: {} }));
-    agentFindOne.mockReturnValue(lean(AGENT));
-
-    const snapshot = await snapshotFor("p1", null);
-
-    expect(snapshot?.name).toBe("Default");
-    expect(agentFindOne).toHaveBeenCalledWith({ scope: "global", name: "Default" });
-  });
-
-  it("has nothing to run when not even the seeded Default is there", async () => {
-    projectFindById.mockReturnValue(lean({ worker: {} }));
-    agentFindOne.mockReturnValue(lean(null));
-
+  // Choosing an agent is how work is handed to a machine, so no agent means a person is doing it.
+  // The old chain — task agent, then the project default, then the seeded "Default" — meant an empty
+  // field still ran something, and there was no way to say "not this one".
+  it("returns nothing when the task names no agent", async () => {
     expect(await snapshotFor("p1", null)).toBeNull();
+  });
+
+  it("still resolves the agent a task does name", async () => {
+    agentFindById.mockReturnValue(lean(AGENT));
+
+    const snapshot = await snapshotFor("p1", AGENT_ID);
+
+    expect(snapshot?.name).toBe("Default");
   });
 
   // A shorter agent than the one somebody composed is worse than a refusal: it runs, and the
