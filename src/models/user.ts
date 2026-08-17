@@ -29,6 +29,18 @@ const userSchema = new Schema<IUser>({
     type: Boolean,
     default: false,
   },
+  // One roll-up in the morning instead of a mail per event. Off by default: a digest is silence
+  // for most of the day, and nobody should be moved into it without asking.
+  emailDigest: {
+    type: Boolean,
+    default: false,
+  },
+  // The day a digest was last sent, in the instance's digest timezone, so a second app instance
+  // ticking at the same minute cannot send it twice
+  lastDigestDay: {
+    type: String,
+    default: "",
+  },
   // true keeps the board's existing behaviour for everyone who never touches it
   collapseEmptyColumns: {
     type: Boolean,

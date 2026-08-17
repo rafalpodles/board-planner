@@ -11,6 +11,7 @@ import { Card } from "@/components/ui/Card";
 import { Modal } from "@/components/ui/Modal";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useToast } from "@/components/ui/Toast";
+import { generatePassword } from "@/lib/password-generator";
 
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -357,8 +358,10 @@ export default function UsersPage() {
                     Set a new password
                   </label>
                   <p id="newUserPasswordHelp" className="text-sm text-text-muted">
-                    Nothing is sent — tell {editUser.fullName} yourself. Saving signs them out
-                    everywhere.
+                    The password itself is never emailed — tell {editUser.fullName} yourself.{" "}
+                    {editUser.email
+                      ? `${editUser.email} is told that it changed, and saving signs them out everywhere.`
+                      : "This account has no address, so nothing reaches them. Saving signs them out everywhere."}
                   </p>
                   <div className="flex items-start gap-2">
                     <Input
@@ -372,6 +375,20 @@ export default function UsersPage() {
                       placeholder={`At least ${MIN_PASSWORD_LENGTH} characters`}
                       error={passwordError}
                     />
+                    {/* Generating shows it in the same move: a password nobody can read is one
+                        nobody can pass on, and this one only exists to be passed on */}
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="shrink-0"
+                      onClick={() => {
+                        setNewPassword(generatePassword());
+                        setShowPassword(true);
+                        setPasswordError("");
+                      }}
+                    >
+                      Generate
+                    </Button>
                     {/* Read out over the phone more often than typed twice, so showing it beats a
                         confirm field: a typo here locks the account out of every session it had */}
                     <Button
