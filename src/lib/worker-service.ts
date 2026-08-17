@@ -120,11 +120,16 @@ export const overriddenWorkerPolicy = (worker: IWorker) =>
 
 // A project is offered to a worker when the operator enabled it there AND that machine reports a
 // checkout whose remote matches the project's repository. The path never travels; the remote does.
+// hasOwner gates the whole list rather than leaving it to the claim: a non-empty list here is what
+// a worker's own loop iterates and attempts to claim, so an ownerless machine must see none of it,
+// not a list it can only fail on.
 export function assignmentsFor(
   reported: RepoReport[],
   projects: AssignableProject[],
-  approved: string[]
+  approved: string[],
+  hasOwner: boolean
 ): ResolvedAssignment[] {
+  if (!hasOwner) return [];
   const allowed = new Set(approved);
   const out: ResolvedAssignment[] = [];
   for (const project of projects) {

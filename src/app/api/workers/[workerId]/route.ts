@@ -37,7 +37,12 @@ export const GET = withWorker(async (_request, { worker }) => {
     policy: overriddenWorkerPolicy(worker),
     // This is the field the worker actually reads, so the contested-checkout decision has to be
     // applied here and not only on the heartbeat, whose assignments nothing consumes.
-    assignments: assignmentsFor(usableRepos(worker as never, others as never), projects as never, approvedProjectIds(worker)),
+    assignments: assignmentsFor(
+      usableRepos(worker as never, others as never),
+      projects as never,
+      approvedProjectIds(worker),
+      Boolean(worker.owner)
+    ),
   });
 });
 

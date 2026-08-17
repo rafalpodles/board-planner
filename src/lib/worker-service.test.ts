@@ -1,18 +1,22 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import bcrypt from "bcryptjs";
+import { Types } from "mongoose";
 
 const findById = vi.fn();
 const findOneAndUpdate = vi.fn();
 const updateOne = vi.fn();
+const ensureWorkerUser = vi.fn();
 
 vi.mock("./db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/worker", () => ({ Worker: { findById, findOneAndUpdate, updateOne } }));
+vi.mock("@/lib/worker-user", () => ({ ensureWorkerUser }));
 
 const {
   assignmentsFor,
   lostCheckouts,
   usableRepos,
   overriddenWorkerPolicy,
+  registerWorker,
   verdictFor,
   verifyWorkerCredential,
   PROTOCOL_VERSION,
@@ -202,6 +206,40 @@ describe("verifyWorkerCredential", () => {
   });
 });
 
+// BP-358: this is the write both enrolment doors funnel through — the device-approval flow and the
+// token flow both call registerWorker, and this is the only place either of them sets `owner`.
+describe("registerWorker", () => {
+  const REGISTERED = { _id: "w1" };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    findOneAndUpdate.mockResolvedValue({ ...REGISTERED });
+    updateOne.mockResolvedValue({});
+    ensureWorkerUser.mockResolvedValue({ _id: "identity-1" });
+  });
+
+  it("writes owner as a real ObjectId when ownerId is given", async () => {
+    const ownerId = "6a732075133f935b19154cd2";
+
+    await registerWorker({ name: "rig", host: "mac.home", platform: "darwin", version: "1.0.0", ownerId });
+
+    const update = findOneAndUpdate.mock.calls[0][1];
+    expect(update.$set.owner).toBeInstanceOf(Types.ObjectId);
+    expect(update.$set.owner.equals(ownerId)).toBe(true);
+  });
+
+  // The property both enrolment doors rely on: a re-registration (e.g. a heartbeat-triggered
+  // re-register, or a token-door registration with no admin in the request) must not wipe out an
+  // owner a previous registration already set. Only setting the key when ownerId is given is what
+  // makes that true — a stray `owner: null` here would silently orphan every re-registered machine.
+  it("never clears an existing owner when ownerId is omitted", async () => {
+    await registerWorker({ name: "rig", host: "mac.home", platform: "darwin", version: "1.0.0" });
+
+    const update = findOneAndUpdate.mock.calls[0][1];
+    expect(update.$set).not.toHaveProperty("owner");
+  });
+});
+
 // Two live workers pointed at the same checkout both create worktrees in it and both run `git` in
 // it. The claim is atomic so they will not take the same task, but the working tree is not — one
 // run's checkout moves under the other's feet.
@@ -230,8 +268,8 @@ describe("the approved set, not the reported repos", () => {
   it("offers no assignment for a project outside the approved set", () => {
     const reported = [{ remote: REMOTE, path: "/repo" }];
 
-    expect(assignmentsFor(reported, [project()], [])).toEqual([]);
-    expect(assignmentsFor(reported, [project()], ["other"])).toEqual([]);
+    expect(assignmentsFor(reported, [project()], [], true)).toEqual([]);
+    expect(assignmentsFor(reported, [project()], ["other"], true)).toEqual([]);
   });
 });
 
@@ -239,13 +277,13 @@ describe("assignmentsFor", () => {
   const reported = [{ remote: REMOTE, path: "/repo" }];
 
   it("offers an enabled project whose repository this machine has", () => {
-    expect(assignmentsFor(reported, [project()], [PROJECT_ID])).toEqual([
+    expect(assignmentsFor(reported, [project()], [PROJECT_ID], true)).toEqual([
       { project: PROJECT_ID, remote: REMOTE, policy: {} },
     ]);
   });
 
   it("answers with the remote the worker reported, never a path", () => {
-    const [assignment] = assignmentsFor(reported, [project()], [PROJECT_ID]);
+    const [assignment] = assignmentsFor(reported, [project()], [PROJECT_ID], true);
 
     expect(assignment.remote).toBe(REMOTE);
     expect(Object.keys(assignment).sort()).toEqual(["policy", "project", "remote"]);
@@ -254,11 +292,11 @@ describe("assignmentsFor", () => {
   it("skips a project nobody enabled for workers", () => {
     const off = project({ worker: { enabled: false, policy: {}, policyOverrides: [] } });
 
-    expect(assignmentsFor(reported, [off], [PROJECT_ID])).toEqual([]);
+    expect(assignmentsFor(reported, [off], [PROJECT_ID], true)).toEqual([]);
   });
 
   it("skips a project whose repository this machine does not have", () => {
-    expect(assignmentsFor([{ remote: "git@github.com:someone/else.git", path: "/x" }], [project()], [PROJECT_ID]))
+    expect(assignmentsFor([{ remote: "git@github.com:someone/else.git", path: "/x" }], [project()], [PROJECT_ID], true))
       .toEqual([]);
   });
 
@@ -271,7 +309,7 @@ describe("assignmentsFor", () => {
       },
     });
 
-    expect(assignmentsFor(reported, [configured], [PROJECT_ID])[0].policy).toEqual({
+    expect(assignmentsFor(reported, [configured], [PROJECT_ID], true)[0].policy).toEqual({
       taskTimeoutMs: 900000,
       model: "haiku",
     });
@@ -284,10 +322,16 @@ describe("assignmentsFor", () => {
       { remote: "git@github.com:owner/other.git", path: "/other" },
     ];
 
-    expect(assignmentsFor(both, [project(), other], [PROJECT_ID, "p2"]).map((a) => a.project)).toEqual([
+    expect(assignmentsFor(both, [project(), other], [PROJECT_ID, "p2"], true).map((a) => a.project)).toEqual([
       PROJECT_ID,
       "p2",
     ]);
+  });
+
+  // BP-358: an ownerless machine must be offered nothing, not merely refused at claim time — a
+  // non-empty list here is what sends the worker's own loop into a claim it cannot win.
+  it("offers nothing to a machine with no owner, regardless of what it would otherwise match", () => {
+    expect(assignmentsFor(reported, [project()], [PROJECT_ID], false)).toEqual([]);
   });
 });
 

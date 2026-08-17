@@ -61,6 +61,7 @@ const WORKER = {
   repos: [{ remote: "git@github.com:owner/repo.git", path: "/repo" }],
   // BP-305: assignments are the approved set narrowed by the reported repos
   approvedProjects: ["p1"],
+  owner: "6a732075133f935b19154cd2",
   enabled: true,
   lockedByInstance: false,
   createdAt: new Date("2026-06-01"),
@@ -273,6 +274,14 @@ describe("GET /api/workers/:workerId", () => {
 
   it("offers nothing when no project is enabled for workers", async () => {
     projectFind.mockResolvedValue([]);
+
+    expect((await (await GET(getRequest(), ctx())).json()).assignments).toEqual([]);
+  });
+
+  // BP-358: this is the field the worker's own loop reads and iterates to attempt a claim, so an
+  // ownerless machine offered one here would poll straight into a claim it cannot win.
+  it("offers nothing to a machine with no owner, even when it matches an enabled project", async () => {
+    verifyWorkerCredential.mockResolvedValue({ ...WORKER, owner: null });
 
     expect((await (await GET(getRequest(), ctx())).json()).assignments).toEqual([]);
   });

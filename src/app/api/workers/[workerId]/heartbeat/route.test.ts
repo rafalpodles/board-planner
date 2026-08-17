@@ -47,6 +47,7 @@ function workerDoc(overrides: Record<string, unknown> = {}) {
     repos: [{ remote: REMOTE, path: "/repo" }],
     // BP-305: assignments are the approved set narrowed by the reported repos
     approvedProjects: [PROJECT_ID],
+    owner: "6a732075133f935b19154cd2",
     command: "",
     commandIssuedAt: null,
     ...overrides,
@@ -148,6 +149,15 @@ describe("POST /api/workers/:workerId/heartbeat", () => {
     projectFind.mockResolvedValue([
       { ...enabledProject(), worker: { enabled: false, policy: {}, policyOverrides: [] } },
     ]);
+    const { req, ctx } = request();
+
+    expect((await (await POST(req, ctx)).json()).assignments).toEqual([]);
+  });
+
+  // BP-358: a non-empty list here is what the worker's own loop iterates and attempts to claim.
+  // Offering one to a machine with no owner would send it straight into a claim it cannot win.
+  it("offers nothing to a machine with no owner, even when it matches an enabled project", async () => {
+    verifyWorkerCredential.mockResolvedValue(workerDoc({ owner: null }));
     const { req, ctx } = request();
 
     expect((await (await POST(req, ctx)).json()).assignments).toEqual([]);

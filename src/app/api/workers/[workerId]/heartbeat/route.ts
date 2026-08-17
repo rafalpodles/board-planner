@@ -109,6 +109,6 @@ export const POST = withWorker(async (request, { worker }) => {
     // Only what an operator set: everything else resolves against the worker's own defaults, so
     // raising a default reaches every machine that never pinned it
     policy: overriddenWorkerPolicy(worker),
-    assignments: assignmentsFor(inventory, projects as never, approvedProjectIds(worker)),
+    assignments: assignmentsFor(inventory, projects as never, approvedProjectIds(worker), Boolean(worker.owner)),
   });
 });
