@@ -52,8 +52,10 @@ export async function register() {
       const { Agent } = await import("@/models/agent");
       const fallback = await Agent.findOne({ scope: "global", name: "Default" }, "_id").lean();
       if (fallback) {
-        // A worker-enabled project with no agent would claim a task and then have nothing to run,
-        // so the backfill has to reach every one of them, not only newly created ones.
+        // worker.agent is no longer a claim-time fallback — BP-358 made snapshotFor stop reading
+        // Project. Its job now is the agent the task picker offers first on a new task, which a
+        // later change wires up. The backfill still has to reach every project, not only newly
+        // created ones, so that suggestion points at a real agent everywhere.
         const backfilled = await Project.updateMany(
           { "worker.agent": { $in: [null, undefined] } },
           { $set: { "worker.agent": fallback._id } }
