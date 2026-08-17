@@ -59,7 +59,7 @@ function harness(overrides: Partial<WorkerDeps> = {}) {
   };
 
   const control = { close: vi.fn() };
-  const logError = vi.fn();
+  const logError = vi.fn<WorkerDeps["logError"]>();
 
   const deps: Partial<WorkerDeps> = {
     env: ENV,
@@ -546,6 +546,9 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       apiUrl: "https://app.example.com",
       workerName: "worker-1",
       projectCount: 1,
+      // Asserted against the producer, not only against a fixture: local-server serves this object
+      // untransformed, so nothing else would notice the field being dropped or renamed here
+      pollIntervalMs: 30_000,
     });
     expect(localConfig?.().projects).toEqual([
       expect.objectContaining({

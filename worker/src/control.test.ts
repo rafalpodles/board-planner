@@ -150,9 +150,14 @@ describe("connectControl — frame parsing", () => {
 
   it("sends the worker credential, X-Worker-Id and X-CP-Protocol headers", async () => {
     // Declared with the arguments it is called with, not none: this is the one test that reads
-    // mock.calls, and a zero-argument stub gives an empty tuple to destructure
+    // mock.calls, and a zero-argument stub gives an empty tuple to destructure. signal is in the
+    // type though nothing here reads it — control.close() has no other way to end the request, so a
+    // stub that denies it would make the next test of that a compile error in the mock.
     const fetchImpl = vi.fn(
-      async (_url: string, _init: { headers: Record<string, string> }) => ({
+      async (
+        _url: string,
+        _init: { headers: Record<string, string>; signal?: AbortSignal }
+      ) => ({
         ok: true,
         status: 200,
         body: openStream([]),

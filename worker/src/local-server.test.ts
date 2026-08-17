@@ -35,12 +35,24 @@ function idleLoop(): Loop {
   });
 }
 
+// One populated project, not none: the disclosure test below reads this body, and a credential or a
+// checkout path would leak from a *project* row. With projects empty there were no rows to inspect,
+// so adding `checkout: repoPath` to the view left that test green.
 const SOME_CONFIG: LocalConfigView = {
   apiUrl: "http://localhost:3000",
   workerName: "test-worker",
-  projectCount: 0,
+  projectCount: 1,
   pollIntervalMs: 30_000,
-  projects: [],
+  projects: [
+    {
+      project: "p1",
+      baseBranch: "main",
+      model: "opus",
+      reviewModel: "opus",
+      maxDiffLines: 800,
+      taskTimeoutMs: 1000,
+    },
+  ],
 };
 
 async function serve(

@@ -3,16 +3,14 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { createExecutor } from "./executor.js";
 import { parseStream, StreamEvent } from "./stream.js";
 import { claimedTask } from "./__fixtures__/task.js";
-import { WorkerConfig } from "./config.js";
+import { workerConfig } from "./__fixtures__/config.js";
 
-// Deliberately partial: the tests below check what the executor does when a policy field is unset,
-// which is what an older worker build or a hand-assembled config really produces. Cast through
-// unknown rather than to never, so the object stays an object and can be spread.
-const config = {
-  taskTimeoutMs: 1000,
-  apiBaseUrl: "https://app.example.com",
-  apiToken: "cp_t",
-} as unknown as WorkerConfig;
+// Whole but for the policy fields, which the tests below leave unset on purpose — model and
+// fallbackModel are optional on WorkerConfig, and what the executor does without them is the thing
+// under test. It used to be a three-field literal cast through unknown, which also hid nine missing
+// *required* fields: the day the executor reads one of those, every test here would have handed it
+// undefined and stayed green.
+const config = workerConfig();
 
 const task = claimedTask({ description: "Do it well", acceptanceCriteria: ["works"] });
 
