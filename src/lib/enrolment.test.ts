@@ -1,17 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import bcrypt from "bcryptjs";
+import { Types } from "mongoose";
 
 const find = vi.fn();
 const create = vi.fn();
 const findOneAndUpdate = vi.fn();
 const findByIdAndUpdate = vi.fn();
+const findById = vi.fn();
 
 vi.mock("./db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/enrolmentToken", () => ({
-  EnrolmentToken: { find, create, findOneAndUpdate, findByIdAndUpdate },
+  EnrolmentToken: { find, create, findOneAndUpdate, findByIdAndUpdate, findById },
 }));
 
-const { mintEnrolmentToken, consumeEnrolmentToken, ENROLMENT_TTL_MS } = await import("./enrolment");
+const { mintEnrolmentToken, consumeEnrolmentToken, enrolmentTokenOwnerId, ENROLMENT_TTL_MS } =
+  await import("./enrolment");
 
 const now = new Date("2026-08-03T12:00:00.000Z");
 
@@ -127,5 +130,27 @@ describe("consumeEnrolmentToken", () => {
     });
     expect(await consumeEnrolmentToken("", now)).toEqual({ ok: false, reason: "unknown" });
     expect(find).not.toHaveBeenCalled();
+  });
+});
+
+// BP-358: the token door's half of "a machine belongs to a person" — registerWorker gets ownerId
+// from here. A fixture returning createdBy as a plain string would never catch a dropped
+// String(...) cast, since a string coerced through String() is itself; it has to be a real
+// ObjectId, the shape a non-populated ref field actually has coming out of a lean query.
+describe("enrolmentTokenOwnerId", () => {
+  it("returns the token creator's id as a string", async () => {
+    const createdBy = new Types.ObjectId("6a732075133f935b19154cd2");
+    const select = vi.fn().mockReturnValue({ lean: () => Promise.resolve({ createdBy }) });
+    findById.mockReturnValue({ select });
+
+    expect(await enrolmentTokenOwnerId("e1")).toBe("6a732075133f935b19154cd2");
+    expect(findById).toHaveBeenCalledWith("e1");
+    expect(select).toHaveBeenCalledWith("createdBy");
+  });
+
+  it("returns null when the token cannot be found", async () => {
+    findById.mockReturnValue({ select: () => ({ lean: () => Promise.resolve(null) }) });
+
+    expect(await enrolmentTokenOwnerId("missing")).toBeNull();
   });
 });
