@@ -46,6 +46,7 @@ function worker(overrides: Record<string, unknown> = {}) {
     repos: [{ remote: REMOTE, path: "/repo" }],
     // BP-305: what an admin approved. The reported repos narrow this, they never define it.
     approvedProjects: [PROJECT_ID],
+    owner: "6a732075133f935b19154cd2",
     ...overrides,
   } as never;
 }
@@ -127,6 +128,26 @@ describe("verdictFor", () => {
   // A worker heartbeating every WORKER_STALE_MS would race its own staleness check
   it("heartbeats comfortably inside the staleness window", () => {
     expect(WORKER_HEARTBEAT_MS * 2).toBeLessThan(WORKER_STALE_MS);
+  });
+
+  // The enrolment screen says "The machine acts under this account". Until BP-358 that was a display
+  // name; a machine enrolled before it has no owner, and there is no safe guess — a fallback to the
+  // old project-wide nominee would keep the race it replaces alive indefinitely.
+  it("refuses a machine with no owner", () => {
+    const verdict = verdictFor(
+      worker({ owner: null }),
+      project(),
+      PROTOCOL_VERSION,
+      now,
+      []
+    );
+
+    expect(verdict).toMatchObject({ ok: false });
+    expect((verdict as { reason: string }).reason).toMatch(/owner/i);
+  });
+
+  it("lets a machine with an owner through", () => {
+    expect(verdictFor(worker(), project(), PROTOCOL_VERSION, now, []).ok).toBe(true);
   });
 });
 

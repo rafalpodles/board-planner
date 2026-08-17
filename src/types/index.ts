@@ -606,6 +606,8 @@ export interface IWorker {
   enabled: boolean;
   lockedByInstance: boolean;
   lastSeenAt: Date | null;
+  // The person this machine belongs to; null for a worker enrolled before BP-358
+  owner?: Types.ObjectId | null;
   // The user this machine acts as — see src/lib/worker-user.ts
   identity: Types.ObjectId | null;
   bindingError: string;
