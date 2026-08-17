@@ -22,6 +22,7 @@ const LABELS: Record<string, string> = {
   project_workers_disabled: "Workers disabled for project",
   user_password_reset: "Password set by an admin",
   user_email_changed: "Address changed by an admin",
+  user_email_changed_self: "Address changed by the account itself",
   user_password_reset_by_email: "Password reset by email",
 };
 
@@ -33,6 +34,9 @@ const NOTABLE = new Set([
   "enrolment_token_spent",
   "user_password_reset",
   "user_email_changed",
+  // Moving one's own recovery address is worth spotting for the same reason as the admin doing it:
+  // it decides where the next reset link lands, and it signs nobody out
+  "user_email_changed_self",
   "user_password_reset_by_email",
 ]);
 
@@ -78,8 +82,9 @@ export default function InstanceAuditPage() {
         <h2 className="text-lg font-semibold mb-1">Instance audit log</h2>
         <p className="text-sm text-text-muted">
           Instance-wide actions: stopping a machine, enrolling one, committing a project to
-          workers, and setting somebody else&apos;s password or address. Each project keeps its own
-          log of its own settings, under that project.
+          workers, and anything that changes how an account is signed into — a password set for
+          somebody, a reset by email, or an address moved, whether by an administrator or by the
+          account itself. Each project keeps its own log of its own settings, under that project.
         </p>
       </div>
 

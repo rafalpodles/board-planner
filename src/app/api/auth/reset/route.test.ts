@@ -32,7 +32,8 @@ vi.mock("@/models/user", () => ({
 }));
 
 const { POST } = await import("./route");
-const { resetRateLimits } = await import("@/lib/rate-limit");
+const { resetRateLimits, lockoutKey, recordFailedAttempt, isRateLimited, ANONYMOUS_ACCOUNT_ATTEMPTS } =
+  await import("@/lib/rate-limit");
 
 function post(body: unknown = { token: "cpr_good", newPassword: "a-brand-new-password" }) {
   return new Request("http://x/api/auth/reset", {
@@ -56,6 +57,45 @@ beforeEach(async () => {
 });
 
 describe("POST /api/auth/reset", () => {
+  // BP-347/BP-353. The login throttle refuses on the account key before reading the credential, and
+  // where there is no client address that key is shared by every caller — so "I could not get in, so
+  // I reset it" ends in the correct new password being refused, and a link that was just spent
+  // looking broken. A reset is the answer to being locked out, so it has to lift the lockout.
+  it("lifts a login lockout, including one filled from an address the resetter never used", async () => {
+    const fromSomebodyElse = lockoutKey("203.0.113.9", "rafal");
+    const shared = lockoutKey("-", "rafal");
+    for (let i = 0; i < ANONYMOUS_ACCOUNT_ATTEMPTS; i++) {
+      await recordFailedAttempt(fromSomebodyElse);
+      await recordFailedAttempt(shared);
+    }
+
+    const res = await POST(post());
+
+    expect(res.status).toBe(200);
+    expect(await isRateLimited(fromSomebodyElse, ANONYMOUS_ACCOUNT_ATTEMPTS)).toBe(false);
+    expect(await isRateLimited(shared, ANONYMOUS_ACCOUNT_ATTEMPTS)).toBe(false);
+  });
+
+  it("leaves another account's lockout in place", async () => {
+    const somebodyElse = lockoutKey("-", "different-person");
+    for (let i = 0; i < ANONYMOUS_ACCOUNT_ATTEMPTS; i++) await recordFailedAttempt(somebodyElse);
+
+    await POST(post());
+
+    expect(await isRateLimited(somebodyElse, ANONYMOUS_ACCOUNT_ATTEMPTS)).toBe(true);
+  });
+
+  it("does not lift a lockout when the token was refused", async () => {
+    consumeResetToken.mockResolvedValue({ ok: false, reason: "expired" });
+    const shared = lockoutKey("-", "rafal");
+    for (let i = 0; i < ANONYMOUS_ACCOUNT_ATTEMPTS; i++) await recordFailedAttempt(shared);
+
+    const res = await POST(post());
+
+    expect(res.status).toBe(400);
+    expect(await isRateLimited(shared, ANONYMOUS_ACCOUNT_ATTEMPTS)).toBe(true);
+  });
+
   it("sets the password, ends every session, and leaves a trace", async () => {
     const res = await POST(post());
 
