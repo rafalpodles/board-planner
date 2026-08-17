@@ -169,6 +169,13 @@ describe("PUT /api/users/me — changing the address that can reset the password
     expect(compare).not.toHaveBeenCalled();
   });
 
+  it("treats resubmitting the stored address on its own as a no-op, not a bad request", async () => {
+    const response = await PUT(put({ email: "old@example.com" }), context);
+
+    expect(response.status).toBe(200);
+    expect(userFindByIdAndUpdate).not.toHaveBeenCalled();
+  });
+
   it("leaves the notification toggle alone — no password needed for a preference", async () => {
     const response = await PUT(put({ emailNotifications: false }), context);
 

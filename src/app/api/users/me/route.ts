@@ -90,6 +90,11 @@ export const PUT = withAuth(async (request, { user }) => {
   }
 
   if (Object.keys(updates).length === 0) {
+    // Submitting the address already on the account is a no-op, not a malformed request: it is
+    // what a client sending the whole profile back does when only the address was left alone.
+    if (body.email !== undefined) {
+      return NextResponse.json(await User.findById(user._id));
+    }
     return NextResponse.json({ error: "No valid fields to update" }, { status: 400 });
   }
 
