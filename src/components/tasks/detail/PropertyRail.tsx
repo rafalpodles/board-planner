@@ -57,6 +57,8 @@ interface PropertyRailProps {
   users: ApiUser[];
   sprints: ApiSprint[];
   agents: ApiAgent[];
+  /** Offered first in the picker once a machine is being chosen; never a fallback */
+  projectDefaultAgent?: string;
   /** Full rows, not names: the chip and the picker dot are tinted by the project's colour */
   categories: ApiProjectCategory[];
   customFields: ApiCustomField[];
@@ -72,6 +74,7 @@ export function PropertyRail({
   users,
   sprints,
   agents,
+  projectDefaultAgent,
   categories,
   customFields,
   reporter,
@@ -121,15 +124,19 @@ export function PropertyRail({
             label="Agent"
             touch={touch}
             value={draft.agent || ""}
-            options={agents.map((a) => ({ value: a._id, label: a.name }))}
-            emptyOption="Project default"
+            options={[...agents]
+              .sort((a, b) =>
+                a._id === projectDefaultAgent ? -1 : b._id === projectDefaultAgent ? 1 : 0
+              )
+              .map((a) => ({ value: a._id, label: a.name }))}
+            emptyOption="No agent — a person does it"
             onChange={(id) => set("agent", id || null)}
           >
             {(selected) =>
               selected ? (
                 <span className="truncate">{selected.label}</span>
               ) : (
-                <EmptyValue>Project default</EmptyValue>
+                <EmptyValue>No agent</EmptyValue>
               )
             }
           </ComboboxRow>
@@ -138,7 +145,7 @@ export function PropertyRail({
             {agentName ? (
               <span className="truncate">{agentName}</span>
             ) : (
-              <EmptyValue>Project default</EmptyValue>
+              <EmptyValue>No agent</EmptyValue>
             )}
           </FieldRow>
         )}

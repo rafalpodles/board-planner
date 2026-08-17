@@ -159,6 +159,7 @@ function TaskDetailView({
   const reporter =
     task.createdBy && typeof task.createdBy === "object" ? task.createdBy.fullName : null;
   const watching = !!currentUser && (task.watchers || []).includes(currentUser._id);
+  const projectDefaultAgent = project.worker?.agent ? String(project.worker.agent) : undefined;
 
   const handleFileUpload = useCallback(
     async (file: File): Promise<string> => {
@@ -376,6 +377,7 @@ function TaskDetailView({
             users={users}
             sprints={sprints}
             agents={agents}
+            projectDefaultAgent={projectDefaultAgent}
             categories={project.categories || []}
             customFields={project.customFields || []}
             reporter={reporter}
@@ -403,6 +405,7 @@ function TaskDetailView({
           users={users}
           sprints={sprints}
           agents={agents}
+          projectDefaultAgent={projectDefaultAgent}
           categories={project.categories || []}
           customFields={project.customFields || []}
           reporter={reporter}
