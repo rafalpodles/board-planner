@@ -25,7 +25,9 @@ vi.mock("@/models/project", () => ({
 }));
 
 const { POST } = await import("./route");
-const { resetRateLimits, ANONYMOUS_ACCOUNT_ATTEMPTS } = await import("@/lib/rate-limit");
+const { resetRateLimits, ANONYMOUS_ACCOUNT_ATTEMPTS, MAX_ATTEMPTS } = await import(
+  "@/lib/rate-limit"
+);
 
 const REDIRECT_URI = "https://client.example/callback";
 const USER = { _id: "u1", username: "victim", role: "member" };
@@ -45,7 +47,11 @@ function login(username: string, password = "secret") {
   });
   return new Request("http://localhost/oauth/authorize", {
     method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+      // What a browser sends posting the sign-in form this endpoint itself served
+      "sec-fetch-site": "same-origin",
+    },
     body,
   });
 }
@@ -67,10 +73,9 @@ beforeEach(async () => {
 });
 
 describe("POST /oauth/authorize login phase", () => {
-  it("bounds guessing when no client identity is available", async () => {
-    // Without a proxy header every caller shares the account key, so a refusal there can be aimed
-    // at somebody else — but leaving it unchecked left login entirely unthrottled, which is worse.
-    // The threshold is raised rather than removed: aiming it costs five times what it did.
+  it("bounds guessing, and stops paying for bcrypt once the budget is spent", async () => {
+    // The source key is the one standing before the credential is read, and it is what bounds the
+    // work: spending it refuses everyone from that address for the rest of the window.
     for (let i = 0; i < ANONYMOUS_ACCOUNT_ATTEMPTS; i++) await attempt("locked");
 
     verifyCredentials.mockClear();
@@ -78,12 +83,15 @@ describe("POST /oauth/authorize login phase", () => {
     const body = await attempt("locked");
 
     expect(body).toContain("Too many failed attempts.");
-    // The point of refusing before verification: the server stops doing bcrypt work
     expect(verifyCredentials).not.toHaveBeenCalled();
   });
 
-  it("leaves a different account alone", async () => {
-    for (let i = 0; i < ANONYMOUS_ACCOUNT_ATTEMPTS; i++) await attempt("locked");
+  // Since BP-353 the account counter no longer cuts guessing off before verify(), so attempts
+  // against one username reach the shared source budget instead of being refused sooner. A
+  // bystander is therefore safe only while that budget survives — which is the same condition
+  // that always applied to an attacker spraying many usernames from one address.
+  it("leaves a different account alone while the address budget survives", async () => {
+    for (let i = 0; i < MAX_ATTEMPTS; i++) await attempt("locked");
 
     verifyCredentials.mockResolvedValue(USER);
     expect(await attempt("bystander")).toContain("Grant access");
@@ -118,5 +126,46 @@ describe("POST /oauth/authorize login phase", () => {
 
     expect(body).toContain("Grant access");
     expect(oauthConsentCreate).toHaveBeenCalledTimes(1);
+  });
+
+  // BP-355. This endpoint reaches the same throttle counters as /api/auth/login, under the same
+  // keys, and a client can be registered at the unauthenticated /oauth/register — so without the
+  // refusal the login route makes, this is the quieter way to spend somebody else's budget.
+  describe("provenance", () => {
+    function crossSite(headers: Record<string, string>) {
+      const body = new URLSearchParams({
+        client_id: "client-1",
+        redirect_uri: "https://client.example.com/cb",
+        code_challenge: "a".repeat(43),
+        code_challenge_method: "S256",
+        response_type: "code",
+        scope: "mcp",
+        username: "rafal",
+        password: "guess",
+      });
+      return new Request("http://localhost/oauth/authorize", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded", ...headers },
+        body,
+      });
+    }
+
+    it("refuses a cross-site post before verifying anything", async () => {
+      verifyCredentials.mockResolvedValue(USER);
+
+      const response = await POST(crossSite({ "sec-fetch-site": "cross-site" }));
+
+      expect(response.status).toBe(400);
+      expect(verifyCredentials).not.toHaveBeenCalled();
+    });
+
+    it("refuses a post carrying neither Sec-Fetch-Site nor Origin", async () => {
+      verifyCredentials.mockResolvedValue(USER);
+
+      const response = await POST(crossSite({}));
+
+      expect(response.status).toBe(400);
+      expect(verifyCredentials).not.toHaveBeenCalled();
+    });
   });
 });

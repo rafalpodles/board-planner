@@ -1,5 +1,6 @@
 import { connectDB } from "@/lib/db";
 import { getClientIp, verifyCredentials } from "@/lib/auth";
+import { checkProvenance } from "@/lib/session";
 import { lockoutKey, sourceKey, withLockout } from "@/lib/rate-limit";
 import { accessibleProjectIds } from "@/lib/grants";
 import { User } from "@/models/user";
@@ -206,6 +207,19 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  // Both phases below verify a credential or grant a consent, and both reach the same throttle
+  // counters the login route uses — under the same keys, so attempts here spend that budget too.
+  // The login route refuses a cross-site post before reading anything; without the same refusal
+  // here, this is the quieter way to the same counters, reachable by anyone who registers a client
+  // at the deliberately unauthenticated /oauth/register.
+  //
+  // The consent and login forms are served by the GET above, from this instance's own origin, so a
+  // genuine submission is same-origin. The cross-site step of the flow is that initial GET, which
+  // checkProvenance ignores because it only inspects mutating methods.
+  if (!checkProvenance(req).ok) {
+    return errorPage("This request did not come from this instance's own sign-in form.");
+  }
+
   await connectDB();
   const form = await req.formData();
   const phase = String(form.get("phase") || "login");
