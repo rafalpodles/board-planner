@@ -22,7 +22,9 @@ vi.mock("@/lib/session", async (importOriginal) => {
 });
 
 const { POST } = await import("./route");
-const { resetRateLimits, ANONYMOUS_ACCOUNT_ATTEMPTS } = await import("@/lib/rate-limit");
+const { resetRateLimits, ANONYMOUS_ACCOUNT_ATTEMPTS, ANONYMOUS_GLOBAL_ATTEMPTS } = await import(
+  "@/lib/rate-limit"
+);
 const { SESSION_IDLE_TTL_MS, SESSION_ABSOLUTE_TTL_MS } = await import("@/lib/session");
 
 const USER = {
@@ -162,6 +164,28 @@ describe("POST /api/auth/login — credentials", () => {
     const refused = await POST(request());
 
     expect(refused.status).toBe(429);
+    // Refused before the credential is read, which is what bounds the bcrypt work. The cost is that
+    // this refusal can be aimed where the key is shared — BP-353 answers that with a way out
+    // (a password change clears the counter), not by moving this check.
+    expect(verifyCredentials).not.toHaveBeenCalled();
+  });
+
+  it("still refuses everyone once the anonymous work budget is spent", async () => {
+    verifyCredentials.mockResolvedValue(null);
+    for (let attempt = 0; attempt < ANONYMOUS_GLOBAL_ATTEMPTS; attempt++) {
+      await POST(
+        request({ "sec-fetch-site": "same-origin" }, {
+          username: `victim-${attempt}`,
+          password: "guess",
+        })
+      );
+    }
+
+    verifyCredentials.mockClear();
+    verifyCredentials.mockResolvedValue(USER);
+    const response = await POST(request());
+
+    expect(response.status).toBe(429);
     expect(verifyCredentials).not.toHaveBeenCalled();
   });
 

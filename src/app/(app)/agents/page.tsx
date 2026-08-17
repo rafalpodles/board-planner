@@ -4,6 +4,7 @@ import { useRef, useState, type KeyboardEvent } from "react";
 import { PageHeader } from "@/components/shell/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { useProjects } from "@/hooks/use-projects";
+import { useAuth } from "@/hooks/use-auth";
 import { useStore } from "./store";
 import { AgentList, BlockList, Section } from "./components/lists";
 import {
@@ -24,6 +25,7 @@ const TABS: { id: Tab; label: string; action: string }[] = [
 
 export default function AgentsPage() {
   const { projects } = useProjects();
+  const { isAdmin } = useAuth();
   const store = useStore();
 
   const [tab, setTab] = useState<Tab>("agents");
@@ -36,6 +38,10 @@ export default function AgentsPage() {
   });
 
   const current = TABS.find((t) => t.id === tab) ?? TABS[0];
+  // A step block's prompt is what runs on somebody's machine, so authoring one is instance-admin
+  // (BP-345). Composing an agent out of blocks that already exist is open to everyone, so the
+  // action is only withheld on the two tabs where it would 403.
+  const mayAct = tab === "agents" || isAdmin;
 
   // role="tablist" promises arrow-key navigation to assistive tech, so it has to work
   function handleKeyDown(e: KeyboardEvent<HTMLButtonElement>) {
@@ -58,9 +64,15 @@ export default function AgentsPage() {
         title="Agents"
         subtitle="Ways of getting a task done"
         actions={
-          <Button size="sm" onClick={() => setDialog(tab)}>
-            {current.action}
-          </Button>
+          mayAct ? (
+            <Button size="sm" onClick={() => setDialog(tab)}>
+              {current.action}
+            </Button>
+          ) : (
+            <p className="text-[13px] text-text-muted">
+              An instance admin authors {tab}
+            </p>
+          )
         }
       />
 

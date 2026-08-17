@@ -61,9 +61,9 @@ Getting the number wrong has consequences in both directions, so it is worth bei
 **too high** and the header is refused as not matching what you described — every caller then shares
 the anonymous bucket, which is bounded but shared. Set it **too low** and the address counted is one
 your proxy chain writes rather than the client's, so every request on earth may land in the same
-bucket. The anonymous and shared buckets carry much larger ceilings than the per-address ones for
-exactly this reason, but a badly-set value still degrades the throttle rather than merely blunting
-it.
+bucket — and because that bucket looks to the app like a genuine address, it is metered at the
+*tight* per-address ceilings rather than the raised anonymous ones. Too low is therefore the worse
+mistake of the two: it throttles the whole world as though it were one caller.
 
 `ENCRYPTION_KEY` encrypts the GitHub, GitLab, Coda and MCP credentials the app stores. Generate one
 with `openssl rand -hex 32`. Without it those fields simply cannot be saved — the app answers the
