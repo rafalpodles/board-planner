@@ -153,35 +153,23 @@ describe("POST /api/auth/login — credentials", () => {
     expect(setCookies(response)).toEqual([]);
   });
 
-  it("bounds guessing even with no client identity", async () => {
+  it("bounds guessing even with no client identity, and a success does not reopen the budget", async () => {
     verifyCredentials.mockResolvedValue(null);
     for (let attempt = 0; attempt < ANONYMOUS_ACCOUNT_ATTEMPTS; attempt++) {
       await POST(request());
     }
 
-    expect((await POST(request())).status).toBe(429);
-  });
-
-  // BP-353. Where there is no client address every caller shares one key per account, so an
-  // account counter that could refuse before the credential was read handed anyone who could name
-  // a username the power to lock that person out. Guessing is still bounded — the test above — but
-  // the owner arriving with the right password is not guessing.
-  it("never refuses the owner their own correct password, however full the account counter is", async () => {
-    verifyCredentials.mockResolvedValue(null);
-    for (let attempt = 0; attempt < ANONYMOUS_ACCOUNT_ATTEMPTS * 2; attempt++) {
-      await POST(request());
-    }
-
     verifyCredentials.mockClear();
     verifyCredentials.mockResolvedValue(USER);
-    const response = await POST(request());
+    const refused = await POST(request());
 
-    expect(response.status).toBe(200);
-    expect(verifyCredentials).toHaveBeenCalled();
+    expect(refused.status).toBe(429);
+    // Refused before the credential is read, which is what bounds the bcrypt work. The cost is that
+    // this refusal can be aimed where the key is shared — BP-353 answers that with a way out
+    // (a password change clears the counter), not by moving this check.
+    expect(verifyCredentials).not.toHaveBeenCalled();
   });
 
-  // The counter that stands before the credential is the one bounding bcrypt, and it must still
-  // stand: a correct password winning past the account counter must not mean unbounded hashing.
   it("still refuses everyone once the anonymous work budget is spent", async () => {
     verifyCredentials.mockResolvedValue(null);
     for (let attempt = 0; attempt < ANONYMOUS_GLOBAL_ATTEMPTS; attempt++) {

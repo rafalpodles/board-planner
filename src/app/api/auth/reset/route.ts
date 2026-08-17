@@ -4,6 +4,7 @@ import { connectDB } from "@/lib/db";
 import { getClientIp, MIN_PASSWORD_LENGTH, PASSWORD_COST_FACTOR } from "@/lib/auth";
 import {
   anonymousMultiplier,
+  clearAccountAttempts,
   isRateLimited,
   recordFailedAttempt,
   sourceKey,
@@ -100,6 +101,12 @@ export async function POST(request: Request) {
   // with the second leaves the first able to set the password again, in an inbox the person may
   // not control.
   await invalidateResetTokens(user._id);
+
+  // "I could not get in, so I reset it" has to end with getting in. The login throttle refuses on
+  // the account key before reading the credential, and that key is shared by every caller where
+  // there is no client address — so without this, the correct new password is refused for the rest
+  // of the window and the link that was just spent looks broken (BP-347).
+  await clearAccountAttempts(user.username).catch(() => {});
 
   void logInstanceAudit({
     action: "user_password_reset_by_email",

@@ -5,6 +5,7 @@ import { MIN_PASSWORD_LENGTH, PASSWORD_COST_FACTOR } from "@/lib/auth";
 import { isValidEmail, normaliseEmail } from "@/lib/email";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { invalidateResetTokens } from "@/lib/password-reset";
+import { clearAccountAttempts } from "@/lib/rate-limit";
 import { duplicateKeyField } from "@/lib/mongo-errors";
 import { withAdmin } from "@/lib/middleware";
 import { revokeUserSessions } from "@/lib/session";
@@ -177,6 +178,12 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
   }
 
   if (passwordWasSet) {
+    // Handing somebody a password is the administrator's answer to "I cannot get in", so it has to
+    // lift a login lockout too — including one an attacker aimed at them, which on a deployment
+    // with no client address anybody can fill (BP-353). After the save, because unlike the revoke
+    // above there is nothing to undo if it fails.
+    await clearAccountAttempts(target.username).catch(() => {});
+
     void logInstanceAudit({
       action: "user_password_reset",
       user: admin._id,

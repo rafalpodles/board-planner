@@ -11,6 +11,11 @@ const logInstanceAudit = vi.fn();
 const hash = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
+// Setting a password clears the target's login lockout (BP-353), which reaches the counter store
+vi.mock("@/models/rateLimit", async () => {
+  const { inMemoryRateLimitModel } = await import("@/lib/rate-limit-test-store");
+  return { RateLimit: inMemoryRateLimitModel() };
+});
 vi.mock("@/lib/auth", () => ({
   getAuthUser,
   RateLimitError: class RateLimitError extends Error {},

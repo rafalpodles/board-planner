@@ -10,6 +10,7 @@ const {
   isRateLimited,
   recordFailedAttempt,
   clearAttempts,
+  clearAccountAttempts,
   resetRateLimits,
   withLockout,
   lockoutKey,
@@ -174,28 +175,14 @@ describe("withLockout", () => {
     expect(await isRateLimited(source, 1)).toBe(true);
   });
 
-  it("refuses further guessing once the account key is spent", async () => {
+  it("refuses without calling verify once the account key is spent", async () => {
     for (let i = 0; i < 10; i++) await recordFailedAttempt(key);
-    const verify = vi.fn().mockResolvedValue(null);
+    const verify = vi.fn();
 
-    const { lockedOut, result } = await withLockout(key, verify, source);
+    const { lockedOut } = await withLockout(key, verify, source);
 
     expect(lockedOut).toBe(true);
-    expect(result).toBeNull();
-  });
-
-  // BP-353. The account key is a caller-supplied username, and where there is no client address to
-  // put beside it every caller shares one. Refusing on it before the credential was read let anyone
-  // lock a named person out of their own account; the source key is what bounds the bcrypt work.
-  it("lets a correct credential through however full the account key is", async () => {
-    for (let i = 0; i < 10; i++) await recordFailedAttempt(key);
-    const verify = vi.fn().mockResolvedValue({ _id: "u1" });
-
-    const { lockedOut, result } = await withLockout(key, verify, source);
-
-    expect(lockedOut).toBe(false);
-    expect(result).toEqual({ _id: "u1" });
-    expect(verify).toHaveBeenCalled();
+    expect(verify).not.toHaveBeenCalled();
   });
 
   it("refuses on the source dimension even when no account counter has climbed", async () => {
@@ -215,5 +202,66 @@ describe("withLockout", () => {
     const { lockedOut } = await withLockout(anon, async () => null);
 
     expect(lockedOut).toBe(false);
+  });
+});
+
+describe("clearing an account's counters", () => {
+  // The caller who filled the counter is not the one changing the password, and where there is no
+  // client address the key they filled is the shared one. So a password change cannot delete "its"
+  // key — it has to clear the account across every address (BP-353).
+  it("forgets failures recorded from every address, not just one", async () => {
+    const fromAttacker = lockoutKey("203.0.113.9", "rafal");
+    const fromAnonymous = lockoutKey("-", "rafal");
+    const fromElsewhere = lockoutKey("198.51.100.4", "rafal");
+    for (const k of [fromAttacker, fromAnonymous, fromElsewhere]) {
+      for (let i = 0; i < 10; i++) await recordFailedAttempt(k);
+    }
+
+    await clearAccountAttempts("rafal");
+
+    expect(await isRateLimited(fromAttacker, 10)).toBe(false);
+    expect(await isRateLimited(fromAnonymous, 10)).toBe(false);
+    expect(await isRateLimited(fromElsewhere, 10)).toBe(false);
+  });
+
+  it("leaves another account's counters alone", async () => {
+    const mine = lockoutKey("-", "rafal");
+    const theirs = lockoutKey("-", "somebody-else");
+    for (let i = 0; i < 10; i++) await recordFailedAttempt(theirs);
+    for (let i = 0; i < 10; i++) await recordFailedAttempt(mine);
+
+    await clearAccountAttempts("rafal");
+
+    expect(await isRateLimited(theirs, 10)).toBe(true);
+  });
+
+  it("normalises the username the same way the key does", async () => {
+    const key = lockoutKey("-", "rafal");
+    for (let i = 0; i < 10; i++) await recordFailedAttempt(key);
+
+    await clearAccountAttempts("  RAFAL  ");
+
+    expect(await isRateLimited(key, 10)).toBe(false);
+  });
+
+  it("does not touch the source dimension, which no password change should reopen", async () => {
+    const shared = sourceKey("203.0.113.9");
+    for (let i = 0; i < SHARED_SOURCE_ATTEMPTS; i++) await recordFailedAttempt(shared);
+
+    await clearAccountAttempts("rafal");
+
+    expect(await isRateLimited(shared, SHARED_SOURCE_ATTEMPTS)).toBe(true);
+  });
+
+  it("stays within its own scope, so clearing a login lockout leaves the profile form's counter", async () => {
+    const login = lockoutKey("-", "rafal");
+    const profile = lockoutKey("-", "rafal", "password-change");
+    for (let i = 0; i < 10; i++) await recordFailedAttempt(login);
+    for (let i = 0; i < 10; i++) await recordFailedAttempt(profile);
+
+    await clearAccountAttempts("rafal");
+
+    expect(await isRateLimited(login, 10)).toBe(false);
+    expect(await isRateLimited(profile, 10)).toBe(true);
   });
 });

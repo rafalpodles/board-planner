@@ -1,25 +1,27 @@
 /**
  * The throttle for the endpoints that verify a password.
  *
- * Two dimensions, on opposite sides of the credential check. The source key — one address across
- * *all* usernames — is refused *before* the credential is read, which is what bounds the work an
- * attacker can make the server do, and it catches spraying one password at fifty accounts even
- * though no account counter ever climbs. The account key is consulted only after a verification
- * has already failed, so it throttles guessing without ever refusing the owner their own password.
+ * Two dimensions. The account key — caller identity plus username — is refused *before* the
+ * credential is read, which is what bounds the work an attacker can make the server do. The source
+ * key counts failures from one address across *all* usernames, so spraying one password at fifty
+ * accounts is caught even though no account counter ever climbs.
  *
- * That ordering is the whole point and it was the other way round until BP-353. The account key
- * contains a caller-supplied username, so where there is no client identity to put beside it —
- * the documented docker-compose deployment, where the app port is published directly — every
- * caller shares one key per account. Consulting it before the credential meant fifty requests
- * could deny a named person their own correct password for a quarter of an hour, renewably, with
- * no way for an administrator to lift it.
+ * Where no client address is available the account key is shared by every caller, so filling it
+ * denies the owner their own password — a refusal that can be aimed. BP-353 tried moving the check
+ * after a failed verification and it cost more than it bought: ten times the guessing budget
+ * against one account, a 429 that had already paid for its own bcrypt, and a login made observable
+ * to anyone probing the shared counter. The bound stays in front; the denial has an exit instead,
+ * `clearAccountAttempts`, which every password change calls.
  *
- * Two rules the obvious implementation gets wrong, both found in review:
+ * Three rules the obvious implementation gets wrong, all found in review:
  *
  * - A success clears only the account key, never the source. Clearing the source would let anyone
  *   holding one valid login reset the budget and guess forever, fifty tries per own login.
- * - The source key applies even with no client identity, under a shared name at a far higher
- *   threshold. Skipping it there leaves the work bound with nothing holding it at all.
+ * - With no client identity available the account key still applies, at a higher threshold. Skipping
+ *   the check there leaves login entirely unthrottled, which is the shape the documented
+ *   docker-compose deployment runs in.
+ * - A password change must clear the account key from *every* address, not the caller's own: the
+ *   caller who filled it is not the one changing the password.
  *
  * The counters live in Mongo. In a module-scope Map they were per-replica, they were wiped by every
  * deploy, and they grew by one entry for every key anybody asked about — and since the key contains
@@ -37,10 +39,10 @@ export const MAX_ATTEMPTS = 10;
 // is not, so it can be refused as tightly as the account dimension without hitting a bystander.
 export const SHARED_SOURCE_ATTEMPTS = 50;
 export const EXCLUSIVE_SOURCE_ATTEMPTS = MAX_ATTEMPTS;
-// Without a client identity every caller shares the account key, so what it counts is "failures
-// against this username from anywhere". Since BP-353 it can no longer refuse a correct password,
-// so sharing it costs an attacker's guesses rather than the owner's access; the raised threshold
-// remains because the shared key aggregates honest typos from every caller too.
+// Without a client identity every caller shares the account key, so a refusal there can be aimed at
+// somebody else. Bounding the work still matters more than the denial: the threshold is raised so
+// aiming it costs five times what it did, it lapses with the window, and since BP-353 a password
+// change clears it — so the person aimed at has a way out that does not involve waiting.
 export const ANONYMOUS_ACCOUNT_ATTEMPTS = 50;
 /**
  * The ceiling on failed credential checks from callers with no identity at all, across every
@@ -138,9 +140,38 @@ export async function resetRateLimits(): Promise<void> {
  * - It ends up as an `_id`, and nothing bounds the length of a posted username. A megabyte of it
  *   became a megabyte of index entry, which moved the unbounded growth from memory to disk rather
  *   than removing it.
+ *
+ * The digest comes before the address so that every counter for one account shares a prefix.
+ * Clearing them all — which is what a password change has to do — is then an indexed range scan on
+ * `_id` rather than a scan of the collection looking for a segment in the middle (BP-353).
  */
 export function lockoutKey(clientIp: string, username: string, scope = "login"): string {
-  return `${scope}:${clientIp}:${accountDigest(username)}`;
+  return `${accountPrefix(username, scope)}${clientIp}`;
+}
+
+/** Everything a given account's counters share, whichever address they were reached from. */
+function accountPrefix(username: string, scope: string): string {
+  return `${scope}:${accountDigest(username)}:`;
+}
+
+/**
+ * Forgets every failed attempt recorded against an account, from every address.
+ *
+ * A password change is the answer to being locked out, so it has to be able to lift the lockout —
+ * otherwise somebody who was refused their old password is refused the new one too, for the rest of
+ * the window, and the reset link they just spent looks broken (BP-347). The counter is keyed on
+ * caller *and* account, and the caller who filled it is not the one changing the password, so there
+ * is no single key to delete.
+ *
+ * Safe to hand a raw username: it is hashed into the prefix, never interpolated into the pattern.
+ */
+export async function clearAccountAttempts(username: string, scope = "login"): Promise<void> {
+  await connectDB();
+  const prefix = accountPrefix(username, scope);
+  // The prefix ends in ":", so the range ends at the next code point after it. Bounding with a high
+  // sentinel character instead would depend on how the comparison orders it.
+  const afterPrefix = `${prefix.slice(0, -1)};`;
+  await RateLimit.deleteMany({ _id: { $gte: prefix, $lt: afterPrefix } });
 }
 
 /** Exactly what Mongoose will do to the filter before it looks the user up. */
@@ -171,19 +202,21 @@ export function anonymousMultiplier(clientIp: string | null, perAddress: number)
 }
 
 /**
- * `key` is the account dimension, `source` the caller. A correct credential always wins: the
- * account counter is consulted only after a *failed* verification, so it can throttle guessing
- * without ever denying the real owner their login — which is what an account-keyed refusal becomes
- * the moment an attacker can aim it, and on a proxy-less deployment every caller can.
+ * `key` is the account dimension, `source` the caller. Both are refused *before* the credential is
+ * read, which is what bounds the work an attacker can make the server do: since the miss path pays
+ * for bcrypt to close a timing oracle, every admitted request is ~100 ms of CPU, and a counter
+ * consulted afterwards bounds the status code rather than the work.
  *
- * The two counters answer different questions and therefore sit on different sides of verify().
- * The source counter bounds the *work*: it stands before the credential is read, because the miss
- * path pays for bcrypt and an unbounded stream of attempts is an unbounded stream of ~100 ms of
- * CPU. The account counter bounds the *guessing*, and guessing is only established by a failed
- * verification — so consulting it first bought a per-account slice of the same CPU bound at the
- * price of letting anyone who can name a username deny that person their own password. The source
- * counter still bounds the CPU; what an attacker gains is the ability to spend the shared budget
- * against one account instead of being cut off sooner, and what the owner gains is their login.
+ * The cost of that ordering is real and was measured (BP-353). Where no client address is available
+ * the account key is shared by every caller, so filling it denies the owner their own correct
+ * password: it is a refusal that can be aimed. Moving the check after a failed verification was
+ * tried and was worse — it handed a single account ten times the guessing budget, made the 429 a
+ * status that had already paid for its own hash, and turned a successful login into an observable
+ * event, because clearing the shared counter flipped an attacker's probe from 429 to 401.
+ *
+ * So the bound stays in front, and the denial gets an exit instead: `clearAccountAttempts` lets a
+ * password change lift the lockout. Somebody aimed at pays for it once and recovers deliberately,
+ * rather than waiting out a window they cannot see.
  */
 export async function withLockout<T>(
   key: string,
@@ -197,6 +230,7 @@ export async function withLockout<T>(
   const effectiveSource = source ?? ANONYMOUS_GLOBAL_KEY;
   const effectiveSourceThreshold = source ? sourceThreshold : ANONYMOUS_GLOBAL_ATTEMPTS;
 
+  if (await isRateLimited(key, accountThreshold)) return { lockedOut: true, result: null };
   if (await isRateLimited(effectiveSource, effectiveSourceThreshold)) {
     return { lockedOut: true, result: null };
   }

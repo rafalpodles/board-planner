@@ -4,6 +4,7 @@ import { connectDB } from "@/lib/db";
 import { getClientIp, MIN_PASSWORD_LENGTH, PASSWORD_COST_FACTOR } from "@/lib/auth";
 import { withAuth } from "@/lib/middleware";
 import {
+  clearAccountAttempts,
   EXCLUSIVE_SOURCE_ATTEMPTS,
   lockoutKey,
   sourceKey,
@@ -72,6 +73,8 @@ export const PUT = withAuth(async (request, { user }) => {
   // themselves; the link in their inbox must not still be able to overwrite this
   await invalidateResetTokens(user._id);
   await revokeUserSessions(user._id, user.sessionId);
+  // Changing it here is also a way out of a login lockout somebody else filled (BP-353)
+  await clearAccountAttempts(user.username).catch(() => {});
 
   return NextResponse.json({ ok: true });
 });
