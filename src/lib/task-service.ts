@@ -222,6 +222,7 @@ export async function createTask(
     category,
     status,
     assignee: assigneeId,
+    assignedBy: assigneeId ? actorId : null,
     dueDate: body.dueDate || null,
     checklist: Array.isArray(body.checklist)
       ? body.checklist
@@ -443,6 +444,7 @@ export async function updateTask(
       updates[field] = body[field];
     }
   }
+  if (updates.assignee !== undefined) updates.assignedBy = actorId;
 
   // "" is what a cleared <select> sends, and it is not a value this field can hold: `sprint` is an
   // ObjectId, so an empty string casts to a CastError and surfaces as a 500. Normalise first, then
