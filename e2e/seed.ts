@@ -21,6 +21,9 @@ export const PROJECT_KEY = "TP";
 export const PROJECT_NAME = "E2E Run Conflict Board";
 
 export const WORKER_NAME = "e2e-macbook-pro";
+// The credential the seeded machine authenticates with, so a spec can drive the claim route itself
+// rather than the service behind it
+export const WORKER_CREDENTIAL = "e2e-worker-credential";
 
 // Real API tokens: the browser authenticates with a session cookie no APIRequestContext can be
 // handed, so every setup call the suite makes over the API carries one of these instead. The
@@ -620,7 +623,7 @@ export async function seed() {
     platform: "darwin",
     version: "0.0.0-e2e",
     protocolVersion: 1,
-    credentialHash: bcrypt.hashSync("e2e-worker-credential", 10),
+    credentialHash: bcrypt.hashSync(WORKER_CREDENTIAL, 10),
     repos: [],
     policy: { pollIntervalMs: 30_000 },
     policyOverrides: [],

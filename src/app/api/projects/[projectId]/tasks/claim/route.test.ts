@@ -49,6 +49,9 @@ vi.mock("@/lib/middleware", () => ({
 const { POST } = await import("./route");
 
 const OID = "69a52e3b399b27d3cbb2c5a5";
+// Deliberately not OID: the machine's id and its owner's are two different people's answers, and a
+// fixture sharing one cannot tell "asked on behalf of the owner" from "asked on behalf of itself"
+const OWNER = "69a52e3b399b27d3cbb2c5b7";
 
 function request(headers: Record<string, string>, body: unknown = { runId: "run-1" }) {
   return new Request("http://localhost/api/projects/CP/tasks/claim", {
@@ -119,6 +122,36 @@ describe("POST /tasks/claim", () => {
     });
 
     expect(claimNextTask).toHaveBeenCalledWith(OID, OID, "run-1", null);
+  });
+
+  /**
+   * The claim and the snapshot must be asked the SAME question. `claimNextTask` matches a task the
+   * owner handed themselves, and `snapshotFor` then refuses a personal agent that is not that
+   * person's — a defence in depth that holds however the document reached the database, which is
+   * what a rule enforced in every writer cannot promise.
+   */
+  it("resolves the agent on behalf of the machine's owner, not the machine", async () => {
+    verifyWorkerCredential.mockResolvedValue({ _id: OID, owner: OWNER, assignments: [] });
+
+    await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
+
+    expect(claimNextTask).toHaveBeenCalledWith(OID, OID, "run-1", OWNER);
+    expect(snapshotFor).toHaveBeenCalledWith(OID, undefined, OWNER);
+  });
+
+  // The fleet route populates `owner`, and String() on a populated document is its inspect output —
+  // which claimNextTask answers by claiming nothing at all, silently, for the whole fleet
+  it("reads the id out of a populated owner before either call sees it", async () => {
+    verifyWorkerCredential.mockResolvedValue({
+      _id: OID,
+      owner: { _id: OWNER, username: "kasia" },
+      assignments: [],
+    });
+
+    await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
+
+    expect(claimNextTask).toHaveBeenCalledWith(OID, OID, "run-1", OWNER);
+    expect(snapshotFor).toHaveBeenCalledWith(OID, undefined, OWNER);
   });
 
   it("resolves a project key before asking the verdict or the claim", async () => {

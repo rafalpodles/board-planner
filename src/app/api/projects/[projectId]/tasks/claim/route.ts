@@ -51,17 +51,18 @@ export const POST = withWorker(async (request, { params, worker }) => {
     return NextResponse.json({ error: "runId is required" }, { status: 400 });
   }
 
-  const task = await claimNextTask(
-    projectId,
-    String(worker._id),
-    runId,
-    ownerIdOf(worker.owner)
-  );
+  const machineOwnerId = ownerIdOf(worker.owner);
+
+  const task = await claimNextTask(projectId, String(worker._id), runId, machineOwnerId);
   if (!task) return new NextResponse(null, { status: 204 });
 
   // Resolved here rather than referenced, so the run means what it meant when it started even if
   // the agent is edited while it holds the task.
-  const agent = await snapshotFor(projectId, task.agent);
+  //
+  // The owner goes with it: a personal agent is a composition nobody vetted, and this is the last
+  // point before it runs at which anyone can ask whether the machine about to run it is that
+  // person's own.
+  const agent = await snapshotFor(projectId, task.agent, machineOwnerId);
   if (!agent) {
     // Holding a task a machine cannot run would park it behind a lease for two hours. Hand it back
     // at once instead.
