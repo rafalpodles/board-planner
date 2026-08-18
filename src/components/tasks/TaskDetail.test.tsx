@@ -529,3 +529,72 @@ describe("TaskDetail, re-assigning a task whose assigner was never recorded", ()
     expect(api.put).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * A personal agent runs only on a task its owner assigned to themselves, so the rail withholds one
+ * from the picker anywhere else — which it can only do if it is told who is reading. The prop is
+ * required, so dropping it from a call site is a `tsc` error; passing the WRONG thing is not, and a
+ * rail that never matches the reader silently offers nobody their own agents anywhere.
+ *
+ * Both call sites, separately, and in both polarities: the note is the only visible difference, so
+ * a test asserting it in one state alone would pass with a rail that always printed it.
+ */
+describe("TaskDetail, whether the rail knows who is reading", () => {
+  const MINE = { _id: "ag9", name: "My own agent", scope: "user", description: "" };
+
+  function serve(over: Record<string, unknown> = {}) {
+    api.get.mockImplementation((url: string) => {
+      if (url === "/api/users")
+        return Promise.resolve([{ _id: "u1", username: "rpo", fullName: "Rafal Podles" }]);
+      if (url === "/api/agents") return Promise.resolve([MINE]);
+      if (url.startsWith("/api/agent")) return Promise.resolve([]);
+      if (url.includes("/tasks/")) return Promise.resolve({ ...task, status: "todo", ...over });
+      if (url.includes("/sprints")) return Promise.resolve([]);
+      return Promise.resolve(project);
+    });
+  }
+
+  const mine = { assignee: { _id: "u1", username: "rpo", fullName: "Rafal Podles" } };
+  const theirs = { assignee: { _id: "u2", username: "claude", fullName: "Claude Code" } };
+
+  async function openSheet() {
+    await act(async () => screen.getByRole("button", { name: "All details" }).click());
+    return screen.getByRole("dialog");
+  }
+
+  it("offers the reader their own agent on their own task, in the desktop rail", async () => {
+    serve(mine);
+    renderDetail();
+    await loaded();
+
+    expect(
+      within(screen.getByRole("complementary")).queryByTestId("personal-agents-withheld")
+    ).toBeNull();
+  });
+
+  it("withholds it on somebody else's task, in the desktop rail", async () => {
+    serve(theirs);
+    renderDetail();
+    await loaded();
+
+    expect(
+      within(screen.getByRole("complementary")).queryByTestId("personal-agents-withheld")
+    ).not.toBeNull();
+  });
+
+  it("offers it on their own task in the mobile sheet too", async () => {
+    serve(mine);
+    renderDetail();
+    await loaded();
+
+    expect(within(await openSheet()).queryByTestId("personal-agents-withheld")).toBeNull();
+  });
+
+  it("withholds it on somebody else's task in the mobile sheet too", async () => {
+    serve(theirs);
+    renderDetail();
+    await loaded();
+
+    expect(within(await openSheet()).queryByTestId("personal-agents-withheld")).not.toBeNull();
+  });
+});

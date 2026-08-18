@@ -73,6 +73,7 @@ function renderRail(over: Partial<React.ComponentProps<typeof PropertyRail>> = {
       customFields={[]}
       stored={{ agent: null, assignee: null, assignedBy: null, status: "todo" }}
       onRepairAssigner={() => {}}
+      currentUsername="rpo"
       reporter="Claude Code"
       onDelete={() => {}}
       {...over}
@@ -373,6 +374,123 @@ describe("the Agent row", () => {
     await pick(/With security review/);
 
     expect(set).toHaveBeenCalledWith("agent", "a2");
+  });
+
+  /**
+   * `agentUsableOnProject` runs a personal agent only on a task its owner assigned to themselves —
+   * anyone may compose one, so its steps are a composition nobody vetted, and a `merge` step merges
+   * whatever the prompt around it says. Offering one anywhere else would be a control that 400s on
+   * click, and this view's save failure prints no server message at all: "Save failed — retry",
+   * and retrying fails the same way.
+   *
+   * `/api/agents` only ever answers with the reader's OWN user-scoped agents, so `scope: "user"`
+   * in this list always means mine.
+   */
+  describe("and a personal agent, which the server runs only on its owner's own task", () => {
+    const MINE = [
+      ...(AGENTS as unknown as { _id: string; name: string; scope: string }[]),
+      { _id: "a3", name: "My own agent", scope: "user", description: "" },
+    ] as never;
+
+    async function agentOptions() {
+      await openRow("Agent");
+      return screen.getAllByRole("option").map((o) => o.textContent || "");
+    }
+
+    it("offers it on a task assigned to me", async () => {
+      renderRail({ agents: MINE, draft: { ...draft, assignee: "rpo" }, currentUsername: "rpo" });
+
+      expect((await agentOptions()).join("|")).toContain("My own agent");
+      expect(screen.queryByTestId("personal-agents-withheld")).toBeNull();
+    });
+
+    // The shape the server refuses. Asserted on the option list rather than on the note, so a
+    // version that printed the sentence and still offered the control would fail.
+    it("withholds it on a task assigned to somebody else", async () => {
+      renderRail({ agents: MINE, draft: { ...draft, assignee: "claude" }, currentUsername: "rpo" });
+
+      expect((await agentOptions()).join("|")).not.toContain("My own agent");
+    });
+
+    // …and the other half: withholding it without saying so is the silent refusal, just moved
+    it("says why it is not there, rather than shortening the list in silence", async () => {
+      renderRail({ agents: MINE, draft: { ...draft, assignee: "claude" }, currentUsername: "rpo" });
+
+      expect(screen.getByTestId("personal-agents-withheld").textContent).toMatch(
+        /personal agent only runs on a task you have assigned to yourself/i
+      );
+    });
+
+    // Nobody's task is not my task, and it is also what a released task looks like
+    it("withholds it on an unassigned task", async () => {
+      renderRail({ agents: MINE, currentUsername: "rpo" });
+
+      expect((await agentOptions()).join("|")).not.toContain("My own agent");
+      expect(screen.queryByTestId("personal-agents-withheld")).not.toBeNull();
+    });
+
+    /**
+     * The draft, not the stored task: auto-save sends every edited field in one PUT, and the server
+     * judges the assignee that write LEAVES. Keyed on the stored value, taking a task on and
+     * picking your own agent in the same visit would offer nothing until the page reloaded.
+     */
+    it("offers it as soon as the draft assigns the task to me, before anything is saved", async () => {
+      renderRail({
+        agents: MINE,
+        draft: { ...draft, assignee: "rpo" },
+        stored: { agent: null, assignee: null, assignedBy: null, status: "todo" },
+        currentUsername: "rpo",
+      });
+
+      expect((await agentOptions()).join("|")).toContain("My own agent");
+    });
+
+    /**
+     * Filtering the list must not filter what the task is carrying. A personal agent can outlive
+     * the pairing — reassigning a task does not re-check its agent — and a row rendering "No agent"
+     * over a task that has one is the diagnostic this branch spent two rounds removing.
+     */
+    it("still names the agent already on the task, even when it would not be offered", async () => {
+      renderRail({
+        agents: MINE,
+        draft: { ...draft, assignee: "claude", agent: "a3" },
+        currentUsername: "rpo",
+      });
+
+      expect(
+        [...screen.queryAllByRole("combobox")]
+          .find((el) => (el.textContent || "").startsWith("Agent"))
+          ?.textContent
+      ).toContain("My own agent");
+    });
+
+    // Nothing to withhold, nothing to explain: the note must not appear on a board whose agents are
+    // all the project's or the instance's
+    it("says nothing when there is no personal agent to withhold", () => {
+      renderRail({ agents: AGENTS, draft: { ...draft, assignee: "claude" }, currentUsername: "rpo" });
+
+      expect(screen.queryByTestId("personal-agents-withheld")).toBeNull();
+    });
+
+    /**
+     * On an UNASSIGNED task specifically, which is where the two nulls meet: `draft.assignee` is
+     * null for "nobody has it" and `currentUsername` is null for "the app has not resolved a
+     * reader yet", and comparing them alone makes those the same answer. A version keyed on
+     * "assigned to me" without asking whether there is a me offers the whole personal shelf on
+     * every unassigned task to a reader it cannot name.
+     */
+    it("withholds it on an unassigned task when there is no reader either", async () => {
+      renderRail({ agents: MINE, currentUsername: null });
+
+      expect((await agentOptions()).join("|")).not.toContain("My own agent");
+    });
+
+    // The same guard from the other side: a reader who is not the assignee is not the assignee
+    it("withholds it from a reader the app cannot name, on somebody's task", async () => {
+      renderRail({ agents: MINE, draft: { ...draft, assignee: "rpo" }, currentUsername: null });
+
+      expect((await agentOptions()).join("|")).not.toContain("My own agent");
+    });
   });
 });
 

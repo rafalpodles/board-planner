@@ -104,6 +104,11 @@ interface PropertyRailProps {
    * task whose assigner was never recorded, which made the instruction untrue in the view giving it.
    */
   onRepairAssigner: (username: string | null) => void;
+  /**
+   * Whoever is reading. Required rather than optional: a call site that forgot it would silently
+   * stop offering this person their own agents everywhere, which looks exactly like having none.
+   */
+  currentUsername: string | null;
   /** Full rows, not names: the chip and the picker dot are tinted by the project's colour */
   categories: ApiProjectCategory[];
   customFields: ApiCustomField[];
@@ -123,6 +128,7 @@ export function PropertyRail({
   stored,
   columns,
   onRepairAssigner,
+  currentUsername,
   categories,
   customFields,
   reporter,
@@ -143,6 +149,21 @@ export function PropertyRail({
   // the column requirement first: the repair is about what the document is missing, not about
   // which sentence won the right to be shown.
   const assignerUnrecorded = !!stored.assignee && !stored.assignedBy;
+  /**
+   * A personal agent is a composition nobody vetted — anyone may compose one out of the admin's
+   * blocks — so the server runs it only on a task its owner assigned to themselves. Offering one
+   * elsewhere would be a control that 400s on click, and this view's save failure carries no
+   * message: the reader is told "Save failed — retry", and retrying fails the same way.
+   *
+   * Keyed on the DRAFT assignee, which is what the same save will send, so taking a task on and
+   * picking your own agent in one gesture works. The agent already on the task stays listed
+   * whatever it is, or the row would name "No agent" for a task that is carrying one.
+   */
+  const ownTask = !!currentUsername && draft.assignee === currentUsername;
+  const offeredAgents = agents.filter(
+    (a) => a.scope !== "user" || ownTask || a._id === draft.agent
+  );
+  const personalAgentsWithheld = offeredAgents.length < agents.length;
 
   return (
     <div className="flex h-full flex-col gap-6">
@@ -184,7 +205,7 @@ export function PropertyRail({
           label="Agent"
           touch={touch}
           value={draft.agent || ""}
-          options={[...agents]
+          options={[...offeredAgents]
             .sort((a, b) =>
               a._id === projectDefaultAgent ? -1 : b._id === projectDefaultAgent ? 1 : 0
             )
@@ -200,6 +221,13 @@ export function PropertyRail({
             )
           }
         </ComboboxRow>
+
+        {personalAgentsWithheld && (
+          <p data-testid="personal-agents-withheld" className="mt-1 text-xs text-muted">
+            Your own agents are not offered here — a personal agent only runs on a task you have
+            assigned to yourself.
+          </p>
+        )}
 
         <HandoverNotice handover={handover} />
 

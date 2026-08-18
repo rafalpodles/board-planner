@@ -1687,10 +1687,30 @@ describe("choosing a task's agent", () => {
   // writer that lets a draft through onto a task (BP-358).
   const COMPOSED = { implementation: [{ key: "write-the-change" }] };
 
+  /**
+   * Three people, never collapsed into one id. With the caller, the assignee and the agent's owner
+   * all the same string, "the actor owns this agent" and "the actor is the assignee" are the same
+   * assertion, and no test below could say which of the two rules was doing the work.
+   */
+  const ACTOR = "u-actor";
+  const MATE = "u-colleague";
+
   // The before-image the activity log reads. Answered through both `lean()` and `populate().lean()`
   // so a change of shape in the reader does not silently hand every test an undefined task.
-  function storedAgent(agent: string | null) {
-    const task = { _id: "t1", taskNumber: 1, status: "doing", title: "x", agent };
+  //
+  // The assignee arrives POPULATED, which is the shape updateTask reads it in; `assignedBy` mirrors
+  // it, so every fixture here is a task somebody handed to themselves — the only shape a machine
+  // ever takes, and therefore the only one worth asking about an agent.
+  function storedAgent(agent: string | null, assignee: string | null = ACTOR) {
+    const task = {
+      _id: "t1",
+      taskNumber: 1,
+      status: "doing",
+      title: "x",
+      agent,
+      assignee: assignee ? { _id: assignee, username: "whoever" } : null,
+      assignedBy: assignee,
+    };
     findOne.mockReturnValue({
       lean: () => Promise.resolve(task),
       populate: () => ({ lean: () => Promise.resolve(task) }),
@@ -1752,16 +1772,20 @@ describe("choosing a task's agent", () => {
     it("refuses a project agent belonging to another project", async () => {
       agentInTheCatalog({ _id: AGENT, scope: "project", project: "p2", composition: COMPOSED });
 
-      const result = await updateTask("p1", "t1", { agent: AGENT }, "actor");
+      const result = await updateTask("p1", "t1", { agent: AGENT }, ACTOR);
 
       expect(result).toMatchObject({ ok: false, status: 400 });
       expect(findOneAndUpdate).not.toHaveBeenCalled();
     });
 
-    it("accepts a project agent belonging to this one", async () => {
+    // On a COLLEAGUE's task, deliberately: a project agent was authored by a project admin
+    // (`POST /api/agents` refuses one otherwise), so it is the board's own composition and runs
+    // wherever the board's work goes. Nothing about it depends on who is holding the task.
+    it("accepts a project agent belonging to this one, on anybody's task", async () => {
+      storedAgent(null, MATE);
       agentInTheCatalog({ _id: AGENT, scope: "project", project: "p1", composition: COMPOSED });
 
-      expect((await updateTask("p1", "t1", { agent: AGENT }, "actor")).ok).toBe(true);
+      expect((await updateTask("p1", "t1", { agent: AGENT }, ACTOR)).ok).toBe(true);
     });
 
     // Pointing a task at somebody else's personal agent would run their prompts, with write
@@ -1769,21 +1793,146 @@ describe("choosing a task's agent", () => {
     it("refuses another person's personal agent", async () => {
       agentInTheCatalog({ _id: AGENT, scope: "user", owner: OTHER, composition: COMPOSED });
 
-      const result = await updateTask("p1", "t1", { agent: AGENT }, "actor");
+      const result = await updateTask("p1", "t1", { agent: AGENT }, ACTOR);
 
       expect(result).toMatchObject({ ok: false, status: 400 });
     });
 
-    it("accepts the caller's own personal agent", async () => {
-      agentInTheCatalog({ _id: AGENT, scope: "user", owner: "actor", composition: COMPOSED });
+    it("accepts the caller's own personal agent, on the caller's own task", async () => {
+      agentInTheCatalog({ _id: AGENT, scope: "user", owner: ACTOR, composition: COMPOSED });
 
-      expect((await updateTask("p1", "t1", { agent: AGENT }, "actor")).ok).toBe(true);
+      expect((await updateTask("p1", "t1", { agent: AGENT }, ACTOR)).ok).toBe(true);
+    });
+
+    /**
+     * The hole the lowering left. A claim runs on the machine of whoever assigned the task to
+     * themselves, and that need not be whoever picked the agent — so "the actor owns it" alone let
+     * a member compose an agent from admin-authored blocks, put `merge` in it with no review gate
+     * ahead of it (which agent-rules grades risky, not broken, so it stores), point a colleague's
+     * self-assigned task at it and have it run on the colleague's machine under their credentials.
+     *
+     * Authoring a PROJECT agent takes project-admin; authoring a personal one takes nothing. So
+     * this is the only scope where the composition is unvetted, and the only one narrowed.
+     */
+    it("refuses the caller's own personal agent on a colleague's task", async () => {
+      storedAgent(null, MATE);
+      agentInTheCatalog({ _id: AGENT, scope: "user", owner: ACTOR, composition: COMPOSED });
+
+      const result = await updateTask("p1", "t1", { agent: AGENT }, ACTOR);
+
+      expect(result).toMatchObject({ ok: false, status: 400 });
+      expect(findOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    // Distinguished from the foreign-owner refusal above, which shares the status and the code path
+    // but not the message. Asserting only on `ok` would pass with either, and the two say opposite
+    // things about what the reader should do next.
+    it("says which task a personal agent would run on, and how to get there", async () => {
+      storedAgent(null, MATE);
+      agentInTheCatalog({ _id: AGENT, scope: "user", owner: ACTOR, composition: COMPOSED });
+
+      const { error } = (await updateTask("p1", "t1", { agent: AGENT }, ACTOR)) as {
+        error: string;
+      };
+
+      expect(error).not.toMatch(/cannot run on this project/i);
+      expect(error).toMatch(/personal agent/i);
+      expect(error).toMatch(/assign this task to yourself/i);
+      expect(error).toMatch(/project's agents/i);
+    });
+
+    // Nobody's task is not your task. An unassigned one is also the state a release leaves behind,
+    // and whoever picks it up next would be the one running this composition.
+    it("refuses the caller's own personal agent on an unassigned task", async () => {
+      storedAgent(null, null);
+      agentInTheCatalog({ _id: AGENT, scope: "user", owner: ACTOR, composition: COMPOSED });
+
+      expect((await updateTask("p1", "t1", { agent: AGENT }, ACTOR)).ok).toBe(false);
+    });
+
+    // A global agent is what the instance ships. It answers to neither rule, and asking it to would
+    // make the built-in default unpickable on every task not already in the caller's hands.
+    it("accepts a global agent whoever is holding the task", async () => {
+      storedAgent(null, MATE);
+
+      expect((await updateTask("p1", "t1", { agent: AGENT }, ACTOR)).ok).toBe(true);
+    });
+
+    /**
+     * Assignee and agent travel in one PUT — the detail view's auto-save sends every edited field
+     * together — so the pair that matters is the one the task ENDS UP with. Read the stored
+     * assignee instead and `{ assignee: colleague, agent: mine }` goes through on the strength of a
+     * pairing the same write is about to end.
+     */
+    describe("the pairing it judges is the one the update leaves behind", () => {
+      beforeEach(() => {
+        agentInTheCatalog({ _id: AGENT, scope: "user", owner: ACTOR, composition: COMPOSED });
+      });
+
+      it("refuses handing my own task, and my own agent with it, to a colleague", async () => {
+        storedAgent(null, ACTOR);
+        userFindOne.mockResolvedValue({ _id: MATE, username: "colleague" });
+
+        const result = await updateTask(
+          "p1",
+          "t1",
+          { assignee: "colleague", agent: AGENT },
+          ACTOR
+        );
+
+        expect(result).toMatchObject({ ok: false, status: 400 });
+      });
+
+      // The other direction, and the reason the check cannot simply read the stored value either:
+      // taking a colleague's task on and picking my own agent in the same gesture is allowed
+      it("accepts taking the task on and picking my own agent in one write", async () => {
+        storedAgent(null, MATE);
+        userFindOne.mockResolvedValue({ _id: ACTOR, username: "me" });
+
+        expect(
+          (await updateTask("p1", "t1", { assignee: "me", agent: AGENT }, ACTOR)).ok
+        ).toBe(true);
+      });
+
+      /**
+       * Leaving the active column takes the task off the worker holding it, and that write blanks
+       * the assignee — so the task this update leaves behind belongs to nobody, whatever it was
+       * assigned to when it was read. Whoever picks it up next would be the one running this
+       * composition, which is the case the rule exists for.
+       */
+      it("refuses my own agent in the same write that releases the task from a run", async () => {
+        const held = {
+          _id: "t1",
+          taskNumber: 1,
+          status: "doing",
+          title: "x",
+          agent: null,
+          assignee: { _id: ACTOR, username: "me" },
+          assignedBy: ACTOR,
+          execution: { runId: "r1", workerId: "w1" },
+        };
+        findOne.mockReturnValue({
+          lean: () => Promise.resolve(held),
+          populate: () => ({ lean: () => Promise.resolve(held) }),
+        });
+
+        const result = await updateTask(
+          "p1",
+          "t1",
+          { status: "ready", agent: AGENT },
+          ACTOR,
+          true
+        );
+
+        expect(result).toMatchObject({ ok: false, status: 400 });
+        expect(findOneAndUpdate).not.toHaveBeenCalled();
+      });
     });
 
     it("refuses an id that is not an object id, without querying for it", async () => {
       agentFindById.mockClear();
 
-      const result = await updateTask("p1", "t1", { agent: "nonsense" }, "actor");
+      const result = await updateTask("p1", "t1", { agent: "nonsense" }, ACTOR);
 
       expect(result).toMatchObject({ ok: false, status: 400 });
       expect(agentFindById).not.toHaveBeenCalled();
@@ -1792,7 +1941,7 @@ describe("choosing a task's agent", () => {
     it("refuses an agent that does not exist", async () => {
       agentInTheCatalog(null);
 
-      expect((await updateTask("p1", "t1", { agent: AGENT }, "actor")).ok).toBe(false);
+      expect((await updateTask("p1", "t1", { agent: AGENT }, ACTOR)).ok).toBe(false);
     });
 
     /**
@@ -1811,7 +1960,7 @@ describe("choosing a task's agent", () => {
       it("is refused, naming it and saying what is missing", async () => {
         draft();
 
-        const result = await updateTask("p1", "t1", { agent: AGENT }, "actor");
+        const result = await updateTask("p1", "t1", { agent: AGENT }, ACTOR);
 
         expect(result).toMatchObject({ ok: false, status: 400 });
         expect((result as { error: string }).error).toContain("Untitled agent");
@@ -1822,9 +1971,9 @@ describe("choosing a task's agent", () => {
       // Distinguished from the cross-project and foreign-owner refusals, which share the status
       // and the code path but not the message — asserting only on `ok` would pass with either
       it("is refused for its emptiness, not for its scope", async () => {
-        draft({ scope: "user", owner: "actor" });
+        draft({ scope: "user", owner: ACTOR });
 
-        const result = await updateTask("p1", "t1", { agent: AGENT }, "actor");
+        const result = await updateTask("p1", "t1", { agent: AGENT }, ACTOR);
 
         expect((result as { error: string }).error).not.toMatch(/cannot run on this project/i);
         expect((result as { error: string }).error).toMatch(/no steps/i);
@@ -1834,7 +1983,7 @@ describe("choosing a task's agent", () => {
       it("is refused when every bucket it has is empty", async () => {
         draft({ composition: { analysis: [], implementation: [], delivery: [] } });
 
-        expect((await updateTask("p1", "t1", { agent: AGENT }, "actor")).ok).toBe(false);
+        expect((await updateTask("p1", "t1", { agent: AGENT }, ACTOR)).ok).toBe(false);
       });
 
       // A bucket written before entries existed holds bare key strings, and normaliseComposition
@@ -1842,7 +1991,7 @@ describe("choosing a task's agent", () => {
       it("accepts an agent whose composition still holds bare keys", async () => {
         draft({ composition: { implementation: ["write-the-change"] } });
 
-        expect((await updateTask("p1", "t1", { agent: AGENT }, "actor")).ok).toBe(true);
+        expect((await updateTask("p1", "t1", { agent: AGENT }, ACTOR)).ok).toBe(true);
       });
     });
   });
@@ -2153,6 +2302,160 @@ describe("what a member can and cannot arm by choosing an agent", () => {
     await updateTask("p1", "t1", { title: "x", assignedBy: ME }, SOMEBODY_ELSE);
 
     expect(setStage(findOneAndUpdate.mock.calls[0][1])).not.toHaveProperty("assignedBy");
+  });
+});
+
+/**
+ * The sentence the whole lowering rests on: choosing an agent can set work running only on the
+ * chooser's own machine — or, on somebody else's, only an agent the project itself sanctioned.
+ *
+ * Neither half of the system proves that alone. `updateTask` decides what may be written; the claim
+ * filter decides whose machine ever reads it. So each shape below is written through the real
+ * writer and the result is then offered to the real filter of a machine belonging to each person in
+ * turn. The document handed to the filter is the stored one with the writer's OWN `$set` over it —
+ * nothing here asserts an assignee this code did not produce.
+ */
+describe("whose machine choosing an agent can reach", () => {
+  // Parseable ObjectIds, because the claim filter casts the owner before writing it
+  const ME = "6a732075133f935b19154cd2";
+  const MATE = "6a732075133f935b19154cd3";
+  const AGENT_ID = "69a52e3b399b27d3cbb2c5a5";
+  const COMPOSED = { implementation: [{ key: "write-the-change" }] };
+
+  beforeEach(() => {
+    findById.mockReset();
+    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    find.mockReset();
+    find.mockReturnValue({ lean: () => Promise.resolve([]) });
+    findOne.mockReset();
+    findOneAndUpdate.mockReset();
+  });
+
+  /** What a machine belonging to this person actually asks the database for */
+  async function machineOf(owner: string) {
+    findOneAndUpdate.mockReset();
+    await claimNextTask("p1", "w1", "r1", owner);
+    return findOneAndUpdate.mock.calls[0][0];
+  }
+
+  interface Shape {
+    agent: Record<string, unknown>;
+    assignee: string | null;
+    /** Who did the assigning; the same person unless a shape is about being handed work */
+    assigner?: string | null;
+    actor: string;
+  }
+
+  async function choose({ agent, assignee, assigner = assignee, actor }: Shape) {
+    agentInTheCatalog({ _id: AGENT_ID, name: "An agent", composition: COMPOSED, ...agent });
+    const stored = {
+      _id: "t1",
+      taskNumber: 1,
+      status: "ready",
+      title: "x",
+      agent: null,
+      assignee: assignee ? { _id: assignee, username: "whoever" } : null,
+      assignedBy: assigner,
+    };
+    findOne.mockReturnValue({
+      lean: () => Promise.resolve(stored),
+      populate: () => ({ lean: () => Promise.resolve(stored) }),
+    });
+    findOneAndUpdate.mockReset();
+    findOneAndUpdate.mockReturnValue({
+      populate: () => Promise.resolve({ _id: "t1", taskNumber: 1, title: "x", execution: {} }),
+    });
+
+    const result = await updateTask("p1", "t1", { agent: AGENT_ID }, actor);
+
+    const written = findOneAndUpdate.mock.calls.length
+      ? setStage(findOneAndUpdate.mock.calls[0][1])
+      : {};
+    const document = {
+      project: "p1",
+      status: "ready",
+      assignee,
+      assignedBy: assigner,
+      agent: null,
+      blockedBy: [],
+      execution: { attempts: 0 },
+      ...written,
+    };
+    return { result, document };
+  }
+
+  it("my own task, my own personal agent: runs, and on my machine alone", async () => {
+    const { result, document } = await choose({
+      agent: { scope: "user", owner: ME },
+      assignee: ME,
+      actor: ME,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(document.agent).toBe(AGENT_ID);
+    expect(matches(await machineOf(ME), document)).toBe(true);
+    expect(matches(await machineOf(MATE), document)).toBe(false);
+  });
+
+  it("my own task, one of the project's agents: the same", async () => {
+    const { result, document } = await choose({
+      agent: { scope: "project", project: "p1" },
+      assignee: ME,
+      actor: ME,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(matches(await machineOf(ME), document)).toBe(true);
+    expect(matches(await machineOf(MATE), document)).toBe(false);
+  });
+
+  // The shape this change exists for. Refused at the writer, so there is no document for any
+  // machine to read — asserted at both ends, because a refusal that still wrote would be worse
+  // than one that never fired.
+  it("a colleague's self-assigned task, my personal agent: refused, and nothing is stored", async () => {
+    const { result, document } = await choose({
+      agent: { scope: "user", owner: ME },
+      assignee: MATE,
+      actor: ME,
+    });
+
+    expect(result).toMatchObject({ ok: false, status: 400 });
+    expect(document.agent).toBeNull();
+    expect(matches(await machineOf(MATE), document)).toBe(false);
+    expect(matches(await machineOf(ME), document)).toBe(false);
+  });
+
+  /**
+   * Allowed, and it really does run on the colleague's machine — which is the residue rpo's own
+   * decision text describes and accepts. What bounds it is that a project agent takes project-admin
+   * to author (`POST /api/agents`), so the composition reaching that machine is the board's own.
+   */
+  it("a colleague's self-assigned task, one of the project's agents: runs, on their machine", async () => {
+    const { result, document } = await choose({
+      agent: { scope: "project", project: "p1" },
+      assignee: MATE,
+      actor: ME,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(matches(await machineOf(MATE), document)).toBe(true);
+    expect(matches(await machineOf(ME), document)).toBe(false);
+  });
+
+  // Being handed work is a proposal. The write is fine — it is my task and my agent — and no
+  // machine takes it, because nobody assigned it to themselves.
+  it("a task somebody else assigned to me: written, and no machine takes it", async () => {
+    const { result, document } = await choose({
+      agent: { scope: "user", owner: ME },
+      assignee: ME,
+      assigner: MATE,
+      actor: ME,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(document.agent).toBe(AGENT_ID);
+    expect(matches(await machineOf(ME), document)).toBe(false);
+    expect(matches(await machineOf(MATE), document)).toBe(false);
   });
 });
 
