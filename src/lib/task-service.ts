@@ -827,6 +827,11 @@ async function createNextRecurrence(
     // may be the worker's own identity finishing its run, not the person who owns the series. The
     // next occurrence continues the same standing assignment, so it carries the same assigner.
     assignedBy: oldTask.assignedBy,
+    // Carried for the same reason, and BP-358 is why it has to be: choosing an agent is the whole
+    // of the hand-over now, so an occurrence created without one is a task no machine looks at. A
+    // weekly task that had run autonomously for months would simply stop, and the card would look
+    // entirely normal — no error, no empty field a person would notice.
+    agent: oldTask.agent ?? null,
     dueDate: nextDue,
     checklist,
     recurrence: oldTask.recurrence,

@@ -358,6 +358,26 @@ describe("the Agent row and who may change it", () => {
     expect(options[0]).toContain("No agent");
     expect(options[1]).toContain("With security review");
   });
+
+  // Nothing checked what picking the empty option actually sends. It is inert today only because
+  // updateTask normalises "" to null before the write, which is pinned in task-service.test.ts —
+  // this is the other half. If the picker ever sent "" straight through to a caller that does not
+  // normalise, it would reach an ObjectId ref as an empty string.
+  it("sends null when the empty option is picked, never an empty string", async () => {
+    const set = renderRail({ agents: AGENTS, draft: { ...draft, agent: "a2" } });
+    await openRow("Agent");
+    await pick(/No agent/);
+
+    expect(set).toHaveBeenCalledWith("agent", null);
+  });
+
+  it("sends the id when a real agent is picked", async () => {
+    const set = renderRail({ agents: AGENTS });
+    await openRow("Agent");
+    await pick(/With security review/);
+
+    expect(set).toHaveBeenCalledWith("agent", "a2");
+  });
 });
 
 /**

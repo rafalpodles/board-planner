@@ -1494,6 +1494,31 @@ describe("a status change announces the same things whichever path made it", () 
     expect(taskCreate.mock.calls[0]?.[0].assignedBy).toBe("u9");
   });
 
+  // BP-358: choosing an agent is the whole of the hand-over, so an occurrence created without one
+  // is a task no machine looks at. A weekly task that ran autonomously for months would simply
+  // stop, and the card would look entirely normal — no error, no field a person would notice.
+  it("carries the agent into the next occurrence, or the series stops running on the machine", async () => {
+    setup({
+      recurrence: { frequency: "weekly", interval: 1 },
+      assignee: "u9",
+      assignedBy: "u9",
+      agent: "a1",
+    });
+    await updateTask("p1", "t1", { status: "shipped" }, "actor");
+
+    expect(taskCreate.mock.calls[0]?.[0].agent).toBe("a1");
+  });
+
+  // Null rather than undefined: Task.create would default an absent field anyway, but the pair
+  // above and below are the two halves of one decision and reading them together should not
+  // require knowing which fields the schema defaults
+  it("leaves the next occurrence of a hand-written task with no agent", async () => {
+    setup({ recurrence: { frequency: "weekly", interval: 1 }, assignee: "u9", assignedBy: "u9" });
+    await updateTask("p1", "t1", { status: "shipped" }, "actor");
+
+    expect(taskCreate.mock.calls[0]?.[0].agent).toBeNull();
+  });
+
   // Asserting only on Task.create is too weak: without the recurrence guard the helper still
   // throws on destructuring an absent config, so create is never reached and the test passes on
   // the mutation. It burns a task number on the way, though — the counter is incremented first —
@@ -1883,6 +1908,18 @@ describe("a task records who assigned it", () => {
 
   it("leaves it alone when the edit touches no assignee", async () => {
     await updateTask("p1", "t1", { title: "renamed" }, "actor");
+
+    expect(setStage(findOneAndUpdate.mock.calls[0][1])).not.toHaveProperty("assignedBy");
+  });
+
+  /**
+   * assignedBy is what says a machine may act unattended, and it is kept honest only by being
+   * absent from updateTask's `allowed` array — so a request body naming it is dropped. Nothing
+   * pinned that, and adding the field to the whitelist would look like an ordinary oversight while
+   * handing every client the ability to forge its own consent.
+   */
+  it("ignores an assignedBy the caller supplied, rather than storing it", async () => {
+    await updateTask("p1", "t1", { title: "renamed", assignedBy: "somebody-else" }, "actor");
 
     expect(setStage(findOneAndUpdate.mock.calls[0][1])).not.toHaveProperty("assignedBy");
   });
