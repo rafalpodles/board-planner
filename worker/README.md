@@ -83,9 +83,10 @@ A policy change takes effect on the worker's own refresh cycle, without a restar
 
 ## Registration
 
-A worker has no identity until an instance admin registers it and assigns it one or more projects
-in `/settings/workers`. Until then it polls but claims nothing: `/tasks/claim` and the rest of
-`/api/workers/**` refuse any request without a credential the server itself issued.
+A worker has no identity until somebody enrols it — from the machine itself, confirmed in a browser,
+or with an enrolment token. Whoever does that owns it, and no admin approval stands in between
+(BP-358). Until then it polls but claims nothing: `/tasks/claim` and the rest of `/api/workers/**`
+refuse any request without a credential the server itself issued.
 
 On first run the worker registers itself with its enrolment token and persists the response — a
 `workerId` and a `cpw_`-prefixed credential — to `<CP_STATE_DIR>/worker.json`, mode `0600`. Every
@@ -93,11 +94,11 @@ later run reuses that file; the worker registers again only if the file is missi
 rejects its stored credential with 401. A run that reuses a stored identity, rather than
 registering fresh, reads its current policy and assignments back from `GET /api/workers/:id`.
 
-Registration assigns projects, but not a filesystem. The repository path an admin proposes for
-each assigned project must still be approved on this machine, by listing it in
-`<CP_STATE_DIR>/repos.json`. A worker pointed at a path outside its own allowlist leaves that one
-project unbound and idle, with the reason visible as `bindingError` in `/settings/workers` — its
-other assignments keep working normally.
+Registration settles which projects are offered, but not a filesystem. The repository behind each
+offered project must still be approved on this machine, by listing its checkout in
+`<CP_STATE_DIR>/repos.json`. A worker with no entry for a project leaves that one unbound and idle,
+with the reason visible as `bindingError` in `/settings/workers` — its other assignments keep
+working normally.
 
 ## Running
 
