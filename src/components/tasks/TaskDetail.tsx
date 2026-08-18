@@ -378,6 +378,7 @@ function TaskDetailView({
             sprints={sprints}
             agents={agents}
             projectDefaultAgent={projectDefaultAgent}
+            stored={task}
             categories={project.categories || []}
             customFields={project.customFields || []}
             reporter={reporter}
@@ -406,6 +407,7 @@ function TaskDetailView({
           sprints={sprints}
           agents={agents}
           projectDefaultAgent={projectDefaultAgent}
+          stored={task}
           categories={project.categories || []}
           customFields={project.customFields || []}
           reporter={reporter}

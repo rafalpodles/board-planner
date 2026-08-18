@@ -97,7 +97,6 @@ vi.mock("@/lib/pm/triggers", () => ({ onTaskStatusChanged: vi.fn().mockResolvedV
 
 const {
   CLEAR_WORKER_ASSIGNEE,
-  WAS_UNASSIGNED,
   claimNextTask,
   releaseTask,
   releaseExpiredTasks,
@@ -198,7 +197,7 @@ describe("claimNextTask", () => {
 
     async function claimFilter(): Promise<Record<string, unknown>> {
       findOneAndUpdate.mockResolvedValue(null);
-      await claimNextTask("p1", "worker-a", "run-1", null, OWNER);
+      await claimNextTask("p1", "worker-a", "run-1", OWNER);
       return findOneAndUpdate.mock.calls[0][0];
     }
 
@@ -298,7 +297,7 @@ describe("claimNextTask", () => {
   it("derives the source column from the approved role, not a fixed id", async () => {
     findOneAndUpdate.mockResolvedValue({ _id: "t1", taskNumber: 1 });
 
-    await claimNextTask("p1", "worker-a", "run-1", null, OWNER);
+    await claimNextTask("p1", "worker-a", "run-1", OWNER);
 
     const filter = findOneAndUpdate.mock.calls[0][0];
     expect(filter.status).toEqual({ $in: ["ready"] });
@@ -308,7 +307,7 @@ describe("claimNextTask", () => {
   it("derives the claimed status from the active role, not a fixed id", async () => {
     findOneAndUpdate.mockResolvedValue({ _id: "t1", taskNumber: 1 });
 
-    await claimNextTask("p1", "worker-a", "run-1", null, OWNER);
+    await claimNextTask("p1", "worker-a", "run-1", OWNER);
 
     expect(claimSet(findOneAndUpdate.mock.calls[0]).status).toBe("doing");
   });
@@ -334,7 +333,7 @@ describe("claimNextTask", () => {
   it("orders by board position, never lexicographically by priority", async () => {
     findOneAndUpdate.mockResolvedValue({ _id: "t1", taskNumber: 1 });
 
-    await claimNextTask("p1", "worker-a", "run-1", null, OWNER);
+    await claimNextTask("p1", "worker-a", "run-1", OWNER);
 
     const options = findOneAndUpdate.mock.calls[0][2];
     expect(options.sort).toEqual({ order: 1, createdAt: 1 });
@@ -344,21 +343,19 @@ describe("claimNextTask", () => {
   it("claims tasks that predate the execution subdocument", async () => {
     findOneAndUpdate.mockResolvedValue({ _id: "t1", taskNumber: 1 });
 
-    await claimNextTask("p1", "worker-a", "run-1", null, OWNER);
+    await claimNextTask("p1", "worker-a", "run-1", OWNER);
 
     const filter = findOneAndUpdate.mock.calls[0][0];
-    expect(filter.$and).toContainEqual({
-      $or: [
-        { "execution.attempts": { $exists: false } },
-        { "execution.attempts": { $lt: MAX_EXECUTION_ATTEMPTS } },
-      ],
-    });
+    expect(filter.$or).toEqual([
+      { "execution.attempts": { $exists: false } },
+      { "execution.attempts": { $lt: MAX_EXECUTION_ATTEMPTS } },
+    ]);
   });
 
   it("stamps worker identity and increments attempts", async () => {
     findOneAndUpdate.mockResolvedValue({ _id: "t1", taskNumber: 1 });
 
-    await claimNextTask("p1", "worker-a", "run-1", null, OWNER);
+    await claimNextTask("p1", "worker-a", "run-1", OWNER);
 
     const set = claimSet(findOneAndUpdate.mock.calls[0]);
     expect(set["execution.workerId"]).toBe("worker-a");
@@ -375,14 +372,14 @@ describe("claimNextTask", () => {
   it("drops any phase an earlier run left on the task", async () => {
     findOneAndUpdate.mockResolvedValue({ _id: "t1", taskNumber: 1 });
 
-    await claimNextTask("p1", "worker-a", "run-1", null, OWNER);
+    await claimNextTask("p1", "worker-a", "run-1", OWNER);
 
     expect(claimStages(findOneAndUpdate.mock.calls[0])[1].$unset).toEqual(PHASE_KEYS);
   });
 
   it("returns null when nothing is claimable", async () => {
     findOneAndUpdate.mockResolvedValue(null);
-    expect(await claimNextTask("p1", "worker-a", "run-1", null, OWNER)).toBeNull();
+    expect(await claimNextTask("p1", "worker-a", "run-1", OWNER)).toBeNull();
   });
 });
 
@@ -903,44 +900,28 @@ describe("claiming by assignment", () => {
     updateMany.mockResolvedValue({ modifiedCount: 0 });
   });
 
-  it("assigns the task to the worker's own identity", async () => {
-    await claimNextTask("p1", "w1", "run-1", IDENTITY, OWNER);
-
-    // Kept rather than overwritten: the filter only ever matches a task already assigned, so
-    // whether the claim is what put the assignee there is what decides if a release may clear it
-    expect(claimSet(findOneAndUpdate.mock.calls[0]).assignee).toEqual({
-      $ifNull: ["$assignee", new Types.ObjectId(IDENTITY)],
-    });
-  });
-
-  it("records itself as the assigner exactly when the claim is what assigned it", async () => {
-    await claimNextTask("p1", "w1", "run-1", IDENTITY, OWNER);
-
-    // Same signal as execution.assignedByRun: the claim is the assigner only when the claim is
-    // what set the assignee, so a resumed run keeps whatever assignedBy already recorded.
-    expect(claimSet(findOneAndUpdate.mock.calls[0]).assignedBy).toEqual({
-      $cond: [WAS_UNASSIGNED, new Types.ObjectId(IDENTITY), "$assignedBy"],
-    });
-  });
-
-  // String(worker.identity) always yields 24 hex, but a corrupt worker record must not 500 the
-  // poll loop — nor claim a task while assigning nobody to it
-  it("claims nothing rather than throwing on an identity that is not an id", async () => {
-    expect(await claimNextTask("p1", "w1", "run-1", "u-worker", OWNER)).toBeNull();
-    expect(findOneAndUpdate).not.toHaveBeenCalled();
-  });
-
-  it("claims nothing rather than throwing on an owner that is not an id", async () => {
-    expect(await claimNextTask("p1", "w1", "run-1", IDENTITY, "u-owner")).toBeNull();
-    expect(findOneAndUpdate).not.toHaveBeenCalled();
-  });
-
-  it("claims without assigning when the worker has no identity yet", async () => {
-    await claimNextTask("p1", "w1", "run-1", null, OWNER);
+  // The filter matched on both fields, so writing either could only overwrite the hand-over with
+  // itself — or, if the expression were ever wrong, quietly rewrite whose task it is
+  it("touches neither the assignee nor the assigner", async () => {
+    await claimNextTask("p1", "w1", "run-1", OWNER);
 
     expect(claimSet(findOneAndUpdate.mock.calls[0])).not.toHaveProperty("assignee");
     expect(claimSet(findOneAndUpdate.mock.calls[0])).not.toHaveProperty("assignedBy");
     expect(claimSet(findOneAndUpdate.mock.calls[0]).status).toBe("doing");
+  });
+
+  // Not omitted: releasing reads $ifNull over this field and treats MISSING as "the claim assigned
+  // it", so leaving it out blanks the person's own assignment on the first release — and a blanked
+  // task drops out of what any machine may claim and is never retried.
+  it("records that the claim is not what assigned the task", async () => {
+    await claimNextTask("p1", "w1", "run-1", OWNER);
+
+    expect(claimSet(findOneAndUpdate.mock.calls[0])["execution.assignedByRun"]).toBe(false);
+  });
+
+  it("claims nothing rather than throwing on an owner that is not an id", async () => {
+    expect(await claimNextTask("p1", "w1", "run-1", "u-owner")).toBeNull();
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
   });
 });
 
@@ -1886,7 +1867,6 @@ describe("createTask stamps who assigned it", () => {
  */
 describe("a machine claims its owner's work", () => {
   const OWNER = "6a732075133f935b19154cd2";
-  const IDENTITY = "6a732075133f935b19154cd3";
 
   // Not inherited from any describe above: this block sets its own board so it means the same
   // thing regardless of which test happened to run immediately before it.
@@ -1898,29 +1878,33 @@ describe("a machine claims its owner's work", () => {
 
   async function claimFilterFor(ownerId: string | null) {
     findOneAndUpdate.mockClear();
-    await claimNextTask("p1", "w1", "r1", IDENTITY, ownerId);
+    await claimNextTask("p1", "w1", "r1", ownerId);
     return findOneAndUpdate.mock.calls[0]?.[0];
   }
 
   it("asks only for tasks its owner assigned to themselves", async () => {
     const filter = await claimFilterFor(OWNER);
-    const alternatives = filter.$and.find((c: Record<string, unknown>) => c.$or).$or;
 
-    expect(alternatives).toContainEqual({ assignee: OWNER, assignedBy: OWNER });
+    expect(filter.assignee).toBe(OWNER);
+    expect(filter.assignedBy).toBe(OWNER);
   });
 
-  it("still takes back the task its own run is resuming", async () => {
+  // The alternative that used to sit beside it. A task assigned to the worker's own `worker-<id>`
+  // account matched with no assignedBy check at all, so anyone able to reach the API could hand a
+  // machine unattended work by naming its account — the shape of BP-345.
+  it("offers no alternative that skips the assigner check", async () => {
     const filter = await claimFilterFor(OWNER);
-    const alternatives = filter.$and.find((c: Record<string, unknown>) => c.$or).$or;
 
-    expect(alternatives).toContainEqual({ assignee: IDENTITY });
+    expect(filter.$or).toEqual([
+      { "execution.attempts": { $exists: false } },
+      { "execution.attempts": { $lt: 3 } },
+    ]);
   });
 
   it("never asks for an unassigned task, which belongs to nobody", async () => {
     const filter = await claimFilterFor(OWNER);
-    const alternatives = filter.$and.find((c: Record<string, unknown>) => c.$or).$or;
 
-    expect(alternatives).not.toContainEqual({ assignee: null });
+    expect(filter.assignee).not.toBeNull();
   });
 
   it("asks for a task that names an agent, because that is the hand-over", async () => {
@@ -1930,7 +1914,7 @@ describe("a machine claims its owner's work", () => {
   });
 
   it("claims nothing at all for a machine with no owner", async () => {
-    expect(await claimNextTask("p1", "w1", "r1", IDENTITY, null)).toBeNull();
+    expect(await claimNextTask("p1", "w1", "r1", null)).toBeNull();
     expect(findOneAndUpdate).not.toHaveBeenCalled();
   });
 });
