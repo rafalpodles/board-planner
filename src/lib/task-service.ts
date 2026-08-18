@@ -578,7 +578,15 @@ export async function updateTask(
   if (updates.assignee !== undefined) {
     const before = oldTask.assignee as { _id?: unknown } | null | undefined;
     const storedAssignee = String((before && before._id) ?? before ?? "");
-    if (storedAssignee !== String(updates.assignee ?? "")) updates.assignedBy = actorId;
+    // Or when nothing is recorded yet, which is every task stored before BP-358. Without that
+    // clause the documented repair — assign it again — is a no-op for the common legacy shape
+    // (already assigned to you, no assigner), and the Agent row's "assign it again to record that"
+    // becomes a lie. It cannot invent consent in the direction that matters: somebody else doing
+    // this leaves assignedBy naming them, which the claim refuses just as firmly as no assigner.
+    const unrecorded = !oldTask.assignedBy;
+    if (unrecorded || storedAssignee !== String(updates.assignee ?? "")) {
+      updates.assignedBy = actorId;
+    }
   }
 
   // The edit form PUTs the whole task, status included, so leaving the active column is
