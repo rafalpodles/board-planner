@@ -8,7 +8,9 @@ import { ApiCustomField, ApiSprint, ApiUser } from "@/types";
 // The Agent row is the only one whose editability depends on the viewer (BP-345), so the rail now
 // reads auth. Default to admin, which is what every other test here assumes it can click.
 const isAdmin = vi.hoisted(() => ({ value: true }));
-vi.mock("@/hooks/use-auth", () => ({ useAuth: () => ({ isAdmin: isAdmin.value }) }));
+vi.mock("@/hooks/use-auth", () => ({
+  useAuth: () => ({ isAdmin: isAdmin.value, onUnauthorized: vi.fn(), noteApiStatus: vi.fn() }),
+}));
 
 afterEach(() => {
   cleanup();
