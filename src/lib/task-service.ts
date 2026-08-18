@@ -12,7 +12,13 @@ import { escalationColumnId } from "@/lib/escalation";
 import { logActivity } from "@/lib/activity";
 import { dispatchWebhooks } from "@/lib/webhooks";
 import { dispatchNotifications } from "@/lib/notifications";
-import { createNotifications, collectRecipients, resolveMentions } from "@/lib/in-app-notifications";
+import {
+  createNotifications,
+  collectRecipients,
+  resolveMentions,
+  assigneeIdOf,
+} from "@/lib/in-app-notifications";
+import { pillToneForRole } from "@/lib/email-template";
 import { parseChecklistString } from "@/lib/checklist";
 import {
   validateCustomFieldValues,
@@ -21,6 +27,7 @@ import {
 } from "@/lib/custom-fields";
 import { onTaskStatusChanged } from "@/lib/pm/triggers";
 import { PROJECT_POLICY_DEFAULTS, isClaimScope } from "@/lib/worker-policy";
+import { workerUsername } from "@/lib/worker-user";
 
 export const MAX_EXECUTION_ATTEMPTS = 3;
 
@@ -259,6 +266,37 @@ export async function createTask(
   dispatchWebhooks(projectId, "task_created", eventPayload);
   dispatchNotifications(projectId, "task_created", eventPayload);
 
+  // Assigning an existing task told the assignee; creating one already assigned to them said
+  // nothing, which is how the MCP, the PM agent and a worker all hand work over.
+  if (assigneeId) {
+    const taskKey = `${project.key}-${task.taskNumber}`;
+    const column = getProjectColumns(project).find((c) => c.id === status);
+    createNotifications({
+      type: "task_assigned",
+      taskId: String(task._id),
+      projectId,
+      actorId,
+      title: `${taskKey} assigned to you`,
+      body: task.title,
+      recipientIds: [String(assigneeId)],
+      email: {
+        kicker: "Assigned to you",
+        taskKey,
+        taskTitle: task.title,
+        taskPills: [
+          { label: column?.label ?? status, tone: pillToneForRole(column?.role) },
+          { label: capitalise(String(task.priority ?? DEFAULT_PRIORITY)), tone: "neutral" },
+        ],
+        taskMeta: [project.name, `created by ${await usernameOf(actorId)}`]
+          .filter(Boolean)
+          .join(" · "),
+        projectRef: project.key,
+        taskNumber: task.taskNumber,
+        assigneeId: String(assigneeId),
+      },
+    });
+  }
+
   return { ok: true, data: populated as ITask };
 }
 
@@ -379,6 +417,15 @@ interface StatusChangeAnnouncement {
  * Activity logging stays with each caller. changeStatus writes one entry deliberately, and
  * updateTask already writes one through its own field tracking, so logging here would double it.
  */
+function capitalise(value: string): string {
+  return value ? value.charAt(0).toUpperCase() + value.slice(1) : value;
+}
+
+async function usernameOf(userId: string): Promise<string> {
+  const user = await User.findById(userId, "username").lean();
+  return user?.username ?? "somebody";
+}
+
 async function announceStatusChange(a: StatusChangeAnnouncement): Promise<void> {
   const status = String(a.task.status);
   const eventPayload = {
@@ -389,16 +436,39 @@ async function announceStatusChange(a: StatusChangeAnnouncement): Promise<void> 
   dispatchWebhooks(a.projectId, "status_changed", eventPayload);
   dispatchNotifications(a.projectId, "status_changed", eventPayload);
 
-  const project = await Project.findById(a.projectId, "key name").lean();
+  const [project, actor] = await Promise.all([
+    Project.findById(a.projectId, "key name").lean(),
+    usernameOf(a.actorId),
+  ]);
   const taskKey = project ? `${project.key}-${a.task.taskNumber}` : `#${a.task.taskNumber}`;
+  // The column's own label, not its id: since CP-128 a project names its columns, and
+  // "BP-142 → in_review" is the seeded id showing through on a board that may call it anything.
+  const columns = getProjectColumns(a.project);
+  const from = columns.find((c) => c.id === String(a.oldTask.status));
+  const to = columns.find((c) => c.id === status);
+  const toLabel = to?.label ?? status;
   createNotifications({
     type: "status_changed",
     taskId: a.taskId,
     projectId: a.projectId,
     actorId: a.actorId,
-    title: `${taskKey} → ${status}`,
+    title: `${taskKey} moved to ${toLabel}`,
     body: a.task.title,
     recipientIds: collectRecipients(a.task),
+    email: {
+      kicker: "Status changed",
+      taskKey,
+      taskTitle: a.task.title,
+      taskPills: [
+        { label: from?.label ?? String(a.oldTask.status), tone: pillToneForRole(from?.role) },
+        "arrow",
+        { label: toLabel, tone: pillToneForRole(to?.role) },
+      ],
+      taskMeta: [project?.name, `moved by ${actor}`].filter(Boolean).join(" · "),
+      projectRef: project?.key,
+      taskNumber: a.task.taskNumber,
+      assigneeId: assigneeIdOf(a.task),
+    },
   });
 
   if (roleOf(a.project, status) === "done" && a.oldTask.recurrence) {
@@ -655,8 +725,12 @@ export async function updateTask(
     const newAssigneeId = typeof task.assignee === "object" && "_id" in task.assignee
       ? String(task.assignee._id)
       : String(task.assignee);
-    const project = await Project.findById(projectId, "key").lean();
+    const [project, actor] = await Promise.all([
+      Project.findById(projectId, "key name columns").lean(),
+      usernameOf(actorId),
+    ]);
     const taskKey = project ? `${project.key}-${task.taskNumber}` : `#${task.taskNumber}`;
+    const column = getProjectColumns(project).find((c) => c.id === String(task.status));
     createNotifications({
       type: "task_assigned",
       taskId,
@@ -665,6 +739,19 @@ export async function updateTask(
       title: `${taskKey} assigned to you`,
       body: task.title,
       recipientIds: [newAssigneeId],
+      email: {
+        kicker: "Assigned to you",
+        taskKey,
+        taskTitle: task.title,
+        taskPills: [
+          { label: column?.label ?? String(task.status), tone: pillToneForRole(column?.role) },
+          { label: capitalise(String(task.priority ?? DEFAULT_PRIORITY)), tone: "neutral" },
+        ],
+        taskMeta: [project?.name, `assigned by ${actor}`].filter(Boolean).join(" · "),
+        projectRef: project?.key,
+        taskNumber: task.taskNumber,
+        assigneeId: newAssigneeId,
+      },
     });
   }
 
@@ -719,29 +806,53 @@ export async function addComment(
   dispatchWebhooks(projectId, "comment_added", eventPayload);
   dispatchNotifications(projectId, "comment_added", eventPayload);
 
-  const project = await Project.findById(projectId, "key").lean();
+  const [project, mentionedIds] = await Promise.all([
+    Project.findById(projectId, "key name columns").lean(),
+    resolveMentions(bodyText),
+  ]);
   const taskKey = project ? `${project.key}-${task.taskNumber}` : `#${task.taskNumber}`;
-  const recipients = collectRecipients(task);
-  createNotifications({
-    type: "comment_added",
-    taskId,
-    projectId,
-    actorId: actor.id,
-    title: `New comment on ${taskKey}`,
-    body: bodyText.trim().substring(0, 120),
-    recipientIds: recipients,
-  });
+  const column = getProjectColumns(project).find((c) => c.id === String(task.status));
+  const excerpt = bodyText.trim().substring(0, 120);
+  const sharedEmail = {
+    taskKey,
+    taskTitle: task.title,
+    taskPills: [
+      { label: column?.label ?? String(task.status), tone: pillToneForRole(column?.role) },
+    ],
+    taskMeta: project?.name ?? "",
+    quote: { who: actor.username, text: excerpt },
+    projectRef: project?.key,
+    taskNumber: task.taskNumber,
+    assigneeId: assigneeIdOf(task),
+  };
 
-  const mentionedIds = await resolveMentions(bodyText);
+  // A watcher who was also mentioned used to get both, with the same excerpt in each. The
+  // mention is the one that says why they were wanted, so it wins and the other skips them.
+  const mentioned = new Set(mentionedIds);
+  const commentRecipients = collectRecipients(task).filter((id) => !mentioned.has(id));
+  if (commentRecipients.length > 0) {
+    createNotifications({
+      type: "comment_added",
+      taskId,
+      projectId,
+      actorId: actor.id,
+      title: `New comment on ${taskKey}`,
+      body: excerpt,
+      recipientIds: commentRecipients,
+      email: { kicker: "New comment", ...sharedEmail },
+    });
+  }
+
   if (mentionedIds.length > 0) {
     createNotifications({
       type: "mentioned",
       taskId,
       projectId,
       actorId: actor.id,
-      title: `You were mentioned in ${taskKey}`,
-      body: bodyText.trim().substring(0, 120),
+      title: `${actor.username} mentioned you in ${taskKey}`,
+      body: excerpt,
       recipientIds: mentionedIds,
+      email: { kicker: "You were mentioned", ...sharedEmail },
     });
   }
 
@@ -821,7 +932,7 @@ async function createNextRecurrence(
 export async function releaseExpiredTasks(projectId: string, now = new Date()): Promise<number> {
   await connectDB();
 
-  const project = await Project.findById(projectId, "columns").lean();
+  const project = await Project.findById(projectId, "columns key name").lean();
   const columns = getProjectColumns(project);
   const approved = columns.find((c) => c.role === "approved")?.id;
   const active = columns.filter((c) => c.role === "active").map((c) => c.id);
@@ -833,12 +944,21 @@ export async function releaseExpiredTasks(projectId: string, now = new Date()): 
     status: { $in: active },
     "execution.startedAt": { $lt: new Date(now.getTime() - EXECUTION_LEASE_MS) },
   };
+  const outOfAttempts = { ...expired, "execution.attempts": { $gte: MAX_EXECUTION_ATTEMPTS } };
+
+  // Read before the update, not after: the move clears an assignee the run put there, so afterwards
+  // there is nobody left on the task to tell. A task out of attempts is rare, so this normally
+  // costs one query that matches nothing.
+  const abandoned = await Task.find(
+    outOfAttempts,
+    "taskNumber title assignee watchers execution.workerId"
+  ).lean();
 
   // The attempt is not refunded: a task that repeatedly outlives its worker has to run out of
   // attempts and reach a human, rather than cycling through the queue forever
   const [spent, retryable] = await Promise.all([
     Task.updateMany(
-      { ...expired, "execution.attempts": { $gte: MAX_EXECUTION_ATTEMPTS } },
+      outOfAttempts,
       [{ $set: { status: exhausted, ...CLEAR_WORKER_ASSIGNEE } }, { $unset: RUN_FIELDS }],
       { updatePipeline: true }
     ),
@@ -849,7 +969,66 @@ export async function releaseExpiredTasks(projectId: string, now = new Date()): 
     ),
   ]);
 
+  // Only what this call actually moved: two workers polling at once both read the list, and the
+  // one whose update matched nothing must not announce the other's work a second time.
+  if (spent.modifiedCount > 0) {
+    announceAbandonedRuns(projectId, project, abandoned, exhausted, columns).catch((err) =>
+      console.error("Failed to announce an abandoned run:", err)
+    );
+  }
+
   return spent.modifiedCount + retryable.modifiedCount;
+}
+
+/**
+ * A run reaching its attempt limit is the one thing on a board that happens with nobody watching:
+ * the lease expires on a machine that is already gone, so the move has no actor and went through
+ * updateMany, which fires no webhook and no notification.
+ */
+async function announceAbandonedRuns(
+  projectId: string,
+  project: { key?: string; name?: string } | null,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tasks: any[],
+  exhausted: string,
+  columns: ReturnType<typeof getProjectColumns>
+): Promise<void> {
+  const column = columns.find((c) => c.id === exhausted);
+  for (const task of tasks) {
+    const taskKey = project?.key ? `${project.key}-${task.taskNumber}` : `#${task.taskNumber}`;
+    const recipients = collectRecipients(task);
+    if (recipients.length === 0) continue;
+    // The machine that stopped answering is the actor, because that is what happened — and the
+    // notification row needs one. Without its identity there is nothing truthful to put there.
+    const workerId = task.execution?.workerId;
+    const actor = workerId
+      ? await User.findOne({ username: workerUsername(String(workerId)) }, "_id").lean()
+      : null;
+    if (!actor) continue;
+    createNotifications({
+      type: "status_changed",
+      taskId: String(task._id),
+      projectId,
+      actorId: String(actor._id),
+      title: `${taskKey} needs a human — the run was abandoned`,
+      body: task.title,
+      recipientIds: recipients,
+      email: {
+        kicker: "Run abandoned",
+        taskKey,
+        taskTitle: task.title,
+        taskPills: [
+          { label: column?.label ?? exhausted, tone: pillToneForRole(column?.role) },
+        ],
+        taskMeta: [project?.name, `no worker report in ${EXECUTION_LEASE_MS / 3_600_000} h`]
+          .filter(Boolean)
+          .join(" · "),
+        projectRef: project?.key,
+        taskNumber: task.taskNumber,
+        assigneeId: assigneeIdOf(task),
+      },
+    });
+  }
 }
 
 // The blockers that tasks waiting in the approved column actually name, narrowed to those that have

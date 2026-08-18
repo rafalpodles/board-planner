@@ -8,6 +8,8 @@ const userExists = vi.fn();
 const revokeUserSessions = vi.fn();
 const invalidateResetTokens = vi.fn();
 const logInstanceAudit = vi.fn();
+const notifyPasswordChanged = vi.fn();
+const notifyAddressChanged = vi.fn();
 const hash = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
@@ -26,6 +28,7 @@ vi.mock("@/lib/grants", () => ({ check, accessibleProjectIds: vi.fn() }));
 vi.mock("@/lib/session", () => ({ revokeUserSessions }));
 vi.mock("@/lib/password-reset", () => ({ invalidateResetTokens }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
+vi.mock("@/lib/security-mail", () => ({ notifyPasswordChanged, notifyAddressChanged }));
 vi.mock("bcryptjs", () => ({ default: { hash } }));
 vi.mock("@/models/user", () => ({
   User: {
@@ -40,7 +43,7 @@ const { PUT } = await import("./route");
 const { resetRateLimits, lockoutKey, recordFailedAttempt, isRateLimited, ANONYMOUS_ACCOUNT_ATTEMPTS } =
   await import("@/lib/rate-limit");
 
-const ADMIN = { _id: "admin-1", role: "admin" };
+const ADMIN = { _id: "admin-1", role: "admin", username: "rafal" };
 
 function put(body: unknown) {
   return new Request("http://x/api/users/target-1", {
@@ -269,6 +272,37 @@ describe("PUT /api/users/:id — an admin sets a password", () => {
     );
   });
 
+  // The account holder is the only person this happens to who was not in the room for it, and
+  // until now the audit row was the whole of what it left behind
+  it("tells the account holder, naming the administrator", async () => {
+    const target = targetDoc({ role: "member" });
+    found(target);
+
+    await PUT(put({ password: "a-fresh-password" }), ctx());
+
+    expect(notifyPasswordChanged).toHaveBeenCalledWith({
+      email: "target@example.com",
+      username: "target",
+      how: "admin",
+      actor: "rafal",
+    });
+    // Whatever the mail says, it is not this
+    expect(JSON.stringify(notifyPasswordChanged.mock.calls)).not.toContain("a-fresh-password");
+  });
+
+  // One PUT can set a password and repoint the address. Telling the address the request just
+  // installed would send the warning to whoever took the account over.
+  it("warns the address the account had on the way in, not the one it was just given", async () => {
+    const target = targetDoc({ role: "member" });
+    found(target);
+
+    await PUT(put({ password: "a-fresh-password", email: "attacker@evil.test" }), ctx());
+
+    expect(notifyPasswordChanged).toHaveBeenCalledWith(
+      expect.objectContaining({ email: "target@example.com" })
+    );
+  });
+
   // The hash must never be loaded, so it can never be serialised back to the caller
   it("does not pull the hash out of the database", async () => {
     const target = targetDoc({ role: "member" });
@@ -376,5 +410,33 @@ describe("PUT /api/users/:id — an admin sets a password", () => {
     expect(res.status).toBe(200);
     expect(revokeUserSessions).not.toHaveBeenCalled();
     expect(logInstanceAudit).not.toHaveBeenCalled();
+  });
+});
+
+// Repointing an address takes the account over at the next reset and signs nobody out. The self
+// path has warned the losing address since BP-354; done by an admin it was silent, which is the
+// half a borrowed admin session actually uses.
+describe("PUT /api/users/:id — an admin repoints the address", () => {
+  it("warns the address being taken off the account, naming the administrator", async () => {
+    const target = targetDoc({ role: "member" });
+    found(target);
+
+    await PUT(put({ email: "new@example.com" }), ctx());
+
+    expect(notifyAddressChanged).toHaveBeenCalledWith({
+      previousEmail: "target@example.com",
+      username: "target",
+      newEmail: "new@example.com",
+      actor: "rafal",
+    });
+  });
+
+  it("stays quiet when the address submitted is the one already stored", async () => {
+    const target = targetDoc({ role: "member" });
+    found(target);
+
+    await PUT(put({ email: "target@example.com" }), ctx());
+
+    expect(notifyAddressChanged).not.toHaveBeenCalled();
   });
 });

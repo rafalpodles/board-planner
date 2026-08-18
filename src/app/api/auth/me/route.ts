@@ -28,6 +28,7 @@ export async function GET(request: Request) {
     fullName: user.fullName,
     email: user.email || "",
     emailNotifications: user.emailNotifications || false,
+    emailDigest: user.emailDigest || false,
     collapseEmptyColumns: user.collapseEmptyColumns ?? true,
     role: user.role || "member",
     createdAt: user.createdAt,

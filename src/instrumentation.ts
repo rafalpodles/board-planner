@@ -66,6 +66,13 @@ export async function register() {
       const { startPmScheduler } = await import("@/lib/pm/scheduler");
       startPmScheduler();
       console.log("PM scheduler started");
+
+      const { startDigestScheduler, digestHour, digestTimezone } = await import("@/lib/digest");
+      const { isEmailConfigured } = await import("@/lib/email");
+      if (isEmailConfigured()) {
+        startDigestScheduler();
+        console.log(`Digest scheduler started — ${digestHour()}:00 ${digestTimezone()}`);
+      }
     } catch (err) {
       // Don't crash the server on a transient boot-time DB hiccup;
       // route handlers reconnect lazily via connectDB().

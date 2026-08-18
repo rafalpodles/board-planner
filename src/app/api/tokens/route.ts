@@ -5,8 +5,39 @@ import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
 import { withAuth } from "@/lib/middleware";
 import { accessibleProjectIds } from "@/lib/grants";
+import { isEmailConfigured } from "@/lib/email";
+import { notifyCredentialCreated } from "@/lib/security-mail";
 import { ApiToken } from "@/models/apiToken";
 import { Project } from "@/models/project";
+
+/**
+ * Not awaited by the handler, and it asks whether mail is configured before it asks the database
+ * anything: the scope is only ever read to fill a line in a message nobody may be sending.
+ */
+async function announceToken(
+  owner: { email: string; username: string },
+  name: string,
+  projectIds: string[]
+): Promise<void> {
+  try {
+    if (!owner.email || !isEmailConfigured()) return;
+    let scope = "every board this account can reach";
+    if (projectIds.length > 0) {
+      const projects = await Project.find({ _id: { $in: projectIds } }).select("key").lean();
+      const keys = projects.map((p) => p.key as string).sort();
+      scope = keys.join(", ") || "no board";
+    }
+    await notifyCredentialCreated({
+      email: owner.email,
+      username: owner.username,
+      kind: "token",
+      name,
+      scope,
+    });
+  } catch (err) {
+    console.error("Could not announce the new token:", err);
+  }
+}
 
 export const GET = withAuth(async (_request, { user }) => {
   await connectDB();
@@ -74,6 +105,8 @@ export const POST = withAuth(async (request, { user }) => {
     prefix,
     allowedProjects: scope,
   });
+
+  void announceToken(user, token.name, scope);
 
   // Return the raw token ONCE — it's never stored or retrievable again
   return NextResponse.json({
