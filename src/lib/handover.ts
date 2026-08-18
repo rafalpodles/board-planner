@@ -26,7 +26,13 @@ export type Handover =
 
 type Judged = Pick<ApiTask, "agent" | "assignee" | "assignedBy" | "status">;
 
-function idOf(ref: ApiTask["assignedBy"]): string | null {
+/**
+ * The id behind a reference the API may or may not have populated. Both shapes reach the browser:
+ * a task read whole carries the document, a writer echoing back what it sent carries the id.
+ */
+export function refIdOf(
+  ref: { _id: string } | string | null | undefined
+): string | null {
   if (!ref) return null;
   return typeof ref === "string" ? ref : String(ref._id);
 }
@@ -66,7 +72,7 @@ export function handoverOf(task: Judged, columns?: AnyColumn[]): Handover {
   // has to test the value, not its type, or a deleted assigner reads as a live one.
   if (!task.assignee) return { runs: false, reason: "unassigned", by: null };
 
-  const assigner = idOf(task.assignedBy);
+  const assigner = refIdOf(task.assignedBy);
   // Absent on every task assigned before BP-358, and deliberately never backfilled: the document
   // does not record whether that person handed it to themselves, and guessing would invent consent.
   if (!assigner) return { runs: false, reason: "assigner-unrecorded", by: null };

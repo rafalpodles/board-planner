@@ -492,6 +492,118 @@ describe("the Agent row", () => {
       expect((await agentOptions()).join("|")).not.toContain("My own agent");
     });
   });
+
+  /**
+   * The agent SOMEBODY ELSE composed, on a task that carries it. `/api/agents` answers only with
+   * agents the reader may choose, so this one is not in the list at all — and the picker, unable
+   * to resolve the id, rendered its empty state. "No agent" printed over the one field that
+   * decides what runs on a machine, which is the exact thing the consent model rests on.
+   *
+   * The name therefore travels on the task itself. The row stops being a picker: re-offering the
+   * value would be a control that 400s on click, which this view reports as "Save failed — retry"
+   * and nothing more.
+   */
+  describe("and an agent the reader may not choose, which the task carries anyway", () => {
+    // Populated, which is the shape the task routes answer with. A fixture holding the bare id
+    // could not tell a row that names the agent from one that cannot.
+    const CARRIED = {
+      agent: { _id: "a9", name: "Kasia's own agent" },
+      assignee: { _id: "u2", username: "claude", fullName: "Claude Code" },
+      assignedBy: { _id: "u2", username: "claude", fullName: "Claude Code" },
+      status: "ready",
+    } as unknown as ApiTask;
+
+    // The reader has a personal agent of their own as well, so without the suppression below both
+    // notes print at once — and the second one explains a list that is not on screen
+    const MINE_AND_THEIRS = [
+      ...(AGENTS as unknown as { _id: string; name: string; scope: string }[]),
+      { _id: "a3", name: "My own agent", scope: "user", description: "" },
+    ] as never;
+
+    function renderCarried(over: Partial<React.ComponentProps<typeof PropertyRail>> = {}) {
+      return renderRail({
+        agents: AGENTS,
+        draft: { ...draft, assignee: "claude", agent: "a9" },
+        stored: CARRIED,
+        currentUsername: "rpo",
+        columns: BOARD,
+        ...over,
+      });
+    }
+
+    it("names it, instead of saying the task has none", () => {
+      renderCarried();
+
+      expect(screen.getByTestId("agent-not-offered").textContent).toBe("Kasia's own agent");
+    });
+
+    // Asserted on the CONTROL, not on the words: the picker's own empty state says "No agent" too,
+    // so a version that named the agent and still offered a combobox would satisfy any text match
+    it("offers no picker for it, because re-choosing it is what the server refuses", () => {
+      renderCarried();
+
+      expect(
+        [...screen.queryAllByRole("combobox")].find((el) =>
+          (el.textContent || "").startsWith("Agent")
+        )
+      ).toBeUndefined();
+    });
+
+    it("says why it is not yours to choose", () => {
+      renderCarried();
+
+      expect(screen.getByTestId("agent-not-offered-reason").textContent).toMatch(
+        /only offered to the person who composed it/i
+      );
+    });
+
+    // Two muted lines under one row, and the second is about a list that is not on screen
+    it("does not also explain a shortened list where there is no list", () => {
+      renderCarried({ agents: MINE_AND_THEIRS });
+
+      expect(screen.queryByTestId("personal-agents-withheld")).toBeNull();
+    });
+
+    // The ordinary case has to keep its picker, or this branch has simply replaced the field
+    it("leaves the row a picker when the agent is one the reader can see", () => {
+      renderRail({
+        agents: AGENTS,
+        draft: { ...draft, agent: "a2" },
+        stored: { agent: "a2", assignee: null, assignedBy: null, status: "todo" },
+      });
+
+      expect(screen.queryByTestId("agent-not-offered")).toBeNull();
+      expect(
+        [...screen.queryAllByRole("combobox")].find((el) =>
+          (el.textContent || "").startsWith("Agent")
+        )?.textContent
+      ).toContain("With security review");
+    });
+
+    /**
+     * The hand-over notice is suppressed while the draft and the stored task disagree, and the
+     * comparison reads the stored agent. Against a POPULATED task an id-to-object comparison never
+     * matches, so every task would look mid-edit and the notice would never appear again — the
+     * lying diagnostic put back by the fix for a different one.
+     */
+    it("still judges the hand-over, though the stored agent arrives populated", () => {
+      renderRail({
+        agents: AGENTS,
+        draft: { ...draft, assignee: "claude", agent: "a2" },
+        stored: {
+          agent: { _id: "a2", name: "With security review" },
+          assignee: { _id: "u2", username: "claude", fullName: "Claude Code" },
+          assignedBy: { _id: "u1", username: "rpo", fullName: "Rafal Podles" },
+          status: "ready",
+        } as unknown as ApiTask,
+        columns: BOARD,
+      });
+
+      expect(screen.getByTestId("handover-notice").getAttribute("data-reason")).toBe(
+        "assigned-by-someone-else"
+      );
+    });
+  });
 });
 
 /**
