@@ -4,7 +4,7 @@ import { connectDB } from "@/lib/db";
 import { withAuth, withWorker } from "@/lib/middleware";
 import { Worker } from "@/models/worker";
 import { Project } from "@/models/project";
-import { assignmentsFor, approvedProjectIds, overriddenWorkerPolicy, toApiWorker, usableRepos } from "@/lib/worker-service";
+import { assignmentsFor, overriddenWorkerPolicy, ownerReachableProjectIds, toApiWorker, usableRepos } from "@/lib/worker-service";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { InstanceAuditAction } from "@/types";
 
@@ -25,11 +25,12 @@ export const GET = withWorker(async (_request, { worker }) => {
   }
 
   await connectDB();
-  const [projects, others] = await Promise.all([
+  const [projects, others, reachable] = await Promise.all([
     Project.find({ "worker.enabled": true }).select("_id repositoryUrl githubRepo gitlabRepo gitlabHost worker").lean(),
     Worker.find({ _id: { $ne: worker._id } }).select(
       "_id name host repos enabled lockedByInstance lastSeenAt createdAt"
     ),
+    ownerReachableProjectIds(worker),
   ]);
 
   return NextResponse.json({
@@ -40,8 +41,7 @@ export const GET = withWorker(async (_request, { worker }) => {
     assignments: assignmentsFor(
       usableRepos(worker as never, others as never),
       projects as never,
-      approvedProjectIds(worker),
-      Boolean(worker.owner)
+      reachable
     ),
   });
 });
@@ -81,23 +81,6 @@ export const PATCH = withAuth(async (request, { params, user }) => {
   }
 
   const update: Record<string, unknown> = {};
-
-  // The only way to widen or narrow what an already-enrolled machine may claim, and the recovery
-  // path for a worker enrolled before BP-305 — those have an empty set and so claim nothing.
-  if ("approvedProjects" in body) {
-    const ids = body.approvedProjects;
-    if (!Array.isArray(ids) || ids.some((id) => typeof id !== "string" || !isValidObjectId(id))) {
-      return NextResponse.json(
-        { error: "approvedProjects must be an array of project ids" },
-        { status: 400 }
-      );
-    }
-    const known = await Project.countDocuments({ _id: { $in: ids } });
-    if (known !== new Set(ids).size) {
-      return NextResponse.json({ error: "approvedProjects names a project that does not exist" }, { status: 400 });
-    }
-    update.approvedProjects = [...new Set(ids as string[])];
-  }
 
   for (const field of ADMIN_FIELDS) {
     if (!(field in body)) continue;

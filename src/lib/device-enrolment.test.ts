@@ -23,8 +23,6 @@ const {
   denyDeviceEnrolment,
   formatUserCode,
   normaliseUserCode,
-  PRESET_AGENT,
-  isWorkerPreset,
 } = await import("./device-enrolment");
 
 const bcrypt = (await import("bcryptjs")).default;
@@ -211,20 +209,6 @@ describe("refusing an enrolment", () => {
 
     expect(updateOne.mock.calls[0][0].status).toBe("pending");
     expect(updateOne.mock.calls[0][1].$set.credential).toBe("");
-  });
-});
-
-describe("the presets", () => {
-  // Reviewing and merging are properties of a composition, so a preset names the agent that has
-  // them rather than restating them as flags beside it.
-  it("names a seeded agent for each level of autonomy", () => {
-    expect(PRESET_AGENT.write).toBe("Default");
-    expect(PRESET_AGENT.review).toBe("With security review");
-    expect(PRESET_AGENT.merge).toBe("Merges its own work");
-  });
-
-  it("offers exactly the three levels the enrolment screen shows", () => {
-    expect(Object.keys(PRESET_AGENT).sort()).toEqual(["merge", "review", "write"]);
   });
 });
 

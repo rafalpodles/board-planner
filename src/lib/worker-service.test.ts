@@ -6,23 +6,44 @@ const findById = vi.fn();
 const findOneAndUpdate = vi.fn();
 const updateOne = vi.fn();
 const ensureWorkerUser = vi.fn();
+const userFindById = vi.fn();
+const grantFind = vi.fn();
 
 vi.mock("./db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/worker", () => ({ Worker: { findById, findOneAndUpdate, updateOne } }));
 vi.mock("@/lib/worker-user", () => ({ ensureWorkerUser }));
+vi.mock("@/models/user", () => ({ User: { findById: userFindById } }));
+// The real grants module runs on top of this: what a machine may reach is what its owner may
+// reach, and mocking that answer instead of the collection under it would assert the wiring
+// against itself.
+vi.mock("@/models/grant", () => ({ Grant: { find: grantFind } }));
 
 const {
   assignmentsFor,
   lostCheckouts,
   usableRepos,
   overriddenWorkerPolicy,
+  ownerReachableProjectIds,
   registerWorker,
-  verdictFor,
+  verdictFor: rawVerdictFor,
   verifyWorkerCredential,
   PROTOCOL_VERSION,
   WORKER_STALE_MS,
   WORKER_HEARTBEAT_MS,
 } = await import("./worker-service");
+
+// Reach is resolved from the owner's grants by the caller and handed in, so every case that is not
+// about reach says "the owner can reach this project" and varies something else. Passed explicitly
+// rather than defaulted inside verdictFor, whose own default denies.
+const verdictFor = (...args: Parameters<typeof rawVerdictFor>) =>
+  rawVerdictFor(
+    args[0],
+    args[1],
+    args[2],
+    args[3],
+    args[4],
+    args.length > 5 ? args[5] : [PROJECT_ID]
+  );
 
 const now = new Date("2026-08-01T12:00:00.000Z");
 const fresh = new Date(now.getTime() - 1000);
@@ -48,8 +69,6 @@ function worker(overrides: Record<string, unknown> = {}) {
     lastSeenAt: fresh,
     host: "mac.home",
     repos: [{ remote: REMOTE, path: "/repo" }],
-    // BP-305: what an admin approved. The reported repos narrow this, they never define it.
-    approvedProjects: [PROJECT_ID],
     owner: "6a732075133f935b19154cd2",
     ...overrides,
   } as never;
@@ -243,33 +262,75 @@ describe("registerWorker", () => {
 // Two live workers pointed at the same checkout both create worktrees in it and both run `git` in
 // it. The claim is atomic so they will not take the same task, but the working tree is not — one
 // run's checkout moves under the other's feet.
-// Assignment is no longer stored: it is the project being enabled AND this machine reporting a
-// checkout of its repository. Nothing the server writes decides it.
-// BP-305: a remote is public information and the worker reports its own, so approval for one
-// project must not become approval for every enabled one
-describe("the approved set, not the reported repos", () => {
-  it("refuses a project this worker was never approved for", () => {
-    const verdict = verdictFor(
-      worker({ approvedProjects: ["someone-else"] }),
-      project(),
-      PROTOCOL_VERSION,
-      fresh
-    );
+// Assignment is no longer stored: it is the project being enabled AND its owner being able to
+// reach it AND this machine reporting a checkout of its repository.
+// BP-305/BP-358: a remote is public information and the worker reports its own, so having the
+// checkout must not become permission to serve every enabled project
+describe("the owner's reach, not the reported repos", () => {
+  const reported = [{ remote: REMOTE, path: "/repo" }];
 
-    expect(verdict).toEqual({ ok: false, reason: "this worker was not approved for this project" });
+  it("refuses a project this machine's owner cannot reach", () => {
+    const verdict = verdictFor(worker(), project(), PROTOCOL_VERSION, fresh, [], ["someone-else"]);
+
+    expect(verdict).toEqual({
+      ok: false,
+      reason: "this machine's owner cannot reach this project",
+    });
   });
 
-  it("refuses a worker approved for nothing, which is what a pre-BP-305 enrolment is", () => {
-    const verdict = verdictFor(worker({ approvedProjects: [] }), project(), PROTOCOL_VERSION, fresh);
-
-    expect(verdict.ok).toBe(false);
+  it("refuses a machine whose owner reaches nothing", () => {
+    expect(verdictFor(worker(), project(), PROTOCOL_VERSION, fresh, [], []).ok).toBe(false);
   });
 
-  it("offers no assignment for a project outside the approved set", () => {
-    const reported = [{ remote: REMOTE, path: "/repo" }];
+  // Null is the answer accessibleProjectIds gives an instance admin, and reading it as "reaches
+  // nothing" would strand every admin-owned machine
+  it("admits an owner under no restriction at all", () => {
+    expect(verdictFor(worker(), project(), PROTOCOL_VERSION, fresh, [], null)).toEqual({ ok: true });
+  });
 
-    expect(assignmentsFor(reported, [project()], [], true)).toEqual([]);
-    expect(assignmentsFor(reported, [project()], ["other"], true)).toEqual([]);
+  it("offers no assignment for a project outside the owner's reach", () => {
+    expect(assignmentsFor(reported, [project()], [])).toEqual([]);
+    expect(assignmentsFor(reported, [project()], ["other"])).toEqual([]);
+  });
+});
+
+// BP-358: the stored approved list is gone, so this is now the only thing standing between a
+// machine and every project on the instance.
+describe("ownerReachableProjectIds", () => {
+  beforeEach(() => {
+    userFindById.mockReset();
+    grantFind.mockReset();
+    grantFind.mockReturnValue({ select: () => ({ lean: () => Promise.resolve([]) }) });
+  });
+
+  // An ownerless machine is the pre-BP-358 enrolment. Falling back to anything wider would keep
+  // the race this design replaces alive indefinitely.
+  it("reaches nothing for a machine with no owner", async () => {
+    expect(await ownerReachableProjectIds({ owner: null })).toEqual([]);
+    expect(userFindById).not.toHaveBeenCalled();
+  });
+
+  // A deleted account is not an absent restriction: populate renders null, and typeof null is
+  // "object", so a truthiness check on the ref alone would read it as a live owner
+  it("reaches nothing when the owner's account is gone", async () => {
+    userFindById.mockResolvedValue(null);
+
+    expect(await ownerReachableProjectIds({ owner: "6a732075133f935b19154cd2" } as never)).toEqual([]);
+  });
+
+  it("reaches exactly the projects its owner is granted", async () => {
+    userFindById.mockResolvedValue({ _id: "u1", role: "user" });
+    grantFind.mockReturnValue({
+      select: () => ({ lean: () => Promise.resolve([{ object: PROJECT_ID }, { object: "p2" }]) }),
+    });
+
+    expect(await ownerReachableProjectIds({ owner: "u1" } as never)).toEqual([PROJECT_ID, "p2"]);
+  });
+
+  it("is unrestricted when its owner is an instance admin", async () => {
+    userFindById.mockResolvedValue({ _id: "u1", role: "admin" });
+
+    expect(await ownerReachableProjectIds({ owner: "u1" } as never)).toBeNull();
   });
 });
 
@@ -277,13 +338,13 @@ describe("assignmentsFor", () => {
   const reported = [{ remote: REMOTE, path: "/repo" }];
 
   it("offers an enabled project whose repository this machine has", () => {
-    expect(assignmentsFor(reported, [project()], [PROJECT_ID], true)).toEqual([
+    expect(assignmentsFor(reported, [project()], [PROJECT_ID])).toEqual([
       { project: PROJECT_ID, remote: REMOTE, policy: {} },
     ]);
   });
 
   it("answers with the remote the worker reported, never a path", () => {
-    const [assignment] = assignmentsFor(reported, [project()], [PROJECT_ID], true);
+    const [assignment] = assignmentsFor(reported, [project()], [PROJECT_ID]);
 
     expect(assignment.remote).toBe(REMOTE);
     expect(Object.keys(assignment).sort()).toEqual(["policy", "project", "remote"]);
@@ -292,11 +353,11 @@ describe("assignmentsFor", () => {
   it("skips a project nobody enabled for workers", () => {
     const off = project({ worker: { enabled: false, policy: {}, policyOverrides: [] } });
 
-    expect(assignmentsFor(reported, [off], [PROJECT_ID], true)).toEqual([]);
+    expect(assignmentsFor(reported, [off], [PROJECT_ID])).toEqual([]);
   });
 
   it("skips a project whose repository this machine does not have", () => {
-    expect(assignmentsFor([{ remote: "git@github.com:someone/else.git", path: "/x" }], [project()], [PROJECT_ID], true))
+    expect(assignmentsFor([{ remote: "git@github.com:someone/else.git", path: "/x" }], [project()], [PROJECT_ID]))
       .toEqual([]);
   });
 
@@ -309,7 +370,7 @@ describe("assignmentsFor", () => {
       },
     });
 
-    expect(assignmentsFor(reported, [configured], [PROJECT_ID], true)[0].policy).toEqual({
+    expect(assignmentsFor(reported, [configured], [PROJECT_ID])[0].policy).toEqual({
       taskTimeoutMs: 900000,
       model: "haiku",
     });
@@ -322,16 +383,23 @@ describe("assignmentsFor", () => {
       { remote: "git@github.com:owner/other.git", path: "/other" },
     ];
 
-    expect(assignmentsFor(both, [project(), other], [PROJECT_ID, "p2"], true).map((a) => a.project)).toEqual([
+    expect(assignmentsFor(both, [project(), other], [PROJECT_ID, "p2"]).map((a) => a.project)).toEqual([
       PROJECT_ID,
       "p2",
     ]);
   });
 
   // BP-358: an ownerless machine must be offered nothing, not merely refused at claim time — a
-  // non-empty list here is what sends the worker's own loop into a claim it cannot win.
-  it("offers nothing to a machine with no owner, regardless of what it would otherwise match", () => {
-    expect(assignmentsFor(reported, [project()], [PROJECT_ID], false)).toEqual([]);
+  // non-empty list here is what sends the worker's own loop into a claim it cannot win. Its reach
+  // is the empty list ownerReachableProjectIds answers with, not a separate flag.
+  it("offers nothing to a machine reaching nothing, whatever it would otherwise match", () => {
+    expect(assignmentsFor(reported, [project()], [])).toEqual([]);
+  });
+
+  // Null means no restriction, and a machine whose owner is an instance admin must still be
+  // offered its checkouts rather than treated as reaching nothing
+  it("offers every enabled, matching project when there is no restriction", () => {
+    expect(assignmentsFor(reported, [project()], null).map((a) => a.project)).toEqual([PROJECT_ID]);
   });
 });
 

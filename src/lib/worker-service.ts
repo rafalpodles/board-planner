@@ -3,10 +3,12 @@ import bcrypt from "bcryptjs";
 import { isValidObjectId, Types } from "mongoose";
 import { connectDB } from "./db";
 import { Worker } from "@/models/worker";
-import { ApiWorker, ApiWorkerTask, IWorker } from "@/types";
+import { ApiUserSummary, ApiWorker, ApiWorkerTask, IUser, IWorker } from "@/types";
 import { PROJECT_POLICY_DEFAULTS, WORKER_POLICY_DEFAULTS } from "@/lib/worker-policy";
 import { MatchableProject, RepoReport, matchRepo } from "@/lib/repo-match";
 import { ensureWorkerUser } from "@/lib/worker-user";
+import { accessibleProjectIds } from "@/lib/grants";
+import { User } from "@/models/user";
 
 export const PROTOCOL_VERSION = 1;
 export const WORKER_STALE_MS = 5 * 60 * 1000;
@@ -14,15 +16,32 @@ export const WORKER_HEARTBEAT_MS = 60 * 1000;
 
 export type Verdict = { ok: true } | { ok: false; reason: string };
 
-export function approvedProjectIds(worker: Pick<IWorker, "approvedProjects">): string[] {
-  return (worker.approvedProjects ?? []).map(String);
+/**
+ * The projects this machine may serve: the ones its owner can reach, resolved on every call.
+ *
+ * BP-358 removed the stored per-worker list an admin used to approve. That list was the right shape
+ * while a machine took work assigned to a project-wide nominee — anyone's work — so admitting it to
+ * a project was an instance-level decision. A machine now runs only its owner's own work, entirely
+ * inside permissions that person already holds, so the list had nothing left to decide that the
+ * owner's own grants do not. Resolving it live also means a revoked grant reaches the machine on
+ * its next poll instead of leaving a stale approval behind.
+ *
+ * `null` means no restriction, which is what `accessibleProjectIds` returns for an instance admin.
+ * An empty array means this machine reaches nothing — a worker with no owner, or one whose owner
+ * has been deleted.
+ */
+export async function ownerReachableProjectIds(
+  worker: Pick<IWorker, "owner">
+): Promise<string[] | null> {
+  if (!worker.owner) return [];
+  await connectDB();
+  const owner = await User.findById(worker.owner);
+  if (!owner) return [];
+  return accessibleProjectIds(owner);
 }
 
-export function isApprovedFor(
-  worker: Pick<IWorker, "approvedProjects">,
-  projectId: string
-): boolean {
-  return approvedProjectIds(worker).includes(projectId);
+export function canServe(reachable: string[] | null, projectId: string): boolean {
+  return reachable === null || reachable.includes(projectId);
 }
 
 export function verdictFor(
@@ -33,7 +52,10 @@ export function verdictFor(
   // Every live worker on this instance. Without them a worker that lost a contested checkout would
   // still be allowed to claim for it — the assignment would be withheld while the claim went
   // through, which is the same working tree shared by two processes.
-  others: CheckoutClaimant[] = []
+  others: CheckoutClaimant[] = [],
+  // What ownerReachableProjectIds() answered for this machine. Defaults to reaching nothing, so a
+  // caller that forgets it is refused rather than trusted.
+  reachable: string[] | null = []
 ): Verdict {
   if (requestProtocol !== PROTOCOL_VERSION) {
     return {
@@ -55,13 +77,15 @@ export function verdictFor(
   if (!project?.worker?.enabled) {
     return { ok: false, reason: "this project is not enabled for workers" };
   }
-  // The repos a worker reports are self-asserted and a remote is public information, so they can
-  // only narrow what an admin approved — never stand in for it (BP-305)
-  if (!isApprovedFor(worker, String(project._id))) {
-    return { ok: false, reason: "this worker was not approved for this project" };
-  }
+  // Ownership first, because it is the answer to both questions: an ownerless machine reaches
+  // nothing, and saying so beats saying it cannot reach this particular project.
   if (!worker.owner) {
-    return { ok: false, reason: "this machine has no owner — re-approve it from the board" };
+    return { ok: false, reason: "this machine has no owner — enrol it again from the machine" };
+  }
+  // The repos a worker reports are self-asserted and a remote is public information, so they can
+  // only narrow what its owner can already reach — never stand in for it (BP-305)
+  if (!canServe(reachable, String(project._id))) {
+    return { ok: false, reason: "this machine's owner cannot reach this project" };
   }
   const usable = usableRepos(worker as unknown as CheckoutClaimant, others, now);
   if (!matchRepo(project, usable)) {
@@ -118,23 +142,20 @@ export function overriddenPolicy(
 export const overriddenWorkerPolicy = (worker: IWorker) =>
   overriddenPolicy(worker as never, WORKER_POLICY_DEFAULTS);
 
-// A project is offered to a worker when the operator enabled it there AND that machine reports a
-// checkout whose remote matches the project's repository. The path never travels; the remote does.
-// hasOwner gates the whole list rather than leaving it to the claim: a non-empty list here is what
-// a worker's own loop iterates and attempts to claim, so an ownerless machine must see none of it,
-// not a list it can only fail on.
+// A project is offered to a worker when the operator enabled it there AND its owner can reach it
+// AND that machine reports a checkout whose remote matches the project's repository. The path never
+// travels; the remote does. An ownerless machine reaches nothing, which is `reachable` being empty
+// rather than a separate gate — a non-empty list here is what a worker's own loop iterates and
+// attempts to claim, so it must never carry a project the claim will refuse.
 export function assignmentsFor(
   reported: RepoReport[],
   projects: AssignableProject[],
-  approved: string[],
-  hasOwner: boolean
+  reachable: string[] | null
 ): ResolvedAssignment[] {
-  if (!hasOwner) return [];
-  const allowed = new Set(approved);
   const out: ResolvedAssignment[] = [];
   for (const project of projects) {
     if (!project.worker?.enabled) continue;
-    if (!allowed.has(String(project._id))) continue;
+    if (!canServe(reachable, String(project._id))) continue;
     const remote = matchRepo(project, reported);
     if (!remote) continue;
     out.push({
@@ -216,9 +237,9 @@ export async function registerWorker(input: {
   host: string;
   platform: string;
   version: string;
-  // Whoever minted the enrolment token. Only used to name the machine's identity.
+  // Whoever enrolled the machine. Only used to name the machine's identity.
   owner?: string;
-  // The account the machine belongs to, which is what the claim keys on.
+  // The account the machine belongs to, which is what the claim and its reach key on.
   ownerId?: string;
 }): Promise<{ worker: IWorker; credential: string }> {
   await connectDB();
@@ -276,6 +297,15 @@ export async function touchWorker(
   await Worker.updateOne({ _id: workerId }, { $set: { lastSeenAt: new Date(), ...patch } });
 }
 
+// Whose machine this is, rendered only when the caller populated it. An unpopulated ref is an id
+// and no name, which would put "6a70…" in the column that exists to answer "whose is this" — so it
+// reads as unknown instead, and the route that wants a name populates.
+function apiOwner(owner: IWorker["owner"]): ApiUserSummary | null {
+  const user = owner as IUser | null | undefined;
+  if (!user || !user.username) return null;
+  return { _id: String(user._id), username: user.username, fullName: user.fullName };
+}
+
 // Built field-by-field so credentialHash can never leak through, even if a caller
 // passes in a document that was queried with it selected
 export function toApiWorker(
@@ -294,7 +324,7 @@ export function toApiWorker(
     version: worker.version,
     protocolVersion: worker.protocolVersion,
     repos: (worker.repos ?? []).map((r) => ({ remote: r.remote, path: r.path })),
-    approvedProjects: approvedProjectIds(worker),
+    owner: apiOwner(worker.owner),
     policy: worker.policy,
     policyOverrides: [...(worker.policyOverrides ?? [])],
     enabled: worker.enabled,

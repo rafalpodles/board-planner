@@ -4,7 +4,7 @@ import { protocolOf, resolveProjectId, withWorker } from "@/lib/middleware";
 import { claimNextTask, releaseExpiredTasks } from "@/lib/task-service";
 import { Project } from "@/models/project";
 import { Worker } from "@/models/worker";
-import { verdictFor } from "@/lib/worker-service";
+import { ownerReachableProjectIds, verdictFor } from "@/lib/worker-service";
 import { snapshotFor } from "@/lib/agent-snapshot";
 import { releaseTask } from "@/lib/task-service";
 
@@ -19,14 +19,22 @@ export const POST = withWorker(async (request, { params, worker }) => {
   // queue from healing tasks its previous run abandoned
   await releaseExpiredTasks(projectId).catch(() => 0);
 
-  const [project, others] = await Promise.all([
+  const [project, others, reachable] = await Promise.all([
     Project.findById(projectId).select("_id repositoryUrl githubRepo gitlabRepo gitlabHost worker").lean(),
     // A worker that lost a contested checkout must be refused here too, not merely left unassigned
     Worker.find({ _id: { $ne: worker._id } }).select(
       "_id name host repos enabled lockedByInstance lastSeenAt createdAt"
     ),
+    ownerReachableProjectIds(worker),
   ]);
-  const verdict = verdictFor(worker, project as never, protocolOf(request), new Date(), others as never);
+  const verdict = verdictFor(
+    worker,
+    project as never,
+    protocolOf(request),
+    new Date(),
+    others as never,
+    reachable
+  );
   if (!verdict.ok) return NextResponse.json({ error: verdict.reason }, { status: 403 });
 
   const { runId } = (await request.json().catch(() => ({}))) ?? {};

@@ -16,9 +16,11 @@ vi.mock("@/models/project", () => ({
 vi.mock("@/models/worker", () => ({
   Worker: { find: () => ({ select: workerFindOthers }) },
 }));
+const ownerReachableProjectIds = vi.fn();
 vi.mock("@/lib/worker-service", () => ({
   verifyWorkerCredential,
   verdictFor,
+  ownerReachableProjectIds,
   PROTOCOL_VERSION: 1,
 }));
 const releaseTask = vi.fn();
@@ -86,6 +88,7 @@ beforeEach(() => {
   resolveProjectId.mockResolvedValue(OID);
   verifyWorkerCredential.mockResolvedValue({ _id: OID, assignments: [] });
   verdictFor.mockReturnValue({ ok: true });
+  ownerReachableProjectIds.mockResolvedValue(["p1"]);
   claimNextTask.mockResolvedValue(hydrated({ _id: "t1", taskNumber: 1 }));
   snapshotFor.mockResolvedValue({ agentId: "a1", name: "Default", sequence: [] });
   releaseExpiredTasks.mockResolvedValue(0);
@@ -230,10 +233,25 @@ describe("the worker's identity travels with the claim", () => {
   });
 });
 
-// BP-358: a machine claims its owner's work, so the owner set at approval has to reach
+// BP-358: a machine claims its owner's work, so the owner set at enrolment has to reach
 // task-service too — without it every claim is refused, owner or not.
 describe("the worker's owner travels with the claim", () => {
-  it("passes the owner set at approval", async () => {
+  // The verdict decides whether this machine may serve the project at all, and since BP-358 that
+  // answer comes from the owner's own grants rather than a list stored on the worker. Asserted on
+  // the argument, because verdictFor is mocked here and would say ok either way.
+  it("hands the verdict what its owner can reach", async () => {
+    verifyWorkerCredential.mockResolvedValue({ _id: OID, assignments: [], owner: "u-owner" });
+    ownerReachableProjectIds.mockResolvedValue(["p1", "p2"]);
+
+    await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
+
+    expect(ownerReachableProjectIds).toHaveBeenCalledWith(
+      expect.objectContaining({ owner: "u-owner" })
+    );
+    expect(verdictFor.mock.calls[0][5]).toEqual(["p1", "p2"]);
+  });
+
+  it("passes the owner set at enrolment", async () => {
     verifyWorkerCredential.mockResolvedValue({ _id: OID, assignments: [], owner: "u-owner" });
     claimNextTask.mockResolvedValue(hydrated({ _id: "t1" }));
 

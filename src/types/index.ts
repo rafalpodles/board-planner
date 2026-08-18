@@ -543,12 +543,8 @@ export interface ApiWorkerPreflight extends Omit<WorkerPreflight, "reportedAt"> 
   reportedAt: string;
 }
 
-// How much autonomy a worker is given, worded as a choice rather than a gate checklist. The pair
-// the validator refuses — merging without review — is unreachable from these by construction.
-export type WorkerPreset = "write" | "review" | "merge";
-
-// An enrolment in progress: the app holds the device code, the operator approves the user code in
-// a browser, and the credential is handed back exactly once.
+// An enrolment in progress: the app holds the device code, the person at the machine confirms the
+// user code in a browser, and the credential is handed back exactly once.
 export interface IDeviceEnrolment {
   _id: Types.ObjectId;
   deviceCodeHash: string;
@@ -557,9 +553,9 @@ export interface IDeviceEnrolment {
   machineName: string;
   machineHost: string;
   status: "pending" | "approved" | "denied";
-  approvedBy: Types.ObjectId | null;
+  // Who confirmed it, which is who the machine then belongs to
+  enrolledBy: Types.ObjectId | null;
   project: Types.ObjectId | null;
-  preset: WorkerPreset;
   worker: Types.ObjectId | null;
   credential: string;
   deliveredAt: Date | null;
@@ -591,16 +587,15 @@ export interface IWorker {
   protocolVersion: number;
   credentialHash: string;
   repos: WorkerRepo[];
-  // Projects an admin approved this machine for; the reported repos narrow this, never widen it
-  approvedProjects: Types.ObjectId[];
   policy: WorkerPolicy;
   // Which policy fields an operator actually set; everything else follows the default
   policyOverrides: string[];
   enabled: boolean;
   lockedByInstance: boolean;
   lastSeenAt: Date | null;
-  // The person this machine belongs to; null for a worker enrolled before BP-358
-  owner?: Types.ObjectId | null;
+  // The person this machine belongs to, and the only thing that decides what it may reach: null
+  // for a worker enrolled before BP-358, which claims nothing until it is enrolled again
+  owner?: Types.ObjectId | IUser | null;
   // The user this machine acts as — see src/lib/worker-user.ts
   identity: Types.ObjectId | null;
   bindingError: string;
@@ -620,8 +615,8 @@ export interface ApiWorker {
   version: string;
   protocolVersion: number;
   repos: WorkerRepo[];
-  // Projects an admin approved this machine for; empty means it claims nothing
-  approvedProjects: string[];
+  // Whose machine this is. Null is not cosmetic: such a worker reaches no project at all.
+  owner: ApiUserSummary | null;
   policy: WorkerPolicy;
   policyOverrides: string[];
   enabled: boolean;
