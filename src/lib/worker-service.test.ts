@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import bcrypt from "bcryptjs";
+import sift from "sift";
 import { Types } from "mongoose";
 
 const findById = vi.fn();
@@ -10,7 +11,10 @@ const userFindById = vi.fn();
 const grantFind = vi.fn();
 
 vi.mock("./db", () => ({ connectDB: vi.fn() }));
-vi.mock("@/models/worker", () => ({ Worker: { findById, findOneAndUpdate, updateOne } }));
+const workerFindOne = vi.fn();
+vi.mock("@/models/worker", () => ({
+  Worker: { findById, findOne: workerFindOne, findOneAndUpdate, updateOne },
+}));
 vi.mock("@/lib/worker-user", () => ({ ensureWorkerUser }));
 vi.mock("@/models/user", () => ({ User: { findById: userFindById } }));
 // The real grants module runs on top of this: what a machine may reach is what its owner may
@@ -25,6 +29,7 @@ const {
   overriddenWorkerPolicy,
   ownerReachableProjectIds,
   registerWorker,
+  WorkerAlreadyOwned,
   verdictFor: rawVerdictFor,
   verifyWorkerCredential,
   PROTOCOL_VERSION,
@@ -229,10 +234,42 @@ describe("verifyWorkerCredential", () => {
 // token flow both call registerWorker, and this is the only place either of them sets `owner`.
 describe("registerWorker", () => {
   const REGISTERED = { _id: "w1" };
+  const OWNER_ID = "6a732075133f935b19154cd2";
+  const SOMEBODY_ELSE = "6a732075133f935b19154cd3";
+
+  // ObjectIds compare by identity in JavaScript and by value in MongoDB, so both sides are put in
+  // the form the database compares them in before the filter is judged.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function byValue(value: any): any {
+    if (value instanceof Types.ObjectId) return String(value);
+    if (Array.isArray(value)) return value.map(byValue);
+    if (value && typeof value === "object") {
+      return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, byValue(v)]));
+    }
+    return value;
+  }
+
+  // The real thing: a unique index on {name, host} plus an upsert. A filter that does not match the
+  // stored document makes the upsert attempt an insert, and the index answers with a duplicate key.
+  // Judged through mongoose's own matcher rather than by reading the filter, because what is under
+  // test is whether MongoDB admits that document — the shape of the `$or` says nothing about it.
+  function storedMachine(doc: Record<string, unknown> | null) {
+    workerFindOne.mockReturnValue({
+      select: () => ({ lean: () => Promise.resolve(doc ? { owner: doc.owner ?? null } : null) }),
+    });
+    findOneAndUpdate.mockImplementation((filter: Record<string, unknown>) => {
+      if (!doc) return Promise.resolve({ ...REGISTERED });
+      if (sift(byValue(filter))(byValue(doc))) return Promise.resolve({ ...REGISTERED });
+      return Promise.reject(Object.assign(new Error("E11000 duplicate key"), { code: 11000 }));
+    });
+  }
+
+  const alreadyThere = (owner: unknown) =>
+    storedMachine({ name: "rig", host: "mac.home", owner });
 
   beforeEach(() => {
     vi.clearAllMocks();
-    findOneAndUpdate.mockResolvedValue({ ...REGISTERED });
+    storedMachine(null);
     updateOne.mockResolvedValue({});
     ensureWorkerUser.mockResolvedValue({ _id: "identity-1" });
   });
@@ -256,6 +293,98 @@ describe("registerWorker", () => {
 
     const update = findOneAndUpdate.mock.calls[0][1];
     expect(update.$set).not.toHaveProperty("owner");
+  });
+
+  /**
+   * BP-358 made enrolling self-service, and registration upserts on name+host. Without this, anyone
+   * signed in could enrol "somebody's machine": the enrolment-start route is unauthenticated and
+   * takes an arbitrary name and host, so guessing a colleague's hostname would mint a new
+   * credential for their machine — stopping the process running there, whose stored credential is
+   * then rejected — and inherit that record's reported checkout paths.
+   */
+  describe("a machine that already belongs to somebody", () => {
+    it("refuses to re-register it for a different person", async () => {
+      alreadyThere(SOMEBODY_ELSE);
+
+      await expect(
+        registerWorker({ name: "rig", host: "mac.home", platform: "", version: "", ownerId: OWNER_ID })
+      ).rejects.toBeInstanceOf(WorkerAlreadyOwned);
+      // The identity is not touched either: renaming the machine account would retro-label every
+      // comment it has ever authored
+      expect(ensureWorkerUser).not.toHaveBeenCalled();
+    });
+
+    // Read-then-write would let two registrations racing on the same name+host both see it
+    // unowned, and the second would silently overwrite the first's owner. The decision is the
+    // filter, so the loser gets a duplicate key from the unique index instead.
+    it("refuses through the update filter rather than a prior read", async () => {
+      alreadyThere(SOMEBODY_ELSE);
+
+      await expect(
+        registerWorker({ name: "rig", host: "mac.home", platform: "", version: "", ownerId: OWNER_ID })
+      ).rejects.toBeInstanceOf(WorkerAlreadyOwned);
+      expect(findOneAndUpdate).toHaveBeenCalled();
+    });
+
+    // A person re-enrolling their own laptop is the everyday case — a reinstall, a new state
+    // directory — and must keep working
+    it("lets its own owner register it again", async () => {
+      alreadyThere(OWNER_ID);
+
+      await registerWorker({ name: "rig", host: "mac.home", platform: "", version: "", ownerId: OWNER_ID });
+
+      expect(findOneAndUpdate).toHaveBeenCalled();
+    });
+
+    // Compared as strings, because one side is an ObjectId off a lean document and the other is
+    // the id the route stringified — comparing them by identity would refuse every owner their own
+    // machine
+    it("recognises its owner through an ObjectId", async () => {
+      alreadyThere(new Types.ObjectId(OWNER_ID));
+
+      await registerWorker({ name: "rig", host: "mac.home", platform: "", version: "", ownerId: OWNER_ID });
+
+      expect(findOneAndUpdate).toHaveBeenCalled();
+    });
+
+    it("refuses even when the caller names no owner at all", async () => {
+      alreadyThere(SOMEBODY_ELSE);
+
+      await expect(
+        registerWorker({ name: "rig", host: "mac.home", platform: "", version: "" })
+      ).rejects.toBeInstanceOf(WorkerAlreadyOwned);
+    });
+  });
+
+  describe("adopting a machine nobody owns", () => {
+    // The documented recovery for an enrolment predating BP-358, and for one an admin released
+    it("is allowed", async () => {
+      alreadyThere(null);
+
+      await registerWorker({ name: "rig", host: "mac.home", platform: "", version: "", ownerId: OWNER_ID });
+
+      expect(findOneAndUpdate.mock.calls[0][1].$set.owner).toBeInstanceOf(Types.ObjectId);
+    });
+
+    // Those paths are on the previous owner's disk and mean nothing here. The record is handed back
+    // with its own inventory on the first heartbeat, which is what a fresh registration already
+    // promises by answering with no assignments.
+    it("does not inherit the last owner's reported checkouts", async () => {
+      alreadyThere(null);
+
+      await registerWorker({ name: "rig", host: "mac.home", platform: "", version: "", ownerId: OWNER_ID });
+
+      expect(findOneAndUpdate.mock.calls[0][1].$set.repos).toEqual([]);
+      expect(findOneAndUpdate.mock.calls[0][1].$set.bindingError).toBe("");
+    });
+
+    // A machine registering for the first time has nothing to inherit, and blanking repos there
+    // would be describing a record that does not exist
+    it("leaves a first registration's fields alone", async () => {
+      await registerWorker({ name: "rig", host: "mac.home", platform: "", version: "", ownerId: OWNER_ID });
+
+      expect(findOneAndUpdate.mock.calls[0][1].$set).not.toHaveProperty("repos");
+    });
   });
 });
 
