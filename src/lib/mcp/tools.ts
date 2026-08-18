@@ -142,6 +142,15 @@ export function registerPlannerTools(server: McpServer): void {
       priority: z.string().optional().describe("Priority: low, medium, high, or urgent"),
       category: z.string().optional(),
       assignee: z.string().optional().describe("Assignee username. Empty string to unassign."),
+      agent: z
+        .string()
+        .optional()
+        .describe(
+          "Which agent runs this task on a machine, by name. Choosing one is the hand-over: the " +
+            "machine belonging to the task's assignee takes it and runs that agent, and only when " +
+            "that person assigned it to themselves. Empty string means nobody — the default, and " +
+            "what a task somebody is doing by hand looks like. Instance admins only."
+        ),
       acceptanceCriteria: z
         .string()
         .optional()
@@ -154,7 +163,7 @@ export function registerPlannerTools(server: McpServer): void {
             "the task's other field values are left alone. get_project lists them."
         ),
     },
-    async ({ taskKey, title, description, priority, category, assignee, acceptanceCriteria, fields }, extra) => {
+    async ({ taskKey, title, description, priority, category, assignee, agent, acceptanceCriteria, fields }, extra) => {
       const client = clientFrom(extra);
       const { projectId, taskId } = await client.resolveTaskKey(taskKey);
       const data: Record<string, unknown> = {};
@@ -186,6 +195,20 @@ export function registerPlannerTools(server: McpServer): void {
           data.assignee = user.username;
         } else {
           data.assignee = null;
+        }
+      }
+
+      // Resolved by name here rather than asking a caller for an ObjectId, the same way assignee
+      // is: the id appears in no MCP response, so demanding one would make the parameter
+      // unreachable from a conversation.
+      if (agent !== undefined) {
+        if (agent) {
+          const agents = (await client.listAgents()) as { _id: string; name: string }[];
+          const match = agents.find((a) => a.name.toLowerCase() === agent.toLowerCase());
+          if (!match) throw new Error(`Agent "${agent}" not found`);
+          data.agent = match._id;
+        } else {
+          data.agent = null;
         }
       }
 
