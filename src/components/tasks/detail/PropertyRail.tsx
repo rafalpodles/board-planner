@@ -28,7 +28,7 @@ import {
 import type { TaskDraft } from "./useTaskEditor";
 import type { ApiAgent, ApiTask } from "@/types";
 import { handoverOf, type Handover } from "@/lib/handover";
-import { useAuth } from "@/hooks/use-auth";
+import type { AnyColumn } from "@/lib/columns";
 
 const RECURRENCE_UNITS: Record<RecurrenceFrequency, string> = {
   daily: "day",
@@ -65,7 +65,10 @@ function HandoverNotice({ handover }: { handover: Handover | null }) {
       : handover.reason === "unassigned"
       ? "Nothing will run this. A machine takes only work its owner assigned to themselves — assign it to yourself."
       : handover.reason === "assigner-unrecorded"
-        ? "Nothing will run this. It was assigned before the board recorded who hands work over; assign it again to record that."
+        // Named rather than addressed to the reader: the server records the assigner only when the
+        // person doing the assigning is the one being assigned, so telling a colleague to "assign
+        // it again" would be handing them a gesture that writes nothing.
+        ? "Nothing will run this. It was assigned before the board recorded who hands work over; its assignee can record that by assigning it to themselves again."
         : `Nothing will run this. ${handover.by ?? "Somebody else"} assigned it, and a machine takes only work its owner assigned to themselves.`;
 
   return (
@@ -93,8 +96,14 @@ interface PropertyRailProps {
    * describe a state that has never existed.
    */
   stored: Pick<ApiTask, "agent" | "assignee" | "assignedBy" | "status">;
-  /** The board's approved-role columns — the only ones a claim looks at */
-  approvedStatuses?: string[];
+  /** The board's own columns — a claim is defined in terms of their roles, not their names */
+  columns?: AnyColumn[];
+  /**
+   * Writes the assignee a task already carries. Auto-save sends the diff, so re-picking the person
+   * already on the task sends nothing at all — and that is the repair the notice below prints for a
+   * task whose assigner was never recorded, which made the instruction untrue in the view giving it.
+   */
+  onRepairAssigner: (username: string | null) => void;
   /** Full rows, not names: the chip and the picker dot are tinted by the project's colour */
   categories: ApiProjectCategory[];
   customFields: ApiCustomField[];
@@ -112,7 +121,8 @@ export function PropertyRail({
   agents,
   projectDefaultAgent,
   stored,
-  approvedStatuses,
+  columns,
+  onRepairAssigner,
   categories,
   customFields,
   reporter,
@@ -123,15 +133,16 @@ export function PropertyRail({
   const sprint = sprints.find((s) => s._id === draft.sprint);
   const fields = sortedFields(activeFields(customFields));
   const selectableSprints = sprints.filter((s) => s.status !== "completed");
-  // Instance admin, which is what every other admin-only surface in this app keys on
-  const { isAdmin } = useAuth();
-  const agentName = agents.find((a) => a._id === draft.agent)?.name ?? "";
   // Suppressed while the draft and the stored task disagree: the answer changes as soon as the
   // pending edit saves, and a hint that contradicts what the person just typed is worse than none.
   const pending =
     (draft.agent ?? null) !== (stored.agent ?? null) ||
     (draft.assignee ?? null) !== (stored.assignee?.username ?? null);
-  const handover = pending ? null : handoverOf(stored, approvedStatuses);
+  const handover = pending ? null : handoverOf(stored, columns);
+  // Read off the stored task rather than off `handover`, which is suppressed mid-edit and orders
+  // the column requirement first: the repair is about what the document is missing, not about
+  // which sentence won the right to be shown.
+  const assignerUnrecorded = !!stored.assignee && !stored.assignedBy;
 
   return (
     <div className="flex h-full flex-col gap-6">
@@ -150,7 +161,13 @@ export function PropertyRail({
             adornment: <Avatar name={user.fullName} size={20} />,
           }))}
           emptyOption="Unassigned"
-          onChange={(username) => set("assignee", username || null)}
+          onChange={(username) => {
+            const picked = username || null;
+            if (assignerUnrecorded && picked === (stored.assignee?.username ?? null)) {
+              onRepairAssigner(picked);
+            }
+            set("assignee", picked);
+          }}
         >
           {(selected) => (
             <span className="flex items-center gap-2">
@@ -160,46 +177,29 @@ export function PropertyRail({
           )}
         </ComboboxRow>
 
-        {/* Readable by everyone, changeable by an admin: the agent decides what runs on the
-            machine serving this project, and the server refuses the write either way (BP-345).
-            Offering a picker that 403s would be the worse half of both. */}
-        {isAdmin ? (
-          <ComboboxRow
-            label="Agent"
-            touch={touch}
-            value={draft.agent || ""}
-            options={[...agents]
-              .sort((a, b) =>
-                a._id === projectDefaultAgent ? -1 : b._id === projectDefaultAgent ? 1 : 0
-              )
-              .map((a) => ({ value: a._id, label: a.name }))}
-            emptyOption="No agent — a person does it"
-            onChange={(id) => set("agent", id || null)}
-          >
-            {(selected) =>
-              selected ? (
-                <span className="truncate">{selected.label}</span>
-              ) : (
-                <EmptyValue>No agent</EmptyValue>
-              )
-            }
-          </ComboboxRow>
-        ) : (
-          <FieldRow label="Agent" touch={touch}>
-            {agentName ? (
-              <span className="truncate">{agentName}</span>
+        {/* Whoever may edit the task. It was instance-admin under BP-345, when choosing an agent
+            could arm a machine belonging to somebody else; a claim now takes only what its own
+            owner assigned to themselves, so the routing holds that boundary instead of the bar. */}
+        <ComboboxRow
+          label="Agent"
+          touch={touch}
+          value={draft.agent || ""}
+          options={[...agents]
+            .sort((a, b) =>
+              a._id === projectDefaultAgent ? -1 : b._id === projectDefaultAgent ? 1 : 0
+            )
+            .map((a) => ({ value: a._id, label: a.name }))}
+          emptyOption="No agent — a person does it"
+          onChange={(id) => set("agent", id || null)}
+        >
+          {(selected) =>
+            selected ? (
+              <span className="truncate">{selected.label}</span>
             ) : (
-              // Not just "No agent": enrolling a machine is self-service since BP-358, but
-              // choosing the agent — the gesture that hands work to it — is still instance-admin
-              // (BP-345). Somebody who has connected their own laptop and is waiting for it to
-              // pick something up needs to be told which half they are missing and that it is not
-              // theirs to do, rather than reading an empty field.
-              <EmptyValue>
-                <span data-testid="agent-not-yours">No agent — only an instance admin can hand this to a machine</span>
-              </EmptyValue>
-            )}
-          </FieldRow>
-        )}
+              <EmptyValue>No agent</EmptyValue>
+            )
+          }
+        </ComboboxRow>
 
         <HandoverNotice handover={handover} />
 

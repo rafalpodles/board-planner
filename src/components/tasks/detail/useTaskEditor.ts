@@ -147,5 +147,17 @@ export function useTaskEditor(projectId: string, task: ApiTask) {
 
   const retry = useCallback(() => persist(editedFields()), [persist, editedFields]);
 
-  return { draft, set, autoSaveState, retry };
+  /**
+   * Writes a field whatever the diff says. Everything else here sends only what changed, which is
+   * what a view showing one task among several concurrent writers has to do — but it also means
+   * re-picking the value already on the task sends nothing, and re-assigning is the product's
+   * documented repair for a task whose assigner was never recorded.
+   */
+  const resend = useCallback(
+    <K extends keyof TaskDraft>(key: K, value: TaskDraft[K]) =>
+      persist({ [key]: value } as Partial<TaskDraft>),
+    [persist]
+  );
+
+  return { draft, set, autoSaveState, retry, resend };
 }

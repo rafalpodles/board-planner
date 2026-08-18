@@ -450,14 +450,7 @@ export async function updateTask(
   taskId: string,
   body: Body,
   actorId: string,
-  force = false,
-  // Whether this caller may choose the task's agent. A boolean rather than a user, because the
-  // answer is a property of the *request's* principal: `tokenScoped`, `tokenScope` and the role a
-  // scoped token was degraded to are attached in memory by getAuthUser and are not schema fields,
-  // so re-loading the actor here would silently promote a scoped token back to admin. The route
-  // holds the live principal; it decides. Defaults to false so a caller that says nothing is
-  // refused rather than trusted (BP-345).
-  mayChooseAgent = false
+  force = false
 ): Promise<TaskServiceResult> {
   await connectDB();
 
@@ -483,25 +476,14 @@ export async function updateTask(
   }
 
   if (updates.agent === "") updates.agent = null;
-  if (updates.agent !== undefined) {
-    // Compared against what is stored, so re-sending the value a task already carries is a no-op
-    // rather than a refusal. A REST consumer that GETs, edits a title and PUTs the whole object
-    // would otherwise start failing on a field it never touched — the same call BP-354 made for
-    // the stored address. Writing an unchanged value changes nothing, so permitting it is safe.
-    const stored = await Task.findOne({ _id: taskId, project: projectId }, "agent").lean();
-    const changes = String(stored?.agent ?? "") !== String(updates.agent ?? "");
-    if (changes && !mayChooseAgent) {
-      return {
-        ok: false,
-        error: "Only an instance admin can choose which agent runs a task",
-        status: 403,
-      };
-    }
-    // Clearing counts as changing: null now means nobody runs the task, as real a choice as naming one.
-    if (updates.agent !== null) {
-      const usable = await agentUsableOnProject(projectId, updates.agent, actorId);
-      if (!usable.ok) return { ok: false, error: usable.error, status: 400 };
-    }
+  // BP-345 kept this to instance admins because choosing an agent could arm a machine belonging to
+  // somebody else. Since BP-358 a claim requires assignee === assignedBy === the machine's owner,
+  // so the routing holds that boundary and the choice belongs to whoever may edit the task — which
+  // the route's project gate already answers. Which agents may run here at all is a separate
+  // question, and still asked; null is exempt because choosing none names no agent to ask about.
+  if (updates.agent !== undefined && updates.agent !== null) {
+    const usable = await agentUsableOnProject(projectId, updates.agent, actorId);
+    if (!usable.ok) return { ok: false, error: usable.error, status: 400 };
   }
 
   if (updates.category !== undefined || updates.status !== undefined) {
@@ -578,13 +560,20 @@ export async function updateTask(
   if (updates.assignee !== undefined) {
     const before = oldTask.assignee as { _id?: unknown } | null | undefined;
     const storedAssignee = String((before && before._id) ?? before ?? "");
+    const moved = storedAssignee !== String(updates.assignee ?? "");
     // Or when nothing is recorded yet, which is every task stored before BP-358. Without that
     // clause the documented repair — assign it again — is a no-op for the common legacy shape
     // (already assigned to you, no assigner), and the Agent row's "assign it again to record that"
-    // becomes a lie. It cannot invent consent in the direction that matters: somebody else doing
-    // this leaves assignedBy naming them, which the claim refuses just as firmly as no assigner.
-    const unrecorded = !oldTask.assignedBy;
-    if (unrecorded || storedAssignee !== String(updates.assignee ?? "")) {
+    // becomes a lie.
+    //
+    // Narrowed to the actor putting the task in their OWN hands, because the repair is a person
+    // taking on a task and there is nobody else it could be. Any other writer echoing the assignee
+    // it just read — the PM agent, MCP under a second account, a REST client PUTting the whole
+    // object — would otherwise stamp itself as the assigner of work it had nothing to do with,
+    // which reads as a definite "somebody else handed you this" where the truth is "nobody knows",
+    // and leaves the owner's own re-selection unable to change anything.
+    const takesItOn = !oldTask.assignedBy && String(actorId) === String(updates.assignee ?? "");
+    if (moved || takesItOn) {
       updates.assignedBy = actorId;
     }
   }

@@ -4,16 +4,9 @@ import { render, screen, cleanup, act, fireEvent } from "@testing-library/react"
 import { PropertyRail } from "./PropertyRail";
 import type { TaskDraft } from "./useTaskEditor";
 import { ApiCustomField, ApiSprint, ApiTask, ApiUser } from "@/types";
+import type { AnyColumn } from "@/lib/columns";
 
-// The Agent row is the only one whose editability depends on the viewer (BP-345), so the rail now
-// reads auth. Default to admin, which is what every other test here assumes it can click.
-const isAdmin = vi.hoisted(() => ({ value: true }));
-vi.mock("@/hooks/use-auth", () => ({ useAuth: () => ({ isAdmin: isAdmin.value }) }));
-
-afterEach(() => {
-  cleanup();
-  isAdmin.value = true;
-});
+afterEach(cleanup);
 
 const draft: TaskDraft = {
   title: "A task",
@@ -28,6 +21,15 @@ const draft: TaskDraft = {
   recurrence: null,
   customFieldValues: {},
 };
+
+// Not the seeded seven: with those the approved column is literally called "todo" and the active
+// one "in_progress", so an implementation comparing ids rather than roles would pass every case
+const BOARD: AnyColumn[] = [
+  { id: "someday", label: "Someday", color: "#888", role: "backlog", order: 0 },
+  { id: "ready", label: "Ready", color: "#888", role: "approved", order: 1 },
+  { id: "doing", label: "Doing", color: "#888", role: "active", order: 2 },
+  { id: "shipped", label: "Shipped", color: "#888", role: "done", order: 3 },
+];
 
 const users = [
   { _id: "u1", username: "rpo", fullName: "Rafal Podles" },
@@ -70,6 +72,7 @@ function renderRail(over: Partial<React.ComponentProps<typeof PropertyRail>> = {
       ]}
       customFields={[]}
       stored={{ agent: null, assignee: null, assignedBy: null, status: "todo" }}
+      onRepairAssigner={() => {}}
       reporter="Claude Code"
       onDelete={() => {}}
       {...over}
@@ -283,11 +286,12 @@ describe("PropertyRail", () => {
 });
 
 /**
- * The agent decides what runs on the operator's machine, so the server refuses the write from
- * anyone below project admin. A picker that 403s on click would be the worse half of both — the
- * value stays readable, the control goes away.
+ * The agent decides what runs on the operator's machine. BP-345 made this row read-only for anyone
+ * below instance admin, because choosing an agent could then arm somebody else's machine; BP-358
+ * moved that boundary into the claim — assignee === assignedBy === the machine's owner — and the
+ * row went back to being an ordinary editable field for whoever may edit the task.
  */
-describe("the Agent row and who may change it", () => {
+describe("the Agent row", () => {
   const AGENTS = [
     { _id: "a1", name: "Default", scope: "global", description: "" },
     { _id: "a2", name: "With security review", scope: "global", description: "" },
@@ -301,63 +305,27 @@ describe("the Agent row and who may change it", () => {
     );
   }
 
-  it("is a picker for an admin", () => {
+  /**
+   * A control, not a label. The version of this that asserted only the words "No agent" passed with
+   * the read-only row on screen, because that row rendered the same words — what distinguishes the
+   * two is whether there is anything to open.
+   */
+  it("is a picker, and shows the chosen agent in it", () => {
     renderRail({ agents: AGENTS, draft: { ...draft, agent: "a2" } });
 
     expect(agentRow()?.getAttribute("role")).toBe("combobox");
     expect(agentRow()?.textContent).toContain("With security review");
   });
 
-  it("shows the name but offers no control to anyone else", () => {
-    isAdmin.value = false;
-    renderRail({ agents: AGENTS, draft: { ...draft, agent: "a2" } });
-
-    const row = screen.getByText("Agent").closest("div");
-    expect(row?.textContent).toContain("With security review");
-    expect(agentRow()).toBeUndefined();
-  });
-
-  // The first version of this asserted only the words "No agent", which ComboboxRow renders
-  // too via emptyOption — so it passed with the admin picker on screen and could not fail. What
-  // distinguishes the two is the control, not the label.
-  it("says No agent to a non-admin, with no control to open", () => {
-    isAdmin.value = false;
+  // The read-only branch had its own empty state, telling the reader that handing work to a machine
+  // was not theirs to do. There is no such reader left, and leaving that sentence in the product
+  // would be refusing somebody a thing they can now simply do.
+  it("offers the picker with nothing chosen either, and no note about who may", () => {
     renderRail({ agents: AGENTS });
 
-    const row = screen.getByText("Agent").closest("div");
-    expect(row?.textContent).toContain("No agent");
-    expect(row?.querySelector("[role='combobox']")).toBeNull();
-    expect(screen.queryAllByRole("combobox").some((el) => el.textContent?.startsWith("Agent"))).toBe(
-      false
-    );
-  });
-
-  /**
-   * BP-358 made enrolling a machine self-service, but choosing the agent — the gesture that hands
-   * work to it — is still instance-admin (BP-345). Somebody who has connected their own laptop and
-   * is waiting for it to pick something up would otherwise read an empty field and be told nothing.
-   * Located by testid: the admin's picker renders "No agent" too, through emptyOption.
-   */
-  it("tells a non-admin that handing work to a machine is not theirs to do", () => {
-    isAdmin.value = false;
-    renderRail({ agents: AGENTS });
-
-    expect(screen.getByTestId("agent-not-yours").textContent).toMatch(/instance admin/i);
-  });
-
-  it("says nothing of the sort to an admin, who can just pick one", () => {
-    renderRail({ agents: AGENTS });
-
+    expect(agentRow()?.getAttribute("role")).toBe("combobox");
     expect(screen.queryByTestId("agent-not-yours")).toBeNull();
-  });
-
-  // The row already names the agent when there is one; adding the refusal there would be telling
-  // somebody they cannot do a thing that has been done
-  it("says nothing of the sort once an agent is chosen", () => {
-    isAdmin.value = false;
-    renderRail({ agents: AGENTS, draft: { ...draft, agent: "a2" } });
-
-    expect(screen.queryByTestId("agent-not-yours")).toBeNull();
+    expect(screen.getByText("Agent").closest("div")?.textContent).not.toMatch(/instance admin/i);
   });
 
   // "Project default" was honest while an empty field fell back to the project's agent. Since BP-358
@@ -422,16 +390,21 @@ describe("the agent picker says when nothing will run the task", () => {
     typeof PropertyRail
   >["agents"];
 
-  function withStored(stored: Partial<ApiTask>, over: Partial<TaskDraft> = {}) {
+  // `status` widened to a plain string: TaskStatus is the union of the SEEDED column ids, and this
+  // board deliberately uses none of them
+  function withStored(
+    stored: Partial<Omit<ApiTask, "status">> & { status?: string },
+    over: Partial<TaskDraft> = {}
+  ) {
     renderRail({
       agents: AGENT,
-      approvedStatuses: ["todo"],
+      columns: BOARD,
       draft: { ...draft, agent: "a1", assignee: "rpo", ...over },
       stored: {
         agent: "a1",
         assignee: RAFAL,
         assignedBy: { ...RAFAL },
-        status: "todo",
+        status: "ready",
         ...stored,
       } as ApiTask,
     });
@@ -450,8 +423,8 @@ describe("the agent picker says when nothing will run the task", () => {
   });
 
   // A task with an agent, self-assigned, and simply not in the column a claim looks at
-  it("says a task outside the approved column is not there yet", () => {
-    withStored({ status: "planned" });
+  it("says a task before the approved column is not there yet", () => {
+    withStored({ status: "someday" });
 
     const notice = screen.getByTestId("handover-notice");
     expect(notice.dataset.reason).toBe("not-approved-yet");
@@ -460,6 +433,21 @@ describe("the agent picker says when nothing will run the task", () => {
     // the message could be replaced with the opposite of what it means and stay green.
     expect(notice.textContent).toMatch(/column work is approved in/i);
   });
+
+  /**
+   * The reproduction: a task with an agent, self-assigned, sitting in the active column with a run
+   * on it, rendered "Nothing will run this yet — move it to the column work is approved in" beside
+   * the live run indicator. `done` said the same. The requirement belongs before the approved
+   * column, and the notice was reading a list of approved ids rather than the board's roles.
+   */
+  it.each(["doing", "shipped"])(
+    "says nothing about a task in %s, which a machine is past being asked about",
+    (status) => {
+      withStored({ status });
+
+      expect(screen.queryByTestId("handover-notice")).toBeNull();
+    }
+  );
 
   it("says an unassigned task belongs to nobody", () => {
     withStored({ assignee: null }, { assignee: null });
@@ -476,7 +464,10 @@ describe("the agent picker says when nothing will run the task", () => {
 
     const notice = screen.getByTestId("handover-notice");
     expect(notice.dataset.reason).toBe("assigner-unrecorded");
-    expect(notice.textContent).toMatch(/assign it again/i);
+    // Who can perform it, not only that a repair exists: the server records the assigner only for
+    // the person being assigned, so a sentence addressed to whoever is reading would be wrong for
+    // everybody else on the board
+    expect(notice.textContent).toMatch(/its assignee can record that by assigning it to themselves/i);
   });
 
   it("names whoever else handed it over", () => {
@@ -516,12 +507,68 @@ describe("the agent picker says when nothing will run the task", () => {
     expect(screen.queryByTestId("handover-notice")).toBeNull();
   });
 
-  // Readable by everyone: a member who cannot choose the agent is exactly the person who needs to
-  // be told the task is waiting on them
-  it("is shown to somebody who cannot change the agent", () => {
-    isAdmin.value = false;
-    withStored({ assignedBy: undefined });
+});
 
-    expect(screen.getByTestId("handover-notice").dataset.reason).toBe("assigner-unrecorded");
+/**
+ * The Agent row tells the reader to "assign it again to record that", and the detail view saves by
+ * diff — so re-picking the person already on the task produced no request at all, and the recovery
+ * the product printed was a no-op in the view printing it. The e2e that proves the repair calls
+ * updateTask directly, stepping straight over this seam.
+ *
+ * What the forced write reaches is asserted in TaskDetail.test.tsx: this half only says when the
+ * rail asks for one.
+ */
+describe("re-assigning to record an assigner the board never had", () => {
+  const RAFAL = { _id: "u1", username: "rpo", fullName: "Rafal Podles" } as ApiUser;
+
+  function railFor(stored: Partial<Omit<ApiTask, "status">> & { status?: string }) {
+    const onRepairAssigner = vi.fn();
+    renderRail({
+      agents: [{ _id: "a1", name: "Default" }] as React.ComponentProps<typeof PropertyRail>["agents"],
+      columns: BOARD,
+      draft: { ...draft, agent: "a1", assignee: "rpo" },
+      stored: { agent: "a1", assignee: RAFAL, assignedBy: { ...RAFAL }, status: "ready", ...stored } as ApiTask,
+      onRepairAssigner,
+    });
+    return onRepairAssigner;
+  }
+
+  it("forces the write when the assignee already on the task is picked again", async () => {
+    const repair = railFor({ assignedBy: undefined });
+    await openRow("Assignee");
+    await pick(/Rafal Podles/);
+
+    expect(repair).toHaveBeenCalledWith("rpo");
+  });
+
+  // Nothing to record, so nothing to force: the ordinary diff already declines to write this, and
+  // forcing it would put a save on the wire every time somebody opened the picker and changed
+  // their mind
+  it("leaves a task whose assigner is recorded alone", async () => {
+    const repair = railFor({});
+    await openRow("Assignee");
+    await pick(/Rafal Podles/);
+
+    expect(repair).not.toHaveBeenCalled();
+  });
+
+  // Picking somebody else is an ordinary edit: it differs from the stored value, so auto-save
+  // sends it, and stamping the assigner is then the server's ordinary behaviour
+  it("leaves a genuine change to the ordinary save", async () => {
+    const repair = railFor({ assignedBy: undefined });
+    await openRow("Assignee");
+    await pick(/Claude Code/);
+
+    expect(repair).not.toHaveBeenCalled();
+  });
+
+  // Unassigning is a change too, and it is the one case where the picked value is null on both
+  // sides if the guard compared the wrong things
+  it("does not mistake unassigning for re-picking the same person", async () => {
+    const repair = railFor({ assignedBy: undefined });
+    await openRow("Assignee");
+    await pick(/Unassigned/);
+
+    expect(repair).not.toHaveBeenCalled();
   });
 });

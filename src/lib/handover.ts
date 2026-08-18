@@ -1,4 +1,5 @@
-import { ApiTask, ApiUserSummary } from "@/types";
+import { ApiTask, ApiUserSummary, ColumnRole } from "@/types";
+import { AnyColumn, columnFor } from "@/lib/columns";
 
 /**
  * Which of the claim's requirements this task fails, of the ones a browser can see. The claim
@@ -36,15 +37,29 @@ function nameOf(ref: ApiTask["assignedBy"]): string | null {
   return user.fullName || user.username || null;
 }
 
+// Where work is still waiting for the column a claim looks at. Past the approved one the machine
+// has already had its chance — a run may be holding the task at this moment — and "nothing will run
+// this yet" printed beside the live run indicator is a plain contradiction; on a finished task it
+// is nonsense. `blocked` belongs here rather than after: a parked task has not been taken, and
+// moving it back to the approved column is exactly what would run it.
+const AWAITING_APPROVAL: ColumnRole[] = ["backlog", "blocked"];
+
+function stillWaitingForApproval(columns: AnyColumn[], status: string): boolean {
+  const role = columnFor({ columns }, status)?.role;
+  // A status naming no column at all is what a task left behind by a deleted column carries, and
+  // that is nowhere a claim looks either.
+  return role === undefined || AWAITING_APPROVAL.includes(role);
+}
+
 /**
- * @param approvedStatuses the board's `approved`-role columns, which is the only place a claim
- * looks. Omitted where the caller does not know them, and then this requirement is not judged.
+ * @param columns the board's own columns, which carry the roles a claim is defined in terms of.
+ * Omitted where the caller does not know them, and then this requirement is not judged.
  */
-export function handoverOf(task: Judged, approvedStatuses?: string[]): Handover {
+export function handoverOf(task: Judged, columns?: AnyColumn[]): Handover {
   if (!task.agent) return { runs: false, reason: "no-agent", by: null };
   // The everyday false positive without it: pick an agent on a task still in the backlog, assign it
   // to yourself, and every other requirement passes while no claim ever looks at that column.
-  if (approvedStatuses && !approvedStatuses.includes(task.status)) {
+  if (columns && stillWaitingForApproval(columns, task.status)) {
     return { runs: false, reason: "not-approved-yet", by: null };
   }
   // Populate renders a reference to a deleted user as null, and typeof null is "object" — so this

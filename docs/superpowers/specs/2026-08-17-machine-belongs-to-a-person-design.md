@@ -165,6 +165,17 @@ stops being a security boundary.
 But only once this ships. BP-345 goes out with authoring restricted to instance admins; when this
 lands, that bar can be deliberately **lowered** rather than raised.
 
+**It has been lowered.** Choosing a task's agent is an ordinary edit again, gated by nothing beyond
+the project access the route already requires. Authoring a step block stays instance-admin: a
+block's prompt is what the machine executes, and writing one is a different act from choosing among
+blocks somebody already approved.
+
+What the claim gives back in exchange is narrower than the "proposal" above. There is no surface for
+accepting one, so a proposal is refused rather than queued: the filter requires
+`assignee === assignedBy === owner`, and work somebody else put in your hands never runs. The
+residue is that choosing an agent on a task its assignee handed to *themselves* arms that person's
+machine, which may not be the chooser's — see "Concerns" in the branch's final-round report.
+
 ## Risks and open questions
 
 **`Task.assignedBy` is a new field in a hot path.** It has to be written by every writer of
