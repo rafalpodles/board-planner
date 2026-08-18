@@ -1669,17 +1669,15 @@ describe("createTask and a foreign sprint", () => {
 
 /**
  * Choosing the agent chooses what runs on the operator's machine, under bypassPermissions, in
- * their own checkout. Before BP-345 this field sat on updateTask's ordinary whitelist behind
- * withProjectAccess, so any member of a worker-enabled project could point a task at a
- * composition of their own and hand it to the worker.
+ * their own checkout. BP-345 held it to instance admins because, at the time, choosing one could
+ * arm a machine belonging to somebody else. Since BP-358 a claim takes only what its own owner
+ * assigned to themselves, so the routing holds that boundary — see "what a member can and cannot
+ * arm by choosing an agent" — and the choice belongs to whoever may edit the task, which is what
+ * `withProjectAccess` on the route already answers.
  *
- * The capability arrives as an argument rather than being recomputed here. Reviewers found the
- * first version reloading the actor from Mongo, which drops tokenScoped/tokenScope and the role a
- * scoped token was degraded to — all attached in memory by getAuthUser and none of them schema
- * fields — so an admin's project-scoped CI token was handed the one capability its scope existed
- * to withhold. The route holds the live principal; it decides.
+ * What stays here is which agents may run on this project at all, below.
  */
-describe("who may choose a task's agent", () => {
+describe("choosing a task's agent", () => {
   const AGENT = "69a52e3b399b27d3cbb2c5a5";
   const OTHER = "69a52e3b399b27d3cbb2c5b7";
 
@@ -1689,8 +1687,8 @@ describe("who may choose a task's agent", () => {
   // writer that lets a draft through onto a task (BP-358).
   const COMPOSED = { implementation: [{ key: "write-the-change" }] };
 
-  // updateTask reads this task twice: once bare for the agent it currently carries, once populated
-  // for the before-image the activity log needs. One mock has to answer both.
+  // The before-image the activity log reads. Answered through both `lean()` and `populate().lean()`
+  // so a change of shape in the reader does not silently hand every test an undefined task.
   function storedAgent(agent: string | null) {
     const task = { _id: "t1", taskNumber: 1, status: "doing", title: "x", agent };
     findOne.mockReturnValue({
@@ -1706,42 +1704,21 @@ describe("who may choose a task's agent", () => {
     });
     findById.mockReset();
     findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
-    // The stored value the no-op comparison reads. Its own describe sets this, rather than
-    // inheriting a mock from the block above — under --sequence.shuffle that inheritance made two
-    // of these pass by accident.
+    // Its own describe sets this, rather than inheriting a mock from the block above — under
+    // --sequence.shuffle that inheritance made two of these pass by accident.
     findOne.mockReset();
     storedAgent(null);
     agentInTheCatalog({ _id: AGENT, scope: "global", name: "Default", composition: COMPOSED });
   });
 
-  it("refuses a caller without the capability, and writes nothing", async () => {
-    const result = await updateTask("p1", "t1", { agent: AGENT }, "actor", false, false);
-
-    expect(result).toMatchObject({ ok: false, status: 403 });
-    expect(findOneAndUpdate).not.toHaveBeenCalled();
-  });
-
-  // Omitting it entirely must not be read as permission — the PM agent calls updateTask and passes
-  // nothing, and a future caller will too
-  it("refuses when the capability is not passed at all", async () => {
-    const result = await updateTask("p1", "t1", { agent: AGENT }, "actor");
-
-    expect(result).toMatchObject({ ok: false, status: 403 });
-    expect(findOneAndUpdate).not.toHaveBeenCalled();
-  });
-
-  it("refuses clearing it back to the project default", async () => {
-    storedAgent(AGENT);
-
-    const result = await updateTask("p1", "t1", { agent: "" }, "actor", false, false);
-
-    expect(result).toMatchObject({ ok: false, status: 403 });
-    expect(findOneAndUpdate).not.toHaveBeenCalled();
-  });
-
-  // Without this the refusals above would pass just as well on a field nobody can ever set
-  it("lets a caller with the capability choose one", async () => {
-    const result = await updateTask("p1", "t1", { agent: AGENT }, "actor", false, true);
+  /**
+   * The bar BP-345 raised. updateTask took a `mayChooseAgent` boolean the route computed from the
+   * live principal, defaulting to false, and answered 403 without it. Nothing about the caller is
+   * consulted any more — the project gate on the route is the whole of it — so an ordinary member's
+   * write goes through.
+   */
+  it("lets an ordinary caller choose one, with no capability to pass", async () => {
+    const result = await updateTask("p1", "t1", { agent: AGENT }, "member");
 
     expect(result.ok).toBe(true);
     expect(setStage(findOneAndUpdate.mock.calls[0][1]).agent).toBe(AGENT);
@@ -1750,42 +1727,32 @@ describe("who may choose a task's agent", () => {
   // "" is what a cleared picker sends, and it is not a value an ObjectId ref can hold. Without the
   // normalisation it reaches agentUsableOnProject and comes back as "that agent cannot run here" —
   // a 400 about a foreign agent, for the act of choosing none.
-  it("stores null, not an empty string, when an admin clears it", async () => {
+  it("lets the same caller clear it again, storing null rather than an empty string", async () => {
     storedAgent(AGENT);
 
-    const result = await updateTask("p1", "t1", { agent: "" }, "actor", false, true);
+    const result = await updateTask("p1", "t1", { agent: "" }, "member");
 
     expect(result.ok).toBe(true);
     expect(setStage(findOneAndUpdate.mock.calls[0][1]).agent).toBeNull();
   });
 
-  // The gate is on the field, not on the request: an ordinary edit must not start needing admin
+  // The catalog is consulted for the field, not for the request: an ordinary edit must not start
+  // paying for a lookup, nor fail on an agent it never named
   it("leaves an edit that names no agent alone", async () => {
     agentFindById.mockClear();
 
-    const result = await updateTask("p1", "t1", { title: "renamed" }, "actor", false, false);
+    const result = await updateTask("p1", "t1", { title: "renamed" }, "member");
 
     expect(result.ok).toBe(true);
     expect(setStage(findOneAndUpdate.mock.calls[0][1])).not.toHaveProperty("agent");
     expect(agentFindById).not.toHaveBeenCalled();
   });
 
-  // BP-354 made the same call for the stored address: a REST consumer that GETs, edits one field
-  // and PUTs the whole object must not fail on a field it never touched. Writing an unchanged
-  // value changes nothing, so permitting it costs nothing.
-  it("treats resending the stored agent as a no-op rather than a refusal", async () => {
-    storedAgent(AGENT);
-
-    const result = await updateTask("p1", "t1", { agent: AGENT, title: "t" }, "actor", false, false);
-
-    expect(result.ok).toBe(true);
-  });
-
   describe("and which agents may run here at all", () => {
     it("refuses a project agent belonging to another project", async () => {
       agentInTheCatalog({ _id: AGENT, scope: "project", project: "p2", composition: COMPOSED });
 
-      const result = await updateTask("p1", "t1", { agent: AGENT }, "actor", false, true);
+      const result = await updateTask("p1", "t1", { agent: AGENT }, "actor");
 
       expect(result).toMatchObject({ ok: false, status: 400 });
       expect(findOneAndUpdate).not.toHaveBeenCalled();
@@ -1794,7 +1761,7 @@ describe("who may choose a task's agent", () => {
     it("accepts a project agent belonging to this one", async () => {
       agentInTheCatalog({ _id: AGENT, scope: "project", project: "p1", composition: COMPOSED });
 
-      expect((await updateTask("p1", "t1", { agent: AGENT }, "actor", false, true)).ok).toBe(true);
+      expect((await updateTask("p1", "t1", { agent: AGENT }, "actor")).ok).toBe(true);
     });
 
     // Pointing a task at somebody else's personal agent would run their prompts, with write
@@ -1802,7 +1769,7 @@ describe("who may choose a task's agent", () => {
     it("refuses another person's personal agent", async () => {
       agentInTheCatalog({ _id: AGENT, scope: "user", owner: OTHER, composition: COMPOSED });
 
-      const result = await updateTask("p1", "t1", { agent: AGENT }, "actor", false, true);
+      const result = await updateTask("p1", "t1", { agent: AGENT }, "actor");
 
       expect(result).toMatchObject({ ok: false, status: 400 });
     });
@@ -1810,13 +1777,13 @@ describe("who may choose a task's agent", () => {
     it("accepts the caller's own personal agent", async () => {
       agentInTheCatalog({ _id: AGENT, scope: "user", owner: "actor", composition: COMPOSED });
 
-      expect((await updateTask("p1", "t1", { agent: AGENT }, "actor", false, true)).ok).toBe(true);
+      expect((await updateTask("p1", "t1", { agent: AGENT }, "actor")).ok).toBe(true);
     });
 
     it("refuses an id that is not an object id, without querying for it", async () => {
       agentFindById.mockClear();
 
-      const result = await updateTask("p1", "t1", { agent: "nonsense" }, "actor", false, true);
+      const result = await updateTask("p1", "t1", { agent: "nonsense" }, "actor");
 
       expect(result).toMatchObject({ ok: false, status: 400 });
       expect(agentFindById).not.toHaveBeenCalled();
@@ -1825,7 +1792,7 @@ describe("who may choose a task's agent", () => {
     it("refuses an agent that does not exist", async () => {
       agentInTheCatalog(null);
 
-      expect((await updateTask("p1", "t1", { agent: AGENT }, "actor", false, true)).ok).toBe(false);
+      expect((await updateTask("p1", "t1", { agent: AGENT }, "actor")).ok).toBe(false);
     });
 
     /**
@@ -1844,7 +1811,7 @@ describe("who may choose a task's agent", () => {
       it("is refused, naming it and saying what is missing", async () => {
         draft();
 
-        const result = await updateTask("p1", "t1", { agent: AGENT }, "actor", false, true);
+        const result = await updateTask("p1", "t1", { agent: AGENT }, "actor");
 
         expect(result).toMatchObject({ ok: false, status: 400 });
         expect((result as { error: string }).error).toContain("Untitled agent");
@@ -1857,7 +1824,7 @@ describe("who may choose a task's agent", () => {
       it("is refused for its emptiness, not for its scope", async () => {
         draft({ scope: "user", owner: "actor" });
 
-        const result = await updateTask("p1", "t1", { agent: AGENT }, "actor", false, true);
+        const result = await updateTask("p1", "t1", { agent: AGENT }, "actor");
 
         expect((result as { error: string }).error).not.toMatch(/cannot run on this project/i);
         expect((result as { error: string }).error).toMatch(/no steps/i);
@@ -1867,7 +1834,7 @@ describe("who may choose a task's agent", () => {
       it("is refused when every bucket it has is empty", async () => {
         draft({ composition: { analysis: [], implementation: [], delivery: [] } });
 
-        expect((await updateTask("p1", "t1", { agent: AGENT }, "actor", false, true)).ok).toBe(false);
+        expect((await updateTask("p1", "t1", { agent: AGENT }, "actor")).ok).toBe(false);
       });
 
       // A bucket written before entries existed holds bare key strings, and normaliseComposition
@@ -1875,7 +1842,7 @@ describe("who may choose a task's agent", () => {
       it("accepts an agent whose composition still holds bare keys", async () => {
         draft({ composition: { implementation: ["write-the-change"] } });
 
-        expect((await updateTask("p1", "t1", { agent: AGENT }, "actor", false, true)).ok).toBe(true);
+        expect((await updateTask("p1", "t1", { agent: AGENT }, "actor")).ok).toBe(true);
       });
     });
   });
@@ -1958,17 +1925,48 @@ describe("a task records who assigned it", () => {
    * "assign it again to record that" a lie. Caught by e2e/claim-ownership.spec.ts, which drives the
    * real writer against a real document.
    */
-  it("stamps a task that has no assigner yet, even when the assignee does not move", async () => {
-    const legacy = { _id: "t1", taskNumber: 1, status: "doing", title: "x", assignee: { _id: "u1" } };
+  function legacyTaskAssignedTo(userId: string) {
+    const legacy = { _id: "t1", taskNumber: 1, status: "doing", title: "x", assignee: { _id: userId } };
     findOne.mockReturnValue({
       lean: () => Promise.resolve(legacy),
       populate: () => ({ lean: () => Promise.resolve(legacy) }),
     });
-    userFindOne.mockResolvedValue({ _id: "u1", username: "rpo" });
+    userFindOne.mockResolvedValue({ _id: userId, username: "rpo" });
+  }
 
-    await updateTask("p1", "t1", { assignee: "rpo" }, "actor");
+  it("stamps a task that has no assigner yet, when its assignee takes it on themselves", async () => {
+    legacyTaskAssignedTo("u1");
 
-    expect(setStage(findOneAndUpdate.mock.calls[0][1]).assignedBy).toBe("actor");
+    await updateTask("p1", "t1", { assignee: "rpo" }, "u1");
+
+    expect(setStage(findOneAndUpdate.mock.calls[0][1]).assignedBy).toBe("u1");
+  });
+
+  /**
+   * The other side of the same clause, and the reason it is not simply "stamp whenever nothing is
+   * recorded". The PM agent, MCP under a second account and any REST client that GETs a task and
+   * PUTs the whole object back all send the assignee unchanged — and each would stamp ITSELF as
+   * the assigner of a legacy task. That reads as a definite "somebody else handed you this" where
+   * the truth is "nobody recorded it", and it is worse than the blank: the notice for it offers no
+   * remedy, and the owner re-selecting themselves then changes nothing at all.
+   */
+  it("leaves a legacy task blank when a third writer merely echoes its assignee", async () => {
+    legacyTaskAssignedTo("u1");
+
+    await updateTask("p1", "t1", { assignee: "rpo", title: "renamed" }, "the-pm-agent");
+
+    expect(setStage(findOneAndUpdate.mock.calls[0][1])).not.toHaveProperty("assignedBy");
+  });
+
+  // Still a hand-over when it really is one: moving a legacy task to somebody else records who did
+  // it, actor and assignee being different people being exactly what that field is for
+  it("still stamps a third writer that moves a legacy task to a different assignee", async () => {
+    legacyTaskAssignedTo("u1");
+    userFindOne.mockResolvedValue({ _id: "u2", username: "kuba" });
+
+    await updateTask("p1", "t1", { assignee: "kuba" }, "the-pm-agent");
+
+    expect(setStage(findOneAndUpdate.mock.calls[0][1]).assignedBy).toBe("the-pm-agent");
   });
 
   it("leaves it alone when the edit touches no assignee", async () => {
@@ -2087,6 +2085,74 @@ describe("a machine claims its owner's work", () => {
   it("claims nothing at all for a machine with no owner", async () => {
     expect(await claimNextTask("p1", "w1", "r1", null)).toBeNull();
     expect(findOneAndUpdate).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * BP-345 held the agent picker to instance admins because choosing an agent could arm a machine
+ * belonging to somebody else. BP-358 took that bar down, and the whole of the argument for taking
+ * it down is that this filter now holds the boundary instead — so it is asserted here, against the
+ * filter, rather than against a permission check that no longer exists.
+ *
+ * Run through sift rather than read off the filter: `expect(filter.assignedBy).toBe(ME)` passes for
+ * the wrong reason once the clause is gone, because `undefined` is not `SOMEBODY_ELSE` either.
+ * Each case asserts BOTH polarities, so a filter that matched nothing at all would fail too.
+ */
+describe("what a member can and cannot arm by choosing an agent", () => {
+  // The member doing the choosing, who also owns a machine on this project
+  const ME = "6a732075133f935b19154cd2";
+  const SOMEBODY_ELSE = "6a732075133f935b19154cd3";
+
+  beforeEach(() => {
+    findOneAndUpdate.mockReset();
+    findById.mockReset();
+    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    find.mockReset();
+    find.mockReturnValue({ lean: () => Promise.resolve([]) });
+  });
+
+  async function whatMyMachineAsksFor() {
+    await claimNextTask("p1", "w1", "r1", ME);
+    return findOneAndUpdate.mock.calls[0][0];
+  }
+
+  // Every document below already carries an agent, because that is the gesture under test: the
+  // member has picked one. What decides is the hand-over, and nothing else.
+  it("cannot arm my machine with a task assigned to somebody else", async () => {
+    const filter = await whatMyMachineAsksFor();
+
+    expect(matches(filter, task({ assignee: SOMEBODY_ELSE, assignedBy: SOMEBODY_ELSE }))).toBe(false);
+    // Nor by being the one who put it in their hands
+    expect(matches(filter, task({ assignee: SOMEBODY_ELSE, assignedBy: ME }))).toBe(false);
+    expect(matches(filter, task({ assignee: ME, assignedBy: ME }))).toBe(true);
+  });
+
+  // The other half, and the reason `assignedBy` exists at all: being handed work is a proposal, and
+  // accepting one is a gesture the product does not have yet
+  it("cannot arm my machine with a task somebody else assigned to me", async () => {
+    const filter = await whatMyMachineAsksFor();
+
+    expect(matches(filter, task({ assignee: ME, assignedBy: SOMEBODY_ELSE }))).toBe(false);
+    expect(matches(filter, task({ assignee: ME, assignedBy: ME }))).toBe(true);
+  });
+
+  // The forgery the two above would be worth nothing against. `assignedBy` is kept off updateTask's
+  // whitelist, so a body naming it is dropped — pinned in full by "ignores an assignedBy the caller
+  // supplied", and named here because it is the other leg this decision stands on.
+  it("has no writer that lets a caller name the assigner", async () => {
+    findOneAndUpdate.mockReset();
+    findOneAndUpdate.mockReturnValue({
+      populate: () => Promise.resolve({ _id: "t1", taskNumber: 1, title: "x", execution: {} }),
+    });
+    const stored = { _id: "t1", taskNumber: 1, status: "ready", title: "x", assignee: { _id: ME } };
+    findOne.mockReturnValue({
+      lean: () => Promise.resolve(stored),
+      populate: () => ({ lean: () => Promise.resolve(stored) }),
+    });
+
+    await updateTask("p1", "t1", { title: "x", assignedBy: ME }, SOMEBODY_ELSE);
+
+    expect(setStage(findOneAndUpdate.mock.calls[0][1])).not.toHaveProperty("assignedBy");
   });
 });
 

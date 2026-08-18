@@ -147,7 +147,7 @@ function TaskDetailView({
   const [deleting, setDeleting] = useState(false);
   const [commentRefreshKey, setCommentRefreshKey] = useState(0);
 
-  const { draft, set, autoSaveState, retry } = useTaskEditor(projectId, task);
+  const { draft, set, autoSaveState, retry, resend } = useTaskEditor(projectId, task);
 
   const columns = effectiveColumns(project.columns);
   // What a written task key is measured against. Former keys included, because this board renamed
@@ -160,9 +160,17 @@ function TaskDetailView({
     task.createdBy && typeof task.createdBy === "object" ? task.createdBy.fullName : null;
   const watching = !!currentUser && (task.watchers || []).includes(currentUser._id);
   const projectDefaultAgent = project.worker?.agent ? String(project.worker.agent) : undefined;
-  // The only columns a claim looks at, so the Agent row can say when a task with an agent is
-  // simply not there yet
-  const approvedStatuses = columns.filter((c) => c.role === "approved").map((c) => c.id);
+
+  // Forces the write the diff-based auto-save would drop, which is how "assign it again" repairs a
+  // task whose assigner was never recorded. Reloaded straight after: that write is what clears the
+  // notice asking for it, and without this the reader repairs the task and watches it stay.
+  const repairAssigner = useCallback(
+    async (username: string | null) => {
+      await resend("assignee", username);
+      onReload();
+    },
+    [resend, onReload]
+  );
 
   const handleFileUpload = useCallback(
     async (file: File): Promise<string> => {
@@ -382,7 +390,8 @@ function TaskDetailView({
             agents={agents}
             projectDefaultAgent={projectDefaultAgent}
             stored={task}
-            approvedStatuses={approvedStatuses}
+            columns={columns}
+            onRepairAssigner={repairAssigner}
             categories={project.categories || []}
             customFields={project.customFields || []}
             reporter={reporter}
@@ -412,7 +421,8 @@ function TaskDetailView({
           agents={agents}
           projectDefaultAgent={projectDefaultAgent}
           stored={task}
-          approvedStatuses={approvedStatuses}
+          columns={columns}
+          onRepairAssigner={repairAssigner}
           categories={project.categories || []}
           customFields={project.customFields || []}
           reporter={reporter}

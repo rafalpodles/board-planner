@@ -396,15 +396,15 @@ describe("TaskDetail, the Agent row's handover notice", () => {
     ).toContain("Ada");
   });
 
-  // The board's own approved columns have to reach the rail as well, or a task sitting in the
-  // backlog with an agent reports that its hand-over is fine. Asserted at both call sites for the
-  // same reason `stored` is: dropping it from either one alone is what a test on the other misses.
+  // The board's own columns have to reach the rail as well, or a task sitting in the backlog with
+  // an agent reports that its hand-over is fine. Asserted at both call sites for the same reason
+  // `stored` is: dropping it from either one alone is what a test on the other misses.
   const inTheBacklog = {
     status: "planned",
     assignedBy: { _id: "u1", username: "rpo", fullName: "Rafal Podles" },
   };
 
-  it("carries the board's approved columns to the rail, naming a backlog task as not there yet", async () => {
+  it("carries the board's columns to the rail, naming a backlog task as not there yet", async () => {
     serve(inTheBacklog);
     renderDetail();
     await loaded();
@@ -425,6 +425,23 @@ describe("TaskDetail, the Agent row's handover notice", () => {
     ).toBe("not-approved-yet");
   });
 
+  /**
+   * The reproduction, at the assembly rather than in the unit: a task with an agent, handed to
+   * itself, under a run — and the rail told the reader beside the live indicator that nothing would
+   * run it. `done` printed the same sentence. Reading the board's ROLES rather than a list of its
+   * approved ids is what distinguishes "not there yet" from "already past there".
+   */
+  it.each(["in_progress", "done"])(
+    "says nothing about a task in %s, whatever the rest of its hand-over is",
+    async (status) => {
+      serve({ status, assignedBy: { _id: "u1", username: "rpo", fullName: "Rafal Podles" } });
+      renderDetail();
+      await loaded();
+
+      expect(screen.queryByTestId("handover-notice")).toBeNull();
+    }
+  );
+
   // Nothing to say about a task whose assignee handed it to themselves — the everyday case, and a
   // notice on it would be on almost every task on the board
   it("says nothing when the hand-over is sound", async () => {
@@ -433,5 +450,82 @@ describe("TaskDetail, the Agent row's handover notice", () => {
     await loaded();
 
     expect(screen.queryByTestId("handover-notice")).toBeNull();
+  });
+});
+
+/**
+ * The notice above tells the reader to "assign it again to record that", and this is the view that
+ * prints it. Auto-save sends the diff, so re-picking the person already on the task sent nothing at
+ * all: no PUT, no toast, no change — the recovery the product documents was a no-op exactly where
+ * it was documented. The e2e that proves the repair calls updateTask directly and steps over this.
+ *
+ * Asserted on the request rather than on a callback, because the callback is the half that already
+ * worked: what broke is between the picker and the wire.
+ */
+describe("TaskDetail, re-assigning a task whose assigner was never recorded", () => {
+  const RAFAL = { _id: "u1", username: "rpo", fullName: "Rafal Podles" };
+  const legacy = {
+    ...task,
+    status: "todo",
+    agent: "ag1",
+    assignee: RAFAL,
+    // The absence itself. A null would take the same branch, but an old document has no key at all.
+    assignedBy: undefined,
+  };
+
+  function serve(over: Record<string, unknown> = {}) {
+    api.get.mockImplementation((url: string) => {
+      if (url === "/api/users") return Promise.resolve([RAFAL, { _id: "u2", username: "claude", fullName: "Claude Code" }]);
+      if (url.startsWith("/api/agent")) return Promise.resolve([]);
+      if (url.includes("/tasks/")) return Promise.resolve({ ...legacy, ...over });
+      if (url.includes("/sprints")) return Promise.resolve([]);
+      return Promise.resolve(project);
+    });
+  }
+
+  async function pickAssignee(name: RegExp) {
+    const rail = within(screen.getByRole("complementary"));
+    await act(async () => rail.getByRole("combobox", { name: "Assignee" }).click());
+    const option = screen.getAllByRole("option").find((o) => name.test(o.textContent || ""));
+    await act(async () => option!.click());
+  }
+
+  it("sends the assignee it already has, which the diff would have dropped", async () => {
+    serve();
+    renderDetail();
+    await loaded();
+
+    await pickAssignee(/Rafal Podles/);
+
+    expect(api.put).toHaveBeenCalledWith("/api/projects/TP/tasks/t1", { assignee: "rpo" });
+  });
+
+  // The task is re-read afterwards, or the reader performs the repair and watches the complaint it
+  // fixed stay on screen until they navigate away
+  it("re-reads the task, so the notice it just fixed goes", async () => {
+    serve();
+    renderDetail();
+    await loaded();
+    const readsBefore = api.get.mock.calls.filter((c: unknown[]) => String(c[0]).includes("/tasks/")).length;
+
+    await pickAssignee(/Rafal Podles/);
+
+    await waitFor(() =>
+      expect(
+        api.get.mock.calls.filter((c: unknown[]) => String(c[0]).includes("/tasks/")).length
+      ).toBeGreaterThan(readsBefore)
+    );
+  });
+
+  // The forced write is for the missing assigner and nothing else. A task that records one is
+  // already correct, and re-picking on it must stay the no-op the diff makes it.
+  it("sends nothing when the assigner is already recorded", async () => {
+    serve({ assignedBy: RAFAL });
+    renderDetail();
+    await loaded();
+
+    await pickAssignee(/Rafal Podles/);
+
+    expect(api.put).not.toHaveBeenCalled();
   });
 });

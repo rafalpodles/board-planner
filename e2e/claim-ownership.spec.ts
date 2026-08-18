@@ -229,7 +229,7 @@ test.describe("a task from before assignedBy existed", () => {
 
   // Driven through the real writer, not by setting the field: what has to be true is that the
   // product's own everyday gesture repairs it, and a hand-written $set could not show that.
-  test("becomes claimable once somebody assigns it, through the ordinary write", async () => {
+  test("becomes claimable once its assignee takes it on, through the ordinary write", async () => {
     const legacy = await addLegacyTask();
 
     const assigned = await updateTask(
@@ -242,6 +242,33 @@ test.describe("a task from before assignedBy existed", () => {
 
     const claimed = await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(OWNER));
     expect(String(claimed?._id)).toBe(String(legacy));
+  });
+
+  /**
+   * The other writers of the same field. The PM agent, MCP under a second account and any REST
+   * client that GETs a task and PUTs the whole object back all send `assignee` unchanged — and
+   * stamping themselves would replace "nobody recorded it" with a definite "somebody else handed
+   * you this". The claim refuses both, but only the first is repairable: once a name is stored, the
+   * owner re-selecting themselves changes nothing, and the notice for that state offers no remedy.
+   *
+   * Against a real document because the condition is the ABSENCE of the key, which a mock's
+   * `undefined` stands in for a little too willingly.
+   */
+  test("is not adopted by a third writer that merely echoes its assignee", async () => {
+    const legacy = await addLegacyTask();
+
+    const echoed = await updateTask(
+      String(PROJECT_ID),
+      String(legacy),
+      { assignee: ADMIN_USERNAME, title: "renamed by somebody else" },
+      String(MEMBER_ID)
+    );
+    expect(echoed.ok).toBe(true);
+
+    const handle = await db();
+    const stored = await handle.collection("tasks").findOne({ _id: legacy });
+    expect(stored?.assignedBy ?? null).toBeNull();
+    expect(await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(OWNER))).toBeNull();
   });
 });
 

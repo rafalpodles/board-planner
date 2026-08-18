@@ -1,14 +1,26 @@
 import { describe, it, expect } from "vitest";
 import { handoverOf } from "./handover";
 import { ApiTask, ApiUser } from "@/types";
+import type { AnyColumn } from "@/lib/columns";
 
 const RAFAL = { _id: "u1", username: "rpo", fullName: "Rafal" } as ApiUser;
 const KRZYSIEK = { _id: "u2", username: "kmk", fullName: "Krzysiek" };
 
-const APPROVED = ["todo"];
+// A board of its own rather than the seeded seven, so an implementation comparing against literal
+// ids — "todo", "in_progress", "done" — fails every case here instead of passing by coincidence
+const BOARD: AnyColumn[] = [
+  { id: "someday", label: "Someday", color: "#888", role: "backlog", order: 0 },
+  { id: "ready", label: "Ready", color: "#888", role: "approved", order: 1 },
+  { id: "doing", label: "Doing", color: "#888", role: "active", order: 2 },
+  { id: "parked", label: "Parked", color: "#888", role: "blocked", order: 3 },
+  { id: "checking", label: "Checking", color: "#888", role: "review", order: 4 },
+  { id: "shipped", label: "Shipped", color: "#888", role: "done", order: 5 },
+];
 
-function task(over: Partial<ApiTask> = {}): Parameters<typeof handoverOf>[0] {
-  return { agent: "a1", assignee: RAFAL, assignedBy: { ...RAFAL }, status: "todo", ...over } as ApiTask;
+// `status` widened to a plain string: TaskStatus is the union of the SEEDED column ids, and a
+// project that built its own board has ids outside it — which is the whole point of judging by role
+function task(over: Partial<Omit<ApiTask, "status">> & { status?: string } = {}): Parameters<typeof handoverOf>[0] {
+  return { agent: "a1", assignee: RAFAL, assignedBy: { ...RAFAL }, status: "ready", ...over } as ApiTask;
 }
 
 /**
@@ -17,37 +29,73 @@ function task(over: Partial<ApiTask> = {}): Parameters<typeof handoverOf>[0] {
  */
 describe("handoverOf", () => {
   it("runs a task its assignee handed to themselves", () => {
-    expect(handoverOf(task(), APPROVED)).toEqual({ runs: true });
+    expect(handoverOf(task(), BOARD)).toEqual({ runs: true });
   });
 
   /**
    * The everyday false positive without it: pick an agent on a task still in the backlog, assign
    * it to yourself, and every other requirement passes while no claim ever looks at that column.
    */
-  it("names a task sitting outside the approved column", () => {
-    expect(handoverOf(task({ status: "planned" }), APPROVED)).toEqual({
+  it("names a task sitting in a column the work has not been approved out of", () => {
+    expect(handoverOf(task({ status: "someday" }), BOARD)).toEqual({
       runs: false,
       reason: "not-approved-yet",
       by: null,
     });
   });
 
+  /**
+   * The reason is "not there YET", and past the approved column it is the opposite of true: a task
+   * in the active column may be under a machine at this moment, and the notice rendered beside the
+   * live run indicator said nothing would run it. On a finished task it is nonsense.
+   *
+   * Each column is named by its ROLE here rather than by an approved-id list, which is what made
+   * every one of these read as "not approved yet".
+   */
+  it.each([
+    ["active", "doing"],
+    ["review", "checking"],
+    ["done", "shipped"],
+  ])("says nothing about a task in the %s column, which is past that question", (_role, status) => {
+    expect(handoverOf(task({ status }), BOARD)).toEqual({ runs: true });
+  });
+
+  // Parked, not taken: nothing claims it, and moving it back to the approved column is exactly
+  // what would
+  it("still names a blocked task as one nothing will pick up", () => {
+    expect(handoverOf(task({ status: "parked" }), BOARD)).toMatchObject({
+      reason: "not-approved-yet",
+    });
+  });
+
+  // What a task left behind by a deleted column carries. Nowhere a claim looks either.
+  it("names a task whose status matches no column this board has", () => {
+    expect(handoverOf(task({ status: "a-column-somebody-deleted" }), BOARD)).toMatchObject({
+      reason: "not-approved-yet",
+    });
+  });
+
   // Choosing no agent is the more useful thing to say, and the ordinary case besides
   it("still names the missing agent first, wherever the task sits", () => {
-    expect(handoverOf(task({ agent: null, status: "planned" }), APPROVED)).toMatchObject({
+    expect(handoverOf(task({ agent: null, status: "someday" }), BOARD)).toMatchObject({
       reason: "no-agent",
     });
   });
 
   // A caller that does not know the board's columns must not have that requirement invented for
   // it — omitted means unjudged, not failed
-  it("does not judge the column when it is not told which ones are approved", () => {
-    expect(handoverOf(task({ status: "planned" }))).toEqual({ runs: true });
+  it("does not judge the column when it is not told what the board is", () => {
+    expect(handoverOf(task({ status: "someday" }))).toEqual({ runs: true });
   });
 
   // A board may define more than one approved-role column
   it("accepts any of the approved columns", () => {
-    expect(handoverOf(task({ status: "in_review" }), ["todo", "in_review"])).toEqual({ runs: true });
+    const twoApproved: AnyColumn[] = [
+      ...BOARD,
+      { id: "also-ready", label: "Also ready", color: "#888", role: "approved", order: 6 },
+    ];
+
+    expect(handoverOf(task({ status: "also-ready" }), twoApproved)).toEqual({ runs: true });
   });
 
   it("compares by id, so an unpopulated reference is read the same way", () => {
