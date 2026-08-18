@@ -5,6 +5,7 @@ const getAuthUser = vi.fn();
 const projectFindById = vi.fn();
 const userFindById = vi.fn();
 const check = vi.fn();
+const accessibleProjectIds = vi.fn();
 
 vi.mock("./db", () => ({ connectDB: vi.fn() }));
 vi.mock("./worker-service", async (importOriginal) => {
@@ -12,8 +13,9 @@ vi.mock("./worker-service", async (importOriginal) => {
   return { ...actual, verifyWorkerCredential };
 });
 vi.mock("./auth", () => ({ getAuthUser, RateLimitError: class extends Error {} }));
-// Only the person branch consults it; the worker branch in this file never reaches it
-vi.mock("./grants", () => ({ check, accessibleProjectIds: vi.fn() }));
+// The person branch consults check(); the worker branch consults accessibleProjectIds() through
+// ownerReachableProjectIds, because a machine reaches exactly what its owner reaches (BP-358)
+vi.mock("./grants", () => ({ check, accessibleProjectIds }));
 vi.mock("@/models/project", () => ({
   Project: { findById: projectFindById, findOne: vi.fn() },
 }));
@@ -24,6 +26,7 @@ const { withProjectAccessOrWorker } = await import("./middleware");
 
 const PROJECT_ID = "69a52e3b399b27d3cbb2c5a5";
 const IDENTITY_ID = "69a52e3b399b27d3cbb2c5b7";
+const OWNER_ID = "69a52e3b399b27d3cbb2c5c9";
 const REMOTE = "git@github.com:owner/repo.git";
 
 function workerDoc(overrides: Record<string, unknown> = {}) {
@@ -33,8 +36,9 @@ function workerDoc(overrides: Record<string, unknown> = {}) {
     lockedByInstance: false,
     identity: IDENTITY_ID,
     repos: [{ remote: REMOTE, path: "/checkout" }],
-    // BP-305: the reported repos narrow what an admin approved, they never stand in for it
-    approvedProjects: [PROJECT_ID],
+    // BP-305/BP-358: the reported repos narrow what this machine's owner can reach, they never
+    // stand in for it
+    owner: OWNER_ID,
     ...overrides,
   };
 }
@@ -50,6 +54,12 @@ function projectDoc(overrides: Record<string, unknown> = {}) {
 
 function identityDoc() {
   return { _id: IDENTITY_ID, username: "worker-w1", fullName: "Rafal · MacBook", role: "member" };
+}
+
+// Two different accounts, because they answer two different questions: identity is which machine
+// acted, owner is whose machine it is — and only the owner's grants decide what it may reach.
+function ownerDoc() {
+  return { _id: OWNER_ID, username: "rpo", fullName: "Rafal", role: "member" };
 }
 
 function workerRequest(headers: Record<string, string> = {}) {
@@ -69,7 +79,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   verifyWorkerCredential.mockResolvedValue(workerDoc());
   projectFindById.mockReturnValue({ select: () => ({ lean: () => Promise.resolve(projectDoc()) }) });
-  userFindById.mockResolvedValue(identityDoc());
+  userFindById.mockImplementation((id: string) =>
+    Promise.resolve(String(id) === OWNER_ID ? ownerDoc() : identityDoc())
+  );
+  accessibleProjectIds.mockResolvedValue([PROJECT_ID]);
 });
 
 describe("a worker reporting with its own credential", () => {
@@ -191,6 +204,40 @@ describe("the grant is re-derived on every call", () => {
 
     expect((await withProjectAccessOrWorker(handler)(workerRequest(), context())).status).toBe(403);
     expect(handler).not.toHaveBeenCalled();
+  });
+
+  // BP-358: what the stored approved list used to answer. Resolved live, so a revoked grant reaches
+  // the machine on its next call instead of leaving an approval behind that nothing revisits.
+  it("refuses a project this machine's owner cannot reach", async () => {
+    accessibleProjectIds.mockResolvedValue(["some-other-project"]);
+    const handler = vi.fn();
+
+    expect((await withProjectAccessOrWorker(handler)(workerRequest(), context())).status).toBe(403);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("refuses a machine with no owner at all", async () => {
+    verifyWorkerCredential.mockResolvedValue(workerDoc({ owner: null }));
+    const handler = vi.fn();
+
+    expect((await withProjectAccessOrWorker(handler)(workerRequest(), context())).status).toBe(403);
+    expect(handler).not.toHaveBeenCalled();
+    // Not merely refused by an empty grant list: the owner is never looked up at all
+    expect(accessibleProjectIds).not.toHaveBeenCalled();
+  });
+
+  // The identity is a `worker-<id>` machine account with no grants of its own. Reading reach off it
+  // rather than off the owner would refuse every project on the instance, and both accounts are
+  // members, so nothing about the outcome distinguishes them — only who was asked.
+  it("asks the owner's account what it may reach, not the machine's own identity", async () => {
+    await withProjectAccessOrWorker(vi.fn().mockResolvedValue(new Response("ok")))(
+      workerRequest(),
+      context()
+    );
+
+    expect(accessibleProjectIds).toHaveBeenCalledWith(
+      expect.objectContaining({ _id: OWNER_ID, username: "rpo" })
+    );
   });
 });
 

@@ -95,7 +95,7 @@ export const CAREFUL_COMPOSITION: AgentComposition = {
   delivery: [{ key: "push" }, { key: "pull-request" }],
 };
 
-// The merge preset's agent. Merging is a property of the composition now, so "may this project
+// The agent that merges its own work. Merging is a property of the composition now, so "may this project
 // merge" is answered by whether its agent carries the step — not by a boolean beside it.
 export const MERGING_COMPOSITION: AgentComposition = {
   analysis: [],

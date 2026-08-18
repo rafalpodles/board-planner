@@ -4,7 +4,7 @@ import { getAuthUser } from "./auth";
 import { ProvenanceError } from "./session";
 import { connectDB } from "./db";
 import { check } from "./grants";
-import { verifyWorkerCredential, isApprovedFor } from "./worker-service";
+import { canServe, ownerReachableProjectIds, verifyWorkerCredential } from "./worker-service";
 import { Project } from "@/models/project";
 import { User } from "@/models/user";
 import { Task } from "@/models/task";
@@ -215,12 +215,15 @@ export function withProjectAccessOrWorker(handler: AuthenticatedHandler) {
     if (!projectId) return NextResponse.json({ error: "Project not found" }, { status: 404 });
 
     await connectDB();
-    const project = await Project.findById(projectId)
-      .select("_id repositoryUrl githubRepo gitlabRepo gitlabHost worker")
-      .lean();
+    const [project, reachable] = await Promise.all([
+      Project.findById(projectId)
+        .select("_id repositoryUrl githubRepo gitlabRepo gitlabHost worker")
+        .lean(),
+      ownerReachableProjectIds(worker),
+    ]);
     if (
       !project?.worker?.enabled ||
-      !isApprovedFor(worker, String(project._id)) ||
+      !canServe(reachable, String(project._id)) ||
       !matchRepo(project as never, worker.repos ?? [])
     ) {
       return NextResponse.json(

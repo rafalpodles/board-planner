@@ -11,8 +11,7 @@ import { usePollWhileVisible } from "@/hooks/use-poll-while-visible";
 import { timeAgo } from "@/lib/time";
 import { workerPolicyRows } from "@/lib/worker-policy-view";
 import { commandStatus, WorkerCommand } from "@/lib/worker-command-status";
-import { ApiWorker, ApiWorkerPreflight, ApiProject } from "@/types";
-import { useProjects } from "@/hooks/use-projects";
+import { ApiWorker, ApiWorkerPreflight } from "@/types";
 
 const POLL_MS = 5_000;
 
@@ -22,57 +21,22 @@ const TONE_CLASSES = {
   warning: "text-danger",
 };
 
-// What an admin approved this machine for. A worker with none claims nothing — which is what
-// every enrolment predating BP-305 is, so this is also the recovery path for them.
-function ApprovedProjectsCell({
-  worker,
-  projects,
-  disabled,
-  onToggle,
-}: {
-  worker: ApiWorker;
-  projects: ApiProject[];
-  disabled: boolean;
-  onToggle: (approvedProjects: string[]) => void;
-}) {
-  const approved = new Set(worker.approvedProjects ?? []);
-
-  if (projects.length === 0) {
-    return <span className="text-xs text-text-muted">no projects</span>;
+// Whose machine this is, which since BP-358 is the whole of what it may reach: the projects that
+// person can reach, resolved on every call. A worker with no owner reaches nothing at all, and
+// looked identical to a healthy one until this column existed — it has no binding error, no failed
+// heartbeat and an empty assignment list, which is also what an idle machine has.
+function OwnerCell({ worker }: { worker: ApiWorker }) {
+  if (!worker.owner) {
+    return (
+      <span className="text-xs text-danger" data-testid="worker-no-owner">
+        no owner — claims nothing
+      </span>
+    );
   }
-
   return (
-    <div className="flex flex-col gap-1">
-      {approved.size === 0 && (
-        <span className="text-xs text-danger">claims nothing until approved</span>
-      )}
-      <div className="flex flex-wrap gap-1">
-        {projects.map((project) => {
-          const on = approved.has(project._id);
-          return (
-            <button
-              key={project._id}
-              disabled={disabled}
-              onClick={() =>
-                onToggle(
-                  on
-                    ? [...approved].filter((id) => id !== project._id)
-                    : [...approved, project._id]
-                )
-              }
-              className={`text-xs px-1.5 py-0.5 rounded border transition-colors cursor-pointer ${
-                on
-                  ? "border-primary bg-primary/10 text-primary"
-                  : "border-border text-text-muted hover:text-text"
-              }`}
-              title={on ? `Approved for ${project.name}` : `Approve for ${project.name}`}
-            >
-              {project.key}
-            </button>
-          );
-        })}
-      </div>
-    </div>
+    <span className="text-xs text-text whitespace-nowrap" title={worker.owner.username}>
+      {worker.owner.fullName || worker.owner.username}
+    </span>
   );
 }
 
@@ -103,7 +67,6 @@ export default function AdminWorkersPage() {
   const api = useApi();
   const router = useRouter();
   const { isAdmin, isLoading: authLoading } = useAuth();
-  const { projects } = useProjects();
   const { toast } = useToast();
 
   const [workers, setWorkers] = useState<ApiWorker[] | null>(null);
@@ -132,7 +95,7 @@ export default function AdminWorkersPage() {
 
   async function patch(
     worker: ApiWorker,
-    changes: Partial<Pick<ApiWorker, "enabled" | "lockedByInstance" | "approvedProjects">>
+    changes: Partial<Pick<ApiWorker, "enabled" | "lockedByInstance">>
   ) {
     setSavingId(worker._id);
     try {
@@ -202,7 +165,7 @@ export default function AdminWorkersPage() {
                 <th className="text-left px-3 py-2 font-medium">Host</th>
                 <th className="text-left px-3 py-2 font-medium">Version</th>
                 <th className="text-left px-3 py-2 font-medium">Checkouts</th>
-                <th className="text-left px-3 py-2 font-medium">Approved for</th>
+                <th className="text-left px-3 py-2 font-medium">Owner</th>
                 <th className="text-left px-3 py-2 font-medium">Running</th>
                 <th className="text-left px-3 py-2 font-medium">Last seen</th>
                 <th className="text-left px-3 py-2 font-medium">Preflight</th>
@@ -215,7 +178,7 @@ export default function AdminWorkersPage() {
             <tbody>
               {workers.length === 0 && (
                 <tr>
-                  <td colSpan={11} className="px-3 py-6 text-center text-text-muted text-sm">
+                  <td colSpan={12} className="px-3 py-6 text-center text-text-muted text-sm">
                     No workers registered yet.
                   </td>
                 </tr>
@@ -268,13 +231,8 @@ export default function AdminWorkersPage() {
                         )}
                       </div>
                     </td>
-                    <td className="px-3 py-2 max-w-[16rem]">
-                      <ApprovedProjectsCell
-                        worker={worker}
-                        projects={projects ?? []}
-                        disabled={savingId === worker._id}
-                        onToggle={(approvedProjects) => patch(worker, { approvedProjects })}
-                      />
+                    <td className="px-3 py-2 max-w-[12rem]">
+                      <OwnerCell worker={worker} />
                     </td>
                     <td className="px-3 py-2 max-w-[14rem]">
                       <PreflightCell preflight={worker.preflight} />
@@ -349,7 +307,7 @@ export default function AdminWorkersPage() {
                     </td>
                   </tr>,
                   <tr key={`${worker._id}-policy`} className="border-b border-border last:border-b-0">
-                    <td colSpan={10} className="px-3 pb-3 pt-0">
+                    <td colSpan={12} className="px-3 pb-3 pt-0">
                       <div className="flex flex-wrap gap-1.5">
                         {workerPolicyRows(worker as never).map((row) => (
                           <span

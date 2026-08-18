@@ -6,8 +6,12 @@ const touchWorker = vi.fn();
 const projectFind = vi.fn();
 const workerUpdateOne = vi.fn();
 const workerFind = vi.fn();
+const accessibleProjectIds = vi.fn();
+const userFindById = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
+vi.mock("@/lib/grants", () => ({ accessibleProjectIds, check: vi.fn() }));
+vi.mock("@/models/user", () => ({ User: { findById: userFindById } }));
 vi.mock("@/models/project", () => ({
   Project: { find: () => ({ select: () => ({ lean: projectFind }) }) },
 }));
@@ -23,6 +27,7 @@ const { POST } = await import("./route");
 
 const WORKER_ID = "69a52e3b399b27d3cbb2c5a5";
 const PROJECT_ID = "69a52e3b399b27d3cbb2c5b7";
+const OWNER_ID = "6a732075133f935b19154cd2";
 const REMOTE = "git@github.com:owner/repo.git";
 
 function enabledProject() {
@@ -45,9 +50,8 @@ function workerDoc(overrides: Record<string, unknown> = {}) {
     policy: { pollIntervalMs: 5000 },
     policyOverrides: ["pollIntervalMs"],
     repos: [{ remote: REMOTE, path: "/repo" }],
-    // BP-305: assignments are the approved set narrowed by the reported repos
-    approvedProjects: [PROJECT_ID],
-    owner: "6a732075133f935b19154cd2",
+    // BP-305/BP-358: assignments are what the owner can reach, narrowed by the reported repos
+    owner: OWNER_ID,
     command: "",
     commandIssuedAt: null,
     ...overrides,
@@ -77,6 +81,8 @@ beforeEach(() => {
   workerFind.mockResolvedValue([]);
   verifyWorkerCredential.mockResolvedValue(workerDoc());
   touchWorker.mockResolvedValue(undefined);
+  userFindById.mockResolvedValue({ _id: OWNER_ID, role: "member" });
+  accessibleProjectIds.mockResolvedValue([PROJECT_ID]);
 });
 
 describe("POST /api/workers/:workerId/heartbeat", () => {
@@ -227,7 +233,7 @@ describe("one working tree, one worker", () => {
   // Only the contested checkout drops out; a second, uncontested one must still be offered
   it("drops only the contested checkout, not the whole inventory", async () => {
     workerFind.mockResolvedValue([otherOnSameHost]);
-    verifyWorkerCredential.mockResolvedValue(workerDoc({ approvedProjects: [PROJECT_ID, "p2"] }));
+    accessibleProjectIds.mockResolvedValue([PROJECT_ID, "p2"]);
     projectFind.mockResolvedValue([
       enabledProject(),
       { _id: "p2", githubRepo: "owner/other", worker: { enabled: true, policy: {}, policyOverrides: [] } },

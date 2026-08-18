@@ -5,7 +5,7 @@ import { Project } from "@/models/project";
 import { Worker } from "@/models/worker";
 import { RepoReport } from "@/lib/repo-match";
 import { WorkerPreflight, WorkerPreflightCheck } from "@/types";
-import { assignmentsFor, approvedProjectIds, overriddenWorkerPolicy, touchWorker, usableRepos } from "@/lib/worker-service";
+import { assignmentsFor, ownerReachableProjectIds, overriddenWorkerPolicy, touchWorker, usableRepos } from "@/lib/worker-service";
 
 // A worker reports its own checkouts; anything else is discarded rather than trusted, since this
 // list decides which projects it is offered.
@@ -99,9 +99,12 @@ export const POST = withWorker(async (request, { worker }) => {
     others as never
   );
 
-  const projects = await Project.find({ "worker.enabled": true })
-    .select("_id repositoryUrl githubRepo gitlabRepo gitlabHost worker")
-    .lean();
+  const [projects, reachable] = await Promise.all([
+    Project.find({ "worker.enabled": true })
+      .select("_id repositoryUrl githubRepo gitlabRepo gitlabHost worker")
+      .lean(),
+    ownerReachableProjectIds(worker),
+  ]);
 
   return NextResponse.json({
     command: worker.command,
@@ -109,6 +112,6 @@ export const POST = withWorker(async (request, { worker }) => {
     // Only what an operator set: everything else resolves against the worker's own defaults, so
     // raising a default reaches every machine that never pinned it
     policy: overriddenWorkerPolicy(worker),
-    assignments: assignmentsFor(inventory, projects as never, approvedProjectIds(worker), Boolean(worker.owner)),
+    assignments: assignmentsFor(inventory, projects as never, reachable),
   });
 });

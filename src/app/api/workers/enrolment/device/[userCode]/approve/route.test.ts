@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const getAuthUser = vi.fn();
+const check = vi.fn();
 const logInstanceAudit = vi.fn();
 const denyDeviceEnrolment = vi.fn();
 const findPendingByUserCode = vi.fn();
@@ -8,15 +9,14 @@ const registerWorker = vi.fn();
 
 const projectSelect = vi.fn();
 const projectUpdateOne = vi.fn();
-const workerUpdateOne = vi.fn();
 const deviceEnrolmentUpdateOne = vi.fn();
-const agentFindOneLean = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({
   getAuthUser,
   RateLimitError: class RateLimitError extends Error {},
 }));
+vi.mock("@/lib/grants", () => ({ check, accessibleProjectIds: vi.fn() }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 vi.mock("@/lib/device-enrolment", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/device-enrolment")>();
@@ -32,13 +32,14 @@ vi.mock("@/models/project", () => ({
 vi.mock("@/models/deviceEnrolment", () => ({
   DeviceEnrolment: { updateOne: deviceEnrolmentUpdateOne },
 }));
-vi.mock("@/models/worker", () => ({ Worker: { updateOne: workerUpdateOne } }));
-vi.mock("@/models/agent", () => ({ Agent: { findOne: () => ({ lean: agentFindOneLean }) } }));
 
 const { POST } = await import("./route");
 
-const ADMIN = { _id: "admin-1", role: "admin", fullName: "Rafal Podles", username: "rpo" };
 const PROJECT_ID = "69a52e3b399b27d3cbb2c5a5";
+// An ordinary member connecting their own laptop — the case admin approval used to stand in front
+// of, and the one the whole of BP-358 is about.
+const MEMBER = { _id: "member-1", role: "member", fullName: "Rafal Podles", username: "rpo" };
+const ADMIN = { _id: "admin-1", role: "admin", fullName: "Ada", username: "ada" };
 
 function enrolment(overrides: Record<string, unknown> = {}) {
   return {
@@ -73,53 +74,164 @@ function ctx(userCode = "ABCD-1234") {
   return { params: Promise.resolve({ userCode }) };
 }
 
+// "may reach it, may not administer it" — the member case, which is the default here
+function grants(access: boolean, admin: boolean) {
+  check.mockImplementation((_user: unknown, _project: string, need: string) =>
+    Promise.resolve(need === "admin" ? admin : access)
+  );
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
-  getAuthUser.mockResolvedValue(ADMIN);
+  getAuthUser.mockResolvedValue(MEMBER);
+  grants(true, false);
   findPendingByUserCode.mockResolvedValue(enrolment());
   projectSelect.mockResolvedValue(project());
   projectUpdateOne.mockResolvedValue({});
-  agentFindOneLean.mockResolvedValue({ _id: "agent-1" });
   registerWorker.mockResolvedValue({
     worker: { _id: "w1", name: "rig-laptop" },
     credential: "cpw_secret",
   });
-  workerUpdateOne.mockResolvedValue({});
   deviceEnrolmentUpdateOne.mockResolvedValue({});
   denyDeviceEnrolment.mockResolvedValue(true);
 });
 
-// BP-358: this is "the path people actually take" per the route's own comment — one click enables
-// a project and registers a machine, and the admin approving it is who that machine belongs to.
-// Until now this route had no test file at all.
+// BP-358: this is "the path people actually take" — one click connects a machine, and the person
+// confirming is who that machine belongs to. There is no admin approval step in front of it any
+// more: a machine runs only its owner's own work, inside permissions that person already holds.
 describe("POST /api/workers/enrolment/device/:userCode/approve", () => {
-  it("passes the approving admin as the machine's owner, by name and by id", async () => {
-    await POST(request({ projectId: PROJECT_ID, preset: "write" }), ctx());
+  it("passes the person confirming as the machine's owner, by name and by id", async () => {
+    await POST(request({ projectId: PROJECT_ID }), ctx());
 
     expect(registerWorker).toHaveBeenCalledWith(
       expect.objectContaining({
         name: "rig-laptop",
         host: "mac.home",
         owner: "Rafal Podles",
-        ownerId: "admin-1",
+        ownerId: "member-1",
       })
     );
   });
 
-  it("falls back to the username when the admin has no display name", async () => {
-    getAuthUser.mockResolvedValue({ _id: "admin-2", role: "admin", fullName: "", username: "rpo2" });
+  it("falls back to the username when they have no display name", async () => {
+    getAuthUser.mockResolvedValue({ ...MEMBER, _id: "member-2", fullName: "", username: "rpo2" });
 
-    await POST(request({ projectId: PROJECT_ID, preset: "write" }), ctx());
+    await POST(request({ projectId: PROJECT_ID }), ctx());
 
     expect(registerWorker).toHaveBeenCalledWith(
-      expect.objectContaining({ owner: "rpo2", ownerId: "admin-2" })
+      expect.objectContaining({ owner: "rpo2", ownerId: "member-2" })
     );
   });
 
-  it("registers the machine and returns its id", async () => {
-    const response = await POST(request({ projectId: PROJECT_ID, preset: "write" }), ctx());
+  // The removed gate: MEMBER has role "member", so an admin-gated route answers 403 here.
+  it("registers the machine for an ordinary member and returns its id", async () => {
+    const response = await POST(request({ projectId: PROJECT_ID }), ctx());
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ state: "approved", workerId: "w1" });
+    expect(await response.json()).toMatchObject({ state: "approved", workerId: "w1" });
+  });
+
+  // The machine is told what to clone, so a project this person cannot reach must not have its
+  // repository address handed over. 404 rather than 403: existence is the thing being hidden.
+  it("refuses a project the person confirming cannot reach", async () => {
+    grants(false, false);
+
+    const response = await POST(request({ projectId: PROJECT_ID }), ctx());
+
+    expect(response.status).toBe(404);
+    expect(registerWorker).not.toHaveBeenCalled();
+  });
+
+  describe("committing the project to machines", () => {
+    // Still a project-admin decision with its own audit row: a member connecting their laptop does
+    // not make it on the project's behalf.
+    it("leaves the switch alone for someone who cannot administer the project", async () => {
+      const response = await POST(request({ projectId: PROJECT_ID }), ctx());
+
+      expect(projectUpdateOne).not.toHaveBeenCalled();
+      expect((await response.json()).workersEnabled).toBe(false);
+      expect(logInstanceAudit).not.toHaveBeenCalledWith(
+        expect.objectContaining({ action: "project_workers_enabled" })
+      );
+    });
+
+    it("turns it on, and records that, for someone who can", async () => {
+      getAuthUser.mockResolvedValue(ADMIN);
+      grants(true, true);
+
+      const response = await POST(request({ projectId: PROJECT_ID }), ctx());
+
+      expect(projectUpdateOne).toHaveBeenCalledWith(
+        { _id: PROJECT_ID },
+        { $set: { "worker.enabled": true } }
+      );
+      expect((await response.json()).workersEnabled).toBe(true);
+      expect(logInstanceAudit).toHaveBeenCalledWith(
+        expect.objectContaining({ action: "project_workers_enabled", target: "BP" })
+      );
+    });
+
+    it("records nothing when the switch was already on", async () => {
+      getAuthUser.mockResolvedValue(ADMIN);
+      grants(true, true);
+      projectSelect.mockResolvedValue(project({ worker: { enabled: true } }));
+
+      await POST(request({ projectId: PROJECT_ID }), ctx());
+
+      expect(projectUpdateOne).not.toHaveBeenCalled();
+      expect(logInstanceAudit).not.toHaveBeenCalledWith(
+        expect.objectContaining({ action: "project_workers_enabled" })
+      );
+    });
+
+    // A member connecting to an already-enabled project still gets a machine that will run
+    it("reports the switch as on when somebody else already turned it on", async () => {
+      projectSelect.mockResolvedValue(project({ worker: { enabled: true } }));
+
+      const response = await POST(request({ projectId: PROJECT_ID }), ctx());
+
+      expect((await response.json()).workersEnabled).toBe(true);
+    });
+  });
+
+  // The preset used to write project.worker.agent — the project's default. After BP-358 that field
+  // only decides which agent the task picker offers first, so an enrolling person would have been
+  // silently changing a project-wide suggestion for everyone from a screen about their own laptop.
+  it("does not write a project-wide agent from the enrolment", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+    grants(true, true);
+
+    await POST(request({ projectId: PROJECT_ID, preset: "merge" }), ctx());
+
+    expect(projectUpdateOne).toHaveBeenCalledTimes(1);
+    expect(projectUpdateOne.mock.calls[0][1]).toEqual({ $set: { "worker.enabled": true } });
+  });
+
+  it("records who the machine belongs to on the enrolment row", async () => {
+    await POST(request({ projectId: PROJECT_ID }), ctx());
+
+    expect(deviceEnrolmentUpdateOne.mock.calls[0][1].$set).toMatchObject({
+      status: "approved",
+      enrolledBy: "member-1",
+      worker: "w1",
+    });
+  });
+
+  // Still not something a machine can do for itself: a credential readable off the worker's disk
+  // must not be able to enrol a second one.
+  it("refuses a machine credential", async () => {
+    getAuthUser.mockResolvedValue({ ...MEMBER, viaMachineCredential: true });
+
+    const response = await POST(request({ projectId: PROJECT_ID }), ctx());
+
+    expect(response.status).toBe(403);
+    expect(registerWorker).not.toHaveBeenCalled();
+  });
+
+  it("still lets the person refuse it outright", async () => {
+    const response = await POST(request({ deny: true }), ctx());
+
+    expect(await response.json()).toEqual({ state: "denied" });
+    expect(registerWorker).not.toHaveBeenCalled();
   });
 });

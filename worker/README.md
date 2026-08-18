@@ -141,11 +141,9 @@ and `SIGINT` both finish the task in flight before the loop exits.
   no machine looks at it. A task assigned by anyone else is never taken: the approval surface for
   work somebody *else* hands you is a separate, later change.
 
-  The owner is the account that approved this machine's enrolment, deliberately not the worker's
-  own identity: that is an auto-created `worker-<id>` account with kind `machine`, excluded from
-  every list the product offers. Keying the predicate on it would have described a hand-over nobody
-  could perform. The one exception is a run this worker already holds — its own claim also matches
-  by identity, so a released task it started is the task it picks back up.
+  The owner is the account that enrolled this machine, deliberately not the worker's own identity:
+  that is an auto-created `worker-<id>` account with kind `machine`, excluded from every list the
+  product offers. Keying the predicate on it would have described a hand-over nobody could perform.
 - **Nothing starts before its blockers finish.** A task whose `blockedBy` still names an unfinished
   task is passed over, and the claim takes the next one that is free instead. Finished means the
   blocker sits in a column with the `done` role, so a board that renamed its last column is read
@@ -266,18 +264,30 @@ one stale line must not cost this machine every other checkout it could serve.
 
 ## What a worker's credential grants
 
-Instance-wide, not per project. A worker that reports a checkout matching a project's repository is
-offered that project, for **every** project with workers enabled — there is no per-worker list of
-which projects a machine may serve.
+**Exactly what its owner can reach, and nothing else.** A worker is offered a project when three
+things hold at once: the project is enabled for workers, the machine's **owner** can reach it, and
+that machine reports a checkout whose remote matches the project's repository.
 
-That is deliberate. A worker credential comes from a single-use enrolment token that only an
-instance admin can mint from an interactive session, so the set of workers is already the set an
-admin chose to admit, and admitting a machine admits it to the instance. Reporting a remote it does
-not really have gains a worker nothing it could run: it resolves the checkout from this file, so a
-false remote earns an assignment it then fails to bind.
+The owner's reach is resolved from their own grants on every heartbeat, every assignment list and
+every claim — not stored on the worker. A grant revoked from the person is revoked from their
+machine on its next poll, with nothing to remember to un-tick.
 
-Revisit this if workers are ever enrolled by someone other than an instance admin, or if two
-projects on one instance must not share a machine.
+Reporting a remote it does not really have gains a worker nothing it could run: it resolves the
+checkout from `repos.json` on its own disk, so a false remote earns an assignment it then fails to
+bind.
+
+Until BP-358 this was instance-wide, and an instance admin had to approve every enrolment. That was
+the right shape while a machine took work assigned to a project-wide nominee — anyone's work — so
+admitting a machine was an instance-level decision. A machine now runs only its owner's own work, on
+its owner's own hardware, entirely inside permissions that person already holds, so the approval
+signed off on something already permitted. **Enrolling is self-service:** whoever connects the
+machine owns it. An instance admin keeps the fleet console and the kill switch (`enabled`,
+`lockedByInstance`) and is no longer a required step.
+
+A machine with **no owner** — every worker enrolled before BP-358 — reaches nothing: no assignments,
+no claim, refused by the middleware. That is deliberate rather than a fallback to the old behaviour,
+which would keep the race this replaces alive indefinitely. The fleet console's Owner column says
+so; the fix is to enrol the machine again from the machine.
 
 ## Where settings live
 

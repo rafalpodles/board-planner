@@ -1,17 +1,21 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { withAdmin } from "@/lib/middleware";
+import { withAuth } from "@/lib/middleware";
 import { mintEnrolmentToken } from "@/lib/enrolment";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 
-// Minting requires an interactive admin session, never an API token. An API token can be read off a
-// disk the agent can also read, and one that could mint enrolment tokens would hand back the very
-// power this credential exists to remove.
-export const POST = withAdmin(async (request, { user }) => {
+// Minting requires an interactive session, never an API token. An API token can be read off a disk
+// the agent can also read, and one that could mint enrolment tokens would hand back the very power
+// this credential exists to remove.
+//
+// Not withAdmin since BP-358: the token names its creator, registration makes that person the
+// machine's owner, and a machine reaches only what its owner reaches. Requiring an admin would gate
+// the headless path on something the browser path stopped needing, and grant no less.
+export const POST = withAuth(async (request, { user }) => {
   await connectDB();
 
   if (user.viaMachineCredential) {
-    return NextResponse.json({ error: "Interactive admin session required" }, { status: 403 });
+    return NextResponse.json({ error: "Interactive session required" }, { status: 403 });
   }
 
   const body = await request.json().catch(() => ({}));
