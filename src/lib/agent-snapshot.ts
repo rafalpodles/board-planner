@@ -37,10 +37,15 @@ export interface AgentSnapshot {
  * task naming none is a task a person is doing — the claim skips it rather than resolving a default
  * on its behalf. Before BP-358 this fell through the project default to the seeded "Default", which
  * is what made an empty field mean "whatever the project says" instead of "nobody".
+ *
+ * `machineOwnerId` is the person the claiming machine belongs to, and it is required rather than
+ * optional: this is the last check before a composition runs, and a caller that forgot to say whose
+ * machine it is asking for would silently opt out of it.
  */
 export async function snapshotFor(
   projectId: string,
-  taskAgentId?: unknown
+  taskAgentId: unknown,
+  machineOwnerId: string | null
 ): Promise<AgentSnapshot | null> {
   const agentId = taskAgentId ? String(taskAgentId) : "";
   if (!agentId) return null;
@@ -50,6 +55,27 @@ export async function snapshotFor(
 
   // A project agent must not run on another project's task, whichever way it was chosen
   if (agent.scope === "project" && String(agent.project) !== String(projectId)) return null;
+
+  // The same question one layer down, asked where the work is actually picked up rather than where
+  // it was written. Every writer of `agent` judges this pairing, and three consecutive rounds of
+  // BP-358 each closed one writer and were followed by another of the same shape — a rule spread
+  // across every writer is a rule each new path through them can miss. Here it holds for a document
+  // however it reached the database, including ones written before those writers were fixed.
+  if (agent.scope === "user") {
+    const composer = agent.owner ? String(agent.owner) : "";
+    const machine = machineOwnerId ? String(machineOwnerId) : "";
+    // Presence on both sides, not just equality: "" === "" would read an ownerless agent and an
+    // ownerless machine as the same person.
+    if (!composer || composer !== machine) {
+      // The only record that this happened. The route's own line below it says the agent resolved
+      // to nothing runnable, which for this refusal is untrue and would send a reader hunting
+      // through a perfectly good agent.
+      console.error(
+        `Claim refused: agent ${agentId} is a personal agent belonging to ${composer || "nobody"}, and this machine belongs to ${machine || "nobody"}`
+      );
+      return null;
+    }
+  }
 
   const composition = normaliseComposition(agent.composition);
   const entries = sequenceOf(composition);

@@ -16,6 +16,8 @@ import {
   MEMBER_USERNAME,
   PROJECT_ID,
   PROJECT_KEY,
+  WORKER_CREDENTIAL,
+  WORKER_ID,
   seed,
 } from "./seed";
 
@@ -854,5 +856,206 @@ test.describe("whose task a personal agent may go on", () => {
     const after = await handle.collection("tasks").findOne({ _id: own });
     expect(after?.agent).toBeNull();
     expect(String(after?.assignee)).toBe(String(MEMBER_ID));
+  });
+});
+
+/**
+ * The fourth walk, and the one check that is not a writer.
+ *
+ * Everything above is enforced where `agent` is WRITTEN, and three consecutive rounds of BP-358
+ * each closed one writer and were each followed by another hole of the same shape. So this block
+ * goes through the claim route itself — the point where a composition is actually picked up and
+ * handed to a machine — and starts from documents no writer will ever look at again: the ones this
+ * branch's own intermediate commits could store, and the ones `main` holds today.
+ *
+ * The route rather than the service, deliberately. `snapshotFor` is called nowhere else, and the
+ * machine's owner only exists at that layer: the two defects before this one lived in exactly the
+ * seam a direct service call steps over.
+ */
+test.describe("what the machine refuses at the moment it picks the work up", () => {
+  const MINE = new mongoose.Types.ObjectId();
+  const THEIRS = new mongoose.Types.ObjectId();
+  const PROJECTS = new mongoose.Types.ObjectId();
+  // A key the catalog really carries: this block is RESOLVED here rather than merely stored, and
+  // snapshotFor refuses a composition naming a key with no block behind it
+  const RUNNABLE = { analysis: [], implementation: [{ key: "implement" }], verification: [], delivery: [] };
+  const REMOTE = "e2e-owner/e2e-repo";
+
+  // OWNER is the admin, so the three ids stay apart: the machine belongs to one person, MINE is
+  // that person's own composition, THEIRS is the member's, and neither is the machine's id.
+  test.beforeEach(async () => {
+    const handle = await db();
+    // seed() empties the whole database, and the block catalog is written at server BOOT — so by
+    // the second test of any run it is gone. A missing block refuses the claim for a reason that
+    // has nothing to do with ownership, which is exactly how the two positive controls below would
+    // stop controlling anything.
+    await handle.collection("agentblocks").updateOne(
+      { key: "implement" },
+      { $set: { key: "implement", kind: "step", name: "Implement", description: "", prompt: "make the change", capability: "edit", model: "opus", fallbackModel: "sonnet", deterministic: false, builtIn: true } },
+      { upsert: true }
+    );
+    await handle.collection("agents").deleteMany({ _id: { $in: [MINE, THEIRS, PROJECTS] } });
+    await handle.collection("agents").insertMany([
+      { _id: MINE, name: "The owner's own", description: "", scope: "user", owner: OWNER, project: null, composition: RUNNABLE, builtIn: false },
+      { _id: THEIRS, name: "The member's own", description: "", scope: "user", owner: MEMBER_ID, project: null, composition: RUNNABLE, builtIn: false },
+      { _id: PROJECTS, name: "The project's", description: "", scope: "project", owner: null, project: PROJECT_ID, composition: RUNNABLE, builtIn: false },
+    ]);
+    // What verdictFor wants before it will let this machine claim at all: an owner who can reach
+    // the project, and a reported checkout of the project's own repository.
+    await handle.collection("workers").updateOne(
+      { _id: WORKER_ID },
+      { $set: { owner: OWNER, repos: [{ remote: REMOTE, path: "/e2e/checkout" }], lastSeenAt: new Date() } }
+    );
+    await handle.collection("projects").updateOne({ _id: PROJECT_ID }, { $set: { githubRepo: REMOTE } });
+  });
+
+  function claim(request: APIRequestContext, runId: string) {
+    return request.post(`/api/projects/${PROJECT_ID}/tasks/claim`, {
+      headers: {
+        authorization: `Bearer ${WORKER_CREDENTIAL}`,
+        "x-worker-id": String(WORKER_ID),
+        "x-cp-protocol": "1",
+      },
+      data: { runId },
+    });
+  }
+
+  // Nothing below means anything without this: a 204 proves a refusal only if a claim through the
+  // same harness can succeed
+  test("takes a task carrying the machine owner's own composition", async ({ request }) => {
+    const own = await addTask({ assignee: OWNER, assignedBy: OWNER, agent: MINE });
+
+    const claimed = await claim(request, "run-owner");
+
+    expect(claimed.status(), await claimed.text()).toBe(200);
+    const body = await claimed.json();
+    expect(String(body._id)).toBe(String(own));
+    expect(body.agent).toMatchObject({ agentId: String(MINE), name: "The owner's own" });
+    expect((await read(own)).status).toBe(ACTIVE);
+  });
+
+  /**
+   * The residue this round exists for. `f127d26` let anybody put their personal agent on anybody's
+   * self-assigned task, so a document in exactly this pairing can already be sitting in a database
+   * — and no writer re-judges a task nobody is editing. The claim's own filter matches it: it is
+   * assigned to the machine's owner, by the machine's owner, and it names an agent.
+   */
+  test("refuses a stranger's composition on a document no writer will look at again", async ({
+    request,
+  }) => {
+    const armed = await addTask({ assignee: OWNER, assignedBy: OWNER, agent: THEIRS });
+
+    const claimed = await claim(request, "run-alien");
+
+    expect(claimed.status()).toBe(204);
+    const after = await read(armed);
+    expect(after.status).toBe(APPROVED);
+    // Not repaired, only refused: the field is still what it was, and the attempt was spent rather
+    // than refunded, which is what stops the task starving every other one behind it
+    const handle = await db();
+    expect(String((await handle.collection("tasks").findOne({ _id: armed }))?.agent)).toBe(String(THEIRS));
+    expect(after.execution.attempts).toBe(1);
+  });
+
+  /**
+   * What the board sees, which is the question a silent refusal fails. It is not silent and it is
+   * not forever: the attempt is spent on each cycle, and the third one parks the task in the
+   * escalation column — a review column a person reads, and the one that queues a PM triage.
+   */
+  test("parks it where a person reads, rather than handing it back forever", async ({ request }) => {
+    const armed = await addTask({ assignee: OWNER, assignedBy: OWNER, agent: THEIRS });
+
+    expect((await claim(request, "run-1")).status()).toBe(204);
+    expect((await claim(request, "run-2")).status()).toBe(204);
+    expect((await claim(request, "run-3")).status()).toBe(204);
+
+    const after = await read(armed);
+    expect(after.status).toBe("needs_human_review");
+    expect(after.execution.attempts).toBe(3);
+  });
+
+  // The other half of the same rule, at this layer too: what the PROJECT sanctioned is nobody's
+  // personal composition, so it runs on whichever member's machine holds the work
+  test("still runs the project's own agent on a machine belonging to anybody", async ({ request }) => {
+    const sanctioned = await addTask({ assignee: OWNER, assignedBy: OWNER, agent: PROJECTS });
+
+    const claimed = await claim(request, "run-project");
+
+    expect(claimed.status(), await claimed.text()).toBe(200);
+    expect((await claimed.json()).agent).toMatchObject({ name: "The project's" });
+    expect((await read(sanctioned)).status).toBe(ACTIVE);
+  });
+
+  /**
+   * The agent row changing under a task that was written correctly. Nothing in the product edits an
+   * agent's scope — `PUT /api/agents/:id` takes name, description and composition and nothing else
+   * — so this is a hand-edited database rather than a gesture anybody can make. It is here because
+   * that is precisely the difference between a check at the writer and a check at the point of
+   * execution: this one does not care how the pairing came about.
+   */
+  test("refuses an agent that became somebody's own after the task chose it", async ({ request }) => {
+    const chosen = await addTask({ assignee: OWNER, assignedBy: OWNER, agent: PROJECTS });
+    const handle = await db();
+    await handle
+      .collection("agents")
+      .updateOne({ _id: PROJECTS }, { $set: { scope: "user", owner: MEMBER_ID, project: null } });
+
+    expect((await claim(request, "run-rescoped")).status()).toBe(204);
+    expect((await read(chosen)).status).toBe(APPROVED);
+  });
+
+  /**
+   * What the fourth walk turned up, and the reason a residue is not a one-off document.
+   *
+   * `createNextRecurrence` copies `assignee`, `assignedBy` and `agent` forward together and judges
+   * none of them — it is not `updateTask`, and it has no actor to judge against. The copy lands in
+   * the backlog column, and the gesture that approves it is a status change, which is not
+   * `updateTask` either. So a series whose parent was paired before the writers were fixed
+   * reproduces that pairing every week, for good, and no gesture anybody makes will ever clean it.
+   *
+   * Nothing here re-judges. This is the only thing that stops each copy.
+   */
+  test("refuses every copy a recurring series makes of a pairing nothing re-judges", async ({
+    request,
+  }) => {
+    const parent = await addTask({
+      status: ACTIVE,
+      assignee: OWNER,
+      assignedBy: OWNER,
+      agent: THEIRS,
+      dueDate: new Date(),
+      recurrence: { frequency: "weekly", interval: 1 },
+    });
+    const handle = await db();
+
+    await changeStatus(String(PROJECT_ID), String(parent), "done", String(OWNER));
+
+    // The next occurrence is created fire-and-forget, after the status change has answered
+    await expect
+      .poll(async () => await handle.collection("tasks").countDocuments({ recurringParentId: parent }))
+      .toBe(1);
+    const copy = (await handle.collection("tasks").findOne({ recurringParentId: parent }))!;
+    // Carried forward untouched, which is the finding rather than the bug: the copy is only as good
+    // as the pairing it came from
+    expect(String(copy.agent)).toBe(String(THEIRS));
+    expect(String(copy.assignedBy)).toBe(String(OWNER));
+
+    // Approving it is a status change, not an edit, so nothing judges the agent on the way either
+    await changeStatus(String(PROJECT_ID), String(copy._id), APPROVED, String(OWNER));
+
+    expect((await claim(request, "run-recurrence")).status()).toBe(204);
+    expect((await read(copy._id)).status).toBe(APPROVED);
+  });
+
+  // A dangling owner is not a match for anybody, least of all for the machine standing in front of
+  // it: populate renders a deleted reference as null, and only the stored id decides here
+  test("refuses one whose owner no longer exists at all", async ({ request }) => {
+    const gone = new mongoose.Types.ObjectId();
+    const handle = await db();
+    await handle.collection("agents").updateOne({ _id: THEIRS }, { $set: { owner: gone } });
+    const armed = await addTask({ assignee: OWNER, assignedBy: OWNER, agent: THEIRS });
+
+    expect((await claim(request, "run-orphan")).status()).toBe(204);
+    expect((await read(armed)).status).toBe(APPROVED);
   });
 });
