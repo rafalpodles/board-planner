@@ -1902,6 +1902,9 @@ describe("a task records who assigned it", () => {
       status: "doing",
       title: "x",
       assignee: { _id: "u1", username: "rpo", fullName: "Rafal" },
+      // Already recorded, so the no-op cases below are about the assignee not moving rather than
+      // about the legacy repair
+      assignedBy: "u9",
     };
     findOne.mockReturnValue({
       lean: () => Promise.resolve(task),
@@ -1946,6 +1949,26 @@ describe("a task records who assigned it", () => {
     await updateTask("p1", "t1", { assignee: "RPO" }, "somebody-else");
 
     expect(setStage(findOneAndUpdate.mock.calls[0][1])).not.toHaveProperty("assignedBy");
+  });
+
+  /**
+   * Every task stored before BP-358 has no assigner, and the documented repair is the ordinary
+   * gesture: assign it. For the common legacy shape — already assigned to you — that assignment
+   * does not MOVE, so the no-op rule above would make the repair a no-op too and the Agent row's
+   * "assign it again to record that" a lie. Caught by e2e/claim-ownership.spec.ts, which drives the
+   * real writer against a real document.
+   */
+  it("stamps a task that has no assigner yet, even when the assignee does not move", async () => {
+    const legacy = { _id: "t1", taskNumber: 1, status: "doing", title: "x", assignee: { _id: "u1" } };
+    findOne.mockReturnValue({
+      lean: () => Promise.resolve(legacy),
+      populate: () => ({ lean: () => Promise.resolve(legacy) }),
+    });
+    userFindOne.mockResolvedValue({ _id: "u1", username: "rpo" });
+
+    await updateTask("p1", "t1", { assignee: "rpo" }, "actor");
+
+    expect(setStage(findOneAndUpdate.mock.calls[0][1]).assignedBy).toBe("actor");
   });
 
   it("leaves it alone when the edit touches no assignee", async () => {
