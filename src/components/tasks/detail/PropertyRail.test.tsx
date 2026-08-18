@@ -453,13 +453,21 @@ describe("the agent picker says when nothing will run the task", () => {
   it("says a task outside the approved column is not there yet", () => {
     withStored({ status: "planned" });
 
-    expect(screen.getByTestId("handover-notice").dataset.reason).toBe("not-approved-yet");
+    const notice = screen.getByTestId("handover-notice");
+    expect(notice.dataset.reason).toBe("not-approved-yet");
+    // The wording too, not only the attribute: every branch renders the same opening sentence, so
+    // the attribute says WHICH branch and the text says whether it tells the truth. Without this
+    // the message could be replaced with the opposite of what it means and stay green.
+    expect(notice.textContent).toMatch(/column work is approved in/i);
   });
 
   it("says an unassigned task belongs to nobody", () => {
     withStored({ assignee: null }, { assignee: null });
 
-    expect(screen.getByTestId("handover-notice").dataset.reason).toBe("unassigned");
+    const notice = screen.getByTestId("handover-notice");
+    expect(notice.dataset.reason).toBe("unassigned");
+    expect(notice.textContent).toMatch(/Nothing will run this/i);
+    expect(notice.textContent).toMatch(/assign it to yourself/i);
   });
 
   // The legacy case, and the visible half of refusing to backfill assignedBy
@@ -476,7 +484,19 @@ describe("the agent picker says when nothing will run the task", () => {
 
     const notice = screen.getByTestId("handover-notice");
     expect(notice.dataset.reason).toBe("assigned-by-someone-else");
-    expect(notice.textContent).toContain("Krzysiek");
+    expect(notice.textContent).toMatch(
+      /Krzysiek assigned it, and a machine takes only work its owner assigned to themselves/i
+    );
+  });
+
+  // The fallback nothing asserted: an assignedBy the server answered as a bare id has no name to
+  // render, and the sentence still has to read as one
+  it("falls back to Somebody else when the assigner came back unpopulated", () => {
+    withStored({ assignedBy: "u2" });
+
+    const notice = screen.getByTestId("handover-notice");
+    expect(notice.dataset.reason).toBe("assigned-by-someone-else");
+    expect(notice.textContent).toMatch(/Somebody else assigned it/i);
   });
 
   // The verdict depends on assignedBy, which only the server writes. Judging an unsaved draft

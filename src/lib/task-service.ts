@@ -89,8 +89,14 @@ const STILL_HELD = { "execution.runId": { $nin: ["", null] } };
 // active column, where claimNextTask can never see it again — nothing else reclaims it.
 export const EXECUTION_LEASE_MS = 2 * 60 * 60 * 1000;
 
+// The one list, used by task-service's own writes and by both task routes. It was three copies
+// until BP-358's review: `assignedBy` had to be added to each, and dropping it from any one left
+// that route answering with a bare ObjectId — so the Agent row's "Krzysiek assigned it" degraded
+// to "Somebody else assigned it" with nothing failing anywhere.
 export const taskPopulateFields = [
   { path: "assignee", select: "username fullName" },
+  // Named, not left as an id: this is what the agent picker reads to say why nothing will run a
+  // task somebody else handed over, and "assigned by 6a70…" answers nobody's question
   { path: "assignedBy", select: "username fullName" },
   { path: "createdBy", select: "username fullName" },
   { path: "blockedBy", select: "taskNumber title status" },

@@ -106,6 +106,27 @@ describe("GET /api/workers/enrolment/device/:userCode", () => {
     expect(json.projects[0]).toMatchObject({ workersEnabled: true, canEnable: true });
   });
 
+  // The fixture's only project has workers on, so an assertion that reads `true` cannot tell the
+  // computation from a constant. This is the other direction, which is also the state the page's
+  // warning exists for.
+  it("reports a project with machines switched off as switched off", async () => {
+    projectLean.mockResolvedValue([
+      { _id: MINE, name: "Mine", key: "BP", repositoryUrl: "git@github.com:owner/repo.git", worker: { enabled: false } },
+    ]);
+
+    expect((await (await GET(request(), ctx())).json()).projects[0].workersEnabled).toBe(false);
+  });
+
+  // A project that has never had a worker has no `worker` subdocument at all, and `undefined` is
+  // not a value the page can render a switch from
+  it("reports a project that has never had one as switched off, not undefined", async () => {
+    projectLean.mockResolvedValue([
+      { _id: MINE, name: "Mine", key: "BP", repositoryUrl: "git@github.com:owner/repo.git" },
+    ]);
+
+    expect((await (await GET(request(), ctx())).json()).projects[0].workersEnabled).toBe(false);
+  });
+
   // Committing a project to machines is instance-admin, exactly as PUT /api/projects/:id has it —
   // a grant on the project does not make it a project admin's call
   it("reports canEnable false for a member, whatever grants they hold", async () => {

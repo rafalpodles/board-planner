@@ -330,3 +330,108 @@ describe("TaskDetail, the agent picker's project default", () => {
     expect(options[1]).toContain("With security review");
   });
 });
+
+/**
+ * BP-358 fix wave: the same escape as the block above, for the prop that carries the whole
+ * user-visible half of this branch. `handoverOf` and the notice it renders are unit-tested in
+ * PropertyRail.test.tsx, where `stored` is passed directly — so blanking `stored={task}` on the
+ * desktop aside, or on the mobile sheet, or nulling `assignedBy` inside it, left the entire suite
+ * green while the product went back to saying nothing about why a task will never run.
+ *
+ * Both call sites are asserted separately, because that is what "removing it from either" means.
+ */
+describe("TaskDetail, the Agent row's handover notice", () => {
+  // Assigned to one person BY ANOTHER, which is the branch with something to say. `todo` carries
+  // the approved role in DEFAULT_PROJECT_COLUMNS, which is what the empty `columns` above resolves
+  // to — a task outside that column would report "not-approved-yet" instead and pass for the wrong
+  // reason.
+  const handedOver = {
+    ...task,
+    status: "todo",
+    agent: "ag1",
+    assignee: { _id: "u1", username: "rpo", fullName: "Rafal Podles" },
+    assignedBy: { _id: "u2", username: "kmk", fullName: "Krzysiek" },
+  };
+
+  function serve(over: Record<string, unknown> = {}) {
+    api.get.mockImplementation((url: string) => {
+      if (url === "/api/users") return Promise.resolve([]);
+      if (url.startsWith("/api/agent")) return Promise.resolve([]);
+      if (url.includes("/tasks/")) return Promise.resolve({ ...handedOver, ...over });
+      if (url.includes("/sprints")) return Promise.resolve([]);
+      return Promise.resolve(project);
+    });
+  }
+
+  beforeEach(() => serve());
+
+  it("reaches the desktop rail", async () => {
+    renderDetail();
+    await loaded();
+
+    const notice = within(screen.getByRole("complementary")).getByTestId("handover-notice");
+    expect(notice.dataset.reason).toBe("assigned-by-someone-else");
+    expect(notice.textContent).toContain("Krzysiek");
+  });
+
+  it("reaches the mobile sheet too", async () => {
+    renderDetail();
+    await loaded();
+    await act(async () => screen.getByRole("button", { name: "All details" }).click());
+
+    const notice = within(screen.getByRole("dialog")).getByTestId("handover-notice");
+    expect(notice.dataset.reason).toBe("assigned-by-someone-else");
+    expect(notice.textContent).toContain("Krzysiek");
+  });
+
+  // The stored task, not a blank: reading `assignedBy` off anything else is how the notice would
+  // silently stop describing this task
+  it("reads the assigner off the task the page loaded", async () => {
+    serve({ assignedBy: { _id: "u3", username: "ada", fullName: "Ada" } });
+    renderDetail();
+    await loaded();
+
+    expect(
+      within(screen.getByRole("complementary")).getByTestId("handover-notice").textContent
+    ).toContain("Ada");
+  });
+
+  // The board's own approved columns have to reach the rail as well, or a task sitting in the
+  // backlog with an agent reports that its hand-over is fine. Asserted at both call sites for the
+  // same reason `stored` is: dropping it from either one alone is what a test on the other misses.
+  const inTheBacklog = {
+    status: "planned",
+    assignedBy: { _id: "u1", username: "rpo", fullName: "Rafal Podles" },
+  };
+
+  it("carries the board's approved columns to the rail, naming a backlog task as not there yet", async () => {
+    serve(inTheBacklog);
+    renderDetail();
+    await loaded();
+
+    expect(
+      within(screen.getByRole("complementary")).getByTestId("handover-notice").dataset.reason
+    ).toBe("not-approved-yet");
+  });
+
+  it("carries them to the mobile sheet too", async () => {
+    serve(inTheBacklog);
+    renderDetail();
+    await loaded();
+    await act(async () => screen.getByRole("button", { name: "All details" }).click());
+
+    expect(
+      within(screen.getByRole("dialog")).getByTestId("handover-notice").dataset.reason
+    ).toBe("not-approved-yet");
+  });
+
+  // Nothing to say about a task whose assignee handed it to themselves — the everyday case, and a
+  // notice on it would be on almost every task on the board
+  it("says nothing when the hand-over is sound", async () => {
+    serve({ assignedBy: { _id: "u1", username: "rpo", fullName: "Rafal Podles" } });
+    renderDetail();
+    await loaded();
+
+    expect(screen.queryByTestId("handover-notice")).toBeNull();
+  });
+});
