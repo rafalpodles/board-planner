@@ -133,6 +133,31 @@ describe("the enrolment confirmation screen", () => {
     });
   });
 
+  describe("a machine of this name that is already enrolled", () => {
+    it("warns that connecting replaces the credential of one that is yours", async () => {
+      await show({ existingWorker: { mine: true } });
+
+      expect(screen.getByTestId("already-registered")).toBeTruthy();
+      expect(screen.queryByTestId("belongs-to-somebody-else")).toBeNull();
+    });
+
+    // Registration refuses this, so saying so before the click beats a toast afterwards. Located by
+    // testid: both banners sit in the same place and open the same way.
+    it("says outright that somebody else's will be refused", async () => {
+      await show({ existingWorker: { mine: false } });
+
+      expect(screen.getByTestId("belongs-to-somebody-else")).toBeTruthy();
+      expect(screen.queryByTestId("already-registered")).toBeNull();
+    });
+
+    it("warns about neither when there is no such machine", async () => {
+      await show();
+
+      expect(screen.queryByTestId("already-registered")).toBeNull();
+      expect(screen.queryByTestId("belongs-to-somebody-else")).toBeNull();
+    });
+  });
+
   it("says whose account the machine will act under, and what it will reach", async () => {
     await show();
 

@@ -7,9 +7,8 @@ The worker talks to the app over REST with a Bearer token and never touches Mong
 app runs on Railway while the checkout lives on a laptop behind NAT, and a machine executing
 agent-written code has no business holding database credentials.
 
-A single worker process can serve more than one project: it registers once, an instance admin
-assigns it whichever projects it should work, and the poll loop claims from each assignment in
-turn.
+A single worker process can serve more than one project: it registers once, it is offered whichever
+projects its owner can reach and it has a checkout of, and the poll loop claims from each in turn.
 
 User-facing documentation lives on the docs site, under **AI and automation → Execution
 workers**: what the gates do, how to enable a project, which tasks get picked up, and how to stop a

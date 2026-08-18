@@ -35,7 +35,7 @@ const PHASE_FIELDS = ["execution.phase", "execution.phaseAt", "execution.phaseSe
 const RUN_FIELDS = [...PHASE_FIELDS, "execution.runId"];
 const UNSET_RUN = Object.fromEntries(RUN_FIELDS.map((field) => [field, ""]));
 
-// A worker that claimed an unassigned task assigns it to itself, and that assignment has to die
+// A worker used to claim an unassigned task and assign it to itself, and that assignment has to die
 // with the run — every way back to the board, or the task is left assigned to a machine that is not
 // running it and no worker will ever claim it again.
 //
@@ -70,8 +70,10 @@ const RUN_RELEASES_ASSIGNEE = {
   ],
 };
 
-// assignedBy mirrors assignee on the same condition: a clear that leaves no assignee must leave no
-// assignedBy either, or it goes on describing a person who has nothing to do with the empty field.
+// assignedBy mirrors assignee on the same condition, and only on this one: a RUN giving back an
+// assignment it invented must leave no assigner behind either, or the field goes on describing a
+// person who has nothing to do with the empty one. A PERSON unassigning a task is the opposite
+// case — there `updateTask` records who did it, because somebody did.
 export const CLEAR_WORKER_ASSIGNEE = {
   assignee: { $cond: [RUN_RELEASES_ASSIGNEE, null, "$assignee"] },
   assignedBy: { $cond: [RUN_RELEASES_ASSIGNEE, null, "$assignedBy"] },

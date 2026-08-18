@@ -297,7 +297,7 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
 
       <SettingsCard
         title="Agent"
-        description="How a worker carries a task on this project. Pick a different one on a single task when it needs it."
+        description="Offered first when somebody picks the agent for a task here. It runs nothing by itself — a task with no agent chosen is one a person is doing."
       >
         <div className="max-w-md">
           <p className="text-sm font-medium mb-2">Default agent</p>

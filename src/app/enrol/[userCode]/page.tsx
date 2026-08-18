@@ -25,7 +25,7 @@ interface EnrolmentView {
   status: string;
   expiresAt: string;
   projects: EnrolProject[];
-  existingWorker: { _id: string; name: string; host: string; lastSeenAt: string | null } | null;
+  existingWorker: { mine: boolean } | null;
 }
 
 // A machine sent you here, so the page carries no sidebar, no search and no chat: nothing inviting
@@ -147,10 +147,23 @@ function Enrol({ params }: { params: Promise<{ userCode: string }> }) {
           <code className="font-mono text-text">{enrolment.userCode}</code>
         </p>
 
-        {enrolment.existingWorker && (
-          <div className="mt-6 rounded-lg border border-warning/40 bg-warning/10 p-4 text-sm text-text">
+        {enrolment.existingWorker?.mine && (
+          <div
+            data-testid="already-registered"
+            className="mt-6 rounded-lg border border-warning/40 bg-warning/10 p-4 text-sm text-text"
+          >
             This machine already has a worker registered. Connecting replaces its credential, which
             stops the one running there now — it will need restarting from the app.
+          </div>
+        )}
+
+        {enrolment.existingWorker && !enrolment.existingWorker.mine && (
+          <div
+            data-testid="belongs-to-somebody-else"
+            className="mt-6 rounded-lg border border-danger/40 bg-danger/10 p-4 text-sm text-text"
+          >
+            A machine with this name is already enrolled to somebody else, so connecting will be
+            refused. If it is yours, ask an instance admin to release it under Settings → Workers.
           </div>
         )}
 

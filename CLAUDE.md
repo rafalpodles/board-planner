@@ -45,7 +45,7 @@ Since CP-128, statuses are project-defined **board columns** mapped to semantic 
 - `done` — merged to `main`, task complete.
 
 ### Autonomous task processing
-Claude automatically picks up tasks in `todo` status and processes them through the pipeline. No user confirmation needed for `todo` tasks.
+Claude automatically picks up tasks in `todo` status and processes them through the pipeline. No user confirmation needed for `todo` tasks. A **machine** taking one is a further step with its own requirements, below.
 
 Which of them a project's autonomous worker (Settings → Workers) may take follows the task's assignee, not a project-wide setting. A machine belongs to one person — whoever enrolled it — and it takes a task only when **all** of these hold:
 

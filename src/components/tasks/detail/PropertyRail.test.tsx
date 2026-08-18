@@ -69,7 +69,7 @@ function renderRail(over: Partial<React.ComponentProps<typeof PropertyRail>> = {
         { _id: "c2", name: "bug", color: "#ef4444" },
       ]}
       customFields={[]}
-      stored={{ agent: null, assignee: null, assignedBy: null }}
+      stored={{ agent: null, assignee: null, assignedBy: null, status: "todo" }}
       reporter="Claude Code"
       onDelete={() => {}}
       {...over}
@@ -332,6 +332,34 @@ describe("the Agent row and who may change it", () => {
     );
   });
 
+  /**
+   * BP-358 made enrolling a machine self-service, but choosing the agent — the gesture that hands
+   * work to it — is still instance-admin (BP-345). Somebody who has connected their own laptop and
+   * is waiting for it to pick something up would otherwise read an empty field and be told nothing.
+   * Located by testid: the admin's picker renders "No agent" too, through emptyOption.
+   */
+  it("tells a non-admin that handing work to a machine is not theirs to do", () => {
+    isAdmin.value = false;
+    renderRail({ agents: AGENTS });
+
+    expect(screen.getByTestId("agent-not-yours").textContent).toMatch(/instance admin/i);
+  });
+
+  it("says nothing of the sort to an admin, who can just pick one", () => {
+    renderRail({ agents: AGENTS });
+
+    expect(screen.queryByTestId("agent-not-yours")).toBeNull();
+  });
+
+  // The row already names the agent when there is one; adding the refusal there would be telling
+  // somebody they cannot do a thing that has been done
+  it("says nothing of the sort once an agent is chosen", () => {
+    isAdmin.value = false;
+    renderRail({ agents: AGENTS, draft: { ...draft, agent: "a2" } });
+
+    expect(screen.queryByTestId("agent-not-yours")).toBeNull();
+  });
+
   // "Project default" was honest while an empty field fell back to the project's agent. Since BP-358
   // it means nobody takes the task, and the label has to say so — this is the only signal that a task
   // is one a person is doing.
@@ -397,8 +425,15 @@ describe("the agent picker says when nothing will run the task", () => {
   function withStored(stored: Partial<ApiTask>, over: Partial<TaskDraft> = {}) {
     renderRail({
       agents: AGENT,
+      approvedStatuses: ["todo"],
       draft: { ...draft, agent: "a1", assignee: "rpo", ...over },
-      stored: { agent: "a1", assignee: RAFAL, assignedBy: { ...RAFAL }, ...stored } as ApiTask,
+      stored: {
+        agent: "a1",
+        assignee: RAFAL,
+        assignedBy: { ...RAFAL },
+        status: "todo",
+        ...stored,
+      } as ApiTask,
     });
   }
 
@@ -412,6 +447,13 @@ describe("the agent picker says when nothing will run the task", () => {
     withStored({ agent: null, assignee: null }, { agent: null, assignee: null });
 
     expect(screen.queryByTestId("handover-notice")).toBeNull();
+  });
+
+  // A task with an agent, self-assigned, and simply not in the column a claim looks at
+  it("says a task outside the approved column is not there yet", () => {
+    withStored({ status: "planned" });
+
+    expect(screen.getByTestId("handover-notice").dataset.reason).toBe("not-approved-yet");
   });
 
   it("says an unassigned task belongs to nobody", () => {

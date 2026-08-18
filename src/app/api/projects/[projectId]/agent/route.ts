@@ -36,7 +36,7 @@ export const PUT = withProjectAccess(async (request, { params, user }) => {
 
   if (!isRunnable(normaliseComposition(agent.composition))) {
     return NextResponse.json(
-      { error: "That agent has nothing in it yet, so a worker would claim a task and stall" },
+      { error: "That agent has nothing in it yet, so offering it first would suggest one that cannot run" },
       { status: 400 }
     );
   }

@@ -72,8 +72,9 @@ export const DELETE = withAuth(async (_request, { params, user }) => {
     return NextResponse.json({ error: "Not yours to delete" }, { status: 403 });
   }
 
-  // A project pointing at a deleted agent would claim a task and have nothing to run; a task
-  // pointing at one would fail at the machine. Both are better refused here.
+  // A task pointing at a deleted agent is claimed and then handed straight back, three times,
+  // before it escalates; a project pointing at one offers a first choice that does not exist.
+  // Both are better refused here.
   const { Project } = await import("@/models/project");
   const { Task } = await import("@/models/task");
   const projects = await Project.find({ "worker.agent": agent._id }, "name").lean();
