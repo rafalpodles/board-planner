@@ -3,6 +3,7 @@ import { isValidObjectId } from "mongoose";
 import { getAuthUser } from "./auth";
 import { ProvenanceError } from "./session";
 import { connectDB } from "./db";
+import { isDatabaseUnreachable } from "./db-errors";
 import { check } from "./grants";
 import { verifyWorkerCredential, isApprovedFor } from "./worker-service";
 import { Project } from "@/models/project";
@@ -27,6 +28,21 @@ type AuthenticatedHandler = (
   }
 ) => Promise<NextResponse | Response>;
 
+/**
+ * The database could not be answered from, which is not the caller's fault and must not read as one.
+ *
+ * 503 rather than 401, because the browser client treats a 401 as "your session is gone" and clears
+ * it — so an outage used to sign everybody out, and the sign-in they were sent to failed too, with
+ * nothing anywhere naming the real cause (BP-362). Retry-After is short: the connection is retried
+ * on the next request now that a failed one is no longer cached.
+ */
+export function databaseUnavailable(): NextResponse {
+  return NextResponse.json(
+    { error: "The database is unreachable. This is not a problem with your session." },
+    { status: 503, headers: { "Retry-After": "5" } }
+  );
+}
+
 export function withAuth(handler: AuthenticatedHandler) {
   return async (
     request: Request,
@@ -39,6 +55,10 @@ export function withAuth(handler: AuthenticatedHandler) {
       if (e instanceof ProvenanceError) {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
+      // isDatabaseUnreachable, not an instanceof: a database that dies while the app is
+      // connected fails from the query rather than from connectDB, and that error is the
+      // driver's own class (BP-362 review)
+      if (isDatabaseUnreachable(e)) return databaseUnavailable();
       throw e;
     }
 
@@ -46,7 +66,15 @@ export function withAuth(handler: AuthenticatedHandler) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    return handler(request, { ...context, user });
+    // The handler too, not only the credential: resolveProjectId, the grant check and every route
+    // body reach the database after this point, and a 500 there withholds the Retry-After a machine
+    // client needs — while the middleware's own comment promised a 503 (BP-362 review)
+    try {
+      return await handler(request, { ...context, user });
+    } catch (e) {
+      if (isDatabaseUnreachable(e)) return databaseUnavailable();
+      throw e;
+    }
   };
 }
 

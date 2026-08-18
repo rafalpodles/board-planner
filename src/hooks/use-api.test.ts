@@ -4,7 +4,8 @@ import { renderHook } from "@testing-library/react";
 import { useApi } from "./use-api";
 
 const onUnauthorized = vi.fn();
-vi.mock("./use-auth", () => ({ useAuth: () => ({ onUnauthorized }) }));
+const noteApiStatus = vi.fn();
+vi.mock("./use-auth", () => ({ useAuth: () => ({ onUnauthorized, noteApiStatus }) }));
 
 function response(status: number, statusText: string, body?: unknown): Response {
   return {
@@ -17,6 +18,7 @@ function response(status: number, statusText: string, body?: unknown): Response 
 
 beforeEach(() => {
   onUnauthorized.mockClear();
+  noteApiStatus.mockClear();
   vi.stubGlobal("fetch", vi.fn());
 });
 afterEach(() => {
@@ -72,3 +74,69 @@ describe("useApi dead session", () => {
     expect(onUnauthorized).not.toHaveBeenCalled();
   });
 });
+
+// The one code path that can clear a live session, and until now nothing pinned it to 401 alone:
+// widening it to `|| res.status >= 500` left all 2403 tests green, which is BP-362 re-shipped
+describe("useApi during an outage", () => {
+  const outage = () =>
+    response(503, "Service Unavailable", {
+      error: "The database is unreachable. This is not a problem with your session.",
+    });
+
+  it("does not clear the session on a 503 from get", async () => {
+    vi.mocked(fetch).mockResolvedValue(outage());
+    const { result } = renderHook(() => useApi());
+
+    await expect(result.current.get("/api/x")).rejects.toThrow(/database is unreachable/i);
+    expect(onUnauthorized).not.toHaveBeenCalled();
+  });
+
+  it("does not clear the session on a 503 from upload", async () => {
+    vi.mocked(fetch).mockResolvedValue(outage());
+    const { result } = renderHook(() => useApi());
+
+    await expect(result.current.upload("/api/uploads", new FormData())).rejects.toThrow();
+    expect(onUnauthorized).not.toHaveBeenCalled();
+  });
+
+  it("does not clear the session on a 503 from stream", async () => {
+    vi.mocked(fetch).mockResolvedValue(outage());
+    const { result } = renderHook(() => useApi());
+
+    await result.current.stream("/api/pm/chat", {});
+    expect(onUnauthorized).not.toHaveBeenCalled();
+  });
+
+  it("does not clear the session on a 500 either", async () => {
+    vi.mocked(fetch).mockResolvedValue(response(500, "Internal Server Error"));
+    const { result } = renderHook(() => useApi());
+
+    await expect(result.current.get("/api/x")).rejects.toThrow();
+    expect(onUnauthorized).not.toHaveBeenCalled();
+  });
+
+  // Somebody already signed in is never re-asked who they are, so this is the only way the shell
+  // learns the instance is in trouble instead of each screen reporting its own failure
+  it("reports every status to the auth context, so the shell can say what is happening", async () => {
+    vi.mocked(fetch).mockResolvedValue(outage());
+    const { result } = renderHook(() => useApi());
+
+    await expect(result.current.get("/api/x")).rejects.toThrow();
+    expect(noteApiStatus).toHaveBeenCalledWith(503);
+
+    vi.mocked(fetch).mockResolvedValue(response(200, "OK", { ok: true }));
+    await result.current.get("/api/x");
+    expect(noteApiStatus).toHaveBeenLastCalledWith(200);
+  });
+
+  it("reports the status from upload and stream too", async () => {
+    vi.mocked(fetch).mockResolvedValue(outage());
+    const { result } = renderHook(() => useApi());
+
+    await expect(result.current.upload("/api/uploads", new FormData())).rejects.toThrow();
+    await result.current.stream("/api/pm/chat", {});
+
+    expect(noteApiStatus.mock.calls).toEqual([[503], [503]]);
+  });
+});
+

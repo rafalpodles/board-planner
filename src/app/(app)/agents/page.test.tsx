@@ -3,7 +3,9 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup, act } from "@testing-library/react";
 
 const isAdmin = vi.hoisted(() => ({ value: true }));
-vi.mock("@/hooks/use-auth", () => ({ useAuth: () => ({ isAdmin: isAdmin.value }) }));
+vi.mock("@/hooks/use-auth", () => ({
+  useAuth: () => ({ isAdmin: isAdmin.value, onUnauthorized: vi.fn(), noteApiStatus: vi.fn() }),
+}));
 vi.mock("@/hooks/use-projects", () => ({ useProjects: () => ({ projects: [] }) }));
 vi.mock("./store", () => ({
   useStore: () => ({
