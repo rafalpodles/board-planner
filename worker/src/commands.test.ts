@@ -36,7 +36,11 @@ function heartbeatDeps(
 
   return {
     apiBaseUrl: "https://app.example.com",
-    apiToken: "cp_admin_token",
+    // apiToken belongs to WorkerConfig, not here — it was never read from these deps. What this
+    // type wants is the enrolment token, and empty is the honest value: the store below already
+    // holds a credential, so this worker is registered and registration.ts takes the "no token"
+    // branch exactly as it would in production
+    enrolmentToken: "",
     registration: { name: "worker-1", host: "host-1", platform: "darwin", version: "1.0.0" },
     store: {
       read: () => JSON.stringify({ workerId: "w1", credential: "cpw_x", heartbeatMs: 60_000 }),
