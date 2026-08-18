@@ -9,6 +9,7 @@ import { Sprint } from "@/models/sprint";
 import { ApiTaskExecution, ICustomField, ITask, ITaskExecution, RunConflict, DEFAULT_PRIORITY } from "@/types";
 import { getColumnIds, defaultStatusFor, roleOf, getProjectColumns, columnIdsWithRole } from "@/lib/columns";
 import { escalationColumnId } from "@/lib/escalation";
+import { isRunnable, normaliseComposition } from "@/lib/agent-rules";
 import { logActivity } from "@/lib/activity";
 import { dispatchWebhooks } from "@/lib/webhooks";
 import { dispatchNotifications } from "@/lib/notifications";
@@ -141,24 +142,41 @@ type Body = Record<string, any>;
  * appear in another board's counts and be moved by its sprint completion (BP-314).
  */
 /**
+ * Whether this agent may be written onto this project's task, and why not.
+ *
  * A project agent belongs to one project and must not be borrowed by another's task — the same
  * shape of cross-project reference BP-314 closed for sprints. Global and personal agents run
  * anywhere their owner can reach.
+ *
+ * Runnability is checked here too, because since BP-358 the task's own agent is the only thing
+ * that reaches a machine. Every agent is born empty — `NewAgent` carries no composition — and an
+ * empty one is a draft, which agent-rules deliberately stores rather than refuses. Written onto a
+ * task it becomes a claim the worker cannot serve: `snapshotFor` answers null, the route hands the
+ * task straight back, and the task sorts first on the next poll thirty seconds later. That is the
+ * task's own queue position, so every other claimable task on the project waits behind it.
  */
 async function agentUsableOnProject(
   projectId: string,
   agent: unknown,
   actingUserId: unknown
-): Promise<boolean> {
-  if (typeof agent !== "string" || !Types.ObjectId.isValid(agent)) return false;
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const unusable = { ok: false as const, error: "That agent cannot run on this project" };
+  if (typeof agent !== "string" || !Types.ObjectId.isValid(agent)) return unusable;
   const { Agent } = await import("@/models/agent");
-  const found = await Agent.findById(agent, "scope project owner").lean();
-  if (!found) return false;
-  if (found.scope === "project") return String(found.project) === String(projectId);
+  const found = await Agent.findById(agent, "scope project owner name composition").lean();
+  if (!found) return unusable;
+  if (found.scope === "project" && String(found.project) !== String(projectId)) return unusable;
   // A personal agent is somebody's own; pointing a task at another person's would run their
   // prompts, with write access, on this project's checkout.
-  if (found.scope === "user") return String(found.owner) === String(actingUserId);
-  return true;
+  if (found.scope === "user" && String(found.owner) !== String(actingUserId)) return unusable;
+
+  if (!isRunnable(normaliseComposition(found.composition))) {
+    return {
+      ok: false,
+      error: `"${found.name}" has no steps in it yet, so a machine handed this task would have nothing to run. Add at least one step to it first.`,
+    };
+  }
+  return { ok: true };
 }
 
 async function sprintBelongsToProject(projectId: string, sprint: unknown): Promise<boolean> {
@@ -474,8 +492,9 @@ export async function updateTask(
       };
     }
     // Clearing counts as changing: null now means nobody runs the task, as real a choice as naming one.
-    if (updates.agent !== null && !(await agentUsableOnProject(projectId, updates.agent, actorId))) {
-      return { ok: false, error: "That agent cannot run on this project", status: 400 };
+    if (updates.agent !== null) {
+      const usable = await agentUsableOnProject(projectId, updates.agent, actorId);
+      if (!usable.ok) return { ok: false, error: usable.error, status: 400 };
     }
   }
 

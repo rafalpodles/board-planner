@@ -152,14 +152,68 @@ describe("POST /tasks/claim", () => {
 
   // Holding a task no machine can run parks it behind the two-hour lease. 204 rather than an error
   // because the worker's loop treats a failed claim as a cycle failure and retries every poll —
-  // nothing here is claimable until somebody fixes the project, which is what 204 means.
+  // nothing here is claimable until somebody fixes the agent, which is what 204 means.
   it("hands the task back and reports an empty queue when no agent resolves", async () => {
     snapshotFor.mockResolvedValue(null as never);
 
     const response = await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
     expect(response.status).toBe(204);
-    expect(releaseTask).toHaveBeenCalledWith(OID, "t1", { refund: true });
+    expect(releaseTask).toHaveBeenCalled();
+  });
+
+  /**
+   * BP-358: with the attempt refunded this never terminated. The task went back to the head of the
+   * approved column, sorted first again thirty seconds later, and attempts never accumulated — so
+   * nothing escalated, nothing was logged, and every other claimable task on the project starved
+   * behind it. Spending the attempt bounds it: three cycles, then releaseTask parks it in the
+   * escalation column.
+   */
+  describe("a task naming an agent that resolves to nothing", () => {
+    beforeEach(() => {
+      snapshotFor.mockResolvedValue(null as never);
+    });
+
+    it("spends the attempt rather than refunding it", async () => {
+      await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
+
+      expect(releaseTask).toHaveBeenCalledWith(OID, "t1", {
+        refund: false,
+        workerId: OID,
+      });
+    });
+
+    // Naming the holder, or worker A could park worker B's task in escalation mid-run
+    it("names itself as the holder it is releasing on behalf of", async () => {
+      await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
+
+      expect(releaseTask.mock.calls[0][2].workerId).toBe(OID);
+    });
+
+    // The task moves back a column with no comment, no activity row and no run left to attach an
+    // error to, so this is the only record that it happened at all
+    it("logs the task and the agent that could not be resolved", async () => {
+      claimNextTask.mockResolvedValue(hydrated({ _id: "t1", taskNumber: 1, agent: "a-empty" }));
+      const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
+
+      expect(logged).toHaveBeenCalledWith(expect.stringContaining("t1"));
+      expect(logged).toHaveBeenCalledWith(expect.stringContaining("a-empty"));
+      logged.mockRestore();
+    });
+
+    // A failed release must not turn a 204 into a 500: the worker retries on its next poll either
+    // way, and throwing here would read as the server being down
+    it("still answers 204 when the release itself fails", async () => {
+      releaseTask.mockRejectedValue(new Error("mongo is having a moment"));
+      const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const response = await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
+
+      expect(response.status).toBe(204);
+      logged.mockRestore();
+    });
   });
 
   it("reports an empty queue as 204", async () => {
