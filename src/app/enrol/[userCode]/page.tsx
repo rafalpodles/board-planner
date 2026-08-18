@@ -194,7 +194,8 @@ function Enrol({ params }: { params: Promise<{ userCode: string }> }) {
             className="mt-6 rounded-lg border border-warning/40 bg-warning/10 p-4 text-sm text-text"
           >
             That project does not run machines yet, and you cannot turn that on. The machine will
-            connect and sit idle until one of the project&apos;s admins enables it under Workers.
+            connect and sit idle until an instance admin enables it under the project&apos;s Workers
+            settings.
           </div>
         )}
 
