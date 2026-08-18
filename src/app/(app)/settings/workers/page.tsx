@@ -6,6 +6,7 @@ import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/components/ui/Toast";
 import { Button } from "@/components/ui/Button";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { EnrolWorkerModal } from "@/components/settings/EnrolWorkerModal";
 import { usePollWhileVisible } from "@/hooks/use-poll-while-visible";
 import { timeAgo } from "@/lib/time";
@@ -95,6 +96,10 @@ export default function AdminWorkersPage() {
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [enrolling, setEnrolling] = useState(false);
+  // The only way back from a release is a fresh enrolment run on that machine, by whoever sits at
+  // it — every other destructive control in this product asks first, and this one is less reversible
+  // than most of them.
+  const [releasing, setReleasing] = useState<ApiWorker | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -178,6 +183,20 @@ export default function AdminWorkersPage() {
 
       <EnrolWorkerModal open={enrolling} onClose={() => setEnrolling(false)} />
 
+      <ConfirmDialog
+        open={!!releasing}
+        onClose={() => setReleasing(null)}
+        title={`Release ${releasing?.name ?? ""}?`}
+        message={`${releasing?.owner?.fullName || releasing?.owner?.username || "Its owner"} will stop being the owner of this machine, and it will claim nothing until somebody enrols it again — which has to be done from the machine itself, by whoever sits at it. Nothing here can undo it.`}
+        confirmLabel="Release"
+        loading={savingId === releasing?._id}
+        onConfirm={() => {
+          const worker = releasing;
+          setReleasing(null);
+          if (worker) patch(worker, { owner: null });
+        }}
+      />
+
       <div className="border border-border rounded-lg overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -257,7 +276,7 @@ export default function AdminWorkersPage() {
                       <OwnerCell
                         worker={worker}
                         disabled={savingId === worker._id}
-                        onRelease={() => patch(worker, { owner: null })}
+                        onRelease={() => setReleasing(worker)}
                       />
                     </td>
                     <td className="px-3 py-2 max-w-[14rem]">

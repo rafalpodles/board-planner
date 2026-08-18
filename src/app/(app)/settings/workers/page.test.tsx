@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { render, screen, cleanup, waitFor } from "@testing-library/react";
+import { render, screen, cleanup, waitFor, within } from "@testing-library/react";
 import { ApiWorker } from "@/types";
 
 const { api, toast, replace } = vi.hoisted(() => ({
@@ -137,13 +137,44 @@ describe("releasing a machine from its owner", () => {
     expect(screen.queryByTestId("worker-release")).toBeNull();
   });
 
-  it("clears the owner, and asks for nothing else", async () => {
+  /**
+   * It used to patch on the single click. The only way back is a fresh enrolment run on that
+   * machine by whoever sits at it — the console cannot assign an owner — so a misclick here is
+   * undoable from this screen and from every other one.
+   */
+  it("asks before clearing the owner, and writes nothing until the answer", async () => {
+    api.get.mockResolvedValue([worker()]);
+
+    render(<WorkersPage />);
+    (await screen.findByTestId("worker-release")).click();
+
+    // The name of the machine and of the person losing it: a dialog that named neither could be
+    // confirming any row in the table
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog.textContent).toContain("rafal-mac");
+    expect(dialog.textContent).toContain("Rafal Podles");
+    expect(api.patch).not.toHaveBeenCalled();
+  });
+
+  it("clears the owner once it is confirmed, and asks for nothing else", async () => {
     api.get.mockResolvedValue([worker()]);
     api.patch.mockResolvedValue(worker({ owner: null }));
 
     render(<WorkersPage />);
     (await screen.findByTestId("worker-release")).click();
+    (await within(await screen.findByRole("dialog")).findByRole("button", { name: "Release" })).click();
 
     await waitFor(() => expect(api.patch).toHaveBeenCalledWith("/api/workers/w1", { owner: null }));
+  });
+
+  it("writes nothing when the answer is no", async () => {
+    api.get.mockResolvedValue([worker()]);
+
+    render(<WorkersPage />);
+    (await screen.findByTestId("worker-release")).click();
+    (await within(await screen.findByRole("dialog")).findByRole("button", { name: "Cancel" })).click();
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(api.patch).not.toHaveBeenCalled();
   });
 });
