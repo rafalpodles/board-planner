@@ -55,11 +55,30 @@ export const POST = withWorker(async (request, { params, worker }) => {
   const agent = await snapshotFor(projectId, task.agent);
   if (!agent) {
     // Holding a task a machine cannot run would park it behind a lease for two hours. Hand it back
-    // at once and say why, so the board shows the cause rather than a silent stall.
-    await releaseTask(projectId, String(task._id), { refund: true }).catch(() => {});
+    // at once instead.
+    //
+    // Without the refund, deliberately. Refunding the attempt made this unbounded: the task returns
+    // to the head of the approved column, sorts first again on the next poll thirty seconds later,
+    // and every other claimable task on the project waits behind it — for good, because attempts
+    // never accumulate and nothing ever escalates. Spending the attempt bounds it at
+    // MAX_EXECUTION_ATTEMPTS, after which releaseTask parks the task in the escalation column where
+    // a person sees it.
+    //
+    // The everyday way in was an agent nobody had composed yet; task-service now refuses to write
+    // one of those onto a task at all. This is what happens to the ones that are left: an agent
+    // emptied or deleted after it was chosen, or one naming a block this instance does not have.
+    await releaseTask(projectId, String(task._id), {
+      refund: false,
+      workerId: String(worker._id),
+    }).catch(() => {});
+    // Logged, because nothing else records it: the task moves back a column with no comment, no
+    // activity row and no run to attach an error to.
+    console.error(
+      `Claim released: ${projectId}/${String(task._id)} names agent ${String(task.agent)}, which resolves to nothing runnable`
+    );
     // 204, not an error: the worker's loop treats a failed claim as a cycle failure and retries on
-    // the next poll, so an unrunnable default would claim and release every thirty seconds forever.
-    // Nothing is claimable here until somebody fixes the project, which is what 204 means.
+    // the next poll. Nothing is claimable here until somebody fixes the agent, which is what 204
+    // means.
     return new NextResponse(null, { status: 204 });
   }
 

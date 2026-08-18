@@ -1637,6 +1637,12 @@ describe("who may choose a task's agent", () => {
   const AGENT = "69a52e3b399b27d3cbb2c5a5";
   const OTHER = "69a52e3b399b27d3cbb2c5b7";
 
+  // Exactly what the API stores for an agent somebody has actually composed. Not `{}`: an agent
+  // with no composition is a real and common state — every agent is empty between "New agent" and
+  // the first block dragged into it — and a fixture that always carried one could never notice a
+  // writer that lets a draft through onto a task (BP-358).
+  const COMPOSED = { implementation: [{ key: "write-the-change" }] };
+
   // updateTask reads this task twice: once bare for the agent it currently carries, once populated
   // for the before-image the activity log needs. One mock has to answer both.
   function storedAgent(agent: string | null) {
@@ -1660,7 +1666,7 @@ describe("who may choose a task's agent", () => {
     findOne.mockReset();
     storedAgent(null);
     agentFindById.mockReturnValue({
-      lean: () => Promise.resolve({ _id: AGENT, scope: "global" }),
+      lean: () => Promise.resolve({ _id: AGENT, scope: "global", name: "Default", composition: COMPOSED }),
     });
   });
 
@@ -1734,7 +1740,7 @@ describe("who may choose a task's agent", () => {
   describe("and which agents may run here at all", () => {
     it("refuses a project agent belonging to another project", async () => {
       agentFindById.mockReturnValue({
-        lean: () => Promise.resolve({ _id: AGENT, scope: "project", project: "p2" }),
+        lean: () => Promise.resolve({ _id: AGENT, scope: "project", project: "p2", composition: COMPOSED }),
       });
 
       const result = await updateTask("p1", "t1", { agent: AGENT }, "actor", false, true);
@@ -1745,7 +1751,7 @@ describe("who may choose a task's agent", () => {
 
     it("accepts a project agent belonging to this one", async () => {
       agentFindById.mockReturnValue({
-        lean: () => Promise.resolve({ _id: AGENT, scope: "project", project: "p1" }),
+        lean: () => Promise.resolve({ _id: AGENT, scope: "project", project: "p1", composition: COMPOSED }),
       });
 
       expect((await updateTask("p1", "t1", { agent: AGENT }, "actor", false, true)).ok).toBe(true);
@@ -1755,7 +1761,7 @@ describe("who may choose a task's agent", () => {
     // access, on this project's checkout
     it("refuses another person's personal agent", async () => {
       agentFindById.mockReturnValue({
-        lean: () => Promise.resolve({ _id: AGENT, scope: "user", owner: OTHER }),
+        lean: () => Promise.resolve({ _id: AGENT, scope: "user", owner: OTHER, composition: COMPOSED }),
       });
 
       const result = await updateTask("p1", "t1", { agent: AGENT }, "actor", false, true);
@@ -1765,7 +1771,7 @@ describe("who may choose a task's agent", () => {
 
     it("accepts the caller's own personal agent", async () => {
       agentFindById.mockReturnValue({
-        lean: () => Promise.resolve({ _id: AGENT, scope: "user", owner: "actor" }),
+        lean: () => Promise.resolve({ _id: AGENT, scope: "user", owner: "actor", composition: COMPOSED }),
       });
 
       expect((await updateTask("p1", "t1", { agent: AGENT }, "actor", false, true)).ok).toBe(true);
@@ -1784,6 +1790,60 @@ describe("who may choose a task's agent", () => {
       agentFindById.mockReturnValue({ lean: () => Promise.resolve(null) });
 
       expect((await updateTask("p1", "t1", { agent: AGENT }, "actor", false, true)).ok).toBe(false);
+    });
+
+    /**
+     * Every agent is born empty — `NewAgent` is {name, description, projectId} with no composition
+     * — and storing an empty one is deliberate: it is a draft until something is dragged into it.
+     *
+     * Since BP-358 the task's own agent is the only thing a claim resolves, so an empty one written
+     * onto a task is a task no machine can serve: snapshotFor answers null, the route hands it
+     * straight back, and it sorts first again thirty seconds later. Nothing escalates, nothing is
+     * logged, and every other claimable task on the project waits behind it.
+     */
+    describe("an agent nobody has composed yet", () => {
+      const draft = (over: Record<string, unknown> = {}) =>
+        agentFindById.mockReturnValue({
+          lean: () =>
+            Promise.resolve({ _id: AGENT, scope: "global", name: "Untitled agent", ...over }),
+        });
+
+      it("is refused, naming it and saying what is missing", async () => {
+        draft();
+
+        const result = await updateTask("p1", "t1", { agent: AGENT }, "actor", false, true);
+
+        expect(result).toMatchObject({ ok: false, status: 400 });
+        expect((result as { error: string }).error).toContain("Untitled agent");
+        expect((result as { error: string }).error).toMatch(/no steps/i);
+        expect(findOneAndUpdate).not.toHaveBeenCalled();
+      });
+
+      // Distinguished from the cross-project and foreign-owner refusals, which share the status
+      // and the code path but not the message — asserting only on `ok` would pass with either
+      it("is refused for its emptiness, not for its scope", async () => {
+        draft({ scope: "user", owner: "actor" });
+
+        const result = await updateTask("p1", "t1", { agent: AGENT }, "actor", false, true);
+
+        expect((result as { error: string }).error).not.toMatch(/cannot run on this project/i);
+        expect((result as { error: string }).error).toMatch(/no steps/i);
+      });
+
+      // Buckets present but empty is what an agent looks like after its last block is removed
+      it("is refused when every bucket it has is empty", async () => {
+        draft({ composition: { analysis: [], implementation: [], delivery: [] } });
+
+        expect((await updateTask("p1", "t1", { agent: AGENT }, "actor", false, true)).ok).toBe(false);
+      });
+
+      // A bucket written before entries existed holds bare key strings, and normaliseComposition
+      // reads either shape. One of those agents is runnable and must not be refused as a draft.
+      it("accepts an agent whose composition still holds bare keys", async () => {
+        draft({ composition: { implementation: ["write-the-change"] } });
+
+        expect((await updateTask("p1", "t1", { agent: AGENT }, "actor", false, true)).ok).toBe(true);
+      });
     });
   });
 });
