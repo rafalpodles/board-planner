@@ -7,19 +7,10 @@ import { Task } from "@/models/task";
 import { Comment } from "@/models/comment";
 import { ActivityLog } from "@/models/activityLog";
 import { Notification } from "@/models/notification";
-import { toApiExecution, updateTask } from "@/lib/task-service";
+import { toApiExecution, updateTask, taskPopulateFields } from "@/lib/task-service";
 import { Worker } from "@/models/worker";
 import { ITaskExecution } from "@/types";
 
-const populateFields = [
-  { path: "assignee", select: "username fullName" },
-  // Named, not left as an id: this is what the agent picker reads to say why nothing will run a
-  // task somebody else handed over, and "assigned by 6a70…" answers nobody's question
-  { path: "assignedBy", select: "username fullName" },
-  { path: "createdBy", select: "username fullName" },
-  { path: "blockedBy", select: "taskNumber title status" },
-  { path: "relations.task", select: "taskNumber title status" },
-];
 
 export const GET = withProjectAccess(async (_request, { params }) => {
   const { projectId, taskId } = await params;
@@ -29,7 +20,7 @@ export const GET = withProjectAccess(async (_request, { params }) => {
   await connectDB();
 
   const task = await Task.findOne({ _id: taskId, project: projectId })
-    .populate(populateFields);
+    .populate(taskPopulateFields);
 
   if (!task) {
     return NextResponse.json({ error: "Task not found" }, { status: 404 });

@@ -82,6 +82,26 @@ const userFindById = vi.fn();
 vi.mock("@/models/user", () => ({ User: { findOne: userFindOne, findById: userFindById } }));
 const agentFindById = vi.fn();
 vi.mock("@/models/agent", () => ({ Agent: { findById: agentFindById } }));
+
+/**
+ * Answers with only the fields the caller's PROJECTION named, the way MongoDB does.
+ *
+ * A mock that ignores its arguments hands back a whole fixture whatever was asked for, which makes
+ * the projection string untestable — and it is a real dependency here: drop `composition` from
+ * `agentUsableOnProject`'s and `isRunnable` is false for every agent on the instance, so updateTask
+ * refuses EVERY agent on EVERY task with `"undefined" has no steps in it yet`. The feature this
+ * branch exists to add, off, with the suite green.
+ */
+function agentInTheCatalog(doc: Record<string, unknown> | null) {
+  agentFindById.mockImplementation((_id: unknown, projection?: unknown) => {
+    if (!doc) return { lean: () => Promise.resolve(null) };
+    const named = String(projection ?? "").split(/\s+/).filter(Boolean);
+    const visible = named.length
+      ? Object.fromEntries(Object.entries(doc).filter(([key]) => key === "_id" || named.includes(key)))
+      : doc;
+    return { lean: () => Promise.resolve(visible) };
+  });
+}
 vi.mock("@/models/comment", () => ({ Comment: {} }));
 const sprintExists = vi.fn();
 vi.mock("@/models/sprint", () => ({ Sprint: { exists: sprintExists } }));
@@ -98,6 +118,7 @@ vi.mock("@/lib/pm/triggers", () => ({ onTaskStatusChanged: vi.fn().mockResolvedV
 const {
   CLEAR_WORKER_ASSIGNEE,
   claimNextTask,
+  taskPopulateFields,
   releaseTask,
   releaseExpiredTasks,
   recordTaskPhase,
@@ -1690,9 +1711,7 @@ describe("who may choose a task's agent", () => {
     // of these pass by accident.
     findOne.mockReset();
     storedAgent(null);
-    agentFindById.mockReturnValue({
-      lean: () => Promise.resolve({ _id: AGENT, scope: "global", name: "Default", composition: COMPOSED }),
-    });
+    agentInTheCatalog({ _id: AGENT, scope: "global", name: "Default", composition: COMPOSED });
   });
 
   it("refuses a caller without the capability, and writes nothing", async () => {
@@ -1764,9 +1783,7 @@ describe("who may choose a task's agent", () => {
 
   describe("and which agents may run here at all", () => {
     it("refuses a project agent belonging to another project", async () => {
-      agentFindById.mockReturnValue({
-        lean: () => Promise.resolve({ _id: AGENT, scope: "project", project: "p2", composition: COMPOSED }),
-      });
+      agentInTheCatalog({ _id: AGENT, scope: "project", project: "p2", composition: COMPOSED });
 
       const result = await updateTask("p1", "t1", { agent: AGENT }, "actor", false, true);
 
@@ -1775,9 +1792,7 @@ describe("who may choose a task's agent", () => {
     });
 
     it("accepts a project agent belonging to this one", async () => {
-      agentFindById.mockReturnValue({
-        lean: () => Promise.resolve({ _id: AGENT, scope: "project", project: "p1", composition: COMPOSED }),
-      });
+      agentInTheCatalog({ _id: AGENT, scope: "project", project: "p1", composition: COMPOSED });
 
       expect((await updateTask("p1", "t1", { agent: AGENT }, "actor", false, true)).ok).toBe(true);
     });
@@ -1785,9 +1800,7 @@ describe("who may choose a task's agent", () => {
     // Pointing a task at somebody else's personal agent would run their prompts, with write
     // access, on this project's checkout
     it("refuses another person's personal agent", async () => {
-      agentFindById.mockReturnValue({
-        lean: () => Promise.resolve({ _id: AGENT, scope: "user", owner: OTHER, composition: COMPOSED }),
-      });
+      agentInTheCatalog({ _id: AGENT, scope: "user", owner: OTHER, composition: COMPOSED });
 
       const result = await updateTask("p1", "t1", { agent: AGENT }, "actor", false, true);
 
@@ -1795,9 +1808,7 @@ describe("who may choose a task's agent", () => {
     });
 
     it("accepts the caller's own personal agent", async () => {
-      agentFindById.mockReturnValue({
-        lean: () => Promise.resolve({ _id: AGENT, scope: "user", owner: "actor", composition: COMPOSED }),
-      });
+      agentInTheCatalog({ _id: AGENT, scope: "user", owner: "actor", composition: COMPOSED });
 
       expect((await updateTask("p1", "t1", { agent: AGENT }, "actor", false, true)).ok).toBe(true);
     });
@@ -1812,7 +1823,7 @@ describe("who may choose a task's agent", () => {
     });
 
     it("refuses an agent that does not exist", async () => {
-      agentFindById.mockReturnValue({ lean: () => Promise.resolve(null) });
+      agentInTheCatalog(null);
 
       expect((await updateTask("p1", "t1", { agent: AGENT }, "actor", false, true)).ok).toBe(false);
     });
@@ -1828,10 +1839,7 @@ describe("who may choose a task's agent", () => {
      */
     describe("an agent nobody has composed yet", () => {
       const draft = (over: Record<string, unknown> = {}) =>
-        agentFindById.mockReturnValue({
-          lean: () =>
-            Promise.resolve({ _id: AGENT, scope: "global", name: "Untitled agent", ...over }),
-        });
+        agentInTheCatalog({ _id: AGENT, scope: "global", name: "Untitled agent", ...over });
 
       it("is refused, naming it and saying what is missing", async () => {
         draft();
@@ -2032,10 +2040,19 @@ describe("a machine claims its owner's work", () => {
     ]);
   });
 
+  /**
+   * Judged by running the filter over an unassigned document rather than by reading the field:
+   * `expect(filter.assignee).not.toBeNull()` passed for the wrong reason — deleting the clause it
+   * names leaves the field `undefined`, and `undefined !== null`, so it could not fail.
+   */
   it("never asks for an unassigned task, which belongs to nobody", async () => {
     const filter = await claimFilterFor(OWNER);
 
-    expect(filter.assignee).not.toBeNull();
+    // Built for THIS block's owner rather than reusing the module fixture's, so the pair differs
+    // only in the hand-over
+    const handed = task({ assignee: OWNER, assignedBy: OWNER });
+    expect(sift(filter)(handed)).toBe(true);
+    expect(sift(filter)({ ...handed, assignee: null, assignedBy: null })).toBe(false);
   });
 
   it("asks for a task that names an agent, because that is the hand-over", async () => {
@@ -2047,5 +2064,38 @@ describe("a machine claims its owner's work", () => {
   it("claims nothing at all for a machine with no owner", async () => {
     expect(await claimNextTask("p1", "w1", "r1", null)).toBeNull();
     expect(findOneAndUpdate).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * BP-358 review: `assignedBy` is what says whether a machine may act on a task, and the Agent row
+ * reads it to name whoever handed the task over. Left unpopulated it serialises as a bare ObjectId,
+ * so "Krzysiek assigned it" degrades to "Somebody else assigned it" — and nothing fails anywhere,
+ * because the component's own tests are handed an already-populated fixture.
+ *
+ * This was three copies of the list (here and both task routes) until the same review; it is one
+ * now, and this is where its contents are pinned.
+ */
+describe("what a task is populated with before it is answered", () => {
+  const path = (name: string) => taskPopulateFields.find((f) => f.path === name);
+
+  it("names the assigner, not just the assignee", () => {
+    expect(path("assignedBy")).toEqual({ path: "assignedBy", select: "username fullName" });
+  });
+
+  // The same two fields the assignee is asked for, because the Agent row falls back from one to
+  // the other and an id would satisfy neither
+  it("asks the assigner for a display name and a username", () => {
+    expect(path("assignedBy")?.select).toBe(path("assignee")?.select);
+  });
+
+  it("still names everyone else a task detail renders", () => {
+    expect(taskPopulateFields.map((f) => f.path)).toEqual([
+      "assignee",
+      "assignedBy",
+      "createdBy",
+      "blockedBy",
+      "relations.task",
+    ]);
   });
 });
