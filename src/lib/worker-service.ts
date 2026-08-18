@@ -37,6 +37,10 @@ export async function ownerReachableProjectIds(
   await connectDB();
   const owner = await User.findById(worker.owner);
   if (!owner) return [];
+  // The stored account, with none of getAuthUser's runtime narrowing on it — so this is that
+  // person's whole reach rather than the reach of whatever credential they happened to hold at
+  // enrolment. That is the right answer: enrolling always goes through an interactive session, and
+  // a machine credential is refused there, so there is no narrowed principal to inherit.
   return accessibleProjectIds(owner);
 }
 
@@ -71,9 +75,10 @@ export function verdictFor(
   const isFresh = Number.isFinite(seenAt) && now.getTime() - seenAt <= WORKER_STALE_MS;
   if (!isFresh) return { ok: false, reason: "this worker has not reported in" };
 
-  // Assignment is no longer stored on the worker: it is the project being enabled AND this machine
-  // reporting a checkout of that project's repository. Deciding it here keeps the check in one
-  // place rather than trusting a list the server would have had to write.
+  // Assignment is no longer stored on the worker: it is the project being enabled AND its owner
+  // being able to reach it AND this machine reporting a checkout of that project's repository —
+  // the three checks below, in that order. Deciding it here keeps them in one place rather than
+  // trusting a list the server would have had to write.
   if (!project?.worker?.enabled) {
     return { ok: false, reason: "this project is not enabled for workers" };
   }
