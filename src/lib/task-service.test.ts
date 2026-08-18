@@ -1886,12 +1886,22 @@ describe("a task records who assigned it", () => {
     });
     findById.mockReset();
     findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
-    const task = { _id: "t1", taskNumber: 1, status: "doing", title: "x" };
+    // Assigned to somebody already, and POPULATED, which is the shape updateTask reads it in —
+    // an unassigned fixture could not tell "the assignee moved" from "the body named the same one"
+    const task = {
+      _id: "t1",
+      taskNumber: 1,
+      status: "doing",
+      title: "x",
+      assignee: { _id: "u1", username: "rpo", fullName: "Rafal" },
+    };
     findOne.mockReturnValue({
       lean: () => Promise.resolve(task),
       populate: () => ({ lean: () => Promise.resolve(task) }),
     });
-    userFindOne.mockReturnValue({ lean: () => Promise.resolve({ _id: "u2", username: "kuba" }) });
+    // What User.findOne actually resolves to here — updateTask reads `._id` off it directly, with
+    // no .lean(), so a mock wrapping the document in one would leave the id undefined
+    userFindOne.mockResolvedValue({ _id: "u2", username: "kuba" });
   });
 
   it("stamps the actor when the assignee changes", async () => {
@@ -1904,6 +1914,30 @@ describe("a task records who assigned it", () => {
     await updateTask("p1", "t1", { assignee: null }, "actor");
 
     expect(setStage(findOneAndUpdate.mock.calls[0][1]).assignedBy).toBe("actor");
+  });
+
+  /**
+   * The same call `agent` makes: re-sending the value a task already carries is a no-op. A REST or
+   * MCP consumer that GETs a task, edits one field and PUTs the whole object back would otherwise
+   * re-stamp itself as the assigner — which silently takes the task out of what any machine may
+   * claim, with no error, no activity row, and a card that looks exactly as it did.
+   */
+  it("leaves the assigner alone when the body re-sends the assignee it already has", async () => {
+    userFindOne.mockResolvedValue({ _id: "u1", username: "rpo" });
+
+    await updateTask("p1", "t1", { assignee: "rpo", title: "renamed" }, "somebody-else");
+
+    expect(setStage(findOneAndUpdate.mock.calls[0][1])).not.toHaveProperty("assignedBy");
+  });
+
+  // Resolved first, then compared: the body carries a username and the stored value is an id, so
+  // comparing before resolution would read every re-send as a change
+  it("compares the resolved id, not the username the body carried", async () => {
+    userFindOne.mockResolvedValue({ _id: "u1", username: "rpo" });
+
+    await updateTask("p1", "t1", { assignee: "RPO" }, "somebody-else");
+
+    expect(setStage(findOneAndUpdate.mock.calls[0][1])).not.toHaveProperty("assignedBy");
   });
 
   it("leaves it alone when the edit touches no assignee", async () => {

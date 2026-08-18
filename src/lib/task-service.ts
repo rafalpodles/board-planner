@@ -464,8 +464,6 @@ export async function updateTask(
       updates[field] = body[field];
     }
   }
-  if (updates.assignee !== undefined) updates.assignedBy = actorId;
-
   // "" is what a cleared <select> sends, and it is not a value this field can hold: `sprint` is an
   // ObjectId, so an empty string casts to a CastError and surfaces as a 500. Normalise first, then
   // there is exactly one way to say "no sprint" and one check for everything else.
@@ -561,6 +559,18 @@ export async function updateTask(
       username: (updates.assignee as string).toLowerCase(),
     });
     updates.assignee = assigneeUser ? assigneeUser._id : null;
+  }
+
+  // Stamped only when the assignee actually moves, and after it has been resolved to an id so the
+  // comparison is between two of the same thing. The same call `agent` makes eighteen lines above,
+  // for the same client: a REST or MCP consumer that GETs a task, edits one field and PUTs the
+  // whole object back would otherwise re-stamp itself as the assigner — which silently takes the
+  // task out of what any machine may claim, with no error, no activity row, and a card that looks
+  // exactly as it did.
+  if (updates.assignee !== undefined) {
+    const before = oldTask.assignee as { _id?: unknown } | null | undefined;
+    const storedAssignee = String((before && before._id) ?? before ?? "");
+    if (storedAssignee !== String(updates.assignee ?? "")) updates.assignedBy = actorId;
   }
 
   // The edit form PUTs the whole task, status included, so leaving the active column is

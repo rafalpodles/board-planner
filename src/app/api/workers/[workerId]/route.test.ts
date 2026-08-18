@@ -80,12 +80,19 @@ function patchRequest(body: unknown) {
 }
 
 const ctx = () => ({ params: Promise.resolve({ workerId: WORKER_ID }) });
+const patchPopulates: unknown[] = [];
 
 beforeEach(() => {
   vi.clearAllMocks();
   check.mockResolvedValue(false);
   workerFindById.mockResolvedValue(WORKER);
-  workerFindByIdAndUpdate.mockResolvedValue({ ...WORKER, name: "renamed" });
+  patchPopulates.length = 0;
+  workerFindByIdAndUpdate.mockReturnValue({
+    populate: (...args: unknown[]) => {
+      patchPopulates.push(args);
+      return Promise.resolve({ ...WORKER, name: "renamed" });
+    },
+  });
   verifyWorkerCredential.mockResolvedValue(WORKER);
   workerFindOthers.mockResolvedValue([]);
   userFindById.mockResolvedValue({ _id: OWNER_ID, role: "member" });
@@ -124,6 +131,64 @@ describe("PATCH no longer writes a per-worker project list", () => {
 
     expect(res.status).toBe(200);
     expect(workerFindByIdAndUpdate.mock.calls[0][1].$set).toEqual({ enabled: false });
+  });
+});
+
+// BP-358: registration refuses to re-register a machine that belongs to somebody else, so a machine
+// whose owner has left needs a way to be let go — or it can never be enrolled again under the same
+// name and host.
+describe("PATCH releases a machine from its owner", () => {
+  beforeEach(() => {
+    getAuthUser.mockResolvedValue(INSTANCE_ADMIN);
+  });
+
+  // Without it toApiWorker answers `owner: null` for a machine that has one, the console merges
+  // that into the row it just changed, and the Owner column flashes its red "claims nothing" flag
+  // until the next poll — a false alarm on the indicator this branch added, raised by the page's
+  // most-used control.
+  it("answers with the owner's name, not a bare reference", async () => {
+    await PATCH(patchRequest({ enabled: false }), ctx());
+
+    expect(patchPopulates).toEqual([["owner", "username fullName"]]);
+  });
+
+  it("clears the owner", async () => {
+    const res = await PATCH(patchRequest({ owner: null }), ctx());
+
+    expect(res.status).toBe(200);
+    expect(workerFindByIdAndUpdate.mock.calls[0][1].$set).toEqual({ owner: null });
+  });
+
+  // Clearing is the recovery; assigning from here would hand the decision to somebody who is not at
+  // the machine, which is the step BP-358 removed
+  it("refuses to assign one instead", async () => {
+    const res = await PATCH(patchRequest({ owner: "6a732075133f935b19154cd3" }), ctx());
+
+    expect(res.status).toBe(400);
+    expect(workerFindByIdAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("records the release, naming what it means", async () => {
+    await PATCH(patchRequest({ owner: null }), ctx());
+
+    expect(logInstanceAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "worker_released", target: "rig-laptop" })
+    );
+  });
+
+  it("records nothing when the machine had no owner to release", async () => {
+    workerFindById.mockResolvedValue({ ...WORKER, owner: null });
+
+    await PATCH(patchRequest({ owner: null }), ctx());
+
+    expect(logInstanceAudit).not.toHaveBeenCalled();
+  });
+
+  it("is refused to anyone but an instance admin", async () => {
+    getAuthUser.mockResolvedValue(PLAIN_MEMBER);
+
+    expect((await PATCH(patchRequest({ owner: null }), ctx())).status).toBe(403);
+    expect(workerFindByIdAndUpdate).not.toHaveBeenCalled();
   });
 });
 
@@ -333,7 +398,7 @@ describe("what the fleet audit log records", () => {
   beforeEach(() => {
     getAuthUser.mockResolvedValue(INSTANCE_ADMIN);
     workerFindById.mockResolvedValue({ ...WORKER });
-    workerFindByIdAndUpdate.mockResolvedValue({ ...WORKER });
+    workerFindByIdAndUpdate.mockReturnValue({ populate: () => Promise.resolve({ ...WORKER }) });
   });
 
   it("records the kill switch as its own action, not as an update", async () => {
@@ -426,7 +491,7 @@ describe("what the fleet audit log records", () => {
 
   // Otherwise the log asserts a kill switch that never landed, right before the handler throws
   it("records nothing when the document is gone by the time it is written", async () => {
-    workerFindByIdAndUpdate.mockResolvedValue(null);
+    workerFindByIdAndUpdate.mockReturnValue({ populate: () => Promise.resolve(null) });
 
     const response = await PATCH(patchRequest({ lockedByInstance: true }), ctx());
 

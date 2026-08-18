@@ -20,7 +20,8 @@ vi.mock("@/models/project", () => ({
   Project: { findById: projectFindById, findOne: vi.fn() },
 }));
 vi.mock("@/models/user", () => ({ User: { findById: userFindById } }));
-vi.mock("@/models/task", () => ({ Task: { findOne: vi.fn() } }));
+const taskExists = vi.fn();
+vi.mock("@/models/task", () => ({ Task: { findOne: vi.fn(), exists: taskExists } }));
 
 const { withProjectAccessOrWorker } = await import("./middleware");
 
@@ -83,6 +84,8 @@ beforeEach(() => {
     Promise.resolve(String(id) === OWNER_ID ? ownerDoc() : identityDoc())
   );
   accessibleProjectIds.mockResolvedValue([PROJECT_ID]);
+  // Nothing in flight unless a test says so
+  taskExists.mockResolvedValue(null);
 });
 
 describe("a worker reporting with its own credential", () => {
@@ -224,6 +227,74 @@ describe("the grant is re-derived on every call", () => {
     expect(handler).not.toHaveBeenCalled();
     // Not merely refused by an empty grant list: the owner is never looked up at all
     expect(accessibleProjectIds).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The paragraph at the top of withProjectAccessOrWorker: a worker must still be able to report
+   * the outcome of a task it already holds, or refusing it strands that task in the active column
+   * until the two-hour lease sweeps it and spends an attempt.
+   *
+   * BP-358 made that reachable in a new way — the reach is the OWNER's, and every machine enrolled
+   * before BP-358 has none, so on the day this deploys every in-flight run would 403.
+   */
+  describe("a run this machine is already holding", () => {
+    it("reports through even though its owner reaches nothing", async () => {
+      verifyWorkerCredential.mockResolvedValue(workerDoc({ owner: null }));
+      taskExists.mockResolvedValue({ _id: "t1" });
+      const handler = vi.fn().mockResolvedValue(new Response("ok"));
+
+      const res = await withProjectAccessOrWorker(handler)(workerRequest(), context());
+
+      expect(res.status).toBe(200);
+      expect(handler).toHaveBeenCalled();
+    });
+
+    it("reports through when the grant was revoked mid-run", async () => {
+      accessibleProjectIds.mockResolvedValue(["some-other-project"]);
+      taskExists.mockResolvedValue({ _id: "t1" });
+      const handler = vi.fn().mockResolvedValue(new Response("ok"));
+
+      expect((await withProjectAccessOrWorker(handler)(workerRequest(), context())).status).toBe(200);
+    });
+
+    // runId, not workerId: workerId is left behind as history when a run ends, so keying on it
+    // would let a finished task grant its worker access to the project for good
+    it("asks for a live run, in this project, held by this worker", async () => {
+      verifyWorkerCredential.mockResolvedValue(workerDoc({ owner: null }));
+      taskExists.mockResolvedValue({ _id: "t1" });
+
+      await withProjectAccessOrWorker(vi.fn().mockResolvedValue(new Response("ok")))(
+        workerRequest(),
+        context()
+      );
+
+      expect(taskExists).toHaveBeenCalledWith({
+        project: PROJECT_ID,
+        "execution.workerId": "w1",
+        "execution.runId": { $nin: ["", null] },
+      });
+    });
+
+    // The exemption is for a task in flight, not a standing grant: with nothing held, an
+    // unreachable project is still refused
+    it("does not become a way in once the run has ended", async () => {
+      verifyWorkerCredential.mockResolvedValue(workerDoc({ owner: null }));
+      const handler = vi.fn();
+
+      expect((await withProjectAccessOrWorker(handler)(workerRequest(), context())).status).toBe(403);
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    // A disabled or locked machine is refused before any of this: the kill switch is not a
+    // permissions question and must not be softened by holding a task
+    it("does not let a killed worker report either", async () => {
+      verifyWorkerCredential.mockResolvedValue(workerDoc({ lockedByInstance: true }));
+      taskExists.mockResolvedValue({ _id: "t1" });
+
+      expect(
+        (await withProjectAccessOrWorker(vi.fn())(workerRequest(), context())).status
+      ).toBe(403);
+    });
   });
 
   // The identity is a `worker-<id>` machine account with no grants of its own. Reading reach off it

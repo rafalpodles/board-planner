@@ -5,7 +5,7 @@ import { withAuth } from "@/lib/middleware";
 import { check } from "@/lib/grants";
 import { Project } from "@/models/project";
 import { DeviceEnrolment } from "@/models/deviceEnrolment";
-import { registerWorker } from "@/lib/worker-service";
+import { registerWorker, WorkerAlreadyOwned } from "@/lib/worker-service";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { denyDeviceEnrolment, findPendingByUserCode } from "@/lib/device-enrolment";
 import { projectRepositoryUrl } from "@/lib/repository";
@@ -86,15 +86,28 @@ export const POST = withAuth(async (request, { params, user }) => {
   }
 
   // Registration mints the credential and the machine's identity. Re-registering the same
-  // name+host reclaims the existing worker rather than leaving a ghost holding the assignments.
-  const { worker, credential } = await registerWorker({
-    name: enrolment.machineName,
-    host: enrolment.machineHost,
-    platform: typeof body.platform === "string" ? body.platform : "",
-    version: "",
-    owner: user.fullName || user.username,
-    ownerId: String(user._id),
-  });
+  // name+host reclaims the existing worker rather than leaving a ghost holding the assignments —
+  // but only when it is already yours. Somebody else's machine is refused: the enrolment-start
+  // route is unauthenticated and takes any name and host, so without this, guessing a colleague's
+  // hostname would mint a new credential for their machine, stop the process running there and
+  // inherit its reported checkouts.
+  let registered;
+  try {
+    registered = await registerWorker({
+      name: enrolment.machineName,
+      host: enrolment.machineHost,
+      platform: typeof body.platform === "string" ? body.platform : "",
+      version: "",
+      owner: user.fullName || user.username,
+      ownerId: String(user._id),
+    });
+  } catch (error) {
+    if (error instanceof WorkerAlreadyOwned) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
+    throw error;
+  }
+  const { worker, credential } = registered;
 
   // The device flow's equivalent of spending an enrolment token: a machine gains a credential.
   // The token path records that, and an operator reading the log should not have to know which

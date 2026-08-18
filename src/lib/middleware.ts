@@ -194,6 +194,18 @@ export function withProjectOwner(handler: AuthenticatedHandler) {
 // construction. Deliberately NOT the full claim-time verdict: a worker that lost a contested
 // checkout must still be able to report the outcome of a task it already holds, or refusing it
 // would strand that task — the failure this whole design keeps working to avoid.
+// Keyed on runId, not workerId: workerId is left behind as history when a run ends, so a finished
+// task would otherwise go on granting its worker access to the project for good.
+async function holdsARunIn(projectId: string, workerId: string): Promise<boolean> {
+  return (
+    (await Task.exists({
+      project: projectId,
+      "execution.workerId": workerId,
+      "execution.runId": { $nin: ["", null] },
+    })) !== null
+  );
+}
+
 export function withProjectAccessOrWorker(handler: AuthenticatedHandler) {
   const asPerson = withProjectAccess(handler);
 
@@ -221,11 +233,17 @@ export function withProjectAccessOrWorker(handler: AuthenticatedHandler) {
         .lean(),
       ownerReachableProjectIds(worker),
     ]);
-    if (
-      !project?.worker?.enabled ||
-      !canServe(reachable, String(project._id)) ||
-      !matchRepo(project as never, worker.repos ?? [])
-    ) {
+    const assigned =
+      !!project?.worker?.enabled &&
+      canServe(reachable, String(project._id)) &&
+      matchRepo(project as never, worker.repos ?? []);
+    // A run this machine is holding right now goes through even when the answer above is no. That
+    // is the paragraph at the top of this function, honoured for a case BP-358 introduced: the
+    // reach is its owner's, so revoking a grant — or deploying this at all, since every machine
+    // enrolled before BP-358 has no owner — would otherwise 403 the status, release and comment
+    // routes of a task already in flight, and leave it in the active column until the two-hour
+    // lease swept it and spent an attempt.
+    if (!assigned && !(await holdsARunIn(projectId, String(worker._id)))) {
       return NextResponse.json(
         { error: "this worker is not assigned to this project" },
         { status: 403 }

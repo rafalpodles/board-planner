@@ -25,7 +25,15 @@ const TONE_CLASSES = {
 // person can reach, resolved on every call. A worker with no owner reaches nothing at all, and
 // looked identical to a healthy one until this column existed — it has no binding error, no failed
 // heartbeat and an empty assignment list, which is also what an idle machine has.
-function OwnerCell({ worker }: { worker: ApiWorker }) {
+function OwnerCell({
+  worker,
+  disabled,
+  onRelease,
+}: {
+  worker: ApiWorker;
+  disabled: boolean;
+  onRelease: () => void;
+}) {
   if (!worker.owner) {
     return (
       <span className="text-xs text-danger" data-testid="worker-no-owner">
@@ -34,8 +42,22 @@ function OwnerCell({ worker }: { worker: ApiWorker }) {
     );
   }
   return (
-    <span className="text-xs text-text whitespace-nowrap" title={worker.owner.username}>
-      {worker.owner.fullName || worker.owner.username}
+    <span className="flex items-center gap-1.5 whitespace-nowrap">
+      <span className="text-xs text-text" title={worker.owner.username}>
+        {worker.owner.fullName || worker.owner.username}
+      </span>
+      {/* Registration refuses to re-register a machine that belongs to somebody else, so without a
+          way to let one go, a machine whose owner has left could never be enrolled again under the
+          same name and host. */}
+      <button
+        data-testid="worker-release"
+        disabled={disabled}
+        onClick={onRelease}
+        title="Release it, so somebody else can enrol this machine"
+        className="text-xs text-text-muted underline decoration-dotted hover:text-danger cursor-pointer"
+      >
+        release
+      </button>
     </span>
   );
 }
@@ -95,7 +117,7 @@ export default function AdminWorkersPage() {
 
   async function patch(
     worker: ApiWorker,
-    changes: Partial<Pick<ApiWorker, "enabled" | "lockedByInstance">>
+    changes: Partial<Pick<ApiWorker, "enabled" | "lockedByInstance" | "owner">>
   ) {
     setSavingId(worker._id);
     try {
@@ -232,7 +254,11 @@ export default function AdminWorkersPage() {
                       </div>
                     </td>
                     <td className="px-3 py-2 max-w-[12rem]">
-                      <OwnerCell worker={worker} />
+                      <OwnerCell
+                        worker={worker}
+                        disabled={savingId === worker._id}
+                        onRelease={() => patch(worker, { owner: null })}
+                      />
                     </td>
                     <td className="px-3 py-2 max-w-[14rem]">
                       <PreflightCell preflight={worker.preflight} />

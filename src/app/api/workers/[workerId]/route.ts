@@ -82,6 +82,21 @@ export const PATCH = withAuth(async (request, { params, user }) => {
 
   const update: Record<string, unknown> = {};
 
+  // Release only — `owner: null` and nothing else. Registration is the one thing that decides whose
+  // machine this is, and it now refuses to re-register somebody else's; without a way to let one
+  // go, a machine whose owner has left could never be enrolled again under the same name and host.
+  // Assigning an owner from here is deliberately not offered: that would hand the decision to
+  // somebody who is not at the machine, which is the step BP-358 removed.
+  if ("owner" in body) {
+    if (body.owner !== null) {
+      return NextResponse.json(
+        { error: "owner can only be cleared here — a machine is claimed by enrolling it" },
+        { status: 400 }
+      );
+    }
+    update.owner = null;
+  }
+
   for (const field of ADMIN_FIELDS) {
     if (!(field in body)) continue;
     if (field === "name") {
@@ -117,7 +132,14 @@ export const PATCH = withAuth(async (request, { params, user }) => {
     return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
   }
 
-  const updated = await Worker.findByIdAndUpdate(workerId, { $set: update }, { new: true });
+  // Populated, like the fleet list is: without it toApiWorker answers `owner: null` for a machine
+  // that has one, the console merges that into the row, and its Owner column flashes the red
+  // "claims nothing" flag until the next poll corrects it — a false alarm on the very indicator
+  // this branch added, raised by the page's most-used control.
+  const updated = await Worker.findByIdAndUpdate(workerId, { $set: update }, { new: true }).populate(
+    "owner",
+    "username fullName"
+  );
   if (!updated) {
     return NextResponse.json({ error: "Worker not found" }, { status: 404 });
   }
@@ -135,6 +157,7 @@ interface WorkerBefore {
   name: string;
   enabled: boolean;
   lockedByInstance: boolean;
+  owner?: unknown;
   policy?: { pollIntervalMs?: number };
   policyOverrides?: string[];
 }
@@ -161,6 +184,14 @@ function auditEntries(
 
   if (typeof body.enabled === "boolean" && body.enabled !== before.enabled) {
     entries.push({ action: body.enabled ? "worker_enabled" : "worker_disabled", target });
+  }
+
+  if (body.owner === null && before.owner) {
+    entries.push({
+      action: "worker_released",
+      target,
+      detail: "Owner cleared — it claims nothing until somebody enrols it again",
+    });
   }
 
   if (typeof body.name === "string" && body.name.trim() && body.name.trim() !== before.name) {

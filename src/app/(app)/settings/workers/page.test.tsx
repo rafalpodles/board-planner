@@ -113,3 +113,37 @@ describe("the fleet console's owner column", () => {
     await waitFor(() => expect(screen.queryByText(/Approved for/i)).toBeNull());
   });
 });
+
+/**
+ * Registration refuses to re-register a machine that belongs to somebody else, so without a way to
+ * let one go, a machine whose owner has left could never be enrolled again under the same name and
+ * host. Instance-admin only, and it clears — it never assigns.
+ */
+describe("releasing a machine from its owner", () => {
+  it("offers it on a machine that has one", async () => {
+    api.get.mockResolvedValue([worker()]);
+
+    render(<WorkersPage />);
+
+    expect(await screen.findByTestId("worker-release")).toBeTruthy();
+  });
+
+  it("offers nothing to release on a machine with no owner", async () => {
+    api.get.mockResolvedValue([worker({ owner: null })]);
+
+    render(<WorkersPage />);
+
+    await screen.findByTestId("worker-no-owner");
+    expect(screen.queryByTestId("worker-release")).toBeNull();
+  });
+
+  it("clears the owner, and asks for nothing else", async () => {
+    api.get.mockResolvedValue([worker()]);
+    api.patch.mockResolvedValue(worker({ owner: null }));
+
+    render(<WorkersPage />);
+    (await screen.findByTestId("worker-release")).click();
+
+    await waitFor(() => expect(api.patch).toHaveBeenCalledWith("/api/workers/w1", { owner: null }));
+  });
+});

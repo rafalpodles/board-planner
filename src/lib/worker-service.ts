@@ -237,6 +237,23 @@ export function usableRepos(
   return (worker.repos ?? []).filter((r) => !lost.has(r.path));
 }
 
+/**
+ * A machine already belongs to somebody else.
+ *
+ * Registration upserts on name+host, so without this an enrolment would silently take over an
+ * existing machine: mint a new credential (killing the process running there, whose stored one
+ * stops working), rewrite `owner`, and inherit that record's reported checkouts. That was an
+ * admin's act while enrolment needed approval. Since BP-358 anyone signed in can enrol, and the
+ * enrolment-start route is unauthenticated and takes an arbitrary name and host — so guessing a
+ * colleague's hostname would have been enough.
+ */
+export class WorkerAlreadyOwned extends Error {
+  constructor() {
+    super("That machine is already enrolled to somebody else");
+    this.name = "WorkerAlreadyOwned";
+  }
+}
+
 export async function registerWorker(input: {
   name: string;
   host: string;
@@ -251,21 +268,46 @@ export async function registerWorker(input: {
   const credential = `cpw_${crypto.randomBytes(32).toString("hex")}`;
   const { owner, ownerId, ...fields } = input;
 
-  // Re-registration reclaims the identity rather than creating a ghost that holds the
-  // assignments while the live worker sits idle with none
-  const worker = await Worker.findOneAndUpdate(
-    { name: fields.name, host: fields.host },
-    {
-      $set: {
-        ...fields,
-        ...(ownerId ? { owner: new Types.ObjectId(ownerId) } : {}),
-        protocolVersion: PROTOCOL_VERSION,
-        credentialHash: await bcrypt.hash(credential, 10),
-        lastSeenAt: new Date(),
+  // Read only to decide whether this record is changing hands — the authorization itself is the
+  // filter below, atomically, because a read-then-write here would let two registrations racing on
+  // the same name+host both see it unowned and the second silently overwrite the first's owner.
+  const existing = await Worker.findOne({ name: fields.name, host: fields.host })
+    .select("owner")
+    .lean();
+  // A record changing hands is a different machine as far as the server can tell, so it must not
+  // inherit the last one's reported checkouts — those are paths on somebody else's disk, and the
+  // worker re-reports its own inventory on its first heartbeat anyway.
+  const adopted = !!existing && !existing.owner && !!ownerId;
+
+  // Re-registration reclaims the identity rather than creating a ghost that holds the assignments
+  // while the live worker sits idle with none — but only for a machine that is already yours, or
+  // one nobody owns. Somebody else's is refused: the filter simply does not match it, so the upsert
+  // tries to insert a duplicate name+host and the unique index answers, atomically.
+  const mine = ownerId
+    ? [{ owner: null }, { owner: { $exists: false } }, { owner: new Types.ObjectId(ownerId) }]
+    : [{ owner: null }, { owner: { $exists: false } }];
+
+  let worker;
+  try {
+    worker = await Worker.findOneAndUpdate(
+      { name: fields.name, host: fields.host, $or: mine },
+      {
+        $set: {
+          ...fields,
+          ...(ownerId ? { owner: new Types.ObjectId(ownerId) } : {}),
+          ...(adopted ? { repos: [], bindingError: "" } : {}),
+          protocolVersion: PROTOCOL_VERSION,
+          credentialHash: await bcrypt.hash(credential, 10),
+          lastSeenAt: new Date(),
+        },
       },
-    },
-    { new: true, upsert: true, setDefaultsOnInsert: true }
-  );
+      { new: true, upsert: true, setDefaultsOnInsert: true }
+    );
+  } catch (error) {
+    if ((error as { code?: number })?.code === 11000) throw new WorkerAlreadyOwned();
+    throw error;
+  }
+  if (!worker) throw new WorkerAlreadyOwned();
 
   // The user this machine will act as. Created after the worker so it can be keyed on the worker's
   // id, which is what makes two machines two identities rather than one shared "worker" account.
