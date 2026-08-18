@@ -10,6 +10,9 @@ import { ITaskExecution } from "@/types";
 
 const populateFields = [
   { path: "assignee", select: "username fullName" },
+  // Named, not left as an id: this is what the agent picker reads to say why nothing will run a
+  // task somebody else handed over, and "assigned by 6a70…" answers nobody's question
+  { path: "assignedBy", select: "username fullName" },
   { path: "createdBy", select: "username fullName" },
   { path: "blockedBy", select: "taskNumber title status" },
   { path: "relations.task", select: "taskNumber title status" },

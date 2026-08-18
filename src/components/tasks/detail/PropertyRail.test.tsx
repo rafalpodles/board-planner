@@ -3,7 +3,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup, act, fireEvent } from "@testing-library/react";
 import { PropertyRail } from "./PropertyRail";
 import type { TaskDraft } from "./useTaskEditor";
-import { ApiCustomField, ApiSprint, ApiUser } from "@/types";
+import { ApiCustomField, ApiSprint, ApiTask, ApiUser } from "@/types";
 
 // The Agent row is the only one whose editability depends on the viewer (BP-345), so the rail now
 // reads auth. Default to admin, which is what every other test here assumes it can click.
@@ -69,6 +69,7 @@ function renderRail(over: Partial<React.ComponentProps<typeof PropertyRail>> = {
         { _id: "c2", name: "bug", color: "#ef4444" },
       ]}
       customFields={[]}
+      stored={{ agent: null, assignee: null, assignedBy: null }}
       reporter="Claude Code"
       onDelete={() => {}}
       {...over}
@@ -356,5 +357,89 @@ describe("the Agent row and who may change it", () => {
     const options = screen.getAllByRole("option").map((o) => o.textContent);
     expect(options[0]).toContain("No agent");
     expect(options[1]).toContain("With security review");
+  });
+});
+
+/**
+ * BP-358: the claim takes a task or it does not, and logs nothing either way. An agent chosen on a
+ * task no machine will touch looks entirely normal on the card, which is why "why did nothing
+ * happen" had no answer anywhere in the product.
+ *
+ * Every case is located by data-reason rather than by its wording: all four render the same
+ * opening sentence, so a text matcher would pass with the wrong branch on screen.
+ */
+describe("the agent picker says when nothing will run the task", () => {
+  const RAFAL = { _id: "u1", username: "rpo", fullName: "Rafal Podles" } as ApiUser;
+  const AGENT = [{ _id: "a1", name: "Default" }] as React.ComponentProps<
+    typeof PropertyRail
+  >["agents"];
+
+  function withStored(stored: Partial<ApiTask>, over: Partial<TaskDraft> = {}) {
+    renderRail({
+      agents: AGENT,
+      draft: { ...draft, agent: "a1", assignee: "rpo", ...over },
+      stored: { agent: "a1", assignee: RAFAL, assignedBy: { ...RAFAL }, ...stored } as ApiTask,
+    });
+  }
+
+  it("says nothing when the assignee handed it to themselves", () => {
+    withStored({});
+
+    expect(screen.queryByTestId("handover-notice")).toBeNull();
+  });
+
+  it("says nothing about a task with no agent, which is the ordinary case", () => {
+    withStored({ agent: null, assignee: null }, { agent: null, assignee: null });
+
+    expect(screen.queryByTestId("handover-notice")).toBeNull();
+  });
+
+  it("says an unassigned task belongs to nobody", () => {
+    withStored({ assignee: null }, { assignee: null });
+
+    expect(screen.getByTestId("handover-notice").dataset.reason).toBe("unassigned");
+  });
+
+  // The legacy case, and the visible half of refusing to backfill assignedBy
+  it("says a task assigned before the board recorded who assigns will not run", () => {
+    withStored({ assignedBy: undefined });
+
+    const notice = screen.getByTestId("handover-notice");
+    expect(notice.dataset.reason).toBe("assigner-unrecorded");
+    expect(notice.textContent).toMatch(/assign it again/i);
+  });
+
+  it("names whoever else handed it over", () => {
+    withStored({ assignedBy: { _id: "u2", username: "kmk", fullName: "Krzysiek" } });
+
+    const notice = screen.getByTestId("handover-notice");
+    expect(notice.dataset.reason).toBe("assigned-by-someone-else");
+    expect(notice.textContent).toContain("Krzysiek");
+  });
+
+  // The verdict depends on assignedBy, which only the server writes. Judging an unsaved draft
+  // would tell somebody who just picked an assignee that their own task will not run.
+  it("says nothing while the draft has an edit the server has not seen", () => {
+    withStored({ assignee: null }, { assignee: "rpo" });
+
+    expect(screen.queryByTestId("handover-notice")).toBeNull();
+  });
+
+  // Clearing the agent is the fix for every one of these notices, so the notice has to go the
+  // moment it is cleared rather than sitting there until the save lands. The stored task would
+  // otherwise render "assigned before the board recorded who assigns".
+  it("says nothing while the agent itself is the unsaved edit", () => {
+    withStored({ assignedBy: undefined }, { agent: null });
+
+    expect(screen.queryByTestId("handover-notice")).toBeNull();
+  });
+
+  // Readable by everyone: a member who cannot choose the agent is exactly the person who needs to
+  // be told the task is waiting on them
+  it("is shown to somebody who cannot change the agent", () => {
+    isAdmin.value = false;
+    withStored({ assignedBy: undefined });
+
+    expect(screen.getByTestId("handover-notice").dataset.reason).toBe("assigner-unrecorded");
   });
 });

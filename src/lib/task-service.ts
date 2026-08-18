@@ -49,11 +49,14 @@ const UNSET_RUN = Object.fromEntries(RUN_FIELDS.map((field) => [field, ""]));
 // drag it to To Do" quietly undid the assignment — assignment is still central to the hand-over,
 // and the worker would simply never pick the task up.
 //
-// `assignedByRun` says the claim is what put the assignee there. A claim may now land on a task a
-// person assigned, and releasing it must give the task back to that person rather than blank the
-// field — a released task with no assignee drops out of what the worker may claim and is never
-// retried. Missing means true: tasks claimed before this field existed went through a filter that
-// refused any assignee, so back then the run really did set it.
+// `assignedByRun` says the claim is what put the assignee there. Since BP-358 a claim only ever
+// takes a task somebody already assigned, so it writes this `false` every time and this half of
+// the condition is here for one shrinking population: runs claimed by the older code and still in
+// flight across the deploy, plus tasks it already stamped. Releasing a task a person assigned must
+// give it back to that person rather than blank the field — a released task with no assignee drops
+// out of what the worker may claim and is never retried. Missing means true: tasks claimed before
+// this field existed went through a filter that refused any assignee, so back then the run really
+// did set it.
 //
 // `$ifNull` alone was wrong and shipped once: `execution.runId` defaults to the empty string, and
 // an empty string is TRUTHY in MongoDB's `$cond` — unlike in JavaScript. So every ordinary status
@@ -79,17 +82,13 @@ export const CLEAR_WORKER_ASSIGNEE = {
 // spend an attempt for a move somebody made deliberately.
 const STILL_HELD = { "execution.runId": { $nin: ["", null] } };
 
-// claimNextTask's own signal for whether the task had no assignee before the claim — reused for
-// both execution.assignedByRun and assignedBy, so a claim that is not what assigned the task
-// changes neither field.
-export const WAS_UNASSIGNED = { $eq: [{ $ifNull: ["$assignee", null] }, null] };
-
 // Four times the worker's default task timeout. A worker killed mid-run leaves its task in the
 // active column, where claimNextTask can never see it again — nothing else reclaims it.
 export const EXECUTION_LEASE_MS = 2 * 60 * 60 * 1000;
 
 export const taskPopulateFields = [
   { path: "assignee", select: "username fullName" },
+  { path: "assignedBy", select: "username fullName" },
   { path: "createdBy", select: "username fullName" },
   { path: "blockedBy", select: "taskNumber title status" },
   { path: "relations.task", select: "taskNumber title status" },
@@ -900,9 +899,6 @@ export async function claimNextTask(
   projectId: string,
   workerId: string,
   runId: string,
-  // The worker's own identity user. A claim is an assignment, which is what stops two machines
-  // converging on one task and what makes a task parked for a colleague untouchable.
-  identity?: string | null,
   // The machine's owner. A machine takes the work this person handed it, and nothing else.
   ownerId?: string | null
   // A document, not a plain ITask: the caller has to know, because spreading one silently yields
@@ -916,29 +912,10 @@ export async function claimNextTask(
   const activeStatus = columns.find((c) => c.role === "active")?.id;
   if (approved.length === 0 || !activeStatus) return null;
 
-  // Cast here, not in the pipeline. Mongoose casts a plain $set against the schema and does not
-  // cast an update pipeline at all, so the raw string would be stored in an ObjectId ref field —
-  // populate still renders it, and every query that casts its side (My Tasks, the board's assignee
-  // filter, this very claim filter) silently stops matching the task.
-  // A worker's identity is an ObjectId ref, so one that cannot be parsed means a corrupt worker
-  // record. Claim nothing: throwing would 500 the poll loop, and claiming while assigning nobody
-  // would hand work to a machine that no later query can associate with it.
-  if (identity && !Types.ObjectId.isValid(identity)) return null;
-  const assignTo = identity ? new Types.ObjectId(identity) : null;
-
   // Explicit about presence, not just format: isValid(null | undefined | "") already happens to
   // return false in this bson version, but that is the library's choice, not a guarantee — a
   // missing owner should not depend on it staying that way.
   if (!ownerId || !Types.ObjectId.isValid(ownerId)) return null;
-
-  // Assigned to the owner *by* the owner. Somebody else assigning you work is a proposal, and the
-  // surface for accepting one does not exist yet — so it is refused rather than run unattended.
-  // A task the run is resuming is already assigned to the machine's identity, and without it a
-  // release would hand back a task nothing could pick up again.
-  const claimable = [
-    { assignee: ownerId, assignedBy: ownerId },
-    ...(identity ? [{ assignee: identity }] : []),
-  ];
 
   // Finished is the done role, not a status called "done": a board that renamed its last column
   // would otherwise read every shipped blocker as still open. A board with NO done-role column
@@ -968,40 +945,46 @@ export async function claimNextTask(
     {
       project: projectId,
       status: { $in: approved },
+      // Assigned to the owner *by* the owner. Somebody else assigning you work is a proposal, and
+      // the surface for accepting one does not exist yet — so it is refused rather than run
+      // unattended.
+      //
+      // A task stored before BP-358 has no `assignedBy` key at all, and a missing field never
+      // equals an ObjectId, so this refuses every one of them. That is the decision, not an
+      // oversight, and there is deliberately no backfill: the field answers "did this person hand
+      // this to themselves", the document does not record it, and the obvious guess —
+      // assignedBy := assignee — silently converts work somebody else handed you into work you
+      // handed yourself, for every task at once. Nothing is lost by refusing: a task also has to
+      // name an agent to be claimable, and the ones that do were routed by the old project-wide
+      // nominee, so they are assigned to that nominee rather than to any machine's owner and have
+      // to be reassigned regardless — which stamps `assignedBy` through updateTask. The agent
+      // picker says so on the task itself.
+      assignee: ownerId,
+      assignedBy: ownerId,
       // Choosing an agent is the hand-over; a task naming none is one a person is doing
       agent: { $ne: null },
       // On an array field this means "holds none of them", so a task with no blockers, one whose
       // blockers have all finished, and one written before the field existed all still qualify
       blockedBy: { $nin: openBlockers },
-      $and: [
-        { $or: claimable },
-        // Mongoose applies defaults at hydration, so tasks created before the
-        // execution subdocument existed have no such field — and $lt never
-        // matches a missing one
-        {
-          $or: [
-            { "execution.attempts": { $exists: false } },
-            { "execution.attempts": { $lt: MAX_EXECUTION_ATTEMPTS } },
-          ],
-        },
+      // Mongoose applies defaults at hydration, so tasks created before the
+      // execution subdocument existed have no such field — and $lt never
+      // matches a missing one
+      $or: [
+        { "execution.attempts": { $exists: false } },
+        { "execution.attempts": { $lt: MAX_EXECUTION_ATTEMPTS } },
       ],
     },
     [
       {
         $set: {
           status: activeStatus,
-          // Kept, not overwritten: the assignee is the hand-over itself, and whether the claim is
-          // what set it decides whether releasing may clear it again.
-          // assignedBy follows the same rule on the same signal — the claim is the assigner only
-          // when the claim is what set the assignee; a resumed or already-assigned task keeps
-          // whatever assignedBy already recorded, same as it keeps assignee.
-          ...(assignTo
-            ? {
-                assignee: { $ifNull: ["$assignee", assignTo] },
-                assignedBy: { $cond: [WAS_UNASSIGNED, assignTo, "$assignedBy"] },
-              }
-            : {}),
-          "execution.assignedByRun": WAS_UNASSIGNED,
+          // Neither `assignee` nor `assignedBy` is written: the filter above matched on both, so
+          // the hand-over is already exactly what it should stay.
+          //
+          // Written false, not omitted: releasing reads `$ifNull` over this and treats a MISSING
+          // value as "the claim assigned it", which would blank the person's own assignment on
+          // the first release and drop the task out of what any machine may claim.
+          "execution.assignedByRun": false,
           "execution.workerId": workerId,
           "execution.runId": runId,
           "execution.startedAt": new Date(),

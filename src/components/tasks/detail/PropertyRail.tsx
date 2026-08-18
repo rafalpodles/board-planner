@@ -26,7 +26,8 @@ import {
   PickerRow,
 } from "./FieldRow";
 import type { TaskDraft } from "./useTaskEditor";
-import type { ApiAgent } from "@/types";
+import type { ApiAgent, ApiTask } from "@/types";
+import { handoverOf, type Handover } from "@/lib/handover";
 import { useAuth } from "@/hooks/use-auth";
 
 const RECURRENCE_UNITS: Record<RecurrenceFrequency, string> = {
@@ -51,6 +52,31 @@ function formatDate(value: string): string {
   });
 }
 
+// The claim takes a task or it does not, and logs nothing either way. An agent chosen on a task no
+// machine will touch is the one state nobody could diagnose: the card looks entirely normal.
+function HandoverNotice({ handover }: { handover: Handover | null }) {
+  // "No agent" is the ordinary case and the default — it is what the picker already says, and
+  // repeating it as a warning would put a notice on almost every task on the board.
+  if (!handover || handover.runs || handover.reason === "no-agent") return null;
+
+  const message =
+    handover.reason === "unassigned"
+      ? "Nothing will run this. A machine takes only work its owner assigned to themselves — assign it to yourself."
+      : handover.reason === "assigner-unrecorded"
+        ? "Nothing will run this. It was assigned before the board recorded who hands work over; assign it again to record that."
+        : `Nothing will run this. ${handover.by ?? "Somebody else"} assigned it, and a machine takes only work its owner assigned to themselves.`;
+
+  return (
+    <p
+      data-testid="handover-notice"
+      data-reason={handover.reason}
+      className="mt-1 text-xs text-warning"
+    >
+      {message}
+    </p>
+  );
+}
+
 interface PropertyRailProps {
   draft: TaskDraft;
   set: <K extends keyof TaskDraft>(key: K, value: TaskDraft[K]) => void;
@@ -59,6 +85,12 @@ interface PropertyRailProps {
   agents: ApiAgent[];
   /** Offered first in the picker once a machine is being chosen; never a fallback */
   projectDefaultAgent?: string;
+  /**
+   * The task as stored, not as edited. Whether a machine will take it depends on `assignedBy`,
+   * which only the server writes — so a draft mid-edit has no answer, and judging one would
+   * describe a state that has never existed.
+   */
+  stored: Pick<ApiTask, "agent" | "assignee" | "assignedBy">;
   /** Full rows, not names: the chip and the picker dot are tinted by the project's colour */
   categories: ApiProjectCategory[];
   customFields: ApiCustomField[];
@@ -75,6 +107,7 @@ export function PropertyRail({
   sprints,
   agents,
   projectDefaultAgent,
+  stored,
   categories,
   customFields,
   reporter,
@@ -88,6 +121,12 @@ export function PropertyRail({
   // Instance admin, which is what every other admin-only surface in this app keys on
   const { isAdmin } = useAuth();
   const agentName = agents.find((a) => a._id === draft.agent)?.name ?? "";
+  // Suppressed while the draft and the stored task disagree: the answer changes as soon as the
+  // pending edit saves, and a hint that contradicts what the person just typed is worse than none.
+  const pending =
+    (draft.agent ?? null) !== (stored.agent ?? null) ||
+    (draft.assignee ?? null) !== (stored.assignee?.username ?? null);
+  const handover = pending ? null : handoverOf(stored);
 
   return (
     <div className="flex h-full flex-col gap-6">
@@ -149,6 +188,8 @@ export function PropertyRail({
             )}
           </FieldRow>
         )}
+
+        <HandoverNotice handover={handover} />
 
         <ComboboxRow
           label="Priority"

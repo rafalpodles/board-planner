@@ -1047,6 +1047,10 @@ export interface ApiTask {
   category: Category;
   status: TaskStatus;
   assignee: ApiUser | null;
+  // Who set the assignee, and the only thing that says whether a machine may act on it: a task is
+  // run unattended when its assignee handed it to themselves. Absent on anything assigned before
+  // BP-358, where the answer is not recorded anywhere and is deliberately not guessed.
+  assignedBy?: ApiUserSummary | string | null;
   dueDate: string | null;
   checklist: ApiChecklistItem[];
   linkedPRs: ApiLinkedPR[];

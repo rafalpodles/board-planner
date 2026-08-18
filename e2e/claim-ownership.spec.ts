@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import mongoose from "mongoose";
 import { changeStatus, claimNextTask, releaseTask, updateTask } from "@/lib/task-service";
-import { ADMIN_ID, E2E_MONGODB_URI, MEMBER_ID, PROJECT_ID, seed } from "./seed";
+import { ADMIN_ID, ADMIN_USERNAME, E2E_MONGODB_URI, MEMBER_ID, PROJECT_ID, seed } from "./seed";
 
 /**
  * BP-240. These run against a real MongoDB rather than through a browser, because what is under
@@ -17,8 +17,8 @@ import { ADMIN_ID, E2E_MONGODB_URI, MEMBER_ID, PROJECT_ID, seed } from "./seed";
  *
  * BP-358 renamed this file from claim-scope.spec.ts: the claim no longer reads a project-wide
  * scope/nominee pair, so there is nothing left called "claim scope" to be a spec about. What
- * decides a claim now is the machine's owner — `{ assignee: ownerId, assignedBy: ownerId }` — or
- * the identity of a run it is resuming, and an agent naming the hand-over.
+ * decides a claim now is the machine's owner — `{ assignee: ownerId, assignedBy: ownerId }` — and
+ * an agent naming the hand-over.
  *
  * The settings screen that used to configure the scope and the nominee is gone with them —
  * WorkersSection.test.tsx pins what replaced it (the enable switch and its hint), and
@@ -30,8 +30,8 @@ const APPROVED = "todo";
 const ACTIVE = "in_progress";
 // Two different accounts on purpose, because they are two different things in production: OWNER is
 // the person this machine belongs to — a claim only ever takes a task that person assigned to
-// themselves — IDENTITY is the worker's own `worker-<id>` machine account, which a resumed run's
-// own claim still has to find again.
+// themselves — IDENTITY is the worker's own `worker-<id>` machine account, which the claim
+// deliberately no longer matches on, and which only appears here in a document the older code left.
 const OWNER = ADMIN_ID;
 const IDENTITY = "6a70afff45d39cd9bc8bb5ff";
 const WORKER = "w-claim-ownership";
@@ -82,6 +82,17 @@ async function addTask(over: Record<string, unknown> = {}): Promise<mongoose.Typ
   return _id;
 }
 
+// A task exactly as it sits in a database that predates BP-358: the KEY IS ABSENT, which is what
+// `assignedBy: null` is not — a missing field and a null both fail an ObjectId equality, but only
+// the missing one is what an old document actually looks like, and only it survives a writer that
+// starts defaulting the field.
+async function addLegacyTask(over: Record<string, unknown> = {}): Promise<mongoose.Types.ObjectId> {
+  const _id = await addTask(over);
+  const handle = await db();
+  await handle.collection("tasks").updateOne({ _id }, { $unset: { assignedBy: "" } });
+  return _id;
+}
+
 async function read(taskId: mongoose.Types.ObjectId) {
   const handle = await db();
   const task = await handle.collection("tasks").findOne({ _id: taskId });
@@ -120,7 +131,7 @@ test.describe("what a claim requires", () => {
     await addTask({ assignee: null, assignedBy: null, agent: null });
 
     expect(
-      await claimNextTask(String(PROJECT_ID), WORKER, "run-1", IDENTITY, String(OWNER))
+      await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(OWNER))
     ).toBeNull();
     expect((await read(untouched)).status).toBe(APPROVED);
   });
@@ -128,13 +139,7 @@ test.describe("what a claim requires", () => {
   test("a task the owner assigned to themselves is taken, and stays assigned to them", async () => {
     const handed = await addTask();
 
-    const claimed = await claimNextTask(
-      String(PROJECT_ID),
-      WORKER,
-      "run-1",
-      IDENTITY,
-      String(OWNER)
-    );
+    const claimed = await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(OWNER));
     expect(String(claimed?._id)).toBe(String(handed));
 
     const after = await read(handed);
@@ -149,7 +154,7 @@ test.describe("what a claim requires", () => {
     await addTask({ assignee: MEMBER_ID, assignedBy: MEMBER_ID });
 
     expect(
-      await claimNextTask(String(PROJECT_ID), WORKER, "run-1", IDENTITY, String(OWNER))
+      await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(OWNER))
     ).toBeNull();
   });
 
@@ -159,16 +164,27 @@ test.describe("what a claim requires", () => {
     await addTask({ assignee: OWNER, assignedBy: MEMBER_ID });
 
     expect(
-      await claimNextTask(String(PROJECT_ID), WORKER, "run-1", IDENTITY, String(OWNER))
+      await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(OWNER))
     ).toBeNull();
   });
 
-  test("a worker with no identity user still takes what its owner assigned to themselves", async () => {
+  test("unassigned work in the column does not hide the one task that was handed over", async () => {
     await addTask({ assignee: null, assignedBy: null, agent: null });
     const handed = await addTask({ order: 5 });
 
-    const claimed = await claimNextTask(String(PROJECT_ID), WORKER, "run-1", null, String(OWNER));
+    const claimed = await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(OWNER));
     expect(String(claimed?._id)).toBe(String(handed));
+  });
+
+  // A task assigned to the worker's own `worker-<id>` account used to be claimable, so that a run
+  // could resume one its own older claim had assigned. Under BP-358 a release keeps the person's
+  // assignment, so nothing needs resuming that way — and the branch was a hole: anyone who can
+  // reach the API can assign to a machine account, and that ran unattended with no assignedBy
+  // check at all, which is the shape of BP-345.
+  test("a task assigned to the machine's own identity is not taken", async () => {
+    await addTask({ assignee: IDENTITY, assignedBy: IDENTITY });
+
+    expect(await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(OWNER))).toBeNull();
   });
 
   // The guard this whole task adds: real ids, a real query, and a real assertion that nothing in
@@ -178,8 +194,54 @@ test.describe("what a claim requires", () => {
   test("claims nothing for a machine whose owner is unset", async () => {
     const untouched = await addTask({ assignee: null, assignedBy: null });
 
-    expect(await claimNextTask(String(PROJECT_ID), WORKER, "run-1", IDENTITY, null)).toBeNull();
+    expect(await claimNextTask(String(PROJECT_ID), WORKER, "run-1", null)).toBeNull();
     expect((await read(untouched)).status).toBe(APPROVED);
+  });
+});
+
+/**
+ * Every task stored before this branch has no `assignedBy` key, and the deliberate decision is that
+ * nothing claims one: the field answers "did this person hand this to themselves", the document
+ * does not record it, and guessing converts work somebody else handed you into work you handed
+ * yourself. There is no backfill. The way back is the ordinary gesture — assign it — which is the
+ * same write the migration off the old project-wide nominee already requires.
+ *
+ * Real documents rather than sift, because "a missing key never equals an ObjectId" is a claim
+ * about MongoDB, and the fixture has to be the absence rather than a null standing in for one.
+ */
+test.describe("a task from before assignedBy existed", () => {
+  test("is not claimed, even though its assignee is the machine's owner", async () => {
+    const legacy = await addLegacyTask();
+
+    expect(await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(OWNER))).toBeNull();
+    expect((await read(legacy)).status).toBe(APPROVED);
+  });
+
+  // The fixture is only meaningful if the key really is absent: a `null` would also fail the
+  // filter, so the test above would pass either way and prove nothing about old documents.
+  test("really has no assignedBy key at all, not a null one", async () => {
+    const legacy = await addLegacyTask();
+    const handle = await db();
+
+    const stored = await handle.collection("tasks").findOne({ _id: legacy });
+    expect("assignedBy" in (stored ?? {})).toBe(false);
+  });
+
+  // Driven through the real writer, not by setting the field: what has to be true is that the
+  // product's own everyday gesture repairs it, and a hand-written $set could not show that.
+  test("becomes claimable once somebody assigns it, through the ordinary write", async () => {
+    const legacy = await addLegacyTask();
+
+    const assigned = await updateTask(
+      String(PROJECT_ID),
+      String(legacy),
+      { assignee: ADMIN_USERNAME },
+      String(OWNER)
+    );
+    expect(assigned.ok).toBe(true);
+
+    const claimed = await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(OWNER));
+    expect(String(claimed?._id)).toBe(String(legacy));
   });
 });
 
@@ -198,7 +260,7 @@ test.describe("blockers", () => {
     const blocked = await addTask({ blockedBy: [blocker], order: 2 });
 
     expect(
-      await claimNextTask(String(PROJECT_ID), WORKER, "run-1", IDENTITY, String(OWNER))
+      await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(OWNER))
     ).toBeNull();
     expect((await read(blocked)).status).toBe(APPROVED);
   });
@@ -209,13 +271,7 @@ test.describe("blockers", () => {
     const blocker = await addTask({ order: 2 });
     const blocked = await addTask({ blockedBy: [blocker], order: 1 });
 
-    const claimed = await claimNextTask(
-      String(PROJECT_ID),
-      WORKER,
-      "run-1",
-      IDENTITY,
-      String(OWNER)
-    );
+    const claimed = await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(OWNER));
 
     expect(String(claimed?._id)).toBe(String(blocker));
     expect((await read(blocked)).status).toBe(APPROVED);
@@ -228,7 +284,7 @@ test.describe("blockers", () => {
     await addTask({ blockedBy: [blocker], order: 2 });
 
     expect(
-      await claimNextTask(String(PROJECT_ID), WORKER, "run-1", IDENTITY, String(OWNER))
+      await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(OWNER))
     ).toBeNull();
   });
 
@@ -239,13 +295,7 @@ test.describe("blockers", () => {
     const blocked = await addTask({ blockedBy: [blocker], order: 2 });
     const free = await addTask({ order: 3 });
 
-    const claimed = await claimNextTask(
-      String(PROJECT_ID),
-      WORKER,
-      "run-1",
-      IDENTITY,
-      String(OWNER)
-    );
+    const claimed = await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(OWNER));
 
     expect(String(claimed?._id)).toBe(String(free));
     expect((await read(blocked)).status).toBe(APPROVED);
@@ -256,19 +306,13 @@ test.describe("blockers", () => {
     const blocked = await addTask({ blockedBy: [blocker], order: 2 });
 
     expect(
-      await claimNextTask(String(PROJECT_ID), WORKER, "run-1", IDENTITY, String(OWNER))
+      await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(OWNER))
     ).toBeNull();
 
     const handle = await db();
     await handle.collection("tasks").updateOne({ _id: blocker }, { $set: { status: DONE } });
 
-    const claimed = await claimNextTask(
-      String(PROJECT_ID),
-      WORKER,
-      "run-2",
-      IDENTITY,
-      String(OWNER)
-    );
+    const claimed = await claimNextTask(String(PROJECT_ID), WORKER, "run-2", String(OWNER));
     expect(String(claimed?._id)).toBe(String(blocked));
     expect((await read(blocked)).status).toBe(ACTIVE);
   });
@@ -278,7 +322,7 @@ test.describe("releasing gives back exactly what the claim took", () => {
   test("a hand-over survives the release, so the task can be retried", async () => {
     const handed = await addTask();
 
-    await claimNextTask(String(PROJECT_ID), WORKER, "run-1", IDENTITY, String(OWNER));
+    await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(OWNER));
     await releaseTask(String(PROJECT_ID), String(handed));
 
     const after = await read(handed);
@@ -287,15 +331,15 @@ test.describe("releasing gives back exactly what the claim took", () => {
     // nothing would ever pick it up again — a silent loss of work rather than a failure.
     expect(after.assignee).toBe(String(OWNER));
 
-    const again = await claimNextTask(String(PROJECT_ID), WORKER, "run-2", IDENTITY, String(OWNER));
+    const again = await claimNextTask(String(PROJECT_ID), WORKER, "run-2", String(OWNER));
     expect(String(again?._id)).toBe(String(handed));
   });
 
   // A claim can no longer invent an assignment — it only ever matches a task already self-assigned
-  // by its owner — so this precondition has no live path through claimNextTask any more. Seeded
-  // directly in the exact shape a claim used to leave one in: releaseTask's own logic reads the
-  // flag on the document, not how the document got that way, so this is still the real thing under
-  // test, only reached differently.
+  // by its owner — so this precondition is reachable only by a run the older code claimed and that
+  // is still in flight across the deploy. Seeded directly in the exact shape that claim left one
+  // in: releaseTask reads the flag on the document, not how the document got that way, so this is
+  // still the real thing under test, only reached differently.
   test("an assignment the claim invented does not survive it", async () => {
     const free = await addTask({
       status: ACTIVE,
@@ -317,7 +361,7 @@ test.describe("releasing gives back exactly what the claim took", () => {
   // updateTask passed the whole suite until this existed.
   test("dragging a finished task on the board keeps a fresh assignment", async () => {
     const free = await addTask();
-    await claimNextTask(String(PROJECT_ID), WORKER, "run-1", IDENTITY, String(OWNER));
+    await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(OWNER));
     await releaseTask(String(PROJECT_ID), String(free));
 
     const handle = await db();
@@ -339,7 +383,7 @@ test.describe("releasing gives back exactly what the claim took", () => {
   // claim took: the hand-over stays, so the task is still claimable and gets retried
   test("forcing a held task off a worker keeps the hand-over", async () => {
     const handed = await addTask();
-    await claimNextTask(String(PROJECT_ID), WORKER, "run-1", IDENTITY, String(OWNER));
+    await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(OWNER));
 
     const forced = await updateTask(
       String(PROJECT_ID),
@@ -353,7 +397,7 @@ test.describe("releasing gives back exactly what the claim took", () => {
     const after = await read(handed);
     expect(after.assignee).toBe(String(OWNER));
     expect(
-      await claimNextTask(String(PROJECT_ID), WORKER, "run-2", IDENTITY, String(OWNER))
+      await claimNextTask(String(PROJECT_ID), WORKER, "run-2", String(OWNER))
     ).not.toBeNull();
   });
 

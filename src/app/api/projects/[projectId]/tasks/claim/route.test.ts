@@ -118,7 +118,7 @@ describe("POST /tasks/claim", () => {
       params: Promise.resolve({ projectId: "CP" }),
     });
 
-    expect(claimNextTask).toHaveBeenCalledWith(OID, OID, "run-1", null, null);
+    expect(claimNextTask).toHaveBeenCalledWith(OID, OID, "run-1", null);
   });
 
   it("resolves a project key before asking the verdict or the claim", async () => {
@@ -220,16 +220,22 @@ describe("POST /tasks/claim", () => {
   });
 });
 
-// The claim is an assignment now, so the worker's identity has to reach task-service — without it
-// a task is claimed and left unassigned, and the "never touch an assigned task" rule buys nothing.
-describe("the worker's identity travels with the claim", () => {
-  it("passes the identity the worker registered with", async () => {
-    verifyWorkerCredential.mockResolvedValue({ _id: OID, assignments: [], identity: "u-worker" });
+// The claim matched on the owner alone since BP-358, so the machine's own identity has no place
+// in it: a task assigned to a `worker-<id>` account used to be claimable with no assignedBy check
+// at all, and anyone able to reach the API can name that account.
+describe("the worker's identity does not travel with the claim", () => {
+  it("passes the owner and nothing else, even when the worker has an identity", async () => {
+    verifyWorkerCredential.mockResolvedValue({
+      _id: OID,
+      assignments: [],
+      identity: "u-worker",
+      owner: "u-owner",
+    });
     claimNextTask.mockResolvedValue(hydrated({ _id: "t1" }));
 
     await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
-    expect(claimNextTask).toHaveBeenCalledWith(OID, OID, "run-1", "u-worker", null);
+    expect(claimNextTask).toHaveBeenCalledWith(OID, OID, "run-1", "u-owner");
   });
 });
 
@@ -257,6 +263,6 @@ describe("the worker's owner travels with the claim", () => {
 
     await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
-    expect(claimNextTask).toHaveBeenCalledWith(OID, OID, "run-1", null, "u-owner");
+    expect(claimNextTask).toHaveBeenCalledWith(OID, OID, "run-1", "u-owner");
   });
 });

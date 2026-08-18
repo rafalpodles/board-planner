@@ -46,7 +46,6 @@ export const POST = withWorker(async (request, { params, worker }) => {
     projectId,
     String(worker._id),
     runId,
-    worker.identity ? String(worker.identity) : null,
     worker.owner ? String(worker.owner) : null
   );
   if (!task) return new NextResponse(null, { status: 204 });

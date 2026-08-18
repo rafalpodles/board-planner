@@ -238,13 +238,13 @@ test.describe("a worker claiming on a board with no column called done", () => {
     });
 
     expect(
-      await claimNextTask(String(PROJECT_ID), WORKER, "run-1", null, String(ADMIN_ID))
+      await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(ADMIN_ID))
     ).toBeNull();
 
     const handle = await db();
     await handle.collection("tasks").updateOne({ _id: blocker }, { $set: { status: "shipped" } });
 
-    const claimed = await claimNextTask(String(PROJECT_ID), WORKER, "run-2", null, String(ADMIN_ID));
+    const claimed = await claimNextTask(String(PROJECT_ID), WORKER, "run-2", String(ADMIN_ID));
     expect(String(claimed?._id)).toBe(String(blocked));
   });
 });
