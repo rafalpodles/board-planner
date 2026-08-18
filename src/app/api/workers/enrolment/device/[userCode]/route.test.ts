@@ -94,16 +94,19 @@ describe("GET /api/workers/enrolment/device/:userCode", () => {
 
   // Rendered so the page can say the machine will connect and then sit idle, which is the one
   // outcome nothing on the machine itself can explain
-  it("says whether this person could turn machines on for each project", async () => {
-    check.mockResolvedValue(true);
+  it("says an instance admin could turn machines on", async () => {
+    getAuthUser.mockResolvedValue({ ...MEMBER, role: "admin" });
 
     const json = await (await GET(request(), ctx())).json();
 
     expect(json.projects[0]).toMatchObject({ workersEnabled: true, canEnable: true });
-    expect(check).toHaveBeenCalledWith(expect.objectContaining({ _id: "member-1" }), MINE, "admin");
   });
 
-  it("reports canEnable false for a project they only have access to", async () => {
+  // Committing a project to machines is instance-admin, exactly as PUT /api/projects/:id has it —
+  // a grant on the project does not make it a project admin's call
+  it("reports canEnable false for a member, whatever grants they hold", async () => {
+    check.mockResolvedValue(true);
+
     const json = await (await GET(request(), ctx())).json();
 
     expect(json.projects[0].canEnable).toBe(false);

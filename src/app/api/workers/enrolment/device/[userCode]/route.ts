@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withAuth } from "@/lib/middleware";
-import { accessibleProjectIds, check } from "@/lib/grants";
+import { accessibleProjectIds } from "@/lib/grants";
 import { Project } from "@/models/project";
 import { Worker } from "@/models/worker";
 import { findPendingByUserCode, formatUserCode } from "@/lib/device-enrolment";
@@ -27,6 +27,10 @@ export const GET = withAuth(async (_request, { params, user }) => {
   }
 
   const reachable = await accessibleProjectIds(user);
+  // The same rule PUT /api/projects/:id applies to `worker`: committing a project to machines is
+  // instance-admin, not project-admin. Answered once rather than per project, because it is not a
+  // per-project question.
+  const canEnable = user.role === "admin";
   const projects = await Project.find(reachable === null ? {} : { _id: { $in: reachable } })
     .select("_id name key repositoryUrl worker")
     .lean();
@@ -43,19 +47,17 @@ export const GET = withAuth(async (_request, { params, user }) => {
     expiresAt: enrolment.expiresAt.toISOString(),
     // A project with no repository cannot be served, so it is offered as unavailable rather than
     // hidden — "where is my project" is a worse question than "why is it greyed out"
-    projects: await Promise.all(
-      projects.map(async (p) => ({
-        _id: String(p._id),
-        name: p.name,
-        key: p.key,
-        repositoryUrl: p.repositoryUrl ?? "",
-        workersEnabled: !!p.worker?.enabled,
-        // Whether confirming here can also turn machines on for that project. Rendered rather than
-        // discovered afterwards: a project left switched off takes the machine and then runs
-        // nothing, which is the one outcome nobody can diagnose from the machine's own logs.
-        canEnable: await check(user, String(p._id), "admin"),
-      }))
-    ),
+    projects: projects.map((p) => ({
+      _id: String(p._id),
+      name: p.name,
+      key: p.key,
+      repositoryUrl: p.repositoryUrl ?? "",
+      workersEnabled: !!p.worker?.enabled,
+      // Whether confirming here can also turn machines on for that project. Rendered rather than
+      // discovered afterwards: a project left switched off takes the machine and then runs
+      // nothing, which is the one outcome nobody can diagnose from the machine's own logs.
+      canEnable,
+    })),
     existingWorker: existing
       ? {
           _id: String(existing._id),

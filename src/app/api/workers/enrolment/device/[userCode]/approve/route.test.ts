@@ -74,17 +74,16 @@ function ctx(userCode = "ABCD-1234") {
   return { params: Promise.resolve({ userCode }) };
 }
 
-// "may reach it, may not administer it" — the member case, which is the default here
-function grants(access: boolean, admin: boolean) {
-  check.mockImplementation((_user: unknown, _project: string, need: string) =>
-    Promise.resolve(need === "admin" ? admin : access)
-  );
+// Reach is a grant; committing the project to machines is not — that is instance-admin, decided by
+// the account's role, exactly as PUT /api/projects/:id has it.
+function grants(access: boolean) {
+  check.mockResolvedValue(access);
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
   getAuthUser.mockResolvedValue(MEMBER);
-  grants(true, false);
+  grants(true);
   findPendingByUserCode.mockResolvedValue(enrolment());
   projectSelect.mockResolvedValue(project());
   projectUpdateOne.mockResolvedValue({});
@@ -134,7 +133,7 @@ describe("POST /api/workers/enrolment/device/:userCode/approve", () => {
   // The machine is told what to clone, so a project this person cannot reach must not have its
   // repository address handed over. 404 rather than 403: existence is the thing being hidden.
   it("refuses a project the person confirming cannot reach", async () => {
-    grants(false, false);
+    grants(false);
 
     const response = await POST(request({ projectId: PROJECT_ID }), ctx());
 
@@ -145,7 +144,9 @@ describe("POST /api/workers/enrolment/device/:userCode/approve", () => {
   describe("committing the project to machines", () => {
     // Still a project-admin decision with its own audit row: a member connecting their laptop does
     // not make it on the project's behalf.
-    it("leaves the switch alone for someone who cannot administer the project", async () => {
+    // A project OWNER, not just any member: owning a project is what would make this look like a
+    // project-admin decision, and PUT /api/projects/:id refuses them too
+    it("leaves the switch alone for a member, even one who owns the project", async () => {
       const response = await POST(request({ projectId: PROJECT_ID }), ctx());
 
       expect(projectUpdateOne).not.toHaveBeenCalled();
@@ -155,9 +156,8 @@ describe("POST /api/workers/enrolment/device/:userCode/approve", () => {
       );
     });
 
-    it("turns it on, and records that, for someone who can", async () => {
+    it("turns it on, and records that, for an instance admin", async () => {
       getAuthUser.mockResolvedValue(ADMIN);
-      grants(true, true);
 
       const response = await POST(request({ projectId: PROJECT_ID }), ctx());
 
@@ -173,7 +173,6 @@ describe("POST /api/workers/enrolment/device/:userCode/approve", () => {
 
     it("records nothing when the switch was already on", async () => {
       getAuthUser.mockResolvedValue(ADMIN);
-      grants(true, true);
       projectSelect.mockResolvedValue(project({ worker: { enabled: true } }));
 
       await POST(request({ projectId: PROJECT_ID }), ctx());
@@ -199,7 +198,6 @@ describe("POST /api/workers/enrolment/device/:userCode/approve", () => {
   // silently changing a project-wide suggestion for everyone from a screen about their own laptop.
   it("does not write a project-wide agent from the enrolment", async () => {
     getAuthUser.mockResolvedValue(ADMIN);
-    grants(true, true);
 
     await POST(request({ projectId: PROJECT_ID, preset: "merge" }), ctx());
 
