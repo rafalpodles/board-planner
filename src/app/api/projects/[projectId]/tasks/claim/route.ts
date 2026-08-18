@@ -8,6 +8,15 @@ import { ownerReachableProjectIds, verdictFor } from "@/lib/worker-service";
 import { snapshotFor } from "@/lib/agent-snapshot";
 import { releaseTask } from "@/lib/task-service";
 
+// The ref, never a populated document: `IWorker["owner"]` admits both since the fleet route
+// populates it, and `String(<document>)` yields something that is not an id — which claimNextTask
+// answers by claiming nothing, silently, for the whole fleet.
+function ownerIdOf(owner: unknown): string | null {
+  if (!owner) return null;
+  const ref = owner as { _id?: unknown };
+  return String(ref._id ?? owner);
+}
+
 export const POST = withWorker(async (request, { params, worker }) => {
   const { projectId: identifier } = await params;
   await connectDB();
@@ -46,7 +55,7 @@ export const POST = withWorker(async (request, { params, worker }) => {
     projectId,
     String(worker._id),
     runId,
-    worker.owner ? String(worker.owner) : null
+    ownerIdOf(worker.owner)
   );
   if (!task) return new NextResponse(null, { status: 204 });
 

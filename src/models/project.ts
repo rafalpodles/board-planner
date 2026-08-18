@@ -187,8 +187,9 @@ const projectSchema = new Schema<IProject>(
         fallbackModel: { type: String, default: "sonnet" },
         reviewModel: { type: String, default: "opus" },
       },
-      // A plain field, not a policy one: the agent travels on the claim response, where the task is
-      // known, rather than in the assignment payload, which is built at heartbeat time.
+      // A plain field, not a policy one, and since BP-358 not a fallback either: an agent travels
+      // on the claim response resolved from the TASK, and this is only the one the task picker
+      // offers first. A task naming no agent is one a person is doing.
       agent: { type: Schema.Types.ObjectId, ref: "Agent", default: null },
       policyOverrides: { type: [String], default: [] },
     },

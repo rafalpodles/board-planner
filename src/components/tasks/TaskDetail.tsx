@@ -160,6 +160,9 @@ function TaskDetailView({
     task.createdBy && typeof task.createdBy === "object" ? task.createdBy.fullName : null;
   const watching = !!currentUser && (task.watchers || []).includes(currentUser._id);
   const projectDefaultAgent = project.worker?.agent ? String(project.worker.agent) : undefined;
+  // The only columns a claim looks at, so the Agent row can say when a task with an agent is
+  // simply not there yet
+  const approvedStatuses = columns.filter((c) => c.role === "approved").map((c) => c.id);
 
   const handleFileUpload = useCallback(
     async (file: File): Promise<string> => {
@@ -379,6 +382,7 @@ function TaskDetailView({
             agents={agents}
             projectDefaultAgent={projectDefaultAgent}
             stored={task}
+            approvedStatuses={approvedStatuses}
             categories={project.categories || []}
             customFields={project.customFields || []}
             reporter={reporter}
@@ -408,6 +412,7 @@ function TaskDetailView({
           agents={agents}
           projectDefaultAgent={projectDefaultAgent}
           stored={task}
+          approvedStatuses={approvedStatuses}
           categories={project.categories || []}
           customFields={project.customFields || []}
           reporter={reporter}

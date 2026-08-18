@@ -10,9 +10,9 @@ Its only I/O is the worker's unix socket at `${CP_STATE_DIR}/worker.sock` (defau
 
 **It holds no Board Planner credential and never opens a network connection.** Registration and
 policy live on the worker and in the web console; the Connection and Policy tabs are read-only
-views of what the worker reports over `GET /config`. This follows from worker registration still
-being `withAdmin` — a credential minted for this machine is an instance-admin credential, and there
-is no reason for a second process to hold a copy.
+views of what the worker reports over `GET /config`. This follows from what registration is —
+a credential minted for this machine acts with its owner's reach, and there is no reason for a
+second process to hold a copy.
 
 ## Build
 

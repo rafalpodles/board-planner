@@ -5,8 +5,10 @@ import { ApiTask, ApiUser } from "@/types";
 const RAFAL = { _id: "u1", username: "rpo", fullName: "Rafal" } as ApiUser;
 const KRZYSIEK = { _id: "u2", username: "kmk", fullName: "Krzysiek" };
 
+const APPROVED = ["todo"];
+
 function task(over: Partial<ApiTask> = {}): Parameters<typeof handoverOf>[0] {
-  return { agent: "a1", assignee: RAFAL, assignedBy: { ...RAFAL }, ...over } as ApiTask;
+  return { agent: "a1", assignee: RAFAL, assignedBy: { ...RAFAL }, status: "todo", ...over } as ApiTask;
 }
 
 /**
@@ -15,7 +17,37 @@ function task(over: Partial<ApiTask> = {}): Parameters<typeof handoverOf>[0] {
  */
 describe("handoverOf", () => {
   it("runs a task its assignee handed to themselves", () => {
-    expect(handoverOf(task())).toEqual({ runs: true });
+    expect(handoverOf(task(), APPROVED)).toEqual({ runs: true });
+  });
+
+  /**
+   * The everyday false positive without it: pick an agent on a task still in the backlog, assign
+   * it to yourself, and every other requirement passes while no claim ever looks at that column.
+   */
+  it("names a task sitting outside the approved column", () => {
+    expect(handoverOf(task({ status: "planned" }), APPROVED)).toEqual({
+      runs: false,
+      reason: "not-approved-yet",
+      by: null,
+    });
+  });
+
+  // Choosing no agent is the more useful thing to say, and the ordinary case besides
+  it("still names the missing agent first, wherever the task sits", () => {
+    expect(handoverOf(task({ agent: null, status: "planned" }), APPROVED)).toMatchObject({
+      reason: "no-agent",
+    });
+  });
+
+  // A caller that does not know the board's columns must not have that requirement invented for
+  // it — omitted means unjudged, not failed
+  it("does not judge the column when it is not told which ones are approved", () => {
+    expect(handoverOf(task({ status: "planned" }))).toEqual({ runs: true });
+  });
+
+  // A board may define more than one approved-role column
+  it("accepts any of the approved columns", () => {
+    expect(handoverOf(task({ status: "in_review" }), ["todo", "in_review"])).toEqual({ runs: true });
   });
 
   it("compares by id, so an unpopulated reference is read the same way", () => {

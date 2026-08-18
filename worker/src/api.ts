@@ -289,9 +289,18 @@ export function createApiClient(
       const agent = parseAgent(raw.agent);
       if (!agent) {
         // Returning null alone would hold the task for the full EXECUTION_LEASE_MS — two hours in
-        // the active column with nothing on the board to say why. The attempt is refunded: no
-        // attempt was made, and the project's agent is what has to change.
-        await send(projectId, `/tasks/${raw._id}/release`, "POST").catch(() => {});
+        // the active column with nothing on the board to say why.
+        //
+        // Charged, not refunded, for the same reason the key check above charges: nothing about
+        // the next poll is different, so a refund makes this task claim and release itself every
+        // thirty seconds for good — at the head of the column, where every other claimable task on
+        // the project waits behind it. The server's own claim route made the same correction
+        // (BP-358). What reaches here is an agent this worker cannot parse — a block kind it does
+        // not know, which is version skew between a machine and the server it polls — and that
+        // needs a person, which is what spending the attempts eventually gets.
+        await send(projectId, `/tasks/${raw._id}/release`, "POST", { refund: false }).catch(
+          () => {}
+        );
         return null;
       }
 

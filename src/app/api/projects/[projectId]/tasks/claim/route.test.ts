@@ -311,6 +311,21 @@ describe("the worker's owner travels with the claim", () => {
     expect(verdictFor.mock.calls[0][5]).toEqual(["p1", "p2"]);
   });
 
+  // IWorker["owner"] admits a populated document since the fleet route populates it, and
+  // String(<document>) yields something that is not an id — which claimNextTask answers by
+  // claiming nothing, silently, for every project the fleet serves
+  it("reads the id off a populated owner rather than stringifying the document", async () => {
+    verifyWorkerCredential.mockResolvedValue({
+      _id: OID,
+      assignments: [],
+      owner: { _id: "u-owner", username: "rpo", toString: () => "[object Object]" },
+    });
+
+    await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
+
+    expect(claimNextTask).toHaveBeenCalledWith(OID, OID, "run-1", "u-owner");
+  });
+
   it("passes the owner set at enrolment", async () => {
     verifyWorkerCredential.mockResolvedValue({ _id: OID, assignments: [], owner: "u-owner" });
     claimNextTask.mockResolvedValue(hydrated({ _id: "t1" }));

@@ -50,9 +50,9 @@ but stops being a required step.
 The enrolment screen's "How much should it do on its own?" presets go too: they wrote
 `project.worker.agent`, which after this design decides only which agent the task picker offers
 first, so an enrolling person would have been changing a project-wide suggestion for everyone from
-a screen about their own laptop. Committing a project to machines stays a project-admin decision
-with its own audit row, taken from the enrolment only when the person confirming could take it
-anyway.
+a screen about their own laptop. Committing a project to machines stays an instance-admin decision
+with its own audit row — the same rule `PUT /api/projects/:id` applies — taken from the enrolment
+only when the person confirming could take it anyway.
 
 `Worker.identity` — the auto-created `worker-<id>` account with `kind: "machine"` — stays untouched.
 The two answer different questions: `identity` is *which machine did this* in the audit trail,

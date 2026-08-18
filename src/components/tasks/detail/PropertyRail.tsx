@@ -60,7 +60,9 @@ function HandoverNotice({ handover }: { handover: Handover | null }) {
   if (!handover || handover.runs || handover.reason === "no-agent") return null;
 
   const message =
-    handover.reason === "unassigned"
+    handover.reason === "not-approved-yet"
+      ? "Nothing will run this yet. A machine only looks at the column work is approved in — move it there when it is ready."
+      : handover.reason === "unassigned"
       ? "Nothing will run this. A machine takes only work its owner assigned to themselves — assign it to yourself."
       : handover.reason === "assigner-unrecorded"
         ? "Nothing will run this. It was assigned before the board recorded who hands work over; assign it again to record that."
@@ -90,7 +92,9 @@ interface PropertyRailProps {
    * which only the server writes — so a draft mid-edit has no answer, and judging one would
    * describe a state that has never existed.
    */
-  stored: Pick<ApiTask, "agent" | "assignee" | "assignedBy">;
+  stored: Pick<ApiTask, "agent" | "assignee" | "assignedBy" | "status">;
+  /** The board's approved-role columns — the only ones a claim looks at */
+  approvedStatuses?: string[];
   /** Full rows, not names: the chip and the picker dot are tinted by the project's colour */
   categories: ApiProjectCategory[];
   customFields: ApiCustomField[];
@@ -108,6 +112,7 @@ export function PropertyRail({
   agents,
   projectDefaultAgent,
   stored,
+  approvedStatuses,
   categories,
   customFields,
   reporter,
@@ -126,7 +131,7 @@ export function PropertyRail({
   const pending =
     (draft.agent ?? null) !== (stored.agent ?? null) ||
     (draft.assignee ?? null) !== (stored.assignee?.username ?? null);
-  const handover = pending ? null : handoverOf(stored);
+  const handover = pending ? null : handoverOf(stored, approvedStatuses);
 
   return (
     <div className="flex h-full flex-col gap-6">
@@ -184,7 +189,14 @@ export function PropertyRail({
             {agentName ? (
               <span className="truncate">{agentName}</span>
             ) : (
-              <EmptyValue>No agent</EmptyValue>
+              // Not just "No agent": enrolling a machine is self-service since BP-358, but
+              // choosing the agent — the gesture that hands work to it — is still instance-admin
+              // (BP-345). Somebody who has connected their own laptop and is waiting for it to
+              // pick something up needs to be told which half they are missing and that it is not
+              // theirs to do, rather than reading an empty field.
+              <EmptyValue>
+                <span data-testid="agent-not-yours">No agent — only an instance admin can hand this to a machine</span>
+              </EmptyValue>
             )}
           </FieldRow>
         )}

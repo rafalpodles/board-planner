@@ -69,7 +69,6 @@ const workerSchema = new Schema<IWorker>(
   { timestamps: true }
 );
 
-workerSchema.index({ "assignments.project": 1 });
 workerSchema.index({ name: 1, host: 1 }, { unique: true });
 
 export const Worker: Model<IWorker> =

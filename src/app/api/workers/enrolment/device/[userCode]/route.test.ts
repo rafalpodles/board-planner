@@ -29,6 +29,10 @@ vi.mock("@/models/project", () => ({
 vi.mock("@/models/worker", () => ({
   Worker: { findOne: () => ({ select: workerFindOne }) },
 }));
+vi.mock("@/lib/repository", () => ({
+  projectRepositoryUrl: (p: { repositoryUrl?: string; githubRepo?: string }) =>
+    p.repositoryUrl || (p.githubRepo ? `git@github.com:${p.githubRepo}.git` : ""),
+}));
 
 const { GET } = await import("./route");
 
@@ -110,6 +114,52 @@ describe("GET /api/workers/enrolment/device/:userCode", () => {
     const json = await (await GET(request(), ctx())).json();
 
     expect(json.projects[0].canEnable).toBe(false);
+  });
+
+  /**
+   * The name and host this is looked up by come from the UNAUTHENTICATED start route, so returning
+   * the record turned this into a probe for whose machines exist and when they last ran —
+   * reconnaissance that sat behind withAdmin until BP-358.
+   */
+  describe("a machine of this name that is already enrolled", () => {
+    it("says only whether it is claimable, never who has it", async () => {
+      workerFindOne.mockResolvedValue({ _id: "w1", owner: "somebody-else" });
+
+      const json = await (await GET(request(), ctx())).json();
+
+      expect(json.existingWorker).toEqual({ mine: false });
+      expect(JSON.stringify(json)).not.toContain("somebody-else");
+    });
+
+    it("reports one of this person's own as theirs", async () => {
+      workerFindOne.mockResolvedValue({ _id: "w1", owner: "member-1" });
+
+      expect((await (await GET(request(), ctx())).json()).existingWorker).toEqual({ mine: true });
+    });
+
+    // An ownerless record is the pre-BP-358 enrolment, and adopting one is the documented recovery
+    it("reports one nobody owns as claimable", async () => {
+      workerFindOne.mockResolvedValue({ _id: "w1", owner: null });
+
+      expect((await (await GET(request(), ctx())).json()).existingWorker).toEqual({ mine: true });
+    });
+
+    it("reports nothing at all when no such machine exists", async () => {
+      expect((await (await GET(request(), ctx())).json()).existingWorker).toBeNull();
+    });
+  });
+
+  // The approve route validates with projectRepositoryUrl, which also accepts the legacy
+  // githubRepo/gitlabRepo pair. Reading repositoryUrl alone told an instance that had not run
+  // scripts/migrate-repository-url.ts that no project names a repository at all.
+  it("judges a repository the way the confirmation does", async () => {
+    projectLean.mockResolvedValue([
+      { _id: MINE, name: "Legacy", key: "BP", githubRepo: "owner/repo", worker: { enabled: true } },
+    ]);
+
+    const json = await (await GET(request(), ctx())).json();
+
+    expect(json.projects[0].repositoryUrl).toBe("git@github.com:owner/repo.git");
   });
 
   it("still refuses a machine credential", async () => {

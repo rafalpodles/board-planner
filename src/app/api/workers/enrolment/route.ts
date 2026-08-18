@@ -3,6 +3,11 @@ import { connectDB } from "@/lib/db";
 import { withAuth } from "@/lib/middleware";
 import { mintEnrolmentToken } from "@/lib/enrolment";
 import { logInstanceAudit } from "@/lib/instanceAudit";
+import { isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
+
+// Each mint writes a row and costs a bcrypt hash. Its device-flow sibling has been rate-limited and
+// capped since BP-305; the asymmetry did not matter while this was withAdmin and does now.
+const MINTS_PER_WINDOW = 10;
 
 // Minting requires an interactive session, never an API token. An API token can be read off a disk
 // the agent can also read, and one that could mint enrolment tokens would hand back the very power
@@ -17,6 +22,12 @@ export const POST = withAuth(async (request, { user }) => {
   if (user.viaMachineCredential) {
     return NextResponse.json({ error: "Interactive session required" }, { status: 403 });
   }
+
+  const throttleKey = sourceKey(String(user._id), "enrolment_token_mint");
+  if (await isRateLimited(throttleKey, MINTS_PER_WINDOW)) {
+    return NextResponse.json({ error: "too many enrolment tokens, try again later" }, { status: 429 });
+  }
+  await recordFailedAttempt(throttleKey);
 
   const body = await request.json().catch(() => ({}));
   const label = typeof body.label === "string" ? body.label.trim().slice(0, 200) : "";
