@@ -16,6 +16,7 @@ export default function ProfilePage() {
   const [savedEmail, setSavedEmail] = useState("");
   const [currentPassword, setCurrentPassword] = useState("");
   const [emailNotifications, setEmailNotifications] = useState(false);
+  const [emailDigest, setEmailDigest] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -29,10 +30,11 @@ export default function ProfilePage() {
     // Fetch fresh user data
     api
       .get("/api/auth/me")
-      .then((data: { email?: string; emailNotifications?: boolean }) => {
+      .then((data: { email?: string; emailNotifications?: boolean; emailDigest?: boolean }) => {
         setEmail(data.email || "");
         setSavedEmail(data.email || "");
         setEmailNotifications(data.emailNotifications || false);
+        setEmailDigest(data.emailDigest || false);
         setLoaded(true);
       })
       .catch(() => {
@@ -51,6 +53,8 @@ export default function ProfilePage() {
       await api.put("/api/users/me", {
         email,
         emailNotifications,
+        // Turning notifications off leaves nothing to collect, so the digest goes with them
+        emailDigest: emailNotifications && emailDigest,
         ...(emailChanged ? { currentPassword } : {}),
       });
       setSavedEmail(email.trim().toLowerCase());
@@ -137,6 +141,28 @@ export default function ProfilePage() {
           When enabled, you&apos;ll receive emails for task assignments, mentions,
           and status changes on tasks you&apos;re watching.
         </p>
+
+        {emailNotifications && (
+          <>
+            <div className="flex items-center gap-3">
+              <input
+                type="checkbox"
+                id="emailDigest"
+                checked={emailDigest}
+                onChange={(e) => setEmailDigest(e.target.checked)}
+                className="focus-ring rounded border-border"
+              />
+              <label htmlFor="emailDigest" className="text-sm cursor-pointer">
+                Collect them into one daily digest
+              </label>
+            </div>
+
+            <p className="text-xs text-text-muted">
+              One message each morning listing what you have not read yet, instead of a mail per
+              event. Password and account-security notices are never held back.
+            </p>
+          </>
+        )}
 
         <Button onClick={handleSave} disabled={saving || loadFailed || (emailChanged && !currentPassword.trim())}>
           {saving ? "Saving..." : "Save"}

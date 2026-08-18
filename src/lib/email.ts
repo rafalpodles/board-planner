@@ -70,6 +70,7 @@ interface SendEmailParams {
   subject: string;
   text: string;
   html?: string;
+  headers?: Record<string, string>;
 }
 
 export class EmailNotConfiguredError extends Error {
@@ -87,6 +88,7 @@ export async function sendEmailOrThrow({
   subject,
   text,
   html,
+  headers,
 }: SendEmailParams): Promise<void> {
   const t = getTransporter();
   if (!t) throw new EmailNotConfiguredError();
@@ -97,6 +99,7 @@ export async function sendEmailOrThrow({
     subject,
     text,
     html: html || text,
+    headers,
   });
 }
 

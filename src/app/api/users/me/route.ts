@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
 import { getClientIp } from "@/lib/auth";
-import { isEmailConfigured, isValidEmail, normaliseEmail, sendEmail } from "@/lib/email";
-import { APP_NAME } from "@/lib/brand";
+import { isValidEmail, normaliseEmail } from "@/lib/email";
+import { notifyAddressChanged } from "@/lib/security-mail";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { withAuth } from "@/lib/middleware";
 import { duplicateKeyField } from "@/lib/mongo-errors";
@@ -125,6 +125,10 @@ export const PUT = withAuth(async (request, { user }) => {
       updates.email = email;
     }
   }
+  if (typeof body.emailDigest === "boolean") {
+    updates.emailDigest = body.emailDigest;
+  }
+
   if (typeof body.emailNotifications === "boolean") {
     updates.emailNotifications = body.emailNotifications;
   }
@@ -184,29 +188,13 @@ export const PUT = withAuth(async (request, { user }) => {
     });
     // Told to the address losing the ability to recover the account, not the one gaining it: the
     // person who needs to hear about this is the one who did not do it.
-    void notifyPreviousAddress(previousEmail, user.username);
+    void notifyAddressChanged({
+      previousEmail,
+      username: user.username,
+      newEmail: updates.email,
+    });
   }
 
   return NextResponse.json(updated);
 });
 
-async function notifyPreviousAddress(previousEmail: string, username: string): Promise<void> {
-  if (!previousEmail || !isEmailConfigured()) return;
-  try {
-    await sendEmail({
-      to: previousEmail,
-      subject: `The email address on your ${APP_NAME} account changed`,
-      text: [
-        `The email address for ${username} was changed, so this address can no longer be used to`,
-        "reset that account's password.",
-        "",
-        "If that was not you, ask an administrator to set a password for the account — whoever made",
-        "this change can otherwise request a reset link to their own inbox.",
-      ].join("\n"),
-    });
-  } catch (err) {
-    // Nobody is waiting on this, so an unhandled rejection here would take the process down over a
-    // mail server having a bad afternoon
-    console.error("Could not tell the previous address it was replaced:", err);
-  }
-}

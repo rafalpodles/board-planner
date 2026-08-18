@@ -11,6 +11,7 @@ import { Card } from "@/components/ui/Card";
 import { Modal } from "@/components/ui/Modal";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useToast } from "@/components/ui/Toast";
+import { generatePassword } from "@/lib/password-generator";
 
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -42,6 +43,7 @@ export default function UsersPage() {
     null
   );
   const [deleting, setDeleting] = useState(false);
+  const [mailWorks, setMailWorks] = useState(false);
 
   const api = useApi();
   const { toast } = useToast();
@@ -58,6 +60,13 @@ export default function UsersPage() {
       .then(setUsers)
       .catch(() => toast("Failed to load data", "error"))
       .finally(() => setLoading(false));
+
+    // Whether the notice below the password field is a promise or a lie: an instance with no mail
+    // server sends nothing, and the admin has to know that before they walk away from the screen
+    api
+      .get("/api/admin/email")
+      .then((settings: { configured?: boolean }) => setMailWorks(!!settings.configured))
+      .catch(() => setMailWorks(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdmin, authLoading]);
 
@@ -357,8 +366,10 @@ export default function UsersPage() {
                     Set a new password
                   </label>
                   <p id="newUserPasswordHelp" className="text-sm text-text-muted">
-                    Nothing is sent — tell {editUser.fullName} yourself. Saving signs them out
-                    everywhere.
+                    The password itself is never emailed — tell {editUser.fullName} yourself.{" "}
+                    {mailWorks && editUser.email
+                      ? `${editUser.email} is told that it changed, and saving signs them out everywhere.`
+                      : "Nothing reaches them either, so this is the only way they will know. Saving signs them out everywhere."}
                   </p>
                   <div className="flex items-start gap-2">
                     <Input
@@ -372,6 +383,20 @@ export default function UsersPage() {
                       placeholder={`At least ${MIN_PASSWORD_LENGTH} characters`}
                       error={passwordError}
                     />
+                    {/* Generating shows it in the same move: a password nobody can read is one
+                        nobody can pass on, and this one only exists to be passed on */}
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="shrink-0"
+                      onClick={() => {
+                        setNewPassword(generatePassword());
+                        setShowPassword(true);
+                        setPasswordError("");
+                      }}
+                    >
+                      Generate
+                    </Button>
                     {/* Read out over the phone more often than typed twice, so showing it beats a
                         confirm field: a typo here locks the account out of every session it had */}
                     <Button
