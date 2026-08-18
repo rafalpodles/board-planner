@@ -30,8 +30,29 @@ account."*
 
 ### `Worker.owner`
 
-A real `ObjectId` ref to `User`, set at device-enrolment approval from the account that is
-connecting. This makes the sentence on the enrolment screen true.
+A real `ObjectId` ref to `User`, set at enrolment from the account that is connecting — the person
+who registered the machine, never an admin standing in for them. This makes the sentence on the
+enrolment screen true.
+
+**Amended during implementation: admin approval of a machine goes away entirely.** Under the old
+routing a machine took work assigned to a project-wide nominee — anyone's work — so admitting a
+machine to the instance was an instance-level decision and an admin was the right gate. A machine
+now runs only its owner's own work, on its owner's own hardware, entirely inside permissions that
+person already holds; the approval step signed off on something already permitted.
+
+So enrolling is self-service, in both the device flow and the enrolment-token flow, and the person
+enrolling is the owner. The projects a machine may serve are the projects its owner can reach,
+resolved live rather than stored as a per-worker list — so `approvedProjects` and `isApprovedFor`
+go with the approval, and a revoked grant reaches the machine on its next poll. An instance admin
+keeps visibility and the kill switch — the fleet console and `enabled`/`lockedByInstance` stay —
+but stops being a required step.
+
+The enrolment screen's "How much should it do on its own?" presets go too: they wrote
+`project.worker.agent`, which after this design decides only which agent the task picker offers
+first, so an enrolling person would have been changing a project-wide suggestion for everyone from
+a screen about their own laptop. Committing a project to machines stays a project-admin decision
+with its own audit row, taken from the enrolment only when the person confirming could take it
+anyway.
 
 `Worker.identity` — the auto-created `worker-<id>` account with `kind: "machine"` — stays untouched.
 The two answer different questions: `identity` is *which machine did this* in the audit trail,
@@ -157,8 +178,19 @@ reappear. Judged correct — a new machine is a new consent — but it is a deci
 consequence.
 
 **A machine with no owner.** Workers enrolled before this change have none. They must claim nothing
-until an admin or the connecting user adopts them, rather than falling back to the old behaviour;
-falling back would leave the old race alive indefinitely.
+until the connecting user enrols them again, rather than falling back to the old behaviour; falling
+back would leave the old race alive indefinitely. The fleet console's Owner column says so — such a
+machine has no binding error, no failed heartbeat and an empty assignment list, which is also what a
+healthy idle machine has.
+
+**A task assigned before `assignedBy` existed.** It has no such key, and a missing field never
+equals an ObjectId, so the claim refuses it. Decided during implementation: **no backfill.** The
+field answers "did this person hand this to themselves", the document does not record it, and the
+obvious guess — `assignedBy := assignee` — silently converts work somebody else handed you into work
+you handed yourself, which is the exact distinction this design exists to draw. Nothing is lost:
+such a task also has to name an agent to be claimable, and the ones that do were routed by the old
+project-wide nominee, so they are assigned to that nominee and must be reassigned regardless — which
+records an assigner. The agent picker says so on the task rather than leaving it silent.
 
 **One person, several machines.** Two Macs owned by the same person both match `assignee === owner`,
 so the race returns within one person's own hardware. Acceptable — both machines are theirs — but
