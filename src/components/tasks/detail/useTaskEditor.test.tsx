@@ -141,4 +141,37 @@ describe("useTaskEditor", () => {
     expect(titleField().value).toBe("Mine, still pending");
     expect(screen.getByTestId("priority").textContent).toBe("low");
   });
+
+  /**
+   * The task routes populate `agent` so the reader can be told the name of an agent
+   * `/api/agents` withholds. The draft holds the picker's VALUE, which is the id — seeded with the
+   * document instead, the picker matches no option and the field reads as permanently edited
+   * against the stored task.
+   */
+  it("seeds the agent from a populated reference by its id", () => {
+    function AgentHarness({ task }: { task: ApiTask }) {
+      const { draft } = useTaskEditor("p1", task);
+      return <span data-testid="agent">{String(draft.agent)}</span>;
+    }
+
+    render(
+      <AgentHarness
+        task={{ ...baseTask, agent: { _id: "a9", name: "Somebody's own" } } as unknown as ApiTask}
+      />
+    );
+
+    expect(screen.getByTestId("agent").textContent).toBe("a9");
+  });
+
+  // The other shape the same field arrives in: a writer echoing back what it was sent
+  it("takes a bare agent id as it comes", () => {
+    function AgentHarness({ task }: { task: ApiTask }) {
+      const { draft } = useTaskEditor("p1", task);
+      return <span data-testid="agent">{String(draft.agent)}</span>;
+    }
+
+    render(<AgentHarness task={{ ...baseTask, agent: "a9" } as unknown as ApiTask} />);
+
+    expect(screen.getByTestId("agent").textContent).toBe("a9");
+  });
 });

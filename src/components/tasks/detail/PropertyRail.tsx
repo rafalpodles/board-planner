@@ -27,7 +27,7 @@ import {
 } from "./FieldRow";
 import type { TaskDraft } from "./useTaskEditor";
 import type { ApiAgent, ApiTask } from "@/types";
-import { handoverOf, type Handover } from "@/lib/handover";
+import { handoverOf, refIdOf, type Handover } from "@/lib/handover";
 import type { AnyColumn } from "@/lib/columns";
 
 const RECURRENCE_UNITS: Record<RecurrenceFrequency, string> = {
@@ -141,8 +141,9 @@ export function PropertyRail({
   const selectableSprints = sprints.filter((s) => s.status !== "completed");
   // Suppressed while the draft and the stored task disagree: the answer changes as soon as the
   // pending edit saves, and a hint that contradicts what the person just typed is worse than none.
+  const storedAgent = refIdOf(stored.agent);
   const pending =
-    (draft.agent ?? null) !== (stored.agent ?? null) ||
+    (draft.agent ?? null) !== storedAgent ||
     (draft.assignee ?? null) !== (stored.assignee?.username ?? null);
   const handover = pending ? null : handoverOf(stored, columns);
   // Read off the stored task rather than off `handover`, which is suppressed mid-edit and orders
@@ -163,7 +164,20 @@ export function PropertyRail({
   const offeredAgents = agents.filter(
     (a) => a.scope !== "user" || ownTask || a._id === draft.agent
   );
-  const personalAgentsWithheld = offeredAgents.length < agents.length;
+  /**
+   * Set, and not among the agents this reader may choose — which after the filter above means
+   * `/api/agents` never sent it at all, and the only way that happens is somebody else's personal
+   * agent. Withholding it as an OPTION is right; hiding the current VALUE is not, and the picker
+   * does exactly that, rendering "No agent" over the very field the consent model rests on. So the
+   * row stops being a picker and becomes what it can honestly be: the name, and why it is not
+   * yours to choose. Re-offering it instead would be a control that 400s on click.
+   */
+  const notOffered = !!draft.agent && !agents.some((a) => a._id === draft.agent);
+  const notOfferedName =
+    stored.agent && typeof stored.agent === "object" ? stored.agent.name : null;
+  // Not while the row is a read-only name: a note explaining a shortened list, printed where there
+  // is no list, is the same kind of lie one row up.
+  const personalAgentsWithheld = !notOffered && offeredAgents.length < agents.length;
 
   return (
     <div className="flex h-full flex-col gap-6">
@@ -201,26 +215,41 @@ export function PropertyRail({
         {/* Whoever may edit the task. It was instance-admin under BP-345, when choosing an agent
             could arm a machine belonging to somebody else; a claim now takes only what its own
             owner assigned to themselves, so the routing holds that boundary instead of the bar. */}
-        <ComboboxRow
-          label="Agent"
-          touch={touch}
-          value={draft.agent || ""}
-          options={[...offeredAgents]
-            .sort((a, b) =>
-              a._id === projectDefaultAgent ? -1 : b._id === projectDefaultAgent ? 1 : 0
-            )
-            .map((a) => ({ value: a._id, label: a.name }))}
-          emptyOption="No agent — a person does it"
-          onChange={(id) => set("agent", id || null)}
-        >
-          {(selected) =>
-            selected ? (
-              <span className="truncate">{selected.label}</span>
-            ) : (
-              <EmptyValue>No agent</EmptyValue>
-            )
-          }
-        </ComboboxRow>
+        {notOffered ? (
+          <FieldRow label="Agent" touch={touch}>
+            <span data-testid="agent-not-offered" className="truncate">
+              {notOfferedName ?? "An agent you cannot see"}
+            </span>
+          </FieldRow>
+        ) : (
+          <ComboboxRow
+            label="Agent"
+            touch={touch}
+            value={draft.agent || ""}
+            options={[...offeredAgents]
+              .sort((a, b) =>
+                a._id === projectDefaultAgent ? -1 : b._id === projectDefaultAgent ? 1 : 0
+              )
+              .map((a) => ({ value: a._id, label: a.name }))}
+            emptyOption="No agent — a person does it"
+            onChange={(id) => set("agent", id || null)}
+          >
+            {(selected) =>
+              selected ? (
+                <span className="truncate">{selected.label}</span>
+              ) : (
+                <EmptyValue>No agent</EmptyValue>
+              )
+            }
+          </ComboboxRow>
+        )}
+
+        {notOffered && (
+          <p data-testid="agent-not-offered-reason" className="mt-1 text-xs text-muted">
+            Not yours to choose — a personal agent is only offered to the person who composed it. It
+            stays on this task until the task changes hands.
+          </p>
+        )}
 
         {personalAgentsWithheld && (
           <p data-testid="personal-agents-withheld" className="mt-1 text-xs text-muted">

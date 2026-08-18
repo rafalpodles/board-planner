@@ -887,6 +887,15 @@ export interface ApiUserSummary {
   fullName: string;
 }
 
+// Enough to NAME the agent a task carries. `/api/agents` answers only with agents the reader may
+// choose, so a personal agent belonging to somebody else is absent from that list — and a picker
+// that cannot resolve the id renders its empty state, which says "No agent" over a task that has
+// one. The name has to travel with the task itself.
+export interface ApiAgentSummary {
+  _id: string;
+  name: string;
+}
+
 export interface ApiLabel {
   _id: string;
   name: string;
@@ -1060,7 +1069,9 @@ export interface ApiTask {
   relatedFrom: ApiTaskRelation[];
   watchers: string[];
   sprint: string | null;
-  agent?: string | null;
+  // Populated where the task is read whole, a bare id where a writer echoes back what it sent —
+  // the same union `assignedBy` above carries, and for the same reason
+  agent?: ApiAgentSummary | string | null;
   customFieldValues: Record<string, unknown>;
   recurrence: ApiRecurrence | null;
   recurringParentId: string | null;

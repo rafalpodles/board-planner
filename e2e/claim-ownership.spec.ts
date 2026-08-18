@@ -1,11 +1,23 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
 import mongoose from "mongoose";
 import { changeStatus, claimNextTask, releaseTask, updateTask } from "@/lib/task-service";
 // Statically, though nothing here calls it: `agentUsableOnProject` reaches this model through a
 // dynamic import, and under Playwright's loader that resolves the model but not the `@/types` it
 // imports. Naming it here puts it in the module cache first, resolved the ordinary way.
 import "@/models/agent";
-import { ADMIN_ID, ADMIN_USERNAME, E2E_MONGODB_URI, MEMBER_ID, PROJECT_ID, seed } from "./seed";
+import { ADMIN_AUTH, MEMBER_AUTH } from "./api";
+import {
+  ADMIN_ID,
+  ADMIN_PASSWORD,
+  ADMIN_USERNAME,
+  E2E_MONGODB_URI,
+  MEMBER_ID,
+  MEMBER_PASSWORD,
+  MEMBER_USERNAME,
+  PROJECT_ID,
+  PROJECT_KEY,
+  seed,
+} from "./seed";
 
 /**
  * BP-240. These run against a real MongoDB rather than through a browser, because what is under
@@ -467,11 +479,14 @@ test.describe("releasing gives back exactly what the claim took", () => {
 test.describe("whose task a personal agent may go on", () => {
   const MINE = new mongoose.Types.ObjectId();
   const PROJECTS = new mongoose.Types.ObjectId();
+  // Seeded only by the test that needs it: an agent belonging to the person a task is handed TO is
+  // the case that separates "the new assignee owns it" from "the actor owns it"
+  const THEIRS = new mongoose.Types.ObjectId();
   const RUNNABLE = { analysis: [], implementation: [{ key: "write-the-change" }], verification: [], delivery: [] };
 
   test.beforeEach(async () => {
     const handle = await db();
-    await handle.collection("agents").deleteMany({ _id: { $in: [MINE, PROJECTS] } });
+    await handle.collection("agents").deleteMany({ _id: { $in: [MINE, PROJECTS, THEIRS] } });
     await handle.collection("agents").insertMany([
       // The member's own, composed by them, vetted by nobody
       { _id: MINE, name: "Member's own", description: "", scope: "user", owner: MEMBER_ID, project: null, composition: RUNNABLE, builtIn: false },
@@ -479,6 +494,24 @@ test.describe("whose task a personal agent may go on", () => {
       { _id: PROJECTS, name: "The project's", description: "", scope: "project", owner: null, project: PROJECT_ID, composition: RUNNABLE, builtIn: false },
     ]);
   });
+
+  /** The real route, under a real credential — the seam a direct service call steps over */
+  function put(
+    request: APIRequestContext,
+    taskId: mongoose.Types.ObjectId,
+    data: Record<string, unknown>,
+    auth: Record<string, string>
+  ) {
+    return request.put(`/api/projects/${PROJECT_ID}/tasks/${taskId}`, { headers: auth, data });
+  }
+
+  async function signIn(page: Page, username: string, password: string) {
+    await page.goto("/login");
+    await page.getByLabel("Username").fill(username);
+    await page.getByLabel("Password").fill(password);
+    await page.getByRole("button", { name: "Sign In" }).click();
+    await expect(page).toHaveURL(/\/projects/);
+  }
 
   test("goes on its owner's own task, and that owner's machine takes it", async () => {
     const own = await addTask({ assignee: MEMBER_ID, assignedBy: MEMBER_ID, agent: null });
@@ -535,21 +568,17 @@ test.describe("whose task a personal agent may go on", () => {
   });
 
   /**
-   * The residue, pinned as far as it actually goes. Handing a task away does NOT re-check the agent
-   * already on it — the check runs on the writer of `agent`, and this write does not name that
-   * field — so the member's personal agent stays on a task that is now the admin's. What keeps it
-   * off the admin's machine is the OTHER half of the claim: this write stamps `assignedBy` as the
-   * member, and a claim wants `assignee === assignedBy === owner`.
+   * The residue the round before this one reported, closed. Handing a task away did NOT re-check
+   * the agent already on it — the check runs on the writer of `agent`, and this write does not name
+   * that field — so the member's personal agent stayed on a task that was now the admin's. The
+   * claim's other half hid it for exactly one gesture (this write stamps `assignedBy` as the
+   * member), and stopped hiding it on the next.
    *
-   * That protection ends if the admin later unassigns and re-assigns to themselves, which restores
-   * the pair and runs the member's composition on the admin's machine. Four gestures across two
-   * people, and the admin's own Agent row says "No agent" throughout, because `/api/agents` never
-   * answers with somebody else's personal agent. Reproduced against this database; written up in
-   * .superpowers/sdd/2026-08-17-machine-takes-its-owners-work/final-round-report.md rather than
-   * closed here, because closing it means deciding what a hand-over does to an agent it invalidates
-   * and that is a second decision.
+   * "An agent is the hand-over" is the design's own sentence, so this is a NEW hand-over and the
+   * old agent has no standing on it. The test that used to pin the surviving agent is this one,
+   * rewritten rather than deleted.
    */
-  test("stays on a task handed away, but the hand-over itself keeps it off their machine", async () => {
+  test("does not survive a hand-over to somebody who could not have chosen it", async () => {
     const own = await addTask({ assignee: MEMBER_ID, assignedBy: MEMBER_ID, agent: null });
     await updateTask(String(PROJECT_ID), String(own), { agent: String(MINE) }, String(MEMBER_ID));
 
@@ -563,9 +592,249 @@ test.describe("whose task a personal agent may go on", () => {
     expect(handed.ok).toBe(true);
     const handle = await db();
     const after = await handle.collection("tasks").findOne({ _id: own });
-    expect(String(after?.agent)).toBe(String(MINE));
+    expect(after?.agent).toBeNull();
     expect(String(after?.assignedBy)).toBe(String(MEMBER_ID));
     expect(await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(ADMIN_ID))).toBeNull();
+  });
+
+  // The other half of the same rule, and the one that separates "the new assignee owns it" from
+  // "the actor owns it": the agent belongs to the person the task is going TO, and neither of them
+  // is the writer. It survives, and their machine takes it once they hold it by their own hand.
+  test("survives a hand-over to the person it belongs to", async () => {
+    const handle = await db();
+    await handle.collection("agents").insertOne({
+      _id: THEIRS,
+      name: "The admin's own",
+      description: "",
+      scope: "user",
+      owner: ADMIN_ID,
+      project: null,
+      composition: RUNNABLE,
+      builtIn: false,
+    });
+    const held = await addTask({ assignee: MEMBER_ID, assignedBy: MEMBER_ID, agent: THEIRS });
+
+    const handed = await updateTask(
+      String(PROJECT_ID),
+      String(held),
+      { assignee: ADMIN_USERNAME },
+      String(MEMBER_ID)
+    );
+    expect(handed.ok).toBe(true);
+    expect(String((await handle.collection("tasks").findOne({ _id: held }))?.agent)).toBe(
+      String(THEIRS)
+    );
+    // No machine acts on it yet, and that is the OTHER half of the claim rather than this rule:
+    // being handed work is a proposal, so `assignedBy` naming the member is what holds it.
+    expect(await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(ADMIN_ID))).toBeNull();
+  });
+
+  // Keyed on the assignee MOVING, not on the task being written to. An edit that leaves the
+  // hand-over exactly as it was must not cost somebody the agent they chose — and this is the
+  // shape that actually runs, so the clearing rule is checked against a live claim rather than
+  // against a field alone.
+  test("an edit that does not move the assignee leaves the agent, and it still runs", async ({
+    request,
+  }) => {
+    const handle = await db();
+    await handle.collection("agents").insertOne({
+      _id: THEIRS,
+      name: "The admin's own",
+      description: "",
+      scope: "user",
+      owner: ADMIN_ID,
+      project: null,
+      composition: RUNNABLE,
+      builtIn: false,
+    });
+    const own = await addTask({ assignee: ADMIN_ID, assignedBy: ADMIN_ID, agent: THEIRS });
+
+    const renamed = await put(request, own, { title: "renamed" }, ADMIN_AUTH);
+    expect(renamed.status(), await renamed.text()).toBe(200);
+
+    const claimed = await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(ADMIN_ID));
+    expect(String(claimed?._id)).toBe(String(own));
+    expect(String(claimed?.agent)).toBe(String(THEIRS));
+  });
+
+  // What the PROJECT sanctioned is not anybody's personal composition, and clearing it on every
+  // ordinary reassignment would be a gratuitous loss
+  test("a project's agent survives the same hand-over", async () => {
+    const own = await addTask({ assignee: MEMBER_ID, assignedBy: MEMBER_ID, agent: PROJECTS });
+
+    await updateTask(String(PROJECT_ID), String(own), { assignee: ADMIN_USERNAME }, String(MEMBER_ID));
+
+    const handle = await db();
+    expect(String((await handle.collection("tasks").findOne({ _id: own }))?.agent)).toBe(
+      String(PROJECTS)
+    );
+  });
+
+  /**
+   * The reproduction itself: four gestures by two people, each one a real request to the real
+   * route under that person's own credential. A direct service call steps over the seam the last
+   * two defects on this branch lived in — the body the route accepts, the whitelist, the principal
+   * it resolves — so the reproduction goes over HTTP even though the verdict is read from the
+   * database.
+   */
+  test("the four gestures that used to end with my composition on their machine", async ({
+    request,
+  }) => {
+    const own = await addTask({ assignee: MEMBER_ID, assignedBy: MEMBER_ID, agent: null });
+    const handle = await db();
+    const stored = () => handle.collection("tasks").findOne({ _id: own });
+
+    // 1. It is my task, and I point it at my own personal agent — allowed, and the machine that
+    //    would run it is mine
+    const chose = await put(request, own, { agent: String(MINE) }, MEMBER_AUTH);
+    expect(chose.status(), await chose.text()).toBe(200);
+    expect(String((await stored())?.agent)).toBe(String(MINE));
+
+    // 2. I hand it to the admin. `agent` is not in this body — this is the write that used to
+    //    leave my composition on their task.
+    const handed = await put(request, own, { assignee: ADMIN_USERNAME }, MEMBER_AUTH);
+    expect(handed.status(), await handed.text()).toBe(200);
+    expect((await handed.json()).agent).toBeNull();
+    expect((await stored())?.agent).toBeNull();
+
+    // 3 and 4. The admin unassigns and takes it on themselves, which restores
+    //    `assignee === assignedBy` — the pair that used to let their machine claim it
+    expect((await put(request, own, { assignee: null }, ADMIN_AUTH)).status()).toBe(200);
+    expect((await put(request, own, { assignee: ADMIN_USERNAME }, ADMIN_AUTH)).status()).toBe(200);
+
+    const after = await stored();
+    expect(String(after?.assignee)).toBe(String(ADMIN_ID));
+    expect(String(after?.assignedBy)).toBe(String(ADMIN_ID));
+    expect(after?.agent).toBeNull();
+    expect(await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(ADMIN_ID))).toBeNull();
+  });
+
+  /**
+   * The same rule against the other half of the pair, and the shape "the assignee moved" walks
+   * past. A task stored before BP-358 records no assigner, so no machine looks at it — and the
+   * repair the product prints on the task itself, assign it to yourself again, is what records
+   * one. The assignee never moves, and that one gesture is what makes the task claimable for the
+   * first time, carrying whatever agent it has carried all along.
+   *
+   * The key is genuinely ABSENT here, not null: only a missing field is what an old document looks
+   * like, and only it survives a writer that starts defaulting the field.
+   */
+  test("a legacy repair does not arm the repairer's machine with somebody else's agent", async ({
+    request,
+  }) => {
+    const old = await addLegacyTask({ assignee: ADMIN_ID, agent: MINE });
+    const handle = await db();
+    expect(await handle.collection("tasks").findOne({ _id: old })).not.toHaveProperty("assignedBy");
+
+    const repaired = await put(request, old, { assignee: ADMIN_USERNAME }, ADMIN_AUTH);
+    expect(repaired.status(), await repaired.text()).toBe(200);
+
+    const after = await handle.collection("tasks").findOne({ _id: old });
+    expect(String(after?.assignedBy)).toBe(String(ADMIN_ID));
+    expect(after?.agent).toBeNull();
+    expect(await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(ADMIN_ID))).toBeNull();
+  });
+
+  // …and the repair still does what it exists for, on the ordinary task: their own agent stays,
+  // and recording the assigner is exactly what lets their machine take it
+  test("a legacy repair keeps the repairer's own agent, and their machine then takes it", async () => {
+    const handle = await db();
+    await handle.collection("agents").insertOne({
+      _id: THEIRS,
+      name: "The admin's own",
+      description: "",
+      scope: "user",
+      owner: ADMIN_ID,
+      project: null,
+      composition: RUNNABLE,
+      builtIn: false,
+    });
+    const old = await addLegacyTask({ assignee: ADMIN_ID, agent: THEIRS });
+
+    const repaired = await updateTask(
+      String(PROJECT_ID),
+      String(old),
+      { assignee: ADMIN_USERNAME },
+      String(ADMIN_ID)
+    );
+    expect(repaired.ok).toBe(true);
+
+    const claimed = await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(ADMIN_ID));
+    expect(String(claimed?._id)).toBe(String(old));
+    expect(String(claimed?.agent)).toBe(String(THEIRS));
+  });
+
+  // A field a write changed without being asked to has to be answerable for afterwards
+  test("the drop is written to the task's history", async ({ request }) => {
+    const own = await addTask({ assignee: MEMBER_ID, assignedBy: MEMBER_ID, agent: MINE });
+
+    await put(request, own, { assignee: ADMIN_USERNAME }, MEMBER_AUTH);
+
+    const handle = await db();
+    const rows = await handle.collection("activitylogs").find({ task: own, field: "agent" }).toArray();
+    expect(rows.map((r) => [String(r.oldValue), String(r.newValue ?? "")])).toEqual([
+      [String(MINE), ""],
+    ]);
+  });
+
+  /**
+   * The populate that names the agent hands the history comparison a mongoose DOCUMENT where the
+   * before-image holds a raw id, and `String()` on a document is its inspect output. The unit test
+   * for this is handed a plain `{ _id, name }`, which is not what mongoose returns — so the shape
+   * that could actually break it only exists here.
+   */
+  test("an ordinary edit invents no agent change, though the answer comes back populated", async ({
+    request,
+  }) => {
+    const own = await addTask({ assignee: MEMBER_ID, assignedBy: MEMBER_ID, agent: MINE });
+
+    const renamed = await put(request, own, { title: "renamed" }, MEMBER_AUTH);
+    expect(renamed.status(), await renamed.text()).toBe(200);
+    // …and the agent really did come back as a named document rather than a bare id
+    expect((await renamed.json()).agent).toMatchObject({ name: "Member's own" });
+
+    const handle = await db();
+    expect(await handle.collection("activitylogs").countDocuments({ task: own, field: "agent" })).toBe(0);
+  });
+
+  /**
+   * The other defect this round closes, through the surface it appears on. `/api/agents` never
+   * answers with somebody else's personal agent, so the picker could not resolve the id and
+   * rendered its empty state — "No agent" printed over a task carrying one, on the very field the
+   * consent model rests on.
+   *
+   * The state is ordinary and permanent, not a leftover: the member's own agent on the member's
+   * own task, read by a colleague.
+   */
+  test("names the agent it may not offer, rather than showing the row empty", async ({ page }) => {
+    const theirs = await addTask({ assignee: MEMBER_ID, assignedBy: MEMBER_ID, agent: MINE });
+    const handle = await db();
+    const number = (await handle.collection("tasks").findOne({ _id: theirs }))?.taskNumber;
+
+    await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);
+    await page.goto(`/projects/${PROJECT_KEY}/tasks/${number}`);
+
+    await expect(page.getByTestId("agent-not-offered")).toHaveText("Member's own");
+    await expect(page.getByTestId("agent-not-offered-reason")).toContainText(
+      /only offered to the person who composed it/i
+    );
+  });
+
+  // The member sees their own agent as an ordinary choice, in the same place the colleague above
+  // gets a read-only name — so the branch above is a reader-specific answer rather than a field
+  // that has stopped being editable
+  test("and offers the same agent to the person it belongs to", async ({ page }) => {
+    const own = await addTask({ assignee: MEMBER_ID, assignedBy: MEMBER_ID, agent: MINE });
+    const handle = await db();
+    const number = (await handle.collection("tasks").findOne({ _id: own }))?.taskNumber;
+
+    await signIn(page, MEMBER_USERNAME, MEMBER_PASSWORD);
+    await page.goto(`/projects/${PROJECT_KEY}/tasks/${number}`);
+
+    await expect(page.getByTestId("agent-not-offered")).toHaveCount(0);
+    await expect(
+      page.getByRole("combobox").filter({ hasText: /^Agent/ })
+    ).toContainText("Member's own");
   });
 
   // Assignee and agent travel in one PUT — the detail view's auto-save sends every edited field

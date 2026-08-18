@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { emitBoardRefresh } from "@/lib/board-refresh";
+import { refIdOf } from "@/lib/handover";
 import {
   ApiTask,
   Category,
@@ -51,7 +52,9 @@ export function draftFromTask(task: ApiTask): TaskDraft {
       (task.assignee && typeof task.assignee === "object" ? task.assignee.username : "") || null,
     dueDate: (task.dueDate ? task.dueDate.substring(0, 10) : "") || null,
     checklist: task.checklist || [],
-    agent: task.agent ?? null,
+    // The id, never the populated document: it is the picker's value and the thing compared
+    // against the draft, and an object would make the field read as permanently edited.
+    agent: refIdOf(task.agent),
     sprint: task.sprint || null,
     recurrence: task.recurrence
       ? { frequency: task.recurrence.frequency, interval: task.recurrence.interval }

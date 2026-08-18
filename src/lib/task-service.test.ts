@@ -2460,6 +2460,356 @@ describe("whose machine choosing an agent can reach", () => {
 });
 
 /**
+ * BP-358 final round. `agentUsableOnProject` runs on the writer of `agent`, so a write naming only
+ * `assignee` never asks — and the agent rode the hand-over it was chosen for into somebody else's
+ * hands. The claim's other half hid it for one gesture (the write stamps the OLD holder as the
+ * assigner) and stopped hiding it on the next: the new assignee unassigns and re-assigns to
+ * themselves, restoring `assignee === assignedBy`, and their machine runs a composition nobody
+ * vetted. Reproduced end to end in e2e/claim-ownership.spec.ts.
+ *
+ * "An agent is the hand-over" is the design's own sentence, so handing the task to a different
+ * person is a NEW hand-over and the old agent has no standing on it.
+ *
+ * Three ids throughout, varied one at a time. With the actor, the incoming assignee and the
+ * agent's owner collapsed into one string, "the new assignee owns it" and "the actor owns it" are
+ * the same assertion — and the clause reading the wrong one of the two would pass every case.
+ */
+describe("what a change of hands does to the agent already on the task", () => {
+  const THIRD = "6a732075133f935b19154ce1";
+  const HOLDER = "6a732075133f935b19154ce2";
+  const INCOMING = "6a732075133f935b19154ce3";
+  const AGENT_ID = "69a52e3b399b27d3cbb2c5a5";
+  const PICKED = "69a52e3b399b27d3cbb2c5b8";
+  const COMPOSED = { implementation: [{ key: "write-the-change" }] };
+
+  beforeEach(() => {
+    findById.mockReset();
+    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    find.mockReset();
+    find.mockReturnValue({ lean: () => Promise.resolve([]) });
+    findOne.mockReset();
+    findOneAndUpdate.mockReset();
+    findOneAndUpdate.mockReturnValue({
+      populate: () =>
+        Promise.resolve({ _id: "t1", taskNumber: 1, title: "x", agent: null, execution: {} }),
+    });
+    agentFindById.mockReset();
+  });
+
+  /**
+   * Answers per id, honouring the projection the way MongoDB does. The shared fixture answers with
+   * ONE agent whatever is asked for, which cannot tell the agent a write NAMES from the one the
+   * task already carries — and that is the only difference the clause below turns on.
+   */
+  function catalogOf(docs: Record<string, Record<string, unknown>>) {
+    agentFindById.mockImplementation((id: unknown, projection?: unknown) => {
+      const doc = docs[String(id)];
+      if (!doc) return { lean: () => Promise.resolve(null) };
+      const named = String(projection ?? "").split(/\s+/).filter(Boolean);
+      const visible = named.length
+        ? Object.fromEntries(Object.entries(doc).filter(([k]) => k === "_id" || named.includes(k)))
+        : doc;
+      return { lean: () => Promise.resolve(visible) };
+    });
+  }
+
+  /** What a machine belonging to this person actually asks the database for */
+  async function machineOf(owner: string) {
+    findOneAndUpdate.mockReset();
+    await claimNextTask("p1", "w1", "r1", owner);
+    return findOneAndUpdate.mock.calls[0][0];
+  }
+
+  interface Held {
+    /** The agent the task is ALREADY carrying, as the catalog answers for it */
+    agent: Record<string, unknown> | null;
+    /** Who holds the task before this write */
+    holder?: string | null;
+    /** A task stored before BP-358: the assignedBy KEY is absent, not null */
+    legacy?: boolean;
+    execution?: Record<string, unknown>;
+  }
+
+  function taskHolding({ agent, holder = HOLDER, legacy = false, execution = {} }: Held) {
+    if (agent) {
+      agentInTheCatalog({ _id: AGENT_ID, name: "An agent", composition: COMPOSED, ...agent });
+    } else {
+      agentInTheCatalog(null);
+    }
+    const stored = {
+      _id: "t1",
+      taskNumber: 1,
+      status: "ready",
+      title: "x",
+      agent: agent ? AGENT_ID : null,
+      assignee: holder ? { _id: holder, username: "whoever" } : null,
+      ...(legacy ? {} : { assignedBy: holder }),
+      execution,
+    };
+    findOne.mockReturnValue({
+      lean: () => Promise.resolve(stored),
+      populate: () => ({ lean: () => Promise.resolve(stored) }),
+    });
+  }
+
+  /** The write, and the document it leaves — stored, with its own $set over it */
+  async function write(
+    body: Record<string, unknown>,
+    actor: string,
+    resolves?: string | null,
+    force = false
+  ) {
+    if (resolves !== undefined) {
+      userFindOne.mockResolvedValue(resolves ? { _id: resolves, username: "whoever" } : null);
+    }
+    findOneAndUpdate.mockClear();
+    const result = await updateTask("p1", "t1", body, actor, force);
+    const written = findOneAndUpdate.mock.calls.length
+      ? setStage(findOneAndUpdate.mock.calls[0][1])
+      : {};
+    return {
+      result,
+      written,
+      document: {
+        project: "p1",
+        status: "ready",
+        assignee: HOLDER,
+        assignedBy: HOLDER,
+        agent: AGENT_ID,
+        blockedBy: [],
+        execution: { attempts: 0 },
+        ...written,
+      },
+    };
+  }
+
+  // The headline. The agent is the holder's own composition; the task stops being theirs, so it
+  // stops being a task that composition may run on — asserted at the machine too, because a
+  // cleared field is only interesting if it is what keeps the run off somebody's computer.
+  it("drops a personal agent when the task goes to somebody else", async () => {
+    taskHolding({ agent: { scope: "user", owner: HOLDER } });
+
+    const { result, written, document } = await write({ assignee: "incoming" }, HOLDER, INCOMING);
+
+    expect(result.ok).toBe(true);
+    expect(written.agent).toBeNull();
+    expect(matches(await machineOf(INCOMING), document)).toBe(false);
+  });
+
+  /**
+   * The three-id case, and the only one that separates "the new assignee owns it" from "the actor
+   * owns it": the agent belongs to the person the task is going TO, and the person writing is
+   * neither of them. An agent the incoming assignee could have chosen survives the move.
+   */
+  it("keeps a personal agent that belongs to the person receiving the task", async () => {
+    taskHolding({ agent: { scope: "user", owner: INCOMING } });
+
+    const { result, written } = await write({ assignee: "incoming" }, THIRD, INCOMING);
+
+    expect(result.ok).toBe(true);
+    expect(written).not.toHaveProperty("agent");
+  });
+
+  // …and it is still a hand-over their machine acts on, once they are the one who took it on. The
+  // case above deliberately has a third party doing the assigning, which no machine acts on at
+  // all — so on its own it could not tell "the agent survived" from "the agent stopped mattering".
+  it("and that person's machine takes the task once they have taken it on themselves", async () => {
+    taskHolding({ agent: { scope: "user", owner: INCOMING } });
+
+    const { written, document } = await write({ assignee: "incoming" }, INCOMING, INCOMING);
+
+    expect(written).not.toHaveProperty("agent");
+    expect(document.agent).toBe(AGENT_ID);
+    expect(matches(await machineOf(INCOMING), document)).toBe(true);
+    expect(matches(await machineOf(HOLDER), document)).toBe(false);
+  });
+
+  // Sanctioned by the project rather than composed by a person: `POST /api/agents` refuses a
+  // project agent to anyone but a project admin, so the incoming assignee could have chosen it and
+  // clearing it would be a gratuitous loss on every ordinary reassignment.
+  it("keeps a project agent, which the project sanctioned rather than any one person", async () => {
+    taskHolding({ agent: { scope: "project", project: "p1" } });
+
+    const { written } = await write({ assignee: "incoming" }, HOLDER, INCOMING);
+
+    expect(written).not.toHaveProperty("agent");
+  });
+
+  it("keeps a global agent, which is shipped", async () => {
+    taskHolding({ agent: { scope: "global" } });
+
+    const { written } = await write({ assignee: "incoming" }, HOLDER, INCOMING);
+
+    expect(written).not.toHaveProperty("agent");
+  });
+
+  // Nobody is not "assigned to you" either, and this is what a released task looks like: whoever
+  // picks it up next would otherwise be the one running that composition
+  it("drops a personal agent when the task is unassigned altogether", async () => {
+    taskHolding({ agent: { scope: "user", owner: HOLDER } });
+
+    const { written } = await write({ assignee: null }, HOLDER);
+
+    expect(written.agent).toBeNull();
+  });
+
+  /**
+   * The detail view's auto-save sends every edited field in one PUT, so this body is what picking
+   * an agent and handing the task over in the same visit produces. That agent was judged against
+   * the assignee this write LEAVES, one clause up — re-clearing it here would undo a choice that
+   * was just made validly.
+   */
+  it("leaves an agent chosen in the same write alone", async () => {
+    taskHolding({ agent: { scope: "user", owner: INCOMING } });
+
+    const { result, written } = await write(
+      { assignee: "incoming", agent: AGENT_ID },
+      INCOMING,
+      INCOMING
+    );
+
+    expect(result.ok).toBe(true);
+    expect(written.agent).toBe(AGENT_ID);
+  });
+
+  /**
+   * The same rule where the two agents are different documents, which is the only shape that can
+   * tell "the agent this write names" from "the agent it is replacing": handing the task over and
+   * picking one of the project's agents in the same PUT. Judging the STORED agent here overwrites
+   * the freshly chosen one with null — the clause would undo the choice it was meant to protect.
+   */
+  it("does not clear the agent this write chose because of the one it replaces", async () => {
+    taskHolding({ agent: { scope: "user", owner: HOLDER } });
+    catalogOf({
+      [AGENT_ID]: { _id: AGENT_ID, scope: "user", owner: HOLDER, name: "Mine", composition: COMPOSED },
+      [PICKED]: { _id: PICKED, scope: "project", project: "p1", name: "The board's", composition: COMPOSED },
+    });
+
+    const { result, written } = await write({ assignee: "incoming", agent: PICKED }, HOLDER, INCOMING);
+
+    expect(result.ok).toBe(true);
+    expect(written.agent).toBe(PICKED);
+  });
+
+  /**
+   * Keyed on the assignee MOVING, not on the pairing being wrong. A task already carrying an
+   * invalid pairing — every one the reproduction left behind — must not have a field silently
+   * dropped by an edit that had nothing to do with it, which is the shape of bug the round before
+   * this one exists to stop. It also keeps an ordinary edit from paying for the lookup.
+   */
+  it("leaves the agent alone on an edit that does not move the assignee", async () => {
+    taskHolding({ agent: { scope: "user", owner: THIRD } });
+
+    const { written } = await write({ title: "renamed" }, HOLDER);
+
+    expect(written).not.toHaveProperty("agent");
+    expect(agentFindById).not.toHaveBeenCalled();
+  });
+
+  // The documented repair for a legacy task — assign it to yourself again — must not cost the
+  // person their agent. Resending the assignee already stored is not a change of hands.
+  it("leaves it alone when the body re-sends the assignee the task already has", async () => {
+    taskHolding({ agent: { scope: "user", owner: HOLDER } });
+
+    const { written } = await write({ assignee: "whoever" }, HOLDER, HOLDER);
+
+    expect(written).not.toHaveProperty("agent");
+    expect(agentFindById).not.toHaveBeenCalled();
+  });
+
+  /**
+   * A forced status change that takes a task off a live run blanks the assignee in that same
+   * write, without the body naming the field at all. The task ends up belonging to nobody, so it
+   * is a change of hands like any other — and the pairing is read off what the update SENDS rather
+   * than off what the body carried, which is the only place the two differ.
+   */
+  it("drops a personal agent in the write that releases the task from a run", async () => {
+    taskHolding({
+      agent: { scope: "user", owner: HOLDER },
+      execution: { runId: "r9", workerId: "w9" },
+    });
+
+    const { written } = await write({ status: "doing" }, THIRD, undefined, true);
+
+    expect(written.assignee).toBeNull();
+    expect(written.agent).toBeNull();
+  });
+
+  /**
+   * The other half of the same pair, and a shape the "assignee moved" rule alone walks past. A task
+   * stored before BP-358 records no assigner, so no machine looks at it — and the repair the
+   * product prints on the task itself, ASSIGN IT TO YOURSELF AGAIN, is what records one. The
+   * assignee does not move, and that single gesture is what makes the task claimable for the first
+   * time, carrying whatever agent it has been carrying all along.
+   */
+  it("drops a stranger's agent when a legacy task's assigner is recorded for the first time", async () => {
+    taskHolding({ agent: { scope: "user", owner: THIRD }, legacy: true });
+
+    const { written, document } = await write({ assignee: "whoever" }, HOLDER, HOLDER);
+
+    expect(written.assignedBy).toBe(HOLDER);
+    expect(written.agent).toBeNull();
+    expect(matches(await machineOf(HOLDER), document)).toBe(false);
+  });
+
+  // …and the repair still does what it is for. Clearing here would take the agent off every legacy
+  // task on the board, which is the gratuitous half of the same rule.
+  it("leaves the repairing person's own agent alone, and their machine then takes it", async () => {
+    taskHolding({ agent: { scope: "user", owner: HOLDER }, legacy: true });
+
+    const { written, document } = await write({ assignee: "whoever" }, HOLDER, HOLDER);
+
+    expect(written.assignedBy).toBe(HOLDER);
+    expect(written).not.toHaveProperty("agent");
+    expect(matches(await machineOf(HOLDER), document)).toBe(true);
+  });
+
+  // A field changed by a write nobody asked to change it must be answerable for afterwards. The
+  // response carries the task itself; this is the other half.
+  it("records the drop in the task\'s history", async () => {
+    taskHolding({ agent: { scope: "user", owner: HOLDER } });
+    findOneAndUpdate.mockReturnValue({
+      populate: () =>
+        Promise.resolve({ _id: "t1", taskNumber: 1, title: "x", agent: null, execution: {} }),
+    });
+    vi.mocked(logActivity).mockClear();
+
+    await write({ assignee: "incoming" }, HOLDER, INCOMING);
+
+    expect(vi.mocked(logActivity).mock.calls).toContainEqual([
+      "t1",
+      HOLDER,
+      "updated",
+      "agent",
+      AGENT_ID,
+      "",
+    ]);
+  });
+
+  // The populate added for the Agent row returns a DOCUMENT where the before-image holds an id, so
+  // the history comparison has to read the id out of both. Without that every update to any field
+  // logs an agent change that never happened.
+  it("does not invent an agent change when the answer comes back populated", async () => {
+    taskHolding({ agent: { scope: "user", owner: HOLDER } });
+    findOneAndUpdate.mockReturnValue({
+      populate: () =>
+        Promise.resolve({
+          _id: "t1",
+          taskNumber: 1,
+          title: "renamed",
+          agent: { _id: AGENT_ID, name: "An agent" },
+          execution: {},
+        }),
+    });
+    vi.mocked(logActivity).mockClear();
+
+    await write({ title: "renamed" }, HOLDER);
+
+    expect(vi.mocked(logActivity).mock.calls.map((c) => c[3])).not.toContain("agent");
+  });
+});
+
+/**
  * BP-358 review: `assignedBy` is what says whether a machine may act on a task, and the Agent row
  * reads it to name whoever handed the task over. Left unpopulated it serialises as a bare ObjectId,
  * so "Krzysiek assigned it" degrades to "Somebody else assigned it" — and nothing fails anywhere,
@@ -2481,11 +2831,20 @@ describe("what a task is populated with before it is answered", () => {
     expect(path("assignedBy")?.select).toBe(path("assignee")?.select);
   });
 
+  // `/api/agents` answers only with agents the reader may CHOOSE, so a personal agent belonging to
+  // somebody else never reaches the browser through that route. Without the name here the picker
+  // cannot resolve the id and falls back to its empty state — "No agent" printed over the one
+  // field that decides what executes on a machine.
+  it("names the agent the task carries, which no other route will tell the reader", () => {
+    expect(path("agent")).toEqual({ path: "agent", select: "name" });
+  });
+
   it("still names everyone else a task detail renders", () => {
     expect(taskPopulateFields.map((f) => f.path)).toEqual([
       "assignee",
       "assignedBy",
       "createdBy",
+      "agent",
       "blockedBy",
       "relations.task",
     ]);

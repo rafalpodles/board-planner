@@ -179,8 +179,23 @@ not be the chooser. It is tolerable for an agent somebody vetted, and `POST /api
 project-admin for a project-scoped one, but authoring a **personal** agent is open to anyone. So a
 personal agent additionally requires the actor to be the task's own assignee, judged on the assignee
 the update leaves rather than the one it read. Your own composition goes on your own work; a
-colleague's task takes only what the project or the instance sanctioned. The remaining residue —
-a hand-over does not re-check an agent already on the task — is in the branch's final-round report.
+colleague's task takes only what the project or the instance sanctioned.
+
+That held of the **choosing** and failed of what the choice left behind: a write naming only
+`assignee` never asked, so the agent rode the old hand-over into somebody else's hands. Since an
+agent *is* the hand-over, handing the task to a different person is a new one and the old agent has
+no standing on it — so a `user`-scoped agent the resulting assignee does not own is cleared by the
+same write. A project or global agent survives: the project or the instance sanctioned it, and
+dropping it would be a gratuitous loss on every ordinary reassignment. Both halves of the pair are
+judged, not only the assignee: recording an assigner is what makes a legacy task claimable for the
+first time, and its assignee never moves. An agent named in the same request is left alone, because
+it was just judged against the assignee that write leaves.
+
+What is withheld as an **option** is now shown as a **value**. `/api/agents` answers only with
+agents the reader may choose, so the picker could not resolve somebody else's personal agent and
+rendered "No agent" over a task carrying one — hiding the very field the consent model rests on.
+The name travels with the task, and the row becomes a read-only name with the reason it is not
+selectable.
 
 ## Risks and open questions
 

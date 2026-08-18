@@ -99,9 +99,20 @@ export const taskPopulateFields = [
   // task somebody else handed over, and "assigned by 6a70…" answers nobody's question
   { path: "assignedBy", select: "username fullName" },
   { path: "createdBy", select: "username fullName" },
+  // Named for the same reason, and it is the one field on the task that decides what executes:
+  // `/api/agents` withholds other people's personal agents, so without the name here the picker
+  // cannot resolve the id and renders "No agent" over a task that is carrying one.
+  { path: "agent", select: "name" },
   { path: "blockedBy", select: "taskNumber title status" },
   { path: "relations.task", select: "taskNumber title status" },
 ];
+
+/** The id behind a ref that may or may not have been populated. Guarded first: typeof null is "object". */
+function refId(ref: unknown): string {
+  return ref && typeof ref === "object" && "_id" in ref
+    ? String((ref as { _id: unknown })._id)
+    : String(ref ?? "");
+}
 
 export type TaskServiceResult<T = ITask> =
   | { ok: true; data: T }
@@ -202,6 +213,22 @@ async function agentUsableOnProject(
     };
   }
   return { ok: true };
+}
+
+/**
+ * Whether the agent this task already carries is a personal one the incoming assignee could not
+ * have chosen — the only kind a hand-over invalidates.
+ *
+ * A missing agent answers false rather than clearing: a dangling reference is not somebody's
+ * composition, and `DELETE /api/agents/:id` refuses while any task points at one, so this is a
+ * hand-edited database rather than a state the product produces.
+ */
+async function personalAgentAlienTo(agent: unknown, assigneeAfter: unknown): Promise<boolean> {
+  const { Agent } = await import("@/models/agent");
+  const found = await Agent.findById(agent, "scope owner").lean();
+  if (!found || found.scope !== "user") return false;
+  // "" for an unassigned task, which never equals an owner: nobody holds it, so nobody chose it
+  return String(found.owner) !== refId(assigneeAfter);
 }
 
 async function sprintBelongsToProject(projectId: string, sprint: unknown): Promise<boolean> {
@@ -622,7 +649,21 @@ export async function updateTask(
   const heldByRun = !!oldTask.execution?.runId;
   const claimAssigned = oldTask.execution?.assignedByRun !== false;
   const releasesWorker = leavesColumn && heldByRun && claimAssigned;
-  const setFields = releasesWorker ? { assignee: null, assignedBy: null, ...updates } : updates;
+  const setFields: Record<string, unknown> = releasesWorker
+    ? { assignee: null, assignedBy: null, ...updates }
+    : updates;
+
+  // Who the task belongs to once this update lands. Read off `setFields` rather than off
+  // `updates`, because a status change that leaves the active column while a run holds the task
+  // blanks the assignee in that same write — so a forced release leaves the task belonging to
+  // nobody, and nobody is not "assigned to you".
+  const assigneeAfter = "assignee" in setFields ? setFields.assignee : storedAssignee;
+  // The pair a claim requires is `assignee === assignedBy === the machine's owner`, so a write
+  // changing EITHER half is the hand-over coming into being. The second half is not hypothetical:
+  // the legacy repair the product itself prints — assign it to yourself again — does not move the
+  // assignee, and stamping the assigner is what makes such a task claimable for the first time.
+  const handsItOver =
+    refId(assigneeAfter) !== storedAssignee || updates.assignedBy !== undefined;
 
   // BP-345 kept the choice to instance admins because it could arm a machine belonging to somebody
   // else. Since BP-358 a claim requires assignee === assignedBy === the machine's owner, so the
@@ -632,17 +673,27 @@ export async function updateTask(
   //
   // Judged against the assignee this update LEAVES, not the one it read: assignee and agent travel
   // in the same PUT, so reading the stored one would let `{ assignee: colleague, agent: mine }`
-  // through on the strength of a pairing the write is about to end. `setFields` is the same object
-  // the update sends, so the two cannot drift.
+  // through on the strength of a pairing the write is about to end.
   if (updates.agent !== undefined && updates.agent !== null) {
-    const assigneeAfter = "assignee" in setFields ? setFields.assignee : storedAssignee;
     const usable = await agentUsableOnProject(projectId, updates.agent, actorId, assigneeAfter);
     if (!usable.ok) return { ok: false, error: usable.error, status: 400 };
   }
 
+  // An agent is the hand-over, so handing the task to a different person is a NEW hand-over and
+  // the agent that rode the old one has no standing on it. Only a personal one: a project agent
+  // was authored by a project admin and a global one is shipped, so the incoming assignee could
+  // have chosen either, and dropping them would lose a field on every ordinary reassignment.
+  //
+  // Only the agent already STORED. One named in this same request was judged against the assignee
+  // this write leaves, immediately above, and re-clearing it would undo a valid choice.
+  if (handsItOver && updates.agent === undefined && oldTask.agent) {
+    if (await personalAgentAlienTo(oldTask.agent, assigneeAfter)) setFields.agent = null;
+  }
+
   const task = await Task.findOneAndUpdate(
     { _id: taskId, project: projectId },
-    leavesColumn ? { $set: setFields, $unset: UNSET_RUN } : { $set: updates },
+    // One `$set`, so nothing decided after `setFields` was built can reach one arm and not the other
+    { $set: setFields, ...(leavesColumn ? { $unset: UNSET_RUN } : {}) },
     { returnDocument: "after", runValidators: true, timestamps: !onlyOrder }
   ).populate(taskPopulateFields);
 
@@ -656,8 +707,11 @@ export async function updateTask(
   // Without it there is no answer to "who pointed the machine at that prompt" (BP-345).
   const trackFields = ["title", "priority", "category", "status", "agent"];
   for (const field of trackFields) {
-    const oldVal = String(oldTask[field as keyof typeof oldTask] ?? "");
-    const newVal = String(task[field as keyof typeof task] ?? "");
+    // Through refId, not String(): `oldTask` is lean and holds a raw ObjectId while `task` comes
+    // back with `agent` populated, and String() on a populated document is its inspect output —
+    // so a plain comparison would log an agent change on every update that changed nothing.
+    const oldVal = refId(oldTask[field as keyof typeof oldTask]);
+    const newVal = refId(task[field as keyof typeof task]);
     if (oldVal !== newVal) {
       const action = field === "status" ? "status_changed" as const : "updated" as const;
       activities.push(logActivity(taskId, actorId, action, field, oldVal, newVal));
