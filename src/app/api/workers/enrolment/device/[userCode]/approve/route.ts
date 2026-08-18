@@ -68,12 +68,13 @@ export const POST = withAuth(async (request, { params, user }) => {
     );
   }
 
-  // Committing a project to machines stays a project-admin decision with its own audit row; a
-  // member enrolling their laptop does not make it for them. Done here as well as from the settings
-  // screen because this is the path people actually take, and a log that misses the primary route
-  // implies a completeness it does not have.
+  // Committing a project to machines stays instance-admin, exactly as PUT /api/projects/:id has it:
+  // it commits somebody's machine to running agent-written code, which is not a project admin's
+  // call to make and certainly not a member's. Enrolling a laptop does not make that decision for
+  // the project. Done here as well as from the settings screen because this is the path people
+  // actually take, and a log that misses the primary route implies a completeness it does not have.
   const key = project.key || String(project._id);
-  const mayEnable = await check(user, projectId, "admin");
+  const mayEnable = user.role === "admin";
   if (mayEnable && !project.worker?.enabled) {
     await Project.updateOne({ _id: project._id }, { $set: { "worker.enabled": true } });
     void logInstanceAudit({
