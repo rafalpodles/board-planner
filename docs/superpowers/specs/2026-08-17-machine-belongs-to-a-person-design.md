@@ -172,9 +172,15 @@ blocks somebody already approved.
 
 What the claim gives back in exchange is narrower than the "proposal" above. There is no surface for
 accepting one, so a proposal is refused rather than queued: the filter requires
-`assignee === assignedBy === owner`, and work somebody else put in your hands never runs. The
-residue is that choosing an agent on a task its assignee handed to *themselves* arms that person's
-machine, which may not be the chooser's — see "Concerns" in the branch's final-round report.
+`assignee === assignedBy === owner`, and work somebody else put in your hands never runs.
+
+That still leaves choosing an agent able to arm somebody else's machine — the assignee's, who need
+not be the chooser. It is tolerable for an agent somebody vetted, and `POST /api/agents` requires
+project-admin for a project-scoped one, but authoring a **personal** agent is open to anyone. So a
+personal agent additionally requires the actor to be the task's own assignee, judged on the assignee
+the update leaves rather than the one it read. Your own composition goes on your own work; a
+colleague's task takes only what the project or the instance sanctioned. The remaining residue —
+a hand-over does not re-check an agent already on the task — is in the branch's final-round report.
 
 ## Risks and open questions
 

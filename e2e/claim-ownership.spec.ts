@@ -1,6 +1,10 @@
 import { test, expect } from "@playwright/test";
 import mongoose from "mongoose";
 import { changeStatus, claimNextTask, releaseTask, updateTask } from "@/lib/task-service";
+// Statically, though nothing here calls it: `agentUsableOnProject` reaches this model through a
+// dynamic import, and under Playwright's loader that resolves the model but not the `@/types` it
+// imports. Naming it here puts it in the module cache first, resolved the ordinary way.
+import "@/models/agent";
 import { ADMIN_ID, ADMIN_USERNAME, E2E_MONGODB_URI, MEMBER_ID, PROJECT_ID, seed } from "./seed";
 
 /**
@@ -447,5 +451,139 @@ test.describe("releasing gives back exactly what the claim took", () => {
     expect(moved.ok).toBe(true);
 
     expect((await read(free)).assignee).toBe(String(OWNER));
+  });
+});
+
+/**
+ * BP-358 final round. Choosing a task's agent stopped being an instance-admin act because the claim
+ * routes work to the machine of whoever assigned the task to themselves — but the person choosing
+ * the agent need not be that person, and authoring a PERSONAL agent takes nothing at all
+ * (`POST /api/agents` requires project-admin only for a project-scoped one). So a member could
+ * compose `merge` with no review gate ahead of it and point a colleague's self-assigned task at it.
+ *
+ * Real Agent documents against a real query engine, because the rule is a join between two
+ * collections and the unit suite mocks one of them.
+ */
+test.describe("whose task a personal agent may go on", () => {
+  const MINE = new mongoose.Types.ObjectId();
+  const PROJECTS = new mongoose.Types.ObjectId();
+  const RUNNABLE = { analysis: [], implementation: [{ key: "write-the-change" }], verification: [], delivery: [] };
+
+  test.beforeEach(async () => {
+    const handle = await db();
+    await handle.collection("agents").deleteMany({ _id: { $in: [MINE, PROJECTS] } });
+    await handle.collection("agents").insertMany([
+      // The member's own, composed by them, vetted by nobody
+      { _id: MINE, name: "Member's own", description: "", scope: "user", owner: MEMBER_ID, project: null, composition: RUNNABLE, builtIn: false },
+      // The board's, which only a project admin can add
+      { _id: PROJECTS, name: "The project's", description: "", scope: "project", owner: null, project: PROJECT_ID, composition: RUNNABLE, builtIn: false },
+    ]);
+  });
+
+  test("goes on its owner's own task, and that owner's machine takes it", async () => {
+    const own = await addTask({ assignee: MEMBER_ID, assignedBy: MEMBER_ID, agent: null });
+
+    const chosen = await updateTask(
+      String(PROJECT_ID),
+      String(own),
+      { agent: String(MINE) },
+      String(MEMBER_ID)
+    );
+
+    expect(chosen.ok).toBe(true);
+    expect(
+      await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(MEMBER_ID))
+    ).not.toBeNull();
+  });
+
+  // The hole this round closes: the task is the admin's, the agent is the member's, and the machine
+  // it would have reached is the admin's
+  test("is refused on a colleague's self-assigned task, and nothing is written", async () => {
+    const theirs = await addTask({ assignee: ADMIN_ID, assignedBy: ADMIN_ID, agent: null });
+
+    const chosen = await updateTask(
+      String(PROJECT_ID),
+      String(theirs),
+      { agent: String(MINE) },
+      String(MEMBER_ID)
+    );
+
+    expect(chosen.ok).toBe(false);
+    expect((chosen as { error: string }).error).toMatch(/personal agent/i);
+    const handle = await db();
+    expect((await handle.collection("tasks").findOne({ _id: theirs }))?.agent).toBeNull();
+    // …and with no agent on it there is nothing for the colleague's machine to take
+    expect(await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(ADMIN_ID))).toBeNull();
+  });
+
+  // The other half of the same decision: what the PROJECT sanctioned still goes anywhere the
+  // project's work goes, which is what keeps the bar down rather than putting it back
+  test("a project's own agent goes on a colleague's task, and their machine takes it", async () => {
+    const theirs = await addTask({ assignee: ADMIN_ID, assignedBy: ADMIN_ID, agent: null });
+
+    const chosen = await updateTask(
+      String(PROJECT_ID),
+      String(theirs),
+      { agent: String(PROJECTS) },
+      String(MEMBER_ID)
+    );
+
+    expect(chosen.ok).toBe(true);
+    expect(
+      await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(ADMIN_ID))
+    ).not.toBeNull();
+  });
+
+  /**
+   * The residue, pinned as far as it actually goes. Handing a task away does NOT re-check the agent
+   * already on it — the check runs on the writer of `agent`, and this write does not name that
+   * field — so the member's personal agent stays on a task that is now the admin's. What keeps it
+   * off the admin's machine is the OTHER half of the claim: this write stamps `assignedBy` as the
+   * member, and a claim wants `assignee === assignedBy === owner`.
+   *
+   * That protection ends if the admin later unassigns and re-assigns to themselves, which restores
+   * the pair and runs the member's composition on the admin's machine. Four gestures across two
+   * people, and the admin's own Agent row says "No agent" throughout, because `/api/agents` never
+   * answers with somebody else's personal agent. Reproduced against this database; written up in
+   * .superpowers/sdd/2026-08-17-machine-takes-its-owners-work/final-round-report.md rather than
+   * closed here, because closing it means deciding what a hand-over does to an agent it invalidates
+   * and that is a second decision.
+   */
+  test("stays on a task handed away, but the hand-over itself keeps it off their machine", async () => {
+    const own = await addTask({ assignee: MEMBER_ID, assignedBy: MEMBER_ID, agent: null });
+    await updateTask(String(PROJECT_ID), String(own), { agent: String(MINE) }, String(MEMBER_ID));
+
+    const handed = await updateTask(
+      String(PROJECT_ID),
+      String(own),
+      { assignee: ADMIN_USERNAME },
+      String(MEMBER_ID)
+    );
+
+    expect(handed.ok).toBe(true);
+    const handle = await db();
+    const after = await handle.collection("tasks").findOne({ _id: own });
+    expect(String(after?.agent)).toBe(String(MINE));
+    expect(String(after?.assignedBy)).toBe(String(MEMBER_ID));
+    expect(await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(ADMIN_ID))).toBeNull();
+  });
+
+  // Assignee and agent travel in one PUT — the detail view's auto-save sends every edited field
+  // together — so a check reading the STORED assignee would pass on a pairing the same write ends
+  test("is refused in the write that hands the task away, though it was mine when it was read", async () => {
+    const own = await addTask({ assignee: MEMBER_ID, assignedBy: MEMBER_ID, agent: null });
+
+    const chosen = await updateTask(
+      String(PROJECT_ID),
+      String(own),
+      { assignee: ADMIN_USERNAME, agent: String(MINE) },
+      String(MEMBER_ID)
+    );
+
+    expect(chosen.ok).toBe(false);
+    const handle = await db();
+    const after = await handle.collection("tasks").findOne({ _id: own });
+    expect(after?.agent).toBeNull();
+    expect(String(after?.assignee)).toBe(String(MEMBER_ID));
   });
 });

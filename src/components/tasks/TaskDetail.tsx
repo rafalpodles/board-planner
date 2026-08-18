@@ -392,6 +392,7 @@ function TaskDetailView({
             stored={task}
             columns={columns}
             onRepairAssigner={repairAssigner}
+            currentUsername={currentUser?.username ?? null}
             categories={project.categories || []}
             customFields={project.customFields || []}
             reporter={reporter}
@@ -423,6 +424,7 @@ function TaskDetailView({
           stored={task}
           columns={columns}
           onRepairAssigner={repairAssigner}
+          currentUsername={currentUser?.username ?? null}
           categories={project.categories || []}
           customFields={project.customFields || []}
           reporter={reporter}

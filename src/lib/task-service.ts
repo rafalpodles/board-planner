@@ -162,11 +162,21 @@ type Body = Record<string, any>;
  * task it becomes a claim the worker cannot serve: `snapshotFor` answers null, the route hands the
  * task straight back, and the task sorts first on the next poll thirty seconds later. That is the
  * task's own queue position, so every other claimable task on the project waits behind it.
+ *
+ * `assigneeAfter` is who the task belongs to once this update lands, and it is what keeps a
+ * personal agent personal. Authoring one is open to anyone, so its steps are a composition nobody
+ * vetted — a project agent is project-admin (`/api/agents`), a global one is shipped. A claim runs
+ * on the machine of whoever assigned the task to themselves, which need not be whoever chose the
+ * agent, so "the actor owns it" alone would let a member compose `merge` with no review gate and
+ * point a colleague's self-assigned task at it. `agent-rules` grades that composition risky rather
+ * than broken, so it stores; and a step's capability is not something the prompt around it can
+ * argue with.
  */
 async function agentUsableOnProject(
   projectId: string,
   agent: unknown,
-  actingUserId: unknown
+  actingUserId: unknown,
+  assigneeAfter: unknown
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const unusable = { ok: false as const, error: "That agent cannot run on this project" };
   if (typeof agent !== "string" || !Types.ObjectId.isValid(agent)) return unusable;
@@ -177,6 +187,13 @@ async function agentUsableOnProject(
   // A personal agent is somebody's own; pointing a task at another person's would run their
   // prompts, with write access, on this project's checkout.
   if (found.scope === "user" && String(found.owner) !== String(actingUserId)) return unusable;
+  if (found.scope === "user" && String(found.owner) !== String(assigneeAfter ?? "")) {
+    return {
+      ok: false,
+      error:
+        "A personal agent only runs on your own tasks. Assign this task to yourself, or pick one of the project's agents.",
+    };
+  }
 
   if (!isRunnable(normaliseComposition(found.composition))) {
     return {
@@ -475,16 +492,10 @@ export async function updateTask(
     }
   }
 
+  // "" is what a cleared picker sends, and an ObjectId ref cannot hold it. Normalised here, before
+  // anything reads the field, so there is one way to say "no agent" — the check itself has to wait
+  // until the assignee this update leaves behind is known.
   if (updates.agent === "") updates.agent = null;
-  // BP-345 kept this to instance admins because choosing an agent could arm a machine belonging to
-  // somebody else. Since BP-358 a claim requires assignee === assignedBy === the machine's owner,
-  // so the routing holds that boundary and the choice belongs to whoever may edit the task — which
-  // the route's project gate already answers. Which agents may run here at all is a separate
-  // question, and still asked; null is exempt because choosing none names no agent to ask about.
-  if (updates.agent !== undefined && updates.agent !== null) {
-    const usable = await agentUsableOnProject(projectId, updates.agent, actorId);
-    if (!usable.ok) return { ok: false, error: usable.error, status: 400 };
-  }
 
   if (updates.category !== undefined || updates.status !== undefined) {
     const proj = await Project.findById(projectId, "categories columns").lean();
@@ -552,14 +563,14 @@ export async function updateTask(
   }
 
   // Stamped only when the assignee actually moves, and after it has been resolved to an id so the
-  // comparison is between two of the same thing. The same call `agent` makes eighteen lines above,
+  // comparison is between two of the same thing. The same call `agent` makes further down,
   // for the same client: a REST or MCP consumer that GETs a task, edits one field and PUTs the
   // whole object back would otherwise re-stamp itself as the assigner — which silently takes the
   // task out of what any machine may claim, with no error, no activity row, and a card that looks
   // exactly as it did.
+  const before = oldTask.assignee as { _id?: unknown } | null | undefined;
+  const storedAssignee = String((before && before._id) ?? before ?? "");
   if (updates.assignee !== undefined) {
-    const before = oldTask.assignee as { _id?: unknown } | null | undefined;
-    const storedAssignee = String((before && before._id) ?? before ?? "");
     const moved = storedAssignee !== String(updates.assignee ?? "");
     // Or when nothing is recorded yet, which is every task stored before BP-358. Without that
     // clause the documented repair — assign it again — is a no-op for the common legacy shape
@@ -612,6 +623,22 @@ export async function updateTask(
   const claimAssigned = oldTask.execution?.assignedByRun !== false;
   const releasesWorker = leavesColumn && heldByRun && claimAssigned;
   const setFields = releasesWorker ? { assignee: null, assignedBy: null, ...updates } : updates;
+
+  // BP-345 kept the choice to instance admins because it could arm a machine belonging to somebody
+  // else. Since BP-358 a claim requires assignee === assignedBy === the machine's owner, so the
+  // routing holds that boundary for the vetted agents and the choice belongs to whoever may edit
+  // the task — which the route's project gate already answers. Which agents may run here at all is
+  // a separate question, and still asked; null is exempt because choosing none names no agent.
+  //
+  // Judged against the assignee this update LEAVES, not the one it read: assignee and agent travel
+  // in the same PUT, so reading the stored one would let `{ assignee: colleague, agent: mine }`
+  // through on the strength of a pairing the write is about to end. `setFields` is the same object
+  // the update sends, so the two cannot drift.
+  if (updates.agent !== undefined && updates.agent !== null) {
+    const assigneeAfter = "assignee" in setFields ? setFields.assignee : storedAssignee;
+    const usable = await agentUsableOnProject(projectId, updates.agent, actorId, assigneeAfter);
+    if (!usable.ok) return { ok: false, error: usable.error, status: 400 };
+  }
 
   const task = await Task.findOneAndUpdate(
     { _id: taskId, project: projectId },
