@@ -1,5 +1,22 @@
 import mongoose, { Schema, Model } from "mongoose";
-import { IUser } from "@/types";
+import { IUser, NOTIFICATION_TYPES, PERSONAL_CHAT_KINDS } from "@/types";
+
+// One sub-schema reused by the global grid and by every project override, so a row cannot mean
+// one thing in one place and something else in the other. `_id: false` keeps Mongoose from
+// stamping an id onto each cell.
+const notificationMatrixSchema = new Schema(
+  Object.fromEntries(
+    NOTIFICATION_TYPES.map((type) => [
+      type,
+      {
+        inApp: { type: Boolean, default: false },
+        email: { type: Boolean, default: false },
+        chat: { type: Boolean, default: false },
+      },
+    ])
+  ),
+  { _id: false }
+);
 
 const userSchema = new Schema<IUser>({
   username: {
@@ -25,9 +42,32 @@ const userSchema = new Schema<IUser>({
     trim: true,
     lowercase: true,
   },
+  // Superseded by `notifications` below. Still read for accounts that predate the grid, which is
+  // why nothing migrates them: this field IS their stored preference until they save the screen.
   emailNotifications: {
     type: Boolean,
     default: false,
+  },
+  notifications: {
+    // Absent means "never opened the screen" — resolveChannels falls back to emailNotifications.
+    // A blank grid and an absent one are different answers, so this has no default.
+    defaults: { type: notificationMatrixSchema, default: undefined },
+    // A row here is the override switch for that project. There is no separate flag, so the two
+    // cannot disagree; clearing the switch removes the row.
+    projects: {
+      type: [
+        {
+          project: { type: Schema.Types.ObjectId, ref: "Project", required: true },
+          matrix: { type: notificationMatrixSchema, required: true },
+        },
+      ],
+      default: [],
+    },
+    chat: {
+      kind: { type: String, enum: [...PERSONAL_CHAT_KINDS, ""], default: "" },
+      // Encrypted at rest, like every other credential this instance stores
+      webhookUrl: { type: String, default: "" },
+    },
   },
   // One roll-up in the morning instead of a mail per event. Off by default: a digest is silence
   // for most of the day, and nobody should be moved into it without asking.

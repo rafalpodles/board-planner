@@ -15,6 +15,9 @@ const notificationSchema = new Schema<INotification>(
     title: { type: String, required: true },
     body: { type: String, default: "" },
     read: { type: Boolean, default: false, index: true },
+    // Whether the bell shows this row. The document is written either way: the digest is built
+    // from these, so letting the in-app switch stop the write would empty tomorrow's mail too.
+    inApp: { type: Boolean, default: true },
   },
   { timestamps: { createdAt: true, updatedAt: false } }
 );
