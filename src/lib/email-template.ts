@@ -83,6 +83,30 @@ export function safeUrl(value: string | undefined): string | undefined {
 const FONT = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
 const MONO = "ui-monospace,SFMono-Regular,Menlo,Consolas,monospace";
 
+// The mark is drawn rather than fetched: inline SVG is stripped by Gmail and Outlook, a remote
+// image is blocked by default in most clients, and a CID attachment puts a paperclip on every
+// notification. The tile is the icon's own blue, and the cards are its three opacities blended
+// against it up front, because opacity does not survive the trip.
+const MARK_TILE = "#3b82f6";
+const MARK_ROW_FILL = ["#ebf2fe", "#b1cdfb", "#89b4fa"];
+const MARK_COLUMN_CARDS = [2, 3, 1];
+
+function brandMark(): string {
+  const rows = MARK_ROW_FILL.map((fill, row) => {
+    const cells = MARK_COLUMN_CARDS.map((cards) => {
+      const background = row < cards ? `background:${fill};border-radius:1px;` : "";
+      return `<td width="4" height="3" style="width:4px;height:3px;${background}font-size:0;line-height:0">&nbsp;</td>`;
+    });
+    return `<tr>${cells.join("")}</tr>`;
+  });
+  return [
+    `<td width="24" height="24" align="center" valign="middle" style="width:24px;height:24px;background:${MARK_TILE};border-radius:6px">`,
+    `<table role="presentation" cellpadding="0" cellspacing="1" border="0" style="border-collapse:separate">`,
+    rows.join(""),
+    `</table></td>`,
+  ].join("");
+}
+
 function paragraph(text: string): string {
   return `<p class="body" style="margin:0 0 14px;color:#3c485c;font-size:15px;line-height:1.55">${escapeHtml(text)}</p>`;
 }
@@ -265,7 +289,7 @@ function renderHtml(c: EmailContent): string {
     `<table role="presentation" class="card" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border:1px solid #dde3ec;border-radius:8px;font-family:${FONT};color:#1a2233">`,
     `<tr><td class="rule" style="padding:16px 26px;border-bottom:1px solid #edf1f6">`,
     `<table role="presentation" cellpadding="0" cellspacing="0"><tr>`,
-    `<td style="width:24px;height:24px;background:#2563eb;border-radius:6px;text-align:center;font-family:${MONO};font-size:11px;font-weight:700;color:#ffffff">BP</td>`,
+    brandMark(),
     `<td style="padding-left:9px"><span class="wordmark" style="font-size:13.5px;font-weight:600;color:#33405a">${escapeHtml(APP_NAME)}</span></td>`,
     `</tr></table></td></tr>`,
     `<tr><td style="padding:26px">${body.join("")}</td></tr>`,
