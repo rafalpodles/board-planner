@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { renderEmail, pillToneForRole, safeUrl } from "@/lib/email-template";
+import { APP_NAME } from "@/lib/brand";
 
 const MINIMAL = {
   preheader: "preheader",
@@ -112,6 +113,30 @@ describe("renderEmail", () => {
 });
 
 describe("pillToneForRole", () => {
+  // The header used to hold the string "BP" — not the product's mark, and a second place the brand
+  // was spelled out, which a rename would leave beside the new name coming from APP_NAME.
+  it("draws the mark instead of spelling the brand out", () => {
+    const { html } = renderEmail(MINIMAL);
+
+    expect(html).toContain(APP_NAME);
+    expect(html.replaceAll(APP_NAME, "")).not.toMatch(/\bBP\b/);
+    expect(html).toContain("background:#3b82f6;border-radius:6px");
+    for (const fill of ["#ebf2fe", "#b1cdfb", "#89b4fa"]) expect(html).toContain(fill);
+  });
+
+  // A mark fetched over the network is a mark most readers never see: images are blocked by
+  // default in Gmail, Outlook and Apple Mail
+  it("asks the client to load nothing", () => {
+    const { html } = renderEmail({
+      ...MINIMAL,
+      taskCard: { key: "BP-1", title: "Task", url: "https://app.example.com/t/1" },
+    });
+
+    expect(html).not.toContain("<img");
+    expect(html).not.toContain("background-image");
+    expect(html).not.toContain("cid:");
+  });
+
   it("maps every column role, and an unknown one to neutral", () => {
     expect(pillToneForRole("approved")).toBe("todo");
     expect(pillToneForRole("active")).toBe("progress");
