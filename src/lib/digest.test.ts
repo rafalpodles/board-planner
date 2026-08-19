@@ -187,6 +187,25 @@ describe("digestTick", () => {
     expect(sendEmail).not.toHaveBeenCalled();
   });
 
+  // The point of storing rows the bell hides: turning the in-app column off must not empty the
+  // morning mail as well, or the two switches would silently cancel each other out
+  it("lists a row the bell was told to hide, when the mail column is on", async () => {
+    userFind.mockReturnValue({
+      lean: async () => [
+        {
+          ...WAITING[0],
+          notifications: {
+            defaults: { status_changed: { inApp: false, email: true, chat: false } },
+            projects: [],
+          },
+        },
+      ],
+    });
+
+    expect(await digestTick(morning)).toBe(1);
+    expect(sent().text).toContain("BP-1: moved to In Review");
+  });
+
   // Muting a project has to hold in the morning too, or it only silences the day
   it("drops the rows belonging to a project muted in the mail column", async () => {
     userFind.mockReturnValue({
