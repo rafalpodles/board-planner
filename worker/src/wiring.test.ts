@@ -59,7 +59,7 @@ function harness(overrides: Partial<WorkerDeps> = {}) {
   };
 
   const control = { close: vi.fn() };
-  const logError = vi.fn();
+  const logError = vi.fn<WorkerDeps["logError"]>();
 
   const deps: Partial<WorkerDeps> = {
     env: ENV,
@@ -126,7 +126,7 @@ describe("the local socket's place in the wiring", () => {
     const { seen } = harness();
 
     expect(seen.local?.paused()).toBe(false);
-    seen.local?.handlers.pause("2026-08-02T12:00:00.000Z");
+    seen.local?.handlers.pause();
 
     expect(seen.local?.paused()).toBe(true);
   });
@@ -521,7 +521,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
   // into the argv of the process that does the work. This is the join no unit test can see: config
   // knows the policy, executor knows the flag, and until now nothing carried one to the other.
   it("runs the agent on the model the server's policy names", async () => {
-    const { claudeArgs } = await runOneTask(async () => {}, {
+    const { claudeArgs } = await runOneTask(undefined, {
       model: "haiku",
       fallbackModel: "opus",
     });
@@ -536,7 +536,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
   // Reporting one "model" would show an operator a value no run is using once two projects on one
   // machine resolve differently, so the socket reports each bound project instead.
   it("serves each project's own resolved policy on the socket, not the startup defaults", async () => {
-    const { localConfig } = await runOneTask(async () => {}, {
+    const { localConfig } = await runOneTask(undefined, {
       model: "haiku",
       reviewModel: "opus",
       maxDiffLines: 77,
@@ -546,6 +546,9 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       apiUrl: "https://app.example.com",
       workerName: "worker-1",
       projectCount: 1,
+      // Asserted against the producer, not only against a fixture: local-server serves this object
+      // untransformed, so nothing else would notice the field being dropped or renamed here
+      pollIntervalMs: 30_000,
     });
     expect(localConfig?.().projects).toEqual([
       expect.objectContaining({
@@ -648,7 +651,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       expect(run.api.setStatus).not.toHaveBeenCalledWith("p1", "t1", "in_review");
       expect(run.phases.some((phase) => phase.startsWith("gates:"))).toBe(false);
       // said once, not once per phase still in flight while the run unwinds
-      const lost = run.logError.mock.calls.filter(([message]: [string]) =>
+      const lost = run.logError.mock.calls.filter(([message]) =>
         message.includes("no longer has run")
       );
       expect(lost).toHaveLength(1);
@@ -704,7 +707,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
   // naming a remote this machine does not have must bind nothing and say why.
   describe("the server can never name a directory here", () => {
     it("binds nothing and reports the reason when the remote is not on this machine", async () => {
-      const run = await runOneTask(async () => {}, undefined, {
+      const run = await runOneTask(undefined, undefined, {
         assignmentRemote: "git@github.com:someone/else.git",
       });
 
@@ -716,7 +719,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     // lockfile or without those scripts fails every task forever. It can only be checked once a
     // repository is bound, so the report has to pick it up on rebind rather than at startup.
     it("adds the bound repository's own shortcomings to the report", async () => {
-      const run = await runOneTask(async () => {}, undefined, {
+      const run = await runOneTask(undefined, undefined, {
         readFile: (path) =>
           path.endsWith("package.json") ? JSON.stringify({ scripts: { test: "vitest" } }) : null,
       });
@@ -730,7 +733,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     });
 
     it("says nothing about a bound repository that has what the gates need", async () => {
-      const run = await runOneTask(async () => {}, undefined, {
+      const run = await runOneTask(undefined, undefined, {
         readFile: (path) =>
           path.endsWith("package.json")
             ? JSON.stringify({ scripts: { build: "tsc", test: "vitest" } })
@@ -744,7 +747,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
 
     // A server that sends a path alongside the remote must not get one used
     it("ignores a path the server sends alongside the remote", async () => {
-      const run = await runOneTask(async () => {}, undefined, {
+      const run = await runOneTask(undefined, undefined, {
         extraAssignmentFields: { proposedPath: "/etc", path: "/etc" },
       });
 

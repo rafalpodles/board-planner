@@ -1,8 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+const connectDB = vi.fn();
 const getAuthUser = vi.fn();
 
-vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
+// The real module, so DatabaseUnavailableError is the class the route checks against
+vi.mock("@/lib/db", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/db")>()),
+  connectDB,
+}));
 vi.mock("@/models/session", () => ({ Session: {} }));
 vi.mock("@/lib/auth", () => ({
   getAuthUser,
@@ -21,6 +26,7 @@ vi.mock("mcp-handler", async (importOriginal) => {
 });
 
 const { POST } = await import("./route");
+const { DatabaseUnavailableError } = await import("@/lib/db");
 
 const ORIGINAL = { ...process.env };
 
@@ -34,6 +40,7 @@ beforeEach(() => {
   delete process.env.NEXT_PUBLIC_APP_URL;
   delete process.env.PUBLIC_ORIGIN;
   process.env.PUBLIC_ORIGIN = "https://board.example.com";
+  connectDB.mockResolvedValue(undefined);
   getAuthUser.mockResolvedValue({ username: "rpo" });
 });
 
@@ -86,5 +93,86 @@ describe("POST /api/mcp", () => {
     expect(body.error_description).toMatch(/PUBLIC_ORIGIN/);
     // Not "unconfigured, so fall back to what the caller says" — that was the shape of the bug
     expect(JSON.stringify(body)).not.toContain("evil.example");
+  });
+});
+
+describe("POST /api/mcp when the database is unreachable", () => {
+  function failsWith(error: unknown) {
+    getAuthUser.mockImplementation(async () => {
+      throw error;
+    });
+  }
+
+  function driverError(name: string, message = "connect ECONNREFUSED 127.0.0.1:27017"): Error {
+    const error = new Error(message);
+    error.name = name;
+    return error;
+  }
+
+  // The shape a real restart takes. For the first seconds mongoose still reports the connection as
+  // live, so nothing can be checked beforehand — the query inside verifyToken is what fails, and
+  // withMcpAuth's catch-all called that `invalid_token`: a client then discards a working OAuth
+  // token and walks the whole flow again for one that fails the same way (BP-362 review).
+  it("answers 503, not invalid_token, when the query fails mid-request", async () => {
+    failsWith(driverError("MongoServerSelectionError"));
+
+    const response = await POST(request({ authorization: "Bearer cpat_x" }));
+    const body = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(body.error).toBe("temporarily_unavailable");
+    expect(JSON.stringify(body)).not.toContain("invalid_token");
+    expect(response.headers.get("Retry-After")).toBe("5");
+  });
+
+  it("answers 503 for a connection that could not be established either", async () => {
+    const { DatabaseUnavailableError } = await import("@/lib/db");
+    failsWith(new DatabaseUnavailableError(driverError("MongooseServerSelectionError")));
+
+    expect((await POST(request({ authorization: "Bearer cpat_x" }))).status).toBe(503);
+  });
+
+  it("answers 503 for a query that timed out against the command buffer", async () => {
+    failsWith(
+      driverError("MongooseError", "Operation `sessions.findOne()` buffering timed out after 10000ms")
+    );
+
+    expect((await POST(request({ authorization: "Bearer cpat_x" }))).status).toBe(503);
+  });
+
+  it("says the credential was not the problem", async () => {
+    failsWith(driverError("MongoNetworkError"));
+
+    const body = await (await POST(request({ authorization: "Bearer cpat_x" }))).json();
+
+    expect(body.error_description).toMatch(/credential was not the problem/i);
+  });
+
+  it("still answers 401 to a missing credential, and asks the database nothing", async () => {
+    const response = await POST(request());
+
+    expect(response.status).toBe(401);
+    expect(getAuthUser).not.toHaveBeenCalled();
+  });
+
+  it("still answers 401 to a credential that genuinely resolved to nobody", async () => {
+    getAuthUser.mockImplementation(async () => null);
+
+    expect((await POST(request({ authorization: "Bearer cpat_x" }))).status).toBe(401);
+  });
+
+  it("does not dress an unrelated failure up as an outage", async () => {
+    failsWith(new TypeError("something else entirely"));
+
+    const response = await POST(request({ authorization: "Bearer cpat_x" }));
+
+    // withMcpAuth owns whatever this is; what matters is that it is not reported as a 503
+    expect(response.status).not.toBe(503);
+  });
+
+  it("still serves a healthy request", async () => {
+    const body = await (await POST(request({ authorization: "Bearer cpat_x" }))).json();
+
+    expect(body.auth.clientId).toBe("rpo");
   });
 });

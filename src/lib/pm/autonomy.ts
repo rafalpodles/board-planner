@@ -10,23 +10,10 @@ export const BOARD_REVIEW_DISALLOWED_TOOLS = ["change_status", "create_task", "a
 
 export const NEEDS_HUMAN_REVIEW_DISALLOWED_TOOLS = ["change_status", "assign_task"];
 
-export function hourInTimezone(date: Date, timeZone: string): number {
-  const value = new Intl.DateTimeFormat("en-GB", {
-    timeZone,
-    hour: "2-digit",
-    hourCycle: "h23",
-  }).format(date);
-  return Number(value);
-}
-
-export function dayKeyInTimezone(date: Date, timeZone: string): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(date);
-}
+// Moved to lib/time when the daily digest needed the same three, and re-exported here so the
+// PM's own callers and tests keep their import path
+import { dayKeyInTimezone, hourInTimezone, isValidTimezone } from "@/lib/time";
+export { hourInTimezone, dayKeyInTimezone, isValidTimezone };
 
 export function reviewIntervalHours(autonomy: Pick<IPmAutonomy, "reviewIntervalHours">): number {
   const raw = Math.round(Number(autonomy.reviewIntervalHours));
@@ -95,11 +82,3 @@ export function buildNeedsHumanReviewPrompt(taskKey: string): string {
   ].join("\n");
 }
 
-export function isValidTimezone(timeZone: string): boolean {
-  try {
-    new Intl.DateTimeFormat("en-GB", { timeZone });
-    return true;
-  } catch {
-    return false;
-  }
-}

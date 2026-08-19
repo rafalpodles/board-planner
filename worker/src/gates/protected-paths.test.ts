@@ -68,4 +68,82 @@ describe("protectedPathsGate", () => {
     expect(verdict.reason).toMatch(/CLAUDE\.md/);
     expect(verdict.reason).not.toMatch(/src\/ok\.ts/);
   });
+
+  // BP-333. The build gate runs `npm run build`, and in this repository that is `next build`, which
+  // imports next.config.ts — so the gate checking the change was executing a file the change could
+  // rewrite. --ignore-scripts closed lifecycle hooks; it does nothing about this.
+  it.each([
+    "next.config.ts",
+    "next.config.mjs",
+    "vite.config.js",
+    "vitest.config.ts",
+    "webpack.config.js",
+    "jest.config.cjs",
+    "playwright.config.ts",
+    "tailwind.config.ts",
+    "babel.config.js",
+    ".babelrc",
+    "Makefile",
+  ])("refuses %s, which a build or test script loads and runs", async (file) => {
+    const verdict = await gate.run(context([file, "src/a.test.ts"]));
+
+    expect(verdict.ok).toBe(false);
+  });
+
+  // A package.json script pointing at scripts/build.js means editing that file is execution without
+  // touching package.json, which is protected
+  it.each(["scripts/build.js", "scripts/nested/deploy.sh", "tools/scripts/thing.ts"])(
+    "refuses %s",
+    async (file) => {
+      expect((await gate.run(context([file]))).ok).toBe(false);
+    }
+  );
+
+  // BP-333, the other half: in a non-JS repository the build gate fails on `npm ci` before reading
+  // anything, so nothing here is executed locally. These files decide what runs *after* the change
+  // lands — the same hazard .github/workflows carries, and with autoMerge on there is no human
+  // between the change and the target's own CI.
+  it.each([
+    "pyproject.toml",
+    "requirements.txt",
+    "requirements-dev.txt",
+    "setup.py",
+    "pom.xml",
+    "build.gradle",
+    "build.gradle.kts",
+    "Gemfile",
+    "Rakefile",
+    "Cargo.toml",
+    "go.mod",
+    "composer.json",
+    "mix.exs",
+    "pubspec.yaml",
+    "Dockerfile",
+    "docker-compose.yml",
+    ".gitlab-ci.yml",
+    "Jenkinsfile",
+  ])("refuses %s, which decides what runs after the change lands", async (file) => {
+    const verdict = await gate.run(context([file]));
+
+    expect(verdict.ok).toBe(false);
+  });
+
+  // Not anchored to the root: this repository has three manifests, and worker/package.json is the
+  // one that runs the unattended agent
+  it("matches a manifest at any depth, not only at the repository root", async () => {
+    expect((await gate.run(context(["worker/package.json"]))).ok).toBe(false);
+    expect((await gate.run(context(["services/api/pyproject.toml"]))).ok).toBe(false);
+  });
+
+  // The gate has to stay usable: a repo full of ordinary source and docs must still pass
+  it.each([
+    "src/lib/slug.ts",
+    "docs/guide.md",
+    "src/app/page.tsx",
+    "README.md",
+    "src/styles/globals.css",
+    "public/logo.svg",
+  ])("still passes %s", async (file) => {
+    expect((await gate.run(context([file]))).ok).toBe(true);
+  });
 });

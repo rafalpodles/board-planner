@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createMcpHandler, withMcpAuth } from "mcp-handler";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { getAuthUser } from "@/lib/auth";
+import { isDatabaseUnreachable } from "@/lib/db-errors";
 import { ProvenanceError, selfOrigin, ORIGIN_REQUIRED } from "@/lib/session";
 import { registerPlannerTools } from "@/lib/mcp/tools";
 
@@ -30,29 +31,48 @@ const baseHandler = createMcpHandler(
     registerPlannerTools(server);
   },
   { serverInfo: { name: "boardplanner", version: "1.0.0" } },
-  { basePath: "/api", disableSse: true }
+  { basePath: "/api", disableSse: true },
 );
 
-async function verifyToken(req: Request, bearerToken?: string): Promise<AuthInfo | undefined> {
-  if (!bearerToken) return undefined;
+/**
+ * Built per request so it can report an outage back to the handler.
+ *
+ * withMcpAuth catches everything verifyToken throws and answers `invalid_token`, and a client that
+ * reads that discards a working OAuth token and walks the whole flow again for another one that
+ * fails identically. It cannot be headed off before delegating, either: for the first seconds after
+ * a database goes away mongoose still reports the connection as live, so a pre-flight check passes
+ * and the failure arrives here, from the query. So the honest place to notice is where it happens —
+ * hence the flag rather than a guard (BP-362 review).
+ */
+function makeVerifyToken(onUnreachable: () => void) {
+  return async function verifyToken(
+    req: Request,
+    bearerToken?: string,
+  ): Promise<AuthInfo | undefined> {
+    if (!bearerToken) return undefined;
 
-  let user;
-  try {
-    user = await getAuthUser(req);
-  } catch (e) {
-    if (e instanceof ProvenanceError) return undefined;
-    throw e;
-  }
-  if (!user) return undefined;
+    let user;
+    try {
+      user = await getAuthUser(req);
+    } catch (e) {
+      if (e instanceof ProvenanceError) return undefined;
+      if (isDatabaseUnreachable(e)) {
+        onUnreachable();
+        return undefined;
+      }
+      throw e;
+    }
+    if (!user) return undefined;
 
-  return {
-    token: bearerToken,
-    clientId: user.username,
-    scopes: [],
-    extra: {
-      baseUrl: plannerBaseUrl(),
-      username: user.username,
-    },
+    return {
+      token: bearerToken,
+      clientId: user.username,
+      scopes: [],
+      extra: {
+        baseUrl: plannerBaseUrl(),
+        username: user.username,
+      },
+    };
   };
 }
 
@@ -71,10 +91,32 @@ const handler = async (req: Request) => {
   if (!origin) {
     return NextResponse.json(
       { error: "server_error", error_description: ORIGIN_REQUIRED },
-      { status: 500 }
+      { status: 500 },
     );
   }
-  return withMcpAuth(baseHandler, verifyToken, { required: true, resourceUrl: origin })(req);
+  let unreachable = false;
+  const response = await withMcpAuth(
+    baseHandler,
+    makeVerifyToken(() => {
+      unreachable = true;
+    }),
+    { required: true, resourceUrl: origin },
+  )(req);
+
+  // Answered after the fact rather than before: the 401 mcp-handler has already composed is the
+  // wrong one, and replacing it is the only way to say the credential was never the problem
+  if (unreachable) {
+    return NextResponse.json(
+      {
+        error: "temporarily_unavailable",
+        error_description:
+          "The database is unreachable. The credential was not the problem.",
+      },
+      { status: 503, headers: { "Retry-After": "5" } },
+    );
+  }
+
+  return response;
 };
 
 export { handler as GET, handler as POST, handler as DELETE };

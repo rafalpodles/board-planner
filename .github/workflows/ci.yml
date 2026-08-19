@@ -62,9 +62,22 @@ jobs:
           cache: npm
           cache-dependency-path: worker/package-lock.json
       - run: npm ci
+      # `npm run build` compiles src/ with the tests excluded, and vitest does not type-check at
+      # all, so nothing here had ever read a worker test file's types. The script existed and was
+      # called by no one; 27 errors had collected behind it, including a test asserting a config
+      # shape the worker never serves (BP-334).
+      # Named for what it covers: tsconfig.test.json globs all of src/**, so this is the tests plus
+      # the sources they import, and a production type error surfaces here rather than at Build
+      - name: Types (tests and the sources they import)
+        run: npm run typecheck:tests
+      # Runs even when the type check failed. Steps are fail-fast, so one bad annotation used to
+      # mean the 866 worker tests never ran and the job reported no test result at all — the type
+      # error is the cheaper thing to know, and it must not cost the answer to "did behaviour break"
       - name: Tests
+        if: ${{ !cancelled() }}
         run: npm test
       - name: Build
+        if: ${{ !cancelled() }}
         run: npm run build
 
   mcp-server:
