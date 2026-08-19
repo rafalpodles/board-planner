@@ -121,15 +121,25 @@ test("changing something else about the project records nothing", async ({ page 
 // A worker-settings save that leaves `enabled` alone must not claim the project was committed or
 // withdrawn. The description test cannot cover this: it never sends `worker` at all, so the whole
 // branch is skipped and a broken condition inside it goes unseen.
+//
+// This is also the last real-database coverage of the shared `worker.policy.<field>` +
+// policyOverrides write path — every policy field goes through it, and
+// project-worker-config.test.ts only compares the resulting update object to a literal, which
+// proves what the code intends to write and nothing about what MongoDB does with it. That is the
+// exact shape of gap this repo has shipped before: shape assertions never noticed `""` was truthy
+// in Mongo's `$cond`. "Records nothing" would hold vacuously if the save had silently written
+// nothing at all, so the value and its pin are read back from the real collection too.
 test("changing worker policy without changing whether they run records nothing", async ({ page }) => {
   await signIn(page);
   await page.goto(SETTINGS);
   await page.getByRole("button", { name: "Workers", exact: true }).first().click();
 
+  // Any policy field does: the row has no label association, so it is found by the row it shares
+  // with its own text rather than by an accessible label
   await page
-    .getByRole("combobox")
-    .filter({ has: page.getByRole("option", { name: "Only tasks assigned to the worker" }) })
-    .selectOption("any");
+    .locator("xpath=//span[normalize-space()='Base branch']/..")
+    .getByRole("textbox")
+    .fill("develop");
   await Promise.all([
     page.waitForResponse(
       (r) => r.url().includes("/api/projects/") && r.request().method() === "PUT"
@@ -138,6 +148,11 @@ test("changing worker policy without changing whether they run records nothing",
   ]);
 
   expect(await auditRows()).toHaveLength(0);
+
+  const handle = await db();
+  const project = await handle.collection("projects").findOne({ _id: PROJECT_ID });
+  expect(project?.worker?.policy?.baseBranch).toBe("develop");
+  expect(project?.worker?.policyOverrides).toContain("baseBranch");
 });
 
 // The write used to fire before the update and before five later refusals, all in one handler. A

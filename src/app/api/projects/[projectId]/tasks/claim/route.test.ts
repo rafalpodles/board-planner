@@ -16,9 +16,11 @@ vi.mock("@/models/project", () => ({
 vi.mock("@/models/worker", () => ({
   Worker: { find: () => ({ select: workerFindOthers }) },
 }));
+const ownerReachableProjectIds = vi.fn();
 vi.mock("@/lib/worker-service", () => ({
   verifyWorkerCredential,
   verdictFor,
+  ownerReachableProjectIds,
   PROTOCOL_VERSION: 1,
 }));
 const releaseTask = vi.fn();
@@ -47,6 +49,9 @@ vi.mock("@/lib/middleware", () => ({
 const { POST } = await import("./route");
 
 const OID = "69a52e3b399b27d3cbb2c5a5";
+// Deliberately not OID: the machine's id and its owner's are two different people's answers, and a
+// fixture sharing one cannot tell "asked on behalf of the owner" from "asked on behalf of itself"
+const OWNER = "69a52e3b399b27d3cbb2c5b7";
 
 function request(headers: Record<string, string>, body: unknown = { runId: "run-1" }) {
   return new Request("http://localhost/api/projects/CP/tasks/claim", {
@@ -86,6 +91,7 @@ beforeEach(() => {
   resolveProjectId.mockResolvedValue(OID);
   verifyWorkerCredential.mockResolvedValue({ _id: OID, assignments: [] });
   verdictFor.mockReturnValue({ ok: true });
+  ownerReachableProjectIds.mockResolvedValue(["p1"]);
   claimNextTask.mockResolvedValue(hydrated({ _id: "t1", taskNumber: 1 }));
   snapshotFor.mockResolvedValue({ agentId: "a1", name: "Default", sequence: [] });
   releaseExpiredTasks.mockResolvedValue(0);
@@ -116,6 +122,36 @@ describe("POST /tasks/claim", () => {
     });
 
     expect(claimNextTask).toHaveBeenCalledWith(OID, OID, "run-1", null);
+  });
+
+  /**
+   * The claim and the snapshot must be asked the SAME question. `claimNextTask` matches a task the
+   * owner handed themselves, and `snapshotFor` then refuses a personal agent that is not that
+   * person's — a defence in depth that holds however the document reached the database, which is
+   * what a rule enforced in every writer cannot promise.
+   */
+  it("resolves the agent on behalf of the machine's owner, not the machine", async () => {
+    verifyWorkerCredential.mockResolvedValue({ _id: OID, owner: OWNER, assignments: [] });
+
+    await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
+
+    expect(claimNextTask).toHaveBeenCalledWith(OID, OID, "run-1", OWNER);
+    expect(snapshotFor).toHaveBeenCalledWith(OID, undefined, OWNER);
+  });
+
+  // The fleet route populates `owner`, and String() on a populated document is its inspect output —
+  // which claimNextTask answers by claiming nothing at all, silently, for the whole fleet
+  it("reads the id out of a populated owner before either call sees it", async () => {
+    verifyWorkerCredential.mockResolvedValue({
+      _id: OID,
+      owner: { _id: OWNER, username: "kasia" },
+      assignments: [],
+    });
+
+    await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
+
+    expect(claimNextTask).toHaveBeenCalledWith(OID, OID, "run-1", OWNER);
+    expect(snapshotFor).toHaveBeenCalledWith(OID, undefined, OWNER);
   });
 
   it("resolves a project key before asking the verdict or the claim", async () => {
@@ -149,14 +185,68 @@ describe("POST /tasks/claim", () => {
 
   // Holding a task no machine can run parks it behind the two-hour lease. 204 rather than an error
   // because the worker's loop treats a failed claim as a cycle failure and retries every poll —
-  // nothing here is claimable until somebody fixes the project, which is what 204 means.
+  // nothing here is claimable until somebody fixes the agent, which is what 204 means.
   it("hands the task back and reports an empty queue when no agent resolves", async () => {
     snapshotFor.mockResolvedValue(null as never);
 
     const response = await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
     expect(response.status).toBe(204);
-    expect(releaseTask).toHaveBeenCalledWith(OID, "t1", { refund: true });
+    expect(releaseTask).toHaveBeenCalled();
+  });
+
+  /**
+   * BP-358: with the attempt refunded this never terminated. The task went back to the head of the
+   * approved column, sorted first again thirty seconds later, and attempts never accumulated — so
+   * nothing escalated, nothing was logged, and every other claimable task on the project starved
+   * behind it. Spending the attempt bounds it: three cycles, then releaseTask parks it in the
+   * escalation column.
+   */
+  describe("a task naming an agent that resolves to nothing", () => {
+    beforeEach(() => {
+      snapshotFor.mockResolvedValue(null as never);
+    });
+
+    it("spends the attempt rather than refunding it", async () => {
+      await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
+
+      expect(releaseTask).toHaveBeenCalledWith(OID, "t1", {
+        refund: false,
+        workerId: OID,
+      });
+    });
+
+    // Naming the holder, or worker A could park worker B's task in escalation mid-run
+    it("names itself as the holder it is releasing on behalf of", async () => {
+      await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
+
+      expect(releaseTask.mock.calls[0][2].workerId).toBe(OID);
+    });
+
+    // The task moves back a column with no comment, no activity row and no run left to attach an
+    // error to, so this is the only record that it happened at all
+    it("logs the task and the agent that could not be resolved", async () => {
+      claimNextTask.mockResolvedValue(hydrated({ _id: "t1", taskNumber: 1, agent: "a-empty" }));
+      const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
+
+      expect(logged).toHaveBeenCalledWith(expect.stringContaining("t1"));
+      expect(logged).toHaveBeenCalledWith(expect.stringContaining("a-empty"));
+      logged.mockRestore();
+    });
+
+    // A failed release must not turn a 204 into a 500: the worker retries on its next poll either
+    // way, and throwing here would read as the server being down
+    it("still answers 204 when the release itself fails", async () => {
+      releaseTask.mockRejectedValue(new Error("mongo is having a moment"));
+      const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const response = await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
+
+      expect(response.status).toBe(204);
+      logged.mockRestore();
+    });
   });
 
   it("reports an empty queue as 204", async () => {
@@ -217,15 +307,64 @@ describe("POST /tasks/claim", () => {
   });
 });
 
-// The claim is an assignment now, so the worker's identity has to reach task-service — without it
-// a task is claimed and left unassigned, and the "never touch an assigned task" rule buys nothing.
-describe("the worker's identity travels with the claim", () => {
-  it("passes the identity the worker registered with", async () => {
-    verifyWorkerCredential.mockResolvedValue({ _id: OID, assignments: [], identity: "u-worker" });
+// The claim matched on the owner alone since BP-358, so the machine's own identity has no place
+// in it: a task assigned to a `worker-<id>` account used to be claimable with no assignedBy check
+// at all, and anyone able to reach the API can name that account.
+describe("the worker's identity does not travel with the claim", () => {
+  it("passes the owner and nothing else, even when the worker has an identity", async () => {
+    verifyWorkerCredential.mockResolvedValue({
+      _id: OID,
+      assignments: [],
+      identity: "u-worker",
+      owner: "u-owner",
+    });
     claimNextTask.mockResolvedValue(hydrated({ _id: "t1" }));
 
     await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
-    expect(claimNextTask).toHaveBeenCalledWith(OID, OID, "run-1", "u-worker");
+    expect(claimNextTask).toHaveBeenCalledWith(OID, OID, "run-1", "u-owner");
+  });
+});
+
+// BP-358: a machine claims its owner's work, so the owner set at enrolment has to reach
+// task-service too — without it every claim is refused, owner or not.
+describe("the worker's owner travels with the claim", () => {
+  // The verdict decides whether this machine may serve the project at all, and since BP-358 that
+  // answer comes from the owner's own grants rather than a list stored on the worker. Asserted on
+  // the argument, because verdictFor is mocked here and would say ok either way.
+  it("hands the verdict what its owner can reach", async () => {
+    verifyWorkerCredential.mockResolvedValue({ _id: OID, assignments: [], owner: "u-owner" });
+    ownerReachableProjectIds.mockResolvedValue(["p1", "p2"]);
+
+    await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
+
+    expect(ownerReachableProjectIds).toHaveBeenCalledWith(
+      expect.objectContaining({ owner: "u-owner" })
+    );
+    expect(verdictFor.mock.calls[0][5]).toEqual(["p1", "p2"]);
+  });
+
+  // IWorker["owner"] admits a populated document since the fleet route populates it, and
+  // String(<document>) yields something that is not an id — which claimNextTask answers by
+  // claiming nothing, silently, for every project the fleet serves
+  it("reads the id off a populated owner rather than stringifying the document", async () => {
+    verifyWorkerCredential.mockResolvedValue({
+      _id: OID,
+      assignments: [],
+      owner: { _id: "u-owner", username: "rpo", toString: () => "[object Object]" },
+    });
+
+    await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
+
+    expect(claimNextTask).toHaveBeenCalledWith(OID, OID, "run-1", "u-owner");
+  });
+
+  it("passes the owner set at enrolment", async () => {
+    verifyWorkerCredential.mockResolvedValue({ _id: OID, assignments: [], owner: "u-owner" });
+    claimNextTask.mockResolvedValue(hydrated({ _id: "t1" }));
+
+    await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
+
+    expect(claimNextTask).toHaveBeenCalledWith(OID, OID, "run-1", "u-owner");
   });
 });

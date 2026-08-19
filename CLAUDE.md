@@ -45,11 +45,15 @@ Since CP-128, statuses are project-defined **board columns** mapped to semantic 
 - `done` — merged to `main`, task complete.
 
 ### Autonomous task processing
-Claude automatically picks up tasks in `todo` status and processes them through the pipeline. No user confirmation needed for `todo` tasks.
+Claude automatically picks up tasks in `todo` status and processes them through the pipeline. No user confirmation needed for `todo` tasks. A **machine** taking one is a further step with its own requirements, below.
 
-Which of them an autonomous worker may take is the project's `claimScope` (Settings → Workers), because enabling a project should not by itself offer a machine the whole To Do list. The hand-over is an ordinary assignment to the user the project nominates there — `claude` on this board:
-- `assigned` (default) — only tasks assigned to that user. An enabled project claims nothing until somebody hands a task over, and nominating nobody means nothing qualifies.
-- `any` — unassigned tasks as well. A task parked for anyone else is never taken under either scope.
+Which of them a project's autonomous worker (Settings → Workers) may take follows the task's assignee, not a project-wide setting. A machine belongs to one person — whoever enrolled it — and it takes a task only when **all** of these hold:
+
+- the task is assigned to that person, and **that same person did the assigning** (`assignedBy`). Work somebody else hands you is a proposal; nothing runs it unattended, and the surface for accepting one does not exist yet.
+- the task **names an agent**. Choosing one is the hand-over gesture; the field is `agent` on the task, set from the Agent row in the task detail or `update_task`'s `agent` parameter. No agent means a person is doing it, which is the default.
+- the project is enabled for workers, and the machine's owner can reach that project.
+
+So the old instruction — assign the task to `claude` — no longer hands it to anything. `claude` is a person-shaped account; the machine belongs to **you**, and a task assigned to somebody else is exactly what it will not take. A task assigned before this change has no `assignedBy` recorded and is deliberately never claimed; assigning it again records one. When an agent is chosen and nothing will run the task, the Agent row says so and why.
 
 #### Size-based approach
 Size comes from the project's **Difficulty** field — an ordinary project-defined field since CP-213, not a column on the task. Read it from `customFieldValues`; a project that renamed or removed it has no size, and those tasks are treated as S/M.
@@ -59,7 +63,8 @@ Size comes from the project's **Difficulty** field — an ordinary project-defin
 #### Pipeline: todo → in_progress → in_review → ready_to_test → done
 
 **1. todo → in_progress (Start work)**
-- Pick the task, assign to `claude`, change status to `in_progress`.
+- Pick the task, assign it to yourself (`rpo`), change status to `in_progress`. Assigning it to `claude` hands it to nobody — see *Autonomous task processing* above.
+- To run it on a machine rather than by hand, also choose an agent: `update_task` with `agent: "<agent name>"`. Without one no machine looks at it; with one, and with the task assigned to the machine owner by the machine owner, the worker takes it on its next poll.
 - Add a comment: what approach will be taken (for S/M: brief, for L/XL: detailed plan — wait for approval).
 - Create a feature branch from `main`: `bp-<number>/<short-slug>` (e.g. `bp-5/remove-in-testing`).
 - Implement the task on that branch.
@@ -94,7 +99,8 @@ Size comes from the project's **Difficulty** field — an ordinary project-defin
 ### Conventions
 - Task keys: `BP-1`, `BP-2` — use these when referencing tasks. Pull requests opened under the old `CP-` prefix still link, because the project keeps its former keys.
 - **Project-defined fields go through the generic `fields` parameter**, keyed by field name: `fields: { "Difficulty": "L", "Component": "ui" }`. CP-214 removed the `difficulty` and `component` parameters that used to exist alongside it — a client still passing them gets nothing set. `get_project` lists the field names a project actually has.
-- Assignees use **usernames** (not IDs). `claude` = Claude Code, `rpo` = you.
+- Assignees use **usernames** (not IDs). `claude` = Claude Code, `rpo` = you. Routing keys on the assignee, so a task meant to run on your machine is assigned to `rpo`, not to `claude`.
+- **Handing work to a machine is `update_task`'s `agent` parameter**, named rather than by id — the id appears in no MCP response. Instance admins only, and refused for an agent nobody has composed yet.
 - Branch naming: `bp-<number>/<short-slug>` (e.g. `bp-3/dropdown-menu`)
 
 ### GitHub — always the `rafalpodles` account
@@ -173,11 +179,13 @@ mcp-server/           # Standalone MCP server (stdio transport)
 - **Notifications**: In-app + optional Slack/Discord webhooks + optional email
 - **Recurrence**: When task → done with recurrence config, auto-creates next task
 - **GitHub PR linking**: Matches PRs by branch/title pattern `BP-5`, and by any key the project used to have (case-insensitive)
-- **Autonomous workers**: Opt-in per project (Settings → Workers, instance admin). A worker reports
-  the checkouts it has — resolved from `repos.json` on its own machine — and the server matches
-  those remotes against the project's `githubRepo`/`gitlabRepo`. **The server never sends a path**:
-  an assignment names a remote and the worker resolves its own checkout, so where anything runs
-  stays a local decision. Work policy (`autoMerge`, `baseBranch`, diff limits, models) lives on the
+- **Autonomous workers**: Opt-in per project (Settings → Workers, instance admin). Enrolling a
+  machine is self-service and needs no admin approval: whoever connects it owns it, and a machine
+  reaches exactly the projects its owner reaches, resolved live from that person's grants rather
+  than stored. A worker reports the checkouts it has — resolved from `repos.json` on its own
+  machine — and the server matches those remotes against the project's `githubRepo`/`gitlabRepo`.
+  **The server never sends a path**: an assignment names a remote and the worker resolves its own
+  checkout, so where anything runs stays a local decision. Work policy (`autoMerge`, `baseBranch`, diff limits, models) lives on the
   project; only `pollIntervalMs` and the kill switch live on the worker. `autoMerge` defaults off,
   so an unconfigured project gets a pull request and nothing merged. See `worker/README.md`.
 - **A held task refuses to move**: while a run holds a task (`execution.runId` set), a status change

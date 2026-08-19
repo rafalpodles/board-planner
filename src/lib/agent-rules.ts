@@ -61,7 +61,8 @@ export function agentProblems(composition: AgentComposition, lookup: Lookup): Pr
 
   // An empty agent is a draft, not a broken one: every agent is empty between "New agent" and the
   // first thing dragged into it. It is refused where it would actually reach a machine — see
-  // isRunnable, used by the project-default route.
+  // isRunnable, which since BP-358 gates the task's own agent as well as the project default,
+  // because the task's agent is now the only thing a claim resolves.
   if (sequence.length === 0) return [];
 
   // Last occurrence, not first: a composition may carry the same block twice, and these rules ask
@@ -163,7 +164,13 @@ export function agentProblems(composition: AgentComposition, lookup: Lookup): Pr
   return problems;
 }
 
-/** Whether a worker handed this agent would have anything to do. */
+/**
+ * Whether a worker handed this agent would have anything to do.
+ *
+ * Every writer that can put an agent where a machine will resolve it has to ask: an empty one is
+ * stored on purpose, and `snapshotFor` answers null for it, which a claim can only respond to by
+ * handing the task straight back — every poll, forever, ahead of everything else in the column.
+ */
 export function isRunnable(composition: AgentComposition): boolean {
   return sequenceOf(composition).length > 0;
 }

@@ -4,7 +4,7 @@ import { connectDB } from "./db";
 import { DeviceEnrolment } from "@/models/deviceEnrolment";
 import { Project } from "@/models/project";
 import { projectRepositoryUrl } from "./repository";
-import { IDeviceEnrolment, WorkerPreset } from "@/types";
+import { IDeviceEnrolment } from "@/types";
 
 // Long enough that guessing the app's half is hopeless
 const DEVICE_PREFIX = "cpd_";
@@ -51,8 +51,8 @@ export interface StartedEnrolment {
 }
 
 // Unauthenticated on purpose: the machine has nothing to authenticate with yet, which is the whole
-// point. Nothing is granted here — a row in "pending" is worth nothing until a signed-in admin
-// approves it, and it reaps itself in fifteen minutes if nobody does.
+// point. Nothing is granted here — a row in "pending" is worth nothing until a signed-in person
+// confirms it, and it reaps itself in fifteen minutes if nobody does.
 // Each pending row costs a bcrypt.hash to create and sits in the collection until it reaps, so
 // the number of them one unapproved caller can hold open has to be bounded somewhere (BP-305)
 export const MAX_PENDING_ENROLMENTS = 20;
@@ -185,17 +185,4 @@ export async function denyDeviceEnrolment(userCode: string): Promise<boolean> {
     { $set: { status: "denied", credential: "" } }
   );
   return result.modifiedCount > 0;
-}
-
-// A preset names a seeded agent. Reviewing and merging are properties of a composition — whether it
-// carries a Reviewed gate, whether it carries a Merge step — so a preset that set two booleans
-// beside the composition would describe the same decision twice and lose the argument.
-export const PRESET_AGENT: Record<WorkerPreset, string> = {
-  write: "Default",
-  review: "With security review",
-  merge: "Merges its own work",
-};
-
-export function isWorkerPreset(value: unknown): value is WorkerPreset {
-  return value === "write" || value === "review" || value === "merge";
 }

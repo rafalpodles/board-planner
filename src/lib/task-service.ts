@@ -9,6 +9,7 @@ import { Sprint } from "@/models/sprint";
 import { ApiTaskExecution, ICustomField, ITask, ITaskExecution, RunConflict, DEFAULT_PRIORITY } from "@/types";
 import { getColumnIds, defaultStatusFor, roleOf, getProjectColumns, columnIdsWithRole } from "@/lib/columns";
 import { escalationColumnId } from "@/lib/escalation";
+import { isRunnable, normaliseComposition } from "@/lib/agent-rules";
 import { logActivity } from "@/lib/activity";
 import { dispatchWebhooks } from "@/lib/webhooks";
 import { dispatchNotifications } from "@/lib/notifications";
@@ -26,7 +27,6 @@ import {
   customFieldActivityChanges,
 } from "@/lib/custom-fields";
 import { onTaskStatusChanged } from "@/lib/pm/triggers";
-import { PROJECT_POLICY_DEFAULTS, isClaimScope } from "@/lib/worker-policy";
 import { workerUsername } from "@/lib/worker-user";
 
 export const MAX_EXECUTION_ATTEMPTS = 3;
@@ -42,7 +42,7 @@ const PHASE_FIELDS = ["execution.phase", "execution.phaseAt", "execution.phaseSe
 const RUN_FIELDS = [...PHASE_FIELDS, "execution.runId"];
 const UNSET_RUN = Object.fromEntries(RUN_FIELDS.map((field) => [field, ""]));
 
-// A worker that claimed an unassigned task assigns it to itself, and that assignment has to die
+// A worker used to claim an unassigned task and assign it to itself, and that assignment has to die
 // with the run — every way back to the board, or the task is left assigned to a machine that is not
 // running it and no worker will ever claim it again.
 //
@@ -54,32 +54,36 @@ const UNSET_RUN = Object.fromEntries(RUN_FIELDS.map((field) => [field, ""]));
 // `runId`, not `workerId`: workerId is deliberately left behind when a run ends — every reader
 // pairs it with runId to tell a live run from a memory of one. Keying on it here meant an ordinary
 // status change on a long-finished task still cleared its assignee, so "assign it to claude, then
-// drag it to To Do" quietly undid the assignment. Under claimScope "assigned" that is the whole
-// hand-over, and the worker would simply never pick the task up.
+// drag it to To Do" quietly undid the assignment — assignment is still central to the hand-over,
+// and the worker would simply never pick the task up.
 //
-// `assignedByRun` says the claim is what put the assignee there. A claim may now land on a task a
-// person assigned, and releasing it must give the task back to that person rather than blank the
-// field — a released task with no assignee drops out of what the worker may claim and is never
-// retried. Missing means true: tasks claimed before this field existed went through a filter that
-// refused any assignee, so back then the run really did set it.
+// `assignedByRun` says the claim is what put the assignee there. Since BP-358 a claim only ever
+// takes a task somebody already assigned, so it writes this `false` every time and this half of
+// the condition is here for one shrinking population: runs claimed by the older code and still in
+// flight across the deploy, plus tasks it already stamped. Releasing a task a person assigned must
+// give it back to that person rather than blank the field — a released task with no assignee drops
+// out of what the worker may claim and is never retried. Missing means true: tasks claimed before
+// this field existed went through a filter that refused any assignee, so back then the run really
+// did set it.
 //
 // `$ifNull` alone was wrong and shipped once: `execution.runId` defaults to the empty string, and
 // an empty string is TRUTHY in MongoDB's `$cond` — unlike in JavaScript. So every ordinary status
 // change cleared the assignee of every task that had ever been near the execution subdocument.
 // Compare explicitly; do not lean on truthiness across that boundary.
+const RUN_RELEASES_ASSIGNEE = {
+  $and: [
+    { $ne: [{ $ifNull: ["$execution.runId", ""] }, ""] },
+    { $eq: [{ $ifNull: ["$execution.assignedByRun", true] }, true] },
+  ],
+};
+
+// assignedBy mirrors assignee on the same condition, and only on this one: a RUN giving back an
+// assignment it invented must leave no assigner behind either, or the field goes on describing a
+// person who has nothing to do with the empty one. A PERSON unassigning a task is the opposite
+// case — there `updateTask` records who did it, because somebody did.
 export const CLEAR_WORKER_ASSIGNEE = {
-  assignee: {
-    $cond: [
-      {
-        $and: [
-          { $ne: [{ $ifNull: ["$execution.runId", ""] }, ""] },
-          { $eq: [{ $ifNull: ["$execution.assignedByRun", true] }, true] },
-        ],
-      },
-      null,
-      "$assignee",
-    ],
-  },
+  assignee: { $cond: [RUN_RELEASES_ASSIGNEE, null, "$assignee"] },
+  assignedBy: { $cond: [RUN_RELEASES_ASSIGNEE, null, "$assignedBy"] },
 };
 
 // A release only applies to a task the run still holds. Status alone is not enough: a board may
@@ -92,12 +96,30 @@ const STILL_HELD = { "execution.runId": { $nin: ["", null] } };
 // active column, where claimNextTask can never see it again — nothing else reclaims it.
 export const EXECUTION_LEASE_MS = 2 * 60 * 60 * 1000;
 
+// The one list, used by task-service's own writes and by both task routes. It was three copies
+// until BP-358's review: `assignedBy` had to be added to each, and dropping it from any one left
+// that route answering with a bare ObjectId — so the Agent row's "Krzysiek assigned it" degraded
+// to "Somebody else assigned it" with nothing failing anywhere.
 export const taskPopulateFields = [
   { path: "assignee", select: "username fullName" },
+  // Named, not left as an id: this is what the agent picker reads to say why nothing will run a
+  // task somebody else handed over, and "assigned by 6a70…" answers nobody's question
+  { path: "assignedBy", select: "username fullName" },
   { path: "createdBy", select: "username fullName" },
+  // Named for the same reason, and it is the one field on the task that decides what executes:
+  // `/api/agents` withholds other people's personal agents, so without the name here the picker
+  // cannot resolve the id and renders "No agent" over a task that is carrying one.
+  { path: "agent", select: "name" },
   { path: "blockedBy", select: "taskNumber title status" },
   { path: "relations.task", select: "taskNumber title status" },
 ];
+
+/** The id behind a ref that may or may not have been populated. Guarded first: typeof null is "object". */
+function refId(ref: unknown): string {
+  return ref && typeof ref === "object" && "_id" in ref
+    ? String((ref as { _id: unknown })._id)
+    : String(ref ?? "");
+}
 
 export type TaskServiceResult<T = ITask> =
   | { ok: true; data: T }
@@ -146,24 +168,74 @@ type Body = Record<string, any>;
  * appear in another board's counts and be moved by its sprint completion (BP-314).
  */
 /**
+ * Whether this agent may be written onto this project's task, and why not.
+ *
  * A project agent belongs to one project and must not be borrowed by another's task — the same
  * shape of cross-project reference BP-314 closed for sprints. Global and personal agents run
  * anywhere their owner can reach.
+ *
+ * Runnability is checked here too, because since BP-358 the task's own agent is the only thing
+ * that reaches a machine. Every agent is born empty — `NewAgent` carries no composition — and an
+ * empty one is a draft, which agent-rules deliberately stores rather than refuses. Written onto a
+ * task it becomes a claim the worker cannot serve: `snapshotFor` answers null, the route hands the
+ * task straight back, and the task sorts first on the next poll thirty seconds later. That is the
+ * task's own queue position, so every other claimable task on the project waits behind it.
+ *
+ * `assigneeAfter` is who the task belongs to once this update lands, and it is what keeps a
+ * personal agent personal. Authoring one is open to anyone, so its steps are a composition nobody
+ * vetted — a project agent is project-admin (`/api/agents`), a global one is shipped. A claim runs
+ * on the machine of whoever assigned the task to themselves, which need not be whoever chose the
+ * agent, so "the actor owns it" alone would let a member compose `merge` with no review gate and
+ * point a colleague's self-assigned task at it. `agent-rules` grades that composition risky rather
+ * than broken, so it stores; and a step's capability is not something the prompt around it can
+ * argue with.
  */
 async function agentUsableOnProject(
   projectId: string,
   agent: unknown,
-  actingUserId: unknown
-): Promise<boolean> {
-  if (typeof agent !== "string" || !Types.ObjectId.isValid(agent)) return false;
+  actingUserId: unknown,
+  assigneeAfter: unknown
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const unusable = { ok: false as const, error: "That agent cannot run on this project" };
+  if (typeof agent !== "string" || !Types.ObjectId.isValid(agent)) return unusable;
   const { Agent } = await import("@/models/agent");
-  const found = await Agent.findById(agent, "scope project owner").lean();
-  if (!found) return false;
-  if (found.scope === "project") return String(found.project) === String(projectId);
+  const found = await Agent.findById(agent, "scope project owner name composition").lean();
+  if (!found) return unusable;
+  if (found.scope === "project" && String(found.project) !== String(projectId)) return unusable;
   // A personal agent is somebody's own; pointing a task at another person's would run their
   // prompts, with write access, on this project's checkout.
-  if (found.scope === "user") return String(found.owner) === String(actingUserId);
-  return true;
+  if (found.scope === "user" && String(found.owner) !== String(actingUserId)) return unusable;
+  if (found.scope === "user" && String(found.owner) !== String(assigneeAfter ?? "")) {
+    return {
+      ok: false,
+      error:
+        "A personal agent only runs on your own tasks. Assign this task to yourself, or pick one of the project's agents.",
+    };
+  }
+
+  if (!isRunnable(normaliseComposition(found.composition))) {
+    return {
+      ok: false,
+      error: `"${found.name}" has no steps in it yet, so a machine handed this task would have nothing to run. Add at least one step to it first.`,
+    };
+  }
+  return { ok: true };
+}
+
+/**
+ * Whether the agent this task already carries is a personal one the incoming assignee could not
+ * have chosen — the only kind a hand-over invalidates.
+ *
+ * A missing agent answers false rather than clearing: a dangling reference is not somebody's
+ * composition, and `DELETE /api/agents/:id` refuses while any task points at one, so this is a
+ * hand-edited database rather than a state the product produces.
+ */
+async function personalAgentAlienTo(agent: unknown, assigneeAfter: unknown): Promise<boolean> {
+  const { Agent } = await import("@/models/agent");
+  const found = await Agent.findById(agent, "scope owner").lean();
+  if (!found || found.scope !== "user") return false;
+  // "" for an unassigned task, which never equals an owner: nobody holds it, so nobody chose it
+  return String(found.owner) !== refId(assigneeAfter);
 }
 
 async function sprintBelongsToProject(projectId: string, sprint: unknown): Promise<boolean> {
@@ -229,6 +301,7 @@ export async function createTask(
     category,
     status,
     assignee: assigneeId,
+    assignedBy: assigneeId ? actorId : null,
     dueDate: body.dueDate || null,
     checklist: Array.isArray(body.checklist)
       ? body.checklist
@@ -491,14 +564,7 @@ export async function updateTask(
   taskId: string,
   body: Body,
   actorId: string,
-  force = false,
-  // Whether this caller may choose the task's agent. A boolean rather than a user, because the
-  // answer is a property of the *request's* principal: `tokenScoped`, `tokenScope` and the role a
-  // scoped token was degraded to are attached in memory by getAuthUser and are not schema fields,
-  // so re-loading the actor here would silently promote a scoped token back to admin. The route
-  // holds the live principal; it decides. Defaults to false so a caller that says nothing is
-  // refused rather than trusted (BP-345).
-  mayChooseAgent = false
+  force = false
 ): Promise<TaskServiceResult> {
   await connectDB();
 
@@ -513,7 +579,6 @@ export async function updateTask(
       updates[field] = body[field];
     }
   }
-
   // "" is what a cleared <select> sends, and it is not a value this field can hold: `sprint` is an
   // ObjectId, so an empty string casts to a CastError and surfaces as a 500. Normalise first, then
   // there is exactly one way to say "no sprint" and one check for everything else.
@@ -524,26 +589,10 @@ export async function updateTask(
     }
   }
 
+  // "" is what a cleared picker sends, and an ObjectId ref cannot hold it. Normalised here, before
+  // anything reads the field, so there is one way to say "no agent" — the check itself has to wait
+  // until the assignee this update leaves behind is known.
   if (updates.agent === "") updates.agent = null;
-  if (updates.agent !== undefined) {
-    // Compared against what is stored, so re-sending the value a task already carries is a no-op
-    // rather than a refusal. A REST consumer that GETs, edits a title and PUTs the whole object
-    // would otherwise start failing on a field it never touched — the same call BP-354 made for
-    // the stored address. Writing an unchanged value changes nothing, so permitting it is safe.
-    const stored = await Task.findOne({ _id: taskId, project: projectId }, "agent").lean();
-    const changes = String(stored?.agent ?? "") !== String(updates.agent ?? "");
-    if (changes && !mayChooseAgent) {
-      return {
-        ok: false,
-        error: "Only an instance admin can choose which agent runs a task",
-        status: 403,
-      };
-    }
-    // Clearing counts as changing: reverting to the project default still changes what runs.
-    if (updates.agent !== null && !(await agentUsableOnProject(projectId, updates.agent, actorId))) {
-      return { ok: false, error: "That agent cannot run on this project", status: 400 };
-    }
-  }
 
   if (updates.category !== undefined || updates.status !== undefined) {
     const proj = await Project.findById(projectId, "categories columns").lean();
@@ -610,6 +659,33 @@ export async function updateTask(
     updates.assignee = assigneeUser ? assigneeUser._id : null;
   }
 
+  // Stamped only when the assignee actually moves, and after it has been resolved to an id so the
+  // comparison is between two of the same thing. The same call `agent` makes further down,
+  // for the same client: a REST or MCP consumer that GETs a task, edits one field and PUTs the
+  // whole object back would otherwise re-stamp itself as the assigner — which silently takes the
+  // task out of what any machine may claim, with no error, no activity row, and a card that looks
+  // exactly as it did.
+  const before = oldTask.assignee as { _id?: unknown } | null | undefined;
+  const storedAssignee = String((before && before._id) ?? before ?? "");
+  if (updates.assignee !== undefined) {
+    const moved = storedAssignee !== String(updates.assignee ?? "");
+    // Or when nothing is recorded yet, which is every task stored before BP-358. Without that
+    // clause the documented repair — assign it again — is a no-op for the common legacy shape
+    // (already assigned to you, no assigner), and the Agent row's "assign it again to record that"
+    // becomes a lie.
+    //
+    // Narrowed to the actor putting the task in their OWN hands, because the repair is a person
+    // taking on a task and there is nobody else it could be. Any other writer echoing the assignee
+    // it just read — the PM agent, MCP under a second account, a REST client PUTting the whole
+    // object — would otherwise stamp itself as the assigner of work it had nothing to do with,
+    // which reads as a definite "somebody else handed you this" where the truth is "nobody knows",
+    // and leaves the owner's own re-selection unable to change anything.
+    const takesItOn = !oldTask.assignedBy && String(actorId) === String(updates.assignee ?? "");
+    if (moved || takesItOn) {
+      updates.assignedBy = actorId;
+    }
+  }
+
   // The edit form PUTs the whole task, status included, so leaving the active column is
   // as much a release as changeStatus is. Keyed on the value actually changing, not on
   // the field being present: dragging a card within its own column resends the status it
@@ -643,11 +719,51 @@ export async function updateTask(
   const heldByRun = !!oldTask.execution?.runId;
   const claimAssigned = oldTask.execution?.assignedByRun !== false;
   const releasesWorker = leavesColumn && heldByRun && claimAssigned;
-  const setFields = releasesWorker ? { assignee: null, ...updates } : updates;
+  const setFields: Record<string, unknown> = releasesWorker
+    ? { assignee: null, assignedBy: null, ...updates }
+    : updates;
+
+  // Who the task belongs to once this update lands. Read off `setFields` rather than off
+  // `updates`, because a status change that leaves the active column while a run holds the task
+  // blanks the assignee in that same write — so a forced release leaves the task belonging to
+  // nobody, and nobody is not "assigned to you".
+  const assigneeAfter = "assignee" in setFields ? setFields.assignee : storedAssignee;
+  // The pair a claim requires is `assignee === assignedBy === the machine's owner`, so a write
+  // changing EITHER half is the hand-over coming into being. The second half is not hypothetical:
+  // the legacy repair the product itself prints — assign it to yourself again — does not move the
+  // assignee, and stamping the assigner is what makes such a task claimable for the first time.
+  const handsItOver =
+    refId(assigneeAfter) !== storedAssignee || updates.assignedBy !== undefined;
+
+  // BP-345 kept the choice to instance admins because it could arm a machine belonging to somebody
+  // else. Since BP-358 a claim requires assignee === assignedBy === the machine's owner, so the
+  // routing holds that boundary for the vetted agents and the choice belongs to whoever may edit
+  // the task — which the route's project gate already answers. Which agents may run here at all is
+  // a separate question, and still asked; null is exempt because choosing none names no agent.
+  //
+  // Judged against the assignee this update LEAVES, not the one it read: assignee and agent travel
+  // in the same PUT, so reading the stored one would let `{ assignee: colleague, agent: mine }`
+  // through on the strength of a pairing the write is about to end.
+  if (updates.agent !== undefined && updates.agent !== null) {
+    const usable = await agentUsableOnProject(projectId, updates.agent, actorId, assigneeAfter);
+    if (!usable.ok) return { ok: false, error: usable.error, status: 400 };
+  }
+
+  // An agent is the hand-over, so handing the task to a different person is a NEW hand-over and
+  // the agent that rode the old one has no standing on it. Only a personal one: a project agent
+  // was authored by a project admin and a global one is shipped, so the incoming assignee could
+  // have chosen either, and dropping them would lose a field on every ordinary reassignment.
+  //
+  // Only the agent already STORED. One named in this same request was judged against the assignee
+  // this write leaves, immediately above, and re-clearing it would undo a valid choice.
+  if (handsItOver && updates.agent === undefined && oldTask.agent) {
+    if (await personalAgentAlienTo(oldTask.agent, assigneeAfter)) setFields.agent = null;
+  }
 
   const task = await Task.findOneAndUpdate(
     { _id: taskId, project: projectId },
-    leavesColumn ? { $set: setFields, $unset: UNSET_RUN } : { $set: updates },
+    // One `$set`, so nothing decided after `setFields` was built can reach one arm and not the other
+    { $set: setFields, ...(leavesColumn ? { $unset: UNSET_RUN } : {}) },
     { returnDocument: "after", runValidators: true, timestamps: !onlyOrder }
   ).populate(taskPopulateFields);
 
@@ -661,8 +777,11 @@ export async function updateTask(
   // Without it there is no answer to "who pointed the machine at that prompt" (BP-345).
   const trackFields = ["title", "priority", "category", "status", "agent"];
   for (const field of trackFields) {
-    const oldVal = String(oldTask[field as keyof typeof oldTask] ?? "");
-    const newVal = String(task[field as keyof typeof task] ?? "");
+    // Through refId, not String(): `oldTask` is lean and holds a raw ObjectId while `task` comes
+    // back with `agent` populated, and String() on a populated document is its inspect output —
+    // so a plain comparison would log an agent change on every update that changed nothing.
+    const oldVal = refId(oldTask[field as keyof typeof oldTask]);
+    const newVal = refId(task[field as keyof typeof task]);
     if (oldVal !== newVal) {
       const action = field === "status" ? "status_changed" as const : "updated" as const;
       activities.push(logActivity(taskId, actorId, action, field, oldVal, newVal));
@@ -911,6 +1030,15 @@ async function createNextRecurrence(
     category: oldTask.category || "user-story",
     status: defaultStatusFor(project),
     assignee: oldTask.assignee,
+    // Inherited, not stamped with userId: userId is whoever/whatever closed this occurrence, which
+    // may be the worker's own identity finishing its run, not the person who owns the series. The
+    // next occurrence continues the same standing assignment, so it carries the same assigner.
+    assignedBy: oldTask.assignedBy,
+    // Carried for the same reason, and BP-358 is why it has to be: choosing an agent is the whole
+    // of the hand-over now, so an occurrence created without one is a task no machine looks at. A
+    // weekly task that had run autonomously for months would simply stop, and the card would look
+    // entirely normal — no error, no empty field a person would notice.
+    agent: oldTask.agent ?? null,
     dueDate: nextDue,
     checklist,
     recurrence: oldTask.recurrence,
@@ -1070,62 +1198,23 @@ export async function claimNextTask(
   projectId: string,
   workerId: string,
   runId: string,
-  // The worker's own identity user. A claim is an assignment, which is what stops two machines
-  // converging on one task and what makes a task parked for a colleague untouchable.
-  identity?: string | null
+  // The machine's owner. A machine takes the work this person handed it, and nothing else.
+  ownerId?: string | null
   // A document, not a plain ITask: the caller has to know, because spreading one silently yields
   // Mongoose internals with every real field a level down.
 ): Promise<HydratedDocument<ITask> | null> {
   await connectDB();
 
-  const project = await Project.findById(
-    projectId,
-    "columns worker.policy.claimScope worker.claimAssignee"
-  ).lean();
+  const project = await Project.findById(projectId, "columns").lean();
   const columns = getProjectColumns(project);
   const approved = columns.filter((c) => c.role === "approved").map((c) => c.id);
   const activeStatus = columns.find((c) => c.role === "active")?.id;
   if (approved.length === 0 || !activeStatus) return null;
 
-  // Cast here, not in the pipeline. Mongoose casts a plain $set against the schema and does not
-  // cast an update pipeline at all, so the raw string would be stored in an ObjectId ref field —
-  // populate still renders it, and every query that casts its side (My Tasks, the board's assignee
-  // filter, this very claim filter) silently stops matching the task.
-  // A worker's identity is an ObjectId ref, so one that cannot be parsed means a corrupt worker
-  // record. Claim nothing: throwing would 500 the poll loop, and claiming while assigning nobody
-  // would hand work to a machine that no later query can associate with it.
-  if (identity && !Types.ObjectId.isValid(identity)) return null;
-  const assignTo = identity ? new Types.ObjectId(identity) : null;
-
-  const worker = (
-    project as {
-      worker?: { policy?: { claimScope?: unknown }; claimAssignee?: unknown };
-    } | null
-  )?.worker;
-  const scope = isClaimScope(worker?.policy?.claimScope)
-    ? worker.policy.claimScope
-    : PROJECT_POLICY_DEFAULTS.claimScope;
-  const nominee = worker?.claimAssignee ? String(worker.claimAssignee) : null;
-
-  // What "enabled" is allowed to mean. Under "assigned" a worker only takes tasks handed to the
-  // user this project nominates, so connecting one to a project full of To Do does nothing until
-  // somebody offers it work — the task is the unit of consent, not the project. Under "any" an
-  // unassigned task is fair game too.
-  //
-  // The nominee is an ordinary user a person picks, deliberately not the worker's own identity:
-  // that is an auto-created `worker-<id>` account with kind "machine", excluded from every list
-  // the product offers, so keying on it would make the hand-over impossible to perform.
-  //
-  // A task the run is resuming is already assigned to the worker's identity, so that matches too;
-  // without it a release would hand back a task no scope could pick up again.
-  const handed = [
-    ...(nominee ? [{ assignee: nominee }] : []),
-    ...(identity ? [{ assignee: identity }] : []),
-  ];
-  const claimable = scope === "assigned" ? handed : [{ assignee: null }, ...handed];
-  // Nominating nobody under "assigned" means nothing qualifies. Failing closed is the point of the
-  // setting, and the settings screen says so rather than leaving it to be discovered.
-  if (claimable.length === 0) return null;
+  // Explicit about presence, not just format: isValid(null | undefined | "") already happens to
+  // return false in this bson version, but that is the library's choice, not a guarantee — a
+  // missing owner should not depend on it staying that way.
+  if (!ownerId || !Types.ObjectId.isValid(ownerId)) return null;
 
   // Finished is the done role, not a status called "done": a board that renamed its last column
   // would otherwise read every shipped blocker as still open. A board with NO done-role column
@@ -1155,30 +1244,46 @@ export async function claimNextTask(
     {
       project: projectId,
       status: { $in: approved },
+      // Assigned to the owner *by* the owner. Somebody else assigning you work is a proposal, and
+      // the surface for accepting one does not exist yet — so it is refused rather than run
+      // unattended.
+      //
+      // A task stored before BP-358 has no `assignedBy` key at all, and a missing field never
+      // equals an ObjectId, so this refuses every one of them. That is the decision, not an
+      // oversight, and there is deliberately no backfill: the field answers "did this person hand
+      // this to themselves", the document does not record it, and the obvious guess —
+      // assignedBy := assignee — silently converts work somebody else handed you into work you
+      // handed yourself, for every task at once. Nothing is lost by refusing: a task also has to
+      // name an agent to be claimable, and the ones that do were routed by the old project-wide
+      // nominee, so they are assigned to that nominee rather than to any machine's owner and have
+      // to be reassigned regardless — which stamps `assignedBy` through updateTask. The agent
+      // picker says so on the task itself.
+      assignee: ownerId,
+      assignedBy: ownerId,
+      // Choosing an agent is the hand-over; a task naming none is one a person is doing
+      agent: { $ne: null },
       // On an array field this means "holds none of them", so a task with no blockers, one whose
       // blockers have all finished, and one written before the field existed all still qualify
       blockedBy: { $nin: openBlockers },
-      $and: [
-        { $or: claimable },
-        // Mongoose applies defaults at hydration, so tasks created before the
-        // execution subdocument existed have no such field — and $lt never
-        // matches a missing one
-        {
-          $or: [
-            { "execution.attempts": { $exists: false } },
-            { "execution.attempts": { $lt: MAX_EXECUTION_ATTEMPTS } },
-          ],
-        },
+      // Mongoose applies defaults at hydration, so tasks created before the
+      // execution subdocument existed have no such field — and $lt never
+      // matches a missing one
+      $or: [
+        { "execution.attempts": { $exists: false } },
+        { "execution.attempts": { $lt: MAX_EXECUTION_ATTEMPTS } },
       ],
     },
     [
       {
         $set: {
           status: activeStatus,
-          // Kept, not overwritten: under "assigned" the assignee is the hand-over itself, and
-          // whether the claim is what set it decides whether releasing may clear it again
-          ...(assignTo ? { assignee: { $ifNull: ["$assignee", assignTo] } } : {}),
-          "execution.assignedByRun": { $eq: [{ $ifNull: ["$assignee", null] }, null] },
+          // Neither `assignee` nor `assignedBy` is written: the filter above matched on both, so
+          // the hand-over is already exactly what it should stay.
+          //
+          // Written false, not omitted: releasing reads `$ifNull` over this and treats a MISSING
+          // value as "the claim assigned it", which would blank the person's own assignment on
+          // the first release and drop the task out of what any machine may claim.
+          "execution.assignedByRun": false,
           "execution.workerId": workerId,
           "execution.runId": runId,
           "execution.startedAt": new Date(),

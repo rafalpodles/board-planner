@@ -45,7 +45,11 @@ async function currentTasks(workerIds: string[]): Promise<Map<string, ApiWorkerT
 export const GET = withAdmin(async () => {
   await connectDB();
 
-  const workers = await Worker.find().sort({ name: 1, host: 1 });
+  // Populated, not left as an id: the fleet console's Owner column exists to answer "whose machine
+  // is this", and toApiWorker reads a name off the ref rather than inventing one from the id.
+  const workers = await Worker.find()
+    .populate("owner", "username fullName")
+    .sort({ name: 1, host: 1 });
   const now = new Date();
   const running = await currentTasks(workers.map((worker) => String(worker._id)));
 

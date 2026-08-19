@@ -6,6 +6,8 @@ const verifyWorkerCredential = vi.fn();
 const workerFindById = vi.fn();
 const projectFind = vi.fn();
 const countDocuments = vi.fn();
+const accessibleProjectIds = vi.fn();
+const userFindById = vi.fn();
 const workerFindOthers = vi.fn();
 const workerFindByIdAndUpdate = vi.fn();
 const logInstanceAudit = vi.fn();
@@ -16,7 +18,8 @@ vi.mock("@/lib/auth", () => ({
   getAuthUser,
   RateLimitError: class RateLimitError extends Error {},
 }));
-vi.mock("@/lib/grants", () => ({ check, accessibleProjectIds: vi.fn() }));
+vi.mock("@/lib/grants", () => ({ check, accessibleProjectIds }));
+vi.mock("@/models/user", () => ({ User: { findById: userFindById } }));
 vi.mock("@/models/task", () => ({ Task: {} }));
 vi.mock("@/models/project", () => ({
   Project: { find: () => ({ select: () => ({ lean: projectFind }) }), countDocuments },
@@ -36,6 +39,7 @@ vi.mock("@/lib/worker-service", async (importOriginal) => {
 const { GET, PATCH } = await import("./route");
 
 const WORKER_ID = "69a52e3b399b27d3cbb2c5a5";
+const OWNER_ID = "6a732075133f935b19154cd2";
 
 const INSTANCE_ADMIN = { _id: "admin-1", role: "admin" };
 const PLAIN_MEMBER = { _id: "member-1", role: "member" };
@@ -59,8 +63,8 @@ const WORKER = {
   policy: { pollIntervalMs: 30_000 },
   policyOverrides: [],
   repos: [{ remote: "git@github.com:owner/repo.git", path: "/repo" }],
-  // BP-305: assignments are the approved set narrowed by the reported repos
-  approvedProjects: ["p1"],
+  // BP-305/BP-358: assignments are what the owner can reach, narrowed by the reported repos
+  owner: OWNER_ID,
   enabled: true,
   lockedByInstance: false,
   createdAt: new Date("2026-06-01"),
@@ -76,14 +80,23 @@ function patchRequest(body: unknown) {
 }
 
 const ctx = () => ({ params: Promise.resolve({ workerId: WORKER_ID }) });
+const patchPopulates: unknown[] = [];
 
 beforeEach(() => {
   vi.clearAllMocks();
   check.mockResolvedValue(false);
   workerFindById.mockResolvedValue(WORKER);
-  workerFindByIdAndUpdate.mockResolvedValue({ ...WORKER, name: "renamed" });
+  patchPopulates.length = 0;
+  workerFindByIdAndUpdate.mockReturnValue({
+    populate: (...args: unknown[]) => {
+      patchPopulates.push(args);
+      return Promise.resolve({ ...WORKER, name: "renamed" });
+    },
+  });
   verifyWorkerCredential.mockResolvedValue(WORKER);
   workerFindOthers.mockResolvedValue([]);
+  userFindById.mockResolvedValue({ _id: OWNER_ID, role: "member" });
+  accessibleProjectIds.mockResolvedValue(["p1"]);
   projectFind.mockResolvedValue([
     {
       _id: "p1",
@@ -93,41 +106,89 @@ beforeEach(() => {
   ]);
 });
 
-// BP-305: the only way to widen or narrow what an already-enrolled machine may claim, and the
-// recovery path for an enrolment predating it — those have an empty set and so claim nothing
-describe("PATCH approvedProjects", () => {
+// BP-358 removed the stored approved set: what a machine may serve is what its owner may serve,
+// resolved live. A stale writer would have quietly reintroduced the per-worker grant it replaced.
+describe("PATCH no longer writes a per-worker project list", () => {
   const PROJECT = "69a52e3b399b27d3cbb2c5c9";
 
   beforeEach(() => {
     getAuthUser.mockResolvedValue(INSTANCE_ADMIN);
   });
 
-  it("stores the approved set", async () => {
+  it("treats approvedProjects as nothing to update rather than storing it", async () => {
     countDocuments.mockResolvedValue(1);
 
     const res = await PATCH(patchRequest({ approvedProjects: [PROJECT] }), ctx());
 
+    expect(res.status).toBe(400);
+    expect(workerFindByIdAndUpdate).not.toHaveBeenCalled();
+  });
+
+  // Sent alongside a field this route does accept: the request goes through, and the list is
+  // dropped rather than riding along into the update
+  it("drops it from an otherwise valid update", async () => {
+    const res = await PATCH(patchRequest({ enabled: false, approvedProjects: [PROJECT] }), ctx());
+
     expect(res.status).toBe(200);
-    expect(workerFindByIdAndUpdate).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ $set: expect.objectContaining({ approvedProjects: [PROJECT] }) }),
-      expect.anything()
+    expect(workerFindByIdAndUpdate.mock.calls[0][1].$set).toEqual({ enabled: false });
+  });
+});
+
+// BP-358: registration refuses to re-register a machine that belongs to somebody else, so a machine
+// whose owner has left needs a way to be let go — or it can never be enrolled again under the same
+// name and host.
+describe("PATCH releases a machine from its owner", () => {
+  beforeEach(() => {
+    getAuthUser.mockResolvedValue(INSTANCE_ADMIN);
+  });
+
+  // Without it toApiWorker answers `owner: null` for a machine that has one, the console merges
+  // that into the row it just changed, and the Owner column flashes its red "claims nothing" flag
+  // until the next poll — a false alarm on the indicator this branch added, raised by the page's
+  // most-used control.
+  it("answers with the owner's name, not a bare reference", async () => {
+    await PATCH(patchRequest({ enabled: false }), ctx());
+
+    expect(patchPopulates).toEqual([["owner", "username fullName"]]);
+  });
+
+  it("clears the owner", async () => {
+    const res = await PATCH(patchRequest({ owner: null }), ctx());
+
+    expect(res.status).toBe(200);
+    expect(workerFindByIdAndUpdate.mock.calls[0][1].$set).toEqual({ owner: null });
+  });
+
+  // Clearing is the recovery; assigning from here would hand the decision to somebody who is not at
+  // the machine, which is the step BP-358 removed
+  it("refuses to assign one instead", async () => {
+    const res = await PATCH(patchRequest({ owner: "6a732075133f935b19154cd3" }), ctx());
+
+    expect(res.status).toBe(400);
+    expect(workerFindByIdAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("records the release, naming what it means", async () => {
+    await PATCH(patchRequest({ owner: null }), ctx());
+
+    expect(logInstanceAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "worker_released", target: "rig-laptop" })
     );
   });
 
-  it("refuses a project that does not exist", async () => {
-    countDocuments.mockResolvedValue(0);
+  it("records nothing when the machine had no owner to release", async () => {
+    workerFindById.mockResolvedValue({ ...WORKER, owner: null });
 
-    const res = await PATCH(patchRequest({ approvedProjects: [PROJECT] }), ctx());
+    await PATCH(patchRequest({ owner: null }), ctx());
 
-    expect(res.status).toBe(400);
+    expect(logInstanceAudit).not.toHaveBeenCalled();
   });
 
-  it("refuses anything that is not a list of project ids", async () => {
-    const res = await PATCH(patchRequest({ approvedProjects: ["not-an-id"] }), ctx());
+  it("is refused to anyone but an instance admin", async () => {
+    getAuthUser.mockResolvedValue(PLAIN_MEMBER);
 
-    expect(res.status).toBe(400);
-    expect(countDocuments).not.toHaveBeenCalled();
+    expect((await PATCH(patchRequest({ owner: null }), ctx())).status).toBe(403);
+    expect(workerFindByIdAndUpdate).not.toHaveBeenCalled();
   });
 });
 
@@ -276,6 +337,20 @@ describe("GET /api/workers/:workerId", () => {
 
     expect((await (await GET(getRequest(), ctx())).json()).assignments).toEqual([]);
   });
+
+  // BP-358: this is the field the worker's own loop reads and iterates to attempt a claim, so an
+  // ownerless machine offered one here would poll straight into a claim it cannot win.
+  it("offers nothing to a machine with no owner, even when it matches an enabled project", async () => {
+    verifyWorkerCredential.mockResolvedValue({ ...WORKER, owner: null });
+
+    expect((await (await GET(getRequest(), ctx())).json()).assignments).toEqual([]);
+  });
+
+  it("offers nothing for a project its owner cannot reach", async () => {
+    accessibleProjectIds.mockResolvedValue(["some-other-project"]);
+
+    expect((await (await GET(getRequest(), ctx())).json()).assignments).toEqual([]);
+  });
 });
 
 // The heartbeat also computes assignments, but nothing reads that field — the worker only ever uses
@@ -323,7 +398,7 @@ describe("what the fleet audit log records", () => {
   beforeEach(() => {
     getAuthUser.mockResolvedValue(INSTANCE_ADMIN);
     workerFindById.mockResolvedValue({ ...WORKER });
-    workerFindByIdAndUpdate.mockResolvedValue({ ...WORKER });
+    workerFindByIdAndUpdate.mockReturnValue({ populate: () => Promise.resolve({ ...WORKER }) });
   });
 
   it("records the kill switch as its own action, not as an update", async () => {
@@ -416,7 +491,7 @@ describe("what the fleet audit log records", () => {
 
   // Otherwise the log asserts a kill switch that never landed, right before the handler throws
   it("records nothing when the document is gone by the time it is written", async () => {
-    workerFindByIdAndUpdate.mockResolvedValue(null);
+    workerFindByIdAndUpdate.mockReturnValue({ populate: () => Promise.resolve(null) });
 
     const response = await PATCH(patchRequest({ lockedByInstance: true }), ctx());
 

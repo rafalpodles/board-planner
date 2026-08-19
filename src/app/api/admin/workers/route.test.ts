@@ -55,8 +55,15 @@ function request() {
   return new Request("http://localhost/api/admin/workers");
 }
 
+const ownerPopulates: unknown[] = [];
+
 function mockFleet(list: unknown[]) {
-  workerFind.mockReturnValue({ sort: () => Promise.resolve(list) });
+  workerFind.mockReturnValue({
+    populate: (...args: unknown[]) => {
+      ownerPopulates.push(args);
+      return { sort: () => Promise.resolve(list) };
+    },
+  });
 }
 
 const sorts: unknown[] = [];
@@ -104,6 +111,7 @@ beforeEach(() => {
   sorts.length = 0;
   selects.length = 0;
   populates.length = 0;
+  ownerPopulates.length = 0;
   getAuthUser.mockResolvedValue(ADMIN);
   mockFleet([]);
   mockRunning([]);
@@ -118,6 +126,45 @@ describe("GET /api/admin/workers", () => {
 
     expect(response.status).toBe(403);
     expect(workerFind).not.toHaveBeenCalled();
+  });
+
+  // BP-358: the owner decides everything a machine may reach, and an ownerless one reaches nothing
+  // while looking identical to an idle healthy one. The console cannot show a name the route does
+  // not ask for, and an unpopulated ref serialises as a bare id.
+  it("asks for the owner's name alongside the fleet", async () => {
+    await GET(request(), { params: Promise.resolve({}) });
+
+    expect(ownerPopulates).toEqual([["owner", "username fullName"]]);
+  });
+
+  it("names whose machine each one is", async () => {
+    mockFleet([
+      workerDoc({
+        _id: "a1",
+        name: "rafal-mac",
+        owner: { _id: "u1", username: "rpo", fullName: "Rafal" },
+      }),
+      workerDoc({ _id: "a2", name: "orphan", owner: null }),
+    ]);
+
+    const json = await (await GET(request(), { params: Promise.resolve({}) })).json();
+
+    expect(json.find((w: { name: string }) => w.name === "rafal-mac").owner).toEqual({
+      _id: "u1",
+      username: "rpo",
+      fullName: "Rafal",
+    });
+    expect(json.find((w: { name: string }) => w.name === "orphan").owner).toBeNull();
+  });
+
+  // An id with no name is what an unpopulated ref looks like, and rendering it would put "6a70…"
+  // in the column that exists to answer whose machine this is
+  it("reports no owner rather than an id when the ref was not populated", async () => {
+    mockFleet([workerDoc({ _id: "a1", name: "unpopulated", owner: "6a732075133f935b19154cd2" })]);
+
+    const json = await (await GET(request(), { params: Promise.resolve({}) })).json();
+
+    expect(json[0].owner).toBeNull();
   });
 
   it("lists the fleet with credentialHash stripped and staleness derived", async () => {

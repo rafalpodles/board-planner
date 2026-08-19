@@ -10,6 +10,9 @@ vi.mock("@/models/project", () => ({ Project: { findById: (...a: unknown[]) => p
 
 const { snapshotFor } = await import("./agent-snapshot");
 
+// Every agent here is global, so whose machine is asking cannot be what these tests are about
+const MACHINE_OWNER = "69a52e3b399b27d3cbb2c5f1";
+
 const lean = <T,>(value: T) => ({ lean: () => Promise.resolve(value) });
 
 const BLOCKS = [
@@ -37,7 +40,7 @@ describe("snapshotFor with composition entries", () => {
         },
       })
     );
-    const snapshot = await snapshotFor("p1", "a1");
+    const snapshot = await snapshotFor("p1", "a1", MACHINE_OWNER);
     // maxLines overridden here, maxFiles still the block's
     expect(snapshot?.sequence[1].params).toEqual({ maxLines: "50", maxFiles: "10" });
   });
@@ -56,7 +59,7 @@ describe("snapshotFor with composition entries", () => {
         },
       })
     );
-    const snapshot = await snapshotFor("p1", "a1");
+    const snapshot = await snapshotFor("p1", "a1", MACHINE_OWNER);
     expect(snapshot?.sequence.map((e) => e.params?.maxLines)).toEqual(["50", "5000"]);
   });
 
@@ -65,7 +68,7 @@ describe("snapshotFor with composition entries", () => {
     agentFindById.mockReturnValue(
       lean({ _id: "a1", name: "Old", scope: "global", composition: { implementation: ["implement"] } })
     );
-    const snapshot = await snapshotFor("p1", "a1");
+    const snapshot = await snapshotFor("p1", "a1", MACHINE_OWNER);
     expect(snapshot?.sequence.map((e) => e.key)).toEqual(["implement"]);
   });
 });

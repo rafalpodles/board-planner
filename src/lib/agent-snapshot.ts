@@ -1,8 +1,6 @@
 import { Agent } from "@/models/agent";
 import { AgentBlock } from "@/models/agentBlock";
-import { Project } from "@/models/project";
 import { normaliseComposition, sequenceOf } from "./agent-rules";
-import { SEEDED_DEFAULT_NAME } from "./agent-seed";
 import { StepCapability } from "@/types";
 
 /**
@@ -35,32 +33,49 @@ export interface AgentSnapshot {
 }
 
 /**
- * The task's own agent wins, then the project's default, then the seeded "Default" agent.
+ * The task's own agent, and nothing else. Choosing one is how a task is handed to a machine, so a
+ * task naming none is a task a person is doing — the claim skips it rather than resolving a default
+ * on its behalf. Before BP-358 this fell through the project default to the seeded "Default", which
+ * is what made an empty field mean "whatever the project says" instead of "nobody".
  *
- * That last fallback is what makes adopting this a no-op: every project that had a worker before
- * the catalog existed names no agent, and without it each of them would stop dead — the claim
- * releasing every task with nothing on the board to say why. The seeded Default is exactly the
- * pipeline those projects were already running.
+ * `machineOwnerId` is the person the claiming machine belongs to, and it is required rather than
+ * optional: this is the last check before a composition runs, and a caller that forgot to say whose
+ * machine it is asking for would silently opt out of it.
  */
 export async function snapshotFor(
   projectId: string,
-  taskAgentId?: unknown
+  taskAgentId: unknown,
+  machineOwnerId: string | null
 ): Promise<AgentSnapshot | null> {
-  let agentId = taskAgentId ? String(taskAgentId) : "";
+  const agentId = taskAgentId ? String(taskAgentId) : "";
+  if (!agentId) return null;
 
-  if (!agentId) {
-    const project = await Project.findById(projectId, "worker.agent").lean();
-    const fallback = (project as { worker?: { agent?: unknown } } | null)?.worker?.agent;
-    agentId = fallback ? String(fallback) : "";
-  }
-
-  const agent = agentId
-    ? await Agent.findById(agentId).lean()
-    : await Agent.findOne({ scope: "global", name: SEEDED_DEFAULT_NAME }).lean();
+  const agent = await Agent.findById(agentId).lean();
   if (!agent) return null;
 
   // A project agent must not run on another project's task, whichever way it was chosen
   if (agent.scope === "project" && String(agent.project) !== String(projectId)) return null;
+
+  // The same question one layer down, asked where the work is actually picked up rather than where
+  // it was written. Every writer of `agent` judges this pairing, and three consecutive rounds of
+  // BP-358 each closed one writer and were followed by another of the same shape — a rule spread
+  // across every writer is a rule each new path through them can miss. Here it holds for a document
+  // however it reached the database, including ones written before those writers were fixed.
+  if (agent.scope === "user") {
+    const composer = agent.owner ? String(agent.owner) : "";
+    const machine = machineOwnerId ? String(machineOwnerId) : "";
+    // Presence on both sides, not just equality: "" === "" would read an ownerless agent and an
+    // ownerless machine as the same person.
+    if (!composer || composer !== machine) {
+      // The only record that this happened. The route's own line below it says the agent resolved
+      // to nothing runnable, which for this refusal is untrue and would send a reader hunting
+      // through a perfectly good agent.
+      console.error(
+        `Claim refused: agent ${agentId} is a personal agent belonging to ${composer || "nobody"}, and this machine belongs to ${machine || "nobody"}`
+      );
+      return null;
+    }
+  }
 
   const composition = normaliseComposition(agent.composition);
   const entries = sequenceOf(composition);

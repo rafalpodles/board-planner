@@ -1,5 +1,4 @@
 import { Types } from "mongoose";
-import type { ClaimScope } from "@/lib/worker-policy";
 
 // Difficulty levels
 export type Difficulty = "S" | "M" | "L" | "XL";
@@ -502,9 +501,6 @@ export interface ProjectWorkerPolicy {
   // The second model that reads the diff with no memory of writing it. Turning it off is what
   // separates "write code" from "write and review"; autoMerge may not outlive it.
   reviewGate: boolean;
-  // Which tasks in an approved column a worker may take: "assigned" only those handed to the
-  // project's claimAssignee, "any" unassigned ones too.
-  claimScope: ClaimScope;
   baseBranch: string;
   taskTimeoutMs: number;
   maxDiffLines: number;
@@ -520,9 +516,6 @@ export interface ProjectWorkerConfig {
   enabled: boolean;
   policy: ProjectWorkerPolicy;
   policyOverrides: string[];
-  // The user a task must be assigned to before a worker claims it under claimScope "assigned".
-  // Null means nothing qualifies, which is what a project that has nominated nobody should offer.
-  claimAssignee?: string | null;
 }
 
 // What a worker says it has on disk. Reported upward only — the server never sends a path back.
@@ -552,12 +545,8 @@ export interface ApiWorkerPreflight extends Omit<WorkerPreflight, "reportedAt"> 
   reportedAt: string;
 }
 
-// How much autonomy a worker is given, worded as a choice rather than a gate checklist. The pair
-// the validator refuses — merging without review — is unreachable from these by construction.
-export type WorkerPreset = "write" | "review" | "merge";
-
-// An enrolment in progress: the app holds the device code, the operator approves the user code in
-// a browser, and the credential is handed back exactly once.
+// An enrolment in progress: the app holds the device code, the person at the machine confirms the
+// user code in a browser, and the credential is handed back exactly once.
 export interface IDeviceEnrolment {
   _id: Types.ObjectId;
   deviceCodeHash: string;
@@ -566,9 +555,9 @@ export interface IDeviceEnrolment {
   machineName: string;
   machineHost: string;
   status: "pending" | "approved" | "denied";
-  approvedBy: Types.ObjectId | null;
+  // Who confirmed it, which is who the machine then belongs to
+  enrolledBy: Types.ObjectId | null;
   project: Types.ObjectId | null;
-  preset: WorkerPreset;
   worker: Types.ObjectId | null;
   credential: string;
   deliveredAt: Date | null;
@@ -600,14 +589,15 @@ export interface IWorker {
   protocolVersion: number;
   credentialHash: string;
   repos: WorkerRepo[];
-  // Projects an admin approved this machine for; the reported repos narrow this, never widen it
-  approvedProjects: Types.ObjectId[];
   policy: WorkerPolicy;
   // Which policy fields an operator actually set; everything else follows the default
   policyOverrides: string[];
   enabled: boolean;
   lockedByInstance: boolean;
   lastSeenAt: Date | null;
+  // The person this machine belongs to, and the only thing that decides what it may reach: null
+  // for a worker enrolled before BP-358, which claims nothing until it is enrolled again
+  owner?: Types.ObjectId | IUser | null;
   // The user this machine acts as — see src/lib/worker-user.ts
   identity: Types.ObjectId | null;
   bindingError: string;
@@ -627,8 +617,8 @@ export interface ApiWorker {
   version: string;
   protocolVersion: number;
   repos: WorkerRepo[];
-  // Projects an admin approved this machine for; empty means it claims nothing
-  approvedProjects: string[];
+  // Whose machine this is. Null is not cosmetic: such a worker reaches no project at all.
+  owner: ApiUserSummary | null;
   policy: WorkerPolicy;
   policyOverrides: string[];
   enabled: boolean;
@@ -845,6 +835,8 @@ export interface ITask {
   category: Category;
   status: TaskStatus;
   assignee: Types.ObjectId | IUser | null;
+  // Who set assignee; absent on a task assigned before BP-358
+  assignedBy?: Types.ObjectId | null;
   dueDate: Date | null;
   checklist: IChecklistItem[];
   linkedPRs: ILinkedPR[];
@@ -896,6 +888,15 @@ export interface ApiUserSummary {
   _id: string;
   username: string;
   fullName: string;
+}
+
+// Enough to NAME the agent a task carries. `/api/agents` answers only with agents the reader may
+// choose, so a personal agent belonging to somebody else is absent from that list — and a picker
+// that cannot resolve the id renders its empty state, which says "No agent" over a task that has
+// one. The name has to travel with the task itself.
+export interface ApiAgentSummary {
+  _id: string;
+  name: string;
 }
 
 export interface ApiLabel {
@@ -1058,6 +1059,10 @@ export interface ApiTask {
   category: Category;
   status: TaskStatus;
   assignee: ApiUser | null;
+  // Who set the assignee, and the only thing that says whether a machine may act on it: a task is
+  // run unattended when its assignee handed it to themselves. Absent on anything assigned before
+  // BP-358, where the answer is not recorded anywhere and is deliberately not guessed.
+  assignedBy?: ApiUserSummary | string | null;
   dueDate: string | null;
   checklist: ApiChecklistItem[];
   linkedPRs: ApiLinkedPR[];
@@ -1067,7 +1072,9 @@ export interface ApiTask {
   relatedFrom: ApiTaskRelation[];
   watchers: string[];
   sprint: string | null;
-  agent?: string | null;
+  // Populated where the task is read whole, a bare id where a writer echoes back what it sent —
+  // the same union `assignedBy` above carries, and for the same reason
+  agent?: ApiAgentSummary | string | null;
   customFieldValues: Record<string, unknown>;
   recurrence: ApiRecurrence | null;
   recurringParentId: string | null;
@@ -1226,6 +1233,7 @@ export const INSTANCE_AUDIT_ACTIONS = [
   "worker_enabled",
   "worker_disabled",
   "worker_renamed",
+  "worker_released",
   "worker_poll_interval_changed",
   "enrolment_token_minted",
   "enrolment_token_spent",

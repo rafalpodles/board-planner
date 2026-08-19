@@ -151,6 +151,28 @@ describe("createApiClient", () => {
     expect(String(fetchMock.mock.calls.at(-1)?.[0])).toContain("/tasks/t1/release");
   });
 
+  /**
+   * BP-358. Refunding made this unbounded: nothing about the next poll is different, so the task
+   * claims and releases itself every thirty seconds for good — at the head of the approved column,
+   * where every other claimable task on the project waits behind it, with attempts never
+   * accumulating so nothing ever escalates. The server's own claim route made the same correction;
+   * this is the worker's half of it.
+   */
+  it("charges the attempt for an agent it cannot run, so the task eventually escalates", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ _id: "t1", taskNumber: 1, title: "t", description: "" }),
+    });
+    const api = createApiClient(config, fetchMock as never, identityStore);
+
+    await api.claim("CP", "run-1");
+
+    const release = fetchMock.mock.calls.at(-1);
+    expect(String(release?.[0])).toContain("/tasks/t1/release");
+    expect(JSON.parse(release?.[1].body)).toEqual({ refund: false });
+  });
+
   // Skipping the bad entry would run a shorter agent than the one somebody composed, and a missing
   // check looks exactly like a check that passed
   it("refuses the whole agent when one entry is malformed, rather than dropping it", async () => {

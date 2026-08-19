@@ -10,7 +10,11 @@ vi.mock("@/lib/auth", () => ({ getAuthUser, RateLimitError: class extends Error 
 vi.mock("@/lib/grants", () => ({ check }));
 vi.mock("@/models/task", () => ({ Task: { find: taskFind } }));
 vi.mock("@/models/worker", () => ({ Worker: { find: workerFind } }));
-vi.mock("@/lib/task-service", () => ({
+// Partial, so `taskPopulateFields` is the REAL list this route hands to populate. Stubbing it here
+// would make the assertion below about the stub, which is exactly the drift that let three copies
+// of that list disagree.
+vi.mock("@/lib/task-service", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/task-service")>()),
   createTask: vi.fn(),
   toApiExecution: vi.fn(() => undefined),
 }));
@@ -27,12 +31,21 @@ function request(query = "") {
 }
 
 const ctx = () => ({ params: Promise.resolve({ projectId: PROJECT_ID }) });
+const populated: unknown[] = [];
 
 beforeEach(() => {
   vi.clearAllMocks();
   getAuthUser.mockResolvedValue(USER);
   check.mockResolvedValue(true);
-  taskFind.mockReturnValue({ sort: () => ({ populate: () => Promise.resolve([]) }) });
+  populated.length = 0;
+  taskFind.mockReturnValue({
+    sort: () => ({
+      populate: (fields: unknown) => {
+        populated.push(fields);
+        return Promise.resolve([]);
+      },
+    }),
+  });
   workerFind.mockReturnValue({ select: () => Promise.resolve([]) });
 });
 
@@ -67,5 +80,20 @@ describe("GET /api/projects/:projectId/tasks — sprint filter", () => {
     expect(response.status).toBe(200);
     const filter = taskFind.mock.calls[0][0];
     expect(filter).not.toHaveProperty("sprint");
+  });
+});
+
+/**
+ * BP-358: `assignedBy` is what says whether a machine may act on a task, and the Agent row reads it
+ * to name whoever handed the task over. Left unpopulated it serialises as a bare ObjectId, so
+ * "Krzysiek assigned it" degrades to "Somebody else assigned it" — with nothing failing anywhere,
+ * because the component's own tests pass an already-populated fixture.
+ */
+describe("GET /api/projects/:projectId/tasks — what it names", () => {
+  it("asks for the assigner by name, alongside the assignee", async () => {
+    await GET(request(), ctx());
+
+    expect(populated[0]).toContainEqual({ path: "assignedBy", select: "username fullName" });
+    expect(populated[0]).toContainEqual({ path: "assignee", select: "username fullName" });
   });
 });

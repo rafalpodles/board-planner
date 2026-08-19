@@ -7,7 +7,6 @@ import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/components/ui/Toast";
 import { AuthGuard } from "@/components/AuthGuard";
 import { Button } from "@/components/ui/Button";
-import { WorkerPreset } from "@/types";
 import { APP_NAME } from "@/lib/brand";
 
 interface EnrolProject {
@@ -16,6 +15,7 @@ interface EnrolProject {
   key: string;
   repositoryUrl: string;
   workersEnabled: boolean;
+  canEnable: boolean;
 }
 
 interface EnrolmentView {
@@ -25,28 +25,8 @@ interface EnrolmentView {
   status: string;
   expiresAt: string;
   projects: EnrolProject[];
-  existingWorker: { _id: string; name: string; host: string; lastSeenAt: string | null } | null;
+  existingWorker: { mine: boolean } | null;
 }
-
-// Worded as autonomy, not as a gate checklist. A page that configures ten things is a settings
-// screen wearing an approval's clothes, and people click through those without reading.
-const PRESETS: { id: WorkerPreset; title: string; detail: string }[] = [
-  {
-    id: "write",
-    title: "Write code",
-    detail: "Runs the checks, the build and the tests, then opens a pull request. No second model reads the diff.",
-  },
-  {
-    id: "review",
-    title: "Write and review",
-    detail: "As above, plus a second model that reads the diff with no memory of writing it.",
-  },
-  {
-    id: "merge",
-    title: "Write, review and merge",
-    detail: "As above, and it merges its own pull request once everything passes.",
-  },
-];
 
 // A machine sent you here, so the page carries no sidebar, no search and no chat: nothing inviting
 // you elsewhere mid-decision, and nothing that makes granting a credential look like an ordinary
@@ -93,7 +73,6 @@ function Enrol({ params }: { params: Promise<{ userCode: string }> }) {
   const [enrolment, setEnrolment] = useState<EnrolmentView | null>(null);
   const [error, setError] = useState("");
   const [projectId, setProjectId] = useState("");
-  const [preset, setPreset] = useState<WorkerPreset>("review");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<"approved" | "denied" | null>(null);
 
@@ -113,7 +92,7 @@ function Enrol({ params }: { params: Promise<{ userCode: string }> }) {
     setBusy(true);
     try {
       await api.post(`/api/workers/enrolment/device/${userCode}/approve`,
-        deny ? { deny: true } : { projectId, preset });
+        deny ? { deny: true } : { projectId });
       setDone(deny ? "denied" : "approved");
     } catch (err) {
       toast(err instanceof Error ? err.message : "Could not complete this", "error");
@@ -150,6 +129,10 @@ function Enrol({ params }: { params: Promise<{ userCode: string }> }) {
   }
 
   const usable = enrolment.projects.filter((p) => p.repositoryUrl);
+  const chosen = usable.find((p) => p._id === projectId);
+  // A project with machines switched off takes the enrolment and then runs nothing, and nothing on
+  // the machine can say why. Said here, before the click, and only where this person cannot fix it.
+  const willStaySwitchedOff = !!chosen && !chosen.workersEnabled && !chosen.canEnable;
 
   return (
     <ConsentScreen>
@@ -164,10 +147,23 @@ function Enrol({ params }: { params: Promise<{ userCode: string }> }) {
           <code className="font-mono text-text">{enrolment.userCode}</code>
         </p>
 
-        {enrolment.existingWorker && (
-          <div className="mt-6 rounded-lg border border-warning/40 bg-warning/10 p-4 text-sm text-text">
-            This machine already has a worker registered. Approving replaces its credential, which
+        {enrolment.existingWorker?.mine && (
+          <div
+            data-testid="already-registered"
+            className="mt-6 rounded-lg border border-warning/40 bg-warning/10 p-4 text-sm text-text"
+          >
+            This machine already has a worker registered. Connecting replaces its credential, which
             stops the one running there now — it will need restarting from the app.
+          </div>
+        )}
+
+        {enrolment.existingWorker && !enrolment.existingWorker.mine && (
+          <div
+            data-testid="belongs-to-somebody-else"
+            className="mt-6 rounded-lg border border-danger/40 bg-danger/10 p-4 text-sm text-text"
+          >
+            A machine with this name is already enrolled to somebody else, so connecting will be
+            refused. If it is yours, ask an instance admin to release it under Settings → Workers.
           </div>
         )}
 
@@ -205,32 +201,16 @@ function Enrol({ params }: { params: Promise<{ userCode: string }> }) {
           </div>
         </section>
 
-        <section className="mt-8">
-          <h2 className="text-sm font-medium text-text">How much should it do on its own?</h2>
-          <div className="mt-3 space-y-2">
-            {PRESETS.map((option) => (
-              <label
-                key={option.id}
-                className="flex cursor-pointer items-start gap-3 rounded-lg border border-border p-3 hover:border-primary"
-              >
-                <input
-                  type="radio"
-                  name="preset"
-                  className="mt-1"
-                  checked={preset === option.id}
-                  onChange={() => setPreset(option.id)}
-                />
-                <span>
-                  <span className="block font-medium text-text">{option.title}</span>
-                  <span className="block text-sm text-text-muted">{option.detail}</span>
-                </span>
-              </label>
-            ))}
+        {willStaySwitchedOff && (
+          <div
+            data-testid="workers-off-warning"
+            className="mt-6 rounded-lg border border-warning/40 bg-warning/10 p-4 text-sm text-text"
+          >
+            That project does not run machines yet, and you cannot turn that on. The machine will
+            connect and sit idle until an instance admin enables it under the project&apos;s Workers
+            settings.
           </div>
-          <p className="mt-2 text-xs text-text-muted">
-            You can change this later in the project&apos;s Workers settings.
-          </p>
-        </section>
+        )}
 
         <div className="mt-8 flex gap-3">
           <Button disabled={busy || !projectId} onClick={() => decide(false)}>
@@ -242,10 +222,11 @@ function Enrol({ params }: { params: Promise<{ userCode: string }> }) {
         </div>
       </div>
 
-      {/* The worker is registered as whoever approves it, so say whose name it will carry */}
+      {/* The machine belongs to whoever connects it, so say whose name it will carry */}
       {user && (
         <p className="mt-4 text-center text-xs text-text-muted">
-          Connecting as {user.fullName || user.username}. The machine acts under this account.
+          Connecting as {user.fullName || user.username}. The machine acts under this account, and
+          reaches exactly the projects you can.
         </p>
       )}
     </ConsentScreen>

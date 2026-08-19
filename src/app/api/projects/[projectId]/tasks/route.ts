@@ -4,16 +4,10 @@ import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
 import { Task } from "@/models/task";
 import { DEFAULT_PRIORITY } from "@/types";
-import { createTask, toApiExecution } from "@/lib/task-service";
+import { createTask, toApiExecution, taskPopulateFields } from "@/lib/task-service";
 import { Worker } from "@/models/worker";
 import { ITaskExecution } from "@/types";
 
-const populateFields = [
-  { path: "assignee", select: "username fullName" },
-  { path: "createdBy", select: "username fullName" },
-  { path: "blockedBy", select: "taskNumber title status" },
-  { path: "relations.task", select: "taskNumber title status" },
-];
 
 export const GET = withProjectAccess(async (request, { params }) => {
   const { projectId } = await params;
@@ -73,7 +67,7 @@ export const GET = withProjectAccess(async (request, { params }) => {
 
   const tasks = await Task.find(filter)
     .sort({ order: 1, createdAt: -1 })
-    .populate(populateFields);
+    .populate(taskPopulateFields);
 
   // The board loads every task, so a raw document here would publish each one's whole execution
   // subdocument — run identity included — to every project member on every page load

@@ -26,3 +26,12 @@ describe("Task serialization", () => {
     });
   });
 });
+
+// task-service.test.ts mocks this model entirely, so nothing there exercises the real schema —
+// this is the only thing that would notice assignedBy going missing
+describe("Task schema", () => {
+  it("keeps assignedBy as a User reference", () => {
+    expect(Task.schema.path("assignedBy").instance).toBe("ObjectId");
+    expect(Task.schema.path("assignedBy").options.ref).toBe("User");
+  });
+});

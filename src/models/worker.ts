@@ -18,10 +18,11 @@ const workerSchema = new Schema<IWorker>(
       }],
       default: [],
     },
-    // What an admin approved this machine for. Written at approval and read on every claim: the
-    // repos the worker reports narrow this set, they do not define it. A worker with none claims
-    // nothing, which is what an enrolment predating BP-305 means.
-    approvedProjects: { type: [{ type: Schema.Types.ObjectId, ref: "Project" }], default: [] },
+    // The person this machine belongs to, set from the account that enrolled it. Distinct from
+    // `identity` below: identity is which machine acted, owner is whose machine it is. It is also
+    // the whole of what this machine may reach — the projects that person can reach, resolved on
+    // every call rather than stored, so a revoked grant reaches the machine at once.
+    owner: { type: Schema.Types.ObjectId, ref: "User", default: null },
     policy: {
       pollIntervalMs: { type: Number, default: 30_000 },
     },
@@ -68,7 +69,6 @@ const workerSchema = new Schema<IWorker>(
   { timestamps: true }
 );
 
-workerSchema.index({ "assignments.project": 1 });
 workerSchema.index({ name: 1, host: 1 }, { unique: true });
 
 export const Worker: Model<IWorker> =

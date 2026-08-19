@@ -39,6 +39,13 @@ const taskSchema = new Schema<ITask>(
       ref: "User",
       default: null,
     },
+    // Who set the assignee. A machine runs its owner's work, and "I assigned this to myself" has to
+    // be distinguishable from "somebody handed this to my machine".
+    assignedBy: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
     dueDate: {
       type: Date,
       default: null,
@@ -84,7 +91,7 @@ const taskSchema = new Schema<ITask>(
       ref: "Sprint",
       default: null,
     },
-    // Overrides the project's default for this one task. Null means the project decides.
+    // Overrides the project's default for this one task. Null means nobody takes the task.
     agent: {
       type: Schema.Types.ObjectId,
       ref: "Agent",

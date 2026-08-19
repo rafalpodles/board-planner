@@ -7,16 +7,10 @@ import { Task } from "@/models/task";
 import { Comment } from "@/models/comment";
 import { ActivityLog } from "@/models/activityLog";
 import { Notification } from "@/models/notification";
-import { toApiExecution, updateTask } from "@/lib/task-service";
+import { toApiExecution, updateTask, taskPopulateFields } from "@/lib/task-service";
 import { Worker } from "@/models/worker";
 import { ITaskExecution } from "@/types";
 
-const populateFields = [
-  { path: "assignee", select: "username fullName" },
-  { path: "createdBy", select: "username fullName" },
-  { path: "blockedBy", select: "taskNumber title status" },
-  { path: "relations.task", select: "taskNumber title status" },
-];
 
 export const GET = withProjectAccess(async (_request, { params }) => {
   const { projectId, taskId } = await params;
@@ -26,7 +20,7 @@ export const GET = withProjectAccess(async (_request, { params }) => {
   await connectDB();
 
   const task = await Task.findOne({ _id: taskId, project: projectId })
-    .populate(populateFields);
+    .populate(taskPopulateFields);
 
   if (!task) {
     return NextResponse.json({ error: "Task not found" }, { status: 404 });
@@ -85,18 +79,7 @@ export const PUT = withProjectAccess(async (request, { params, user }) => {
     return NextResponse.json({ error: MACHINE_FORCE_REFUSAL }, { status: 403 });
   }
 
-  // The live principal, not one re-read from the database: a scoped token's role is degraded to
-  // member in memory by getAuthUser, and that degradation is the whole point of a scoped token.
-  // Reading `role` here honours it; reloading the user would hand an admin's CI token the one
-  // capability its scope was meant to withhold (BP-345).
-  const result = await updateTask(
-    projectId,
-    taskId,
-    updates,
-    String(user._id),
-    force === true,
-    user.role === "admin"
-  );
+  const result = await updateTask(projectId, taskId, updates, String(user._id), force === true);
   if (!result.ok) {
     return NextResponse.json(
       { error: result.error, ...(result.runConflict ? { runConflict: result.runConflict } : {}) },

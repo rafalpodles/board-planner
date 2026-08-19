@@ -148,8 +148,8 @@ describe("runPmTurn withholding", () => {
   });
 });
 
-// Step 4 of the chain in BP-301 needs both an assignment to the worker's nominee and a
-// status in an approved column; either alone stops claimNextTask from matching.
+// Step 4 of the chain in BP-301 needs the task assigned to the machine's owner by that owner, an
+// agent named, and a status in an approved column; any one missing stops claimNextTask from matching.
 describe("autonomous turns cannot hand work to a machine", () => {
   it("withholds assign_task and change_status from the needs_human_review trigger", () => {
     expect(NEEDS_HUMAN_REVIEW_DISALLOWED_TOOLS).toContain("assign_task");

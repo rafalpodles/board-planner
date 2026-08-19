@@ -26,8 +26,9 @@ import {
   PickerRow,
 } from "./FieldRow";
 import type { TaskDraft } from "./useTaskEditor";
-import type { ApiAgent } from "@/types";
-import { useAuth } from "@/hooks/use-auth";
+import type { ApiAgent, ApiTask } from "@/types";
+import { handoverOf, refIdOf, type Handover } from "@/lib/handover";
+import type { AnyColumn } from "@/lib/columns";
 
 const RECURRENCE_UNITS: Record<RecurrenceFrequency, string> = {
   daily: "day",
@@ -51,12 +52,63 @@ function formatDate(value: string): string {
   });
 }
 
+// The claim takes a task or it does not, and logs nothing either way. An agent chosen on a task no
+// machine will touch is the one state nobody could diagnose: the card looks entirely normal.
+function HandoverNotice({ handover }: { handover: Handover | null }) {
+  // "No agent" is the ordinary case and the default — it is what the picker already says, and
+  // repeating it as a warning would put a notice on almost every task on the board.
+  if (!handover || handover.runs || handover.reason === "no-agent") return null;
+
+  const message =
+    handover.reason === "not-approved-yet"
+      ? "Nothing will run this yet. A machine only looks at the column work is approved in — move it there when it is ready."
+      : handover.reason === "unassigned"
+      ? "Nothing will run this. A machine takes only work its owner assigned to themselves — assign it to yourself."
+      : handover.reason === "assigner-unrecorded"
+        // Named rather than addressed to the reader: the server records the assigner only when the
+        // person doing the assigning is the one being assigned, so telling a colleague to "assign
+        // it again" would be handing them a gesture that writes nothing.
+        ? "Nothing will run this. It was assigned before the board recorded who hands work over; its assignee can record that by assigning it to themselves again."
+        : `Nothing will run this. ${handover.by ?? "Somebody else"} assigned it, and a machine takes only work its owner assigned to themselves.`;
+
+  return (
+    <p
+      data-testid="handover-notice"
+      data-reason={handover.reason}
+      className="mt-1 text-xs text-warning"
+    >
+      {message}
+    </p>
+  );
+}
+
 interface PropertyRailProps {
   draft: TaskDraft;
   set: <K extends keyof TaskDraft>(key: K, value: TaskDraft[K]) => void;
   users: ApiUser[];
   sprints: ApiSprint[];
   agents: ApiAgent[];
+  /** Offered first in the picker once a machine is being chosen; never a fallback */
+  projectDefaultAgent?: string;
+  /**
+   * The task as stored, not as edited. Whether a machine will take it depends on `assignedBy`,
+   * which only the server writes — so a draft mid-edit has no answer, and judging one would
+   * describe a state that has never existed.
+   */
+  stored: Pick<ApiTask, "agent" | "assignee" | "assignedBy" | "status">;
+  /** The board's own columns — a claim is defined in terms of their roles, not their names */
+  columns?: AnyColumn[];
+  /**
+   * Writes the assignee a task already carries. Auto-save sends the diff, so re-picking the person
+   * already on the task sends nothing at all — and that is the repair the notice below prints for a
+   * task whose assigner was never recorded, which made the instruction untrue in the view giving it.
+   */
+  onRepairAssigner: (username: string | null) => void;
+  /**
+   * Whoever is reading. Required rather than optional: a call site that forgot it would silently
+   * stop offering this person their own agents everywhere, which looks exactly like having none.
+   */
+  currentUsername: string | null;
   /** Full rows, not names: the chip and the picker dot are tinted by the project's colour */
   categories: ApiProjectCategory[];
   customFields: ApiCustomField[];
@@ -72,6 +124,11 @@ export function PropertyRail({
   users,
   sprints,
   agents,
+  projectDefaultAgent,
+  stored,
+  columns,
+  onRepairAssigner,
+  currentUsername,
   categories,
   customFields,
   reporter,
@@ -82,9 +139,45 @@ export function PropertyRail({
   const sprint = sprints.find((s) => s._id === draft.sprint);
   const fields = sortedFields(activeFields(customFields));
   const selectableSprints = sprints.filter((s) => s.status !== "completed");
-  // Instance admin, which is what every other admin-only surface in this app keys on
-  const { isAdmin } = useAuth();
-  const agentName = agents.find((a) => a._id === draft.agent)?.name ?? "";
+  // Suppressed while the draft and the stored task disagree: the answer changes as soon as the
+  // pending edit saves, and a hint that contradicts what the person just typed is worse than none.
+  const storedAgent = refIdOf(stored.agent);
+  const pending =
+    (draft.agent ?? null) !== storedAgent ||
+    (draft.assignee ?? null) !== (stored.assignee?.username ?? null);
+  const handover = pending ? null : handoverOf(stored, columns);
+  // Read off the stored task rather than off `handover`, which is suppressed mid-edit and orders
+  // the column requirement first: the repair is about what the document is missing, not about
+  // which sentence won the right to be shown.
+  const assignerUnrecorded = !!stored.assignee && !stored.assignedBy;
+  /**
+   * A personal agent is a composition nobody vetted — anyone may compose one out of the admin's
+   * blocks — so the server runs it only on a task its owner assigned to themselves. Offering one
+   * elsewhere would be a control that 400s on click, and this view's save failure carries no
+   * message: the reader is told "Save failed — retry", and retrying fails the same way.
+   *
+   * Keyed on the DRAFT assignee, which is what the same save will send, so taking a task on and
+   * picking your own agent in one gesture works. The agent already on the task stays listed
+   * whatever it is, or the row would name "No agent" for a task that is carrying one.
+   */
+  const ownTask = !!currentUsername && draft.assignee === currentUsername;
+  const offeredAgents = agents.filter(
+    (a) => a.scope !== "user" || ownTask || a._id === draft.agent
+  );
+  /**
+   * Set, and not among the agents this reader may choose — which after the filter above means
+   * `/api/agents` never sent it at all, and the only way that happens is somebody else's personal
+   * agent. Withholding it as an OPTION is right; hiding the current VALUE is not, and the picker
+   * does exactly that, rendering "No agent" over the very field the consent model rests on. So the
+   * row stops being a picker and becomes what it can honestly be: the name, and why it is not
+   * yours to choose. Re-offering it instead would be a control that 400s on click.
+   */
+  const notOffered = !!draft.agent && !agents.some((a) => a._id === draft.agent);
+  const notOfferedName =
+    stored.agent && typeof stored.agent === "object" ? stored.agent.name : null;
+  // Not while the row is a read-only name: a note explaining a shortened list, printed where there
+  // is no list, is the same kind of lie one row up.
+  const personalAgentsWithheld = !notOffered && offeredAgents.length < agents.length;
 
   return (
     <div className="flex h-full flex-col gap-6">
@@ -103,7 +196,13 @@ export function PropertyRail({
             adornment: <Avatar name={user.fullName} size={20} />,
           }))}
           emptyOption="Unassigned"
-          onChange={(username) => set("assignee", username || null)}
+          onChange={(username) => {
+            const picked = username || null;
+            if (assignerUnrecorded && picked === (stored.assignee?.username ?? null)) {
+              onRepairAssigner(picked);
+            }
+            set("assignee", picked);
+          }}
         >
           {(selected) => (
             <span className="flex items-center gap-2">
@@ -113,35 +212,53 @@ export function PropertyRail({
           )}
         </ComboboxRow>
 
-        {/* Readable by everyone, changeable by an admin: the agent decides what runs on the
-            machine serving this project, and the server refuses the write either way (BP-345).
-            Offering a picker that 403s would be the worse half of both. */}
-        {isAdmin ? (
+        {/* Whoever may edit the task. It was instance-admin under BP-345, when choosing an agent
+            could arm a machine belonging to somebody else; a claim now takes only what its own
+            owner assigned to themselves, so the routing holds that boundary instead of the bar. */}
+        {notOffered ? (
+          <FieldRow label="Agent" touch={touch}>
+            <span data-testid="agent-not-offered" className="truncate">
+              {notOfferedName ?? "An agent you cannot see"}
+            </span>
+          </FieldRow>
+        ) : (
           <ComboboxRow
             label="Agent"
             touch={touch}
             value={draft.agent || ""}
-            options={agents.map((a) => ({ value: a._id, label: a.name }))}
-            emptyOption="Project default"
+            options={[...offeredAgents]
+              .sort((a, b) =>
+                a._id === projectDefaultAgent ? -1 : b._id === projectDefaultAgent ? 1 : 0
+              )
+              .map((a) => ({ value: a._id, label: a.name }))}
+            emptyOption="No agent — a person does it"
             onChange={(id) => set("agent", id || null)}
           >
             {(selected) =>
               selected ? (
                 <span className="truncate">{selected.label}</span>
               ) : (
-                <EmptyValue>Project default</EmptyValue>
+                <EmptyValue>No agent</EmptyValue>
               )
             }
           </ComboboxRow>
-        ) : (
-          <FieldRow label="Agent" touch={touch}>
-            {agentName ? (
-              <span className="truncate">{agentName}</span>
-            ) : (
-              <EmptyValue>Project default</EmptyValue>
-            )}
-          </FieldRow>
         )}
+
+        {notOffered && (
+          <p data-testid="agent-not-offered-reason" className="mt-1 text-xs text-muted">
+            Not yours to choose — a personal agent is only offered to the person who composed it. It
+            stays on this task until the task changes hands.
+          </p>
+        )}
+
+        {personalAgentsWithheld && (
+          <p data-testid="personal-agents-withheld" className="mt-1 text-xs text-muted">
+            Your own agents are not offered here — a personal agent only runs on a task you have
+            assigned to yourself.
+          </p>
+        )}
+
+        <HandoverNotice handover={handover} />
 
         <ComboboxRow
           label="Priority"
