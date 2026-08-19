@@ -86,8 +86,13 @@ there is no way to reach "override on, matrix empty" or its mirror. Switching th
 deletes the row.
 
 `chat.webhookUrl` is a credential and is encrypted with the same `ENCRYPTION_KEY` the integration
-tokens use. Whether `project.notificationChannels.webhookUrl` is encrypted today is a separate
-question and is not settled here.
+tokens use.
+
+`project.notificationChannels.webhookUrl` is stored in plain text today — the route that saves it
+only parses the URL, and `dispatchNotifications` passes it straight to `safeFetch`
+(`src/lib/notifications.ts:219`). That leaves two sibling credentials protected differently, which
+is worth fixing and is not fixed here: it is its own task, and folding it in would mean touching a
+working feature this design promised not to disturb.
 
 ## Resolution
 
@@ -99,7 +104,19 @@ The project's row if it has one, otherwise `defaults`. This is the whole archite
 preference leaves the query and becomes a decision, testable on its own and called by all three
 dispatch paths rather than restated in each.
 
-`createNotifications` stops writing a document unconditionally — the bell obeys the matrix too.
+### Storage and display are not the same switch
+
+The in-app column controls what the bell **shows**, not whether a row is **stored**, and the
+distinction is load-bearing: the digest is assembled from `Notification` documents, not from the
+events themselves (`src/lib/digest.ts:66`). If the bell column stopped the write, then in-app off
+plus e-mail on plus digest on would deliver nothing at all — a person would get an empty morning
+and no way to connect it to a checkbox they cleared days earlier.
+
+So `createNotifications` keeps writing a document for every recipient, and the resolved in-app
+value is stored on it as `Notification.inApp` (default `true`). The bell list filters on that
+field; it takes everything for the recipient today (`src/app/api/notifications/route.ts:13`). The
+digest ignores it and recomputes e-mail eligibility per row through `resolveChannels`, which it can
+do because every document carries its project and its type.
 
 The chat column needs two message shapes that do not exist yet. `src/lib/notifications.ts` formats
 `task_created`, `status_changed` and `comment_added` for Slack and Discord, because those are the
@@ -199,7 +216,9 @@ suppress the mail during the day and deliver it anyway the next morning.
 
 - `resolveChannels`: global values, a project override, an account with no `notifications`, a
   project with no row
-- a muted project writes no notification document and calls no `sendEmail`
+- a muted project stores its notification with `inApp: false` and the bell list omits it
+- a muted e-mail row calls no `sendEmail`
+- in-app off with e-mail on still leaves the digest something to list
 - a muted project contributes nothing to the digest
 - the chat column cannot be ticked with no connection configured
 - the project section is visible to an ordinary member, not only to a project admin
