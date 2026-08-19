@@ -15,6 +15,7 @@ import { GeneralSection } from "./sections/GeneralSection";
 import { BoardSection } from "./sections/BoardSection";
 import { TaskFieldsSection } from "./sections/TaskFieldsSection";
 import { IntegrationsSection } from "./sections/IntegrationsSection";
+import { NotificationsSection } from "./sections/NotificationsSection";
 import { PmAgentSection } from "./sections/PmAgentSection";
 import { WorkersSection } from "./sections/WorkersSection";
 import { AuditSection } from "./sections/AuditSection";
@@ -89,11 +90,24 @@ const SECTIONS: SectionMeta[] = [
     ),
   },
   {
+    id: "notifications",
+    label: "Notifications",
+    title: "My notifications",
+    blurb:
+      "What this project sends to you. Personal — each member has their own, and it overrides the global grid for this board only.",
+    keywords: "notifications email in-app slack discord mute per project personal grid matrix",
+    // Deliberately not projectAdmin: this is the reader's own preference, so every member has one
+    access: "member",
+    icon: (
+      <Icon d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 00-4-5.7V5a2 2 0 10-4 0v.3C7.7 6.2 6 8.4 6 11v3.2c0 .5-.2 1-.6 1.4L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+    ),
+  },
+  {
     id: "integrations",
     label: "Integrations",
     title: "Integrations",
     blurb:
-      "Connect the board to the places work actually happens — code hosting and team chat.",
+      "Connect the board to the places work actually happens — code hosting and the team's shared chat channel.",
     keywords:
       "github gitlab token webhook slack discord notifications pull request merge sync repo",
     access: "projectAdmin",
@@ -396,6 +410,7 @@ export default function ProjectSettingsPage() {
                   {s.id === "general" && <GeneralSection {...sectionProps} />}
                   {s.id === "board" && <BoardSection {...sectionProps} />}
                   {s.id === "fields" && <TaskFieldsSection {...sectionProps} />}
+                  {s.id === "notifications" && <NotificationsSection {...sectionProps} />}
                   {s.id === "integrations" && (
                     <IntegrationsSection {...sectionProps} />
                   )}

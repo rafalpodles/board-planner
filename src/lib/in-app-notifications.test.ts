@@ -10,14 +10,17 @@ const WATCHER = "507f1f77bcf86cd799439012";
 const ACTOR = "507f1f77bcf86cd799439013";
 
 vi.mock("@/models/notification", () => ({ Notification: { insertMany: (...a: unknown[]) => insertMany(...a) } }));
+// Preferences now decide per recipient rather than filtering inside the query, so the fixture has
+// to carry them. Both of these are ordinary accounts that predate the grid: emailNotifications is
+// their stored preference and nothing has been migrated.
+let users: Record<string, unknown>[] = [];
+const ordinaryUsers = () => [
+  { _id: ASSIGNEE, email: "assignee@example.com", fullName: "Ann", emailNotifications: true },
+  { _id: WATCHER, email: "watcher@example.com", fullName: "Wes", emailNotifications: true },
+];
 vi.mock("@/models/user", () => ({
   User: {
-    find: (...a: unknown[]) => (userFind(...a), {
-      lean: async () => [
-        { _id: ASSIGNEE, email: "assignee@example.com", fullName: "Ann" },
-        { _id: WATCHER, email: "watcher@example.com", fullName: "Wes" },
-      ],
-    }),
+    find: (...a: unknown[]) => (userFind(...a), { lean: async () => users }),
   },
 }));
 vi.mock("@/lib/email", () => ({
@@ -59,6 +62,7 @@ async function sentMails() {
 beforeEach(() => {
   sendEmail.mockClear();
   insertMany.mockClear();
+  users = ordinaryUsers();
   selfOrigin.mockReturnValue("https://app.example.com");
 });
 
@@ -119,12 +123,66 @@ describe("notification emails", () => {
   // Somebody on the digest hears about this in one message tomorrow morning; sending both would
   // make the digest a duplicate rather than a replacement
   it("skips the people who chose the daily digest", async () => {
+    users = [
+      { ...ordinaryUsers()[0], emailDigest: true },
+      ordinaryUsers()[1],
+    ];
+
     await createNotifications(NOTIFICATION);
     await sentMails();
 
-    const [filter] = userFind.mock.calls.at(-1) ?? [];
-    expect(filter.emailNotifications).toBe(true);
-    expect(filter.emailDigest).toEqual({ $ne: true });
+    const to = sendEmail.mock.calls.map(([p]) => (p as { to: string }).to);
+    expect(to).toEqual(["watcher@example.com"]);
+  });
+
+  // The bell hides the row; it does not stop the write. The digest is assembled from these
+  // documents, so a skipped insert would take tomorrow's mail down with today's bell.
+  it("still stores a notification the bell is not allowed to show", async () => {
+    users = [
+      {
+        _id: WATCHER,
+        email: "watcher@example.com",
+        notifications: {
+          defaults: {
+            comment_added: { inApp: false, email: true, chat: false },
+          },
+          projects: [],
+        },
+      },
+    ];
+
+    await createNotifications({ ...NOTIFICATION, recipientIds: [WATCHER] });
+
+    expect(insertMany.mock.calls[0][0][0]).toMatchObject({ inApp: false });
+    await sentMails();
+  });
+
+  it("sends no mail for a project the recipient muted, while another project still arrives", async () => {
+    users = [
+      {
+        _id: WATCHER,
+        email: "watcher@example.com",
+        emailNotifications: true,
+        notifications: {
+          projects: [
+            {
+              project: NOTIFICATION.projectId,
+              matrix: { comment_added: { inApp: true, email: false, chat: false } },
+            },
+          ],
+        },
+      },
+    ];
+
+    await createNotifications({ ...NOTIFICATION, recipientIds: [WATCHER] });
+    expect(sendEmail).not.toHaveBeenCalled();
+
+    await createNotifications({
+      ...NOTIFICATION,
+      recipientIds: [WATCHER],
+      projectId: "507f1f77bcf86cd799439099",
+    });
+    await sentMails();
   });
 
   it("never writes to the person who caused the notification", async () => {
