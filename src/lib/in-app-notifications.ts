@@ -1,6 +1,8 @@
 import { Notification } from "@/models/notification";
 import { User } from "@/models/user";
 import { NotificationType } from "@/types";
+import { resolveChannels } from "@/lib/notification-prefs";
+import { sendPersonalChat, PersonalChatRecipient } from "@/lib/personal-chat";
 import { Types } from "mongoose";
 import { sendEmail, isEmailConfigured } from "@/lib/email";
 import { APP_NAME } from "@/lib/brand";
@@ -26,6 +28,8 @@ export interface NotificationEmail {
   /** Lets the footer tell an assignee why they got this without a second query per recipient. */
   assigneeId?: string;
 }
+
+type MailRecipient = { _id: unknown; email: string; fullName?: string };
 
 interface NotifyParams {
   type: NotificationType;
@@ -58,6 +62,18 @@ export async function createNotifications({
   );
   if (unique.length === 0) return;
 
+  // One read of everyone's preferences, then one decision per recipient. The switch used to be a
+  // clause inside the recipient query, which is why nothing could depend on the project or the
+  // event; resolveChannels can, so it has to run out here.
+  const recipients = await User.find(
+    { _id: { $in: unique.map((id) => new Types.ObjectId(id)) } },
+    "email fullName emailNotifications emailDigest notifications"
+  ).lean();
+
+  const wants = new Map(
+    recipients.map((user) => [String(user._id), resolveChannels(user, projectId, type)])
+  );
+
   try {
     await Notification.insertMany(
       unique.map((recipientId) => ({
@@ -68,6 +84,9 @@ export async function createNotifications({
         actor: new Types.ObjectId(actorId),
         title,
         body: body || "",
+        // Stored regardless, hidden if the bell is off for this row: the digest reads these
+        // documents, and skipping the write would take the morning mail down with the bell.
+        inApp: wants.get(recipientId)?.inApp ?? true,
       }))
     );
   } catch (err) {
@@ -76,8 +95,26 @@ export async function createNotifications({
 
   // Fire-and-forget email notifications
   if (isEmailConfigured()) {
-    sendEmailNotifications({ recipientIds: unique, type, title, body: body || "", email }).catch(
-      (err) => console.error("Failed to send email notifications:", err)
+    const mailTo = recipients.filter((user) => {
+      if (!wants.get(String(user._id))?.email) return false;
+      if (!user.email) return false;
+      // Somebody on the digest hears about this tomorrow morning, in one message. Sending both
+      // would make the digest a duplicate rather than a replacement.
+      return !user.emailDigest;
+    });
+    if (mailTo.length > 0) {
+      sendEmailNotifications({ users: mailTo, type, title, body: body || "", email }).catch((err) =>
+        console.error("Failed to send email notifications:", err)
+      );
+    }
+  }
+
+  const chatTo = recipients.filter(
+    (user) => wants.get(String(user._id))?.chat && user.notifications?.chat?.kind
+  );
+  if (chatTo.length > 0) {
+    sendPersonalChat({ users: chatTo, type, title, email }).catch((err) =>
+      console.error("Failed to send chat notifications:", err)
     );
   }
 }
@@ -100,23 +137,13 @@ function reasonFor(
 }
 
 async function sendEmailNotifications(n: {
-  recipientIds: string[];
+  users: MailRecipient[];
   type: NotificationType;
   title: string;
   body: string;
   email?: NotificationEmail;
 }): Promise<void> {
-  const users = await User.find(
-    {
-      _id: { $in: n.recipientIds.map((id) => new Types.ObjectId(id)) },
-      emailNotifications: true,
-      // Somebody on the digest hears about this tomorrow morning, in one message. Sending both
-      // would make the digest a duplicate rather than a replacement.
-      emailDigest: { $ne: true },
-      email: { $ne: "" },
-    },
-    "email fullName"
-  ).lean();
+  const users = n.users;
   if (users.length === 0) return;
 
   // Without a configured origin there is no address to link to. The mail still goes out, just
