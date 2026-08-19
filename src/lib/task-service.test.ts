@@ -69,6 +69,13 @@ const find = vi.fn();
 const findByIdAndUpdate = vi.fn();
 const findById = vi.fn();
 const userFindOne = vi.fn();
+// The notification mails name the person who moved the task, so every announcing path resolves
+// the actor's username now
+const userFindById = vi.fn(() => ({ lean: async () => ({ username: "actor" }) }));
+const commentCreate = vi.fn(async () => ({ _id: "c1" }));
+const createNotificationsMock = vi.fn();
+const collectRecipientsMock = vi.fn((_task?: unknown): string[] => []);
+const resolveMentionsMock = vi.fn(async (_body?: string): Promise<string[]> => []);
 const workerFindById = vi.fn();
 const taskFindById = vi.fn();
 
@@ -78,7 +85,6 @@ vi.mock("@/models/task", () => ({
   Task: { findOneAndUpdate, updateMany, updateOne, findOne, find, findByIdAndUpdate, findById: taskFindById, create: taskCreate },
 }));
 vi.mock("@/models/project", () => ({ Project: { findById, findOneAndUpdate: projectFindOneAndUpdate } }));
-const userFindById = vi.fn();
 vi.mock("@/models/user", () => ({ User: { findOne: userFindOne, findById: userFindById } }));
 const agentFindById = vi.fn();
 vi.mock("@/models/agent", () => ({ Agent: { findById: agentFindById } }));
@@ -102,16 +108,22 @@ function agentInTheCatalog(doc: Record<string, unknown> | null) {
     return { lean: () => Promise.resolve(visible) };
   });
 }
-vi.mock("@/models/comment", () => ({ Comment: {} }));
+vi.mock("@/models/comment", () => ({
+  Comment: {
+    create: commentCreate,
+    findById: () => ({ populate: async () => ({ _id: "c1" }) }),
+  },
+}));
 const sprintExists = vi.fn();
 vi.mock("@/models/sprint", () => ({ Sprint: { exists: sprintExists } }));
 vi.mock("@/lib/activity", () => ({ logActivity: vi.fn() }));
 vi.mock("@/lib/webhooks", () => ({ dispatchWebhooks: vi.fn() }));
 vi.mock("@/lib/notifications", () => ({ dispatchNotifications: vi.fn() }));
 vi.mock("@/lib/in-app-notifications", () => ({
-  createNotifications: vi.fn(),
-  collectRecipients: () => [],
-  resolveMentions: async () => [],
+  createNotifications: createNotificationsMock,
+  collectRecipients: (task: { watchers?: string[] }) => collectRecipientsMock(task),
+  resolveMentions: (body: string) => resolveMentionsMock(body),
+  assigneeIdOf: () => undefined,
 }));
 vi.mock("@/lib/pm/triggers", () => ({ onTaskStatusChanged: vi.fn().mockResolvedValue(undefined) }));
 
@@ -127,6 +139,7 @@ const {
   changeStatus,
   updateTask,
   createTask,
+  addComment,
   MAX_EXECUTION_ATTEMPTS,
   MAX_PHASE_LENGTH,
   EXECUTION_LEASE_MS,
@@ -543,10 +556,12 @@ describe("releaseTask charging the attempt", () => {
 
 describe("releaseExpiredTasks", () => {
   const board = {
+    key: "TP",
+    name: "Test Project",
     columns: [
       { id: "ready", role: "approved", order: 1 },
       { id: "doing", role: "active", order: 2 },
-      { id: "escalated", role: "review", order: 3, triggersPmReview: true },
+      { id: "escalated", label: "Escalated", role: "review", order: 3, triggersPmReview: true },
     ],
   };
   const now = new Date("2026-07-31T12:00:00.000Z");
@@ -554,7 +569,11 @@ describe("releaseExpiredTasks", () => {
   beforeEach(() => {
     updateMany.mockReset();
     findById.mockReset();
+    find.mockReset();
+    createNotificationsMock.mockClear();
+    collectRecipientsMock.mockReturnValue([]);
     findById.mockReturnValue({ lean: () => Promise.resolve(board) });
+    find.mockReturnValue({ lean: () => Promise.resolve([]) });
     updateMany.mockResolvedValue({ modifiedCount: 0 });
   });
 
@@ -628,6 +647,80 @@ describe("releaseExpiredTasks", () => {
 
     expect(await releaseExpiredTasks("p1", now)).toBe(0);
     expect(updateMany).not.toHaveBeenCalled();
+  });
+
+  // The move has no actor — the worker that held it is gone — so nothing else on this path says
+  // it happened: updateMany fires no webhook and no notification
+  describe("telling somebody the machine gave up", () => {
+    const WATCHER = "507f1f77bcf86cd799439051";
+
+    function abandoned() {
+      find.mockReturnValue({
+        lean: async () => [
+          {
+            _id: "t9",
+            taskNumber: 9,
+            title: "Split the worker lease",
+            watchers: [WATCHER],
+            execution: { workerId: "w1" },
+          },
+        ],
+      });
+      // The machine that stopped answering owns the notification row
+      userFindOne.mockReturnValue({ lean: async () => ({ _id: "worker-user-1" }) });
+      collectRecipientsMock.mockReturnValue([WATCHER]);
+      updateMany.mockImplementation(async (filter: Record<string, { $gte?: number }>) =>
+        filter["execution.attempts"]?.$gte === MAX_EXECUTION_ATTEMPTS
+          ? { modifiedCount: 1 }
+          : { modifiedCount: 0 }
+      );
+    }
+
+    it("names the task, the column it landed in and who it is for", async () => {
+      abandoned();
+
+      await releaseExpiredTasks("p1", now);
+
+      const [notification] = createNotificationsMock.mock.calls.at(-1) ?? [];
+      expect(notification.title).toBe("TP-9 needs a human — the run was abandoned");
+      expect(notification.recipientIds).toEqual([WATCHER]);
+      expect(notification.email.kicker).toBe("Run abandoned");
+      expect(notification.email.taskPills).toEqual([{ label: "Escalated", tone: "review" }]);
+      expect(notification.email.projectRef).toBe("TP");
+      expect(userFindOne).toHaveBeenCalledWith({ username: "worker-w1" }, "_id");
+      expect(notification.actorId).toBe("worker-user-1");
+    });
+
+    // The row's actor is a required reference; a machine whose identity has gone leaves nothing
+    // truthful to put in it, and a half-written notification is worse than none
+    it("says nothing when the worker's identity cannot be resolved", async () => {
+      abandoned();
+      userFindOne.mockReturnValue({ lean: async () => null });
+
+      await releaseExpiredTasks("p1", now);
+
+      expect(createNotificationsMock).not.toHaveBeenCalled();
+    });
+
+    // The list is read before the update, so a poll that lost the race holds tasks somebody else
+    // already moved and announced
+    it("stays quiet when its own update moved nothing", async () => {
+      abandoned();
+      updateMany.mockResolvedValue({ modifiedCount: 0 });
+
+      await releaseExpiredTasks("p1", now);
+
+      expect(createNotificationsMock).not.toHaveBeenCalled();
+    });
+
+    it("says nothing about a task nobody is assigned to or watching", async () => {
+      abandoned();
+      collectRecipientsMock.mockReturnValue([]);
+
+      await releaseExpiredTasks("p1", now);
+
+      expect(createNotificationsMock).not.toHaveBeenCalled();
+    });
   });
 });
 
@@ -2848,5 +2941,235 @@ describe("what a task is populated with before it is answered", () => {
       "blockedBy",
       "relations.task",
     ]);
+  });
+});
+
+// Handing work over by creating the task — how the MCP, the PM agent and a worker all do it —
+// used to tell the assignee nothing. Only reassigning an existing task did.
+describe("createTask handing the task to somebody", () => {
+  const ASSIGNEE = "507f1f77bcf86cd799439041";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    sprintExists.mockResolvedValue(null);
+    projectFindOneAndUpdate.mockResolvedValue({
+      _id: "p1",
+      taskCounter: 7,
+      key: "BP",
+      name: "Board Planner",
+      ...customBoard,
+    });
+    taskCreate.mockImplementation(async (doc: Record<string, unknown>) => ({ ...doc, _id: "new" }));
+    taskFindById.mockReturnValue({ populate: () => ({ lean: async () => ({ _id: "new" }) }) });
+    userFindOne.mockResolvedValue({ _id: ASSIGNEE, username: "rpo" });
+  });
+
+  it("tells the assignee, with the column's label and a link", async () => {
+    await createTask("p1", "actor", { title: "Session cookie survives a change", assignee: "rpo" });
+
+    const [notification] = createNotificationsMock.mock.calls.at(-1) ?? [];
+    expect(notification.type).toBe("task_assigned");
+    expect(notification.recipientIds).toEqual([ASSIGNEE]);
+    expect(notification.title).toBe("BP-7 assigned to you");
+    expect(notification.email.taskPills[0]).toEqual({ label: "Ready", tone: "todo" });
+    expect(notification.email.projectRef).toBe("BP");
+    expect(notification.email.taskNumber).toBe(7);
+  });
+
+  it("stays quiet when the task is created for nobody", async () => {
+    await createTask("p1", "actor", { title: "x" });
+
+    expect(createNotificationsMock).not.toHaveBeenCalled();
+  });
+});
+
+// One comment used to raise two notifications for the same person: the watcher list and the
+// mention list overlap, and each one sent its own mail carrying the identical excerpt.
+describe("a comment mentioning a watcher", () => {
+  const WATCHER = "507f1f77bcf86cd799439031";
+  const MENTIONED_WATCHER = "507f1f77bcf86cd799439032";
+  const board = {
+    key: "TP",
+    name: "Test Project",
+    columns: [{ id: "doing", label: "Doing", role: "active", order: 1 }],
+  };
+
+  function setup(mentions: string[], watchers: string[]) {
+    vi.clearAllMocks();
+    findOne.mockReturnValue({ _id: "t1", taskNumber: 7, title: "x", status: "doing" });
+    findById.mockReturnValue({ lean: () => Promise.resolve(board) });
+    collectRecipientsMock.mockReturnValue(watchers);
+    resolveMentionsMock.mockResolvedValue(mentions);
+  }
+
+  const notificationsByType = (): Record<string, Record<string, unknown>> =>
+    Object.fromEntries(createNotificationsMock.mock.calls.map(([n]) => [n.type, n]));
+
+  it("writes to a mentioned watcher once, as a mention", async () => {
+    setup([MENTIONED_WATCHER], [MENTIONED_WATCHER]);
+    await addComment("p1", "t1", "@bob look at this", { id: "actor", username: "rafal" });
+
+    const byType = notificationsByType();
+    expect(byType.comment_added, "the same person got both mails").toBeUndefined();
+    expect(byType.mentioned.recipientIds).toEqual([MENTIONED_WATCHER]);
+  });
+
+  it("still tells the watchers who were not mentioned", async () => {
+    setup([MENTIONED_WATCHER], [WATCHER, MENTIONED_WATCHER]);
+    await addComment("p1", "t1", "@bob look at this", { id: "actor", username: "rafal" });
+
+    const byType = notificationsByType();
+    expect(byType.comment_added.recipientIds).toEqual([WATCHER]);
+    expect(byType.mentioned.recipientIds).toEqual([MENTIONED_WATCHER]);
+  });
+
+  it("gives the mail the column's label and a link, not the raw status id", async () => {
+    setup([], [WATCHER]);
+    await addComment("p1", "t1", "no mentions here", { id: "actor", username: "rafal" });
+
+    const email = notificationsByType().comment_added.email as Record<string, unknown>;
+    expect(email.taskPills).toEqual([{ label: "Doing", tone: "progress" }]);
+    expect(email.projectRef).toBe("TP");
+    expect(email.taskNumber).toBe(7);
+    expect(email.quote).toEqual({ who: "rafal", text: "no mentions here" });
+  });
+});
+
+/**
+ * The three paths where this branch's control flow and main's notifications meet.
+ *
+ * `updateTask` was rewritten here — the assignee is resolved earlier, the agent is judged against
+ * the assignee the write LEAVES, and two guards return before the write. Main added a notification
+ * after that write. Nothing in either side's suite fired it, so the one arrangement that matters —
+ * guard refuses BEFORE the write and says nothing, write succeeds and the assignee is told — was
+ * held up by no test at all, on either branch.
+ */
+describe("what a rewritten updateTask still tells the assignee", () => {
+  const board = {
+    key: "TP",
+    name: "Test Project",
+    columns: [
+      { id: "ready", label: "Ready", role: "approved", order: 1 },
+      { id: "doing", label: "Doing", role: "active", order: 2 },
+    ],
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    findById.mockReturnValue({ lean: () => Promise.resolve(board) });
+    const stored = {
+      _id: "t1",
+      taskNumber: 4,
+      status: "doing",
+      title: "Session cookie survives a change",
+      assignee: { _id: "u1", username: "rpo" },
+      assignedBy: "u9",
+    };
+    findOne.mockReturnValue({
+      lean: () => Promise.resolve(stored),
+      populate: () => ({ lean: () => Promise.resolve(stored) }),
+    });
+    findOneAndUpdate.mockReturnValue({
+      populate: () =>
+        Promise.resolve({
+          _id: "t1",
+          taskNumber: 4,
+          status: "doing",
+          title: "Session cookie survives a change",
+          priority: "high",
+          assignee: { _id: "u2", username: "kuba" },
+          execution: {},
+        }),
+    });
+    userFindOne.mockResolvedValue({ _id: "u2", username: "kuba" });
+    // Auto-watch on assign runs in the same Promise.all as the activity writes
+    findByIdAndUpdate.mockReturnValue(Promise.resolve(null));
+  });
+
+  // Main's notification sits after the write. The branch moved the assignee resolution above it
+  // and added two early returns, so "still reached" is the whole question.
+  it("tells the new assignee, with the column's label and the assigner's name", async () => {
+    await updateTask("p1", "t1", { assignee: "kuba" }, "actor");
+
+    const [notification] = createNotificationsMock.mock.calls.at(-1) ?? [];
+    expect(notification.type).toBe("task_assigned");
+    expect(notification.recipientIds).toEqual(["u2"]);
+    expect(notification.title).toBe("TP-4 assigned to you");
+    // The column's label, not the raw id, and the priority beside it
+    expect(notification.email.taskPills).toEqual([
+      { label: "Doing", tone: "progress" },
+      { label: "High", tone: "neutral" },
+    ]);
+    expect(notification.email.taskMeta).toBe("Test Project · assigned by actor");
+    expect(notification.email.projectRef).toBe("TP");
+    expect(notification.email.taskNumber).toBe(4);
+  });
+
+  // The other half of the same arrangement: a guard that refuses must refuse BEFORE the write, so
+  // there is nothing to announce. A guard moved below the notification would still return 400 and
+  // still leave this mail sent.
+  it("says nothing when the agent guard refuses the write", async () => {
+    agentInTheCatalog({
+      _id: "a1",
+      scope: "user",
+      owner: "someone-else",
+      name: "Mine",
+      composition: { implementation: ["write-the-change"] },
+    });
+
+    const result = await updateTask(
+      "p1",
+      "t1",
+      { assignee: "kuba", agent: "507f1f77bcf86cd799439011" },
+      "actor"
+    );
+
+    expect(result).toMatchObject({ ok: false, status: 400 });
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
+    expect(createNotificationsMock).not.toHaveBeenCalled();
+  });
+});
+
+// The status-change mail, which no test on either side fired. The title and the pills both read
+// the project's own column labels, so a board that renamed its columns is the case that separates
+// "reads the label" from "prints the id".
+describe("what a status change tells a watcher", () => {
+  const board = {
+    key: "TP",
+    name: "Test Project",
+    columns: [
+      { id: "doing", label: "Doing", role: "active", order: 2 },
+      { id: "checking", label: "Under review", role: "review", order: 3 },
+    ],
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    findById.mockReturnValue({ lean: () => Promise.resolve(board) });
+    const stored = { _id: "t1", taskNumber: 9, status: "doing", title: "x" };
+    findOne.mockReturnValue({
+      lean: () => Promise.resolve(stored),
+      populate: () => ({ lean: () => Promise.resolve(stored) }),
+    });
+    findOneAndUpdate.mockReturnValue({
+      populate: () => Promise.resolve({ _id: "t1", taskNumber: 9, status: "checking", title: "x" }),
+    });
+    updateMany.mockResolvedValue({ modifiedCount: 0 });
+    collectRecipientsMock.mockReturnValue(["u1"]);
+  });
+
+  it("names the column the board calls it, in the title and in both pills", async () => {
+    await changeStatus("p1", "t1", "checking", "actor");
+
+    const [notification] = createNotificationsMock.mock.calls.at(-1) ?? [];
+    expect(notification.type).toBe("status_changed");
+    expect(notification.title).toBe("TP-9 moved to Under review");
+    expect(notification.email.taskPills).toEqual([
+      { label: "Doing", tone: "progress" },
+      "arrow",
+      { label: "Under review", tone: "review" },
+    ]);
+    expect(notification.email.taskMeta).toBe("Test Project · moved by actor");
+    expect(notification.email.projectRef).toBe("TP");
   });
 });

@@ -13,6 +13,12 @@ function apiStub(claim: ApiClient["claim"]) {
     release: vi.fn<ApiClient["release"]>().mockResolvedValue(undefined),
     statusIds: vi.fn<ApiClient["statusIds"]>(),
     columnIds: vi.fn<ApiClient["columnIds"]>(),
+    // The loop itself never posts telemetry — api.ts, outbox.ts and wiring.ts do — but it takes a
+    // whole ApiClient, so the stub has to be one. Deliberately without a resolved value: present to
+    // satisfy the contract, not to answer for one. If the loop ever does post, awaiting undefined
+    // fails loudly here rather than being handed a plausible {applied: true}.
+    postEvent: vi.fn<ApiClient["postEvent"]>(),
+    postRun: vi.fn<ApiClient["postRun"]>(),
   };
 }
 

@@ -9,7 +9,7 @@ interface ApiOptions {
 }
 
 export function useApi() {
-  const { onUnauthorized } = useAuth();
+  const { onUnauthorized, noteApiStatus } = useAuth();
 
   const request = useCallback(
     async (method: string, url: string, opts?: ApiOptions) => {
@@ -24,7 +24,11 @@ export function useApi() {
         body: opts?.body ? JSON.stringify(opts.body) : undefined,
       });
 
+      noteApiStatus(res.status);
+
       if (!res.ok) {
+        // Only a 401. A 5xx means the server could not answer, and clearing the session on that is
+        // what turned an outage into a logout (BP-362).
         if (res.status === 401) onUnauthorized();
         const error = await res.json().catch(() => ({ error: res.statusText }));
         // Message stays the whole error for every existing caller; status and body ride along
@@ -37,7 +41,7 @@ export function useApi() {
 
       return res.json();
     },
-    [onUnauthorized]
+    [onUnauthorized, noteApiStatus]
   );
 
   const upload = useCallback(
@@ -47,7 +51,11 @@ export function useApi() {
         body: formData,
       });
 
+      noteApiStatus(res.status);
+
       if (!res.ok) {
+        // Only a 401. A 5xx means the server could not answer, and clearing the session on that is
+        // what turned an outage into a logout (BP-362).
         if (res.status === 401) onUnauthorized();
         const error = await res.json().catch(() => ({ error: res.statusText }));
         // Message stays the whole error for every existing caller; status and body ride along
@@ -60,7 +68,7 @@ export function useApi() {
 
       return res.json();
     },
-    [onUnauthorized]
+    [onUnauthorized, noteApiStatus]
   );
 
   // Raw streaming POST (SSE): returns the Response so callers can read the body
@@ -71,10 +79,11 @@ export function useApi() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
+      noteApiStatus(res.status);
       if (res.status === 401) onUnauthorized();
       return res;
     },
-    [onUnauthorized]
+    [onUnauthorized, noteApiStatus]
   );
 
   const get = useCallback((url: string) => request("GET", url), [request]);

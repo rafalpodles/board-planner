@@ -4,6 +4,7 @@ import { connectDB } from "@/lib/db";
 import { MIN_PASSWORD_LENGTH, PASSWORD_COST_FACTOR } from "@/lib/auth";
 import { isValidEmail, normaliseEmail } from "@/lib/email";
 import { logInstanceAudit } from "@/lib/instanceAudit";
+import { notifyAddressChanged, notifyPasswordChanged } from "@/lib/security-mail";
 import { invalidateResetTokens } from "@/lib/password-reset";
 import { clearAccountAttempts } from "@/lib/rate-limit";
 import { duplicateKeyField } from "@/lib/mongo-errors";
@@ -189,6 +190,16 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
       user: admin._id,
       target: target.username,
     });
+    // The account holder is the one person this happens to who was not in the room for it. Sent to
+    // the address the account had on the way in, which is the same one in the ordinary case — and
+    // in the case that matters, one PUT setting a password AND repointing the address, it is the
+    // victim's inbox rather than the inbox the change just handed the account to.
+    void notifyPasswordChanged({
+      email: previousEmail || target.email,
+      username: target.username,
+      how: "admin",
+      actor: admin.username,
+    });
   }
 
   if (emailWasChanged) {
@@ -205,6 +216,14 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
       user: admin._id,
       target: target.username,
       detail: `${previousEmail || "none"} → ${target.email || "none"}`,
+    });
+    // To the address being taken off the account, exactly as the self-service path does — this is
+    // the half where the person doing it is not the person losing the recovery address.
+    void notifyAddressChanged({
+      previousEmail,
+      username: target.username,
+      newEmail: target.email,
+      actor: admin.username,
     });
   }
 

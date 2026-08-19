@@ -2,7 +2,8 @@ import { Project } from "@/models/project";
 import { Task } from "@/models/task";
 import { PmTrigger } from "@/models/pmTrigger";
 import { IPmTrigger } from "@/types";
-import { createNotifications, collectRecipients } from "@/lib/in-app-notifications";
+import { createNotifications, collectRecipients, assigneeIdOf } from "@/lib/in-app-notifications";
+import { pillToneForRole } from "@/lib/email-template";
 import { explicitEscalationColumnId } from "@/lib/escalation";
 import { getPmUser } from "./pm-user";
 import { runPmTurn } from "./agent";
@@ -78,16 +79,33 @@ async function notifyWatchers(
   pmUserId: string,
   summary: string
 ): Promise<void> {
-  const task = await Task.findById(trigger.task, "title watchers assignee createdBy").lean();
+  const [task, project] = await Promise.all([
+    Task.findById(trigger.task, "title watchers assignee createdBy status taskNumber").lean(),
+    Project.findById(trigger.project, "key name columns").lean(),
+  ]);
   if (!task) return;
+  const column = getProjectColumns(project).find((c) => c.id === String(task.status));
   createNotifications({
     type: "comment_added",
     taskId: String(trigger.task),
     projectId: String(trigger.project),
     actorId: pmUserId,
-    title: `PM reviewed ${trigger.taskKey}`,
+    title: `PM reviewed ${trigger.taskKey} — needs your call`,
     body: summary.slice(0, 120),
     recipientIds: collectRecipients(task),
+    email: {
+      kicker: "PM review",
+      taskKey: trigger.taskKey,
+      taskTitle: task.title,
+      taskPills: [
+        { label: column?.label ?? String(task.status), tone: pillToneForRole(column?.role) },
+      ],
+      taskMeta: [project?.name, "reviewed by pm"].filter(Boolean).join(" · "),
+      quote: { who: "pm · autonomous review", text: summary.slice(0, 200) },
+      projectRef: project?.key,
+      taskNumber: task.taskNumber,
+      assigneeId: assigneeIdOf(task),
+    },
   });
 }
 
