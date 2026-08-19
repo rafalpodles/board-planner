@@ -28,23 +28,26 @@ const { digestTick, dueDigestDay, digestHour, digestTimezone, DIGEST_ROW_LIMIT }
   "@/lib/digest"
 );
 
-const WAITING = [{ _id: "u1", email: "rpo@example.com", username: "rpo" }];
+// An ordinary account that predates the grid: emailNotifications is still its stored preference,
+// and the digest now reads that through resolveChannels rather than through the query.
+const WAITING = [
+  { _id: "u1", email: "rpo@example.com", username: "rpo", emailNotifications: true },
+];
+
+const PROJECT = "507f1f77bcf86cd799439021";
 
 /** `shown` rows come back from the page; `total` is what the count says is really waiting. */
 function notifications(shown: number, total = shown) {
-  const rows = Array.from({ length: shown }, (_, i) => ({
+  const rows = Array.from({ length: total }, (_, i) => ({
     title: `BP-${i + 1} moved to In Review`,
+    type: "status_changed" as const,
     task: { taskNumber: i + 1 },
-    project: { key: "BP" },
+    project: { _id: PROJECT, key: "BP" },
   }));
   notificationFind.mockReturnValue({
-    sort: () => ({
-      limit: () => ({
-        populate: () => ({ populate: () => ({ lean: async () => rows }) }),
-      }),
-    }),
+    sort: () => ({ populate: () => ({ populate: () => ({ lean: async () => rows }) }) }),
   });
-  notificationCount.mockResolvedValue(total);
+  void shown;
 }
 
 const sent = () => sendEmail.mock.calls.at(-1)?.[0] as {
@@ -167,18 +170,53 @@ describe("digestTick", () => {
 
     const [filter] = userFind.mock.calls.at(-1) ?? [];
     expect(filter).toEqual({
-      // Turning email notifications off means no email, digest included
-      emailNotifications: true,
       emailDigest: true,
       email: { $ne: "" },
       lastDigestDay: { $ne: "2026-08-17" },
     });
   });
 
+  // Turning mail off means no mail, digest included — decided in code now, because the condition
+  // reads over a grid keyed by event
+  it("leaves out somebody whose grid has mail off everywhere", async () => {
+    userFind.mockReturnValue({
+      lean: async () => [{ ...WAITING[0], emailNotifications: false }],
+    });
+
+    expect(await digestTick(morning)).toBe(0);
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  // Muting a project has to hold in the morning too, or it only silences the day
+  it("drops the rows belonging to a project muted in the mail column", async () => {
+    userFind.mockReturnValue({
+      lean: async () => [
+        {
+          ...WAITING[0],
+          notifications: {
+            defaults: { status_changed: { inApp: true, email: true, chat: false } },
+            projects: [
+              {
+                project: PROJECT,
+                matrix: { status_changed: { inApp: true, email: false, chat: false } },
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+    expect(await digestTick(morning)).toBe(0);
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
   // One person's mail server refusing must not cost everybody else their digest
   it("keeps going when a send fails", async () => {
     userFind.mockReturnValue({
-      lean: async () => [...WAITING, { _id: "u2", email: "b@example.com", username: "b" }],
+      lean: async () => [
+        ...WAITING,
+        { _id: "u2", email: "b@example.com", username: "b", emailNotifications: true },
+      ],
     });
     userFindOneAndUpdate.mockResolvedValue({ _id: "x" });
     sendEmail.mockRejectedValueOnce(new Error("smtp down"));

@@ -9,6 +9,8 @@ export const GET = withAuth(async (_request, { user }) => {
   const count = await Notification.countDocuments({
     recipient: user._id,
     read: false,
+    // Counting rows the list will not show would put a number on an empty bell
+    inApp: { $ne: false },
   });
 
   return NextResponse.json({ count });

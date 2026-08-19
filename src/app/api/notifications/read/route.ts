@@ -16,9 +16,10 @@ export const PATCH = withAuth(async (request, { user }) => {
       { $set: { read: true } }
     );
   } else {
-    // Mark all as read
+    // Mark all as read — only what the bell showed. A row the grid hid was never seen here, and
+    // the digest lists what is unread: marking it read would drop it from tomorrow's mail.
     await Notification.updateMany(
-      { recipient: user._id, read: false },
+      { recipient: user._id, read: false, inApp: { $ne: false } },
       { $set: { read: true } }
     );
   }

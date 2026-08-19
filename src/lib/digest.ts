@@ -7,6 +7,8 @@ import { dayKeyInTimezone, hourInTimezone, isValidTimezone } from "@/lib/time";
 import { taskPath } from "@/lib/urls";
 import { Notification } from "@/models/notification";
 import { User } from "@/models/user";
+import { defaultMatrix, resolveChannels, PrefsSource } from "@/lib/notification-prefs";
+import { NOTIFICATION_TYPES } from "@/types";
 
 const TICK_MS = Number(process.env.DIGEST_TICK_MS) || 5 * 60 * 1000;
 const DEFAULT_TIMEZONE = "Europe/Warsaw";
@@ -61,23 +63,32 @@ function lineFor(notification: any, origin: string | null): DigestLine {
  */
 export async function buildDigestFor(
   userId: string,
-  since: Date
+  since: Date,
+  prefs?: PrefsSource
 ): Promise<{ lines: DigestLine[]; total: number }> {
   const filter = { recipient: userId, read: false, createdAt: { $gte: since } };
-  // Counted rather than inferred from the page: a digest that lists 25 and says "and 1 more" when
-  // 40 are waiting is a silent cap wearing a number
-  const [notifications, total] = await Promise.all([
-    Notification.find(filter)
-      .sort({ createdAt: 1 })
-      .limit(DIGEST_ROW_LIMIT)
-      .populate("task", "taskNumber")
-      .populate("project", "key")
-      .lean(),
-    Notification.countDocuments(filter),
-  ]);
+  // Read whole rather than paged, because which of them belong in the mail is decided per row
+  // below and a page of 25 could be 25 muted ones. DIGEST_ROW_LIMIT still bounds what is listed.
+  const notifications = await Notification.find(filter)
+    .sort({ createdAt: 1 })
+    .populate("task", "taskNumber")
+    .populate("project", "key")
+    .lean();
+
+  // A project muted in the mail column drops out here too. Without this, muting would silence the
+  // mail during the day and deliver it anyway the next morning.
+  const wanted = notifications.filter((n) => {
+    const projectId = (n.project as { _id?: unknown })?._id ?? n.project;
+    return resolveChannels(prefs, String(projectId), n.type).email;
+  });
 
   const origin = selfOrigin();
-  return { lines: notifications.map((n) => lineFor(n, origin)), total };
+  return {
+    lines: wanted.slice(0, DIGEST_ROW_LIMIT).map((n) => lineFor(n, origin)),
+    // Counted rather than inferred from the page: a digest that lists 25 and says "and 1 more"
+    // when 40 are waiting is a silent cap wearing a number
+    total: wanted.length,
+  };
 }
 
 async function sendDigest(
@@ -121,17 +132,20 @@ export async function digestTick(now = new Date()): Promise<number> {
   if (!day) return 0;
 
   await connectDB();
-  // Both switches, not just the digest one: turning email notifications off has to mean no email,
-  // and the API accepts the two fields independently even though the screen ties them together
-  const waiting = await User.find(
+  // "Mail is on somewhere" now reads over a grid keyed by event, which Mongo 4.4 expresses badly,
+  // so the query narrows to the digest switch and resolveChannels does the rest in code. One
+  // source of truth beats a denormalised flag that would drift from the grid it summarises.
+  const candidates = await User.find(
     {
-      emailNotifications: true,
       emailDigest: true,
       email: { $ne: "" },
       lastDigestDay: { $ne: day },
     },
-    "email username"
+    "email username emailNotifications notifications"
   ).lean();
+  const waiting = candidates.filter((user) =>
+    NOTIFICATION_TYPES.some((type) => defaultMatrix(user)[type].email)
+  );
   if (waiting.length === 0) return 0;
 
   const since = new Date(now.getTime() - 24 * 60 * 60 * 1000);
@@ -147,7 +161,7 @@ export async function digestTick(now = new Date()): Promise<number> {
     if (!claimed) continue;
 
     try {
-      const { lines, total } = await buildDigestFor(String(user._id), since);
+      const { lines, total } = await buildDigestFor(String(user._id), since, user);
       // A quiet day is not worth a mail saying so
       if (lines.length === 0) continue;
       await sendDigest(user, lines, total);

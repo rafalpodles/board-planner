@@ -10,7 +10,9 @@ export const GET = withAuth(async (request, { user }) => {
   const limit = Math.min(parseInt(url.searchParams.get("limit") || "30"), 100);
   const before = url.searchParams.get("before"); // cursor pagination
 
-  const filter: Record<string, unknown> = { recipient: user._id };
+  // Rows the grid hid from the bell are still stored, because the digest is built from them.
+  // `$ne: false` rather than `true`: everything written before BP-371 has no field at all.
+  const filter: Record<string, unknown> = { recipient: user._id, inApp: { $ne: false } };
   if (before) {
     filter.createdAt = { $lt: new Date(before) };
   }
