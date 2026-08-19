@@ -7,9 +7,8 @@ The worker talks to the app over REST with a Bearer token and never touches Mong
 app runs on Railway while the checkout lives on a laptop behind NAT, and a machine executing
 agent-written code has no business holding database credentials.
 
-A single worker process can serve more than one project: it registers once, an instance admin
-assigns it whichever projects it should work, and the poll loop claims from each assignment in
-turn.
+A single worker process can serve more than one project: it registers once, it is offered whichever
+projects its owner can reach and it has a checkout of, and the poll loop claims from each in turn.
 
 User-facing documentation lives on the docs site, under **AI and automation → Execution
 workers**: what the gates do, how to enable a project, which tasks get picked up, and how to stop a
@@ -83,9 +82,10 @@ A policy change takes effect on the worker's own refresh cycle, without a restar
 
 ## Registration
 
-A worker has no identity until an instance admin registers it and assigns it one or more projects
-in `/settings/workers`. Until then it polls but claims nothing: `/tasks/claim` and the rest of
-`/api/workers/**` refuse any request without a credential the server itself issued.
+A worker has no identity until somebody enrols it — from the machine itself, confirmed in a browser,
+or with an enrolment token. Whoever does that owns it, and no admin approval stands in between
+(BP-358). Until then it polls but claims nothing: `/tasks/claim` and the rest of `/api/workers/**`
+refuse any request without a credential the server itself issued.
 
 On first run the worker registers itself with its enrolment token and persists the response — a
 `workerId` and a `cpw_`-prefixed credential — to `<CP_STATE_DIR>/worker.json`, mode `0600`. Every
@@ -93,11 +93,11 @@ later run reuses that file; the worker registers again only if the file is missi
 rejects its stored credential with 401. A run that reuses a stored identity, rather than
 registering fresh, reads its current policy and assignments back from `GET /api/workers/:id`.
 
-Registration assigns projects, but not a filesystem. The repository path an admin proposes for
-each assigned project must still be approved on this machine, by listing it in
-`<CP_STATE_DIR>/repos.json`. A worker pointed at a path outside its own allowlist leaves that one
-project unbound and idle, with the reason visible as `bindingError` in `/settings/workers` — its
-other assignments keep working normally.
+Registration settles which projects are offered, but not a filesystem. The repository behind each
+offered project must still be approved on this machine, by listing its checkout in
+`<CP_STATE_DIR>/repos.json`. A worker with no entry for a project leaves that one unbound and idle,
+with the reason visible as `bindingError` in `/settings/workers` — its other assignments keep
+working normally.
 
 ## Running
 
@@ -135,14 +135,14 @@ and `SIGINT` both finish the task in flight before the loop exits.
 
 ## Safety
 
-- **Nothing is claimed that was not offered.** A project's `claimScope` decides what the approved
-  column actually hands over. On `assigned`, the default, a worker takes only tasks assigned to the
-  user that project nominates — so enabling a project claims nothing until somebody hands a task
-  over, one at a time. `any` adds unassigned tasks, which is the whole column. A task assigned to
-  anyone else is never taken under either scope.
+- **Nothing is claimed that was not offered.** A machine takes only a task its own owner assigned
+  to themselves — `{ assignee: ownerId, assignedBy: ownerId }` — and only once that task names an
+  agent, which is the hand-over gesture. A task with no agent is one a person is doing by hand, and
+  no machine looks at it. A task assigned by anyone else is never taken: the approval surface for
+  work somebody *else* hands you is a separate, later change.
 
-  The nominee is an ordinary user a person picks, deliberately not the worker's own identity: that
-  is an auto-created `worker-<id>` account with kind `machine`, excluded from every list the
+  The owner is the account that enrolled this machine, deliberately not the worker's own identity:
+  that is an auto-created `worker-<id>` account with kind `machine`, excluded from every list the
   product offers. Keying the predicate on it would have described a hand-over nobody could perform.
 - **Nothing starts before its blockers finish.** A task whose `blockedBy` still names an unfinished
   task is passed over, and the claim takes the next one that is free instead. Finished means the
@@ -264,18 +264,30 @@ one stale line must not cost this machine every other checkout it could serve.
 
 ## What a worker's credential grants
 
-Instance-wide, not per project. A worker that reports a checkout matching a project's repository is
-offered that project, for **every** project with workers enabled — there is no per-worker list of
-which projects a machine may serve.
+**Exactly what its owner can reach, and nothing else.** A worker is offered a project when three
+things hold at once: the project is enabled for workers, the machine's **owner** can reach it, and
+that machine reports a checkout whose remote matches the project's repository.
 
-That is deliberate. A worker credential comes from a single-use enrolment token that only an
-instance admin can mint from an interactive session, so the set of workers is already the set an
-admin chose to admit, and admitting a machine admits it to the instance. Reporting a remote it does
-not really have gains a worker nothing it could run: it resolves the checkout from this file, so a
-false remote earns an assignment it then fails to bind.
+The owner's reach is resolved from their own grants on every heartbeat, every assignment list and
+every claim — not stored on the worker. A grant revoked from the person is revoked from their
+machine on its next poll, with nothing to remember to un-tick.
 
-Revisit this if workers are ever enrolled by someone other than an instance admin, or if two
-projects on one instance must not share a machine.
+Reporting a remote it does not really have gains a worker nothing it could run: it resolves the
+checkout from `repos.json` on its own disk, so a false remote earns an assignment it then fails to
+bind.
+
+Until BP-358 this was instance-wide, and an instance admin had to approve every enrolment. That was
+the right shape while a machine took work assigned to a project-wide nominee — anyone's work — so
+admitting a machine was an instance-level decision. A machine now runs only its owner's own work, on
+its owner's own hardware, entirely inside permissions that person already holds, so the approval
+signed off on something already permitted. **Enrolling is self-service:** whoever connects the
+machine owns it. An instance admin keeps the fleet console and the kill switch (`enabled`,
+`lockedByInstance`) and is no longer a required step.
+
+A machine with **no owner** — every worker enrolled before BP-358 — reaches nothing: no assignments,
+no claim, refused by the middleware. That is deliberate rather than a fallback to the old behaviour,
+which would keep the race this replaces alive indefinitely. The fleet console's Owner column says
+so; the fix is to enrol the machine again from the machine.
 
 ## Where settings live
 

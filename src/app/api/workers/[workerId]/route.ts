@@ -4,7 +4,7 @@ import { connectDB } from "@/lib/db";
 import { withAuth, withWorker } from "@/lib/middleware";
 import { Worker } from "@/models/worker";
 import { Project } from "@/models/project";
-import { assignmentsFor, approvedProjectIds, overriddenWorkerPolicy, toApiWorker, usableRepos } from "@/lib/worker-service";
+import { assignmentsFor, overriddenWorkerPolicy, ownerReachableProjectIds, toApiWorker, usableRepos } from "@/lib/worker-service";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { InstanceAuditAction } from "@/types";
 
@@ -25,11 +25,12 @@ export const GET = withWorker(async (_request, { worker }) => {
   }
 
   await connectDB();
-  const [projects, others] = await Promise.all([
+  const [projects, others, reachable] = await Promise.all([
     Project.find({ "worker.enabled": true }).select("_id repositoryUrl githubRepo gitlabRepo gitlabHost worker").lean(),
     Worker.find({ _id: { $ne: worker._id } }).select(
       "_id name host repos enabled lockedByInstance lastSeenAt createdAt"
     ),
+    ownerReachableProjectIds(worker),
   ]);
 
   return NextResponse.json({
@@ -37,7 +38,11 @@ export const GET = withWorker(async (_request, { worker }) => {
     policy: overriddenWorkerPolicy(worker),
     // This is the field the worker actually reads, so the contested-checkout decision has to be
     // applied here and not only on the heartbeat, whose assignments nothing consumes.
-    assignments: assignmentsFor(usableRepos(worker as never, others as never), projects as never, approvedProjectIds(worker)),
+    assignments: assignmentsFor(
+      usableRepos(worker as never, others as never),
+      projects as never,
+      reachable
+    ),
   });
 });
 
@@ -77,21 +82,19 @@ export const PATCH = withAuth(async (request, { params, user }) => {
 
   const update: Record<string, unknown> = {};
 
-  // The only way to widen or narrow what an already-enrolled machine may claim, and the recovery
-  // path for a worker enrolled before BP-305 — those have an empty set and so claim nothing.
-  if ("approvedProjects" in body) {
-    const ids = body.approvedProjects;
-    if (!Array.isArray(ids) || ids.some((id) => typeof id !== "string" || !isValidObjectId(id))) {
+  // Release only — `owner: null` and nothing else. Registration is the one thing that decides whose
+  // machine this is, and it now refuses to re-register somebody else's; without a way to let one
+  // go, a machine whose owner has left could never be enrolled again under the same name and host.
+  // Assigning an owner from here is deliberately not offered: that would hand the decision to
+  // somebody who is not at the machine, which is the step BP-358 removed.
+  if ("owner" in body) {
+    if (body.owner !== null) {
       return NextResponse.json(
-        { error: "approvedProjects must be an array of project ids" },
+        { error: "owner can only be cleared here — a machine is claimed by enrolling it" },
         { status: 400 }
       );
     }
-    const known = await Project.countDocuments({ _id: { $in: ids } });
-    if (known !== new Set(ids).size) {
-      return NextResponse.json({ error: "approvedProjects names a project that does not exist" }, { status: 400 });
-    }
-    update.approvedProjects = [...new Set(ids as string[])];
+    update.owner = null;
   }
 
   for (const field of ADMIN_FIELDS) {
@@ -129,7 +132,14 @@ export const PATCH = withAuth(async (request, { params, user }) => {
     return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
   }
 
-  const updated = await Worker.findByIdAndUpdate(workerId, { $set: update }, { new: true });
+  // Populated, like the fleet list is: without it toApiWorker answers `owner: null` for a machine
+  // that has one, the console merges that into the row, and its Owner column flashes the red
+  // "claims nothing" flag until the next poll corrects it — a false alarm on the very indicator
+  // this branch added, raised by the page's most-used control.
+  const updated = await Worker.findByIdAndUpdate(workerId, { $set: update }, { new: true }).populate(
+    "owner",
+    "username fullName"
+  );
   if (!updated) {
     return NextResponse.json({ error: "Worker not found" }, { status: 404 });
   }
@@ -147,6 +157,7 @@ interface WorkerBefore {
   name: string;
   enabled: boolean;
   lockedByInstance: boolean;
+  owner?: unknown;
   policy?: { pollIntervalMs?: number };
   policyOverrides?: string[];
 }
@@ -173,6 +184,14 @@ function auditEntries(
 
   if (typeof body.enabled === "boolean" && body.enabled !== before.enabled) {
     entries.push({ action: body.enabled ? "worker_enabled" : "worker_disabled", target });
+  }
+
+  if (body.owner === null && before.owner) {
+    entries.push({
+      action: "worker_released",
+      target,
+      detail: "Owner cleared — it claims nothing until somebody enrols it again",
+    });
   }
 
   if (typeof body.name === "string" && body.name.trim() && body.name.trim() !== before.name) {

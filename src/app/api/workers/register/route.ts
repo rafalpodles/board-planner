@@ -1,8 +1,19 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { protocolOf } from "@/lib/middleware";
-import { PROTOCOL_VERSION, WORKER_HEARTBEAT_MS, overriddenWorkerPolicy, registerWorker } from "@/lib/worker-service";
-import { attachWorkerToEnrolment, consumeEnrolmentToken, enrolmentTokenOwner } from "@/lib/enrolment";
+import {
+  PROTOCOL_VERSION,
+  WORKER_HEARTBEAT_MS,
+  WorkerAlreadyOwned,
+  overriddenWorkerPolicy,
+  registerWorker,
+} from "@/lib/worker-service";
+import {
+  attachWorkerToEnrolment,
+  consumeEnrolmentToken,
+  enrolmentTokenOwner,
+  enrolmentTokenOwnerId,
+} from "@/lib/enrolment";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 
 // Authenticated by a single-use enrolment token, NOT by an admin session or an admin API token.
@@ -45,14 +56,27 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid or spent enrolment token" }, { status: 401 });
   }
 
-  const { worker, credential } = await registerWorker({
-    name,
-    host,
-    platform: String(body.platform ?? ""),
-    version: String(body.version ?? ""),
-    // Names the machine's identity after the person who enrolled it — "Rafal · MacBook"
-    owner: await enrolmentTokenOwner(consumed.tokenId),
-  });
+  // The same refusal the browser flow makes: a machine that already belongs to somebody else is
+  // not re-registered, whoever holds the token. The token is spent by now either way, which is the
+  // right way round — it makes a token aimed at a colleague's hostname cost the attempt.
+  let registered;
+  try {
+    registered = await registerWorker({
+      name,
+      host,
+      platform: String(body.platform ?? ""),
+      version: String(body.version ?? ""),
+      // Names the machine's identity after the person who enrolled it — "Rafal · MacBook"
+      owner: await enrolmentTokenOwner(consumed.tokenId),
+      ownerId: (await enrolmentTokenOwnerId(consumed.tokenId)) ?? undefined,
+    });
+  } catch (error) {
+    if (error instanceof WorkerAlreadyOwned) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
+    throw error;
+  }
+  const { worker, credential } = registered;
 
   await attachWorkerToEnrolment(consumed.tokenId, String(worker._id));
 

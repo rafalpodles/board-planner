@@ -5,6 +5,7 @@ const getAuthUser = vi.fn();
 const projectFindById = vi.fn();
 const userFindById = vi.fn();
 const check = vi.fn();
+const accessibleProjectIds = vi.fn();
 
 vi.mock("./db", () => ({ connectDB: vi.fn() }));
 vi.mock("./worker-service", async (importOriginal) => {
@@ -12,18 +13,21 @@ vi.mock("./worker-service", async (importOriginal) => {
   return { ...actual, verifyWorkerCredential };
 });
 vi.mock("./auth", () => ({ getAuthUser, RateLimitError: class extends Error {} }));
-// Only the person branch consults it; the worker branch in this file never reaches it
-vi.mock("./grants", () => ({ check, accessibleProjectIds: vi.fn() }));
+// The person branch consults check(); the worker branch consults accessibleProjectIds() through
+// ownerReachableProjectIds, because a machine reaches exactly what its owner reaches (BP-358)
+vi.mock("./grants", () => ({ check, accessibleProjectIds }));
 vi.mock("@/models/project", () => ({
   Project: { findById: projectFindById, findOne: vi.fn() },
 }));
 vi.mock("@/models/user", () => ({ User: { findById: userFindById } }));
-vi.mock("@/models/task", () => ({ Task: { findOne: vi.fn() } }));
+const taskExists = vi.fn();
+vi.mock("@/models/task", () => ({ Task: { findOne: vi.fn(), exists: taskExists } }));
 
 const { withProjectAccessOrWorker } = await import("./middleware");
 
 const PROJECT_ID = "69a52e3b399b27d3cbb2c5a5";
 const IDENTITY_ID = "69a52e3b399b27d3cbb2c5b7";
+const OWNER_ID = "69a52e3b399b27d3cbb2c5c9";
 const REMOTE = "git@github.com:owner/repo.git";
 
 function workerDoc(overrides: Record<string, unknown> = {}) {
@@ -33,8 +37,9 @@ function workerDoc(overrides: Record<string, unknown> = {}) {
     lockedByInstance: false,
     identity: IDENTITY_ID,
     repos: [{ remote: REMOTE, path: "/checkout" }],
-    // BP-305: the reported repos narrow what an admin approved, they never stand in for it
-    approvedProjects: [PROJECT_ID],
+    // BP-305/BP-358: the reported repos narrow what this machine's owner can reach, they never
+    // stand in for it
+    owner: OWNER_ID,
     ...overrides,
   };
 }
@@ -50,6 +55,12 @@ function projectDoc(overrides: Record<string, unknown> = {}) {
 
 function identityDoc() {
   return { _id: IDENTITY_ID, username: "worker-w1", fullName: "Rafal · MacBook", role: "member" };
+}
+
+// Two different accounts, because they answer two different questions: identity is which machine
+// acted, owner is whose machine it is — and only the owner's grants decide what it may reach.
+function ownerDoc() {
+  return { _id: OWNER_ID, username: "rpo", fullName: "Rafal", role: "member" };
 }
 
 function workerRequest(headers: Record<string, string> = {}) {
@@ -69,7 +80,12 @@ beforeEach(() => {
   vi.clearAllMocks();
   verifyWorkerCredential.mockResolvedValue(workerDoc());
   projectFindById.mockReturnValue({ select: () => ({ lean: () => Promise.resolve(projectDoc()) }) });
-  userFindById.mockResolvedValue(identityDoc());
+  userFindById.mockImplementation((id: string) =>
+    Promise.resolve(String(id) === OWNER_ID ? ownerDoc() : identityDoc())
+  );
+  accessibleProjectIds.mockResolvedValue([PROJECT_ID]);
+  // Nothing in flight unless a test says so
+  taskExists.mockResolvedValue(null);
 });
 
 describe("a worker reporting with its own credential", () => {
@@ -191,6 +207,108 @@ describe("the grant is re-derived on every call", () => {
 
     expect((await withProjectAccessOrWorker(handler)(workerRequest(), context())).status).toBe(403);
     expect(handler).not.toHaveBeenCalled();
+  });
+
+  // BP-358: what the stored approved list used to answer. Resolved live, so a revoked grant reaches
+  // the machine on its next call instead of leaving an approval behind that nothing revisits.
+  it("refuses a project this machine's owner cannot reach", async () => {
+    accessibleProjectIds.mockResolvedValue(["some-other-project"]);
+    const handler = vi.fn();
+
+    expect((await withProjectAccessOrWorker(handler)(workerRequest(), context())).status).toBe(403);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("refuses a machine with no owner at all", async () => {
+    verifyWorkerCredential.mockResolvedValue(workerDoc({ owner: null }));
+    const handler = vi.fn();
+
+    expect((await withProjectAccessOrWorker(handler)(workerRequest(), context())).status).toBe(403);
+    expect(handler).not.toHaveBeenCalled();
+    // Not merely refused by an empty grant list: the owner is never looked up at all
+    expect(accessibleProjectIds).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The paragraph at the top of withProjectAccessOrWorker: a worker must still be able to report
+   * the outcome of a task it already holds, or refusing it strands that task in the active column
+   * until the two-hour lease sweeps it and spends an attempt.
+   *
+   * BP-358 made that reachable in a new way — the reach is the OWNER's, and every machine enrolled
+   * before BP-358 has none, so on the day this deploys every in-flight run would 403.
+   */
+  describe("a run this machine is already holding", () => {
+    it("reports through even though its owner reaches nothing", async () => {
+      verifyWorkerCredential.mockResolvedValue(workerDoc({ owner: null }));
+      taskExists.mockResolvedValue({ _id: "t1" });
+      const handler = vi.fn().mockResolvedValue(new Response("ok"));
+
+      const res = await withProjectAccessOrWorker(handler)(workerRequest(), context());
+
+      expect(res.status).toBe(200);
+      expect(handler).toHaveBeenCalled();
+    });
+
+    it("reports through when the grant was revoked mid-run", async () => {
+      accessibleProjectIds.mockResolvedValue(["some-other-project"]);
+      taskExists.mockResolvedValue({ _id: "t1" });
+      const handler = vi.fn().mockResolvedValue(new Response("ok"));
+
+      expect((await withProjectAccessOrWorker(handler)(workerRequest(), context())).status).toBe(200);
+    });
+
+    // runId, not workerId: workerId is left behind as history when a run ends, so keying on it
+    // would let a finished task grant its worker access to the project for good
+    it("asks for a live run, in this project, held by this worker", async () => {
+      verifyWorkerCredential.mockResolvedValue(workerDoc({ owner: null }));
+      taskExists.mockResolvedValue({ _id: "t1" });
+
+      await withProjectAccessOrWorker(vi.fn().mockResolvedValue(new Response("ok")))(
+        workerRequest(),
+        context()
+      );
+
+      expect(taskExists).toHaveBeenCalledWith({
+        project: PROJECT_ID,
+        "execution.workerId": "w1",
+        "execution.runId": { $nin: ["", null] },
+      });
+    });
+
+    // The exemption is for a task in flight, not a standing grant: with nothing held, an
+    // unreachable project is still refused
+    it("does not become a way in once the run has ended", async () => {
+      verifyWorkerCredential.mockResolvedValue(workerDoc({ owner: null }));
+      const handler = vi.fn();
+
+      expect((await withProjectAccessOrWorker(handler)(workerRequest(), context())).status).toBe(403);
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    // A disabled or locked machine is refused before any of this: the kill switch is not a
+    // permissions question and must not be softened by holding a task
+    it("does not let a killed worker report either", async () => {
+      verifyWorkerCredential.mockResolvedValue(workerDoc({ lockedByInstance: true }));
+      taskExists.mockResolvedValue({ _id: "t1" });
+
+      expect(
+        (await withProjectAccessOrWorker(vi.fn())(workerRequest(), context())).status
+      ).toBe(403);
+    });
+  });
+
+  // The identity is a `worker-<id>` machine account with no grants of its own. Reading reach off it
+  // rather than off the owner would refuse every project on the instance, and both accounts are
+  // members, so nothing about the outcome distinguishes them — only who was asked.
+  it("asks the owner's account what it may reach, not the machine's own identity", async () => {
+    await withProjectAccessOrWorker(vi.fn().mockResolvedValue(new Response("ok")))(
+      workerRequest(),
+      context()
+    );
+
+    expect(accessibleProjectIds).toHaveBeenCalledWith(
+      expect.objectContaining({ _id: OWNER_ID, username: "rpo" })
+    );
   });
 });
 

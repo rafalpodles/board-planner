@@ -7,7 +7,9 @@ import { Project } from "@/models/project";
 import { isRunnable, normaliseComposition } from "@/lib/agent-rules";
 
 // Its own route rather than a field on the worker policy: policy is instance-admin only and travels
-// in the assignment payload, and this is neither — a project admin picks it, and it rides the claim.
+// in the assignment payload, and this is neither — a project admin picks it. Since BP-358 it does
+// not ride the claim either: the task's own agent is the only thing a claim resolves, and this is
+// the agent the task picker offers first.
 export const PUT = withProjectAccess(async (request, { params, user }) => {
   const { projectId } = await params;
   await connectDB();
@@ -34,7 +36,7 @@ export const PUT = withProjectAccess(async (request, { params, user }) => {
 
   if (!isRunnable(normaliseComposition(agent.composition))) {
     return NextResponse.json(
-      { error: "That agent has nothing in it yet, so a worker would claim a task and stall" },
+      { error: "That agent has nothing in it yet, so offering it first would suggest one that cannot run" },
       { status: 400 }
     );
   }

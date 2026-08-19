@@ -6,13 +6,13 @@ import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/components/ui/Toast";
 import { Button } from "@/components/ui/Button";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { EnrolWorkerModal } from "@/components/settings/EnrolWorkerModal";
 import { usePollWhileVisible } from "@/hooks/use-poll-while-visible";
 import { timeAgo } from "@/lib/time";
 import { workerPolicyRows } from "@/lib/worker-policy-view";
 import { commandStatus, WorkerCommand } from "@/lib/worker-command-status";
-import { ApiWorker, ApiWorkerPreflight, ApiProject } from "@/types";
-import { useProjects } from "@/hooks/use-projects";
+import { ApiWorker, ApiWorkerPreflight } from "@/types";
 
 const POLL_MS = 5_000;
 
@@ -22,57 +22,44 @@ const TONE_CLASSES = {
   warning: "text-danger",
 };
 
-// What an admin approved this machine for. A worker with none claims nothing — which is what
-// every enrolment predating BP-305 is, so this is also the recovery path for them.
-function ApprovedProjectsCell({
+// Whose machine this is, which since BP-358 is the whole of what it may reach: the projects that
+// person can reach, resolved on every call. A worker with no owner reaches nothing at all, and
+// looked identical to a healthy one until this column existed — it has no binding error, no failed
+// heartbeat and an empty assignment list, which is also what an idle machine has.
+function OwnerCell({
   worker,
-  projects,
   disabled,
-  onToggle,
+  onRelease,
 }: {
   worker: ApiWorker;
-  projects: ApiProject[];
   disabled: boolean;
-  onToggle: (approvedProjects: string[]) => void;
+  onRelease: () => void;
 }) {
-  const approved = new Set(worker.approvedProjects ?? []);
-
-  if (projects.length === 0) {
-    return <span className="text-xs text-text-muted">no projects</span>;
+  if (!worker.owner) {
+    return (
+      <span className="text-xs text-danger" data-testid="worker-no-owner">
+        no owner — claims nothing
+      </span>
+    );
   }
-
   return (
-    <div className="flex flex-col gap-1">
-      {approved.size === 0 && (
-        <span className="text-xs text-danger">claims nothing until approved</span>
-      )}
-      <div className="flex flex-wrap gap-1">
-        {projects.map((project) => {
-          const on = approved.has(project._id);
-          return (
-            <button
-              key={project._id}
-              disabled={disabled}
-              onClick={() =>
-                onToggle(
-                  on
-                    ? [...approved].filter((id) => id !== project._id)
-                    : [...approved, project._id]
-                )
-              }
-              className={`text-xs px-1.5 py-0.5 rounded border transition-colors cursor-pointer ${
-                on
-                  ? "border-primary bg-primary/10 text-primary"
-                  : "border-border text-text-muted hover:text-text"
-              }`}
-              title={on ? `Approved for ${project.name}` : `Approve for ${project.name}`}
-            >
-              {project.key}
-            </button>
-          );
-        })}
-      </div>
-    </div>
+    <span className="flex items-center gap-1.5 whitespace-nowrap">
+      <span className="text-xs text-text" title={worker.owner.username}>
+        {worker.owner.fullName || worker.owner.username}
+      </span>
+      {/* Registration refuses to re-register a machine that belongs to somebody else, so without a
+          way to let one go, a machine whose owner has left could never be enrolled again under the
+          same name and host. */}
+      <button
+        data-testid="worker-release"
+        disabled={disabled}
+        onClick={onRelease}
+        title="Release it, so somebody else can enrol this machine"
+        className="text-xs text-text-muted underline decoration-dotted hover:text-danger cursor-pointer"
+      >
+        release
+      </button>
+    </span>
   );
 }
 
@@ -103,13 +90,16 @@ export default function AdminWorkersPage() {
   const api = useApi();
   const router = useRouter();
   const { isAdmin, isLoading: authLoading } = useAuth();
-  const { projects } = useProjects();
   const { toast } = useToast();
 
   const [workers, setWorkers] = useState<ApiWorker[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [enrolling, setEnrolling] = useState(false);
+  // The only way back from a release is a fresh enrolment run on that machine, by whoever sits at
+  // it — every other destructive control in this product asks first, and this one is less reversible
+  // than most of them.
+  const [releasing, setReleasing] = useState<ApiWorker | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -132,7 +122,7 @@ export default function AdminWorkersPage() {
 
   async function patch(
     worker: ApiWorker,
-    changes: Partial<Pick<ApiWorker, "enabled" | "lockedByInstance" | "approvedProjects">>
+    changes: Partial<Pick<ApiWorker, "enabled" | "lockedByInstance" | "owner">>
   ) {
     setSavingId(worker._id);
     try {
@@ -193,6 +183,20 @@ export default function AdminWorkersPage() {
 
       <EnrolWorkerModal open={enrolling} onClose={() => setEnrolling(false)} />
 
+      <ConfirmDialog
+        open={!!releasing}
+        onClose={() => setReleasing(null)}
+        title={`Release ${releasing?.name ?? ""}?`}
+        message={`${releasing?.owner?.fullName || releasing?.owner?.username || "Its owner"} will stop being the owner of this machine, and it will claim nothing until somebody enrols it again — which has to be done from the machine itself, by whoever sits at it. Nothing here can undo it.`}
+        confirmLabel="Release"
+        loading={savingId === releasing?._id}
+        onConfirm={() => {
+          const worker = releasing;
+          setReleasing(null);
+          if (worker) patch(worker, { owner: null });
+        }}
+      />
+
       <div className="border border-border rounded-lg overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -202,7 +206,7 @@ export default function AdminWorkersPage() {
                 <th className="text-left px-3 py-2 font-medium">Host</th>
                 <th className="text-left px-3 py-2 font-medium">Version</th>
                 <th className="text-left px-3 py-2 font-medium">Checkouts</th>
-                <th className="text-left px-3 py-2 font-medium">Approved for</th>
+                <th className="text-left px-3 py-2 font-medium">Owner</th>
                 <th className="text-left px-3 py-2 font-medium">Running</th>
                 <th className="text-left px-3 py-2 font-medium">Last seen</th>
                 <th className="text-left px-3 py-2 font-medium">Preflight</th>
@@ -215,7 +219,7 @@ export default function AdminWorkersPage() {
             <tbody>
               {workers.length === 0 && (
                 <tr>
-                  <td colSpan={11} className="px-3 py-6 text-center text-text-muted text-sm">
+                  <td colSpan={12} className="px-3 py-6 text-center text-text-muted text-sm">
                     No workers registered yet.
                   </td>
                 </tr>
@@ -268,12 +272,11 @@ export default function AdminWorkersPage() {
                         )}
                       </div>
                     </td>
-                    <td className="px-3 py-2 max-w-[16rem]">
-                      <ApprovedProjectsCell
+                    <td className="px-3 py-2 max-w-[12rem]">
+                      <OwnerCell
                         worker={worker}
-                        projects={projects ?? []}
                         disabled={savingId === worker._id}
-                        onToggle={(approvedProjects) => patch(worker, { approvedProjects })}
+                        onRelease={() => setReleasing(worker)}
                       />
                     </td>
                     <td className="px-3 py-2 max-w-[14rem]">
@@ -349,7 +352,7 @@ export default function AdminWorkersPage() {
                     </td>
                   </tr>,
                   <tr key={`${worker._id}-policy`} className="border-b border-border last:border-b-0">
-                    <td colSpan={10} className="px-3 pb-3 pt-0">
+                    <td colSpan={12} className="px-3 pb-3 pt-0">
                       <div className="flex flex-wrap gap-1.5">
                         {workerPolicyRows(worker as never).map((row) => (
                           <span

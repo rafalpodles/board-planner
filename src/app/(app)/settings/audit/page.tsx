@@ -15,6 +15,7 @@ const LABELS: Record<string, string> = {
   worker_enabled: "Worker enabled",
   worker_disabled: "Worker disabled",
   worker_renamed: "Worker renamed",
+  worker_released: "Worker released from its owner",
   worker_poll_interval_changed: "Poll interval changed",
   enrolment_token_minted: "Enrolment token minted",
   enrolment_token_spent: "Enrolment token spent",

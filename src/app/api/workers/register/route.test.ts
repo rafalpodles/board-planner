@@ -4,6 +4,7 @@ const getAuthUser = vi.fn();
 const consumeEnrolmentToken = vi.fn();
 const attachWorkerToEnrolment = vi.fn();
 const enrolmentTokenOwner = vi.fn().mockResolvedValue("Rafal");
+const enrolmentTokenOwnerId = vi.fn().mockResolvedValue("u1");
 const registerWorker = vi.fn();
 
 const logInstanceAudit = vi.fn();
@@ -13,7 +14,12 @@ vi.mock("@/lib/auth", () => ({
   getAuthUser,
   RateLimitError: class RateLimitError extends Error {},
 }));
-vi.mock("@/lib/enrolment", () => ({ consumeEnrolmentToken, attachWorkerToEnrolment, enrolmentTokenOwner }));
+vi.mock("@/lib/enrolment", () => ({
+  consumeEnrolmentToken,
+  attachWorkerToEnrolment,
+  enrolmentTokenOwner,
+  enrolmentTokenOwnerId,
+}));
 vi.mock("@/lib/worker-service", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/worker-service")>();
   return { ...actual, registerWorker };
@@ -66,6 +72,14 @@ describe("POST /api/workers/register", () => {
     await POST(request(VALID, "cpe_good"));
 
     expect(attachWorkerToEnrolment).toHaveBeenCalledWith("e1", "w1");
+  });
+
+  // BP-358: enrolment is enrolment whichever door it comes through. This path has no admin session
+  // to read a user from, but the token itself was minted by one — that person is the owner.
+  it("passes the token's creator as the machine's owner", async () => {
+    await POST(request(VALID, "cpe_good"));
+
+    expect(registerWorker.mock.calls[0][0].ownerId).toBe("u1");
   });
 
   // BP-233. No user on this one: the caller is a machine holding a token and no session, which is

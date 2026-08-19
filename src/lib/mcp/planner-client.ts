@@ -121,6 +121,10 @@ export class PlannerClient {
     return this.request("GET", "/api/users/list") as Promise<unknown[]>;
   }
 
+  async listAgents(): Promise<unknown[]> {
+    return this.request("GET", "/api/agents") as Promise<unknown[]>;
+  }
+
   async resolveTaskKey(taskKey: string): Promise<{ projectId: string; taskId: string }> {
     const match = taskKey.match(/^([A-Z]+)-(\d+)$/i);
     if (!match) throw new Error(`Invalid task key: "${taskKey}". Expected format: "CP-1"`);

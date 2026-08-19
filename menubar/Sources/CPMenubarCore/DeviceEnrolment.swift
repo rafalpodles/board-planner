@@ -31,7 +31,7 @@ private struct PollBody: Decodable {
 
 // The app's half of CP-237: begin, open the browser, poll. Nothing here is authenticated, because
 // the machine has nothing to authenticate with yet — that is the problem being solved. What it
-// receives is worth nothing until an admin approves it in a browser.
+// receives is worth nothing until somebody signed in confirms it in a browser.
 public struct DeviceEnrolmentClient: Sendable {
     public typealias Send = @Sendable (URLRequest) async throws -> (Data, URLResponse)
 

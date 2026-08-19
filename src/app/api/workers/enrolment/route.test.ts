@@ -13,6 +13,12 @@ vi.mock("@/lib/auth", () => ({
 }));
 vi.mock("@/lib/grants", () => ({ check, accessibleProjectIds: vi.fn() }));
 vi.mock("@/lib/enrolment", () => ({ mintEnrolmentToken }));
+const isRateLimited = vi.fn();
+vi.mock("@/lib/rate-limit", () => ({
+  isRateLimited,
+  recordFailedAttempt: vi.fn(),
+  sourceKey: (a: string, b: string) => `${b}:${a}`,
+}));
 
 const { POST } = await import("./route");
 
@@ -22,8 +28,9 @@ const UNSCOPED_ADMIN_TOKEN = {
   role: "admin",
   viaMachineCredential: true,
 };
-// Enrolling a machine is the instance's business, so not even a project owner reaches it
-const PROJECT_OWNER = { _id: "owner-1", role: "member" };
+// Since BP-358 an ordinary member enrols their own machine: the token names them, registration
+// makes them its owner, and the machine reaches exactly what they reach.
+const MEMBER = { _id: "member-1", role: "member" };
 
 function request(body: unknown = {}) {
   return new Request("http://localhost/api/workers/enrolment", {
@@ -36,6 +43,7 @@ function request(body: unknown = {}) {
 beforeEach(() => {
   vi.clearAllMocks();
   check.mockResolvedValue(false);
+  isRateLimited.mockResolvedValue(false);
   mintEnrolmentToken.mockResolvedValue({
     token: "cpe_secret",
     expiresAt: new Date("2026-08-03T13:00:00.000Z"),
@@ -43,7 +51,7 @@ beforeEach(() => {
 });
 
 describe("POST /api/workers/enrolment", () => {
-  it("mints for an admin at a keyboard, returning the token exactly once", async () => {
+  it("mints for a person at a keyboard, returning the token exactly once", async () => {
     getAuthUser.mockResolvedValue(SESSION_ADMIN);
 
     const response = await POST(request({ label: "rig laptop" }), { params: Promise.resolve({}) });
@@ -90,9 +98,34 @@ describe("POST /api/workers/enrolment", () => {
     expect(mintEnrolmentToken).not.toHaveBeenCalled();
   });
 
-  it("refuses a project owner", async () => {
-    getAuthUser.mockResolvedValue(PROJECT_OWNER);
-    check.mockResolvedValue(true);
+  // The decision this route stopped making (BP-358). An admin approval step in front of it would
+  // have signed off on something the member could already do: the machine runs only their own work.
+  it("mints for an ordinary member, naming them as the token's creator", async () => {
+    getAuthUser.mockResolvedValue(MEMBER);
+
+    const response = await POST(request({ label: "my laptop" }), { params: Promise.resolve({}) });
+
+    expect(response.status).toBe(201);
+    expect(mintEnrolmentToken).toHaveBeenCalledWith("member-1", "my laptop");
+  });
+
+  // Each mint writes a row and costs a bcrypt hash. Its device-flow sibling has been capped since
+  // BP-305; the asymmetry did not matter while this route was withAdmin and does now that any
+  // member reaches it.
+  it("throttles minting, per account", async () => {
+    getAuthUser.mockResolvedValue(MEMBER);
+    isRateLimited.mockResolvedValue(true);
+
+    const response = await POST(request(), { params: Promise.resolve({}) });
+
+    expect(response.status).toBe(429);
+    expect(mintEnrolmentToken).not.toHaveBeenCalled();
+    expect(isRateLimited).toHaveBeenCalledWith("enrolment_token_mint:member-1", 10);
+  });
+
+  // Still not something a machine can do for itself, whatever the account behind the token
+  it("refuses a member's own API token", async () => {
+    getAuthUser.mockResolvedValue({ ...MEMBER, viaMachineCredential: true });
 
     expect((await POST(request(), { params: Promise.resolve({}) })).status).toBe(403);
     expect(mintEnrolmentToken).not.toHaveBeenCalled();

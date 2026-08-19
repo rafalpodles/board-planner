@@ -20,7 +20,7 @@ const ENROLMENTS_PER_WINDOW = 10;
 
 // Unauthenticated, and that is the point: the machine has nothing to authenticate with yet — this
 // exists so nobody has to copy a token onto it by hand. Nothing is granted here. A pending row is
-// worth nothing until a signed-in admin approves it, and it reaps itself in fifteen minutes.
+// worth nothing until a signed-in person confirms it, and it reaps itself in fifteen minutes.
 export async function POST(request: Request) {
   await connectDB();
 

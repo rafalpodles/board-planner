@@ -1,6 +1,5 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { IProject, DEFAULT_PROJECT_CATEGORIES, DEFAULT_PROJECT_COLUMNS, COLUMN_ROLES, WEBHOOK_EVENTS, NOTIFICATION_CHANNEL_TYPES, CUSTOM_FIELD_TYPES } from "@/types";
-import { CLAIM_SCOPES } from "@/lib/worker-policy";
 
 const categorySchema = new Schema(
   {
@@ -180,7 +179,6 @@ const projectSchema = new Schema<IProject>(
       policy: {
         autoMerge: { type: Boolean, default: false },
         reviewGate: { type: Boolean, default: true },
-        claimScope: { type: String, enum: CLAIM_SCOPES, default: "assigned" },
         baseBranch: { type: String, default: "main" },
         taskTimeoutMs: { type: Number, default: 1_800_000 },
         maxDiffLines: { type: Number, default: 400 },
@@ -189,12 +187,9 @@ const projectSchema = new Schema<IProject>(
         fallbackModel: { type: String, default: "sonnet" },
         reviewModel: { type: String, default: "opus" },
       },
-      // Who a task must be assigned to before a worker may take it under claimScope "assigned".
-      // A person picks this, so it is an ordinary user — a worker's own identity is a machine
-      // account, excluded from every list the product offers and unselectable by design.
-      claimAssignee: { type: Schema.Types.ObjectId, ref: "User", default: null },
-      // A plain field, not a policy one: the agent travels on the claim response, where the task is
-      // known, rather than in the assignment payload, which is built at heartbeat time.
+      // A plain field, not a policy one, and since BP-358 not a fallback either: an agent travels
+      // on the claim response resolved from the TASK, and this is only the one the task picker
+      // offers first. A task naming no agent is one a person is doing.
       agent: { type: Schema.Types.ObjectId, ref: "Agent", default: null },
       policyOverrides: { type: [String], default: [] },
     },

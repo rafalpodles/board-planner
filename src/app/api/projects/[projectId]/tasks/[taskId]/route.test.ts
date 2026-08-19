@@ -61,32 +61,37 @@ describe("PUT .../tasks/:taskId and force", () => {
     const res = await PUT(request({ status: "done", force: true }), ctx());
 
     expect(res.status).toBe(200);
-    expect(updateTask).toHaveBeenCalledWith("p1", TASK, { status: "done" }, "u1", true, false);
+    expect(updateTask).toHaveBeenCalledWith("p1", TASK, { status: "done" }, "u1", true);
   });
 
   it("still lets a machine credential make an ordinary edit", async () => {
     const res = await PUT(request({ title: "renamed" }, true), ctx());
 
     expect(res.status).toBe(200);
-    expect(updateTask).toHaveBeenCalledWith("p1", TASK, { title: "renamed" }, "u1", false, false);
+    expect(updateTask).toHaveBeenCalledWith("p1", TASK, { title: "renamed" }, "u1", false);
   });
 
   it("does not treat a non-true force as a force", async () => {
     const res = await PUT(request({ status: "done", force: "yes" }, true), ctx());
 
     expect(res.status).toBe(200);
-    expect(updateTask).toHaveBeenCalledWith("p1", TASK, { status: "done" }, "u1", false, false);
+    expect(updateTask).toHaveBeenCalledWith("p1", TASK, { status: "done" }, "u1", false);
   });
 });
 
 
 /**
- * The route decides whether the caller may choose a task's agent, because only it holds the live
- * principal. updateTask used to work it out by reloading the actor from Mongo, which drops
- * tokenScoped/tokenScope and the role a scoped token was degraded to — so an admin's
- * project-scoped CI token was handed the one capability its scope existed to withhold (BP-345).
+ * BP-345 had this route work out whether the caller could choose a task's agent and pass the answer
+ * down, because choosing one could then arm a machine belonging to somebody else. BP-358 moved that
+ * boundary into the claim — a machine takes only what its own owner assigned to themselves — and
+ * the choice went back to whoever may edit the task, which `withProjectAccess` already answers.
+ *
+ * Asserted on the whole argument list rather than on a role: what changed is that the route stopped
+ * having an opinion, and a test naming one index could not tell "false" from "gone".
  */
-describe("PUT .../tasks/:taskId and who may choose the agent", () => {
+describe("PUT .../tasks/:taskId and the agent", () => {
+  const AGENT = "69a52e3b399b27d3cbb2c5a5";
+
   beforeEach(() => {
     vi.clearAllMocks();
     updateTask.mockResolvedValue({ ok: true, data: { _id: TASK } });
@@ -96,28 +101,24 @@ describe("PUT .../tasks/:taskId and who may choose the agent", () => {
     return new Request(`https://app.example.com/api/projects/p1/tasks/${TASK}`, {
       method: "PUT",
       headers: { "content-type": "application/json", "x-role": role },
-      body: JSON.stringify({ agent: "69a52e3b399b27d3cbb2c5a5" }),
+      body: JSON.stringify({ agent: AGENT }),
     });
   }
 
-  it("withholds it from a member", async () => {
-    await PUT(roleOf("member"), ctx());
+  it.each(["member", "admin"])("passes a %s's choice straight through", async (role) => {
+    const res = await PUT(roleOf(role), ctx());
 
-    expect(updateTask.mock.calls[0][5]).toBe(false);
+    expect(res.status).toBe(200);
+    expect(updateTask).toHaveBeenCalledWith("p1", TASK, { agent: AGENT }, "u1", false);
   });
 
-  it("grants it to an instance admin", async () => {
+  // A scoped token's role is degraded to member in memory by getAuthUser, and the route no longer
+  // reads it at all — so the two requests above have to be indistinguishable here, not merely both
+  // permitted
+  it("says the same thing whoever asks", async () => {
+    await PUT(roleOf("member"), ctx());
     await PUT(roleOf("admin"), ctx());
 
-    expect(updateTask.mock.calls[0][5]).toBe(true);
-  });
-
-  // The exploit a reviewer drove: an admin mints a token scoped to one project, whose documented
-  // contract is member-level on it. getAuthUser degrades the role; reading it here honours that,
-  // and reloading the user from the database would not.
-  it("withholds it from an admin's project-scoped token, whose role is degraded to member", async () => {
-    await PUT(roleOf("member"), ctx());
-
-    expect(updateTask.mock.calls[0][5]).toBe(false);
+    expect(updateTask.mock.calls[0]).toEqual(updateTask.mock.calls[1]);
   });
 });
