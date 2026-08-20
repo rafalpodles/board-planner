@@ -12,12 +12,22 @@ public struct ProjectConfig: Decodable, Sendable {
     public let taskTimeoutMs: Int
 }
 
+public struct GithubAccountChoice: Decodable, Sendable, Identifiable, Equatable {
+    public let login: String
+    public let active: Bool
+    public var id: String { login }
+}
+
 public struct ConfigResponse: Decodable, Sendable {
     public let apiUrl: String
     public let workerName: String
     public let projectCount: Int
     public let pollIntervalMs: Int
     public let projects: [ProjectConfig]
+    // Optional so a worker built before BP-373 still decodes: an app that refuses to read the
+    // config would show "—" for everything, which reads as a dead worker rather than an old one.
+    public let githubAccount: String?
+    public let githubAccounts: [GithubAccountChoice]?
 }
 
 public enum SocketError: Error, Equatable {

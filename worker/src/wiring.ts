@@ -28,8 +28,10 @@ import {
 import { connectControl, ControlDeps } from "./control.js";
 import { createDelivery } from "./delivery.js";
 import { collectDiff } from "./diff.js";
+import { pinnedAccount, resolveGhToken } from "./github-account.js";
 import { gateFromEntry } from "./gates/from-entry.js";
 import { createRunner, Runner } from "./exec.js";
+import { childEnv } from "./env.js";
 import { createExecutor } from "./executor.js";
 import { LocalServer, LocalServerDeps, startLocalServer } from "./local-server.js";
 import { createLoop } from "./loop.js";
@@ -211,6 +213,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
         env: deps.env,
         execPath: deps.execPath,
         isExecutable: deps.isExecutable,
+        pinnedGithubAccount: pinnedAccount(deps.readFile, bootstrap.stateDir),
       });
     } catch (error) {
       deps.logError(`preflight could not run: ${String(error)}`);
@@ -396,6 +399,25 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     postPhase(update);
   });
 
+  // Read per run, not captured at startup: an operator who picks a different account in the app
+  // gets it on the next task rather than on the next launch, the same way policy changes land.
+  // Empty leaves gh to resolve its own identity, which is what every machine did before BP-373.
+  async function githubIdentityToken(): Promise<string> {
+    const account = pinnedAccount(deps.readFile, bootstrap.stateDir);
+    if (!account) return "";
+
+    const ghPath = preflight?.paths.gh ?? "";
+    const token = await resolveGhToken(deps.runner, ghPath, account, childEnv([], deps.env));
+    if (!token) {
+      // Loud, and then out of the way: falling back to gh's active account is what happens next,
+      // and a run that pushes as the wrong name is the thing this message has to make findable.
+      deps.logError(
+        `could not resolve a token for the pinned GitHub account ${account} — delivery falls back to whichever account gh has active`
+      );
+    }
+    return token;
+  }
+
   async function execute(task: ClaimedTask): Promise<void> {
     const taskConfig = configFor(task.projectId);
     if (!taskConfig) {
@@ -404,6 +426,8 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       await api.release(task.projectId, task.taskId).catch(() => {});
       return;
     }
+
+    const githubToken = await githubIdentityToken();
 
     currentRun = { taskId: task.taskId, runId: task.runId };
     try {
@@ -414,7 +438,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
           columnIds: (projectId) => api.columnIds(projectId),
           createReporter: (client, statusIds) =>
             createReporter(client, statusIds, (message) => deps.logError(message), outbox),
-          createDelivery,
+          createDelivery: (runner, baseBranch) => createDelivery(runner, baseBranch, githubToken),
           workspace: createWorkspace(taskConfig, deps.runner),
           executor: createExecutor(taskConfig, deps.runner),
           collectDiff,
@@ -512,6 +536,12 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
         maxDiffLines: repo.config.maxDiffLines,
         taskTimeoutMs: repo.config.taskTimeoutMs,
       })),
+      // Read here rather than taken from the startup report: an operator who picks another account
+      // in the app must see the answer change without restarting the worker, which is also exactly
+      // when it changes for the next run.
+      githubAccount:
+        pinnedAccount(deps.readFile, bootstrap.stateDir) || preflight?.githubAccount || "",
+      githubAccounts: preflight?.githubAccounts ?? [],
     }),
     log: deps.logError,
   });

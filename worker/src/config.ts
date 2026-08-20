@@ -144,6 +144,13 @@ function required(env: Env, key: string): string {
   return value.trim();
 }
 
+// Resolvable before anything else is: `--preflight` runs on a machine that has not enrolled yet,
+// with none of the variables loadBootstrap insists on, and it still has to find the state
+// directory to read the operator's pinned GitHub account out of.
+export function stateDirFrom(env: Env): string {
+  return env.CP_STATE_DIR?.trim() || join(homedir(), ".boardplanner");
+}
+
 export function loadBootstrap(env: Env, readSecret: SecretReader = readSecretFile): Bootstrap {
   return {
     apiBaseUrl: required(env, "CP_API_URL").replace(/\/$/, ""),
@@ -153,7 +160,7 @@ export function loadBootstrap(env: Env, readSecret: SecretReader = readSecretFil
     enrolmentToken: optionalSecret(env, "CP_ENROLMENT_TOKEN", readSecret),
     enrolmentTokenFile: env.CP_ENROLMENT_TOKEN_FILE?.trim() || "",
     workerName: required(env, "CP_WORKER_NAME"),
-    stateDir: env.CP_STATE_DIR?.trim() || join(homedir(), ".boardplanner"),
+    stateDir: stateDirFrom(env),
   };
 }
 
