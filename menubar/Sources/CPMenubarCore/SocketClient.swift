@@ -18,6 +18,31 @@ public struct GithubAccountChoice: Decodable, Sendable, Identifiable, Equatable 
     public var id: String { login }
 }
 
+// A project this machine could serve once it has a checkout. What the app offers to set up.
+public struct ProjectOffer: Decodable, Sendable, Identifiable, Equatable {
+    public let project: String
+    public let key: String
+    public let name: String
+    public let repositoryUrl: String
+    public var id: String { project }
+
+    public init(project: String, key: String, name: String, repositoryUrl: String) {
+        self.project = project
+        self.key = key
+        self.name = name
+        self.repositoryUrl = repositoryUrl
+    }
+
+    /// What an operator recognises it by. A project with neither is still worth listing by its
+    /// repository — anything is better than a blank row.
+    public var label: String {
+        if !name.isEmpty && !key.isEmpty { return "\(name) · \(key)" }
+        if !name.isEmpty { return name }
+        if !key.isEmpty { return key }
+        return repositoryUrl
+    }
+}
+
 public struct ConfigResponse: Decodable, Sendable {
     public let apiUrl: String
     public let workerName: String
@@ -28,6 +53,7 @@ public struct ConfigResponse: Decodable, Sendable {
     // config would show "—" for everything, which reads as a dead worker rather than an old one.
     public let githubAccount: String?
     public let githubAccounts: [GithubAccountChoice]?
+    public let offers: [ProjectOffer]?
 }
 
 public enum SocketError: Error, Equatable {

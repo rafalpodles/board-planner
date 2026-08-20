@@ -359,6 +359,16 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         ok: true,
         status: 200,
         json: async () => ({
+          // What this machine could set up but has not — read only by the socket, never by the
+          // claim loop
+          offers: [
+            {
+              project: "p2",
+              key: "SB",
+              name: "Sandbox",
+              repositoryUrl: "https://github.com/owner/sandbox",
+            },
+          ],
           // Work policy travels with the assignment now: it describes the project, so two projects
           // on one machine can resolve differently.
           assignments: [
@@ -608,6 +618,21 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         reviewModel: "opus",
         maxDiffLines: 77,
       }),
+    ]);
+  });
+
+  // BP-375. The app can only offer to set up a project it has heard of, and assignments carry only
+  // the ones already working — so the socket has to carry the other half.
+  it("serves the projects it could set up but has no checkout of", async () => {
+    const { localConfig } = await runOneTask();
+
+    expect(localConfig?.().offers).toEqual([
+      {
+        project: "p2",
+        key: "SB",
+        name: "Sandbox",
+        repositoryUrl: "https://github.com/owner/sandbox",
+      },
     ]);
   });
 

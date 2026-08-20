@@ -84,6 +84,16 @@ export interface Assignment {
   policy?: Record<string, unknown>;
 }
 
+// A project this machine could serve if it had the checkout — enabled, reachable by its owner, and
+// naming a repository. The app renders these as the projects you can add; nothing here is claimed
+// or bound until a checkout exists and repos.json grants it.
+export interface ProjectOffer {
+  project: string;
+  key: string;
+  name: string;
+  repositoryUrl: string;
+}
+
 // What this machine tells the server it has. Built from repos.json, which stays the only thing that
 // decides where anything may run.
 export interface RepoInventory {
@@ -214,4 +224,22 @@ function isAssignment(value: unknown): value is Assignment {
 // every other project this worker serves down with it
 export function parseAssignments(value: unknown): Assignment[] {
   return Array.isArray(value) ? value.filter(isAssignment) : [];
+}
+
+function isOffer(value: unknown): value is ProjectOffer {
+  if (typeof value !== "object" || value === null) return false;
+  const { project, repositoryUrl } = value as Record<string, unknown>;
+  return isNonEmptyString(project) && isNonEmptyString(repositoryUrl);
+}
+
+// Same forgiveness as the assignments above, and for a smaller stake: a malformed entry here costs
+// one row in a list the operator is reading, never a project that stops being served.
+export function parseOffers(value: unknown): ProjectOffer[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(isOffer).map((offer) => ({
+    project: offer.project,
+    key: typeof offer.key === "string" ? offer.key : "",
+    name: typeof offer.name === "string" ? offer.name : "",
+    repositoryUrl: offer.repositoryUrl,
+  }));
 }

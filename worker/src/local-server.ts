@@ -40,6 +40,9 @@ export interface LocalConfigView {
   // which one a run acted as. No token, here or anywhere else on this socket.
   githubAccount: string;
   githubAccounts: { login: string; active: boolean }[];
+  // Projects this machine could serve once it has a checkout of their repository. A list to render
+  // and an address to clone from — never a local path, which is the machine's own business.
+  offers: { project: string; key: string; name: string; repositoryUrl: string }[];
 }
 
 export interface LocalServerDeps {
