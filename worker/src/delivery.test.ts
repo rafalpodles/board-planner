@@ -415,3 +415,50 @@ describe("push argument boundaries", () => {
     expect(args.indexOf("--")).toBeLessThan(args.indexOf("--receive-pack=/bin/echo"));
   });
 });
+
+// BP-373. `gh auth switch` writes global machine state, so a worker that lets gh resolve its own
+// identity pushes as whichever account some other terminal switched to last. Pinning means the
+// token travels with the call.
+describe("the github identity delivery acts as", () => {
+  const PINNED = "gho_pinned_account_token";
+
+  it("carries the pinned account's token on the push", async () => {
+    const run = vi.fn().mockResolvedValue(ok);
+    await createDelivery({ run }, "main", PINNED).push("/wt", "bp-373/pin");
+
+    expect(envOf(run).GH_TOKEN).toBe(PINNED);
+  });
+
+  it("carries it on pr create and pr merge too", async () => {
+    const { runner, run } = fakeCli({
+      "gh pr create": { stdout: "https://github.com/x/y/pull/9" },
+    });
+    const delivery = createDelivery(runner, "main", PINNED);
+
+    await delivery.openPr("/wt", task as ClaimedTask, "summary");
+    await delivery.merge("/wt", "https://github.com/x/y/pull/9");
+
+    expect(envOf(run, 0).GH_TOKEN).toBe(PINNED);
+    expect(envOf(run, 1).GH_TOKEN).toBe(PINNED);
+  });
+
+  // gh reads GITHUB_TOKEN as well, and an inherited one would decide the identity behind the pin's
+  // back — the failure being pushing as an account that does have access, under the wrong name.
+  it("overrides an inherited GITHUB_TOKEN rather than letting it win", async () => {
+    const run = vi.fn().mockResolvedValue(ok);
+    await createDelivery({ run }, "main", PINNED).push("/wt", "bp-373/pin");
+
+    expect(envOf(run).GITHUB_TOKEN).toBe(PINNED);
+  });
+
+  // Opt-in: a machine with one account, or an operator who never picked, keeps exactly the
+  // behaviour it had — gh resolves its own identity from the keyring.
+  it("sets no token at all when no account is pinned", async () => {
+    const run = vi.fn().mockResolvedValue(ok);
+    await createDelivery({ run }, "main").push("/wt", "bp-373/pin");
+
+    const env = envOf(run);
+    expect("GH_TOKEN" in env).toBe(false);
+    expect("GITHUB_TOKEN" in env).toBe(false);
+  });
+});

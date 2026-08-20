@@ -35,6 +35,11 @@ export interface LocalConfigView {
   projectCount: number;
   pollIntervalMs: number;
   projects: LocalProjectView[];
+  // The GitHub identity this worker pushes as, and the accounts it could be pointed at instead —
+  // so the cockpit shows the account rather than making the operator run `gh auth status` to guess
+  // which one a run acted as. No token, here or anywhere else on this socket.
+  githubAccount: string;
+  githubAccounts: { login: string; active: boolean }[];
 }
 
 export interface LocalServerDeps {

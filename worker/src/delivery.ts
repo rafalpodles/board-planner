@@ -129,8 +129,19 @@ export function hardenedGitConfig(): NodeJS.ProcessEnv {
   return env;
 }
 
-export function createDelivery(runner: Runner, baseBranch?: string): Delivery {
+// githubToken is the operator's pinned account, resolved by name at startup. Absent means what it
+// has always meant: gh resolves its own identity from the keyring, and pushes act as whichever
+// account is active. Present means the identity travels with the call, so a `gh auth switch` in
+// another terminal — global machine state, shared with every process on the box — cannot decide
+// mid-run who this worker pushes as (BP-373).
+export function createDelivery(runner: Runner, baseBranch?: string, githubToken?: string): Delivery {
   const baseArgs = baseBranch?.trim() ? ["--base", baseBranch.trim()] : [];
+  // Both names, not just the one gh prefers: an inherited GITHUB_TOKEN would otherwise decide the
+  // identity behind the pin's back, and the failure it produces is a push that succeeds as the
+  // wrong account rather than one that fails.
+  const pinnedIdentity: NodeJS.ProcessEnv = githubToken?.trim()
+    ? { GH_TOKEN: githubToken.trim(), GITHUB_TOKEN: githubToken.trim() }
+    : {};
 
   // Delivery is the one place that may carry the credentials git and gh need for the remote — and
   // it runs inside the worktree the agent just wrote. The command is ours; what git *executes* on
@@ -148,6 +159,7 @@ export function createDelivery(runner: Runner, baseBranch?: string): Delivery {
       timeoutMs: TIMEOUT_MS,
       env: {
         ...childEnv(["SSH_AUTH_SOCK", "GH_TOKEN", "GITHUB_TOKEN", "GH_CONFIG_DIR", "XDG_CONFIG_HOME"]),
+        ...pinnedIdentity,
         ...hardenedGitConfig(),
       },
     });

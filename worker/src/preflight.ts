@@ -1,6 +1,7 @@
 import { dirname, join } from "path";
 import { childEnv } from "./env.js";
 import { Runner } from "./exec.js";
+import { GhAccount, parseGhAccounts, resolveGhToken, usableAccount } from "./github-account.js";
 
 // The four binaries the worker shells out to. Nothing here is optional: without any one of them a
 // task is claimed, run, and failed — three times, until the attempt cap routes it to a human.
@@ -21,6 +22,13 @@ export interface PreflightReport {
   checks: PreflightCheck[];
   // Absolute, so the PATH a spawned child gets can be repaired from them
   paths: Record<string, string>;
+  // Every GitHub account gh holds a session for, so the app can offer them without writing a
+  // second parser for `gh auth status` in Swift
+  githubAccounts: GhAccount[];
+  // The one this machine will push and open pull requests as
+  githubAccount: string;
+  // Whether that came from the operator's pin or from whichever account gh happens to have active
+  githubPinned: boolean;
 }
 
 export interface PreflightDeps {
@@ -31,6 +39,9 @@ export interface PreflightDeps {
   // launchd, or under an app launched from Finder, an nvm node is exactly what PATH cannot see.
   execPath: string;
   isExecutable: (path: string) => boolean;
+  // The GitHub login the operator pinned, read from the state directory by the caller. Empty means
+  // nothing is pinned, which is what every machine did before BP-373: use gh's active account.
+  pinnedGithubAccount?: string;
 }
 
 const TIMEOUT_MS = 20_000;
@@ -168,21 +179,94 @@ async function claudeSession(
   };
 }
 
+// The identity that pushes, named as plainly as the one that writes the code. Reporting only
+// "authenticated" was BP-373: on a machine with two accounts the check was green for the account
+// that had no write access, and the truth arrived from GitHub as a 403 two steps later.
 async function ghSession(
   deps: PreflightDeps,
   path: string,
   env: NodeJS.ProcessEnv
-): Promise<PreflightCheck> {
+): Promise<{ check: PreflightCheck; accounts: GhAccount[]; login: string; pinned: boolean }> {
   const result = await deps.runner.run(path, ["auth", "status"], {
     cwd: deps.env.HOME?.trim() || "/",
     timeoutMs: TIMEOUT_MS,
     env,
   });
-  if (result.code === 0) return { name: "gh", ok: true, detail: `authenticated (${path})` };
+
+  if (result.code !== 0) {
+    return {
+      check: {
+        name: "gh",
+        ok: false,
+        detail:
+          "gh is installed but not authenticated — run `gh auth login`; it pushes branches and opens pull requests as that identity",
+      },
+      accounts: [],
+      login: "",
+      pinned: false,
+    };
+  }
+
+  // gh writes the status banner to stderr on some versions and stdout on others
+  const accounts = parseGhAccounts(`${result.stdout}\n${result.stderr}`);
+  const usable = usableAccount(accounts, deps.pinnedGithubAccount ?? "");
+  const report = (ok: boolean, detail: string): PreflightCheck => ({ name: "gh", ok, detail });
+
+  // Asked of gh rather than inferred from the list above. Parsing `gh auth status` is how the
+  // picker gets its options, but deciding a machine is broken on it would turn any change to that
+  // output into a red row on a worker that is fine — while `auth token --user` answers the actual
+  // question, by name, with an exit code. The token itself is dropped on the floor here.
+  const resolvable = usable.pinned
+    ? !!(await resolveGhToken(deps.runner, path, usable.login, env, deps.env.HOME?.trim() || "/"))
+    : false;
+
+  if (usable.pinned && !resolvable) {
+    return {
+      check: report(
+        false,
+        `pinned to the GitHub account ${usable.login}, which gh cannot produce a token for — run \`gh auth login\` as ${usable.login}, or pick another account in the app`
+      ),
+      accounts,
+      login: usable.login,
+      pinned: true,
+    };
+  }
+
+  if (usable.pinned) {
+    const active = accounts.find((a) => a.active)?.login ?? "";
+    // Both names when they differ: which account is active is global machine state any other
+    // terminal can change, and "why is it pushing as somebody else" is unanswerable from one name.
+    const aside =
+      active && active !== usable.login ? ` (gh's own active account is ${active})` : "";
+    return {
+      check: report(true, `pinned to ${usable.login}${aside}`),
+      accounts,
+      login: usable.login,
+      pinned: true,
+    };
+  }
+
+  if (!usable.login) {
+    return {
+      check: report(
+        true,
+        `authenticated (${path}), but gh did not say which account — pushes act as whichever it has active`
+      ),
+      accounts,
+      login: "",
+      pinned: false,
+    };
+  }
+
+  const drift =
+    accounts.length > 1
+      ? ` — gh holds ${accounts.length} accounts and any terminal can switch them, so pin one in the app`
+      : "";
   return {
-    name: "gh",
-    ok: false,
-    detail: "gh is installed but not authenticated — run `gh auth login`; it pushes branches and opens pull requests as that identity",
+    check: report(true, `signed in as ${usable.login}${drift}`),
+    accounts,
+    login: usable.login,
+    pinned: false,
   };
 }
 
@@ -203,6 +287,9 @@ export async function runPreflight(deps: PreflightDeps): Promise<PreflightReport
 
   const checks: PreflightCheck[] = [];
   let account = "";
+  let githubAccounts: GhAccount[] = [];
+  let githubAccount = "";
+  let githubPinned = false;
 
   for (const tool of TOOLS) {
     const path = paths[tool];
@@ -222,13 +309,25 @@ export async function runPreflight(deps: PreflightDeps): Promise<PreflightReport
       account = session.account;
       checks.push(session.check);
     } else if (tool === "gh") {
-      checks.push(await ghSession(deps, path, env));
+      const session = await ghSession(deps, path, env);
+      githubAccounts = session.accounts;
+      githubAccount = session.login;
+      githubPinned = session.pinned;
+      checks.push(session.check);
     } else {
       checks.push({ name: tool, ok: true, detail: path });
     }
   }
 
-  return { ok: checks.every((c) => c.ok), account, checks, paths };
+  return {
+    ok: checks.every((c) => c.ok),
+    account,
+    checks,
+    paths,
+    githubAccounts,
+    githubAccount,
+    githubPinned,
+  };
 }
 
 // The repair for the trap this whole check exists to close: resolving a binary through a login
