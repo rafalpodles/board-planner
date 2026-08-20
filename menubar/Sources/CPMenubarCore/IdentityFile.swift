@@ -33,6 +33,14 @@ public struct IdentityFile: Sendable {
         return try JSONDecoder().decode(WorkerIdentity.self, from: data)
     }
 
+    /// Forgetting the credential this machine holds. A credential is minted by one board and means
+    /// nothing to another, so changing boards has to drop it rather than carry it across — and a
+    /// file left behind is one a restarted worker would happily present to a server that refuses it.
+    public func forget() throws {
+        guard FileManager.default.fileExists(atPath: path) else { return }
+        try FileManager.default.removeItem(atPath: path)
+    }
+
     public func write(_ identity: WorkerIdentity) throws {
         let data = try JSONEncoder().encode(identity)
         let url = URL(fileURLWithPath: path)

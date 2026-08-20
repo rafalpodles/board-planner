@@ -4,7 +4,10 @@ import Foundation
 // show. Reporting one would put a number on screen that no run is using.
 public struct ProjectConfig: Decodable, Sendable {
     public let project: String
-    public let autoMerge: Bool
+    // autoMerge stood here and the worker has not sent it since the flag was retired — an agent
+    // merges because its sequence carries a Merge step. A required field nothing sends made the
+    // whole response undecodable, and `try?` at the call site turned that into a config of nil:
+    // every value in Preferences read "—", the policy pane was empty, and the reason was invisible.
     public let baseBranch: String
     public let model: String
     public let reviewModel: String
