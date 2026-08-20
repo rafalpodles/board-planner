@@ -226,6 +226,33 @@ final class OnboardingModel {
     }
 
 
+    // Pointing this machine at a different board. Not startAgain(): the checkouts folder and the
+    // resolved tool paths describe the machine, and asking for them again is asking the operator to
+    // redo a setup that is still true.
+    //
+    // The worker is stopped first and its credential dropped, in that order. A credential minted by
+    // one board is refused by every other, so leaving either behind means a process still polling
+    // the old server, or a restart presenting a credential the new one will not take.
+    func changeBoard() {
+        poller?.cancel()
+        RunningWorker.shared.stop()
+
+        do {
+            try IdentityFile(path: IdentityFile.path(in: stateDirectory)).forget()
+        } catch {
+            message = "Could not remove the old credential: \(error.localizedDescription)"
+            return
+        }
+
+        state = Onboarding.changingBoard(state)
+        persist()
+        apiURL = state.apiURL
+        workerName = state.workerName
+        preflight = nil
+        repositoryProblems = []
+        message = "Point this machine at another board, then connect it again."
+    }
+
     func startAgain() {
         poller?.cancel()
         Onboarding.reset()

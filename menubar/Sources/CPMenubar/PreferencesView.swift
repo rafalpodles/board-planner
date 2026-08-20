@@ -4,10 +4,11 @@ import CPMenubarCore
 
 struct PreferencesView: View {
     let model: AppModel
+    var onboarding: OnboardingModel
 
     var body: some View {
         TabView {
-            ConnectionTab(model: model)
+            ConnectionTab(model: model, onboarding: onboarding)
                 .tabItem { Label("Connection", systemImage: "network") }
             RepositoriesTab(model: model)
                 .tabItem { Label("Repositories", systemImage: "folder") }
@@ -22,10 +23,21 @@ struct PreferencesView: View {
 
 private struct ConnectionTab: View {
     let model: AppModel
+    // Owned by the app, not this pane: changing boards stops the worker and drops its credential,
+    // and the panel behind this window has to come back as the first-run screen.
+    var onboarding: OnboardingModel
+    @State private var confirming = false
 
     var body: some View {
         Form {
-            LabeledContent("Server", value: model.config?.apiUrl ?? "—")
+            LabeledContent("Server") {
+                HStack {
+                    // The stored address, not the one the socket reports: after the switch there is
+                    // no worker to report anything, and a dash there would read as a broken machine.
+                    Text(model.config?.apiUrl ?? onboarding.state.apiURL).lineLimit(1).truncationMode(.head)
+                    Button("Change…") { confirming = true }
+                }
+            }
             LabeledContent("Worker", value: model.config?.workerName ?? "—")
             LabeledContent("Projects", value: model.config.map { "\($0.projectCount)" } ?? "—")
             GithubAccountRow(accounts: model.config?.githubAccounts ?? [])
@@ -36,6 +48,21 @@ private struct ConnectionTab: View {
         }
         .formStyle(.grouped)
         .padding()
+        .confirmationDialog(
+            "Connect this machine to a different board?",
+            isPresented: $confirming,
+            titleVisibility: .visible
+        ) {
+            Button("Change board", role: .destructive) { onboarding.changeBoard() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            // Said before it happens, because it ends whatever the worker is running — and a
+            // credential is minted by one board and refused by every other, so it cannot be carried
+            // across. The checkouts stay: a checkout is still a checkout, whichever board is asking.
+            Text(
+                "The worker stops and forgets the credential this board gave it, so anything running now ends. Your checkouts and their allowlist are left alone. You will be asked to approve this machine on the new board."
+            )
+        }
     }
 }
 
@@ -237,7 +264,6 @@ private struct PolicyTab: View {
                     LabeledContent("Model", value: project.model)
                     LabeledContent("Review model", value: project.reviewModel)
                     LabeledContent("Max diff lines", value: "\(project.maxDiffLines)")
-                    LabeledContent("Merges automatically", value: project.autoMerge ? "yes" : "no")
                 }
             }
             if model.config?.projects.isEmpty ?? true {
