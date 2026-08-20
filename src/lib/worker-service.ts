@@ -6,6 +6,7 @@ import { Worker } from "@/models/worker";
 import { ApiUserSummary, ApiWorker, ApiWorkerTask, IUser, IWorker } from "@/types";
 import { PROJECT_POLICY_DEFAULTS, WORKER_POLICY_DEFAULTS } from "@/lib/worker-policy";
 import { MatchableProject, RepoReport, matchRepo } from "@/lib/repo-match";
+import { projectRepositoryUrl } from "@/lib/repository";
 import { ensureWorkerUser } from "@/lib/worker-user";
 import { accessibleProjectIds } from "@/lib/grants";
 import { User } from "@/models/user";
@@ -173,6 +174,52 @@ export function assignmentsFor(
     });
   }
   return out;
+}
+
+// The same question assignmentsFor asks, minus the checkout — "what could this machine serve if
+// somebody cloned the repository". assignmentsFor is deliberately silent about those, because it
+// feeds a claim loop that must never iterate a project the claim would refuse; the app needs the
+// other half, or adding a second project stays a git clone in a terminal that no screen mentions.
+//
+// No path and no policy here: this is a list to render and one address to clone from. The machine
+// decides where its own checkout lives, exactly as it does for an assignment.
+export function offersFor(
+  reported: RepoReport[],
+  projects: OfferableProject[],
+  reachable: string[] | null
+): ProjectOffer[] {
+  const out: ProjectOffer[] = [];
+  for (const project of projects) {
+    if (!project.worker?.enabled) continue;
+    if (!canServe(reachable, String(project._id))) continue;
+    // Already served: offering it again invites a second clone of a repository this machine has
+    if (matchRepo(project, reported)) continue;
+
+    const repositoryUrl = projectRepositoryUrl(project);
+    if (!repositoryUrl) continue;
+
+    out.push({
+      project: String(project._id),
+      key: project.key ?? "",
+      name: project.name ?? "",
+      repositoryUrl,
+    });
+  }
+  return out;
+}
+
+export interface ProjectOffer {
+  project: string;
+  // What the checkout is named on disk, and what the operator recognises it by. The app renders the
+  // name; CloneStep keys the directory on the project key, as it does at onboarding.
+  key: string;
+  name: string;
+  repositoryUrl: string;
+}
+
+export interface OfferableProject extends AssignableProject {
+  key?: string;
+  name?: string;
 }
 
 export interface CheckoutClaimant {

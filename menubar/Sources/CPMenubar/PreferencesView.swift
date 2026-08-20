@@ -9,7 +9,7 @@ struct PreferencesView: View {
         TabView {
             ConnectionTab(model: model)
                 .tabItem { Label("Connection", systemImage: "network") }
-            RepositoriesTab()
+            RepositoriesTab(model: model)
                 .tabItem { Label("Repositories", systemImage: "folder") }
             PolicyTab(model: model)
                 .tabItem { Label("Policy", systemImage: "slider.horizontal.3") }
@@ -87,9 +87,13 @@ private struct GithubAccountRow: View {
 }
 
 private struct RepositoriesTab: View {
+    let model: AppModel
+
     @State private var paths: [String] = []
     @State private var selection: String?
     @State private var error: String?
+    @State private var note = ""
+    @State private var busy = false
 
     private let file = ReposFile(path: ReposFile.defaultPath())
 
@@ -104,18 +108,45 @@ private struct RepositoriesTab: View {
             }
 
             HStack {
+                // Named by project, because that is what the operator is adding. The folder picker
+                // beside it stays for a checkout they already have — and for a repository no
+                // project names yet.
+                Menu("Add from board…") {
+                    ForEach(offers) { offer in
+                        Button(offer.label) { addFromBoard(offer) }
+                    }
+                }
+                .disabled(offers.isEmpty || busy)
+                .frame(width: 150)
+
                 Button("Add…") { add() }
                 Button("Remove") { remove() }.disabled(selection == nil)
                 Spacer()
             }
 
-            Text("The worker only ever binds a repository listed here.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            if !note.isEmpty {
+                Text(note).font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Text(
+                offers.isEmpty
+                    // The empty menu is the question "where is my project" waiting to happen, so it
+                    // answers it in the place where the answer would be
+                    ? "The worker only ever binds a repository listed here. A project joins this list once workers are enabled on it and it names a repository — and drops off it again once this machine has its checkout."
+                    : "The worker only ever binds a repository listed here."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
         }
         .padding()
         .onAppear(perform: load)
     }
+
+    // What the worker says this machine could serve and has no checkout of. The app asks nobody
+    // else: it holds no board credential, and the worker is already answering this question.
+    private var offers: [ProjectOffer] { model.config?.offers ?? [] }
 
     private func load() {
         do {
@@ -123,6 +154,45 @@ private struct RepositoriesTab: View {
             error = nil
         } catch {
             self.error = "Could not read repos.json: \(error.localizedDescription)"
+        }
+    }
+
+    // The same two steps onboarding takes for the first project — clone it, then grant it — with
+    // the same refusal when the checkout cannot be pushed to.
+    private func addFromBoard(_ offer: ProjectOffer) {
+        let state = Onboarding.load()
+        guard !state.checkoutsFolder.isEmpty else {
+            error = "This machine has no checkouts folder yet. Finish connecting it first."
+            return
+        }
+
+        busy = true
+        note = "Cloning \(offer.repositoryUrl)…"
+        error = nil
+
+        let setup = ProjectSetup(
+            clone: WorkerProcess.cloneStep(
+                toolPath: state.toolPath,
+                githubToken: WorkerProcess.githubToken(
+                    account: (try? GithubAccountFile(path: GithubAccountFile.defaultPath()).read()) ?? "",
+                    toolPath: state.toolPath)),
+            repos: file)
+
+        // Off the main actor: a clone of a large repository would otherwise freeze the window, and
+        // the operator would be looking at a hung app rather than a running git.
+        Task.detached {
+            let result = setup.add(offer, parent: state.checkoutsFolder)
+            await MainActor.run {
+                busy = false
+                switch result {
+                case .success(let path):
+                    note = "\(offer.label) is set up in \(path). The worker picks it up on its next poll."
+                    load()
+                case .failure(.clone(let reason)), .failure(.grant(let reason)):
+                    note = ""
+                    error = reason
+                }
+            }
         }
     }
 
