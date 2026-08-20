@@ -24,6 +24,7 @@ vi.mock("@/models/grant", () => ({ Grant: { find: grantFind } }));
 
 const {
   assignmentsFor,
+  offersFor,
   lostCheckouts,
   usableRepos,
   overriddenWorkerPolicy,
@@ -655,5 +656,56 @@ describe("overriddenWorkerPolicy", () => {
     });
 
     expect(overriddenWorkerPolicy(legacy)).toEqual({ pollIntervalMs: 5000 });
+  });
+});
+
+// BP-375. assignmentsFor answers "what can this machine work on now", which is deliberately silent
+// about a project it could serve if somebody cloned the repository — so the app had no way to offer
+// one, and the second project meant a git clone in a terminal nothing on screen mentions.
+describe("offersFor", () => {
+  const OTHER_ID = "69a52e3b399b27d3cbb2c5a6";
+  const reported = [{ remote: REMOTE, path: "/repo" }];
+
+  function candidate(overrides: Record<string, unknown> = {}) {
+    return project({ _id: OTHER_ID, key: "SB", name: "Sandbox", githubRepo: "owner/sandbox", ...overrides });
+  }
+
+  it("offers a project this machine could serve but has no checkout of", () => {
+    expect(offersFor(reported, [candidate()], [OTHER_ID])).toEqual([
+      {
+        project: OTHER_ID,
+        key: "SB",
+        name: "Sandbox",
+        repositoryUrl: "https://github.com/owner/sandbox",
+      },
+    ]);
+  });
+
+  // The list is what the app renders as "things you can add". A project already being served is not
+  // one of them, and showing it would invite a second clone of a repository the machine has.
+  it("says nothing about a project whose checkout this machine already reports", () => {
+    expect(offersFor(reported, [project({ key: "BP", name: "Board Planner" })], [PROJECT_ID])).toEqual([]);
+  });
+
+  // The same two gates an assignment passes. An offer the claim would refuse is worse than no offer:
+  // it ends in a clone, a checkout on disk, and a machine that still does nothing.
+  it("offers nothing the assignment itself would refuse", () => {
+    expect(offersFor(reported, [candidate({ worker: { enabled: false } })], [OTHER_ID])).toEqual([]);
+    expect(offersFor(reported, [candidate()], [])).toEqual([]);
+    expect(offersFor(reported, [candidate()], ["somebody-elses-project"])).toEqual([]);
+  });
+
+  it("offers nothing for a project that names no repository, since there is nothing to clone", () => {
+    expect(offersFor(reported, [candidate({ githubRepo: "", repositoryUrl: "" })], [OTHER_ID])).toEqual([]);
+  });
+
+  // An ownerless machine reaches nothing — the same rule assignmentsFor applies, and the reason the
+  // reach is passed in rather than derived here.
+  it("offers nothing to a machine whose owner reaches nothing", () => {
+    expect(offersFor(reported, [candidate()], [])).toEqual([]);
+  });
+
+  it("reaches everything for an unrestricted owner, the way an assignment does", () => {
+    expect(offersFor(reported, [candidate()], null)).toHaveLength(1);
   });
 });

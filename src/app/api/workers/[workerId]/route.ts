@@ -4,7 +4,7 @@ import { connectDB } from "@/lib/db";
 import { withAuth, withWorker } from "@/lib/middleware";
 import { Worker } from "@/models/worker";
 import { Project } from "@/models/project";
-import { assignmentsFor, overriddenWorkerPolicy, ownerReachableProjectIds, toApiWorker, usableRepos } from "@/lib/worker-service";
+import { assignmentsFor, offersFor, overriddenWorkerPolicy, ownerReachableProjectIds, toApiWorker, usableRepos } from "@/lib/worker-service";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { InstanceAuditAction } from "@/types";
 
@@ -26,7 +26,7 @@ export const GET = withWorker(async (_request, { worker }) => {
 
   await connectDB();
   const [projects, others, reachable] = await Promise.all([
-    Project.find({ "worker.enabled": true }).select("_id repositoryUrl githubRepo gitlabRepo gitlabHost worker").lean(),
+    Project.find({ "worker.enabled": true }).select("_id key name repositoryUrl githubRepo gitlabRepo gitlabHost worker").lean(),
     Worker.find({ _id: { $ne: worker._id } }).select(
       "_id name host repos enabled lockedByInstance lastSeenAt createdAt"
     ),
@@ -39,6 +39,14 @@ export const GET = withWorker(async (_request, { worker }) => {
     // This is the field the worker actually reads, so the contested-checkout decision has to be
     // applied here and not only on the heartbeat, whose assignments nothing consumes.
     assignments: assignmentsFor(
+      usableRepos(worker as never, others as never),
+      projects as never,
+      reachable
+    ),
+    // The other half of the same question: what this machine could serve if it had the checkout.
+    // Rendered by the app as the projects you can add, so it carries an address to clone and a name
+    // to show — never a path, which stays the machine's own business.
+    offers: offersFor(
       usableRepos(worker as never, others as never),
       projects as never,
       reachable
