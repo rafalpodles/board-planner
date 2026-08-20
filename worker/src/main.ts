@@ -1,5 +1,7 @@
 import { defaultWorkerDeps, createWorker } from "./wiring.js";
 import { pathWithTools } from "./preflight.js";
+import { stateDirFrom } from "./config.js";
+import { pinnedAccount } from "./github-account.js";
 
 // `node dist/main.js --preflight` answers "can this machine do the work" as JSON and exits, without
 // registering anything or claiming anything. The menubar app runs this before it will enrol a
@@ -13,6 +15,9 @@ async function preflight(): Promise<void> {
     env: deps.env,
     execPath: deps.execPath,
     isExecutable: deps.isExecutable,
+    // The same pin the running worker reads, so the app's checklist answers for the identity that
+    // will actually push rather than for whichever account gh has active while it is on screen
+    pinnedGithubAccount: pinnedAccount(deps.readFile, stateDirFrom(deps.env)),
   });
 
   process.stdout.write(
@@ -22,6 +27,9 @@ async function preflight(): Promise<void> {
         account: report.account,
         checks: report.checks,
         paths: report.paths,
+        githubAccounts: report.githubAccounts,
+        githubAccount: report.githubAccount,
+        githubPinned: report.githubPinned,
         // What the app has to put on the spawned worker's PATH. Handing over the repaired string
         // rather than the ingredients keeps one implementation of the repair.
         path: pathWithTools(report.paths, deps.env.PATH ?? ""),

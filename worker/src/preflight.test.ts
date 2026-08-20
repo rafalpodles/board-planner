@@ -18,6 +18,9 @@ interface Machine {
   has?: string[];
   claudeAuth?: CommandResult;
   ghAuth?: CommandResult;
+  // `gh auth token --user <login>` — the authoritative answer to "does gh hold this account", and
+  // a different call from `gh auth status`
+  ghToken?: CommandResult;
   versions?: Record<string, CommandResult>;
   shellNoise?: string;
   // Present on disk but not on the login shell's PATH — ~/.local/bin, which .zshrc adds and a
@@ -58,6 +61,9 @@ function machine(spec: Machine = {}): {
       envs[tool] = opts.env;
 
       if (command.endsWith("/claude") && args[0] === "auth") return spec.claudeAuth ?? ok(LOGGED_IN);
+      if (command.endsWith("/gh") && args[0] === "auth" && args[1] === "token") {
+        return spec.ghToken ?? ok("gho_a_token\n");
+      }
       if (command.endsWith("/gh") && args[0] === "auth") {
         return spec.ghAuth ?? ok("Logged in to github.com account someone");
       }
@@ -76,14 +82,28 @@ function machine(spec: Machine = {}): {
 
 const env = { SHELL: "/bin/zsh", HOME: "/Users/someone", PATH: "/usr/bin:/bin" };
 
-function depsFor(m: ReturnType<typeof machine>, override: Partial<{ env: typeof env }> = {}) {
+function depsFor(
+  m: ReturnType<typeof machine>,
+  override: Partial<{ env: typeof env; pinnedGithubAccount: string }> = {}
+) {
   return {
     runner: m.runner,
     env: override.env ?? env,
     execPath: NODE,
     isExecutable: m.isExecutable,
+    pinnedGithubAccount: override.pinnedGithubAccount,
   };
 }
+
+const TWO_GH_ACCOUNTS = `github.com
+  ✓ Logged in to github.com account podlesrafal (keyring)
+  - Active account: true
+  - Git operations protocol: ssh
+
+  ✓ Logged in to github.com account rafalpodles (keyring)
+  - Active account: false
+  - Git operations protocol: ssh
+`;
 
 function check(report: { checks: { name: string; ok: boolean; detail: string }[] }, name: string) {
   const found = report.checks.find((c) => c.name === name);
@@ -202,6 +222,96 @@ describe("runPreflight", () => {
 
     expect(report.ok).toBe(false);
     expect(check(report, "gh").ok).toBe(false);
+    expect(check(report, "gh").detail).toMatch(/gh auth login/);
+  });
+
+  // BP-373. The check said `authenticated (/opt/homebrew/bin/gh)` while gh's active account was one
+  // with no write access to the repository, so the panel was green and the clone step failed with
+  // GitHub's own 403 two steps later. The identity that pushes is worth as much as the identity
+  // that writes the code, and the claude check has always named that one.
+  it("names the github account it is authenticated as", async () => {
+    const m = machine({ ghAuth: ok(TWO_GH_ACCOUNTS) });
+
+    const report = await runPreflight(depsFor(m));
+
+    expect(check(report, "gh").ok).toBe(true);
+    expect(check(report, "gh").detail).toContain("podlesrafal");
+    expect(report.githubAccount).toBe("podlesrafal");
+    expect(report.githubPinned).toBe(false);
+  });
+
+  it("lists every account gh knows, so the app can offer them without parsing this itself", async () => {
+    const m = machine({ ghAuth: ok(TWO_GH_ACCOUNTS) });
+
+    const report = await runPreflight(depsFor(m));
+
+    expect(report.githubAccounts).toEqual([
+      { login: "podlesrafal", active: true },
+      { login: "rafalpodles", active: false },
+    ]);
+  });
+
+  it("says a machine with several accounts uses whichever is active until one is pinned", async () => {
+    const m = machine({ ghAuth: ok(TWO_GH_ACCOUNTS) });
+
+    const report = await runPreflight(depsFor(m));
+
+    expect(check(report, "gh").detail).toMatch(/pin/i);
+  });
+
+  it("reports the pinned account rather than gh's active one", async () => {
+    const m = machine({ ghAuth: ok(TWO_GH_ACCOUNTS) });
+
+    const report = await runPreflight(depsFor(m, { pinnedGithubAccount: "rafalpodles" }));
+
+    expect(check(report, "gh").ok).toBe(true);
+    expect(report.githubAccount).toBe("rafalpodles");
+    expect(report.githubPinned).toBe(true);
+    // Both names, because the difference between them is the whole answer to "why is it pushing as
+    // somebody else" — and it is invisible from either name alone
+    expect(check(report, "gh").detail).toContain("rafalpodles");
+    expect(check(report, "gh").detail).toContain("podlesrafal");
+  });
+
+  // Deciding a machine is broken on a text parse would turn any change to gh's status output into a
+  // red row on a worker that is perfectly fine. `auth token --user` answers the actual question by
+  // name, with an exit code, so the pin survives an output shape this parser has never seen.
+  it("verifies the pin against gh itself, not against the status text it parsed", async () => {
+    const m = machine({ ghAuth: ok("some future format nobody has parsed") });
+
+    const report = await runPreflight(depsFor(m, { pinnedGithubAccount: "rafalpodles" }));
+
+    expect(check(report, "gh").ok).toBe(true);
+    expect(report.githubAccount).toBe("rafalpodles");
+    expect(m.calls).toContainEqual([
+      "/opt/homebrew/bin/gh",
+      "auth",
+      "token",
+      "--user",
+      "rafalpodles",
+    ]);
+  });
+
+  // The token is the means, never the message: a preflight report travels to the server on the
+  // heartbeat and is rendered in the fleet console.
+  it("puts no token in the report it hands back", async () => {
+    const m = machine({ ghAuth: ok(TWO_GH_ACCOUNTS), ghToken: ok("gho_a_real_looking_token") });
+
+    const report = await runPreflight(depsFor(m, { pinnedGithubAccount: "rafalpodles" }));
+
+    expect(JSON.stringify(report)).not.toContain("gho_");
+  });
+
+  // Refused here, where the fix is one click away, rather than at push time — which is 30 minutes
+  // of agent work later, and reads as a repository permission problem.
+  it("fails when the pinned account is one gh has no session for", async () => {
+    const m = machine({ ghAuth: ok(TWO_GH_ACCOUNTS), ghToken: fail("no such user") });
+
+    const report = await runPreflight(depsFor(m, { pinnedGithubAccount: "someone-else" }));
+
+    expect(report.ok).toBe(false);
+    expect(check(report, "gh").ok).toBe(false);
+    expect(check(report, "gh").detail).toContain("someone-else");
     expect(check(report, "gh").detail).toMatch(/gh auth login/);
   });
 

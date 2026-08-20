@@ -260,9 +260,14 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     return parts;
   }
 
-  function streamingRunner(claudeCalls: string[][] = [], onAgentStart?: (nth: number) => void): Runner {
+  function streamingRunner(
+    claudeCalls: string[][] = [],
+    onAgentStart?: (nth: number) => void,
+    everyCall: string[][] = []
+  ): Runner {
     return {
       async run(command, args, opts) {
+        everyCall.push([command, ...args]);
         if (command === "claude") {
           claudeCalls.push(args);
           onAgentStart?.(claudeCalls.length);
@@ -295,6 +300,9 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       assignmentRemote?: string;
       extraAssignmentFields?: Record<string, unknown>;
       readFile?: (path: string) => string | null;
+      // Written into the run's own state directory before the worker starts, the way an operator's
+      // choices already sit there — repos.json, worker.json, and now the pinned GitHub account
+      stateFiles?: Record<string, string>;
       // Claimed in order, one per pass of the loop, then the queue runs dry
       tasks?: ClaimedTask[];
       onAgentStart?: (nth: number) => void;
@@ -304,9 +312,14 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     const stateDir = mkdtempSync(join(tmpdir(), "cp-wiring-run-"));
     writeFileSync(join(stateDir, "repos.json"), JSON.stringify({ repos: [REPO] }), { mode: 0o600 });
 
+    for (const [name, contents] of Object.entries(opts.stateFiles ?? {})) {
+      writeFileSync(join(stateDir, name), contents, { mode: 0o600 });
+    }
+
     const telemetry = createTelemetry();
     const posted: PhaseEvent[] = [];
     const claudeCalls: string[][] = [];
+    const everyCall: string[][] = [];
     const bindingErrors: string[] = [];
     const queue = opts.tasks ?? [CLAIMED];
     const logError = vi.fn();
@@ -333,7 +346,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     let stop = (): void => {};
     const worker = createWorker({
       env: { ...ENV, CP_STATE_DIR: stateDir },
-      runner: streamingRunner(claudeCalls, opts.onAgentStart),
+      runner: streamingRunner(claudeCalls, opts.onAgentStart, everyCall),
       hostname: () => "host-1",
       // the loop only sleeps once it has nothing left to claim, which is one pass after the run
       sleep: async () => stop(),
@@ -386,6 +399,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       bindingErrors,
       logError,
       claimed: claudeCalls.length > 0,
+      everyCall,
       workspacePaths: claudeCalls.flat(),
       phases: posted.map((event) => event.phase),
       telemetry,
@@ -530,6 +544,43 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     expect(claudeArgs[claudeArgs.indexOf("--fallback-model") + 1]).toBe("opus");
   });
 
+  // BP-373. `gh auth switch` is global machine state any terminal can flip, so the identity a run
+  // pushes as has to be resolved by name at the start of that run rather than left to whichever
+  // account gh happens to have active when delivery reaches the remote.
+  it("resolves the pinned github account's token by name before the run", async () => {
+    const { everyCall } = await runOneTask(undefined, undefined, {
+      stateFiles: { "github.json": JSON.stringify({ account: "rafalpodles" }) },
+    });
+
+    expect(everyCall).toContainEqual([
+      expect.stringContaining("gh"),
+      "auth",
+      "token",
+      "--user",
+      "rafalpodles",
+    ]);
+  });
+
+  // Opt-in. Asking gh for "the token" with nothing pinned would hand back the active account's,
+  // which is the very thing being pinned away from.
+  it("asks gh for no token at all when no account is pinned", async () => {
+    const { everyCall } = await runOneTask();
+
+    expect(everyCall.filter((call) => call.includes("token"))).toEqual([]);
+  });
+
+  // A pin the keyring cannot answer for must not take the run down with it: delivery falls back to
+  // gh's own resolution, and the reason is on the operator's log rather than inside a 403 later.
+  it("says so and carries on when the pinned account has no token to give", async () => {
+    const { logError } = await runOneTask(undefined, undefined, {
+      stateFiles: { "github.json": JSON.stringify({ account: "logged-out-account" }) },
+    });
+
+    expect(logError).toHaveBeenCalledWith(
+      expect.stringContaining("logged-out-account")
+    );
+  });
+
   // Same join as the model test below, one surface further on: the server's policy has to reach the
   // socket the operator's own cockpit reads, or the app shows defaults while the run uses something
   // else. config knows the policy and local-server serves it; nothing carried one to the other.
@@ -558,6 +609,18 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         maxDiffLines: 77,
       }),
     ]);
+  });
+
+  // The cockpit's Connection tab answers "which account did that push act as" from this, so it has
+  // to be the live pin rather than the value preflight read when the process started.
+  it("serves the pinned github account on the socket, and never a token", async () => {
+    const { localConfig } = await runOneTask(undefined, undefined, {
+      stateFiles: { "github.json": JSON.stringify({ account: "rafalpodles" }) },
+    });
+
+    const view = localConfig?.();
+    expect(view?.githubAccount).toBe("rafalpodles");
+    expect(JSON.stringify(view)).not.toMatch(/gho_|ghp_|cpw_/);
   });
 
   it("puts no credential and no repository path on the socket", async () => {
@@ -772,6 +835,9 @@ describe("preflight's place in the wiring", () => {
     account: "someone@example.com",
     checks: [{ name: "git", ok: true, detail: RESOLVED.git }],
     paths: RESOLVED,
+    githubAccounts: [{ login: "octocat", active: true }],
+    githubAccount: "octocat",
+    githubPinned: false,
   };
 
   function preflightHarness(overrides: Partial<WorkerDeps> = {}) {

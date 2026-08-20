@@ -2,11 +2,12 @@ import { describe, it, expect, vi } from "vitest";
 import { homedir } from "os";
 import { join } from "path";
 import {
-  applyPolicy,
   DEFAULT_POLICY,
+  applyPolicy,
   loadBootstrap,
   localSocketPath,
   parseAssignments,
+  stateDirFrom,
 } from "./config.js";
 
 const base = {
@@ -229,3 +230,23 @@ describe("parseAssignments", () => {
 // The autoMerge and reviewGate describes stood here. Both flags are retired: an agent merges
 // because its sequence carries a Merge step, and is reviewed because a Reviewed gate stands after
 // the last step that writes. agent-rules.test.ts is where those two rules are asserted now.
+
+// `node dist/main.js --preflight` is what the app runs before a machine has enrolled: no CP_API_URL,
+// no CP_WORKER_NAME, nothing loadBootstrap would accept. It still has to find the state directory,
+// because the pinned GitHub account lives there and the check answers for that identity.
+describe("stateDirFrom", () => {
+  it("resolves without any of the variables a bootstrap needs", () => {
+    expect(stateDirFrom({ CP_STATE_DIR: "/Users/rpo/rig/state" })).toBe("/Users/rpo/rig/state");
+    expect(stateDirFrom({})).toMatch(/\.boardplanner$/);
+  });
+
+  it("agrees with the bootstrap the running worker loads", () => {
+    const env = {
+      CP_API_URL: "https://board.example.com",
+      CP_WORKER_NAME: "machine",
+      CP_STATE_DIR: "/state",
+    };
+
+    expect(stateDirFrom(env)).toBe(loadBootstrap(env).stateDir);
+  });
+});

@@ -43,6 +43,8 @@ const SOME_CONFIG: LocalConfigView = {
   workerName: "test-worker",
   projectCount: 1,
   pollIntervalMs: 30_000,
+  githubAccount: "octocat",
+  githubAccounts: [{ login: "octocat", active: true }],
   projects: [
     {
       project: "p1",
@@ -362,6 +364,8 @@ describe("the progress stream", () => {
         workerName: "rig-laptop",
         projectCount: 1,
         pollIntervalMs: 30_000,
+        githubAccount: "rafalpodles",
+        githubAccounts: [{ login: "rafalpodles", active: true }],
         projects: [
           {
             project: "BP",
@@ -383,6 +387,8 @@ describe("the progress stream", () => {
       workerName: "rig-laptop",
       projectCount: 1,
       pollIntervalMs: 30_000,
+      githubAccount: "rafalpodles",
+      githubAccounts: [{ login: "rafalpodles", active: true }],
       projects: [
         {
           project: "BP",
@@ -416,6 +422,8 @@ describe("the progress stream", () => {
         workerName: "w",
         projectCount: 1,
         pollIntervalMs: 30_000,
+        githubAccount: "rafalpodles",
+        githubAccounts: [{ login: "rafalpodles", active: true }],
         projects: [
           {
             project: "BP",

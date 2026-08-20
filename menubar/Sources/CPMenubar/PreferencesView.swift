@@ -28,6 +28,7 @@ private struct ConnectionTab: View {
             LabeledContent("Server", value: model.config?.apiUrl ?? "—")
             LabeledContent("Worker", value: model.config?.workerName ?? "—")
             LabeledContent("Projects", value: model.config.map { "\($0.projectCount)" } ?? "—")
+            GithubAccountRow(accounts: model.config?.githubAccounts ?? [])
             Text("This app reads the worker over a local socket and holds no credential of its own. "
                  + "Registration is done on the worker.")
                 .font(.caption)
@@ -35,6 +36,53 @@ private struct ConnectionTab: View {
         }
         .formStyle(.grouped)
         .padding()
+    }
+}
+
+// The identity every push and pull request acts as. Editable here and not only during onboarding,
+// because `gh auth switch` is global machine state — the day this matters is the day somebody adds
+// a second account to a machine that has been running fine for months.
+private struct GithubAccountRow: View {
+    let accounts: [GithubAccountChoice]
+    @State private var pinned = (try? GithubAccountFile(path: GithubAccountFile.defaultPath()).read()) ?? ""
+    @State private var error = ""
+
+    var body: some View {
+        Group {
+            if accounts.isEmpty {
+                LabeledContent("GitHub", value: "—")
+            } else {
+                Picker("GitHub", selection: binding) {
+                    Text("Whichever gh has active").tag("")
+                    ForEach(accounts) { account in
+                        Text(account.login).tag(account.login)
+                    }
+                }
+            }
+            if !error.isEmpty {
+                Text(error).font(.caption).foregroundStyle(.red)
+            } else if !pinned.isEmpty {
+                // Said plainly, because the point of pinning is that this machine stops following
+                // `gh auth switch` — and that is invisible from the account name alone.
+                Text("Pushes act as \(pinned) whatever gh is switched to. It takes effect on the next task; a run already in flight keeps the identity it started with.")
+                    .font(.caption2).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var binding: Binding<String> {
+        Binding(
+            get: { pinned },
+            set: { login in
+                do {
+                    try GithubAccountFile(path: GithubAccountFile.defaultPath()).write(login)
+                    pinned = login
+                    error = ""
+                } catch {
+                    self.error = "Could not write the GitHub account: \(error.localizedDescription)"
+                }
+            })
     }
 }
 
