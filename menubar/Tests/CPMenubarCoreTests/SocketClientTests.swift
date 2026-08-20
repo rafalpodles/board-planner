@@ -64,7 +64,7 @@ private struct RecordingTransport: Transport {
 @Test func parsesTheConfigResponse() async throws {
     let body = #"""
     {"apiUrl":"http://localhost:3991","workerName":"rig","projectCount":2,"pollIntervalMs":30000,
-     "projects":[{"project":"p1","autoMerge":false,"baseBranch":"main","model":"opus",
+     "projects":[{"project":"p1","baseBranch":"main","model":"opus",
      "reviewModel":"sonnet","maxDiffLines":400,"taskTimeoutMs":900000}]}
     """#
     let client = SocketClient(socketPath: "/x",
@@ -76,7 +76,9 @@ private struct RecordingTransport: Transport {
     #expect(config.pollIntervalMs == 30000)
     // Work settings are per project, so they are read from there and not from the top level
     #expect(config.projects.first?.maxDiffLines == 400)
-    #expect(config.projects.first?.autoMerge == false)
+    // The body above is a copy of what local-server.ts serves. It used to be written to match the
+    // decoder instead, autoMerge and all, so it stayed green for years describing a payload no
+    // worker sends — see ConfigDecodingTests for the fixture taken from a running one.
 }
 
 @Test func surfacesEventsFromASplitStream() async throws {

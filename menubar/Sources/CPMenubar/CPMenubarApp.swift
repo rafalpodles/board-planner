@@ -47,6 +47,8 @@ struct CPMenubarApp: App {
         }
         .menuBarExtraStyle(.window)
 
-        Settings { PreferencesView(model: model) }
+        // The same onboarding object the panel renders, so changing boards in Preferences puts
+        // the panel back on the first-run screen rather than leaving two views disagreeing.
+        Settings { PreferencesView(model: model, onboarding: onboarding) }
     }
 }

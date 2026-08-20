@@ -148,6 +148,22 @@ public enum Onboarding {
         return next
     }
 
+    // Changing which board this machine answers to. Not `reset()`: the checkouts folder and the
+    // resolved tool paths describe the machine, not the board, and asking for them again is asking
+    // the operator to redo a setup that is still true. The address is kept as the starting point
+    // for the field they are about to edit — it is the thing being changed, so it is the thing
+    // worth showing.
+    public static func changingBoard(_ state: OnboardingState) -> OnboardingState {
+        var next = state
+        next.step = .needsFolder
+        next.workerID = ""
+        next.checkoutPath = ""
+        next.userCode = ""
+        next.deviceCode = ""
+        next.verificationURL = ""
+        return next
+    }
+
     public static func started(_ state: OnboardingState) -> OnboardingState {
         var next = state
         next.step = .running
