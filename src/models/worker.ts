@@ -32,6 +32,10 @@ const workerSchema = new Schema<IWorker>(
     enabled: { type: Boolean, default: true },
     lockedByInstance: { type: Boolean, default: false },
     lastSeenAt: { type: Date, default: null },
+    // Set only from the browser screen, by the person who owns the machine. Deliberately not
+    // `default: []` versus absent — see IWorker: "never chosen" and "chose nothing" are different
+    // answers, and the second one is a request to remove every checkout.
+    desiredProjects: { type: [{ type: Schema.Types.ObjectId, ref: "Project" }], default: undefined },
     // The user record this machine acts as: comment author, assignee, and the name in history.
     // Null only for a worker registered before CP-241 and not seen since.
     identity: { type: Schema.Types.ObjectId, ref: "User", default: null },

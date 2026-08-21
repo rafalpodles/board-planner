@@ -403,6 +403,54 @@ describe("GET /api/workers/:workerId", () => {
 
       expect((await (await GET(getRequest(), ctx())).json()).offers).toEqual([]);
     });
+
+    // BP-378. The checkbox screen needs the rows offers deliberately omits: the ones already
+    // served, and the ones nobody has switched on yet — which is the row somebody goes there to
+    // tick in the first place.
+    describe("the catalogue the picker renders", () => {
+      it("carries the served project and the switched-off one alike", async () => {
+        projectFind.mockResolvedValue([
+          {
+            _id: "p1",
+            githubRepo: "owner/repo",
+            key: "BP",
+            name: "Board Planner",
+            worker: { enabled: true, policy: {}, policyOverrides: [] },
+          },
+          {
+            _id: "p2",
+            githubRepo: "owner/sandbox",
+            key: "SB",
+            name: "Sandbox",
+            worker: { enabled: false },
+          },
+        ]);
+
+        const json = await (await GET(getRequest(), ctx())).json();
+
+        expect(json.catalogue).toEqual([
+          expect.objectContaining({ key: "BP", servedHere: true, workersEnabled: true, wanted: true }),
+          expect.objectContaining({ key: "SB", servedHere: false, workersEnabled: false, wanted: false }),
+        ]);
+        // and the narrower answer still excludes both, for the reasons it always did
+        expect(json.offers).toEqual([]);
+      });
+
+      it("reads the stored selection when the screen has been used", async () => {
+        verifyWorkerCredential.mockResolvedValue({ ...WORKER, desiredProjects: ["p2"] });
+        projectFind.mockResolvedValue([
+          { _id: "p1", githubRepo: "owner/repo", key: "BP", name: "Board Planner", worker: { enabled: true } },
+          { _id: "p2", githubRepo: "owner/sandbox", key: "SB", name: "Sandbox", worker: { enabled: true } },
+        ]);
+
+        const json = await (await GET(getRequest(), ctx())).json();
+
+        expect(json.catalogue).toEqual([
+          expect.objectContaining({ key: "BP", servedHere: true, wanted: false }),
+          expect.objectContaining({ key: "SB", servedHere: false, wanted: true }),
+        ]);
+      });
+    });
   });
 });
 
