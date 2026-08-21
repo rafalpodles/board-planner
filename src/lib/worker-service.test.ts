@@ -24,6 +24,7 @@ vi.mock("@/models/grant", () => ({ Grant: { find: grantFind } }));
 
 const {
   assignmentsFor,
+  catalogueFor,
   offersFor,
   lostCheckouts,
   usableRepos,
@@ -707,5 +708,88 @@ describe("offersFor", () => {
 
   it("reaches everything for an unrestricted owner, the way an assignment does", () => {
     expect(offersFor(reported, [candidate()], null)).toHaveLength(1);
+  });
+});
+
+// BP-378. offersFor answers "what could this machine take on", which is deliberately silent about
+// everything already served and everything switched off — so a list of checkboxes, where the
+// connected ones are ticked and a disabled project can still be picked, cannot be built from it.
+describe("catalogueFor", () => {
+  const OTHER_ID = "69a52e3b399b27d3cbb2c5a6";
+  const NO_REPO_ID = "69a52e3b399b27d3cbb2c5a7";
+  const reported = [{ remote: REMOTE, path: "/repo" }];
+
+  const served = () => project({ key: "BP", name: "Board Planner" });
+  const candidate = () =>
+    project({ _id: OTHER_ID, key: "SB", name: "Sandbox", githubRepo: "owner/sandbox" });
+  const switchedOff = () =>
+    project({
+      _id: OTHER_ID,
+      key: "SB",
+      name: "Sandbox",
+      githubRepo: "owner/sandbox",
+      worker: { enabled: false },
+    });
+  const noRepo = () =>
+    project({ _id: NO_REPO_ID, key: "MC", name: "Mocci", githubRepo: "", repositoryUrl: "" });
+
+  it("marks a project this machine serves as connected", () => {
+    const [row] = catalogueFor(reported, [served()], [PROJECT_ID], undefined);
+
+    expect(row).toMatchObject({
+      project: PROJECT_ID,
+      key: "BP",
+      name: "Board Planner",
+      workersEnabled: true,
+      servedHere: true,
+      available: true,
+    });
+  });
+
+  // The whole point of the screen: a project nobody has switched on yet is still offered, because
+  // the person confirming in the browser is the one who can switch it on.
+  it("lists a project whose workers are switched off, and says so", () => {
+    const [row] = catalogueFor(reported, [switchedOff()], [OTHER_ID], undefined);
+
+    expect(row).toMatchObject({ key: "SB", workersEnabled: false, servedHere: false, available: true });
+  });
+
+  // Shown rather than hidden — "where is my project" is the worse question, and this one has an
+  // answer the operator can act on.
+  it("lists a project that names no repository as unavailable", () => {
+    const [row] = catalogueFor(reported, [noRepo()], [NO_REPO_ID], undefined);
+
+    expect(row).toMatchObject({ key: "MC", available: false, repositoryUrl: "" });
+  });
+
+  it("says nothing about a project outside the owner's reach", () => {
+    expect(catalogueFor(reported, [candidate()], [], undefined)).toEqual([]);
+    expect(catalogueFor(reported, [candidate()], ["somebody-else"], undefined)).toEqual([]);
+  });
+
+  // Never chosen is not the same as chose-nothing: reading an absent selection as "wants none"
+  // would make the first render of the screen propose deleting every checkout on the machine.
+  it("treats a machine that has never used the screen as wanting what it already serves", () => {
+    const rows = catalogueFor(reported, [served(), candidate()], null, undefined);
+
+    expect(rows.find((r) => r.key === "BP")).toMatchObject({ servedHere: true, wanted: true });
+    expect(rows.find((r) => r.key === "SB")).toMatchObject({ servedHere: false, wanted: false });
+  });
+
+  it("reads the stored selection once there is one", () => {
+    const rows = catalogueFor(reported, [served(), candidate()], null, [OTHER_ID]);
+
+    // Picked but not yet cloned — this is the row the app acts on
+    expect(rows.find((r) => r.key === "SB")).toMatchObject({ servedHere: false, wanted: true });
+    // Served but no longer wanted — this is the row that gets removed
+    expect(rows.find((r) => r.key === "BP")).toMatchObject({ servedHere: true, wanted: false });
+  });
+
+  it("counts a checkout the operator added by hand as connected, rather than offering a second clone", () => {
+    const elsewhere = [{ remote: "git@github.com:owner/repo.git", path: "/somewhere/of/my/own" }];
+
+    expect(catalogueFor(elsewhere, [served()], [PROJECT_ID], undefined)[0]).toMatchObject({
+      servedHere: true,
+    });
   });
 });

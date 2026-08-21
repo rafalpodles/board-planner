@@ -138,6 +138,13 @@ private struct RepositoriesTab: View {
                 // Named by project, because that is what the operator is adding. The folder picker
                 // beside it stays for a checkout they already have — and for a repository no
                 // project names yet.
+                // The list of projects lives in the browser, where the person is signed in: ticking
+                // one there may mean switching workers on for it, and that is an instance admin in
+                // an interactive session — which this app, holding only the machine's credential,
+                // is not and must not become.
+                Button("Choose projects…") { openPicker() }
+                    .disabled(model.config == nil)
+
                 Menu("Add from board…") {
                     ForEach(offers) { offer in
                         Button(offer.label) { addFromBoard(offer) }
@@ -169,6 +176,20 @@ private struct RepositoriesTab: View {
         }
         .padding()
         .onAppear(perform: load)
+    }
+
+    // Opened rather than embedded, and with the worker's own id so the screen is about THIS
+    // machine. The app knows the board's address from the worker it is already reading.
+    private func openPicker() {
+        guard let config = model.config else { return }
+        let board = BoardURL.normalise(config.apiUrl)
+        let workerId = (try? IdentityFile(path: IdentityFile.defaultPath()).read())?.workerId ?? ""
+        guard !workerId.isEmpty, let url = URL(string: "\(board)/settings/workers/\(workerId)/projects")
+        else {
+            error = "This machine has no identity yet, so there is no list to show."
+            return
+        }
+        NSWorkspace.shared.open(url)
     }
 
     // What the worker says this machine could serve and has no checkout of. The app asks nobody
