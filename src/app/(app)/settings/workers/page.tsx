@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
@@ -234,14 +236,17 @@ export default function AdminWorkersPage() {
                       {worker.version || "—"}
                     </td>
                     <td className="px-3 py-2 whitespace-nowrap">
-                      <span
-                        className="text-sm text-text-muted"
+                      {/* The count was the whole answer here, and the question it left was "so how
+                          do I give it another one" — which had no answer on any screen. */}
+                      <Link
+                        href={`/settings/workers/${worker._id}/projects`}
+                        className="text-sm text-text-muted underline"
                         title={(worker.repos ?? []).map((r) => `${r.remote} → ${r.path}`).join("\n")}
                       >
                         {worker.repos?.length
                           ? `${worker.repos.length} repo${worker.repos.length === 1 ? "" : "s"}`
                           : "none reported"}
-                      </span>
+                      </Link>
                     </td>
                     <td className="px-3 py-2 whitespace-nowrap">
                       {worker.currentTask ? (
