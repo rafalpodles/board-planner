@@ -4,7 +4,7 @@ import { connectDB } from "@/lib/db";
 import { withAuth, withWorker } from "@/lib/middleware";
 import { Worker } from "@/models/worker";
 import { Project } from "@/models/project";
-import { assignmentsFor, offersFor, overriddenWorkerPolicy, ownerReachableProjectIds, toApiWorker, usableRepos } from "@/lib/worker-service";
+import { assignmentsFor, catalogueFor, offersFor, overriddenWorkerPolicy, ownerReachableProjectIds, toApiWorker, usableRepos } from "@/lib/worker-service";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { InstanceAuditAction } from "@/types";
 
@@ -26,7 +26,10 @@ export const GET = withWorker(async (_request, { worker }) => {
 
   await connectDB();
   const [projects, others, reachable] = await Promise.all([
-    Project.find({ "worker.enabled": true }).select("_id key name repositoryUrl githubRepo gitlabRepo gitlabHost worker").lean(),
+    // Not narrowed to `worker.enabled` any more: the catalogue below has to carry the switched-off
+    // projects too, because the screen that renders it is where somebody switches one on. The
+    // enabled test still happens, inside assignmentsFor and offersFor, where it decides work.
+    Project.find({}).select("_id key name repositoryUrl githubRepo gitlabRepo gitlabHost worker").lean(),
     Worker.find({ _id: { $ne: worker._id } }).select(
       "_id name host repos enabled lockedByInstance lastSeenAt createdAt"
     ),
@@ -50,6 +53,14 @@ export const GET = withWorker(async (_request, { worker }) => {
       usableRepos(worker as never, others as never),
       projects as never,
       reachable
+    ),
+    // Everything this machine's owner can reach, with the state each row needs: what it serves,
+    // what was picked, what is switched off, and what cannot be picked for want of a repository.
+    catalogue: catalogueFor(
+      usableRepos(worker as never, others as never),
+      projects as never,
+      reachable,
+      worker.desiredProjects?.map(String)
     ),
   });
 });

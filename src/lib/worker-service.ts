@@ -208,6 +208,57 @@ export function offersFor(
   return out;
 }
 
+// Everything the machine's owner can reach, with the state that decides how each row renders: is
+// it available to pick at all, is it switched on, does this machine already serve it, and was it
+// picked. offersFor answers a narrower question — what could be ADDED — and a checkbox list cannot
+// be built from that, because the ticked rows and the switched-off rows are exactly what it omits.
+export function catalogueFor(
+  reported: RepoReport[],
+  projects: OfferableProject[],
+  reachable: string[] | null,
+  desired: string[] | undefined
+): ProjectCatalogueEntry[] {
+  const wanted = desired ? new Set(desired.map(String)) : null;
+  const out: ProjectCatalogueEntry[] = [];
+
+  for (const project of projects) {
+    const id = String(project._id);
+    if (!canServe(reachable, id)) continue;
+
+    const repositoryUrl = projectRepositoryUrl(project);
+    const servedHere = !!matchRepo(project, reported);
+
+    out.push({
+      project: id,
+      key: project.key ?? "",
+      name: project.name ?? "",
+      repositoryUrl,
+      // A project naming no repository cannot be given to a machine, but it is shown rather than
+      // hidden: the operator can fix it, and an absence with no reason is the worse screen.
+      available: !!repositoryUrl,
+      workersEnabled: !!project.worker?.enabled,
+      servedHere,
+      // No stored selection means nobody has opened the screen yet, and the honest answer for
+      // "what does this machine want" is then "what it already has". Reading an absent selection
+      // as an empty one would open the screen proposing to delete every checkout.
+      wanted: wanted ? wanted.has(id) : servedHere,
+    });
+  }
+
+  return out;
+}
+
+export interface ProjectCatalogueEntry {
+  project: string;
+  key: string;
+  name: string;
+  repositoryUrl: string;
+  available: boolean;
+  workersEnabled: boolean;
+  servedHere: boolean;
+  wanted: boolean;
+}
+
 export interface ProjectOffer {
   project: string;
   // What the checkout is named on disk, and what the operator recognises it by. The app renders the

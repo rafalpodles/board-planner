@@ -27,6 +27,10 @@ public struct IdentityFile: Sendable {
         (stateDirectory as NSString).appendingPathComponent("worker.json")
     }
 
+    public static func defaultPath() -> String {
+        path(in: StateDirectory.resolve())
+    }
+
     public func read() throws -> WorkerIdentity? {
         guard FileManager.default.fileExists(atPath: path) else { return nil }
         let data = try Data(contentsOf: URL(fileURLWithPath: path))
