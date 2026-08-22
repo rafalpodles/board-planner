@@ -71,6 +71,7 @@ const project = {
 beforeEach(() => {
   api.get.mockReset();
   api.put.mockReset();
+  api.del.mockReset();
   api.put.mockResolvedValue({});
   api.get.mockImplementation((url: string) => {
     if (url === "/api/users") return Promise.resolve([]);
@@ -178,6 +179,45 @@ describe("TaskDetail", () => {
     await act(async () => del.click());
     expect(screen.getByText(/cannot be undone/)).toBeTruthy();
     expect(api.del).not.toHaveBeenCalled();
+  });
+
+  /**
+   * BP-298. The property rail holding "Delete task" only appears at lg, and below it the same
+   * button sits at the foot of the "All details" sheet, under every field on the task — so a
+   * phone or a tablet had no delete anyone could find. The overflow menu is that affordance:
+   * two taps from an open task, and through the same confirmation as the rail.
+   */
+  it("offers delete from the overflow menu, behind the same confirmation", async () => {
+    api.del.mockResolvedValue({});
+    const onClose = vi.fn();
+    renderDetail({ onClose });
+    await loaded();
+
+    await act(async () => screen.getByRole("button", { name: "More actions" }).click());
+    const menu = within(screen.getByRole("listbox", { name: "More actions" }));
+    await act(async () => menu.getByRole("option", { name: "Delete task" }).click());
+
+    expect(api.del).not.toHaveBeenCalled();
+    expect(screen.getByText(/cannot be undone/)).toBeTruthy();
+
+    await act(async () => screen.getByRole("button", { name: "Delete" }).click());
+
+    expect(api.del).toHaveBeenCalledWith("/api/projects/TP/tasks/t1");
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+  });
+
+  // Cancelling is the whole point of the confirmation — the menu must not delete on its own
+  it("leaves the task alone when the confirmation is dismissed", async () => {
+    renderDetail();
+    await loaded();
+
+    await act(async () => screen.getByRole("button", { name: "More actions" }).click());
+    const menu = within(screen.getByRole("listbox", { name: "More actions" }));
+    await act(async () => menu.getByRole("option", { name: "Delete task" }).click());
+    await act(async () => screen.getByRole("button", { name: "Cancel" }).click());
+
+    expect(api.del).not.toHaveBeenCalled();
+    expect(screen.queryByText(/cannot be undone/)).toBeNull();
   });
 
   // Columns are per project since CP-128, so sending a literal "planned" is a 400 in any

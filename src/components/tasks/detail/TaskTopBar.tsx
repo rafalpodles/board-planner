@@ -24,6 +24,7 @@ interface TaskTopBarProps {
   onToggleWatch: () => void;
   onDuplicate: () => void;
   onAddChild: () => void;
+  onDelete: () => void;
   onClose: () => void;
 }
 
@@ -40,6 +41,7 @@ export function TaskTopBar({
   onToggleWatch,
   onDuplicate,
   onAddChild,
+  onDelete,
   onClose,
 }: TaskTopBarProps) {
   const ghost =
@@ -70,17 +72,18 @@ export function TaskTopBar({
 
       <div className="flex-1" />
 
-      <button type="button" onClick={onToggleWatch} className={`hidden sm:block ${ghost}`}>
+      <button type="button" onClick={onToggleWatch} className={`hidden lg:block ${ghost}`}>
         {watching ? "Watching" : "Watch"}
         {watcherCount > 0 && <span className="ml-1 opacity-60">({watcherCount})</span>}
       </button>
-      <button type="button" onClick={onDuplicate} className={`hidden sm:block ${ghost}`}>
+      <button type="button" onClick={onDuplicate} className={`hidden lg:block ${ghost}`}>
         Duplicate
       </button>
 
-      {/* Narrow screens only: everything in here has its own control once there is
-          room — Watch and Duplicate above, Add subtask in the linked-work section */}
-      <div className="sm:hidden">
+      {/* Everything in here has its own control once there is room — Watch and Duplicate
+          above, Add subtask in the linked-work section, Delete at the foot of the property
+          rail. The rail itself only appears at lg, so this menu carries them until then. */}
+      <div className="lg:hidden">
         <Popover
           label="More actions"
           align="right"
@@ -122,6 +125,15 @@ export function TaskTopBar({
                 }}
               >
                 Add subtask
+              </OptionItem>
+              <OptionItem
+                danger
+                onClick={() => {
+                  onDelete();
+                  close();
+                }}
+              >
+                Delete task
               </OptionItem>
             </OptionList>
           )}
