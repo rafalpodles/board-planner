@@ -22,6 +22,8 @@ import { Telemetry } from "./telemetry.js";
 // bound project reports what it actually resolved to.
 export interface LocalProjectView {
   project: string;
+  /** Why this project is not being claimed from, or empty when it is. */
+  blocked: string;
   baseBranch: string;
   model: string;
   reviewModel: string;

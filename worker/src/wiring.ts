@@ -187,6 +187,10 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   // The gates' own requirements, which only exist relative to a bound repository, so they are
   // recomputed on every rebind rather than once at startup
   let repoChecks: PreflightCheck[] = [];
+  // Projects whose bound checkout already fails checkRepo, with the reason. The machine knows this
+  // before a task is claimed — checkRepo runs at every rebind — and spending an agent's run to
+  // rediscover it at the build gate is the cost this map exists to stop (BP-379).
+  const unusable = new Map<string, string>();
 
   function configFor(projectId: string): WorkerConfig | null {
     const identity = loadIdentity(identityStore);
@@ -302,7 +306,25 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     }
 
     bound = nextBound;
-    repoChecks = [...bound.values()].flatMap((repo) => checkRepo(deps.readFile, repo.path));
+    // Kept per project as well as flat: the flat list is what the fleet console renders, and the
+    // per-project one is what decides whether that project may be claimed from at all.
+    unusable.clear();
+    repoChecks = [...bound.entries()].flatMap(([projectId, repo]) => {
+      const checks = checkRepo(deps.readFile, repo.path);
+      const failing = checks.filter((check) => !check.ok);
+      if (failing.length) {
+        unusable.set(projectId, failing.map((check) => check.detail).join("; "));
+      }
+      return checks;
+    });
+
+    // Said once per binding rather than once per poll: a machine sitting next to a repository the
+    // gates will refuse would otherwise write the same line every thirty seconds forever.
+    for (const [projectId, reason] of unusable) {
+      deps.logError(
+        `not claiming for project ${projectId}: its checkout cannot pass the gates — ${reason}`
+      );
+    }
     heartbeat.reportBindingError([inventoryError, ...errors].filter(Boolean).join("; "));
 
     for (const projectId of bound.keys()) {
@@ -482,7 +504,9 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
 
   const loop = createLoop({
     pollIntervalMs: () => policy.pollIntervalMs,
-    assignments: () => [...bound.keys()],
+    // A project whose checkout cannot pass the gates is not claimed from. The refusal would arrive
+    // anyway — at the build gate, after the agent has worked — with the reason this already has.
+    assignments: () => [...bound.keys()].filter((projectId) => !unusable.has(projectId)),
     api,
     execute,
     sleep: deps.sleep,
@@ -547,6 +571,9 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       pollIntervalMs: policy.pollIntervalMs,
       projects: [...bound.entries()].map(([project, repo]) => ({
         project,
+        // Empty when the project is claimable. Non-empty is the answer to "why is this machine
+        // sitting on a project and doing nothing", which otherwise has no answer anywhere.
+        blocked: unusable.get(project) ?? "",
         baseBranch: repo.config.baseBranch,
         model: repo.config.model,
         reviewModel: repo.config.reviewModel,
