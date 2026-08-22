@@ -46,6 +46,7 @@ const SOME_CONFIG: LocalConfigView = {
   githubAccount: "octocat",
   githubAccounts: [{ login: "octocat", active: true }],
   offers: [],
+  catalogue: [],
   projects: [
     {
       project: "p1",
@@ -368,6 +369,7 @@ describe("the progress stream", () => {
         githubAccount: "rafalpodles",
         githubAccounts: [{ login: "rafalpodles", active: true }],
         offers: [],
+        catalogue: [],
         projects: [
           {
             project: "BP",
@@ -392,6 +394,7 @@ describe("the progress stream", () => {
       githubAccount: "rafalpodles",
       githubAccounts: [{ login: "rafalpodles", active: true }],
       offers: [],
+      catalogue: [],
       projects: [
         {
           project: "BP",
@@ -428,6 +431,7 @@ describe("the progress stream", () => {
         githubAccount: "rafalpodles",
         githubAccounts: [{ login: "rafalpodles", active: true }],
         offers: [],
+        catalogue: [],
         projects: [
           {
             project: "BP",

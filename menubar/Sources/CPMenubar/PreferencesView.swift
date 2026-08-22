@@ -123,6 +123,7 @@ private struct RepositoriesTab: View {
     @State private var busy = false
 
     private let file = ReposFile(path: ReposFile.defaultPath())
+    private var sync: ProjectSyncRunner { ProjectSyncRunner.shared }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -161,6 +162,24 @@ private struct RepositoriesTab: View {
             if !note.isEmpty {
                 Text(note).font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+
+            // What the machine did about the picking, one line each. A clone takes minutes and a
+            // deletion cannot be undone, so neither gets to happen behind a spinner.
+            ForEach(Array(sync.steps.enumerated()), id: \.offset) { _, step in
+                switch step {
+                case .added(let project, let path):
+                    Text("Set up \(project) in \(path)").font(.caption2).foregroundStyle(.secondary)
+                case .removed(let project, let path):
+                    Text("Removed \(project) — deleted \(path)").font(.caption2).foregroundStyle(.secondary)
+                case .refused(let project, let reason):
+                    Text("Left \(project) alone: \(reason)").font(.caption2).foregroundStyle(.orange)
+                case .failed(let project, let reason):
+                    Text("\(project): \(reason)").font(.caption2).foregroundStyle(.red)
+                }
+            }
+            if sync.running {
+                Text("Setting up what you picked…").font(.caption2).foregroundStyle(.secondary)
             }
 
             Text(

@@ -140,6 +140,28 @@ enum WorkerProcess {
         })
     }
 
+    // One git, run the way every other child here is run: on the PATH preflight resolved, not the
+    // one Finder handed this app.
+    static func git(_ args: [String], cwd: String, toolPath: String) -> (code: Int32, output: String) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["git"] + args
+        var environment = ProcessInfo.processInfo.environment
+        if !toolPath.isEmpty { environment["PATH"] = toolPath }
+        process.environment = environment
+        if FileManager.default.fileExists(atPath: cwd) {
+            process.currentDirectoryURL = URL(fileURLWithPath: cwd)
+        }
+
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        do { try process.run() } catch { return (1, String(describing: error)) }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return (process.terminationStatus, String(data: data, encoding: .utf8) ?? "")
+    }
+
     // Asked of gh by name rather than taken from whatever is active, which is the whole point of
     // the pin. Empty when nothing is pinned, or when gh has no session for it — the caller carries
     // on either way, because gh resolving its own identity is what always used to happen.
