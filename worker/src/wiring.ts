@@ -18,6 +18,7 @@ import {
   Assignment,
   RepoInventory,
   ProjectOffer,
+  ProjectCatalogueEntry,
   Bootstrap,
   DEFAULT_POLICY,
   EffectiveConfig,
@@ -25,6 +26,7 @@ import {
   localSocketPath,
   parseAssignments,
   parseOffers,
+  parseCatalogue,
   WorkerConfig,
 } from "./config.js";
 import { connectControl, ControlDeps } from "./control.js";
@@ -170,6 +172,9 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   // Projects this machine could serve but has no checkout of. Read only by the socket, so the app
   // can offer them; nothing in the claim loop iterates this.
   let offers: ProjectOffer[] = [];
+  // Every project the owner can reach, with what the operator picked. The app reconciles against
+  // this: clone what is wanted and missing, remove what is present and no longer wanted.
+  let catalogue: ProjectCatalogueEntry[] = [];
   // Why the inventory could not be read, surfaced on the heartbeat so a broken repos.json shows up
   // in the console instead of looking like a machine that simply has nothing.
   let inventoryError = "";
@@ -339,10 +344,12 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
         policy?: unknown;
         assignments?: unknown;
         offers?: unknown;
+        catalogue?: unknown;
       };
       policy = applyPolicy(policy, body.policy);
       assignments = parseAssignments(body.assignments);
       offers = parseOffers(body.offers);
+      catalogue = parseCatalogue(body.catalogue);
     } catch (error) {
       deps.logError(`could not refresh worker policy: ${String(error)}`);
       return;
@@ -553,6 +560,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
         pinnedAccount(deps.readFile, bootstrap.stateDir) || preflight?.githubAccount || "",
       githubAccounts: preflight?.githubAccounts ?? [],
       offers,
+      catalogue,
     }),
     log: deps.logError,
   });

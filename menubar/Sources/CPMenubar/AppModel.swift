@@ -45,8 +45,16 @@ final class AppModel {
     private func pumpForever() async {
         while !Task.isCancelled {
             do {
-                state.adopt(try await client.status(), at: Date())
+                let status = try await client.status()
+                state.adopt(status, at: Date())
                 config = try? await client.config()
+                // The picking happens in a browser; this is where the machine catches up with it.
+                // `busy` comes from the status just read rather than from a cached one: the gap
+                // between them is the difference between refusing a removal and deleting a
+                // worktree out from under a run.
+                if let catalogue = config?.catalogue {
+                    await ProjectSyncRunner.shared.sync(catalogue: catalogue, busy: status.current != nil)
+                }
                 for await event in client.stream() {
                     state.apply(event, at: Date())
                     Notifier.shared.handle(event)

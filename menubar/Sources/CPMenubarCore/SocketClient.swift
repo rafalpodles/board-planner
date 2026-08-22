@@ -57,6 +57,7 @@ public struct ConfigResponse: Decodable, Sendable {
     public let githubAccount: String?
     public let githubAccounts: [GithubAccountChoice]?
     public let offers: [ProjectOffer]?
+    public let catalogue: [ProjectCatalogueRow]?
 }
 
 public enum SocketError: Error, Equatable {
