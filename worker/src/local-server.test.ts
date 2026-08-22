@@ -46,9 +46,11 @@ const SOME_CONFIG: LocalConfigView = {
   githubAccount: "octocat",
   githubAccounts: [{ login: "octocat", active: true }],
   offers: [],
+  catalogue: [],
   projects: [
     {
       project: "p1",
+      blocked: "",
       baseBranch: "main",
       model: "opus",
       reviewModel: "opus",
@@ -368,9 +370,11 @@ describe("the progress stream", () => {
         githubAccount: "rafalpodles",
         githubAccounts: [{ login: "rafalpodles", active: true }],
         offers: [],
+        catalogue: [],
         projects: [
           {
             project: "BP",
+            blocked: "",
             baseBranch: "main",
             model: "opus",
             reviewModel: "sonnet",
@@ -392,9 +396,11 @@ describe("the progress stream", () => {
       githubAccount: "rafalpodles",
       githubAccounts: [{ login: "rafalpodles", active: true }],
       offers: [],
+      catalogue: [],
       projects: [
         {
           project: "BP",
+          blocked: "",
           baseBranch: "main",
           model: "opus",
           reviewModel: "sonnet",
@@ -428,9 +434,11 @@ describe("the progress stream", () => {
         githubAccount: "rafalpodles",
         githubAccounts: [{ login: "rafalpodles", active: true }],
         offers: [],
+        catalogue: [],
         projects: [
           {
             project: "BP",
+            blocked: "",
             baseBranch: "main",
             model,
             reviewModel: "sonnet",

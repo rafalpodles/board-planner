@@ -22,6 +22,8 @@ import { Telemetry } from "./telemetry.js";
 // bound project reports what it actually resolved to.
 export interface LocalProjectView {
   project: string;
+  /** Why this project is not being claimed from, or empty when it is. */
+  blocked: string;
   baseBranch: string;
   model: string;
   reviewModel: string;
@@ -43,6 +45,18 @@ export interface LocalConfigView {
   // Projects this machine could serve once it has a checkout of their repository. A list to render
   // and an address to clone from — never a local path, which is the machine's own business.
   offers: { project: string; key: string; name: string; repositoryUrl: string }[];
+  // The catalogue the app reconciles against — what the operator picked, next to what this machine
+  // actually has. No path and no credential: `servedHere` is the answer, not the directory.
+  catalogue: {
+    project: string;
+    key: string;
+    name: string;
+    repositoryUrl: string;
+    available: boolean;
+    workersEnabled: boolean;
+    servedHere: boolean;
+    wanted: boolean;
+  }[];
 }
 
 export interface LocalServerDeps {

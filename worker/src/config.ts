@@ -84,6 +84,20 @@ export interface Assignment {
   policy?: Record<string, unknown>;
 }
 
+// One row of the catalogue: every project this machine's owner can reach, with the state that
+// decides what the app does about it. `wanted` is the operator's choice, `servedHere` is what the
+// disk says; the difference between them is the work.
+export interface ProjectCatalogueEntry {
+  project: string;
+  key: string;
+  name: string;
+  repositoryUrl: string;
+  available: boolean;
+  workersEnabled: boolean;
+  servedHere: boolean;
+  wanted: boolean;
+}
+
 // A project this machine could serve if it had the checkout — enabled, reachable by its owner, and
 // naming a repository. The app renders these as the projects you can add; nothing here is claimed
 // or bound until a checkout exists and repos.json grants it.
@@ -230,6 +244,31 @@ function isOffer(value: unknown): value is ProjectOffer {
   if (typeof value !== "object" || value === null) return false;
   const { project, repositoryUrl } = value as Record<string, unknown>;
   return isNonEmptyString(project) && isNonEmptyString(repositoryUrl);
+}
+
+function isCatalogueEntry(value: unknown): value is ProjectCatalogueEntry {
+  if (typeof value !== "object" || value === null) return false;
+  return isNonEmptyString((value as Record<string, unknown>).project);
+}
+
+// Booleans read as `=== true` rather than for truthiness: a missing `wanted` from an older server
+// must mean "not chosen", and a missing `servedHere` must not read as "connected". Both mistakes
+// end with the app deleting a checkout nobody asked it to touch.
+export function parseCatalogue(value: unknown): ProjectCatalogueEntry[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(isCatalogueEntry).map((row) => {
+    const r = row as unknown as Record<string, unknown>;
+    return {
+      project: String(r.project),
+      key: typeof r.key === "string" ? r.key : "",
+      name: typeof r.name === "string" ? r.name : "",
+      repositoryUrl: typeof r.repositoryUrl === "string" ? r.repositoryUrl : "",
+      available: r.available === true,
+      workersEnabled: r.workersEnabled === true,
+      servedHere: r.servedHere === true,
+      wanted: r.wanted === true,
+    };
+  });
 }
 
 // Same forgiveness as the assignments above, and for a smaller stake: a malformed entry here costs
