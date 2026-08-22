@@ -50,6 +50,7 @@ const SOME_CONFIG: LocalConfigView = {
   projects: [
     {
       project: "p1",
+      blocked: "",
       baseBranch: "main",
       model: "opus",
       reviewModel: "opus",
@@ -373,6 +374,7 @@ describe("the progress stream", () => {
         projects: [
           {
             project: "BP",
+            blocked: "",
             baseBranch: "main",
             model: "opus",
             reviewModel: "sonnet",
@@ -398,6 +400,7 @@ describe("the progress stream", () => {
       projects: [
         {
           project: "BP",
+          blocked: "",
           baseBranch: "main",
           model: "opus",
           reviewModel: "sonnet",
@@ -435,6 +438,7 @@ describe("the progress stream", () => {
         projects: [
           {
             project: "BP",
+            blocked: "",
             baseBranch: "main",
             model,
             reviewModel: "sonnet",
