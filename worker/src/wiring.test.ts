@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { describe, expect, it, vi } from "vitest";
@@ -384,7 +384,22 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       createStore: (path) => memoryStore(path.endsWith("worker.json") ? IDENTITY : ""),
       createApi: () => api as unknown as ApiClient,
       createTelemetry: () => telemetry,
-      ...(opts.readFile ? { readFile: opts.readFile } : {}),
+      // A checkout with what the gates need, unless a test says otherwise. Left to the real
+      // filesystem this described a repository with no lockfile and no scripts — which since
+      // BP-379 is one the worker declines to claim from, so every run test would be asserting
+      // against a machine that correctly refuses to work.
+      readFile:
+        opts.readFile ??
+        ((path: string) =>
+          path.endsWith("package-lock.json")
+            ? "{}"
+            : path.endsWith("package.json")
+              ? JSON.stringify({ scripts: { build: "tsc", test: "vitest" } })
+              // Everything else still comes off the real filesystem, which is how the state
+              // directory written by `stateFiles` reaches the worker.
+              : existsSync(path)
+                ? readFileSync(path, "utf8")
+                : null),
       startHeartbeat: (heartbeatDeps) => {
         seenHeartbeat = heartbeatDeps;
         return fakeHeartbeat(bindingErrors);
@@ -462,6 +477,14 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       uid: 501,
       realpath: (path) => path,
       stat: () => ({ uid: 501, mode: 0o40700 }),
+      // A checkout the gates would accept: since BP-379 the loop declines to claim from one that
+      // fails checkRepo, and this test is about aborting a run, not about refusing to start one.
+      readFile: (path: string) =>
+        path.endsWith("package-lock.json")
+          ? "{}"
+          : path.endsWith("package.json")
+            ? JSON.stringify({ scripts: { build: "tsc", test: "vitest" } })
+            : null,
       fetchImpl: vi.fn().mockResolvedValue({
         ok: true,
         status: 200,
@@ -818,6 +841,54 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         expect.arrayContaining(["package-lock.json", "build script"])
       );
       expect(report?.checks.find((c) => c.name === "package-lock.json")?.detail).toContain(REPO);
+    });
+
+    // BP-379. Found by running it: MP-75 was claimed from a repository with no lockfile and no
+    // test script, an agent worked for sixteen minutes, and the run died at a gate whose reason
+    // checkRepo had already reported at binding time.
+    it("does not claim from a repository its own checks already failed", async () => {
+      const run = await runOneTask(undefined, undefined, {
+        readFile: (path) =>
+          path.endsWith("package.json") ? JSON.stringify({ scripts: { lint: "eslint" } }) : null,
+      });
+
+      expect(run.claimed).toBe(false);
+      expect(run.api.claim).not.toHaveBeenCalled();
+    });
+
+    it("says which project it is refusing, and why, rather than idling silently", async () => {
+      const run = await runOneTask(undefined, undefined, {
+        readFile: (path) =>
+          path.endsWith("package.json") ? JSON.stringify({ scripts: { lint: "eslint" } }) : null,
+      });
+
+      expect(run.logError).toHaveBeenCalledWith(
+        expect.stringContaining("not claiming for project p1")
+      );
+      expect(run.logError).toHaveBeenCalledWith(expect.stringContaining("package-lock.json"));
+    });
+
+    // "Why is this machine sitting on a project and doing nothing" has to be answerable from the
+    // cockpit, not only from a log line that scrolled past.
+    it("says on the socket why the project is not being worked on", async () => {
+      const run = await runOneTask(undefined, undefined, {
+        readFile: (path) =>
+          path.endsWith("package.json") ? JSON.stringify({ scripts: { lint: "eslint" } }) : null,
+      });
+
+      expect(run.localConfig?.().projects[0].blocked).toContain("package-lock.json");
+    });
+
+    it("claims as before from a repository that has what the gates need", async () => {
+      const run = await runOneTask(undefined, undefined, {
+        readFile: (path) =>
+          path.endsWith("package.json")
+            ? JSON.stringify({ scripts: { build: "tsc", test: "vitest" } })
+            : "{}",
+      });
+
+      expect(run.claimed).toBe(true);
+      expect(run.localConfig?.().projects[0].blocked).toBe("");
     });
 
     it("says nothing about a bound repository that has what the gates need", async () => {
