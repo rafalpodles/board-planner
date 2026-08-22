@@ -18,6 +18,7 @@ struct FirstRunView: View {
             server
             checkout
             if onboarding.preflight != nil { preflightSummary }
+            if onboarding.githubAccounts.count > 1 { githubAccount }
             connect
 
             if !onboarding.message.isEmpty {
@@ -78,6 +79,35 @@ struct FirstRunView: View {
                 }
             }
         }
+    }
+
+    // Offered only where there is a choice to make. On a machine with one account the row would be
+    // a picker with one entry, which is a decision nobody has.
+    private var githubAccount: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Which GitHub account it pushes as").font(.subheadline).bold()
+            Picker("", selection: accountBinding) {
+                // Not the same as picking the account that happens to be active today: this one
+                // follows `gh auth switch`, and the named ones deliberately do not.
+                Text("Whichever gh has active").tag("")
+                ForEach(onboarding.githubAccounts) { account in
+                    Text(account.login).tag(account.login)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            Text(
+                "gh holds \(onboarding.githubAccounts.count) accounts, and any terminal can switch them. Naming one here keeps this machine pushing as that account whatever else happens on it."
+            )
+            .font(.caption2).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var accountBinding: Binding<String> {
+        Binding(
+            get: { onboarding.pinnedGithubAccount },
+            set: { onboarding.pinGithubAccount($0) })
     }
 
     @ViewBuilder

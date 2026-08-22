@@ -24,6 +24,8 @@ vi.mock("@/models/grant", () => ({ Grant: { find: grantFind } }));
 
 const {
   assignmentsFor,
+  catalogueFor,
+  offersFor,
   lostCheckouts,
   usableRepos,
   overriddenWorkerPolicy,
@@ -655,5 +657,139 @@ describe("overriddenWorkerPolicy", () => {
     });
 
     expect(overriddenWorkerPolicy(legacy)).toEqual({ pollIntervalMs: 5000 });
+  });
+});
+
+// BP-375. assignmentsFor answers "what can this machine work on now", which is deliberately silent
+// about a project it could serve if somebody cloned the repository — so the app had no way to offer
+// one, and the second project meant a git clone in a terminal nothing on screen mentions.
+describe("offersFor", () => {
+  const OTHER_ID = "69a52e3b399b27d3cbb2c5a6";
+  const reported = [{ remote: REMOTE, path: "/repo" }];
+
+  function candidate(overrides: Record<string, unknown> = {}) {
+    return project({ _id: OTHER_ID, key: "SB", name: "Sandbox", githubRepo: "owner/sandbox", ...overrides });
+  }
+
+  it("offers a project this machine could serve but has no checkout of", () => {
+    expect(offersFor(reported, [candidate()], [OTHER_ID])).toEqual([
+      {
+        project: OTHER_ID,
+        key: "SB",
+        name: "Sandbox",
+        repositoryUrl: "https://github.com/owner/sandbox",
+      },
+    ]);
+  });
+
+  // The list is what the app renders as "things you can add". A project already being served is not
+  // one of them, and showing it would invite a second clone of a repository the machine has.
+  it("says nothing about a project whose checkout this machine already reports", () => {
+    expect(offersFor(reported, [project({ key: "BP", name: "Board Planner" })], [PROJECT_ID])).toEqual([]);
+  });
+
+  // The same two gates an assignment passes. An offer the claim would refuse is worse than no offer:
+  // it ends in a clone, a checkout on disk, and a machine that still does nothing.
+  it("offers nothing the assignment itself would refuse", () => {
+    expect(offersFor(reported, [candidate({ worker: { enabled: false } })], [OTHER_ID])).toEqual([]);
+    expect(offersFor(reported, [candidate()], [])).toEqual([]);
+    expect(offersFor(reported, [candidate()], ["somebody-elses-project"])).toEqual([]);
+  });
+
+  it("offers nothing for a project that names no repository, since there is nothing to clone", () => {
+    expect(offersFor(reported, [candidate({ githubRepo: "", repositoryUrl: "" })], [OTHER_ID])).toEqual([]);
+  });
+
+  // An ownerless machine reaches nothing — the same rule assignmentsFor applies, and the reason the
+  // reach is passed in rather than derived here.
+  it("offers nothing to a machine whose owner reaches nothing", () => {
+    expect(offersFor(reported, [candidate()], [])).toEqual([]);
+  });
+
+  it("reaches everything for an unrestricted owner, the way an assignment does", () => {
+    expect(offersFor(reported, [candidate()], null)).toHaveLength(1);
+  });
+});
+
+// BP-378. offersFor answers "what could this machine take on", which is deliberately silent about
+// everything already served and everything switched off — so a list of checkboxes, where the
+// connected ones are ticked and a disabled project can still be picked, cannot be built from it.
+describe("catalogueFor", () => {
+  const OTHER_ID = "69a52e3b399b27d3cbb2c5a6";
+  const NO_REPO_ID = "69a52e3b399b27d3cbb2c5a7";
+  const reported = [{ remote: REMOTE, path: "/repo" }];
+
+  const served = () => project({ key: "BP", name: "Board Planner" });
+  const candidate = () =>
+    project({ _id: OTHER_ID, key: "SB", name: "Sandbox", githubRepo: "owner/sandbox" });
+  const switchedOff = () =>
+    project({
+      _id: OTHER_ID,
+      key: "SB",
+      name: "Sandbox",
+      githubRepo: "owner/sandbox",
+      worker: { enabled: false },
+    });
+  const noRepo = () =>
+    project({ _id: NO_REPO_ID, key: "MC", name: "Mocci", githubRepo: "", repositoryUrl: "" });
+
+  it("marks a project this machine serves as connected", () => {
+    const [row] = catalogueFor(reported, [served()], [PROJECT_ID], undefined);
+
+    expect(row).toMatchObject({
+      project: PROJECT_ID,
+      key: "BP",
+      name: "Board Planner",
+      workersEnabled: true,
+      servedHere: true,
+      available: true,
+    });
+  });
+
+  // The whole point of the screen: a project nobody has switched on yet is still offered, because
+  // the person confirming in the browser is the one who can switch it on.
+  it("lists a project whose workers are switched off, and says so", () => {
+    const [row] = catalogueFor(reported, [switchedOff()], [OTHER_ID], undefined);
+
+    expect(row).toMatchObject({ key: "SB", workersEnabled: false, servedHere: false, available: true });
+  });
+
+  // Shown rather than hidden — "where is my project" is the worse question, and this one has an
+  // answer the operator can act on.
+  it("lists a project that names no repository as unavailable", () => {
+    const [row] = catalogueFor(reported, [noRepo()], [NO_REPO_ID], undefined);
+
+    expect(row).toMatchObject({ key: "MC", available: false, repositoryUrl: "" });
+  });
+
+  it("says nothing about a project outside the owner's reach", () => {
+    expect(catalogueFor(reported, [candidate()], [], undefined)).toEqual([]);
+    expect(catalogueFor(reported, [candidate()], ["somebody-else"], undefined)).toEqual([]);
+  });
+
+  // Never chosen is not the same as chose-nothing: reading an absent selection as "wants none"
+  // would make the first render of the screen propose deleting every checkout on the machine.
+  it("treats a machine that has never used the screen as wanting what it already serves", () => {
+    const rows = catalogueFor(reported, [served(), candidate()], null, undefined);
+
+    expect(rows.find((r) => r.key === "BP")).toMatchObject({ servedHere: true, wanted: true });
+    expect(rows.find((r) => r.key === "SB")).toMatchObject({ servedHere: false, wanted: false });
+  });
+
+  it("reads the stored selection once there is one", () => {
+    const rows = catalogueFor(reported, [served(), candidate()], null, [OTHER_ID]);
+
+    // Picked but not yet cloned — this is the row the app acts on
+    expect(rows.find((r) => r.key === "SB")).toMatchObject({ servedHere: false, wanted: true });
+    // Served but no longer wanted — this is the row that gets removed
+    expect(rows.find((r) => r.key === "BP")).toMatchObject({ servedHere: true, wanted: false });
+  });
+
+  it("counts a checkout the operator added by hand as connected, rather than offering a second clone", () => {
+    const elsewhere = [{ remote: "git@github.com:owner/repo.git", path: "/somewhere/of/my/own" }];
+
+    expect(catalogueFor(elsewhere, [served()], [PROJECT_ID], undefined)[0]).toMatchObject({
+      servedHere: true,
+    });
   });
 });

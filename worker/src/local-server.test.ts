@@ -43,9 +43,14 @@ const SOME_CONFIG: LocalConfigView = {
   workerName: "test-worker",
   projectCount: 1,
   pollIntervalMs: 30_000,
+  githubAccount: "octocat",
+  githubAccounts: [{ login: "octocat", active: true }],
+  offers: [],
+  catalogue: [],
   projects: [
     {
       project: "p1",
+      blocked: "",
       baseBranch: "main",
       model: "opus",
       reviewModel: "opus",
@@ -362,9 +367,14 @@ describe("the progress stream", () => {
         workerName: "rig-laptop",
         projectCount: 1,
         pollIntervalMs: 30_000,
+        githubAccount: "rafalpodles",
+        githubAccounts: [{ login: "rafalpodles", active: true }],
+        offers: [],
+        catalogue: [],
         projects: [
           {
             project: "BP",
+            blocked: "",
             baseBranch: "main",
             model: "opus",
             reviewModel: "sonnet",
@@ -383,9 +393,14 @@ describe("the progress stream", () => {
       workerName: "rig-laptop",
       projectCount: 1,
       pollIntervalMs: 30_000,
+      githubAccount: "rafalpodles",
+      githubAccounts: [{ login: "rafalpodles", active: true }],
+      offers: [],
+      catalogue: [],
       projects: [
         {
           project: "BP",
+          blocked: "",
           baseBranch: "main",
           model: "opus",
           reviewModel: "sonnet",
@@ -416,9 +431,14 @@ describe("the progress stream", () => {
         workerName: "w",
         projectCount: 1,
         pollIntervalMs: 30_000,
+        githubAccount: "rafalpodles",
+        githubAccounts: [{ login: "rafalpodles", active: true }],
+        offers: [],
+        catalogue: [],
         projects: [
           {
             project: "BP",
+            blocked: "",
             baseBranch: "main",
             model,
             reviewModel: "sonnet",

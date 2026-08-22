@@ -27,10 +27,22 @@ public struct IdentityFile: Sendable {
         (stateDirectory as NSString).appendingPathComponent("worker.json")
     }
 
+    public static func defaultPath() -> String {
+        path(in: StateDirectory.resolve())
+    }
+
     public func read() throws -> WorkerIdentity? {
         guard FileManager.default.fileExists(atPath: path) else { return nil }
         let data = try Data(contentsOf: URL(fileURLWithPath: path))
         return try JSONDecoder().decode(WorkerIdentity.self, from: data)
+    }
+
+    /// Forgetting the credential this machine holds. A credential is minted by one board and means
+    /// nothing to another, so changing boards has to drop it rather than carry it across — and a
+    /// file left behind is one a restarted worker would happily present to a server that refuses it.
+    public func forget() throws {
+        guard FileManager.default.fileExists(atPath: path) else { return }
+        try FileManager.default.removeItem(atPath: path)
     }
 
     public func write(_ identity: WorkerIdentity) throws {

@@ -17,19 +17,25 @@ import {
   applyPolicy,
   Assignment,
   RepoInventory,
+  ProjectOffer,
+  ProjectCatalogueEntry,
   Bootstrap,
   DEFAULT_POLICY,
   EffectiveConfig,
   loadBootstrap,
   localSocketPath,
   parseAssignments,
+  parseOffers,
+  parseCatalogue,
   WorkerConfig,
 } from "./config.js";
 import { connectControl, ControlDeps } from "./control.js";
 import { createDelivery } from "./delivery.js";
 import { collectDiff } from "./diff.js";
+import { pinnedAccount, resolveGhToken } from "./github-account.js";
 import { gateFromEntry } from "./gates/from-entry.js";
 import { createRunner, Runner } from "./exec.js";
+import { childEnv } from "./env.js";
 import { createExecutor } from "./executor.js";
 import { LocalServer, LocalServerDeps, startLocalServer } from "./local-server.js";
 import { createLoop } from "./loop.js";
@@ -163,6 +169,12 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   let policy: EffectiveConfig = DEFAULT_POLICY;
   let assignments: Assignment[] = [];
   let inventory: RepoInventory[] = [];
+  // Projects this machine could serve but has no checkout of. Read only by the socket, so the app
+  // can offer them; nothing in the claim loop iterates this.
+  let offers: ProjectOffer[] = [];
+  // Every project the owner can reach, with what the operator picked. The app reconciles against
+  // this: clone what is wanted and missing, remove what is present and no longer wanted.
+  let catalogue: ProjectCatalogueEntry[] = [];
   // Why the inventory could not be read, surfaced on the heartbeat so a broken repos.json shows up
   // in the console instead of looking like a machine that simply has nothing.
   let inventoryError = "";
@@ -175,6 +187,10 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   // The gates' own requirements, which only exist relative to a bound repository, so they are
   // recomputed on every rebind rather than once at startup
   let repoChecks: PreflightCheck[] = [];
+  // Projects whose bound checkout already fails checkRepo, with the reason. The machine knows this
+  // before a task is claimed — checkRepo runs at every rebind — and spending an agent's run to
+  // rediscover it at the build gate is the cost this map exists to stop (BP-379).
+  const unusable = new Map<string, string>();
 
   function configFor(projectId: string): WorkerConfig | null {
     const identity = loadIdentity(identityStore);
@@ -211,6 +227,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
         env: deps.env,
         execPath: deps.execPath,
         isExecutable: deps.isExecutable,
+        pinnedGithubAccount: pinnedAccount(deps.readFile, bootstrap.stateDir),
       });
     } catch (error) {
       deps.logError(`preflight could not run: ${String(error)}`);
@@ -289,7 +306,25 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     }
 
     bound = nextBound;
-    repoChecks = [...bound.values()].flatMap((repo) => checkRepo(deps.readFile, repo.path));
+    // Kept per project as well as flat: the flat list is what the fleet console renders, and the
+    // per-project one is what decides whether that project may be claimed from at all.
+    unusable.clear();
+    repoChecks = [...bound.entries()].flatMap(([projectId, repo]) => {
+      const checks = checkRepo(deps.readFile, repo.path);
+      const failing = checks.filter((check) => !check.ok);
+      if (failing.length) {
+        unusable.set(projectId, failing.map((check) => check.detail).join("; "));
+      }
+      return checks;
+    });
+
+    // Said once per binding rather than once per poll: a machine sitting next to a repository the
+    // gates will refuse would otherwise write the same line every thirty seconds forever.
+    for (const [projectId, reason] of unusable) {
+      deps.logError(
+        `not claiming for project ${projectId}: its checkout cannot pass the gates — ${reason}`
+      );
+    }
     heartbeat.reportBindingError([inventoryError, ...errors].filter(Boolean).join("; "));
 
     for (const projectId of bound.keys()) {
@@ -327,9 +362,16 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
         },
       });
       if (!response.ok) return;
-      const body = (await response.json()) as { policy?: unknown; assignments?: unknown };
+      const body = (await response.json()) as {
+        policy?: unknown;
+        assignments?: unknown;
+        offers?: unknown;
+        catalogue?: unknown;
+      };
       policy = applyPolicy(policy, body.policy);
       assignments = parseAssignments(body.assignments);
+      offers = parseOffers(body.offers);
+      catalogue = parseCatalogue(body.catalogue);
     } catch (error) {
       deps.logError(`could not refresh worker policy: ${String(error)}`);
       return;
@@ -396,6 +438,25 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     postPhase(update);
   });
 
+  // Read per run, not captured at startup: an operator who picks a different account in the app
+  // gets it on the next task rather than on the next launch, the same way policy changes land.
+  // Empty leaves gh to resolve its own identity, which is what every machine did before BP-373.
+  async function githubIdentityToken(): Promise<string> {
+    const account = pinnedAccount(deps.readFile, bootstrap.stateDir);
+    if (!account) return "";
+
+    const ghPath = preflight?.paths.gh ?? "";
+    const token = await resolveGhToken(deps.runner, ghPath, account, childEnv([], deps.env));
+    if (!token) {
+      // Loud, and then out of the way: falling back to gh's active account is what happens next,
+      // and a run that pushes as the wrong name is the thing this message has to make findable.
+      deps.logError(
+        `could not resolve a token for the pinned GitHub account ${account} — delivery falls back to whichever account gh has active`
+      );
+    }
+    return token;
+  }
+
   async function execute(task: ClaimedTask): Promise<void> {
     const taskConfig = configFor(task.projectId);
     if (!taskConfig) {
@@ -404,6 +465,8 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       await api.release(task.projectId, task.taskId).catch(() => {});
       return;
     }
+
+    const githubToken = await githubIdentityToken();
 
     currentRun = { taskId: task.taskId, runId: task.runId };
     try {
@@ -414,7 +477,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
           columnIds: (projectId) => api.columnIds(projectId),
           createReporter: (client, statusIds) =>
             createReporter(client, statusIds, (message) => deps.logError(message), outbox),
-          createDelivery,
+          createDelivery: (runner, baseBranch) => createDelivery(runner, baseBranch, githubToken),
           workspace: createWorkspace(taskConfig, deps.runner),
           executor: createExecutor(taskConfig, deps.runner),
           collectDiff,
@@ -441,7 +504,9 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
 
   const loop = createLoop({
     pollIntervalMs: () => policy.pollIntervalMs,
-    assignments: () => [...bound.keys()],
+    // A project whose checkout cannot pass the gates is not claimed from. The refusal would arrive
+    // anyway — at the build gate, after the agent has worked — with the reason this already has.
+    assignments: () => [...bound.keys()].filter((projectId) => !unusable.has(projectId)),
     api,
     execute,
     sleep: deps.sleep,
@@ -506,12 +571,23 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       pollIntervalMs: policy.pollIntervalMs,
       projects: [...bound.entries()].map(([project, repo]) => ({
         project,
+        // Empty when the project is claimable. Non-empty is the answer to "why is this machine
+        // sitting on a project and doing nothing", which otherwise has no answer anywhere.
+        blocked: unusable.get(project) ?? "",
         baseBranch: repo.config.baseBranch,
         model: repo.config.model,
         reviewModel: repo.config.reviewModel,
         maxDiffLines: repo.config.maxDiffLines,
         taskTimeoutMs: repo.config.taskTimeoutMs,
       })),
+      // Read here rather than taken from the startup report: an operator who picks another account
+      // in the app must see the answer change without restarting the worker, which is also exactly
+      // when it changes for the next run.
+      githubAccount:
+        pinnedAccount(deps.readFile, bootstrap.stateDir) || preflight?.githubAccount || "",
+      githubAccounts: preflight?.githubAccounts ?? [],
+      offers,
+      catalogue,
     }),
     log: deps.logError,
   });

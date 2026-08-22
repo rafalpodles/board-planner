@@ -84,6 +84,30 @@ export interface Assignment {
   policy?: Record<string, unknown>;
 }
 
+// One row of the catalogue: every project this machine's owner can reach, with the state that
+// decides what the app does about it. `wanted` is the operator's choice, `servedHere` is what the
+// disk says; the difference between them is the work.
+export interface ProjectCatalogueEntry {
+  project: string;
+  key: string;
+  name: string;
+  repositoryUrl: string;
+  available: boolean;
+  workersEnabled: boolean;
+  servedHere: boolean;
+  wanted: boolean;
+}
+
+// A project this machine could serve if it had the checkout — enabled, reachable by its owner, and
+// naming a repository. The app renders these as the projects you can add; nothing here is claimed
+// or bound until a checkout exists and repos.json grants it.
+export interface ProjectOffer {
+  project: string;
+  key: string;
+  name: string;
+  repositoryUrl: string;
+}
+
 // What this machine tells the server it has. Built from repos.json, which stays the only thing that
 // decides where anything may run.
 export interface RepoInventory {
@@ -144,6 +168,13 @@ function required(env: Env, key: string): string {
   return value.trim();
 }
 
+// Resolvable before anything else is: `--preflight` runs on a machine that has not enrolled yet,
+// with none of the variables loadBootstrap insists on, and it still has to find the state
+// directory to read the operator's pinned GitHub account out of.
+export function stateDirFrom(env: Env): string {
+  return env.CP_STATE_DIR?.trim() || join(homedir(), ".boardplanner");
+}
+
 export function loadBootstrap(env: Env, readSecret: SecretReader = readSecretFile): Bootstrap {
   return {
     apiBaseUrl: required(env, "CP_API_URL").replace(/\/$/, ""),
@@ -153,7 +184,7 @@ export function loadBootstrap(env: Env, readSecret: SecretReader = readSecretFil
     enrolmentToken: optionalSecret(env, "CP_ENROLMENT_TOKEN", readSecret),
     enrolmentTokenFile: env.CP_ENROLMENT_TOKEN_FILE?.trim() || "",
     workerName: required(env, "CP_WORKER_NAME"),
-    stateDir: env.CP_STATE_DIR?.trim() || join(homedir(), ".boardplanner"),
+    stateDir: stateDirFrom(env),
   };
 }
 
@@ -207,4 +238,47 @@ function isAssignment(value: unknown): value is Assignment {
 // every other project this worker serves down with it
 export function parseAssignments(value: unknown): Assignment[] {
   return Array.isArray(value) ? value.filter(isAssignment) : [];
+}
+
+function isOffer(value: unknown): value is ProjectOffer {
+  if (typeof value !== "object" || value === null) return false;
+  const { project, repositoryUrl } = value as Record<string, unknown>;
+  return isNonEmptyString(project) && isNonEmptyString(repositoryUrl);
+}
+
+function isCatalogueEntry(value: unknown): value is ProjectCatalogueEntry {
+  if (typeof value !== "object" || value === null) return false;
+  return isNonEmptyString((value as Record<string, unknown>).project);
+}
+
+// Booleans read as `=== true` rather than for truthiness: a missing `wanted` from an older server
+// must mean "not chosen", and a missing `servedHere` must not read as "connected". Both mistakes
+// end with the app deleting a checkout nobody asked it to touch.
+export function parseCatalogue(value: unknown): ProjectCatalogueEntry[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(isCatalogueEntry).map((row) => {
+    const r = row as unknown as Record<string, unknown>;
+    return {
+      project: String(r.project),
+      key: typeof r.key === "string" ? r.key : "",
+      name: typeof r.name === "string" ? r.name : "",
+      repositoryUrl: typeof r.repositoryUrl === "string" ? r.repositoryUrl : "",
+      available: r.available === true,
+      workersEnabled: r.workersEnabled === true,
+      servedHere: r.servedHere === true,
+      wanted: r.wanted === true,
+    };
+  });
+}
+
+// Same forgiveness as the assignments above, and for a smaller stake: a malformed entry here costs
+// one row in a list the operator is reading, never a project that stops being served.
+export function parseOffers(value: unknown): ProjectOffer[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(isOffer).map((offer) => ({
+    project: offer.project,
+    key: typeof offer.key === "string" ? offer.key : "",
+    name: typeof offer.name === "string" ? offer.name : "",
+    repositoryUrl: offer.repositoryUrl,
+  }));
 }

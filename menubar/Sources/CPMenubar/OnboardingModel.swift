@@ -11,6 +11,10 @@ final class OnboardingModel {
     private(set) var state: OnboardingState
     private(set) var preflight: PreflightReport?
     private(set) var repositoryProblems: [RepositoryProblem] = []
+    /// The account the worker will push and open pull requests as, and the accounts it could use
+    /// instead. Empty until preflight has run, which is also when gh is first asked.
+    private(set) var githubAccount = ""
+    private(set) var githubAccounts: [PreflightReport.GithubAccount] = []
     private(set) var busy = false
     var message = ""
 
@@ -41,6 +45,8 @@ final class OnboardingModel {
             do {
                 let report = try WorkerProcess.preflight(checkout: path)
                 preflight = report
+                githubAccounts = report.githubAccounts ?? []
+                githubAccount = report.githubAccount ?? ""
                 if report.ok {
                     state = Onboarding.preflightPassed(
                         state, apiURL: apiURL, workerName: workerName, toolPath: report.path)
@@ -50,6 +56,26 @@ final class OnboardingModel {
                 message = error.localizedDescription
             }
         }
+    }
+
+    // `gh auth switch` is global machine state — any terminal on this box can flip it mid-run — so
+    // the choice is written down and the worker resolves that login's token by name. Re-running
+    // preflight is not a formality here: it is what turns "pinned to an account gh does not have"
+    // into a red row now instead of a 403 half an hour into a run.
+    func pinGithubAccount(_ login: String) {
+        do {
+            try GithubAccountFile(path: GithubAccountFile.path(in: stateDirectory)).write(login)
+            githubAccount = login.isEmpty
+                ? (githubAccounts.first { $0.active }?.login ?? "")
+                : login
+            runPreflight(checkout: state.checkoutsFolder)
+        } catch {
+            message = "Could not write the GitHub account: \(error.localizedDescription)"
+        }
+    }
+
+    var pinnedGithubAccount: String {
+        (try? GithubAccountFile(path: GithubAccountFile.path(in: stateDirectory)).read()) ?? ""
     }
 
     // Refused here rather than after enrolment, where the same pick surfaces as a string in the
@@ -136,7 +162,13 @@ final class OnboardingModel {
         // the board that cannot yet do a thing. It is not started until the clone is there and a
         // push has been shown to work — there is never one that looks ready and is not.
         message = "Cloning \(repositoryURL)…"
-        switch WorkerProcess.cloneStep(toolPath: state.toolPath).run(
+        // The probe pushes as the account the worker will push as, not as whichever one gh has
+        // active — otherwise it proves access this machine will never use.
+        switch WorkerProcess.cloneStep(
+            toolPath: state.toolPath,
+            githubToken: WorkerProcess.githubToken(
+                account: pinnedGithubAccount, toolPath: state.toolPath)
+        ).run(
             repositoryURL: repositoryURL, parent: state.checkoutsFolder, projectKey: projectKey)
         {
         case .cloned(let path), .reused(let path):
@@ -193,6 +225,33 @@ final class OnboardingModel {
         return (try? await client.status()) != nil
     }
 
+
+    // Pointing this machine at a different board. Not startAgain(): the checkouts folder and the
+    // resolved tool paths describe the machine, and asking for them again is asking the operator to
+    // redo a setup that is still true.
+    //
+    // The worker is stopped first and its credential dropped, in that order. A credential minted by
+    // one board is refused by every other, so leaving either behind means a process still polling
+    // the old server, or a restart presenting a credential the new one will not take.
+    func changeBoard() {
+        poller?.cancel()
+        RunningWorker.shared.stop()
+
+        do {
+            try IdentityFile(path: IdentityFile.path(in: stateDirectory)).forget()
+        } catch {
+            message = "Could not remove the old credential: \(error.localizedDescription)"
+            return
+        }
+
+        state = Onboarding.changingBoard(state)
+        persist()
+        apiURL = state.apiURL
+        workerName = state.workerName
+        preflight = nil
+        repositoryProblems = []
+        message = "Point this machine at another board, then connect it again."
+    }
 
     func startAgain() {
         poller?.cancel()

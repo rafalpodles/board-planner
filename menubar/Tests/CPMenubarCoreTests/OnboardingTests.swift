@@ -108,3 +108,46 @@ final class OnboardingTests: XCTestCase {
         XCTAssertEqual(Onboarding.load(defaults: store).step, .needsPreflight)
     }
 }
+
+// BP-376. The board's address was asked for once and never again: FirstRunView is only shown while
+// the machine is not onboarded, so the field holding it — and the button beside it — were both
+// unreachable for the rest of the machine's life.
+final class ChangingBoardTests: XCTestCase {
+    private func running() -> OnboardingState {
+        OnboardingState(
+            step: .running, apiURL: "http://localhost:3958", workerName: "rig-mac",
+            checkoutsFolder: "/Users/rpo/checkouts", checkoutPath: "/Users/rpo/checkouts/BP",
+            userCode: "ABCD-1234", deviceCode: "cpd_x", workerID: "w1",
+            toolPath: "/opt/homebrew/bin")
+    }
+
+    func testItReturnsToTheScreenThatAsksForTheAddress() {
+        let next = Onboarding.changingBoard(running())
+
+        XCTAssertFalse(next.isOnboarded)
+        XCTAssertEqual(next.step, .needsFolder)
+    }
+
+    // A change of board, not a fresh machine: asking for the folder and the tools again is asking
+    // the operator to redo a setup that is still true.
+    func testItKeepsWhatDescribesTheMachineRatherThanTheBoard() {
+        let next = Onboarding.changingBoard(running())
+
+        XCTAssertEqual(next.checkoutsFolder, "/Users/rpo/checkouts")
+        XCTAssertEqual(next.toolPath, "/opt/homebrew/bin")
+        XCTAssertEqual(next.workerName, "rig-mac")
+        // The address being changed is the one worth showing in the field about to be edited
+        XCTAssertEqual(next.apiURL, "http://localhost:3958")
+    }
+
+    // What the old board minted describes a relationship that is ending. A worker id left behind
+    // would have this machine reporting as somebody the new board has never registered.
+    func testItDropsWhatTheOldBoardMinted() {
+        let next = Onboarding.changingBoard(running())
+
+        XCTAssertEqual(next.workerID, "")
+        XCTAssertEqual(next.checkoutPath, "")
+        XCTAssertEqual(next.userCode, "")
+        XCTAssertEqual(next.deviceCode, "")
+    }
+}

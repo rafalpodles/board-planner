@@ -600,6 +600,13 @@ export interface IWorker {
   // The person this machine belongs to, and the only thing that decides what it may reach: null
   // for a worker enrolled before BP-358, which claims nothing until it is enrolled again
   owner?: Types.ObjectId | IUser | null;
+  // Which projects the operator picked for this machine, from the browser screen that lists them.
+  // Stored because it cannot be derived: what a machine HAS is its reported checkouts, and what
+  // somebody WANTS it to have is a different question — the gap between the two is exactly the
+  // work the app then does (clone the missing, remove the unwanted). Empty means nobody has ever
+  // used that screen, which is not the same as "wants nothing" and must not be read as a request
+  // to remove everything.
+  desiredProjects?: Types.ObjectId[];
   // The user this machine acts as — see src/lib/worker-user.ts
   identity: Types.ObjectId | null;
   bindingError: string;

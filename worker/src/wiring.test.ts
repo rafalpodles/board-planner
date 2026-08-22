@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { describe, expect, it, vi } from "vitest";
@@ -260,9 +260,14 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     return parts;
   }
 
-  function streamingRunner(claudeCalls: string[][] = [], onAgentStart?: (nth: number) => void): Runner {
+  function streamingRunner(
+    claudeCalls: string[][] = [],
+    onAgentStart?: (nth: number) => void,
+    everyCall: string[][] = []
+  ): Runner {
     return {
       async run(command, args, opts) {
+        everyCall.push([command, ...args]);
         if (command === "claude") {
           claudeCalls.push(args);
           onAgentStart?.(claudeCalls.length);
@@ -295,6 +300,9 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       assignmentRemote?: string;
       extraAssignmentFields?: Record<string, unknown>;
       readFile?: (path: string) => string | null;
+      // Written into the run's own state directory before the worker starts, the way an operator's
+      // choices already sit there — repos.json, worker.json, and now the pinned GitHub account
+      stateFiles?: Record<string, string>;
       // Claimed in order, one per pass of the loop, then the queue runs dry
       tasks?: ClaimedTask[];
       onAgentStart?: (nth: number) => void;
@@ -304,9 +312,14 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     const stateDir = mkdtempSync(join(tmpdir(), "cp-wiring-run-"));
     writeFileSync(join(stateDir, "repos.json"), JSON.stringify({ repos: [REPO] }), { mode: 0o600 });
 
+    for (const [name, contents] of Object.entries(opts.stateFiles ?? {})) {
+      writeFileSync(join(stateDir, name), contents, { mode: 0o600 });
+    }
+
     const telemetry = createTelemetry();
     const posted: PhaseEvent[] = [];
     const claudeCalls: string[][] = [];
+    const everyCall: string[][] = [];
     const bindingErrors: string[] = [];
     const queue = opts.tasks ?? [CLAIMED];
     const logError = vi.fn();
@@ -333,7 +346,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     let stop = (): void => {};
     const worker = createWorker({
       env: { ...ENV, CP_STATE_DIR: stateDir },
-      runner: streamingRunner(claudeCalls, opts.onAgentStart),
+      runner: streamingRunner(claudeCalls, opts.onAgentStart, everyCall),
       hostname: () => "host-1",
       // the loop only sleeps once it has nothing left to claim, which is one pass after the run
       sleep: async () => stop(),
@@ -346,6 +359,16 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         ok: true,
         status: 200,
         json: async () => ({
+          // What this machine could set up but has not — read only by the socket, never by the
+          // claim loop
+          offers: [
+            {
+              project: "p2",
+              key: "SB",
+              name: "Sandbox",
+              repositoryUrl: "https://github.com/owner/sandbox",
+            },
+          ],
           // Work policy travels with the assignment now: it describes the project, so two projects
           // on one machine can resolve differently.
           assignments: [
@@ -361,7 +384,22 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       createStore: (path) => memoryStore(path.endsWith("worker.json") ? IDENTITY : ""),
       createApi: () => api as unknown as ApiClient,
       createTelemetry: () => telemetry,
-      ...(opts.readFile ? { readFile: opts.readFile } : {}),
+      // A checkout with what the gates need, unless a test says otherwise. Left to the real
+      // filesystem this described a repository with no lockfile and no scripts — which since
+      // BP-379 is one the worker declines to claim from, so every run test would be asserting
+      // against a machine that correctly refuses to work.
+      readFile:
+        opts.readFile ??
+        ((path: string) =>
+          path.endsWith("package-lock.json")
+            ? "{}"
+            : path.endsWith("package.json")
+              ? JSON.stringify({ scripts: { build: "tsc", test: "vitest" } })
+              // Everything else still comes off the real filesystem, which is how the state
+              // directory written by `stateFiles` reaches the worker.
+              : existsSync(path)
+                ? readFileSync(path, "utf8")
+                : null),
       startHeartbeat: (heartbeatDeps) => {
         seenHeartbeat = heartbeatDeps;
         return fakeHeartbeat(bindingErrors);
@@ -386,6 +424,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       bindingErrors,
       logError,
       claimed: claudeCalls.length > 0,
+      everyCall,
       workspacePaths: claudeCalls.flat(),
       phases: posted.map((event) => event.phase),
       telemetry,
@@ -438,6 +477,14 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       uid: 501,
       realpath: (path) => path,
       stat: () => ({ uid: 501, mode: 0o40700 }),
+      // A checkout the gates would accept: since BP-379 the loop declines to claim from one that
+      // fails checkRepo, and this test is about aborting a run, not about refusing to start one.
+      readFile: (path: string) =>
+        path.endsWith("package-lock.json")
+          ? "{}"
+          : path.endsWith("package.json")
+            ? JSON.stringify({ scripts: { build: "tsc", test: "vitest" } })
+            : null,
       fetchImpl: vi.fn().mockResolvedValue({
         ok: true,
         status: 200,
@@ -530,6 +577,43 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     expect(claudeArgs[claudeArgs.indexOf("--fallback-model") + 1]).toBe("opus");
   });
 
+  // BP-373. `gh auth switch` is global machine state any terminal can flip, so the identity a run
+  // pushes as has to be resolved by name at the start of that run rather than left to whichever
+  // account gh happens to have active when delivery reaches the remote.
+  it("resolves the pinned github account's token by name before the run", async () => {
+    const { everyCall } = await runOneTask(undefined, undefined, {
+      stateFiles: { "github.json": JSON.stringify({ account: "rafalpodles" }) },
+    });
+
+    expect(everyCall).toContainEqual([
+      expect.stringContaining("gh"),
+      "auth",
+      "token",
+      "--user",
+      "rafalpodles",
+    ]);
+  });
+
+  // Opt-in. Asking gh for "the token" with nothing pinned would hand back the active account's,
+  // which is the very thing being pinned away from.
+  it("asks gh for no token at all when no account is pinned", async () => {
+    const { everyCall } = await runOneTask();
+
+    expect(everyCall.filter((call) => call.includes("token"))).toEqual([]);
+  });
+
+  // A pin the keyring cannot answer for must not take the run down with it: delivery falls back to
+  // gh's own resolution, and the reason is on the operator's log rather than inside a 403 later.
+  it("says so and carries on when the pinned account has no token to give", async () => {
+    const { logError } = await runOneTask(undefined, undefined, {
+      stateFiles: { "github.json": JSON.stringify({ account: "logged-out-account" }) },
+    });
+
+    expect(logError).toHaveBeenCalledWith(
+      expect.stringContaining("logged-out-account")
+    );
+  });
+
   // Same join as the model test below, one surface further on: the server's policy has to reach the
   // socket the operator's own cockpit reads, or the app shows defaults while the run uses something
   // else. config knows the policy and local-server serves it; nothing carried one to the other.
@@ -558,6 +642,33 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         maxDiffLines: 77,
       }),
     ]);
+  });
+
+  // BP-375. The app can only offer to set up a project it has heard of, and assignments carry only
+  // the ones already working — so the socket has to carry the other half.
+  it("serves the projects it could set up but has no checkout of", async () => {
+    const { localConfig } = await runOneTask();
+
+    expect(localConfig?.().offers).toEqual([
+      {
+        project: "p2",
+        key: "SB",
+        name: "Sandbox",
+        repositoryUrl: "https://github.com/owner/sandbox",
+      },
+    ]);
+  });
+
+  // The cockpit's Connection tab answers "which account did that push act as" from this, so it has
+  // to be the live pin rather than the value preflight read when the process started.
+  it("serves the pinned github account on the socket, and never a token", async () => {
+    const { localConfig } = await runOneTask(undefined, undefined, {
+      stateFiles: { "github.json": JSON.stringify({ account: "rafalpodles" }) },
+    });
+
+    const view = localConfig?.();
+    expect(view?.githubAccount).toBe("rafalpodles");
+    expect(JSON.stringify(view)).not.toMatch(/gho_|ghp_|cpw_/);
   });
 
   it("puts no credential and no repository path on the socket", async () => {
@@ -732,6 +843,54 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       expect(report?.checks.find((c) => c.name === "package-lock.json")?.detail).toContain(REPO);
     });
 
+    // BP-379. Found by running it: MP-75 was claimed from a repository with no lockfile and no
+    // test script, an agent worked for sixteen minutes, and the run died at a gate whose reason
+    // checkRepo had already reported at binding time.
+    it("does not claim from a repository its own checks already failed", async () => {
+      const run = await runOneTask(undefined, undefined, {
+        readFile: (path) =>
+          path.endsWith("package.json") ? JSON.stringify({ scripts: { lint: "eslint" } }) : null,
+      });
+
+      expect(run.claimed).toBe(false);
+      expect(run.api.claim).not.toHaveBeenCalled();
+    });
+
+    it("says which project it is refusing, and why, rather than idling silently", async () => {
+      const run = await runOneTask(undefined, undefined, {
+        readFile: (path) =>
+          path.endsWith("package.json") ? JSON.stringify({ scripts: { lint: "eslint" } }) : null,
+      });
+
+      expect(run.logError).toHaveBeenCalledWith(
+        expect.stringContaining("not claiming for project p1")
+      );
+      expect(run.logError).toHaveBeenCalledWith(expect.stringContaining("package-lock.json"));
+    });
+
+    // "Why is this machine sitting on a project and doing nothing" has to be answerable from the
+    // cockpit, not only from a log line that scrolled past.
+    it("says on the socket why the project is not being worked on", async () => {
+      const run = await runOneTask(undefined, undefined, {
+        readFile: (path) =>
+          path.endsWith("package.json") ? JSON.stringify({ scripts: { lint: "eslint" } }) : null,
+      });
+
+      expect(run.localConfig?.().projects[0].blocked).toContain("package-lock.json");
+    });
+
+    it("claims as before from a repository that has what the gates need", async () => {
+      const run = await runOneTask(undefined, undefined, {
+        readFile: (path) =>
+          path.endsWith("package.json")
+            ? JSON.stringify({ scripts: { build: "tsc", test: "vitest" } })
+            : "{}",
+      });
+
+      expect(run.claimed).toBe(true);
+      expect(run.localConfig?.().projects[0].blocked).toBe("");
+    });
+
     it("says nothing about a bound repository that has what the gates need", async () => {
       const run = await runOneTask(undefined, undefined, {
         readFile: (path) =>
@@ -772,6 +931,9 @@ describe("preflight's place in the wiring", () => {
     account: "someone@example.com",
     checks: [{ name: "git", ok: true, detail: RESOLVED.git }],
     paths: RESOLVED,
+    githubAccounts: [{ login: "octocat", active: true }],
+    githubAccount: "octocat",
+    githubPinned: false,
   };
 
   function preflightHarness(overrides: Partial<WorkerDeps> = {}) {

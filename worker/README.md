@@ -65,6 +65,24 @@ worker credential while the report 403'd on the API one, stranding the task unti
 Claude Code runs on the logged-in CLI session. Never set `ANTHROPIC_API_KEY`, or runs bill per
 token instead of drawing on the subscription.
 
+`gh` is the identity every branch and pull request is pushed under, and on a machine with more than
+one GitHub account that identity is **global state**: `gh auth switch` is shared with every process
+on the box, so a worker left to gh's own resolution pushes as whichever account somebody switched to
+last. Name one instead, in `<CP_STATE_DIR>/github.json`:
+
+```json
+{ "account": "rafalpodles" }
+```
+
+The menubar app writes it — Preferences → Connection, or the picker during onboarding, both offered
+only where gh holds more than one account. The worker resolves that login's token by name
+(`gh auth token --user`) at the start of each task and carries it on its own delivery calls, so a
+switch in another terminal cannot change who a run in flight pushes as. The file holds a login, not
+a secret; the token is never written to disk. With nothing pinned the behaviour is what it always
+was — whatever gh has active — and preflight then says so, rather than reporting a bare
+`authenticated`. That silence was BP-373: the check was green for an account with no write access,
+and the truth arrived from GitHub as a 403 half an hour into the run.
+
 Everything that used to be an environment variable beyond the four above — base branch, poll
 interval, task timeout, diff caps, model — is now worker policy, set by an instance or project
 admin in `/settings/workers`, not by whoever starts the process:

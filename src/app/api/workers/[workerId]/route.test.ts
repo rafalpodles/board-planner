@@ -351,6 +351,107 @@ describe("GET /api/workers/:workerId", () => {
 
     expect((await (await GET(getRequest(), ctx())).json()).assignments).toEqual([]);
   });
+
+  // BP-375. The app can only offer to set up a project it has been told about, and assignments name
+  // only the ones already working — which is why adding the second project was a git clone in a
+  // terminal that nothing on screen mentions.
+  describe("the projects this machine could set up", () => {
+    beforeEach(() => {
+      accessibleProjectIds.mockResolvedValue(["p1", "p2"]);
+      projectFind.mockResolvedValue([
+        {
+          _id: "p1",
+          githubRepo: "owner/repo",
+          key: "BP",
+          name: "Board Planner",
+          worker: { enabled: true, policy: {}, policyOverrides: [] },
+        },
+        {
+          _id: "p2",
+          githubRepo: "owner/sandbox",
+          key: "SB",
+          name: "Sandbox",
+          worker: { enabled: true, policy: {}, policyOverrides: [] },
+        },
+      ]);
+    });
+
+    it("names the one with no checkout here, with the address to clone", async () => {
+      const json = await (await GET(getRequest(), ctx())).json();
+
+      expect(json.offers).toEqual([
+        {
+          project: "p2",
+          key: "SB",
+          name: "Sandbox",
+          repositoryUrl: "https://github.com/owner/sandbox",
+        },
+      ]);
+    });
+
+    // The one being served is not something to add, and offering it invites a second clone of a
+    // repository this machine already has.
+    it("says nothing about the project it is already working on", async () => {
+      const json = await (await GET(getRequest(), ctx())).json();
+
+      expect(json.offers.map((o: { project: string }) => o.project)).not.toContain("p1");
+      expect(json.assignments.map((a: { project: string }) => a.project)).toEqual(["p1"]);
+    });
+
+    it("offers nothing outside its owner's reach, the same as an assignment", async () => {
+      accessibleProjectIds.mockResolvedValue(["p1"]);
+
+      expect((await (await GET(getRequest(), ctx())).json()).offers).toEqual([]);
+    });
+
+    // BP-378. The checkbox screen needs the rows offers deliberately omits: the ones already
+    // served, and the ones nobody has switched on yet — which is the row somebody goes there to
+    // tick in the first place.
+    describe("the catalogue the picker renders", () => {
+      it("carries the served project and the switched-off one alike", async () => {
+        projectFind.mockResolvedValue([
+          {
+            _id: "p1",
+            githubRepo: "owner/repo",
+            key: "BP",
+            name: "Board Planner",
+            worker: { enabled: true, policy: {}, policyOverrides: [] },
+          },
+          {
+            _id: "p2",
+            githubRepo: "owner/sandbox",
+            key: "SB",
+            name: "Sandbox",
+            worker: { enabled: false },
+          },
+        ]);
+
+        const json = await (await GET(getRequest(), ctx())).json();
+
+        expect(json.catalogue).toEqual([
+          expect.objectContaining({ key: "BP", servedHere: true, workersEnabled: true, wanted: true }),
+          expect.objectContaining({ key: "SB", servedHere: false, workersEnabled: false, wanted: false }),
+        ]);
+        // and the narrower answer still excludes both, for the reasons it always did
+        expect(json.offers).toEqual([]);
+      });
+
+      it("reads the stored selection when the screen has been used", async () => {
+        verifyWorkerCredential.mockResolvedValue({ ...WORKER, desiredProjects: ["p2"] });
+        projectFind.mockResolvedValue([
+          { _id: "p1", githubRepo: "owner/repo", key: "BP", name: "Board Planner", worker: { enabled: true } },
+          { _id: "p2", githubRepo: "owner/sandbox", key: "SB", name: "Sandbox", worker: { enabled: true } },
+        ]);
+
+        const json = await (await GET(getRequest(), ctx())).json();
+
+        expect(json.catalogue).toEqual([
+          expect.objectContaining({ key: "BP", servedHere: true, wanted: false }),
+          expect.objectContaining({ key: "SB", servedHere: false, wanted: true }),
+        ]);
+      });
+    });
+  });
 });
 
 // The heartbeat also computes assignments, but nothing reads that field — the worker only ever uses

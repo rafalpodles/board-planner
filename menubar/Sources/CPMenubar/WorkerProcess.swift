@@ -10,12 +10,23 @@ struct PreflightReport: Decodable, Sendable {
         var id: String { name }
     }
 
+    struct GithubAccount: Decodable, Sendable, Identifiable, Equatable {
+        let login: String
+        let active: Bool
+        var id: String { login }
+    }
+
     let ok: Bool
     let account: String
     let checks: [Check]
     let paths: [String: String]
     /// The repaired PATH, computed by the worker so the repair has one implementation
     let path: String
+    // Decoded leniently on purpose: a bundled worker older than this app reports no accounts, and
+    // an app that refuses to read its report is worse than one that offers no picker.
+    let githubAccounts: [GithubAccount]?
+    let githubAccount: String?
+    let githubPinned: Bool?
 }
 
 enum WorkerProcessError: LocalizedError {
@@ -101,13 +112,21 @@ enum WorkerProcess {
 
     // git runs on the PATH preflight resolved, not the one Finder handed this app — the same trap
     // the worker itself hits, one level up.
-    static func cloneStep(toolPath: String) -> CloneStep {
+    //
+    // githubToken pins the identity the clone and its push probe act as. Without it the probe would
+    // prove that *whichever account gh has active* can push, while the worker pushes as the pinned
+    // one — the check and the thing it checks would be two different machines' worth of access.
+    static func cloneStep(toolPath: String, githubToken: String = "") -> CloneStep {
         CloneStep(run: { tool, args, cwd in
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
             process.arguments = [tool] + args
             var environment = ProcessInfo.processInfo.environment
             if !toolPath.isEmpty { environment["PATH"] = toolPath }
+            if !githubToken.isEmpty {
+                environment["GH_TOKEN"] = githubToken
+                environment["GITHUB_TOKEN"] = githubToken
+            }
             process.environment = environment
             if let cwd { process.currentDirectoryURL = URL(fileURLWithPath: cwd) }
 
@@ -119,6 +138,52 @@ enum WorkerProcess {
             process.waitUntilExit()
             return (process.terminationStatus, String(data: data, encoding: .utf8) ?? "")
         })
+    }
+
+    // One git, run the way every other child here is run: on the PATH preflight resolved, not the
+    // one Finder handed this app.
+    static func git(_ args: [String], cwd: String, toolPath: String) -> (code: Int32, output: String) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["git"] + args
+        var environment = ProcessInfo.processInfo.environment
+        if !toolPath.isEmpty { environment["PATH"] = toolPath }
+        process.environment = environment
+        if FileManager.default.fileExists(atPath: cwd) {
+            process.currentDirectoryURL = URL(fileURLWithPath: cwd)
+        }
+
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        do { try process.run() } catch { return (1, String(describing: error)) }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return (process.terminationStatus, String(data: data, encoding: .utf8) ?? "")
+    }
+
+    // Asked of gh by name rather than taken from whatever is active, which is the whole point of
+    // the pin. Empty when nothing is pinned, or when gh has no session for it — the caller carries
+    // on either way, because gh resolving its own identity is what always used to happen.
+    static func githubToken(account: String, toolPath: String) -> String {
+        let login = account.trimmingCharacters(in: .whitespaces)
+        guard !login.isEmpty else { return "" }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["gh", "auth", "token", "--user", login]
+        var environment = ProcessInfo.processInfo.environment
+        if !toolPath.isEmpty { environment["PATH"] = toolPath }
+        process.environment = environment
+
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = Pipe()
+        do { try process.run() } catch { return "" }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { return "" }
+        return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 
     private static func workerEntry(checkout: String) -> String? {

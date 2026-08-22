@@ -4,12 +4,46 @@ import Foundation
 // show. Reporting one would put a number on screen that no run is using.
 public struct ProjectConfig: Decodable, Sendable {
     public let project: String
-    public let autoMerge: Bool
+    // autoMerge stood here and the worker has not sent it since the flag was retired — an agent
+    // merges because its sequence carries a Merge step. A required field nothing sends made the
+    // whole response undecodable, and `try?` at the call site turned that into a config of nil:
+    // every value in Preferences read "—", the policy pane was empty, and the reason was invisible.
     public let baseBranch: String
     public let model: String
     public let reviewModel: String
     public let maxDiffLines: Int
     public let taskTimeoutMs: Int
+}
+
+public struct GithubAccountChoice: Decodable, Sendable, Identifiable, Equatable {
+    public let login: String
+    public let active: Bool
+    public var id: String { login }
+}
+
+// A project this machine could serve once it has a checkout. What the app offers to set up.
+public struct ProjectOffer: Decodable, Sendable, Identifiable, Equatable {
+    public let project: String
+    public let key: String
+    public let name: String
+    public let repositoryUrl: String
+    public var id: String { project }
+
+    public init(project: String, key: String, name: String, repositoryUrl: String) {
+        self.project = project
+        self.key = key
+        self.name = name
+        self.repositoryUrl = repositoryUrl
+    }
+
+    /// What an operator recognises it by. A project with neither is still worth listing by its
+    /// repository — anything is better than a blank row.
+    public var label: String {
+        if !name.isEmpty && !key.isEmpty { return "\(name) · \(key)" }
+        if !name.isEmpty { return name }
+        if !key.isEmpty { return key }
+        return repositoryUrl
+    }
 }
 
 public struct ConfigResponse: Decodable, Sendable {
@@ -18,6 +52,12 @@ public struct ConfigResponse: Decodable, Sendable {
     public let projectCount: Int
     public let pollIntervalMs: Int
     public let projects: [ProjectConfig]
+    // Optional so a worker built before BP-373 still decodes: an app that refuses to read the
+    // config would show "—" for everything, which reads as a dead worker rather than an old one.
+    public let githubAccount: String?
+    public let githubAccounts: [GithubAccountChoice]?
+    public let offers: [ProjectOffer]?
+    public let catalogue: [ProjectCatalogueRow]?
 }
 
 public enum SocketError: Error, Equatable {
