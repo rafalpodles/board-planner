@@ -185,6 +185,31 @@ describe("notification emails", () => {
     await sentMails();
   });
 
+  // Every writer calls createNotifications without awaiting it, so anything that escapes is an
+  // unhandled rejection — which ends the process rather than losing one notification. A username
+  // reaching the recipient list is enough to cast: `new ObjectId("admin")` throws.
+  it("does not reject when a recipient is not an id", async () => {
+    await expect(
+      createNotifications({ ...NOTIFICATION, recipientIds: ["admin"] })
+    ).resolves.toBeUndefined();
+  });
+
+  it("still writes to the recipients that are ids when one of them is not", async () => {
+    await createNotifications({ ...NOTIFICATION, recipientIds: ["admin", WATCHER] });
+
+    expect(insertMany.mock.calls[0][0]).toHaveLength(1);
+    expect(insertMany.mock.calls[0][0][0]).toMatchObject({ title: NOTIFICATION.title });
+  });
+
+  // Anything the notification path throws is the notification's problem, not the caller's
+  it("does not reject when the preference read fails", async () => {
+    userFind.mockImplementationOnce(() => {
+      throw new Error("mongo is having a bad afternoon");
+    });
+
+    await expect(createNotifications(NOTIFICATION)).resolves.toBeUndefined();
+  });
+
   it("never writes to the person who caused the notification", async () => {
     await createNotifications({ ...NOTIFICATION, actorId: ASSIGNEE });
 

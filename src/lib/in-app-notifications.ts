@@ -42,11 +42,24 @@ interface NotifyParams {
   email?: NotificationEmail;
 }
 
+const OBJECT_ID = /^[0-9a-fA-F]{24}$/;
+
 /**
  * Create in-app notifications for a list of recipients,
  * excluding the actor (you don't notify yourself).
  */
-export async function createNotifications({
+export async function createNotifications(params: NotifyParams): Promise<void> {
+  // Callers fire this and walk away — none of them awaits it. An exception escaping here is an
+  // unhandled rejection, which ends the process, so the whole body is guarded rather than the one
+  // write that used to be.
+  try {
+    await notify(params);
+  } catch (err) {
+    console.error("Failed to notify:", err);
+  }
+}
+
+async function notify({
   type,
   taskId,
   projectId,
@@ -57,9 +70,16 @@ export async function createNotifications({
   email,
 }: NotifyParams): Promise<void> {
   // Deduplicate and exclude actor
-  const unique = [...new Set(recipientIds)].filter(
-    (id) => id && id !== actorId
-  );
+  const named = [...new Set(recipientIds)].filter((id) => id && id !== actorId);
+  // A recipient that is not an id can be neither stored nor looked up, and casting one throws.
+  // Every writer calls this without awaiting it, so a throw here is an unhandled rejection rather
+  // than a failed notification — dropping the bad entry keeps the good ones and the request alive.
+  const unique = named.filter((id) => OBJECT_ID.test(id));
+  if (unique.length < named.length) {
+    console.error(
+      `Skipped ${named.length - unique.length} notification recipient(s) that are not ids`
+    );
+  }
   if (unique.length === 0) return;
 
   // One read of everyone's preferences, then one decision per recipient. The switch used to be a
