@@ -2,8 +2,10 @@ import { NextResponse } from "next/server";
 import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { withProjectOwner } from "@/lib/middleware";
+import { recipientsWithAccess } from "@/lib/grants";
 import { User } from "@/models/user";
 import { Grant } from "@/models/grant";
+import { Notification } from "@/models/notification";
 import { GRANT_RELATIONS, GrantRelation } from "@/types";
 
 async function ownerCount(projectId: string): Promise<number> {
@@ -90,6 +92,11 @@ export const DELETE = withProjectOwner(async (request, { params }) => {
   if (!userId) {
     return NextResponse.json({ error: "userId is required" }, { status: 400 });
   }
+  // PUT validates this and DELETE did not, so anything unparseable reached Grant.deleteOne and
+  // left the handler as a CastError-shaped 500.
+  if (!isValidObjectId(userId)) {
+    return NextResponse.json({ error: "userId must be an object id" }, { status: 400 });
+  }
 
   await connectDB();
   if ((await ownerCount(projectId)) <= 1) {
@@ -108,6 +115,33 @@ export const DELETE = withProjectOwner(async (request, { params }) => {
   }
 
   await Grant.deleteOne({ subject: userId, objectType: "project", object: projectId });
+
+  // Hygiene, NOT containment: what makes a lost board unreadable is the filter on the read
+  // routes, which is authoritative and covers every way access can end — including the ones that
+  // never touch a grant row, like an instance admin being demoted. Do not "simplify" those
+  // readers on the strength of this line; that reopens BP-328 in full.
+  //
+  // Asked rather than assumed, because deleting a grant is not the same as removing access: an
+  // instance admin reaches every board without ever having one. Clearing their backlog here
+  // would empty the feed of somebody this call removed nothing from, repeatably.
+  // The grant is already gone, so nothing below may turn into a failed response: the caller would
+  // be told the removal did not happen when it did. Both queries are logged instead, and both
+  // default to leaving the backlog alone — the read filter is what makes it unreadable, so
+  // keeping it costs nothing, while deleting it on a guess cannot be undone.
+  let stillReaches = true;
+  try {
+    stillReaches = (await recipientsWithAccess([userId], projectId)).length > 0;
+  } catch (err) {
+    console.error("Could not tell whether the removed member still reaches the board:", err);
+  }
+
+  if (!stillReaches) {
+    try {
+      await Notification.deleteMany({ recipient: userId, project: projectId });
+    } catch (err) {
+      console.error("Failed to clear notifications for a removed member:", err);
+    }
+  }
 
   return NextResponse.json({ ok: true });
 });
