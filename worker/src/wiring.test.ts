@@ -15,6 +15,23 @@ import { createWorker, WorkerDeps } from "./wiring.js";
 
 const STATE_DIR = "/tmp/cp-wiring-test-state";
 
+interface RemoteCall {
+  args: string[];
+  env: NodeJS.ProcessEnv;
+}
+
+// GIT_CONFIG_COUNT/KEY_n/VALUE_n is how hardenedGitConfig carries config in the environment. Read
+// back the way git reads it, so the assertion is about the configuration that reaches git and not
+// about the spelling of a variable name.
+function gitConfigPairs(env: NodeJS.ProcessEnv): [string, string][] {
+  const count = Number(env.GIT_CONFIG_COUNT ?? 0);
+  const pairs: [string, string][] = [];
+  for (let index = 0; index < count; index += 1) {
+    pairs.push([env[`GIT_CONFIG_KEY_${index}`] ?? "", env[`GIT_CONFIG_VALUE_${index}`] ?? ""]);
+  }
+  return pairs;
+}
+
 const ENV = {
   CP_API_URL: "https://app.example.com",
   CP_API_TOKEN: "cp_admin_token",
@@ -264,11 +281,17 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
   function streamingRunner(
     claudeCalls: string[][] = [],
     onAgentStart?: (nth: number) => void,
-    everyCall: string[][] = []
+    everyCall: string[][] = [],
+    remoteCalls: RemoteCall[] = []
   ): Runner {
     return {
       async run(command, args, opts) {
         everyCall.push([command, ...args]);
+        // everyCall keeps argv only, and the base lookup's hardening lives entirely in its
+        // environment — workspace.ts composes those two calls' env instead of their args.
+        if (command === "git" && (args[0] === "ls-remote" || args[0] === "fetch")) {
+          remoteCalls.push({ args, env: opts.env ?? {} });
+        }
         if (command === "claude") {
           claudeCalls.push(args);
           onAgentStart?.(claudeCalls.length);
@@ -332,6 +355,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     const posted: PhaseEvent[] = [];
     const claudeCalls: string[][] = [];
     const everyCall: string[][] = [];
+    const remoteCalls: RemoteCall[] = [];
     const bindingErrors: string[] = [];
     const queue = opts.tasks ?? [CLAIMED];
     const logError = vi.fn();
@@ -358,7 +382,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     let stop = (): void => {};
     const worker = createWorker({
       env: { ...ENV, CP_STATE_DIR: stateDir },
-      runner: streamingRunner(claudeCalls, opts.onAgentStart, everyCall),
+      runner: streamingRunner(claudeCalls, opts.onAgentStart, everyCall, remoteCalls),
       hostname: () => "host-1",
       // the loop only sleeps once it has nothing left to claim, which is one pass after the run
       sleep: async () => stop(),
@@ -437,6 +461,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       logError,
       claimed: claudeCalls.length > 0,
       everyCall,
+      remoteCalls,
       workspacePaths: claudeCalls.flat(),
       phases: posted.map((event) => event.phase),
       telemetry,
@@ -717,6 +742,25 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       "--user",
       "rafalpodles",
     ]);
+  });
+
+  // The seam gate-integrity.integration.test.ts cannot reach: that test mirrors what this call site
+  // composes rather than calling it, so a createWorkspace(...) that stopped passing
+  // remoteFetchEnv(...) would leave it green. The lookup's `git fetch` runs inside the checkout,
+  // whose config a previous run's agent can write, and an `[url "ext::<program> %S"] insteadOf =
+  // <the pinned URL>` there runs that program holding GH_TOKEN, GITHUB_TOKEN and SSH_AUTH_SOCK —
+  // measured. protocol.ext.allow=never is what refuses it, and nothing but hardenedGitConfig() puts
+  // it in this environment; a plain { GH_TOKEN, GITHUB_TOKEN } would authenticate just as well and
+  // carry none of it.
+  it("gives the base lookup the hardened git environment, not merely a token", async () => {
+    const { remoteCalls } = await runOneTask();
+
+    // Both halves of the lookup, and named rather than counted: an empty list would satisfy every
+    // assertion below it.
+    expect(remoteCalls.map((call) => call.args[0])).toEqual(["ls-remote", "fetch"]);
+    for (const call of remoteCalls) {
+      expect(gitConfigPairs(call.env)).toContainEqual(["protocol.ext.allow", "never"]);
+    }
   });
 
   // Opt-in. Asking gh for "the token" with nothing pinned would hand back the active account's,
