@@ -128,11 +128,11 @@ export function BoardSection({ projectId, project, patchProject, stats }: Sectio
             className="flex cursor-grab flex-wrap items-center gap-2 rounded-lg border border-border bg-bg-input/30 px-3 py-2"
           >
             <span className="select-none text-text-muted">⠿</span>
-            <div className="w-[180px] shrink-0">
+            <div className="min-w-0 flex-1 sm:w-[180px] sm:flex-none sm:shrink-0">
               <Input
                 value={col.label}
                 onChange={(e) => update(i, { label: e.target.value })}
-                className="min-h-[38px] py-1.5"
+                className="py-1.5"
               />
             </div>
             <Popover
@@ -142,7 +142,7 @@ export function BoardSection({ projectId, project, patchProject, stats }: Sectio
                   type="button"
                   onClick={toggle}
                   aria-label={`Colour for ${col.label}`}
-                  className="focus-ring h-9 w-9 shrink-0 rounded-lg border border-border"
+                  className="focus-ring h-11 w-11 shrink-0 rounded-lg border border-border sm:h-9 sm:w-9"
                   style={{ backgroundColor: col.color }}
                 />
               )}
@@ -160,12 +160,12 @@ export function BoardSection({ projectId, project, patchProject, stats }: Sectio
                 </div>
               )}
             </Popover>
-            <div className="min-w-[190px]">
+            <div className="min-w-0 flex-1 basis-full sm:min-w-[190px] sm:flex-none sm:basis-auto">
               <select
                 value={col.role}
                 aria-label={`What ${col.label || "this column"} means to automation`}
                 onChange={(e) => update(i, { role: e.target.value as ColumnRole })}
-                className="focus-ring w-full rounded-lg border border-border bg-bg-input px-2 py-1.5 text-sm"
+                className="focus-ring w-full rounded-lg border border-border bg-bg-input min-h-11 px-2 py-1.5 text-sm sm:min-h-0"
               >
                 {COLUMN_ROLES.map((r) => (
                   <option key={r} value={r}>
@@ -185,7 +185,7 @@ export function BoardSection({ projectId, project, patchProject, stats }: Sectio
               <button
                 type="button"
                 onClick={() => reorder(i, i - 1)}
-                className="px-1 text-text-muted hover:text-text"
+                className="inline-flex h-11 w-11 items-center justify-center rounded text-text-muted sm:h-6 sm:w-auto sm:px-1 hover:text-text"
                 aria-label="Move column up"
               >
                 ↑
@@ -193,7 +193,7 @@ export function BoardSection({ projectId, project, patchProject, stats }: Sectio
               <button
                 type="button"
                 onClick={() => reorder(i, i + 1)}
-                className="px-1 text-text-muted hover:text-text"
+                className="inline-flex h-11 w-11 items-center justify-center rounded text-text-muted sm:h-6 sm:w-auto sm:px-1 hover:text-text"
                 aria-label="Move column down"
               >
                 ↓
@@ -201,7 +201,7 @@ export function BoardSection({ projectId, project, patchProject, stats }: Sectio
               <button
                 type="button"
                 onClick={() => draft.set("columns", columns.filter((_, idx) => idx !== i))}
-                className="px-1 text-text-muted hover:text-danger"
+                className="inline-flex h-11 w-11 items-center justify-center rounded text-text-muted sm:h-6 sm:w-auto sm:px-1 hover:text-danger"
                 aria-label={`Remove ${col.label}`}
               >
                 ✕
@@ -250,7 +250,7 @@ export function BoardSection({ projectId, project, patchProject, stats }: Sectio
             onChange={(e) =>
               draft.set("columns", withEscalationColumn(columns, e.target.value || null))
             }
-            className="focus-ring w-full rounded-lg border border-border bg-bg-input px-3 py-2 text-sm"
+            className="focus-ring w-full rounded-lg border border-border bg-bg-input min-h-11 px-3 py-2 text-sm sm:min-h-0"
           >
             <option value="">— none —</option>
             {reviewColumns.map((c) => (

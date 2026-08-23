@@ -53,15 +53,15 @@ export default function PreferencesPage() {
       <h2 className="text-lg font-semibold mb-6">Preferences</h2>
 
       <div className="space-y-4">
-        <div className="flex items-center gap-3">
+        <div className="flex min-h-11 items-center gap-3 sm:min-h-0">
           <input
             type="checkbox"
             id="collapseEmptyColumns"
             checked={collapseEmptyColumns}
             onChange={(e) => handleToggle(e.target.checked)}
-            className="focus-ring rounded border-border"
+            className="focus-ring h-5 w-5 shrink-0 rounded border-border sm:h-auto sm:w-auto"
           />
-          <label htmlFor="collapseEmptyColumns" className="text-sm cursor-pointer">
+          <label htmlFor="collapseEmptyColumns" className="flex min-h-11 flex-1 cursor-pointer items-center text-sm sm:inline sm:min-h-0 sm:flex-none">
             Collapse empty columns
           </label>
         </div>
