@@ -1258,6 +1258,10 @@ export const INSTANCE_AUDIT_ACTIONS = [
   // "changed by an admin" would send an investigator looking at the wrong person (BP-354)
   "user_email_changed_self",
   "user_password_reset_by_email",
+  // A display name is not authority — it is never matched on, and the username it sits beside is.
+  // It is what a comment is signed with, though, so this row is the only place the change is
+  // recorded at all (BP-410)
+  "user_full_name_changed_self",
 ] as const;
 
 export type InstanceAuditAction = (typeof INSTANCE_AUDIT_ACTIONS)[number];
