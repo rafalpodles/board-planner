@@ -201,10 +201,17 @@ export function ComboboxRow(props: ComboboxRowSingleProps | ComboboxRowMultiProp
 interface OptionItemProps {
   onClick: () => void;
   selected?: boolean;
+  /** Destructive action — coloured apart from the choices around it */
+  danger?: boolean;
   children: ReactNode;
 }
 
-export function OptionItem({ onClick, selected = false, children }: OptionItemProps) {
+export function OptionItem({
+  onClick,
+  selected = false,
+  danger = false,
+  children,
+}: OptionItemProps) {
   return (
     <button
       type="button"
@@ -212,7 +219,11 @@ export function OptionItem({ onClick, selected = false, children }: OptionItemPr
       aria-selected={selected}
       onClick={onClick}
       className={`focus-ring flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm
-        transition-colors hover:bg-bg-hover ${selected ? "text-text" : "text-text-muted"}`}
+        transition-colors ${
+          danger
+            ? "text-danger hover:bg-danger/10"
+            : `hover:bg-bg-hover ${selected ? "text-text" : "text-text-muted"}`
+        }`}
     >
       {children}
     </button>
