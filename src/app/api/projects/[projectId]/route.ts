@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isValidProjectKey, PROJECT_KEY_RULE } from "@/lib/identifiers";
 import { connectDB } from "@/lib/db";
 import { withProjectAccess, withProjectOwner, withProjectAccessOrWorker } from "@/lib/middleware";
 import { check } from "@/lib/grants";
@@ -251,6 +252,13 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
     const before = await Project.findById(projectId, "key formerKeys").lean();
     const nextKey = updates.key.trim().toUpperCase();
     if (before && nextKey && nextKey !== before.key) {
+      // Checked only when the key actually changes. A project stored before BP-401 keeps working
+      // and stays editable in every other field; the rule applies to the value being chosen now,
+      // which is what makes this need no migration and no decision about existing rows.
+      if (!isValidProjectKey(nextKey)) {
+        return NextResponse.json({ error: PROJECT_KEY_RULE }, { status: 400 });
+      }
+      updates.key = nextKey;
       updates.formerKeys = [...new Set([...(before.formerKeys || []), before.key])];
     }
   }

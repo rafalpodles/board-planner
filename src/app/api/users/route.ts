@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isValidUsername, USERNAME_RULE } from "@/lib/identifiers";
 import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
 import { getAuthUser, MIN_PASSWORD_LENGTH, PASSWORD_COST_FACTOR } from "@/lib/auth";
@@ -28,6 +29,11 @@ export async function POST(request: Request) {
       { error: "username, password, and fullName are required" },
       { status: 400 }
     );
+  }
+  // Stored lower-case, so validate what will be stored. A username reaches a notification title
+  // and from there a chat message, where its characters stop being decoration (BP-401).
+  if (!isValidUsername(String(username).toLowerCase())) {
+    return NextResponse.json({ error: USERNAME_RULE }, { status: 400 });
   }
   // Optional: an instance with no mail server has no use for it, and demanding one would mean
   // inventing addresses. The cost of leaving it out is stated on the form — that account cannot

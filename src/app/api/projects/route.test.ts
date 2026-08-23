@@ -137,3 +137,35 @@ describe("POST /api/projects", () => {
     expect(projectDeleteOne).toHaveBeenCalledWith({ _id: NEW_PROJECT_ID });
   });
 });
+
+/**
+ * The key is interpolated into a task URL and from there into Slack and Discord message markup,
+ * where `>` closes a link and `#` opens a heading. Escaping at each sink was tried three times and
+ * missed something every time; this asserts the value never gets that far (BP-401).
+ */
+describe("the key a project may be given", () => {
+  it.each([
+    ["a Slack link closer", "A><HTTPS://PHISH.EXAMPLE|RESET YOUR PASSWORD"],
+    ["a Discord masked link", "A)[OPEN](HTTPS://PHISH.EXAMPLE)"],
+    ["a Discord heading", "A#URGENT"],
+    ["a newline", "A\nB"],
+    ["a space", "A B"],
+  ])("refuses %s, and creates nothing", async (_label, key) => {
+    getAuthUser.mockResolvedValue(ADMIN);
+
+    const response = await POST(post({ name: "Phish", key }), ctx());
+
+    expect(response.status).toBe(400);
+    expect(projectCreate).not.toHaveBeenCalled();
+  });
+
+  // Without this the refusals above would pass just as well on a route that refuses everything
+  it("accepts an ordinary key, and stores what it will be stored as", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+
+    const response = await POST(post({ name: "Board Planner", key: " bp " }), ctx());
+
+    expect(response.status).toBe(201);
+    expect(projectCreate.mock.calls[0][0].key).toBe("BP");
+  });
+});
