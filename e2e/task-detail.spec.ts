@@ -51,9 +51,9 @@ async function signIn(page: Page) {
   await expect(page.getByRole("heading", { name: PROJECT_NAME })).toBeVisible();
 }
 
-/** Creation answers 201, mutations of existing rows answer 200. */
-function expectWritten(status: number) {
-  return expect([200, 201]).toContain(status);
+/** Asserts the exact contract: creation answers 201, mutations of existing rows answer 200. */
+async function expectWritten(write: Promise<{ status(): number }>, status: number) {
+  expect((await write).status()).toBe(status);
 }
 
 /**
@@ -114,7 +114,7 @@ test("comments can be posted, edited and deleted, and say so while they last", a
   await test.step("posting shows the comment under its author", async () => {
     await composer(page).fill("First observation");
     await page.getByRole("button", { name: "Comment" }).click();
-    expectWritten((await posted).status());
+    await expectWritten(posted, 201);
 
     // Scoped to the comment's own card: the detail names its reporter and creator elsewhere
     const panel = page.locator("#main-content");
@@ -133,7 +133,7 @@ test("comments can be posted, edited and deleted, and say so while they last", a
     await card.getByRole("button", { name: "Edit" }).click();
     await card.locator("textarea").fill("First observation, revised");
     await card.getByRole("button", { name: "Save" }).click();
-    expectWritten((await saved).status());
+    await expectWritten(saved, 200);
 
     await expect(page.locator("#main-content").getByText("First observation, revised")).toBeVisible();
     await expect(page.locator("#main-content").getByText("(edited)")).toBeVisible();
@@ -148,7 +148,7 @@ test("comments can be posted, edited and deleted, and say so while they last", a
     const dialog = page.getByRole("dialog", { name: "Delete Comment" });
     const deleted = taskWrite(page, "DELETE", `/tasks/${FINISHED_TASK_ID}/comments`);
     await dialog.getByRole("button", { name: "Delete" }).click();
-    expectWritten((await deleted).status());
+    await expectWritten(deleted, 200);
 
     const panel = page.locator("#main-content");
     await expect(panel.getByText("No comments yet")).toBeVisible();
@@ -162,7 +162,7 @@ test("a mention lands in the mentioned user's feed", async ({ page, request }) =
   const posted = taskWrite(page, "POST", `/tasks/${FINISHED_TASK_ID}/comments`);
   await composer(page).fill("@member could you take a look at this?");
   await page.getByRole("button", { name: "Comment" }).click();
-  expectWritten((await posted).status());
+  await expectWritten(posted, 201);
 
   // The notification is dispatched without blocking the reply, so the feed is polled until
   // the write lands rather than read once on a clock
@@ -332,7 +332,7 @@ test("dependencies: a blocker is linked by key, shown, and removable", async ({
   await test.step("removing it clears the list and the server", async () => {
     const removed = taskWrite(page, "DELETE", `/tasks/${DECOY_TASK_ID}/links`);
     await page.getByRole("button", { name: `Unlink ${PROJECT_KEY}-${SIBLING_TASK_NUMBER}` }).click();
-    expect((await removed).status()).toBe(200);
+    await expectWritten(removed, 200);
 
     await expect(page.getByText("Blocked by")).toHaveCount(0);
     const task = await readTask(request, DECOY_TASK_NUMBER);
@@ -357,7 +357,7 @@ test("uploads: an image attaches into the description, an oversized one is refus
   await test.step("attaching inserts markdown and persists it", async () => {
     const uploaded = taskWrite(page, "POST", "/api/uploads");
     await fileInput.setInputFiles({ name: "proof.png", mimeType: "image/png", buffer: TINY_PNG });
-    expectWritten((await uploaded).status());
+    await expectWritten(uploaded, 200);
 
     await expect(descriptionField).toHaveValue(/!\[.*\]\(.+\)/);
 
@@ -402,18 +402,31 @@ test("uploads: an image attaches into the description, an oversized one is refus
   });
 });
 
-test("the history tab narrates the actions this spec just performed", async ({ page }) => {
+test("the history tab narrates a status change with both columns named", async ({ page }) => {
   await openTask(page, FINISHED_TASK_NUMBER);
 
   await test.step("a status change is announced with both columns named", async () => {
     const moved = taskWrite(page, "PATCH", `/tasks/${FINISHED_TASK_ID}/status`);
     await page.getByRole("combobox", { name: "Status" }).click();
     await page.getByRole("option", { name: "In Progress" }).click();
-    expect((await moved).status()).toBe(200);
+    await expectWritten(moved, 200);
   });
 
-  // The activity log is written fire-and-forget beside the status write, so the page is
-  // reloaded rather than trusting the open view to know about the entry
+  // The activity log is written fire-and-forget beside the status write, so the reload is
+  // gated on the entry actually existing — reloading sooner hands the History tab's one-shot
+  // fetch a board that does not know yet what just happened
+  await expect.poll(async () => {
+    const activity = await storedActivity(FINISHED_TASK_ID);
+    return activity[0] && {
+      ...activity[0],
+    };
+  }).toMatchObject({
+    action: "status_changed",
+    field: "status",
+    oldValue: "todo",
+    newValue: "in_progress",
+  });
+
   await page.reload();
 
   await test.step("the timeline tells the story", async () => {
