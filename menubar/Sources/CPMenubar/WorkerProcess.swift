@@ -127,7 +127,7 @@ enum WorkerProcess {
                 environment["GH_TOKEN"] = githubToken
                 environment["GITHUB_TOKEN"] = githubToken
             }
-            process.environment = environment
+            process.environment = GitSafeEnvironment.apply(to: environment)
             if let cwd { process.currentDirectoryURL = URL(fileURLWithPath: cwd) }
 
             let pipe = Pipe()
@@ -148,7 +148,7 @@ enum WorkerProcess {
         process.arguments = ["git"] + args
         var environment = ProcessInfo.processInfo.environment
         if !toolPath.isEmpty { environment["PATH"] = toolPath }
-        process.environment = environment
+        process.environment = GitSafeEnvironment.apply(to: environment)
         if FileManager.default.fileExists(atPath: cwd) {
             process.currentDirectoryURL = URL(fileURLWithPath: cwd)
         }

@@ -116,4 +116,41 @@ describe("collectDiff", () => {
       expect(call[2].env.GIT_CONFIG_NOSYSTEM).toBe("1");
     }
   });
+
+  // BP-327. baseBranch is project policy: free text on the server, and the first positional here.
+  // Measured on git 2.50.1 — `git diff --numstat '--output=/tmp/pwned...HEAD'` exits 0 and creates
+  // the file, under the operator's own uid on their own laptop.
+  it.each([
+    "--output=/tmp/pwned",
+    "-o/tmp/pwned",
+    "--ext-diff",
+    "main; touch /tmp/pwned",
+    "main branch",
+    "",
+    "  ",
+  ])("refuses a base branch git would not read as a ref: %j", async (baseBranch) => {
+    const run = vi.fn();
+
+    await expect(collectDiff({ run }, "/wt", baseBranch)).rejects.toThrow(/base branch/i);
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("accepts the ref names branches actually have", async () => {
+    for (const baseBranch of ["main", "develop", "release/1.2", "v1.0", "feature/BP-327_fix"]) {
+      const run = vi.fn().mockResolvedValue({ code: 0, stdout: "", stderr: "", timedOut: false });
+      await expect(collectDiff({ run }, "/wt", baseBranch)).resolves.toBeDefined();
+    }
+  });
+
+  // Second line behind the shape check: nothing after `--` can be read as a revision or an option
+  it("closes the positional list with --", async () => {
+    const run = vi.fn().mockResolvedValue({ code: 0, stdout: "", stderr: "", timedOut: false });
+
+    await collectDiff({ run }, "/wt", "main");
+
+    for (const call of run.mock.calls) {
+      expect(call[1][call[1].length - 1]).toBe("--");
+      expect(call[1]).toContain("main...HEAD");
+    }
+  });
 });

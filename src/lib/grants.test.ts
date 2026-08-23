@@ -116,6 +116,7 @@ describe("principalOf", () => {
 
 const findOne = vi.fn();
 const find = vi.fn();
+const userFind = vi.fn();
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/grant", () => ({
   Grant: {
@@ -123,8 +124,11 @@ vi.mock("@/models/grant", () => ({
     find: (...args: unknown[]) => find(...args),
   },
 }));
+vi.mock("@/models/user", () => ({
+  User: { find: (...args: unknown[]) => userFind(...args) },
+}));
 
-const { check, accessibleProjectIds } = await import("./grants");
+const { check, accessibleProjectIds, recipientsWithAccess } = await import("./grants");
 
 function lean(value: unknown) {
   return { select: () => ({ lean: () => Promise.resolve(value) }) };
@@ -195,5 +199,107 @@ describe("accessibleProjectIds", () => {
     find.mockReturnValue(lean([{ object: P }, { object: OTHER }]));
     const user = { _id: "u1", role: "member", tokenScoped: true, tokenScope: [OTHER] } as never;
     expect(await accessibleProjectIds(user)).toEqual([OTHER]);
+  });
+});
+
+// The mocks below are filter-aware on purpose. An earlier version returned a fixed list and
+// ignored the query, which meant the tests passed with `object`, `objectType` or `role` deleted
+// from it — including the mutation that treats every recipient as an instance admin and turns the
+// whole access filter into a no-op. Found by an independent review of this branch.
+describe("recipientsWithAccess", () => {
+  const MEMBER = "507f1f77bcf86cd799439011";
+  const REMOVED = "507f1f77bcf86cd799439012";
+  const ADMIN = "507f1f77bcf86cd799439013";
+
+  /** subject id -> the grant rows that exist for them, whatever project or object type. */
+  let grantRows: { subject: string; relation: string; objectType: string; object: string }[] = [];
+  let roles: Record<string, string> = {};
+
+  beforeEach(() => {
+    find.mockReset();
+    userFind.mockReset();
+    grantRows = [];
+    roles = { [MEMBER]: "member", [REMOVED]: "member", [ADMIN]: "admin" };
+
+    find.mockImplementation((filter: Record<string, never>) => ({
+      select: () => ({
+        lean: async () =>
+          grantRows.filter(
+            (row) =>
+              ((filter.subject as { $in?: string[] })?.$in ?? []).includes(row.subject) &&
+              (filter.objectType === undefined || filter.objectType === row.objectType) &&
+              (filter.object === undefined || filter.object === row.object)
+          ),
+      }),
+    }));
+
+    userFind.mockImplementation((filter: Record<string, never>) => ({
+      select: () => ({
+        lean: async () =>
+          (((filter._id as { $in?: string[] })?.$in ?? []) as string[])
+            .filter((id) => roles[id] !== undefined)
+            .filter((id) => filter.role === undefined || filter.role === roles[id])
+            .map((id) => ({ _id: id, role: roles[id] })),
+      }),
+    }));
+  });
+
+  function grant(subject: string, relation = "member", object = P, objectType = "project") {
+    grantRows.push({ subject, relation, objectType, object });
+  }
+
+  it("keeps a recipient who holds a grant on the project", async () => {
+    grant(MEMBER);
+    expect(await recipientsWithAccess([MEMBER], P)).toEqual([MEMBER]);
+  });
+
+  it("keeps an owner as readily as a member", async () => {
+    grant(MEMBER, "owner");
+    expect(await recipientsWithAccess([MEMBER], P)).toEqual([MEMBER]);
+  });
+
+  it("drops a recipient whose grant on the project is gone", async () => {
+    grant(MEMBER);
+    expect(await recipientsWithAccess([MEMBER, REMOVED], P)).toEqual([MEMBER]);
+  });
+
+  // An instance admin reaches every board without a Grant row ever being written, so a filter
+  // written as "has a grant" would silently stop notifying them — a regression wearing the
+  // costume of a security fix.
+  it("keeps an instance admin who holds no grant at all", async () => {
+    expect(await recipientsWithAccess([ADMIN], P)).toEqual([ADMIN]);
+  });
+
+  it("does not mistake an ordinary member for an instance admin", async () => {
+    roles = { [MEMBER]: "member" };
+    expect(await recipientsWithAccess([MEMBER], P)).toEqual([]);
+  });
+
+  it("ignores a grant the recipient holds on some other project", async () => {
+    grant(MEMBER, "member", OTHER);
+    expect(await recipientsWithAccess([MEMBER], P)).toEqual([]);
+  });
+
+  it("ignores a grant that is not a grant on a project", async () => {
+    grant(MEMBER, "member", P, "sprint");
+    expect(await recipientsWithAccess([MEMBER], P)).toEqual([]);
+  });
+
+  it("drops a recipient who no longer exists at all", async () => {
+    roles = {};
+    grant(MEMBER);
+    expect(await recipientsWithAccess([MEMBER], P)).toEqual([]);
+  });
+
+  it("asks the database nothing when there is nobody to ask about", async () => {
+    expect(await recipientsWithAccess([], P)).toEqual([]);
+    expect(find).not.toHaveBeenCalled();
+    expect(userFind).not.toHaveBeenCalled();
+  });
+
+  it("preserves the order it was given", async () => {
+    grant(MEMBER);
+    grant(REMOVED);
+    expect(await recipientsWithAccess([REMOVED, MEMBER], P)).toEqual([REMOVED, MEMBER]);
   });
 });

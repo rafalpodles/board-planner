@@ -43,7 +43,7 @@ function heartbeatDeps(
     enrolmentToken: "",
     registration: { name: "worker-1", host: "host-1", platform: "darwin", version: "1.0.0" },
     store: {
-      read: () => JSON.stringify({ workerId: "w1", credential: "cpw_x", heartbeatMs: 60_000 }),
+      read: () => JSON.stringify({ workerId: "6a7c686f70ed274cf658b1b3", credential: "cpw_x", heartbeatMs: 60_000 }),
       write: vi.fn(),
     },
     handlers,
@@ -65,7 +65,7 @@ function streamOf(frames: string[]): ReadableStream<Uint8Array> {
 function controlOver(frames: string[], handlers: CommandHandlers) {
   return connectControl({
     apiBaseUrl: "https://app.example.com",
-    identitySource: { read: () => JSON.stringify({ workerId: "w1", credential: "cpw_x" }) },
+    identitySource: { read: () => JSON.stringify({ workerId: "6a7c686f70ed274cf658b1b3", credential: "cpw_x" }) },
     handlers,
     log: vi.fn(),
     fetchImpl: vi.fn(async () => ({
