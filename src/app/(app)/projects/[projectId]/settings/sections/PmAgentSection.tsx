@@ -306,7 +306,7 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
             )}
           </div>
           <div className="mt-2 flex gap-2">
-            <div className="w-[160px] shrink-0">
+            <div className="min-w-0 flex-1 sm:w-[160px] sm:flex-none sm:shrink-0">
               <Input
                 value={newLinkLabel}
                 onChange={(e) => setNewLinkLabel(e.target.value)}
@@ -404,7 +404,7 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
               <div key={i} className="space-y-2 rounded-lg border border-border p-3">
                 {isAdmin ? (
                   <div className="flex items-center gap-2">
-                    <div className="w-[180px] shrink-0">
+                    <div className="min-w-0 flex-1 sm:w-[180px] sm:flex-none sm:shrink-0">
                       <Input
                         value={server.name}
                         onChange={(e) => updateServer(i, { name: e.target.value })}
@@ -421,7 +421,7 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
                       onClick={() =>
                         draft.set("mcpServers", servers.filter((_, idx) => idx !== i))
                       }
-                      className="text-danger hover:opacity-80"
+                      className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded text-danger hover:opacity-80 sm:h-6 sm:w-auto sm:px-1"
                       aria-label="Remove MCP server"
                     >
                       ✕
@@ -437,7 +437,7 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
                       onChange={(e) =>
                         updateServer(i, { authType: e.target.value as "none" | "bearer" | "oauth" })
                       }
-                      className="rounded-lg border border-border bg-bg-input px-2 py-1.5 text-sm"
+                      className="rounded-lg border border-border bg-bg-input min-h-11 px-2 py-1.5 text-sm sm:min-h-0"
                     >
                       <option value="none">No auth</option>
                       <option value="bearer">Bearer token</option>

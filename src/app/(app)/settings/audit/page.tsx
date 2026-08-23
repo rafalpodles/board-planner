@@ -95,28 +95,36 @@ export default function InstanceAuditPage() {
         <div className="border border-border rounded-lg overflow-hidden">
           <table className="w-full text-xs">
             <tbody>
+              {/* Five columns, four of them nowrap, inside an overflow-hidden card: on a phone
+                  every row was sliced mid-word with nothing to scroll. Below sm the row is a
+                  wrapping block instead, and only the table shape is kept for wider screens. */}
               {logs.map((log) => (
-                <tr key={log._id} className="border-b border-border/50 last:border-b-0">
-                  <td className="whitespace-nowrap py-2 px-3 align-top text-text-muted">
+                <tr
+                  key={log._id}
+                  className="flex flex-wrap gap-x-2 border-b border-border/50 px-3 py-2 last:border-b-0 sm:table-row sm:px-0 sm:py-0"
+                >
+                  <td className="align-top text-text-muted sm:table-cell sm:whitespace-nowrap sm:px-3 sm:py-2">
                     {new Date(log.createdAt).toLocaleString()}
                   </td>
                   {/* "system" for a machine, matching the project log — a worker spending its
                       enrolment token has no session to attribute the row to */}
-                  <td className="whitespace-nowrap py-2 px-3 align-top font-medium">
+                  <td className="align-top font-medium sm:table-cell sm:whitespace-nowrap sm:px-3 sm:py-2">
                     {log.user?.username ?? "system"}
                   </td>
                   <td
-                    className={`whitespace-nowrap py-2 px-3 align-top ${
+                    className={`w-full align-top sm:table-cell sm:w-auto sm:whitespace-nowrap sm:px-3 sm:py-2 ${
                       NOTABLE.has(log.action) ? "text-danger" : "text-text-muted"
                     }`}
                   >
                     {LABELS[log.action] ?? log.action.replace(/_/g, " ")}
                   </td>
-                  <td className="whitespace-nowrap py-2 px-3 align-top">{log.target}</td>
+                  <td className="align-top sm:table-cell sm:whitespace-nowrap sm:px-3 sm:py-2">
+                    {log.target}
+                  </td>
                   {/* w-full + max-w-0 is what lets a cell truncate instead of pushing the table
                       past its container */}
                   <td
-                    className="w-full max-w-0 truncate py-2 px-3 align-top text-text-muted"
+                    className="w-full align-top text-text-muted sm:table-cell sm:max-w-0 sm:truncate sm:px-3 sm:py-2"
                     title={log.detail || undefined}
                   >
                     {log.detail}

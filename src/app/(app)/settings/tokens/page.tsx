@@ -186,13 +186,13 @@ export default function TokensPage() {
               {projects.map((p) => (
                 <label
                   key={p._id}
-                  className="flex items-center gap-2 cursor-pointer text-sm"
+                  className="flex min-h-11 cursor-pointer items-center gap-2 text-sm sm:min-h-0"
                 >
                   <input
                     type="checkbox"
                     checked={scope.includes(p._id)}
                     onChange={() => toggleScope(p._id)}
-                    className="focus-ring rounded border-border"
+                    className="focus-ring h-5 w-5 shrink-0 rounded border-border sm:h-auto sm:w-auto"
                   />
                   <span>{p.name}</span>
                   <span className="text-text-muted font-mono text-xs">{p.key}</span>

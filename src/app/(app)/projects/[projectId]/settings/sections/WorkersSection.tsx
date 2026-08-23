@@ -305,7 +305,7 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
             value={defaultAgent}
             disabled={!isAdmin || store.loading}
             onChange={(e) => saveDefaultAgent(e.target.value)}
-            className="w-full rounded-lg border border-border bg-bg-input px-2 py-1.5 text-sm"
+            className="w-full rounded-lg border border-border bg-bg-input min-h-11 px-2 py-1.5 text-sm sm:min-h-0"
           >
             {store.allAgents
               .filter((a) => a.scope !== "user")
