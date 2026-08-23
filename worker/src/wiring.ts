@@ -40,7 +40,7 @@ import { createExecutor } from "./executor.js";
 import { LocalServer, LocalServerDeps, startLocalServer } from "./local-server.js";
 import { createLoop } from "./loop.js";
 import { createOutbox, Store } from "./outbox.js";
-import { PipelineDeps, runTask } from "./pipeline.js";
+import { PipelineDeps, RunDisposition, runTask } from "./pipeline.js";
 import {
   checkRepo,
   pathWithTools,
@@ -473,11 +473,12 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     return token;
   }
 
-  async function execute(task: ClaimedTask): Promise<void> {
+  async function execute(task: ClaimedTask): Promise<RunDisposition> {
     const taskConfig = configFor(task.projectId);
     if (!taskConfig) {
       // The assignment was reassigned or lost its binding between claim and here — release
-      // rather than strand a task this worker can no longer act on
+      // rather than strand a task this worker can no longer act on. Not a machine fault: the next
+      // task's project may still be bound fine, so the loop should keep claiming.
       await api.release(task.projectId, task.taskId).catch(() => {});
       return;
     }
@@ -489,7 +490,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
 
     currentRun = { taskId: task.taskId, runId: task.runId };
     try {
-      await runs.under((signal) => {
+      return await runs.under((signal) => {
         const pipeline: PipelineDeps = {
           config: taskConfig,
           api,

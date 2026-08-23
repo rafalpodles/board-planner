@@ -119,7 +119,9 @@ export async function runStep(entry: SnapshotEntry, ctx: StepContext): Promise<S
     try {
       const sha = await ctx.commit(`${ctx.task.taskKey}: ${entry.name.toLowerCase()}`);
       if (sha) ctx.state.commits.push(sha);
-      ctx.state.committed = true;
+      // Sticky, not overwritten: a later edit step that finds nothing to commit must not erase what
+      // an earlier one already did.
+      ctx.state.committed = ctx.state.committed || sha !== "";
     } catch (error) {
       return { kind: "error", message: String(error) };
     }

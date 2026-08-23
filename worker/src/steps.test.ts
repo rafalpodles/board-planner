@@ -168,6 +168,27 @@ describe("runStep — a model step", () => {
     expect(c.state.commits).toEqual([]);
   });
 
+  // A no-op edit step must not tell the push step there is something to deliver, and must not tell
+  // an exit after it that the worktree holds work worth keeping.
+  it("does not record committed when the step committed nothing", async () => {
+    const c = ctx({ commit: vi.fn(async () => "") });
+
+    await runStep(entry({ capability: "edit" }), c);
+
+    expect(c.state.committed).toBe(false);
+  });
+
+  // committed is sticky across steps: a later no-op edit step must not erase what an earlier one
+  // already committed, or an exit after it would destroy the only copy of that work.
+  it("keeps committed true when a later step commits nothing", async () => {
+    const c = ctx({ commit: vi.fn().mockResolvedValueOnce("sha1").mockResolvedValueOnce("") });
+
+    await runStep(entry({ capability: "edit" }), c);
+    await runStep(entry({ capability: "edit" }), c);
+
+    expect(c.state.committed).toBe(true);
+  });
+
   // The gate context takes one result and a composed agent produces several
   it("remembers the most recent result and summary for the gates that follow", async () => {
     const c = ctx();

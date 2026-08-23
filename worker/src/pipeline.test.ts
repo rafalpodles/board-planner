@@ -1086,8 +1086,12 @@ describe("runTask", () => {
   it("keeps the worktree when a later step blocks after an earlier one committed", async () => {
     let calls = 0;
     const runner = {
-      run: vi.fn<Runner["run"]>(async () => {
+      run: vi.fn<Runner["run"]>(async (_command, args) => {
         calls += 1;
+        // rev-parse HEAD is what commitAll hands back as the sha it made — a real commit always
+        // resolves it, so a mock that left it empty would prove nothing about state.committed
+        // beyond what an unconditional flag already faked.
+        if (args.includes("rev-parse")) return shell(IMPLEMENT_COMMIT_SHA);
         // 1: the commit's status, dirty so a commit happens; the rest clean
         return calls === 1 ? shell(" M src/a.ts\n") : shell("");
       }),
