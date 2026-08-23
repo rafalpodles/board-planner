@@ -732,3 +732,178 @@ export async function seed() {
 
   await mongoose.disconnect();
 }
+
+// BP-386. Search answers differently depending on who is asking, so the corpus is two boards
+// sharing one word: the member holds a grant on TP only, and SEARCH_WORD matches a task on each.
+// A single-board fixture cannot tell an enforced project filter from an absent one.
+export const OTHER_PROJECT_ID = id("e2e00000000000000000c301");
+export const OTHER_PROJECT_KEY = "SB";
+export const OTHER_PROJECT_NAME = "E2E Second Search Board";
+
+// Stored capitalised and queried in lower case, so a search that only matches literally cannot pass
+export const SEARCH_WORD = "zeppelin";
+
+export const TITLE_HIT_ID = id("e2e00000000000000000d301");
+export const TITLE_HIT_NUMBER = 10;
+export const TITLE_HIT_TITLE = "Zeppelin mooring mast";
+
+// The word appears nowhere in the title: this is the hit that only a description search finds
+export const BODY_HIT_ID = id("e2e00000000000000000d302");
+export const BODY_HIT_NUMBER = 11;
+export const BODY_HIT_TITLE = "Airship paperwork";
+export const BODY_HIT_DESCRIPTION = "Ordered a new Zeppelin cable for the gondola.";
+
+// Carried in a description and in no title anywhere, on both boards. The endpoint ORs title and
+// description together, so a project filter pushed into one arm of that $or would leak every
+// description on the instance while a title-matched leak test stayed green.
+export const BODY_ONLY_WORD = "gondola";
+
+export const OTHER_HIT_ID = id("e2e00000000000000000d303");
+export const OTHER_HIT_NUMBER = 1;
+export const OTHER_HIT_TITLE = "Zeppelin hangar on the other board";
+export const OTHER_HIT_DESCRIPTION = "Spare gondola parts live in this hangar.";
+export const OTHER_HIT_KEY = `${OTHER_PROJECT_KEY}-${OTHER_HIT_NUMBER}`;
+
+// A word no seeded task carries, for the no-results state
+export const ABSENT_WORD = "quokka";
+
+// Its priority key is deliberately absent, the way a task predating the field is stored. The
+// endpoint applies the default on the way out and the page renders a badge from it, so a corpus
+// where every task already carries one leaves both unexercised.
+export const LEGACY_HIT_ID = id("e2e00000000000000000d304");
+export const LEGACY_HIT_NUMBER = 12;
+export const LEGACY_HIT_WORD = "dirigible";
+export const LEGACY_HIT_TITLE = "Dirigible logbook from before priorities";
+export const LEGACY_HIT_KEY = `${PROJECT_KEY}-${LEGACY_HIT_NUMBER}`;
+
+// Regex metacharacters in a title people would actually type. Escaped, "[v2]" finds this one
+// task; unescaped it is a character class and matches every title holding a "v" or a "2".
+export const META_HIT_ID = id("e2e00000000000000000d305");
+export const META_HIT_NUMBER = 13;
+export const META_HIT_TITLE = "Rewrite the (old) mast [v2]";
+export const META_QUERY = "[v2]";
+// Escaped this matches nothing; unescaped it matches everything
+export const META_WILDCARD = ".*";
+
+/**
+ * Never fold this into seed(). What seed() lays down is a contract other specs count against, in
+ * two dimensions:
+ *
+ * - tasks — kanban-board-core.spec.ts counts cards against SEEDED_TASKS = 4 and asserts the number
+ *   the next created task is minted with, so four more tasks on TP and a taskCounter of 13 break it;
+ * - projects — a screen that lists every board the reader can reach (the OAuth consent screen is
+ *   the one that counts them) would silently gain a row for this second board.
+ *
+ * Both are elsewhere in the suite, and neither failure names this function.
+ */
+export async function seedSearchCorpus() {
+  const db = (await connect()).db!;
+  const now = new Date();
+
+  await db.collection("projects").insertOne({
+    _id: OTHER_PROJECT_ID,
+    name: OTHER_PROJECT_NAME,
+    key: OTHER_PROJECT_KEY,
+    description: "",
+    icon: "",
+    categories: CATEGORIES.map((c) => ({ ...c, _id: new mongoose.Types.ObjectId() })),
+    columns: COLUMNS.map((c) => ({ ...c, _id: new mongoose.Types.ObjectId() })),
+    taskTemplates: [],
+    customFields: [],
+    webhooks: [],
+    notificationChannels: [],
+    pm: {
+      enabled: false,
+      lockedByInstance: false,
+      model: "e2e/stub-model",
+      contextNotes: "",
+      dailyTurnCap: 50,
+      autonomy: {
+        dailyReview: false,
+        reviewHour: 9,
+        reviewIntervalHours: 24,
+        timezone: "Europe/Warsaw",
+        handleNeedsHumanReview: false,
+        lastReviewSlot: "",
+      },
+      links: [],
+      mcpServers: [],
+    },
+    worker: { enabled: false, policy: {}, policyOverrides: [] },
+    repositoryUrl: "",
+    githubRepo: "",
+    githubToken: "",
+    gitlabRepo: "",
+    gitlabHost: "https://gitlab.com",
+    gitlabToken: "",
+    codaHost: "https://coda.io",
+    codaDocId: "",
+    codaTableId: "",
+    codaToken: "",
+    taskCounter: OTHER_HIT_NUMBER,
+    sortOrder: 1,
+    createdBy: ADMIN_ID,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  // Distinct updatedAt, because the API sorts on it: the arrow-key test needs to know which hit
+  // the cursor starts on and which one it lands on. Inserted in the OPPOSITE order to the one the
+  // sort produces — a collection scan returns insertion order, so a corpus inserted newest-first
+  // lets the sort be deleted with every test still green.
+  const task = taskFactory(now);
+  await db.collection("tasks").insertMany([
+    task({
+      _id: BODY_HIT_ID,
+      taskNumber: BODY_HIT_NUMBER,
+      title: BODY_HIT_TITLE,
+      description: BODY_HIT_DESCRIPTION,
+      status: SPARE_COLUMN.id,
+      order: 11,
+      updatedAt: new Date(now.getTime() - 2_000),
+    }),
+    task({
+      _id: TITLE_HIT_ID,
+      taskNumber: TITLE_HIT_NUMBER,
+      title: TITLE_HIT_TITLE,
+      status: SPARE_COLUMN.id,
+      order: 10,
+      updatedAt: new Date(now.getTime() - 1_000),
+    }),
+    task({
+      _id: OTHER_HIT_ID,
+      project: OTHER_PROJECT_ID,
+      taskNumber: OTHER_HIT_NUMBER,
+      title: OTHER_HIT_TITLE,
+      description: OTHER_HIT_DESCRIPTION,
+      status: SPARE_COLUMN.id,
+      order: 0,
+      updatedAt: new Date(now.getTime() - 3_000),
+    }),
+    task({
+      _id: META_HIT_ID,
+      taskNumber: META_HIT_NUMBER,
+      title: META_HIT_TITLE,
+      status: SPARE_COLUMN.id,
+      order: 13,
+      updatedAt: new Date(now.getTime() - 4_000),
+    }),
+  ]);
+
+  // Inserted separately because the factory supplies a priority and this task is defined by not
+  // having one — deleting the key is the only way to store the shape the default exists for.
+  const legacy: Record<string, unknown> = task({
+    _id: LEGACY_HIT_ID,
+    taskNumber: LEGACY_HIT_NUMBER,
+    title: LEGACY_HIT_TITLE,
+    status: SPARE_COLUMN.id,
+    order: 12,
+    updatedAt: new Date(now.getTime() - 5_000),
+  });
+  delete legacy.priority;
+  await db.collection("tasks").insertOne(legacy);
+
+  await db.collection("projects").updateOne({ _id: PROJECT_ID }, { $max: { taskCounter: META_HIT_NUMBER } });
+
+  await mongoose.disconnect();
+}
