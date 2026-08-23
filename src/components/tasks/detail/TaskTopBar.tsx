@@ -82,16 +82,19 @@ export function TaskTopBar({
 
       <StatusPill columns={columns} status={status} onChange={onStatusChange} />
 
-      {/* Always laid out, only faded: revealing it by adding an element would reflow the
-          bar mid-scroll, which is the one thing a fixed header must never do */}
+      {/* Always laid out, only faded: revealing it by adding an element would reflow the bar
+          mid-scroll, which is the one thing a pinned header must never do. Below sm the key,
+          the status pill and the menu already fill the bar, so the title yields the row to
+          them and the key carries the context instead. */}
       <span
         data-testid="task-top-bar-title"
         aria-hidden={!showTitle}
-        className={`min-w-0 flex-1 truncate text-sm font-medium text-text transition-opacity
-          duration-150 ${showTitle ? "opacity-100" : "opacity-0"}`}
+        className={`hidden min-w-0 flex-1 truncate text-sm font-medium text-text
+          transition-opacity duration-150 sm:block ${showTitle ? "opacity-100" : "opacity-0"}`}
       >
         {title}
       </span>
+      <div className="flex-1 sm:hidden" />
 
       <button type="button" onClick={onToggleWatch} className={`hidden lg:block ${ghost}`}>
         {watching ? "Watching" : "Watch"}
