@@ -267,14 +267,9 @@ export default function UsersPage() {
               label="Email"
               type="email"
               autoComplete="off"
-              aria-describedby="newUserEmailHelp"
               value={newUserEmail}
               onChange={(e) => setNewUserEmail(e.target.value)}
             />
-            <p id="newUserEmailHelp" className="mt-1 text-sm text-text-muted">
-              Optional. Used for notifications, and to reset a forgotten password — without one,
-              the only way back in is an administrator setting a password.
-            </p>
           </div>
 
           {error && <p className="text-sm text-danger">{error}</p>}
@@ -336,16 +331,10 @@ export default function UsersPage() {
                 label="Email"
                 type="email"
                 autoComplete="off"
-                aria-describedby="editUserEmailHelp"
                 value={editEmail}
                 error={emailError}
                 onChange={(e) => setEditEmail(e.target.value)}
               />
-              <p id="editUserEmailHelp" className="mt-1 text-sm text-text-muted">
-                Used for notifications, and to reset a forgotten password. Changing it hands the
-                next reset to the new address, stops any link already sent to the old one, and is
-                recorded in the audit log.
-              </p>
             </div>
 
             <div className="border-t border-border pt-4">
