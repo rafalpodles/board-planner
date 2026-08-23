@@ -158,6 +158,7 @@ describe("createWorkspace", () => {
     const run = vi.fn(async (_command: string, args: string[], opts: RunOpts): Promise<CommandResult> => {
       if (args[0] === "ls-remote") {
         const cwd = opts.cwd!;
+        mkdirSync(join(cwd, ".git", "objects"), { recursive: true });
         mkdirSync(join(cwd, ".git", "refs"), { recursive: true });
         writeFileSync(join(cwd, ".git", "HEAD"), "ref: refs/heads/main\n");
         writeFileSync(

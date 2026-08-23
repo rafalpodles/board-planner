@@ -209,9 +209,16 @@ export function createDelivery(runner: Runner, baseBranch?: string, githubToken?
       // only ever sees the composed refspec, whose first character is the commit's, so an
       // option-shaped branch would slip past a guard that used to catch it. Refused on the name
       // itself rather than trusting where it happens to land inside the string.
-      if (branch.startsWith("-")) {
+      //
+      // The whole ref-name shape rather than the leading dash alone, because the refspec form gave
+      // the string a second way to be read: git splits a push refspec at its **last** colon, so a
+      // branch carrying one re-splits `<commit>:refs/heads/<branch>` and sends a different source
+      // to a different destination. Measured on git 2.50.1 — with a colon in the branch the src
+      // refspec git reported was neither the commit nor the branch. isGitRefName is the same check
+      // applyPolicy spends on baseBranch, and a branch here is always `<taskKey>/worker`.
+      if (!isGitRefName(branch)) {
         throw new Error(
-          `refusing git argument ${JSON.stringify(branch)}: git reads a leading dash as an option`
+          `refusing to push: ${JSON.stringify(branch)} is not a git ref name, and the push refspec is built from it`
         );
       }
       // a retried attempt rebuilds the branch off the base, so what the previous attempt pushed is

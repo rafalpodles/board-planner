@@ -1,12 +1,15 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { execFileSync } from "node:child_process";
+import { ChildProcess, execFileSync, spawn } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { AddressInfo } from "node:net";
+import { createServer as tcpServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { collectDiff } from "./diff.js";
 import { protectedPathsGate } from "./gates/protected-paths.js";
 import { createRunner } from "./exec.js";
 import { createWorkspace } from "./workspace.js";
+import { hardenedGitConfig } from "./delivery.js";
 import { WorkerConfig } from "./config.js";
 
 /**
@@ -264,6 +267,104 @@ describe("a run's own diff cannot be narrowed from inside the worktree", () => {
       workspaceFor(`--upload-pack=${program}`).create("BP-1", "worker")
     ).rejects.toThrow();
 
+    expect(existsSync(marker)).toBe(false);
+  });
+});
+
+/**
+ * The fetch that freshens the base runs in `config.repoPath`, whose config a previous run's agent
+ * can write — and a transport is not configuration git can be talked out of afterwards: an
+ * `[url "ext::<program> %S"] insteadOf = <the pinned URL>` hands the URL to that program. Measured
+ * on git 2.50.1 against this fixture: the plain fetch RAN the program, and the same fetch under
+ * `protocol.ext.allow=never` answered `transport 'ext' not allowed` and ran nothing.
+ *
+ * The describe above builds its workspace with `() => ({})`, which is not an environment
+ * production ever passes, so it could not have caught the loss of the hardening. This one uses
+ * what wiring.ts composes. It needs a `git://` remote to do it: hardenedGitConfig also refuses the
+ * `file` transport, so a local-path origin would fail at ls-remote and never reach the fetch this
+ * test is about.
+ */
+
+// Mirrors wiring.ts's remoteFetchEnv, minus the operator's token, which a daemon does not want.
+// That function is private to wiring.ts; hardenedGitConfig is the part of it under test.
+const productionRemoteEnv = (): NodeJS.ProcessEnv => ({ ...hardenedGitConfig() });
+
+const freePort = (): Promise<number> =>
+  new Promise((resolve) => {
+    const probe = tcpServer();
+    probe.listen(0, "127.0.0.1", () => {
+      const { port } = probe.address() as AddressInfo;
+      probe.close(() => resolve(port));
+    });
+  });
+
+describe("the base lookup runs with the environment production gives it", () => {
+  let dir: string;
+  let parent: string;
+  let remoteUrl: string;
+  let marker: string;
+  let daemon: ChildProcess;
+
+  beforeEach(async () => {
+    dir = mkdtempSync(join(tmpdir(), "bp382-fetch-env-"));
+    const origin = join(dir, "origin.git");
+    execFileSync("git", ["init", "--quiet", "--bare", "-b", "main", origin], { stdio: "pipe" });
+
+    const seed = join(dir, "seed");
+    execFileSync("git", ["init", "--quiet", "-b", "main", seed], { stdio: "pipe" });
+    git(seed, "config", "user.email", "worker@example.com");
+    git(seed, "config", "user.name", "worker");
+    writeFileSync(join(seed, "README.md"), "# t\n");
+    git(seed, "add", "-A");
+    git(seed, "commit", "--quiet", "-m", "initial");
+    git(seed, "push", "--quiet", origin, "HEAD:refs/heads/main");
+
+    const port = await freePort();
+    daemon = spawn(
+      "git",
+      [
+        "daemon",
+        "--export-all",
+        `--base-path=${dir}`,
+        `--port=${port}`,
+        "--listen=127.0.0.1",
+        dir,
+      ],
+      { stdio: "pipe" }
+    );
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    remoteUrl = `git://127.0.0.1:${port}/origin.git`;
+
+    parent = join(dir, "parent");
+    execFileSync("git", ["clone", "--quiet", remoteUrl, parent], { stdio: "pipe" });
+    git(parent, "config", "user.email", "worker@example.com");
+    git(parent, "config", "user.name", "worker");
+
+    marker = join(dir, "the-planted-program-ran");
+    const program = join(dir, "payload.sh");
+    writeFileSync(program, `#!/bin/sh\ntouch ${marker}\nexit 1\n`, { mode: 0o755 });
+    appendFileSync(
+      join(parent, ".git", "config"),
+      `[url "ext::${program} %S"]\n\tinsteadOf = ${remoteUrl}\n[protocol]\n\tallow = always\n`
+    );
+  });
+
+  afterEach(() => {
+    daemon.kill();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("does not execute a program the checkout wired into the fetch transport", async () => {
+    const workspace = createWorkspace(
+      { repoPath: parent, worktreeRoot: join(dir, "wt"), baseBranch: "main" } as WorkerConfig,
+      createRunner(),
+      productionRemoteEnv,
+      remoteUrl
+    );
+
+    // Named rather than "it rejects": the message proves ls-remote answered and the fetch is where
+    // this stopped, so the refusal is the transport's and not the run failing somewhere earlier.
+    await expect(workspace.create("BP-1", "worker")).rejects.toThrow(/transport 'ext' not allowed/);
     expect(existsSync(marker)).toBe(false);
   });
 });

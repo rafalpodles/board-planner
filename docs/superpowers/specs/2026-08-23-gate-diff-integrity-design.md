@@ -60,7 +60,16 @@ unreadable range — refuses the delivery rather than shipping a tree nothing ju
 
 `git push origin <commit>:refs/heads/<branch>` instead of `-- <branch>`. Measured: `--force-with-lease`
 with an explicit refspec works both when the branch is new on the remote and when it is being
-updated, so the existing flags are kept as they are.
+updated. One flag did not survive the change: `-u` was removed, because git declines to set an
+upstream for a refspec whose source is a raw object id and says nothing about it — exit 0, no
+message — so keeping it would have promised a tracking branch the operator never gets, in exactly
+the worktree a failed run leaves behind for them to look at.
+
+The branch is checked against `isGitRefName` before the refspec is built, rather than only for a
+leading dash: git splits a push refspec at its **last** colon, so a branch carrying one re-splits
+`<commit>:refs/heads/<branch>` into a different source and a different destination. Measured on git
+2.50.1 — the src refspec git reported was neither the commit nor the branch. `api.ts`'s task-key
+shape makes that unreachable today, which is why closing the class costs nothing.
 
 ### Fetching the base is the only path, and it is load-bearing
 
@@ -170,3 +179,25 @@ remote received                             : the payload
 The two attacks above become integration tests against real git repositories, in the style of
 `delivery.hooks.integration.test.ts` — a mocked runner could only show that the flags were spelled
 correctly. Each is checked for vacuity by reverting the fix and confirming it goes red.
+
+That sentence was written before it was true, and three guarantees were shipped with no test that
+could fail if they were deleted. Each now has one, and each was confirmed red with the fix reverted:
+
+- **`GIT_NO_REPLACE_OBJECTS`** — `provenance.integration.test.ts` plants a `git replace --graft`,
+  which drops the foreign commit out of `rev-list <base>..HEAD` while `HEAD` still reads back as the
+  run's own sha. The plain planted commit next to it is refused either way, so only this test can
+  tell. Red without the variable.
+- **The base lookup's hardened environment** — `gate-integrity.integration.test.ts` exercises what
+  `wiring.ts` composes (`hardenedGitConfig`) rather than the `() => ({})` its other fixture passes,
+  and plants an `ext::` transport for the pinned URL in the checkout's config. Red without the
+  hardening: measured, the planted program runs, holding `GH_TOKEN`, `GITHUB_TOKEN` and
+  `SSH_AUTH_SOCK`. The remote is `git://` because that hardening also refuses the `file` transport.
+- **`GIT_DIR` on the lookup directory** — `workspace.test.ts` plants a repository in the lookup's own
+  working directory and runs a real git there with the environment `remoteRun` composed. The
+  existing fixture plants one directory higher, where `GIT_CEILING_DIRECTORIES` alone already holds.
+  Red without `GIT_DIR`.
+
+`GIT_CEILING_DIRECTORIES` has no such test, and cannot: `GIT_DIR` switches repository discovery off
+outright, so while it is set the ceiling is redundant with it in every case measured here. It stays
+as the second line for a call that ever runs without an explicit `GIT_DIR`, and is documented as
+defence in depth rather than as something a test protects.

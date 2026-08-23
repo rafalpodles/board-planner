@@ -224,16 +224,22 @@ and `SIGINT` both finish the task in flight before the loop exits.
   | `command` | heartbeat, SSE, socket | a handler name | matched against a closed list |
   | `project`, `taskId`, `runId` | assignment, claim | path segments in a URL on this worker's own server | deliberately unchecked: whatever they contain, the request still goes to the server that sent them, and a server addressing itself is not a boundary |
   | `remote` | assignment | compared for equality against `repos.json` | never a path — the checkout is found by lookup, and the server never names a directory |
-  | `baseBranch` | project policy | `git diff <base>...HEAD`, `gh pr create --base` | a git ref name, refused where an admin sets it, again in `applyPolicy`, and again at both sinks |
+  | `baseBranch` | project policy | `git ls-remote -- <url> refs/heads/<baseBranch>`, `git fetch --no-tags -- <url> <baseBranch>`, `gh pr create --base` | a git ref name, refused where an admin sets it and again in `applyPolicy`; delivery re-checks it and drops `--base` rather than pass a value that is not one, and the two remote calls keep it behind `--`. It no longer reaches `git diff` at all: since BP-382 the gates diff against the resolved base **sha**, and that sink refuses anything that is not `[0-9a-f]{7,64}` |
   | `model`, `fallbackModel`, `reviewModel` | project policy, a step, a review gate's params | `claude --model` | a model name, at `modelOr` — the one place all three overrides meet |
   | limits and timeouts | policy, gate params | numbers | parsed as numbers; a value that is not one is the default, never zero |
-  | `taskKey` | the project's key and the task number | a directory under the worktree root, and a git branch | `^[A-Za-z0-9][A-Za-z0-9_-]*-\d+$`, and `pathFor` refuses a path that leaves the root |
+  | `taskKey` | the project's key and the task number | a directory under the worktree root, and a git branch | `^[A-Za-z0-9][A-Za-z0-9_-]*-\d+$`, `pathFor` refuses a path that leaves the root, and `push` refuses a branch that is not a git ref name before building `<commit>:refs/heads/<branch>` out of it — git splits a push refspec at its *last* colon |
   | `capability`, `gateKind` | agent snapshot | a tool list, a gate | closed maps this side, so a server cannot widen what a step may do |
   | `title`, `description`, `prompt`, `focus`, summaries | claim, agent snapshot | prompt text, the PR title and body | option *values*, never positionals, and scrubbed before they reach a pull request. Prompt injection is a different problem and nothing here claims to solve it |
 
-  Every git call also separates its options from its positionals with `--`, and `gitArgs` refuses an
-  argument after that separator which begins with a dash — so a future call site inherits the rule
-  instead of having to remember it.
+  Every git call also separates its options from its positionals with `--`, and most of them go
+  through `gitArgs`, which refuses an argument after that separator beginning with a dash — so a
+  call site inherits the rule instead of having to remember it. Two do not. Delivery's `push`
+  hardens through the environment rather than through `gitArgs` (so that the hardening also reaches
+  the git `gh` shells out to), and calls the same refusal, `refuseOptionShapedPositionals`, itself.
+  The base lookup's `git ls-remote` and `git fetch` compose their environment the same way and are
+  held by `--` alone: their positional is a remote URL, which is not a shape that refusal can
+  describe. `gate-integrity.integration.test.ts` runs a real git against a `--upload-pack=` URL to
+  show the separator is what holds there.
 
   **The menubar app is swept separately**, in [`menubar/README.md`](../menubar/README.md). It had
   the same two shapes — the server's `repositoryUrl` as a bare positional to `git clone`, and the
