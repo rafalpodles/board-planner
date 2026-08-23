@@ -97,6 +97,10 @@ export async function boardFeedSubscribers(projectId: string): Promise<string[]>
  *
  * Called without being awaited, like every other notification write, so nothing here may reject:
  * the subscriber lookup is a database read on a path that has already answered the request.
+ *
+ * `email` is a function rather than a value because assembling it costs a query of its own — the
+ * actor's name — and most boards have no subscribers at all. Passing the finished object would
+ * put that query on every task creation on the instance, including the ones nobody hears about.
  */
 export async function notifyBoardFeed(params: {
   taskId: string;
@@ -104,12 +108,22 @@ export async function notifyBoardFeed(params: {
   actorId: string;
   title: string;
   body?: string;
-  email?: NotificationEmail;
+  email?: () => Promise<NotificationEmail> | NotificationEmail;
 }): Promise<void> {
   try {
-    const recipientIds = await boardFeedSubscribers(params.projectId);
+    // Nobody hears about a task they created themselves. createNotifications refuses the actor
+    // anyway and stays the authority on it; dropping them here is only so a board whose one
+    // subscriber is the person creating the task does not assemble a mail for an empty audience.
+    const recipientIds = (await boardFeedSubscribers(params.projectId)).filter(
+      (id) => id !== params.actorId
+    );
     if (recipientIds.length === 0) return;
-    await createNotifications({ ...params, type: "task_created", recipientIds });
+    await createNotifications({
+      ...params,
+      type: "task_created",
+      recipientIds,
+      email: await params.email?.(),
+    });
   } catch (err) {
     console.error("Failed to notify the board feed:", err);
   }

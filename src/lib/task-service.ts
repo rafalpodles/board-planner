@@ -341,7 +341,6 @@ export async function createTask(
   dispatchNotifications(projectId, "task_created", eventPayload);
 
   const createdKey = `${project.key}-${task.taskNumber}`;
-  const createdColumn = getProjectColumns(project).find((c) => c.id === status);
   // The personal counterpart of the shared team channel two lines up. Same event, different
   // audience: that one announces the board to a room nobody subscribed to individually, this one
   // reaches the people who ticked the row for themselves.
@@ -351,17 +350,20 @@ export async function createTask(
     actorId,
     title: `New task ${createdKey} in ${project.name}`,
     body: task.title,
-    email: {
-      kicker: "New on the board",
-      taskKey: createdKey,
-      taskTitle: task.title,
-      taskPills: [
-        { label: createdColumn?.label ?? status, tone: pillToneForRole(createdColumn?.role) },
-        { label: capitalise(String(task.priority ?? DEFAULT_PRIORITY)), tone: "neutral" },
-      ],
-      taskMeta: [project.name, `created by ${await usernameOf(actorId)}`].filter(Boolean).join(" · "),
-      projectRef: project.key,
-      taskNumber: task.taskNumber,
+    email: async () => {
+      const column = getProjectColumns(project).find((c) => c.id === status);
+      return {
+        kicker: "New on the board",
+        taskKey: createdKey,
+        taskTitle: task.title,
+        taskPills: [
+          { label: column?.label ?? status, tone: pillToneForRole(column?.role) },
+          { label: capitalise(String(task.priority ?? DEFAULT_PRIORITY)), tone: "neutral" },
+        ],
+        taskMeta: [project.name, `created by ${await usernameOf(actorId)}`].filter(Boolean).join(" · "),
+        projectRef: project.key,
+        taskNumber: task.taskNumber,
+      };
     },
   });
 
