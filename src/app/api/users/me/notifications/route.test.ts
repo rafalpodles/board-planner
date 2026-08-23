@@ -48,6 +48,65 @@ beforeEach(() => {
   stored({ chat: { kind: "slack", webhookUrl: "enc:x" }, projects: [] });
 });
 
+/**
+ * The connection is resolved once from the stored state and the request. Every one of these was a
+ * defect: a request that changed nothing reported the connection gone and wiped chat everywhere, an
+ * address was storable under no service, and a `chat` that was not an object deleted the credential.
+ */
+describe("the truth table for the chat connection", () => {
+  const connected = { chat: { kind: "slack", webhookUrl: "enc:x" }, projects: [] };
+
+  it("re-stating the connection exactly as it stands changes nothing about it", async () => {
+    stored({ ...connected, projects: [{ project: "p1", matrix: grid(true) }] });
+
+    await put({ chat: { kind: "slack" } });
+
+    const set = written();
+    expect(set["notifications.chat.kind"]).toBe("slack");
+    expect(set).not.toHaveProperty("notifications.chat.webhookUrl");
+    // and above all: the columns it never asked to touch are still standing
+    expect(set).not.toHaveProperty("notifications.defaults");
+    expect(set).not.toHaveProperty("notifications.projects.0.matrix");
+  });
+
+  it("refuses an address with no service rather than storing one nothing reads", async () => {
+    stored({ chat: { kind: "", webhookUrl: "" }, projects: [] });
+
+    const res = await put({ chat: { webhookUrl: "https://hooks.example/x" } });
+
+    expect(res.status).toBe(400);
+    expect(findByIdAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it.each([["a string", "slack"], ["a number", 5], ["an array", []]])(
+    "refuses a chat that is %s instead of reading it as a disconnect",
+    async (_label, value) => {
+      stored(connected);
+
+      const res = await put({ chat: value });
+
+      expect(res.status).toBe(400);
+      expect(findByIdAndUpdate).not.toHaveBeenCalled();
+    }
+  );
+
+  it("keeps the stored address when the sentinel is sent for the same service", async () => {
+    stored(connected);
+
+    await put({ chat: { kind: "slack", webhookUrl: "__kept__" } });
+
+    expect(written()).not.toHaveProperty("notifications.chat.webhookUrl");
+  });
+
+  it("clears the address when the service is cleared", async () => {
+    stored(connected);
+
+    await put({ chat: { kind: "" } });
+
+    expect(written()["notifications.chat.webhookUrl"]).toBe("");
+  });
+});
+
 describe("who may point a webhook at themselves", () => {
   // The same argument PUT /api/users/me makes about the address: a webhook is a standing outbound
   // copy of everything this person is told, chosen once and never shown back, so a token able to
@@ -61,7 +120,7 @@ describe("who may point a webhook at themselves", () => {
     expect(findByIdAndUpdate).not.toHaveBeenCalled();
   });
 
-  // The grid itself is an ordinary preference — only the webhook is the standing channel
+  // The grid itself is an ordinary preference — only the standing channel is withheld
   it("lets a machine credential change the grid", async () => {
     caller = { _id: "u1", viaMachineCredential: true };
 
@@ -69,6 +128,33 @@ describe("who may point a webhook at themselves", () => {
 
     expect(res.status).toBe(200);
     expect(written()).toHaveProperty("notifications.defaults");
+  });
+
+  // The hole the first version of this gate left: it watched for `chat` in the body, so a token
+  // could leave the address alone and simply switch the column on against one the owner had
+  // already stored — the standing outbound copy, reached without mentioning chat at all.
+  it("refuses to switch chat on against an address the owner already stored", async () => {
+    caller = { _id: "u1", viaMachineCredential: true };
+    stored({
+      defaults: grid(false),
+      chat: { kind: "slack", webhookUrl: "enc:x" },
+      projects: [],
+    });
+
+    const res = await put({ defaults: grid(true) });
+
+    expect(res.status).toBe(403);
+    expect(findByIdAndUpdate).not.toHaveBeenCalled();
+  });
+
+  // Tearing the channel down is not the risk the rule is about
+  it("lets a machine credential disconnect", async () => {
+    caller = { _id: "u1", viaMachineCredential: true };
+
+    const res = await put({ chat: { kind: "" } });
+
+    expect(res.status).toBe(200);
+    expect(written()["notifications.chat.webhookUrl"]).toBe("");
   });
 });
 
@@ -143,7 +229,11 @@ describe("disconnecting", () => {
 
     await put({ chat: { kind: "" } });
 
-    const rows = written()["notifications.projects"] as { matrix: Record<string, { chat: boolean }> }[];
-    expect(rows[0].matrix.mentioned.chat).toBe(false);
+    // Row by row rather than the whole array: a wholesale $set regenerates every subdocument id
+    // and reverts a row another tab added between the read and the write
+    const set = written();
+    expect(set).not.toHaveProperty("notifications.projects");
+    const row = set["notifications.projects.0.matrix"] as Record<string, { chat: boolean }>;
+    expect(row.mentioned.chat).toBe(false);
   });
 });

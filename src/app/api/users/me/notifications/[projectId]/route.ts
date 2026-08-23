@@ -25,6 +25,15 @@ export const PUT = withProjectAccess(async (request, { user, params }) => {
     "notifications.chat.kind notifications.chat.webhookUrl"
   ).lean();
   const chat = stored?.notifications?.chat;
+  // Same rule as the global route, for the same reason: switching the column on against an address
+  // the owner already stored creates the standing outbound copy, and doing it one board at a time
+  // is the same act. Turning it off stays open.
+  if (wantsChat(matrix) && user.viaMachineCredential) {
+    return NextResponse.json(
+      { error: "This action requires an interactive session" },
+      { status: 403 }
+    );
+  }
   if (wantsChat(matrix) && !(chat?.kind && chat?.webhookUrl)) {
     // Storing this would tick a column that delivers nowhere, and nothing downstream would say so
     return NextResponse.json(

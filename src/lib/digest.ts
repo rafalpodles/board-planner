@@ -115,7 +115,10 @@ async function sendDigest(
   const origin = selfOrigin();
   const settingsUrl = origin ? `${origin}/settings/notifications` : undefined;
   const hidden = total - lines.length;
-  const count = `${total} update${total === 1 ? "" : "s"}`;
+  // Past the scan ceiling nobody counted the rest, so the headline says so too — putting "at least"
+  // only in the "and N more" line left the subject and heading printing an exact figure, and that
+  // line does not even render when everything that survived the filter fitted.
+  const count = `${atLeast ? "at least " : ""}${total} update${total === 1 ? "" : "s"}`;
 
   const { html, text } = renderEmail({
     preheader: `${count} on your tasks.`,

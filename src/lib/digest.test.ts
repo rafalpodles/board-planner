@@ -36,22 +36,28 @@ const WAITING = [
 
 const PROJECT = "507f1f77bcf86cd799439021";
 
-/** `shown` rows come back from the page; `total` is what the count says is really waiting. */
+/**
+ * Rows are stamped oldest-first, and the mock honours BOTH `sort` and `limit`. A mock that ignores
+ * either can only ever confirm the chain resolves: ignoring `limit` hid the scan ceiling, and
+ * ignoring `sort` let a test named for the ordering pass with the ordering reverted.
+ */
 function notifications(shown: number, total = shown) {
   const rows = Array.from({ length: total }, (_, i) => ({
     title: `BP-${i + 1} moved to In Review`,
     type: "status_changed" as const,
     task: { taskNumber: i + 1 },
     project: { _id: PROJECT, key: "BP" },
+    createdAt: new Date(Date.UTC(2026, 7, 17, 0, i)),
   }));
   notificationFind.mockReturnValue({
-    // Honours its argument: a mock that returns everything regardless can never show the scan
-    // ceiling working, and the largest fixture here sits far below it
-    sort: () => ({
-      limit: (n: number) => ({
-        populate: () => ({ populate: () => ({ lean: async () => rows.slice(0, n) }) }),
-      }),
-    }),
+    sort: (spec: Record<string, number>) => {
+      const ordered = spec.createdAt === -1 ? [...rows].reverse() : rows;
+      return {
+        limit: (n: number) => ({
+          populate: () => ({ populate: () => ({ lean: async () => ordered.slice(0, n) }) }),
+        }),
+      };
+    },
   });
   void shown;
 }
@@ -264,11 +270,14 @@ describe("past the scan ceiling", () => {
   });
 
   it("keeps the newest rows rather than the start of the day", async () => {
-    notifications(DIGEST_SCAN_LIMIT + 200);
+    const total = DIGEST_SCAN_LIMIT + 200;
+    notifications(total);
     await digestTick(morning);
 
-    // rows are built newest-first, so the first listed is the first row the query returned
-    expect(sent().text).toContain("BP-1:");
+    // Ascending, the ceiling kept the first 500 of the day and the reader never saw what had just
+    // happened. The newest row must be in the mail and the oldest must not.
+    expect(sent().text).toContain(`BP-${total}:`);
+    expect(sent().text).not.toContain("BP-1:");
   });
 
   it("says nothing about a floor when everything fitted", async () => {
