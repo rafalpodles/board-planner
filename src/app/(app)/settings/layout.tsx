@@ -18,6 +18,7 @@ const GROUPS: SettingsGroup[] = [
     sections: [
       { id: "profile", label: "Profile" },
       { id: "preferences", label: "Preferences" },
+      { id: "notifications", label: "Notifications" },
       { id: "security", label: "Security" },
       { id: "tokens", label: "API Tokens" },
     ],

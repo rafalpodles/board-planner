@@ -15,14 +15,17 @@ export const PATCH = withAuth(async (request, { user }) => {
 
   if (id) {
     // Mark single notification as read
+    // Same guard as the branch below: a row the bell never showed cannot have been read here, and
+    // marking it read would take it out of tomorrow's digest
     await Notification.findOneAndUpdate(
-      { _id: id, recipient: user._id },
+      { _id: id, recipient: user._id, inApp: { $ne: false } },
       { $set: { read: true } }
     );
   } else {
-    // Mark all as read
+    // Mark all as read — only what the bell showed. A row the grid hid was never seen here, and
+    // the digest lists what is unread: marking it read would drop it from tomorrow's mail.
     await Notification.updateMany(
-      { recipient: user._id, read: false },
+      { recipient: user._id, read: false, inApp: { $ne: false } },
       { $set: { read: true } }
     );
   }
