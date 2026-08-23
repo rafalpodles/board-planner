@@ -245,20 +245,27 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
     }
   }
 
-  // Read before the write: a renamed key must be remembered or every pull request opened
-  // under the old one silently stops matching its task, and after the update the document
-  // already carries the new key to compare against
-  if (typeof updates.key === "string") {
-    const before = await Project.findById(projectId, "key formerKeys").lean();
+  if (updates.key !== undefined) {
+    // Anything the caller offered as a key is judged, not only a string that happens to be
+    // non-empty. Gating on `typeof === "string"` let a number through to Mongoose's cast, and
+    // gating the validation on a truthy result let `""` through to overwrite the stored key —
+    // findByIdAndUpdate runs no validators, so the schema's `required` never saw it.
+    if (typeof updates.key !== "string") {
+      return NextResponse.json({ error: PROJECT_KEY_RULE }, { status: 400 });
+    }
+    // Normalised here rather than left to a schema setter this code never mentions: the value
+    // compared, the value validated and the value written have to be the same string.
     const nextKey = updates.key.trim().toUpperCase();
-    if (before && nextKey && nextKey !== before.key) {
-      // Checked only when the key actually changes. A project stored before BP-401 keeps working
-      // and stays editable in every other field; the rule applies to the value being chosen now,
-      // which is what makes this need no migration and no decision about existing rows.
-      if (!isValidProjectKey(nextKey)) {
-        return NextResponse.json({ error: PROJECT_KEY_RULE }, { status: 400 });
-      }
-      updates.key = nextKey;
+    if (!isValidProjectKey(nextKey)) {
+      return NextResponse.json({ error: PROJECT_KEY_RULE }, { status: 400 });
+    }
+    updates.key = nextKey;
+
+    const before = await Project.findById(projectId, "key formerKeys").lean();
+    // Read before the write: a renamed key must be remembered or every pull request opened under
+    // the old one silently stops matching its task, and after the update the document already
+    // carries the new key to compare against.
+    if (before && nextKey !== before.key) {
       updates.formerKeys = [...new Set([...(before.formerKeys || []), before.key])];
     }
   }

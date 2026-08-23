@@ -30,9 +30,12 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
-  // Stored lower-case, so validate what will be stored. A username reaches a notification title
-  // and from there a chat message, where its characters stop being decoration (BP-401).
-  if (!isValidUsername(String(username).toLowerCase())) {
+  // Validate what will be stored, trim included — the schema trims, so checking the untrimmed
+  // string refused names that would have been stored perfectly well. A username reaches a
+  // notification title and from there a chat message, where its characters stop being
+  // decoration (BP-401).
+  const storedUsername = String(username).trim().toLowerCase();
+  if (!isValidUsername(storedUsername)) {
     return NextResponse.json({ error: USERNAME_RULE }, { status: 400 });
   }
   // Optional: an instance with no mail server has no use for it, and demanding one would mean
@@ -87,7 +90,7 @@ export async function POST(request: Request) {
 
   try {
     const user = await User.create({
-      username: username.toLowerCase(),
+      username: storedUsername,
       password: hashedPassword,
       fullName,
       email,
