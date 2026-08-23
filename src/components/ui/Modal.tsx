@@ -89,7 +89,12 @@ export function Modal({
             </button>
           </div>
         )}
-        <div className={`min-h-0 overflow-y-auto scroll-ring-room ${bare ? "flex-1" : ""}`}>
+        {/* --task-bar-top cancels .scroll-ring-room's 0.3125rem, which a sticky header inside
+            would otherwise leave as a gap with the content scrolling through it */}
+        <div
+          className={`min-h-0 overflow-y-auto scroll-ring-room [--task-bar-top:-0.3125rem]
+            ${bare ? "flex-1" : ""}`}
+        >
           {children}
         </div>
       </div>

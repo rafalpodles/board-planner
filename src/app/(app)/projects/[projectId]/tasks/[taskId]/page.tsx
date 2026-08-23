@@ -22,7 +22,12 @@ export default function TaskDetailPage() {
   // bar at the page's very bottom, and the task's own top bar off the top. Clip rounds the
   // property rail's corner without claiming the sticky elements.
   return (
-    <div className="mx-auto w-full max-w-[1240px] shrink-0 overflow-clip rounded-2xl border border-border bg-bg-card">
+    <div
+      // -1.5rem cancels the scrolling <main>'s own py-6, which the task's sticky bar would
+      // otherwise leave as a gap with the task scrolling through it
+      className="mx-auto w-full max-w-[1240px] shrink-0 overflow-clip rounded-2xl border
+        border-border bg-bg-card [--task-bar-top:-1.5rem]"
+    >
       <TaskDetail
         projectId={projectId}
         taskId={taskId}
