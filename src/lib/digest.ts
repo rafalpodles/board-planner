@@ -7,6 +7,7 @@ import { dayKeyInTimezone, hourInTimezone, isValidTimezone } from "@/lib/time";
 import { taskPath } from "@/lib/urls";
 import { Notification } from "@/models/notification";
 import { User } from "@/models/user";
+import { accessibleProjectIds } from "@/lib/grants";
 
 const TICK_MS = Number(process.env.DIGEST_TICK_MS) || 5 * 60 * 1000;
 const DEFAULT_TIMEZONE = "Europe/Warsaw";
@@ -61,9 +62,16 @@ function lineFor(notification: any, origin: string | null): DigestLine {
  */
 export async function buildDigestFor(
   userId: string,
-  since: Date
+  since: Date,
+  projectIds: string[] | null
 ): Promise<{ lines: DigestLine[]; total: number }> {
-  const filter = { recipient: userId, read: false, createdAt: { $gte: since } };
+  // This is the one channel that reads the backlog straight out of the collection, so a row
+  // banked while the grant still stood would be mailed the morning after it was revoked (BP-328).
+  // Required rather than optional: a caller that forgets is the leak.
+  if (projectIds !== null && projectIds.length === 0) return { lines: [], total: 0 };
+
+  const filter: Record<string, unknown> = { recipient: userId, read: false, createdAt: { $gte: since } };
+  if (projectIds !== null) filter.project = { $in: projectIds };
   // Counted rather than inferred from the page: a digest that lists 25 and says "and 1 more" when
   // 40 are waiting is a silent cap wearing a number
   const [notifications, total] = await Promise.all([
@@ -130,7 +138,7 @@ export async function digestTick(now = new Date()): Promise<number> {
       email: { $ne: "" },
       lastDigestDay: { $ne: day },
     },
-    "email username"
+    "email username role"
   ).lean();
   if (waiting.length === 0) return 0;
 
@@ -147,7 +155,8 @@ export async function digestTick(now = new Date()): Promise<number> {
     if (!claimed) continue;
 
     try {
-      const { lines, total } = await buildDigestFor(String(user._id), since);
+      const projectIds = await accessibleProjectIds(user);
+      const { lines, total } = await buildDigestFor(String(user._id), since, projectIds);
       // A quiet day is not worth a mail saying so
       if (lines.length === 0) continue;
       await sendDigest(user, lines, total);
