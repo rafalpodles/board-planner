@@ -21,12 +21,21 @@ const allOff = (): NotificationMatrix =>
 describe("an account that predates the grid", () => {
   // The whole migration story: no document is rewritten, so the old booleans have to keep
   // producing exactly today's behaviour
-  it("keeps the bell on every row and follows emailNotifications for mail", () => {
+  it("keeps the bell on every row it used to ring, and follows emailNotifications for mail", () => {
     const m = defaultMatrix({ emailNotifications: true });
 
-    for (const type of NOTIFICATION_TYPES) {
+    for (const type of NOTIFICATION_TYPES.filter((t) => t !== "task_created")) {
       expect(m[type]).toEqual({ inApp: true, email: true, chat: false });
     }
+  });
+
+  // The row is new, so there is no behaviour to preserve — and the legacy default is the one
+  // place a new row could subscribe every existing account to a firehose by being added. Adding
+  // task_created to legacyMatrix alongside the rest is exactly the edit that would do it.
+  it("is not subscribed to every task on every board it can reach", () => {
+    const m = defaultMatrix({ emailNotifications: true });
+
+    expect(m.task_created).toEqual({ inApp: false, email: false, chat: false });
   });
 
   it("still rings the bell when mail was switched off", () => {

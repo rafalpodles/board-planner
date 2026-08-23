@@ -143,6 +143,7 @@ export function NotificationsSection({ project }: SectionProps) {
         disabled={!overriding}
         chatDisabled={!chatConfigured}
         chatDisabledHint="Connect Slack or Discord on your global Notifications page first."
+        scope="project"
       />
 
       {overriding && (
