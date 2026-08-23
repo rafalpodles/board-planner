@@ -127,6 +127,17 @@ describe("the consent screen's inline script", () => {
     expect(state()).toEqual({ ignored: "false", disabled: [false, false], limited: true });
   });
 
+  // Implicit submission — Enter — activates the FIRST submit button in tree order, so the
+  // destructive one must not be it. Putting Deny on the left is CSS's job.
+  it("makes Authorize the button Enter presses, with Deny still on the left", () => {
+    const form = document.getElementById("consent") as HTMLFormElement;
+    const buttons = Array.from(form.querySelectorAll("button"));
+
+    expect(form.querySelector<HTMLButtonElement>('button[type="submit"]')!.value).toBe("allow");
+    expect(buttons.map((b) => b.value)).toEqual(["allow", "deny"]);
+    expect(document.querySelector("style")!.textContent).toContain("flex-direction:row-reverse");
+  });
+
   it("keeps the disabled squares out of hit-testing so no spot in the list is dead", () => {
     const css = document.querySelector("style")!.textContent ?? "";
 

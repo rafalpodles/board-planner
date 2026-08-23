@@ -7,6 +7,8 @@ const oauthConsentFindOne = vi.fn();
 const oauthCodeCreate = vi.fn();
 const userFindById = vi.fn();
 const resolveSession = vi.fn();
+const createSession = vi.fn();
+const oauthConsentDeleteOne = vi.fn();
 // A permanently empty board list cannot exercise the line that narrows a grant, which is the
 // privilege-limiting line of the whole feature (BP-383 review).
 let projects: { _id: string; name: string; key: string }[] = [];
@@ -25,7 +27,7 @@ vi.mock("@/models/oauthConsent", () => ({
   OAuthConsent: {
     create: oauthConsentCreate,
     findOne: oauthConsentFindOne,
-    deleteOne: vi.fn(),
+    deleteOne: oauthConsentDeleteOne,
   },
 }));
 vi.mock("@/models/user", () => ({ User: { findById: userFindById } }));
@@ -35,6 +37,7 @@ vi.mock("@/lib/security-mail", () => ({ notifyCredentialCreated: vi.fn() }));
 vi.mock("@/lib/session", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/session")>()),
   resolveSession,
+  createSession,
 }));
 vi.mock("@/models/project", () => ({
   Project: {
@@ -75,13 +78,26 @@ function login(username: string, password = "secret") {
 
 async function attempt(username: string): Promise<string> {
   const res = await POST(login(username));
-  return res.text();
+  // A successful login is a 303 back to the authorize URL, so the body says nothing; the tests
+  // below read it for the refusals and use `signedIn` for the successes.
+  return res.status === 303 ? "Signed in" : res.text();
+}
+
+async function signedIn(username: string): Promise<Response> {
+  return POST(login(username));
 }
 
 beforeEach(async () => {
   vi.clearAllMocks();
   await resetRateLimits();
   projects = [];
+  oauthConsentDeleteOne.mockResolvedValue({ deletedCount: 1 });
+  createSession.mockResolvedValue({
+    token: "cps_fresh",
+    sessionId: "s1",
+    expiresAt: new Date(Date.now() + 60_000),
+    absoluteExpiresAt: new Date(Date.now() + 60_000),
+  });
   oauthClientFindOne.mockResolvedValue({
     clientId: "c1",
     clientName: "Some App",
@@ -111,7 +127,7 @@ describe("POST /oauth/authorize login phase", () => {
     for (let i = 0; i < ANONYMOUS_ACCOUNT_ATTEMPTS; i++) await attempt("locked");
 
     verifyCredentials.mockResolvedValue(USER);
-    expect(await attempt("bystander")).toContain("Grant access");
+    expect(await attempt("bystander")).toContain("Signed in");
   });
 
   it("locks out one username at a time", async () => {
@@ -120,29 +136,38 @@ describe("POST /oauth/authorize login phase", () => {
     verifyCredentials.mockResolvedValue(USER);
     const body = await attempt("bystander");
 
-    expect(body).toContain("Grant access");
+    expect(body).toContain("Signed in");
   });
 
   it("clears the counter on a successful login", async () => {
     for (let i = 0; i < 9; i++) await attempt("recovering");
 
     verifyCredentials.mockResolvedValue(USER);
-    expect(await attempt("recovering")).toContain("Grant access");
+    expect(await attempt("recovering")).toContain("Signed in");
 
     verifyCredentials.mockResolvedValue(null);
     for (let i = 0; i < 9; i++) await attempt("recovering");
 
     verifyCredentials.mockResolvedValue(USER);
-    expect(await attempt("recovering")).toContain("Grant access");
+    expect(await attempt("recovering")).toContain("Signed in");
   });
 
-  it("still issues a consent ticket for correct credentials", async () => {
+  // A consent page rendered straight from the password POST is a POST history entry, and with
+  // no-store keeping it out of the back/forward cache, Back re-fetches it — replaying the password
+  // from the browser's own buffer. Post/Redirect/Get leaves a GET entry with nothing to replay.
+  it("answers a correct password with a session and a redirect, not with the consent page", async () => {
     verifyCredentials.mockResolvedValue(USER);
 
-    const body = await attempt("happy");
+    const response = await signedIn("happy");
 
-    expect(body).toContain("Grant access");
-    expect(oauthConsentCreate).toHaveBeenCalledTimes(1);
+    expect(response.status).toBe(303);
+    expect(response.headers.get("set-cookie")).toContain("cps_fresh");
+    expect(response.headers.get("location")).toContain("/oauth/authorize?");
+    expect(response.headers.get("location")).toContain("code_challenge=challenge");
+    expect(response.headers.get("location")).not.toContain("prompt=login");
+    expect(createSession).toHaveBeenCalledTimes(1);
+    // The ticket is minted by the GET that follows, where it can be bound to that session
+    expect(oauthConsentCreate).not.toHaveBeenCalled();
   });
 
   // BP-355. This endpoint reaches the same throttle counters as /api/auth/login, under the same
@@ -251,6 +276,19 @@ describe("GET /oauth/authorize", () => {
     expect(oauthConsentCreate).toHaveBeenCalledTimes(1);
   });
 
+  // An account with no boards cannot fill a narrow grant, and the answer to that dead end is not to
+  // pre-tick the widest credential the account can issue (BP-383 review).
+  it("offers the wide grant to an account with no boards without pre-selecting it", async () => {
+    resolveSession.mockResolvedValue({ userId: "u1", sessionId: "s1" });
+    projects = [];
+
+    const body = await (await GET(authorizeGet({}, sessionCookie()))).text();
+
+    expect(body).toContain('value="limited" disabled');
+    expect(body).toContain('value="all"> All projects');
+    expect(body).not.toContain('value="all" checked');
+  });
+
   it("asks anyway when the request says prompt=login", async () => {
     resolveSession.mockResolvedValue({ userId: "u1", sessionId: "s1" });
 
@@ -297,25 +335,33 @@ describe("POST /oauth/authorize consent phase", () => {
       _id: "cs1",
       clientId: "c1",
       user: "u1",
-      session: null,
+      session: "s1",
       redirectUri: REDIRECT_URI,
       codeChallenge: "challenge",
       state: "s",
       scope: "mcp",
       expiresAt: new Date(Date.now() + 60_000),
     });
+    resolveSession.mockResolvedValue({ userId: "u1", sessionId: "s1" });
     userFindById.mockResolvedValue(USER);
     oauthCodeCreate.mockResolvedValue({});
   });
 
-  function consent(fields: Record<string, string>) {
+  function consent(fields: Record<string, string>, headers: Record<string, string> = {}) {
     return new Request("http://localhost/oauth/authorize", {
       method: "POST",
       headers: {
         "content-type": "application/x-www-form-urlencoded",
         "sec-fetch-site": "same-origin",
+        ...sessionCookie(),
+        ...headers,
       },
-      body: new URLSearchParams({ phase: "consent", ticket: "t1", ...fields }),
+      body: new URLSearchParams({
+        phase: "consent",
+        ticket: "t1",
+        decision: "allow",
+        ...fields,
+      }),
     });
   }
 
@@ -338,6 +384,7 @@ describe("POST /oauth/authorize consent phase", () => {
   });
 
   it("keeps the whole account off the grant unless it was asked for", async () => {
+    projects = [{ _id: "p1", name: "Orbit", key: "ORB" }];
     await POST(consent({ access: "all" }));
     expect(oauthCodeCreate.mock.calls[0][0].allowedProjects).toEqual([]);
 
@@ -351,6 +398,7 @@ describe("POST /oauth/authorize consent phase", () => {
   // Only "all" is the wide grant. Anything else — a typo, a hand-built form, a value from a future
   // version of this page — has to land on the narrow branch rather than skipping the filter.
   it("treats an access value it does not recognise as the narrow grant", async () => {
+    projects = [{ _id: "p1", name: "Orbit", key: "ORB" }];
     const body = await (await POST(consent({ access: "everything" }))).text();
 
     expect(body).toContain("Select at least one project");
@@ -362,7 +410,12 @@ describe("POST /oauth/authorize consent phase", () => {
       { _id: "p1", name: "Orbit", key: "ORB" },
       { _id: "p2", name: "Mobile", key: "MOB" },
     ];
-    const body = new URLSearchParams({ phase: "consent", ticket: "t1", access: "limited" });
+    const body = new URLSearchParams({
+      phase: "consent",
+      ticket: "t1",
+      decision: "allow",
+      access: "limited",
+    });
     body.append("projects", "p1");
     body.append("projects", "p-not-mine");
 
@@ -372,6 +425,7 @@ describe("POST /oauth/authorize consent phase", () => {
         headers: {
           "content-type": "application/x-www-form-urlencoded",
           "sec-fetch-site": "same-origin",
+          ...sessionCookie(),
         },
         body,
       })
@@ -404,7 +458,12 @@ describe("POST /oauth/authorize consent phase", () => {
           "sec-fetch-site": "same-origin",
           ...sessionCookie(),
         },
-        body: new URLSearchParams({ phase: "consent", ticket: "t1", access: "all" }),
+        body: new URLSearchParams({
+          phase: "consent",
+          ticket: "t1",
+          decision: "allow",
+          access: "all",
+        }),
       })
     );
 
@@ -434,7 +493,12 @@ describe("POST /oauth/authorize consent phase", () => {
           "sec-fetch-site": "same-origin",
           ...sessionCookie(),
         },
-        body: new URLSearchParams({ phase: "consent", ticket: "t1", access: "all" }),
+        body: new URLSearchParams({
+          phase: "consent",
+          ticket: "t1",
+          decision: "allow",
+          access: "all",
+        }),
       })
     );
 
@@ -452,12 +516,84 @@ describe("POST /oauth/authorize consent phase", () => {
     expect(oauthCodeCreate).not.toHaveBeenCalled();
   });
 
-  it("refuses an expired ticket", async () => {
+  it("refuses a session-bound ticket presented with no session at all", async () => {
+    const response = await POST(
+      new Request("http://localhost/oauth/authorize", {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          "sec-fetch-site": "same-origin",
+        },
+        body: new URLSearchParams({
+          phase: "consent",
+          ticket: "t1",
+          decision: "allow",
+          access: "all",
+        }),
+      })
+    );
+
+    expect(response.status).toBe(403);
+    expect(oauthCodeCreate).not.toHaveBeenCalled();
+  });
+
+  // A row written before the binding existed carries no session, and must be refused rather than
+  // waved through on a falsy check.
+  it("refuses a ticket that names no session", async () => {
     oauthConsentFindOne.mockResolvedValue({
       _id: "cs1",
       clientId: "c1",
       user: "u1",
       session: null,
+      redirectUri: REDIRECT_URI,
+      codeChallenge: "challenge",
+      state: "s",
+      scope: "mcp",
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+
+    const response = await POST(consent({ access: "all" }));
+
+    expect(response.status).toBe(403);
+    expect(oauthCodeCreate).not.toHaveBeenCalled();
+  });
+
+  // Two submissions of one ticket that interleave must not mint two redeemable codes
+  it("mints nothing when the ticket was already claimed", async () => {
+    oauthConsentDeleteOne.mockResolvedValue({ deletedCount: 0 });
+
+    const body = await (await POST(consent({ access: "all" }))).text();
+
+    expect(body).toContain("already completed");
+    expect(oauthCodeCreate).not.toHaveBeenCalled();
+  });
+
+  // Only an explicit allow grants, for the same reason only an explicit "all" widens
+  it("does not grant a submission that carries no decision", async () => {
+    const body = await (
+      await POST(
+        new Request("http://localhost/oauth/authorize", {
+          method: "POST",
+          headers: {
+            "content-type": "application/x-www-form-urlencoded",
+            "sec-fetch-site": "same-origin",
+            ...sessionCookie(),
+          },
+          body: new URLSearchParams({ phase: "consent", ticket: "t1", access: "all" }),
+        })
+      )
+    ).text();
+
+    expect(body).toContain("error=access_denied");
+    expect(oauthCodeCreate).not.toHaveBeenCalled();
+  });
+
+  it("refuses an expired ticket", async () => {
+    oauthConsentFindOne.mockResolvedValue({
+      _id: "cs1",
+      clientId: "c1",
+      user: "u1",
+      session: "s1",
       redirectUri: REDIRECT_URI,
       codeChallenge: "challenge",
       state: "s",
