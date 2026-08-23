@@ -14,6 +14,7 @@ const TYPE_LABELS: Record<string, string> = {
   status_changed: "Status changed",
   comment_added: "Comment",
   mentioned: "Mentioned",
+  task_created: "New task",
 };
 
 export default function NotificationsPage() {
