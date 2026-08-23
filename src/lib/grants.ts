@@ -131,3 +131,26 @@ export async function recipientsWithAccess(
     return decide(principalOf({ role }), relationOf.get(id) ?? null, "access", projectId);
   });
 }
+
+/**
+ * The same verdict decide() reaches, expressed as a query over stored users — for the one caller
+ * that has to *select* an audience rather than filter a list it was handed.
+ *
+ * Only the stored halves of the rule are expressible here, and only those exist on a user loaded
+ * from the database: tokenScoped and its siblings are attached at request time by applyTokenScope
+ * and can never be on somebody read out of the collection. Both grant relations pass, because
+ * `access` is what a member has too.
+ *
+ * It narrows, it does not decide. recipientsWithAccess still runs over whatever this returns, so
+ * a rule added to decide() is enforced whether or not it was mirrored here.
+ */
+export async function projectAudienceFilter(
+  projectId: string
+): Promise<Record<string, unknown>> {
+  await connectDB();
+  const grants = await Grant.find({ objectType: "project", object: projectId })
+    .select("subject")
+    .lean();
+
+  return { $or: [{ role: "admin" }, { _id: { $in: grants.map((g) => g.subject) } }] };
+}

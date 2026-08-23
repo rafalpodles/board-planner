@@ -28,12 +28,17 @@ export function blankMatrix(): NotificationMatrix {
 }
 
 /** What an account that has never opened the screen gets: the bell as it has always behaved, and
- *  mail exactly where the old boolean put it. Nothing is written to reach this state. */
+ *  mail exactly where the old boolean put it. Nothing is written to reach this state.
+ *
+ *  task_created is the exception, and deliberately so. The other four rows describe work the
+ *  reader is already attached to; this one is every task anybody opens on the board. Handing it
+ *  the legacy "bell on" would subscribe every existing account to a firehose it never asked for,
+ *  by the act of adding the row. So it starts off everywhere and only a tick turns it on. */
 function legacyMatrix(emailNotifications: boolean): NotificationMatrix {
   return Object.fromEntries(
     NOTIFICATION_TYPES.map((type) => [
       type,
-      { inApp: true, email: emailNotifications, chat: false },
+      type === "task_created" ? { ...OFF } : { inApp: true, email: emailNotifications, chat: false },
     ])
   ) as NotificationMatrix;
 }

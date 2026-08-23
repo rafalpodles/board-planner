@@ -459,6 +459,44 @@ export async function seedSprintEstimates() {
   await mongoose.disconnect();
 }
 
+// BP-402. A second person with a grant on the board and no notification preferences of any kind —
+// the control for the task_created row. Their silence is what tells a working opt-in apart from a
+// notification pipeline that is not wired up in this environment at all.
+export const BYSTANDER_USERNAME = "bystander";
+export const BYSTANDER_PASSWORD = "test1234";
+export const BYSTANDER_ID = id("e2e00000000000000000a005");
+
+export async function seedBoardFeedBystander() {
+  const db = (await connect()).db!;
+  const now = new Date();
+
+  await db.collection("users").insertOne({
+    _id: BYSTANDER_ID,
+    username: BYSTANDER_USERNAME,
+    password: bcrypt.hashSync(BYSTANDER_PASSWORD, 10),
+    fullName: "E2E Bystander",
+    email: "",
+    emailNotifications: false,
+    collapseEmptyColumns: false,
+    kind: "human",
+    role: "member",
+    createdAt: now,
+  });
+
+  await db.collection("grants").insertOne({
+    _id: id("e2e00000000000000000e002"),
+    subject: BYSTANDER_ID,
+    relation: "member",
+    objectType: "project",
+    object: PROJECT_ID,
+    createdBy: ADMIN_ID,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  await mongoose.disconnect();
+}
+
 export async function seedQuietTask(quietForMs: number) {
   const now = new Date();
   await addTask(
