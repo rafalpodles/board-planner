@@ -3,6 +3,7 @@ import { createBudget } from "./budget.js";
 import { commitAll } from "./commit.js";
 import { WorkerConfig } from "./config.js";
 import { GateFallbacks } from "./gates/from-entry.js";
+import { unexpectedHistory } from "./provenance.js";
 import { RunState, runStep } from "./steps.js";
 import { recordFor, RunRecord } from "./run-record.js";
 import { isResultEvent, StreamEvent } from "./stream.js";
@@ -15,7 +16,7 @@ import { Reporter } from "./reporter.js";
 import { SHUTDOWN_SIGNAL } from "./commands.js";
 import { scrub } from "./scrub.js";
 import { OutcomeKind, Phase, Telemetry } from "./telemetry.js";
-import { Workspace } from "./workspace.js";
+import { BaseUnavailableError, Workspace, Worktree } from "./workspace.js";
 import { ClaimedTask, DiffStats, ExecutionResult, Gate, GateResult, SnapshotEntry } from "./types.js";
 
 export interface PipelineDeps {
@@ -26,7 +27,7 @@ export interface PipelineDeps {
   createDelivery: (runner: Runner, baseBranch?: string) => Delivery;
   workspace: Workspace;
   executor: Executor;
-  collectDiff: (runner: Runner, worktreePath: string, baseBranch: string) => Promise<DiffStats>;
+  collectDiff: (runner: Runner, worktreePath: string, baseSha: string) => Promise<DiffStats>;
   // Injected like every other collaborator here, so a test can watch what a gate was given without
   // standing up the gate itself. wiring.ts supplies the real one.
   gateFor: (
@@ -40,6 +41,8 @@ export interface PipelineDeps {
   // into a failed one, and must not be lost to the redeploy a merge triggers either.
   recordRun: (projectId: string, record: RunRecord) => void;
   signal?: AbortSignal;
+  /** Worker-side stderr for faults an operator has to see without opening the board. */
+  logError?: (message: string) => void;
   /** Injected only so a test can move the run's clock; the run itself reads the wall clock. */
   now?: () => number;
   // Where the run says what it is doing. Left out entirely, the run behaves exactly as it did
@@ -131,13 +134,22 @@ async function unfinishedWork(runner: Runner, worktreePath: string): Promise<str
   return result.stdout.trim() || null;
 }
 
+// The gate-rejected branch is still delivered for a human to see, so it gets the same provenance
+// check the push step does — a gate can reject on a diff that is not what actually reaches the
+// remote otherwise (BP-382).
 async function pushFailure(
+  runner: Runner,
+  baseSha: string,
+  expected: string[],
   delivery: Delivery,
   worktreePath: string,
-  branch: string
+  branch: string,
+  commit: string
 ): Promise<string | null> {
+  const wrong = await unexpectedHistory(runner, worktreePath, baseSha, expected);
+  if (wrong) return `refusing to push: ${wrong}`;
   try {
-    await delivery.push(worktreePath, branch);
+    await delivery.push(worktreePath, branch, commit);
     return null;
   } catch (error) {
     return String(error);
@@ -176,7 +188,13 @@ async function releaseIfAborted(
   return true;
 }
 
-export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<void> {
+/**
+ * "machine-fault" means the run failed for a reason that has nothing to do with the task and will
+ * repeat on the next one — the loop stops claiming for a cycle rather than feeding it the queue.
+ */
+export type RunDisposition = void | "machine-fault";
+
+export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<RunDisposition> {
   const { config, workspace, executor, runner, telemetry } = deps;
   const now = deps.now ?? Date.now;
   const branch = `${task.taskKey.toLowerCase()}/${SLUG}`;
@@ -235,12 +253,32 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
   const reporter = deps.createReporter(deps.api, statusIds);
   const delivery = deps.createDelivery(runner, config.baseBranch);
 
-  let worktreePath: string;
+  let worktree: Worktree;
   try {
     enter("worktree");
-    worktreePath = await workspace.create(task.taskKey, SLUG);
+    worktree = await workspace.create(task.taskKey, SLUG);
   } catch (error) {
     await quietly(() => workspace.destroy(task.taskKey));
+    if (error instanceof BaseUnavailableError) {
+      deps.logError?.(`${task.taskKey}: ${String(error)}`);
+      // The remote answered and this repository has no such base branch — a default branch of
+      // master against a policy default of main, a branch renamed away, an empty repository.
+      // Nothing on this machine will change that, and no other project on it is affected, so the
+      // attempt is spent and the task escalates to whoever can fix the setting.
+      if (error.kind === "configuration") {
+        settle("requeued", "the base branch is not configured for this repository");
+        await reporter.requeued(task, String(error));
+        return;
+      }
+      // A transport failure is this machine's, not the task's, and it will fail identically for the
+      // next task and the one after it. Charging the attempt would walk the whole approved queue
+      // into the escalation column over one unreachable remote — and nothing ever resets
+      // execution.attempts, so a human moving those tasks back gets cards no worker will look at
+      // again. Released with the attempt refunded, and the loop is told to stop claiming.
+      settle("released", "the base branch could not be established");
+      await reporter.released(task, String(error));
+      return "machine-fault";
+    }
     settle("requeued", "could not create a worktree");
     await reporter.requeued(task, `could not create a worktree: ${String(error)}`);
     return;
@@ -249,6 +287,7 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
   let keepWorktree = false;
   const state: RunState = {
     committed: false,
+    commits: [],
     pushed: false,
     prUrl: "",
     merged: false,
@@ -280,16 +319,18 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
         // The only agent-authored material that reaches a sink, and it reaches one only through
         // summarise(), whose result type cannot hold a file body, a prompt or a diff
         const outcome = await runStep(entry, {
-          worktreePath,
+          worktreePath: worktree.path,
           branch,
           task,
           executor,
           delivery,
-          commit: (message) => commitAll(runner, worktreePath, message),
+          commit: (message) => commitAll(runner, worktree.path, message),
           state,
           timeoutMs: budget.forEntry(config.taskTimeoutMs),
           signal: deps.signal,
           onEvent,
+          baseSha: worktree.baseSha,
+          runner,
         });
         // Never once the merge has landed — see the same guard after the loop. gh pr merge runs
         // without a signal, so the stop is only ever observed after the change is on the base
@@ -305,7 +346,7 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
 
         if (outcome.kind === "usage_limit") {
           settle("released", "usage limit reached");
-          await reporter.released(task, `usage limit reached${unpushedWork(state, worktreePath)}`);
+          await reporter.released(task, `usage limit reached${unpushedWork(state, worktree.path)}`);
           return;
         }
         if (outcome.kind === "timeout") {
@@ -315,7 +356,7 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
         }
         if (outcome.kind === "blocked") {
           settle("blocked", outcome.reason);
-          await reporter.blocked(task, `${outcome.reason}${unpushedWork(state, worktreePath)}`);
+          await reporter.blocked(task, `${outcome.reason}${unpushedWork(state, worktree.path)}`);
           return;
         }
         if (outcome.kind === "error") {
@@ -327,7 +368,7 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
             settle("failed", outcome.message);
             await reporter.failed(
               task,
-              `${entry.name} failed${whatLanded(state, branch)}: ${outcome.message}\n\nThe worktree is kept at \`${worktreePath}\` on the worker host, with the branch checked out.`
+              `${entry.name} failed${whatLanded(state, branch)}: ${outcome.message}\n\nThe worktree is kept at \`${worktree.path}\` on the worker host, with the branch checked out.`
             );
           } else {
             settle("requeued", outcome.message);
@@ -348,14 +389,14 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
           settle("failed", `no gate named ${entry.key}`);
           await reporter.failed(
             task,
-            `this worker implements no gate of kind ${JSON.stringify(entry.gateKind ?? "")} (${entry.key}), so the agent could not be run as it was composed. Nothing was pushed; the worktree is kept at \`${worktreePath}\` on the worker host.`
+            `this worker implements no gate of kind ${JSON.stringify(entry.gateKind ?? "")} (${entry.key}), so the agent could not be run as it was composed. Nothing was pushed; the worktree is kept at \`${worktree.path}\` on the worker host.`
           );
           return;
         }
 
-        const diff = await deps.collectDiff(runner, worktreePath, config.baseBranch);
+        const diff = await deps.collectDiff(runner, worktree.path, worktree.baseSha);
         const verdict = await gate.run({
-          worktreePath,
+          worktreePath: worktree.path,
           task,
           result: state.lastResult,
           diff,
@@ -376,7 +417,15 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
           // Otherwise the worktree goes next, so the pushed branch is the only copy a human reaches
           const pushFailed = withholdsPush
             ? null
-            : await pushFailure(delivery, worktreePath, branch);
+            : await pushFailure(
+                runner,
+                worktree.baseSha,
+                state.commits,
+                delivery,
+                worktree.path,
+                branch,
+                state.commits[state.commits.length - 1] ?? ""
+              );
           if (withholdsPush || pushFailed) keepWorktree = true;
 
           settle("gateRejected", gate.name);
@@ -384,11 +433,14 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
             task,
             gate.name,
             withholdsPush
-              ? `${verdict.reason}\n\n**The branch was not pushed**, on purpose: what it carries is exactly what this gate refused. The work is in the worktree at \`${worktreePath}\` on the worker host.`
+              ? `${verdict.reason}\n\n**The branch was not pushed**, on purpose: what it carries is exactly what this gate refused. The work is in the worktree at \`${worktree.path}\` on the worker host.`
               : pushFailed
-                ? `${verdict.reason}\n\n**The branch was not pushed**: ${pushFailed}. \`${branch}\` is not on the remote — this work exists only in the worktree at \`${worktreePath}\` on the worker host.`
+                ? `${verdict.reason}\n\n**The branch was not pushed**: ${pushFailed}. \`${branch}\` is not on the remote — this work exists only in the worktree at \`${worktree.path}\` on the worker host.`
                 : verdict.reason,
-            withholdsPush ? "" : branch,
+            // Neither refusal reached the remote, so neither may promise a branch there — the
+            // pushFailed message already says as much, and repeating it as "pushed for inspection"
+            // is the exact contradiction a human reading the comment would have to untangle.
+            withholdsPush || pushFailed ? "" : branch,
             // Only where no branch carries it. A patch in a comment executes nothing, and this
             // gate's demand is that a human read the change — which otherwise means a shell on
             // whichever machine happened to claim the task.
@@ -404,13 +456,13 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
       // artifact the target repo does not gitignore would fail a run that did nothing wrong.
       if (entry.kind !== "step" || entry.capability !== "edit") continue;
 
-      const leftover = await unfinishedWork(runner, worktreePath);
+      const leftover = await unfinishedWork(runner, worktree.path);
       if (leftover) {
         keepWorktree = true;
         settle("failed", `${entry.name} left the worktree unclean`);
         await reporter.failed(
           task,
-          `${entry.name} left the worktree unclean, so anything after it would judge a tree that is not what was committed:\n\n${leftover}\n\nNothing was pushed; the worktree is kept at \`${worktreePath}\` on the worker host.`
+          `${entry.name} left the worktree unclean, so anything after it would judge a tree that is not what was committed:\n\n${leftover}\n\nNothing was pushed; the worktree is kept at \`${worktree.path}\` on the worker host.`
         );
         return;
       }

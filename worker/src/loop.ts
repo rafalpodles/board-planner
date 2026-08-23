@@ -8,7 +8,11 @@ export interface LoopDeps {
   // one project, and an admin can add or remove an assignment while this loop is already running
   assignments: () => string[];
   api: ApiClient;
-  execute: (task: ClaimedTask) => Promise<void>;
+  // "machine-fault" says the run failed for a reason that has nothing to do with the task and will
+  // repeat on the next one — an unreachable remote, say. Claiming onward would walk the whole
+  // approved queue through a failure none of those tasks caused, so the pass ends and the worker
+  // waits out its poll interval instead.
+  execute: (task: ClaimedTask) => Promise<void | "machine-fault">;
   // The signal is aborted by stop(); a sleep that ignores it delays every shutdown by up to a full
   // poll interval, which at the default 30 s outlasts launchd's 20 s exit timeout
   sleep: (ms: number, signal?: AbortSignal) => Promise<void>;
@@ -31,11 +35,23 @@ export function createLoop(deps: LoopDeps): Loop {
   const stopping = new AbortController();
   let running = true;
   let pausedState = false;
+  // The assignment whose run reported the last machine fault. assignments() is stable in order, so
+  // without this a project that faults on every pass keeps the head of the list and no assignment
+  // behind it is ever claimed for again — starvation for as long as the fault lasts, not for one
+  // pass. Starting the next pass after that project puts it last instead.
+  let faultedLast: string | null = null;
+
+  function passOrder(assignments: string[]): string[] {
+    const at = faultedLast === null ? -1 : assignments.indexOf(faultedLast);
+    if (at < 0) return assignments;
+    return [...assignments.slice(at + 1), ...assignments.slice(0, at + 1)];
+  }
 
   return {
     async start() {
       while (running) {
         let claimedAny = false;
+        let machineFault = false;
 
         if (deps.drain) {
           try {
@@ -46,15 +62,21 @@ export function createLoop(deps: LoopDeps): Loop {
         }
 
         if (!pausedState) {
-          // Every assignment gets its own attempt and its own try/catch, in order: a project that
-          // cannot be claimed from, or a task that blows up, must not cost a sibling project its
-          // turn in this pass — that would starve whichever assignment comes last in the list.
-          for (const projectId of deps.assignments()) {
+          // Every assignment gets its own attempt and its own try/catch: a project that cannot be
+          // claimed from, or a task that blows up, must not cost a sibling project its turn in this
+          // pass — that would starve whichever assignment comes last in the list. A machine fault
+          // is the one thing that does end the pass, because it is the machine and not the project
+          // that is broken; passOrder is what keeps that from starving a sibling across passes.
+          for (const projectId of passOrder(deps.assignments())) {
             if (!running) return;
             try {
               const task = await deps.api.claim(projectId, randomUUID());
               if (task) {
-                await deps.execute(task);
+                if ((await deps.execute(task)) === "machine-fault") {
+                  machineFault = true;
+                  faultedLast = projectId;
+                  break;
+                }
                 claimedAny = true;
               }
             } catch (error) {
@@ -66,7 +88,9 @@ export function createLoop(deps: LoopDeps): Loop {
         }
 
         if (!running) return;
-        if (claimedAny) continue;
+        // A machine fault outranks work done earlier in the pass: the fault is what the next claim
+        // would hit, so the pass ends here whatever else succeeded before it.
+        if (claimedAny && !machineFault) continue;
         await deps.sleep(deps.pollIntervalMs(), stopping.signal);
       }
     },

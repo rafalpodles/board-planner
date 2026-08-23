@@ -15,6 +15,23 @@ import { createWorker, WorkerDeps } from "./wiring.js";
 
 const STATE_DIR = "/tmp/cp-wiring-test-state";
 
+interface RemoteCall {
+  args: string[];
+  env: NodeJS.ProcessEnv;
+}
+
+// GIT_CONFIG_COUNT/KEY_n/VALUE_n is how hardenedGitConfig carries config in the environment. Read
+// back the way git reads it, so the assertion is about the configuration that reaches git and not
+// about the spelling of a variable name.
+function gitConfigPairs(env: NodeJS.ProcessEnv): [string, string][] {
+  const count = Number(env.GIT_CONFIG_COUNT ?? 0);
+  const pairs: [string, string][] = [];
+  for (let index = 0; index < count; index += 1) {
+    pairs.push([env[`GIT_CONFIG_KEY_${index}`] ?? "", env[`GIT_CONFIG_VALUE_${index}`] ?? ""]);
+  }
+  return pairs;
+}
+
 const ENV = {
   CP_API_URL: "https://app.example.com",
   CP_API_TOKEN: "cp_admin_token",
@@ -180,6 +197,7 @@ describe("the worker's lifecycle", () => {
 describe("telemetry, from the agent's stdout to the two sinks", () => {
   const REPO = "/repos/demo";
   const REMOTE = "git@github.com:owner/repo.git";
+  const BASE_SHA = "cafef00d";
   const SERVER_RUN_ID = "run-minted-by-the-server";
   const AGENT_SECRET = "cpw_deadbeef0123456789abcdef01234567";
 
@@ -263,11 +281,17 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
   function streamingRunner(
     claudeCalls: string[][] = [],
     onAgentStart?: (nth: number) => void,
-    everyCall: string[][] = []
+    everyCall: string[][] = [],
+    remoteCalls: RemoteCall[] = []
   ): Runner {
     return {
       async run(command, args, opts) {
         everyCall.push([command, ...args]);
+        // everyCall keeps argv only, and the base lookup's hardening lives entirely in its
+        // environment — workspace.ts composes those two calls' env instead of their args.
+        if (command === "git" && (args[0] === "ls-remote" || args[0] === "fetch")) {
+          remoteCalls.push({ args, env: opts.env ?? {} });
+        }
         if (command === "claude") {
           claudeCalls.push(args);
           onAgentStart?.(claudeCalls.length);
@@ -276,6 +300,17 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
             await new Promise((resolve) => setImmediate(resolve));
           }
           return { code: 0, stdout: AGENT_STREAM, stderr: "", timedOut: false };
+        }
+        // The base is resolved off the wire now, so ls-remote has to answer with the ref it was
+        // asked for; whether the *right* ref is picked out is gate-integrity's subject, on real git
+        if (args[0] === "ls-remote") {
+          return { code: 0, stdout: `${BASE_SHA}\t${args[args.length - 1]}\n`, stderr: "", timedOut: false };
+        }
+        // workspace.ts verifies the fetched sha with `rev-parse --verify <sha>^{commit}` before
+        // trusting it as the base; collectDiff then refuses anything that is not an object id, so
+        // this has to answer with one rather than the content-free "" every other call gets
+        if (args.includes("--verify")) {
+          return { code: 0, stdout: `${BASE_SHA}\n`, stderr: "", timedOut: false };
         }
         // bindRepository insists the path is its own toplevel; every other git call is content-free
         return {
@@ -320,6 +355,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     const posted: PhaseEvent[] = [];
     const claudeCalls: string[][] = [];
     const everyCall: string[][] = [];
+    const remoteCalls: RemoteCall[] = [];
     const bindingErrors: string[] = [];
     const queue = opts.tasks ?? [CLAIMED];
     const logError = vi.fn();
@@ -346,7 +382,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     let stop = (): void => {};
     const worker = createWorker({
       env: { ...ENV, CP_STATE_DIR: stateDir },
-      runner: streamingRunner(claudeCalls, opts.onAgentStart, everyCall),
+      runner: streamingRunner(claudeCalls, opts.onAgentStart, everyCall, remoteCalls),
       hostname: () => "host-1",
       // the loop only sleeps once it has nothing left to claim, which is one pass after the run
       sleep: async () => stop(),
@@ -425,6 +461,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       logError,
       claimed: claudeCalls.length > 0,
       everyCall,
+      remoteCalls,
       workspacePaths: claudeCalls.flat(),
       phases: posted.map((event) => event.phase),
       telemetry,
@@ -457,6 +494,9 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
           }
           sawAbort = opts.signal?.aborted === true;
           return { code: 143, stdout: "", stderr: "aborted", timedOut: false };
+        }
+        if (args[0] === "ls-remote") {
+          return { code: 0, stdout: `${REPO}\t${args[args.length - 1]}\n`, stderr: "", timedOut: false };
         }
         return { code: 0, stdout: args.includes("rev-parse") ? REPO : args.includes("get-url") ? REMOTE : "", stderr: "", timedOut: false };
       },
@@ -515,6 +555,116 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
 
     expect(sawAbort).toBe(true);
     expect(reachedSleep).toBe(false);
+  });
+
+  // runTask signals "machine-fault" when the base branch cannot be resolved — the loop is meant to
+  // read that off the seam this worker wires them together through and end the pass without
+  // sleeping. A wiring bug that drops the disposition (`execute` declared Promise<void> and the
+  // pipeline's return value never handed back) type-checks silently, because Promise<void> is
+  // assignable to Promise<void | "machine-fault">, and produces a hot loop instead: the worker
+  // claims again immediately with no poll interval on an unreachable remote.
+  // ls-remote is where resolveFreshBase reads the base branch off the wire; failing it is what
+  // turns workspace.create's failure into a transport-kind BaseUnavailableError, i.e. a machine
+  // fault. Every other call is the content-free catch-all the rest of this file's runners use to
+  // satisfy bindRepository/checkRepo.
+  const unreachableRemote: Runner = {
+    async run(_command, args) {
+      if (args[0] === "ls-remote") {
+        return { code: 1, stdout: "", stderr: "unreachable", timedOut: false };
+      }
+      return {
+        code: 0,
+        stdout: args.includes("rev-parse") ? REPO : args.includes("get-url") ? REMOTE : "",
+        stderr: "",
+        timedOut: false,
+      };
+    },
+  };
+
+  async function runAgainstUnreachableRemote(options: { passes: number; endlessQueue?: boolean }) {
+    const stateDir = mkdtempSync(join(tmpdir(), "cp-machine-fault-"));
+    writeFileSync(join(stateDir, "repos.json"), JSON.stringify({ repos: [REPO] }), { mode: 0o600 });
+
+    const counts = { claims: 0, sleeps: 0 };
+    let stop = (): void => {};
+
+    const api = {
+      claim: vi.fn(async () => {
+        counts.claims++;
+        return options.endlessQueue || counts.claims === 1 ? CLAIMED : null;
+      }),
+      setStatus: vi.fn().mockResolvedValue(undefined),
+      comment: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn().mockResolvedValue(undefined),
+      statusIds: vi.fn().mockResolvedValue({ approved: "todo", review: "in_review", done: "done" }),
+      columnIds: vi.fn().mockResolvedValue(["todo", "in_progress", "in_review", "done"]),
+      postEvent: async () => ({ applied: true }),
+      postRun: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const worker = createWorker({
+      env: { ...ENV, CP_STATE_DIR: stateDir },
+      runner: unreachableRemote,
+      hostname: () => "host-1",
+      sleep: async () => {
+        counts.sleeps++;
+        if (counts.sleeps >= options.passes) stop();
+      },
+      log: vi.fn(),
+      logError: vi.fn(),
+      uid: 501,
+      realpath: (path) => path,
+      stat: () => ({ uid: 501, mode: 0o40700 }),
+      readFile: (path: string) =>
+        path.endsWith("package-lock.json")
+          ? "{}"
+          : path.endsWith("package.json")
+            ? JSON.stringify({ scripts: { build: "tsc", test: "vitest" } })
+            : null,
+      fetchImpl: vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ assignments: [{ project: "p1", remote: REMOTE }] }),
+      }) as unknown as typeof fetch,
+      createStore: (path) => memoryStore(path.endsWith("worker.json") ? IDENTITY : ""),
+      createApi: () => api as unknown as ApiClient,
+      startHeartbeat: () => fakeHeartbeat(),
+      connectControl: () => ({ close: vi.fn() }),
+      startLocalServer: () => ({ ready: Promise.resolve(), close: vi.fn().mockResolvedValue(undefined) }),
+    });
+    stop = () => worker.shutdown();
+
+    try {
+      await worker.run();
+    } finally {
+      rmSync(stateDir, { recursive: true, force: true });
+    }
+    return { api, counts };
+  }
+
+  it("stops claiming for the cycle, without sleeping mid-pass, when the base branch cannot be resolved", async () => {
+    const { counts } = await runAgainstUnreachableRemote({ passes: 1 });
+
+    // A propagated machine-fault ends the pass on the very claim that hit it: one claim, then
+    // sleep. The bug this guards claims a fault as ordinary work instead, so the loop skips the
+    // sleep and claims again immediately — it would only give up once the queue itself ran dry,
+    // claiming a second time (and finding nothing left) before ever sleeping.
+    expect(counts.claims).toBe(1);
+    expect(counts.sleeps).toBe(1);
+  });
+
+  // Three passes over the same unresolvable base, which is what a laptop that lost its wifi does
+  // all night. The reporter dedupes a repeated release comment, but it is built per run, so the
+  // memory behind that dedupe has to be wired somewhere that outlives one — otherwise every poll
+  // writes the card another identical comment and fires another webhook, Slack message and
+  // notification with it: ~120 an hour at the default interval.
+  it("comments once about a base it cannot resolve, however many passes hit the same fault", async () => {
+    const { api, counts } = await runAgainstUnreachableRemote({ passes: 3, endlessQueue: true });
+
+    expect(counts.claims).toBe(3);
+    expect(api.release).toHaveBeenCalledTimes(3);
+    expect(api.comment).toHaveBeenCalledTimes(1);
+    expect(api.comment.mock.calls[0][2]).toMatch(/Returned to the queue: .*could not resolve base branch main/s);
   });
 
   // The whole run, as the board would see it: the three stage boundaries it got past, the three
@@ -592,6 +742,25 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       "--user",
       "rafalpodles",
     ]);
+  });
+
+  // The seam gate-integrity.integration.test.ts cannot reach: that test mirrors what this call site
+  // composes rather than calling it, so a createWorkspace(...) that stopped passing
+  // remoteFetchEnv(...) would leave it green. The lookup's `git fetch` runs inside the checkout,
+  // whose config a previous run's agent can write, and an `[url "ext::<program> %S"] insteadOf =
+  // <the pinned URL>` there runs that program holding GH_TOKEN, GITHUB_TOKEN and SSH_AUTH_SOCK —
+  // measured. protocol.ext.allow=never is what refuses it, and nothing but hardenedGitConfig() puts
+  // it in this environment; a plain { GH_TOKEN, GITHUB_TOKEN } would authenticate just as well and
+  // carry none of it.
+  it("gives the base lookup the hardened git environment, not merely a token", async () => {
+    const { remoteCalls } = await runOneTask();
+
+    // Both halves of the lookup, and named rather than counted: an empty list would satisfy every
+    // assertion below it.
+    expect(remoteCalls.map((call) => call.args[0])).toEqual(["ls-remote", "fetch"]);
+    for (const call of remoteCalls) {
+      expect(gitConfigPairs(call.env)).toContainEqual(["protocol.ext.allow", "never"]);
+    }
   });
 
   // Opt-in. Asking gh for "the token" with nothing pinned would hand back the active account's,

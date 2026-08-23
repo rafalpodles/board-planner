@@ -28,6 +28,15 @@ export interface Reporter {
 
 type Log = (message: string) => void;
 
+/**
+ * The release comment each task last received, keyed by task id.
+ *
+ * Held by the caller because a reporter is built per run: kept inside one, the dedupe below can
+ * never fire, and a fault that recurs on every poll writes the same comment — with its webhook,
+ * its Slack message and its notification — every thirty seconds for as long as it lasts.
+ */
+export type ReleaseMemory = Map<string, string>;
+
 // Every agent- and gate-authored string entering a board comment goes through here. Redacted
 // before the cut, not after: a secret straddling the cut would otherwise survive as a prefix too
 // short for its pattern to match. The dangerous shape is the length-exact one — a ghp_ PAT that
@@ -52,9 +61,9 @@ export function createReporter(
   api: ApiClient,
   statusIds: StatusIds,
   log: Log = (message) => console.error(message),
-  outbox?: Outbox
+  outbox?: Outbox,
+  lastRelease: ReleaseMemory = new Map()
 ): Reporter {
-  const lastRelease = new Map<string, string>();
 
   // Losing a report strands the task: the work is merged but the board still shows it active,
   // and claimNextTask only ever looks at the approved column

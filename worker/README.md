@@ -33,8 +33,8 @@ The gates run in cost order, cheapest first, and the first rejection stops the r
 | `test-run` | the test suite fails |
 | `review` | a second Claude, with a clean context, rejects the diff |
 
-A rejection pushes the branch, comments which gate said no, and routes the task to the review
-column. A usage limit returns the task to the queue with its attempt refunded — it is not the
+A rejection pushes the branch — unless the run committed nothing, or the provenance check refuses
+the history — comments which gate said no, and routes the task to the review column. A usage limit returns the task to the queue with its attempt refunded — it is not the
 task's failure. A crash or timeout also returns it to the queue, but spends the attempt, so a
 repeating failure runs out of retries and lands in front of a human instead of cycling forever.
 
@@ -224,16 +224,22 @@ and `SIGINT` both finish the task in flight before the loop exits.
   | `command` | heartbeat, SSE, socket | a handler name | matched against a closed list |
   | `project`, `taskId`, `runId` | assignment, claim | path segments in a URL on this worker's own server | deliberately unchecked: whatever they contain, the request still goes to the server that sent them, and a server addressing itself is not a boundary |
   | `remote` | assignment | compared for equality against `repos.json` | never a path — the checkout is found by lookup, and the server never names a directory |
-  | `baseBranch` | project policy | `git diff <base>...HEAD`, `gh pr create --base` | a git ref name, refused where an admin sets it, again in `applyPolicy`, and again at both sinks |
+  | `baseBranch` | project policy | `git ls-remote -- <url> refs/heads/<baseBranch>`, `git fetch --no-tags -- <url> <baseBranch>`, `gh pr create --base` | a git ref name, refused where an admin sets it and again in `applyPolicy`; delivery re-checks it and drops `--base` rather than pass a value that is not one, and the two remote calls keep it behind `--`. It no longer reaches `git diff` at all: since BP-382 the gates diff against the resolved base **sha**, and that sink refuses anything that is not `[0-9a-f]{7,64}` |
   | `model`, `fallbackModel`, `reviewModel` | project policy, a step, a review gate's params | `claude --model` | a model name, at `modelOr` — the one place all three overrides meet |
   | limits and timeouts | policy, gate params | numbers | parsed as numbers; a value that is not one is the default, never zero |
-  | `taskKey` | the project's key and the task number | a directory under the worktree root, and a git branch | `^[A-Za-z0-9][A-Za-z0-9_-]*-\d+$`, and `pathFor` refuses a path that leaves the root |
+  | `taskKey` | the project's key and the task number | a directory under the worktree root, and a git branch | `^[A-Za-z0-9][A-Za-z0-9_-]*-\d+$`, `pathFor` refuses a path that leaves the root, and `push` refuses a branch that is not a git ref name before building `<commit>:refs/heads/<branch>` out of it — git splits a push refspec at its *last* colon |
   | `capability`, `gateKind` | agent snapshot | a tool list, a gate | closed maps this side, so a server cannot widen what a step may do |
   | `title`, `description`, `prompt`, `focus`, summaries | claim, agent snapshot | prompt text, the PR title and body | option *values*, never positionals, and scrubbed before they reach a pull request. Prompt injection is a different problem and nothing here claims to solve it |
 
-  Every git call also separates its options from its positionals with `--`, and `gitArgs` refuses an
-  argument after that separator which begins with a dash — so a future call site inherits the rule
-  instead of having to remember it.
+  Every git call also separates its options from its positionals with `--`, and most of them go
+  through `gitArgs`, which refuses an argument after that separator beginning with a dash — so a
+  call site inherits the rule instead of having to remember it. Two do not. Delivery's `push`
+  hardens through the environment rather than through `gitArgs` (so that the hardening also reaches
+  the git `gh` shells out to), and calls the same refusal, `refuseOptionShapedPositionals`, itself.
+  The base lookup's `git ls-remote` and `git fetch` compose their environment the same way and are
+  held by `--` alone: their positional is a remote URL, which is not a shape that refusal can
+  describe. `gate-integrity.integration.test.ts` runs a real git against a `--upload-pack=` URL to
+  show the separator is what holds there.
 
   **The menubar app is swept separately**, in [`menubar/README.md`](../menubar/README.md). It had
   the same two shapes — the server's `repositoryUrl` as a bare positional to `git clone`, and the
@@ -243,8 +249,34 @@ and `SIGINT` both finish the task in flight before the loop exits.
 - **The executor runs with `bypassPermissions` inside the worktree**, so the worktree is checked
   for uncommitted files before the gates run — an agent cannot hide a change from the gates by
   never staging it.
-- **A rejected branch is always pushed** before its worktree is discarded; if the push fails the
-  worktree is kept and the comment says where it is.
+- **A rejected branch is pushed** before its worktree is discarded, unless the run made no commit
+  at all or its history fails the provenance check below; if the push fails the worktree is kept
+  and the comment says where it is. The push names the commit (`<sha>:refs/heads/<branch>`) rather
+  than the branch, so the shared ref store cannot decide what is sent — which also means the
+  pushed branch gets no upstream in that kept worktree, because git ignores `-u` for a refspec
+  whose source is an object id.
+- **The base a run is judged against comes off the wire, every run.** Before the agent starts, the
+  worker asks the project's own remote for `refs/heads/<baseBranch>`, keeps the sha that answer
+  carried, fetches the branch, and then requires that exact object to be present locally; the
+  worktree is created at it and every gate diffs against it. The local ref is never read, because
+  an agent of any earlier run on this checkout can write it and that writing outlives the run — a
+  poisoned base would put a payload *underneath* an innocent run's own change, where no gate looks.
+  The lookup runs in a fresh directory the worker creates, with `GIT_DIR` set so git skips
+  repository discovery entirely: a repository-local `url.<x>.insteadOf` rewrites even a URL given
+  literally on the command line, no `GIT_CONFIG_*` variable turns that off, and `$TMPDIR` is not a
+  safe place to run it either — the agent is given `TMPDIR` and what it writes there persists.
+- **A base that cannot be established releases the task and pauses the worker**, rather than
+  falling back to the local ref: a machine that cannot reach the remote is a machine that cannot
+  gate anything, and an agent able to break the fetch would otherwise choose which of the two paths
+  the next run takes. The failure is charged to the machine, not the task — the attempt is
+  refunded, the task returns to its column, and the worker stops claiming for the rest of the pass
+  and waits out its poll interval. It says why in three places: the board comment, the worker's own
+  stderr, and the run record. `bindingError` is **not** one of them; that field is about repository
+  binding and stays empty for this. A worker whose credentials do not cover the transport the
+  server recorded for a project will do this on every pass until that is fixed.
+- **The worktree is based on `<baseBranch>`, not on whatever the checkout has checked out.** A
+  clone parked on a feature branch used to hand the agent that branch while the gates diffed
+  against the base; runs on such a checkout now start from the base instead.
 - **Worktrees left by a killed worker are reaped**, the first time this process binds each
   project's repository, but only under that project's own derived worktree root (`<repo
   parent>/cp-worktrees/<workerId>`) — the repository checkout and any worktree of your own are

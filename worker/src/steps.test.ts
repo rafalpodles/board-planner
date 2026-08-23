@@ -13,6 +13,29 @@ const completed: ExecutionResult = {
 };
 
 function ctx(over: Partial<StepContext> = {}) {
+  const state = over.state ?? {
+    committed: false,
+    commits: [],
+    pushed: false,
+    prUrl: "",
+    merged: false,
+    summary: "",
+    lastResult: completed,
+  };
+  const baseSha = over.baseSha ?? "base";
+  // Mirrors an untampered checkout: the range holds exactly state.commits, and HEAD is their
+  // newest — or baseSha itself when this run made none. Individual tests override `runner` when
+  // they need to exercise the guard's refusal path.
+  const runner = {
+    run: vi.fn(async (_command: string, args: string[]) => {
+      if (args.includes("rev-list")) {
+        const stdout = state.commits.length ? [...state.commits].reverse().join("\n") + "\n" : "";
+        return { code: 0, stdout, stderr: "", timedOut: false };
+      }
+      const head = state.commits[state.commits.length - 1] ?? baseSha;
+      return { code: 0, stdout: `${head}\n`, stderr: "", timedOut: false };
+    }),
+  };
   const context = {
     worktreePath: "/wt",
     branch: "cp-1/x",
@@ -23,10 +46,12 @@ function ctx(over: Partial<StepContext> = {}) {
       openPr: vi.fn(async () => "https://x/pull/7"),
       merge: vi.fn(async () => {}),
     },
-    commit: vi.fn(async () => {}),
-    state: { committed: false, pushed: false, prUrl: "", merged: false, summary: "", lastResult: completed },
+    commit: vi.fn(async () => "sha1"),
+    state,
     timeoutMs: 1000,
     onEvent: vi.fn(),
+    baseSha,
+    runner,
     ...over,
   } as unknown as StepContext;
   return context as StepContext & {
@@ -127,6 +152,43 @@ describe("runStep — a model step", () => {
     expect(c.state.committed).toBe(true);
   });
 
+  it("records every sha it commits, oldest first", async () => {
+    const c = ctx({ commit: vi.fn(async () => "sha1") });
+
+    await runStep(entry({ capability: "edit" }), c);
+
+    expect(c.state.commits).toEqual(["sha1"]);
+  });
+
+  it("records nothing when the step committed nothing", async () => {
+    const c = ctx({ commit: vi.fn(async () => "") });
+
+    await runStep(entry({ capability: "edit" }), c);
+
+    expect(c.state.commits).toEqual([]);
+  });
+
+  // A no-op edit step must not tell the push step there is something to deliver, and must not tell
+  // an exit after it that the worktree holds work worth keeping.
+  it("does not record committed when the step committed nothing", async () => {
+    const c = ctx({ commit: vi.fn(async () => "") });
+
+    await runStep(entry({ capability: "edit" }), c);
+
+    expect(c.state.committed).toBe(false);
+  });
+
+  // committed is sticky across steps: a later no-op edit step must not erase what an earlier one
+  // already committed, or an exit after it would destroy the only copy of that work.
+  it("keeps committed true when a later step commits nothing", async () => {
+    const c = ctx({ commit: vi.fn().mockResolvedValueOnce("sha1").mockResolvedValueOnce("") });
+
+    await runStep(entry({ capability: "edit" }), c);
+    await runStep(entry({ capability: "edit" }), c);
+
+    expect(c.state.committed).toBe(true);
+  });
+
   // The gate context takes one result and a composed agent produces several
   it("remembers the most recent result and summary for the gates that follow", async () => {
     const c = ctx();
@@ -139,11 +201,32 @@ describe("runStep — a model step", () => {
 
 describe("runStep — a worker action", () => {
   it("pushes on the push step and calls no model", async () => {
+    const c = ctx({ state: { committed: true, commits: ["sha1"], pushed: false, prUrl: "", merged: false, summary: "", lastResult: completed } });
+    await runStep(entry({ key: "push", deterministic: true }), c);
+
+    expect(c.delivery.push).toHaveBeenCalledWith("/wt", "cp-1/x", "sha1");
+    expect(c.executor.execute).not.toHaveBeenCalled();
+  });
+
+  it("refuses nothing itself when no commit was recorded, leaving delivery to say so", async () => {
     const c = ctx();
     await runStep(entry({ key: "push", deterministic: true }), c);
 
-    expect(c.delivery.push).toHaveBeenCalledWith("/wt", "cp-1/x");
-    expect(c.executor.execute).not.toHaveBeenCalled();
+    expect(c.delivery.push).toHaveBeenCalledWith("/wt", "cp-1/x", "");
+  });
+
+  // RunState.commits is documented "oldest first", and the push step reads its *last* element —
+  // so that ordering is load-bearing, not incidental
+  it("pushes the newest of several commits, not the first", async () => {
+    const c = ctx({ commit: vi.fn().mockResolvedValueOnce("sha1").mockResolvedValueOnce("sha2") });
+
+    await runStep(entry({ capability: "edit" }), c);
+    await runStep(entry({ capability: "edit" }), c);
+    expect(c.state.commits).toEqual(["sha1", "sha2"]);
+
+    await runStep(entry({ key: "push", deterministic: true }), c);
+
+    expect(c.delivery.push).toHaveBeenCalledWith("/wt", "cp-1/x", "sha2");
   });
 
   it("remembers the pull request url, and that a merge happened", async () => {
@@ -168,5 +251,27 @@ describe("runStep — a worker action", () => {
     const outcome = await runStep(entry({ key: "deploy", deterministic: true }), ctx());
 
     expect(outcome).toEqual({ kind: "error", message: expect.stringContaining("deploy") });
+  });
+
+  it("refuses to push a history it did not write", async () => {
+    const c = ctx({
+      state: { committed: true, commits: ["sha1"], pushed: false, prUrl: "", merged: false, summary: "", lastResult: completed },
+      runner: {
+        run: vi.fn(async (_command: string, args: string[]) =>
+          args.includes("rev-list")
+            ? { code: 0, stdout: "shaX\nsha1\n", stderr: "", timedOut: false }
+            : { code: 0, stdout: "shaX\n", stderr: "", timedOut: false }
+        ),
+      } as never,
+    });
+
+    const outcome = await runStep(entry({ key: "push", deterministic: true }), c);
+
+    expect(outcome).toEqual({
+      kind: "error",
+      message: expect.stringContaining("refusing to push"),
+    });
+    expect(c.delivery.push).not.toHaveBeenCalled();
+    expect(c.state.pushed).toBe(false);
   });
 });
