@@ -337,6 +337,42 @@ describe("dispatching it", () => {
     expect(createNotifications).not.toHaveBeenCalled();
   });
 
+  // Assembling the mail costs a query for the actor's name. Every task created anywhere on the
+  // instance would pay it if it were built by the caller — including the great majority nobody
+  // has subscribed to.
+  it("does not assemble the mail for a board nobody subscribed to", async () => {
+    const email = vi.fn().mockResolvedValue({ kicker: "New on the board", taskKey: "BP-7", taskTitle: "x" });
+    stored = [member(1)];
+    granted = [id(1)];
+
+    await notifyBoardFeed({ ...params, email });
+
+    expect(email).not.toHaveBeenCalled();
+  });
+
+  it("says nothing to somebody about a task they created themselves", async () => {
+    const email = vi.fn().mockResolvedValue({ kicker: "x", taskKey: "BP-7", taskTitle: "x" });
+    stored = [member(1, { defaults: { task_created: row({ inApp: true }) } })];
+    granted = [id(1)];
+
+    await notifyBoardFeed({ ...params, actorId: id(1), email });
+
+    expect(createNotifications).not.toHaveBeenCalled();
+    expect(email).not.toHaveBeenCalled();
+  });
+
+  it("assembles it once, and hands it on, when somebody did", async () => {
+    const built = { kicker: "New on the board", taskKey: "BP-7", taskTitle: "Bound the fan-out" };
+    const email = vi.fn().mockResolvedValue(built);
+    stored = [member(1, { defaults: { task_created: row({ email: true }) } })];
+    granted = [id(1)];
+
+    await notifyBoardFeed({ ...params, email });
+
+    expect(email).toHaveBeenCalledTimes(1);
+    expect(createNotifications).toHaveBeenCalledWith(expect.objectContaining({ email: built }));
+  });
+
   // Nothing awaits this: task creation has already answered the request. A rejection escaping
   // here is an unhandled rejection, which ends the process rather than losing one notification.
   it("does not reject when the subscriber lookup fails", async () => {
