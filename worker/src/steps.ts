@@ -1,5 +1,7 @@
 import { Delivery } from "./delivery.js";
 import { Executor } from "./executor.js";
+import { Runner } from "./exec.js";
+import { unexpectedHistory } from "./provenance.js";
 import { StreamEvent } from "./stream.js";
 import { ClaimedTask, ExecutionResult, SnapshotEntry } from "./types.js";
 
@@ -13,6 +15,8 @@ export type StepOutcome =
 export interface RunState {
   /** Whether any step has committed yet — an exit after one must not destroy the worktree. */
   committed: boolean;
+  /** Every sha this run created, oldest first. The only thing that commits here is commitAll. */
+  commits: string[];
   /** What has already reached the remote, so an interrupted run can say where the work is. */
   pushed: boolean;
   prUrl: string;
@@ -28,11 +32,13 @@ export interface StepContext {
   task: ClaimedTask;
   executor: Executor;
   delivery: Delivery;
-  commit: (message: string) => Promise<void>;
+  commit: (message: string) => Promise<string>;
   state: RunState;
   timeoutMs: number;
   signal?: AbortSignal;
   onEvent?: (event: StreamEvent) => void;
+  baseSha: string;
+  runner: Runner;
 }
 
 // A push or a merge that throws must not reach the pipeline's outer catch: that requeues and
@@ -47,10 +53,17 @@ async function runWorkerAction(entry: SnapshotEntry, ctx: StepContext): Promise<
 
 async function deliver(entry: SnapshotEntry, ctx: StepContext): Promise<StepOutcome> {
   switch (entry.key) {
-    case "push":
-      await ctx.delivery.push(ctx.worktreePath, ctx.branch);
+    case "push": {
+      const wrong = await unexpectedHistory(ctx.runner, ctx.worktreePath, ctx.baseSha, ctx.state.commits);
+      if (wrong) return { kind: "error", message: `refusing to push: ${wrong}` };
+      await ctx.delivery.push(
+        ctx.worktreePath,
+        ctx.branch,
+        ctx.state.commits[ctx.state.commits.length - 1] ?? ""
+      );
       ctx.state.pushed = true;
       return { kind: "ok" };
+    }
 
     case "pull-request":
       ctx.state.prUrl = await ctx.delivery.openPr(ctx.worktreePath, ctx.task, ctx.state.summary);
@@ -104,8 +117,11 @@ export async function runStep(entry: SnapshotEntry, ctx: StepContext): Promise<S
   // only copy of the work.
   if (entry.capability === "edit") {
     try {
-      await ctx.commit(`${ctx.task.taskKey}: ${entry.name.toLowerCase()}`);
-      ctx.state.committed = true;
+      const sha = await ctx.commit(`${ctx.task.taskKey}: ${entry.name.toLowerCase()}`);
+      if (sha) ctx.state.commits.push(sha);
+      // Sticky, not overwritten: a later edit step that finds nothing to commit must not erase what
+      // an earlier one already did.
+      ctx.state.committed = ctx.state.committed || sha !== "";
     } catch (error) {
       return { kind: "error", message: String(error) };
     }

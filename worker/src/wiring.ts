@@ -30,7 +30,7 @@ import {
   WorkerConfig,
 } from "./config.js";
 import { connectControl, ControlDeps } from "./control.js";
-import { createDelivery } from "./delivery.js";
+import { createDelivery, hardenedGitConfig } from "./delivery.js";
 import { collectDiff } from "./diff.js";
 import { pinnedAccount, resolveGhToken } from "./github-account.js";
 import { gateFromEntry } from "./gates/from-entry.js";
@@ -40,7 +40,7 @@ import { createExecutor } from "./executor.js";
 import { LocalServer, LocalServerDeps, startLocalServer } from "./local-server.js";
 import { createLoop } from "./loop.js";
 import { createOutbox, Store } from "./outbox.js";
-import { PipelineDeps, runTask } from "./pipeline.js";
+import { PipelineDeps, RunDisposition, runTask } from "./pipeline.js";
 import {
   checkRepo,
   pathWithTools,
@@ -49,7 +49,7 @@ import {
   PreflightReport,
   runPreflight,
 } from "./preflight.js";
-import { createReporter } from "./reporter.js";
+import { createReporter, ReleaseMemory } from "./reporter.js";
 import { abortableSleep } from "./sleep.js";
 import { HeartbeatDeps, loadIdentity, PROTOCOL_VERSION, startHeartbeat } from "./registration.js";
 import { bindRepository, createAllowlistReader, repoInventory } from "./repos.js";
@@ -103,6 +103,16 @@ export interface WorkerDeps {
 export interface WorkerRuntime {
   run(): Promise<void>;
   shutdown(): void;
+}
+
+// The workspace freshens its base with the same pinned credential delivery pushes with, composed
+// here rather than in workspace.ts: that module resolves task keys into filesystem paths and must
+// not also learn what an operator's GitHub identity is.
+function remoteFetchEnv(githubToken: string): () => NodeJS.ProcessEnv {
+  return () => ({
+    ...hardenedGitConfig(),
+    ...(githubToken ? { GH_TOKEN: githubToken, GITHUB_TOKEN: githubToken } : {}),
+  });
 }
 
 function fileStore(path: string): Store {
@@ -160,6 +170,10 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
 
   const identityStore = deps.createStore(join(bootstrap.stateDir, "worker.json"));
   const outbox = createOutbox(deps.createStore(join(bootstrap.stateDir, "outbox.jsonl")));
+  // Outlives the run, unlike the reporter it is handed to — see ReleaseMemory. Same lesson as the
+  // once-per-binding log below: a machine parked next to a repository it cannot resolve a base in
+  // would otherwise write the same board comment, and fire the same notification, every poll.
+  const releaseComments: ReleaseMemory = new Map();
   const readAllowlist = createAllowlistReader(bootstrap.stateDir);
 
   // Everything below is worker-wide policy and the assignment list, both server-controlled and
@@ -178,7 +192,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   // Why the inventory could not be read, surfaced on the heartbeat so a broken repos.json shows up
   // in the console instead of looking like a machine that simply has nothing.
   let inventoryError = "";
-  let bound = new Map<string, { path: string; worktreeRoot: string; config: EffectiveConfig }>();
+  let bound = new Map<string, { path: string; worktreeRoot: string; config: EffectiveConfig; remote: string }>();
   const reapedProjects = new Set<string>();
 
   // What this machine can actually do, established once at startup. Null until then, and reported
@@ -268,7 +282,10 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   // absent from bound, so the loop never attempts to claim from it.
   async function rebind(): Promise<void> {
     const identity = loadIdentity(identityStore);
-    const nextBound = new Map<string, { path: string; worktreeRoot: string; config: EffectiveConfig }>();
+    const nextBound = new Map<
+      string,
+      { path: string; worktreeRoot: string; config: EffectiveConfig; remote: string }
+    >();
     const errors: string[] = [];
 
     if (identity) {
@@ -298,6 +315,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
             path: result.path,
             worktreeRoot: result.worktreeRoot,
             config: applyPolicy(policy, assignment.policy),
+            remote: assignment.remote,
           });
         } else {
           errors.push(`${assignment.project}: ${result.reason}`);
@@ -332,6 +350,8 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       reapedProjects.add(projectId);
       const taskConfig = configFor(projectId);
       if (!taskConfig) continue;
+      // reapOrphans only lists and destroys — it never calls create() — so the fetch parameters
+      // stay absent here, same as Ruling 2 intends for any caller that has no use for them.
       const reaped = await reapOrphans(
         createWorkspace(taskConfig, deps.runner),
         taskConfig.worktreeRoot
@@ -457,32 +477,37 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     return token;
   }
 
-  async function execute(task: ClaimedTask): Promise<void> {
+  async function execute(task: ClaimedTask): Promise<RunDisposition> {
     const taskConfig = configFor(task.projectId);
     if (!taskConfig) {
       // The assignment was reassigned or lost its binding between claim and here — release
-      // rather than strand a task this worker can no longer act on
+      // rather than strand a task this worker can no longer act on. Not a machine fault: the next
+      // task's project may still be bound fine, so the loop should keep claiming.
       await api.release(task.projectId, task.taskId).catch(() => {});
       return;
     }
 
     const githubToken = await githubIdentityToken();
+    // The same value rebind() matched this project's checkout against — the server's own record
+    // of the project's repository, never re-read from repoPath/.git at execution time.
+    const remoteUrl = bound.get(task.projectId)?.remote;
 
     currentRun = { taskId: task.taskId, runId: task.runId };
     try {
-      await runs.under((signal) => {
+      return await runs.under((signal) => {
         const pipeline: PipelineDeps = {
           config: taskConfig,
           api,
           columnIds: (projectId) => api.columnIds(projectId),
           createReporter: (client, statusIds) =>
-            createReporter(client, statusIds, (message) => deps.logError(message), outbox),
+            createReporter(client, statusIds, (message) => deps.logError(message), outbox, releaseComments),
           createDelivery: (runner, baseBranch) => createDelivery(runner, baseBranch, githubToken),
-          workspace: createWorkspace(taskConfig, deps.runner),
+          workspace: createWorkspace(taskConfig, deps.runner, remoteFetchEnv(githubToken), remoteUrl),
           executor: createExecutor(taskConfig, deps.runner),
           collectDiff,
           gateFor: gateFromEntry,
           recordRun: (project, record) => outbox.add({ kind: "run", projectId: project, record }),
+          logError: deps.logError,
           runner: deps.runner,
           signal,
           telemetry,
