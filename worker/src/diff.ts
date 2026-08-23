@@ -61,16 +61,15 @@ function boundPatch(patch: string): Pick<DiffStats, "patch" | "truncated"> {
 export async function collectDiff(
   runner: Runner,
   worktreePath: string,
-  baseBranch: string
+  baseSha: string
 ): Promise<DiffStats> {
   const opts: RunOpts = { cwd: worktreePath, timeoutMs: GIT_TIMEOUT_MS };
-  // three-dot: diffs from the merge-base, so a baseBranch that keeps moving concurrently doesn't pollute the diff
-  const range = `${baseBranch}...HEAD`;
-
-  const numstatOutput = await git(runner, ["diff", "--numstat", range], opts);
+  // Two trees, not a range: a merge-base is computed from history, and history is what the agent
+  // rewrites to hide a file from this diff (BP-382).
+  const numstatOutput = await git(runner, ["diff", "--numstat", baseSha, "HEAD"], opts);
   const { changedLines, changedFiles } = parseNumstat(numstatOutput);
 
-  const patchOutput = await git(runner, ["diff", range], opts);
+  const patchOutput = await git(runner, ["diff", baseSha, "HEAD"], opts);
   const { patch, truncated } = boundPatch(patchOutput);
 
   return { changedLines, changedFiles, patch, truncated };

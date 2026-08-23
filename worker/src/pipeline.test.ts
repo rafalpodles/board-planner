@@ -228,11 +228,12 @@ describe("runTask", () => {
     expect(h.createDelivery).toHaveBeenCalledWith(h.runner, "develop");
   });
 
-  it("diffs against the configured base branch", async () => {
+  it("diffs against the worktree's captured base sha, not the configured branch name", async () => {
     const h = harness({ config: { ...config, baseBranch: "develop" } });
+    h.workspace.create.mockResolvedValue({ path: "/wt", baseSha: "base111" });
     await runTask(h.deps, task);
 
-    expect(h.collectDiff).toHaveBeenCalledWith(h.runner, "/wt", "develop");
+    expect(h.collectDiff).toHaveBeenCalledWith(h.runner, "/wt", "base111");
   });
 
   it("resolves the board and builds a reporter for every task, not once per process", async () => {
