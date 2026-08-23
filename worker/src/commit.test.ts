@@ -20,7 +20,7 @@ describe("commitAll", () => {
   });
 
   it("stages everything and commits when there is something to commit", async () => {
-    const { runner, run } = runnerReturning(dirty, clean, clean);
+    const { runner, run } = runnerReturning(dirty, clean, clean, clean);
     await commitAll(runner, "/wt", "BP-1: something");
     expect(run.mock.calls[1][1]).toContain("add");
     expect(run.mock.calls[2][1]).toContain("commit");
@@ -29,7 +29,7 @@ describe("commitAll", () => {
 
   // The agent can write .git/hooks/pre-commit with the Write tool it needs for the task itself
   it("runs no hook of the agent's, on any call", async () => {
-    const { runner, run } = runnerReturning(dirty, clean, clean);
+    const { runner, run } = runnerReturning(dirty, clean, clean, clean);
     await commitAll(runner, "/wt", "m");
     for (const call of run.mock.calls) {
       expect(call[1]).toContain("core.hooksPath=/dev/null");
@@ -49,9 +49,24 @@ describe("commitAll", () => {
 
   // -m takes the next argument, so a subject beginning with a dash would otherwise be read as one
   it("keeps the message out of git's option slot", async () => {
-    const { runner, run } = runnerReturning(dirty, clean, clean);
+    const { runner, run } = runnerReturning(dirty, clean, clean, clean);
     await commitAll(runner, "/wt", "--amend");
     const args = run.mock.calls[2][1] as string[];
     expect(args[args.indexOf("-m") + 1]).toBe("--amend");
+  });
+
+  it("returns the sha it created", async () => {
+    const { runner } = runnerReturning(dirty, clean, clean, { code: 0, stdout: "abc123\n" });
+    expect(await commitAll(runner, "/wt", "BP-1: edit")).toBe("abc123");
+  });
+
+  it("returns an empty string when there was nothing to commit", async () => {
+    const { runner } = runnerReturning(clean);
+    expect(await commitAll(runner, "/wt", "BP-1: edit")).toBe("");
+  });
+
+  it("throws when rev-parse fails, rather than reporting a run with no sha", async () => {
+    const { runner } = runnerReturning(dirty, clean, clean, { code: 1, stderr: "no HEAD" });
+    await expect(commitAll(runner, "/wt", "m")).rejects.toThrow(/no HEAD/);
   });
 });
