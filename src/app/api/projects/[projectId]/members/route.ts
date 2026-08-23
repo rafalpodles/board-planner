@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { withProjectOwner } from "@/lib/middleware";
+import { recipientsWithAccess } from "@/lib/grants";
 import { User } from "@/models/user";
 import { Grant } from "@/models/grant";
 import { Notification } from "@/models/notification";
@@ -91,6 +92,11 @@ export const DELETE = withProjectOwner(async (request, { params }) => {
   if (!userId) {
     return NextResponse.json({ error: "userId is required" }, { status: 400 });
   }
+  // PUT validates this and DELETE did not, so anything unparseable reached Grant.deleteOne and
+  // left the handler as a CastError-shaped 500.
+  if (!isValidObjectId(userId)) {
+    return NextResponse.json({ error: "userId must be an object id" }, { status: 400 });
+  }
 
   await connectDB();
   if ((await ownerCount(projectId)) <= 1) {
@@ -110,14 +116,21 @@ export const DELETE = withProjectOwner(async (request, { params }) => {
 
   await Grant.deleteOne({ subject: userId, objectType: "project", object: projectId });
 
-  // Their watches on this board are kept, so re-adding them restores the feed. The backlog is
-  // not: the read filter already refuses it, and leaving it to be refused forever is hoarding
-  // task titles for somebody who cannot open them (BP-328). The removal itself has succeeded by
-  // now, so a failure here is logged rather than reported as one.
-  try {
-    await Notification.deleteMany({ recipient: userId, project: projectId });
-  } catch (err) {
-    console.error("Failed to clear notifications for a removed member:", err);
+  // Hygiene, NOT containment: what makes a lost board unreadable is the filter on the read
+  // routes, which is authoritative and covers every way access can end — including the ones that
+  // never touch a grant row, like an instance admin being demoted. Do not "simplify" those
+  // readers on the strength of this line; that reopens BP-328 in full.
+  //
+  // Asked rather than assumed, because deleting a grant is not the same as removing access: an
+  // instance admin reaches every board without ever having one. Clearing their backlog here
+  // would empty the feed of somebody this call removed nothing from, repeatably.
+  if ((await recipientsWithAccess([userId], projectId)).length === 0) {
+    // The removal itself has succeeded by now, so a failure here is logged, not reported.
+    try {
+      await Notification.deleteMany({ recipient: userId, project: projectId });
+    } catch (err) {
+      console.error("Failed to clear notifications for a removed member:", err);
+    }
   }
 
   return NextResponse.json({ ok: true });

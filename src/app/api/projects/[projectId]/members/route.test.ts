@@ -13,6 +13,7 @@ const userFindLean = vi.fn();
 const userFindById = vi.fn();
 const userFindByIdSelect = vi.fn();
 const check = vi.fn();
+const recipientsWithAccess = vi.fn(async (_ids?: unknown, _project?: unknown): Promise<string[]> => []);
 const notificationDeleteMany = vi.fn(async (_filter?: unknown) => ({ deletedCount: 0 }));
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
@@ -22,7 +23,7 @@ vi.mock("@/lib/auth", () => ({
 }));
 vi.mock("@/lib/grants", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/grants")>();
-  return { ...actual, check, accessibleProjectIds: vi.fn() };
+  return { ...actual, check, accessibleProjectIds: vi.fn(), recipientsWithAccess };
 });
 vi.mock("@/models/grant", () => ({
   Grant: {
@@ -72,6 +73,7 @@ beforeEach(() => {
   userFindLean.mockResolvedValue([]);
   userFindByIdSelect.mockResolvedValue({ _id: "u1", role: "member", kind: "human" });
   grantCountDocuments.mockResolvedValue(2);
+  recipientsWithAccess.mockResolvedValue([]);
 });
 
 describe("GET members", () => {
@@ -215,11 +217,11 @@ describe("PUT members", () => {
 
 describe("DELETE members", () => {
   it("removes the grant for the named user", async () => {
-    const url = `http://x/api/projects/${PROJECT}/members?userId=u2`;
+    const url = `http://x/api/projects/${PROJECT}/members?userId=${U2}`;
     const res = await DELETE(new Request(url, { method: "DELETE" }), { params });
     expect(res.status).toBe(200);
     expect(grantDeleteOne).toHaveBeenCalledWith({
-      subject: "u2",
+      subject: U2,
       objectType: "project",
       object: PROJECT,
     });
@@ -227,8 +229,8 @@ describe("DELETE members", () => {
 
   it("refuses to remove the last owner", async () => {
     grantCountDocuments.mockResolvedValue(1);
-    grantFindLean.mockResolvedValue([{ subject: "u2", relation: "owner" }]);
-    const url = `http://x/api/projects/${PROJECT}/members?userId=u2`;
+    grantFindLean.mockResolvedValue([{ subject: U2, relation: "owner" }]);
+    const url = `http://x/api/projects/${PROJECT}/members?userId=${U2}`;
     const res = await DELETE(new Request(url, { method: "DELETE" }), { params });
     expect(res.status).toBe(409);
     expect(grantDeleteOne).not.toHaveBeenCalled();
@@ -238,27 +240,50 @@ describe("DELETE members", () => {
   // backlog already addressed to them, which the read filter would otherwise have to keep
   // refusing forever.
   it("clears the pending notifications this board had queued for them", async () => {
-    const url = `http://x/api/projects/${PROJECT}/members?userId=u2`;
+    const url = `http://x/api/projects/${PROJECT}/members?userId=${U2}`;
     await DELETE(new Request(url, { method: "DELETE" }), { params });
 
     expect(notificationDeleteMany).toHaveBeenCalledWith({
-      recipient: "u2",
+      recipient: U2,
       project: PROJECT,
     });
   });
 
-  it("leaves the notifications they hold from other boards alone", async () => {
-    const url = `http://x/api/projects/${PROJECT}/members?userId=u2`;
+  // Found by an independent security review of this branch. Access is not the same thing as a
+  // grant row — an instance admin reaches every board without one — so deleting the grant of
+  // somebody whose access comes from `role: "admin"` removes nothing while still emptying their
+  // feed. That made the route a repeatable way for a board owner to silence instance oversight.
+  it("leaves the backlog of somebody who still reaches the board without a grant", async () => {
+    recipientsWithAccess.mockResolvedValue([U2]);
+    const url = `http://x/api/projects/${PROJECT}/members?userId=${U2}`;
+
+    const res = await DELETE(new Request(url, { method: "DELETE" }), { params });
+
+    expect(res.status).toBe(200);
+    expect(notificationDeleteMany).not.toHaveBeenCalled();
+  });
+
+  it("asks whether they still reach the board before clearing anything", async () => {
+    const url = `http://x/api/projects/${PROJECT}/members?userId=${U2}`;
     await DELETE(new Request(url, { method: "DELETE" }), { params });
 
-    const filter = notificationDeleteMany.mock.calls.at(-1)?.[0];
-    expect(filter).toHaveProperty("project", PROJECT);
+    expect(recipientsWithAccess).toHaveBeenCalledWith([U2], PROJECT);
+  });
+
+  it("refuses a userId that is not an object id, rather than throwing a 500", async () => {
+    const url = `http://x/api/projects/${PROJECT}/members?userId=not-an-object-id`;
+
+    const res = await DELETE(new Request(url, { method: "DELETE" }), { params });
+
+    expect(res.status).toBe(400);
+    expect(grantDeleteOne).not.toHaveBeenCalled();
+    expect(notificationDeleteMany).not.toHaveBeenCalled();
   });
 
   it("clears nothing when the removal itself was refused", async () => {
     grantCountDocuments.mockResolvedValue(1);
-    grantFindLean.mockResolvedValue([{ subject: "u2", relation: "owner" }]);
-    const url = `http://x/api/projects/${PROJECT}/members?userId=u2`;
+    grantFindLean.mockResolvedValue([{ subject: U2, relation: "owner" }]);
+    const url = `http://x/api/projects/${PROJECT}/members?userId=${U2}`;
     await DELETE(new Request(url, { method: "DELETE" }), { params });
 
     expect(notificationDeleteMany).not.toHaveBeenCalled();

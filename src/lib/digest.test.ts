@@ -40,6 +40,7 @@ const { digestTick, dueDigestDay, digestHour, digestTimezone, DIGEST_ROW_LIMIT }
 );
 
 const BOARD = "69a52e3b399b27d3cbb2c5a5";
+const SECOND_BOARD = "69a52e3b399b27d3cbb2c5a7";
 const WAITING = [{ _id: "u1", email: "rpo@example.com", username: "rpo", role: "member" }];
 
 /** `shown` rows come back from the page; `total` is what the count says is really waiting. */
@@ -73,7 +74,7 @@ beforeEach(() => {
   userFind.mockReturnValue({ lean: async () => WAITING });
   userFindOneAndUpdate.mockResolvedValue({ _id: "u1" });
   notifications(3);
-  grantedProjects = [BOARD];
+  grantedProjects = [BOARD, SECOND_BOARD];
   delete process.env.DIGEST_HOUR;
   delete process.env.DIGEST_TIMEZONE;
 });
@@ -211,12 +212,19 @@ describe("a digest for somebody who lost the board", () => {
     return (notificationFind.mock.calls.at(-1) ?? [])[0] as Record<string, unknown>;
   }
 
-  it("carries only the boards the reader can still reach", async () => {
-    grantedProjects = [BOARD];
+  // Two boards, so a digest that quietly covers only the first is a failure and not a pass.
+  it("carries every board the reader can still reach", async () => {
+    await digestTick(DUE);
+
+    expect(digestFilter().project).toEqual({ $in: [BOARD, SECOND_BOARD] });
+  });
+
+  it("keeps the board they still hold when the other one is taken away", async () => {
+    grantedProjects = [SECOND_BOARD];
 
     await digestTick(DUE);
 
-    expect(digestFilter().project).toEqual({ $in: [BOARD] });
+    expect(digestFilter().project).toEqual({ $in: [SECOND_BOARD] });
   });
 
   it("sends nothing at all to somebody who holds no grant anywhere", async () => {

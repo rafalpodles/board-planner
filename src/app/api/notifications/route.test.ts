@@ -6,6 +6,7 @@ const grantFind = vi.fn();
 
 const READER = "507f1f77bcf86cd799439011";
 const REACHABLE = "69a52e3b399b27d3cbb2c5a5";
+const ALSO_REACHABLE = "69a52e3b399b27d3cbb2c5a7";
 const LOST = "69a52e3b399b27d3cbb2c5a6";
 
 let grantedProjects: string[] = [];
@@ -51,25 +52,29 @@ describe("GET /api/notifications", () => {
     getAuthUser.mockReset();
     notificationFind.mockClear();
     grantFind.mockClear();
-    grantedProjects = [REACHABLE];
+    grantedProjects = [REACHABLE, ALSO_REACHABLE];
     getAuthUser.mockImplementation(async () => ({ _id: READER, role: "member" }));
   });
 
-  it("constrains the feed to the projects the reader can still reach", async () => {
-    grantedProjects = [REACHABLE];
-
+  // Two boards, not one: with a single seeded project, keeping only the first accessible board
+  // passes every assertion — and that mutation silences the feed for everybody who belongs to
+  // more than one project, which is the likeliest regression this change could cause.
+  it("constrains the feed to every project the reader can still reach", async () => {
     const res = await GET(request(), noParams);
 
     expect(res.status).toBe(200);
-    expect(filterUsed().project).toEqual({ $in: [REACHABLE] });
+    expect(filterUsed().project).toEqual({ $in: [REACHABLE, ALSO_REACHABLE] });
   });
 
-  it("does not offer a project whose grant is gone", async () => {
-    grantedProjects = [REACHABLE];
+  it("keeps the boards they still hold when one of their grants goes", async () => {
+    grantedProjects = [ALSO_REACHABLE];
 
     await GET(request(), noParams);
 
-    expect((filterUsed().project as { $in: string[] }).$in).not.toContain(LOST);
+    const scoped = (filterUsed().project as { $in: string[] }).$in;
+    expect(scoped).toEqual([ALSO_REACHABLE]);
+    expect(scoped).not.toContain(REACHABLE);
+    expect(scoped).not.toContain(LOST);
   });
 
   it("returns an empty feed to a reader who holds no grant anywhere", async () => {
