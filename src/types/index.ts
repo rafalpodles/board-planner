@@ -238,6 +238,7 @@ export interface IOAuthConsent {
   ticketHash: string;
   clientId: string;
   user: Types.ObjectId | IUser;
+  session: Types.ObjectId | null;
   redirectUri: string;
   codeChallenge: string;
   state: string;

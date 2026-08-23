@@ -7,6 +7,9 @@ const oauthConsentFindOne = vi.fn();
 const oauthCodeCreate = vi.fn();
 const userFindById = vi.fn();
 const resolveSession = vi.fn();
+// A permanently empty board list cannot exercise the line that narrows a grant, which is the
+// privilege-limiting line of the whole feature (BP-383 review).
+let projects: { _id: string; name: string; key: string }[] = [];
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/rateLimit", async () => {
@@ -35,7 +38,7 @@ vi.mock("@/lib/session", async (importOriginal) => ({
 }));
 vi.mock("@/models/project", () => ({
   Project: {
-    find: () => ({ select: () => ({ sort: () => ({ lean: async () => [] }) }) }),
+    find: () => ({ select: () => ({ sort: () => ({ lean: async () => projects }) }) }),
   },
 }));
 
@@ -78,6 +81,7 @@ async function attempt(username: string): Promise<string> {
 beforeEach(async () => {
   vi.clearAllMocks();
   await resetRateLimits();
+  projects = [];
   oauthClientFindOne.mockResolvedValue({
     clientId: "c1",
     clientName: "Some App",
@@ -237,7 +241,7 @@ describe("GET /oauth/authorize", () => {
   // BP-383: the browser already holds a session cookie, and typing the password again proves
   // nothing that cookie has not already proven.
   it("takes the browser session instead of asking for the password again", async () => {
-    resolveSession.mockResolvedValue({ userId: "u1" });
+    resolveSession.mockResolvedValue({ userId: "u1", sessionId: "s1" });
 
     const body = await (await GET(authorizeGet({}, sessionCookie()))).text();
 
@@ -248,7 +252,7 @@ describe("GET /oauth/authorize", () => {
   });
 
   it("asks anyway when the request says prompt=login", async () => {
-    resolveSession.mockResolvedValue({ userId: "u1" });
+    resolveSession.mockResolvedValue({ userId: "u1", sessionId: "s1" });
 
     const body = await (await GET(authorizeGet({ prompt: "login" }, sessionCookie()))).text();
 
@@ -259,12 +263,23 @@ describe("GET /oauth/authorize", () => {
   // An access token belongs to an application. Letting one stand in for the person at the keyboard
   // would let an application mint itself a second, wider credential without anybody present.
   it("does not let a bearer token stand in for the person authorizing", async () => {
+    // The bearer names one account and the cookie another. If the header were read at all, the
+    // page would be built for whoever it resolved to.
+    resolveSession.mockResolvedValue({ userId: "u1", sessionId: "s1" });
+
     const body = await (
-      await GET(authorizeGet({}, { authorization: "Bearer cpat_whatever" }))
+      await GET(authorizeGet({}, { ...sessionCookie(), authorization: "Bearer cpat_admin" }))
     ).text();
 
-    expect(body).toContain("Sign in to");
-    expect(resolveSession).not.toHaveBeenCalled();
+    expect(body).toContain("victim");
+
+    resolveSession.mockResolvedValue(null);
+    const bearerOnly = await (
+      await GET(authorizeGet({}, { authorization: "Bearer cpat_admin" }))
+    ).text();
+
+    expect(bearerOnly).toContain("Sign in to");
+    expect(oauthConsentCreate).toHaveBeenCalledTimes(1);
   });
 
   it("refuses an expired or unknown session quietly", async () => {
@@ -282,6 +297,7 @@ describe("POST /oauth/authorize consent phase", () => {
       _id: "cs1",
       clientId: "c1",
       user: "u1",
+      session: null,
       redirectUri: REDIRECT_URI,
       codeChallenge: "challenge",
       state: "s",
@@ -329,6 +345,147 @@ describe("POST /oauth/authorize consent phase", () => {
     const body = await (await POST(consent({}))).text();
 
     expect(body).toContain("Select at least one project");
+    expect(oauthCodeCreate).not.toHaveBeenCalled();
+  });
+
+  // Only "all" is the wide grant. Anything else — a typo, a hand-built form, a value from a future
+  // version of this page — has to land on the narrow branch rather than skipping the filter.
+  it("treats an access value it does not recognise as the narrow grant", async () => {
+    const body = await (await POST(consent({ access: "everything" }))).text();
+
+    expect(body).toContain("Select at least one project");
+    expect(oauthCodeCreate).not.toHaveBeenCalled();
+  });
+
+  it("narrows the grant to the boards the account can actually reach", async () => {
+    projects = [
+      { _id: "p1", name: "Orbit", key: "ORB" },
+      { _id: "p2", name: "Mobile", key: "MOB" },
+    ];
+    const body = new URLSearchParams({ phase: "consent", ticket: "t1", access: "limited" });
+    body.append("projects", "p1");
+    body.append("projects", "p-not-mine");
+
+    await POST(
+      new Request("http://localhost/oauth/authorize", {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          "sec-fetch-site": "same-origin",
+        },
+        body,
+      })
+    );
+
+    expect(oauthCodeCreate.mock.calls[0][0].allowedProjects).toEqual(["p1"]);
+  });
+
+  // BP-383 review: the ticket is now minted on a GET and rendered into a page a browser will
+  // restore from history, so whoever redeems it has to be the session it was issued to.
+  it("refuses a ticket redeemed by a different session", async () => {
+    oauthConsentFindOne.mockResolvedValue({
+      _id: "cs1",
+      clientId: "c1",
+      user: "u1",
+      session: "s1",
+      redirectUri: REDIRECT_URI,
+      codeChallenge: "challenge",
+      state: "s",
+      scope: "mcp",
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    resolveSession.mockResolvedValue({ userId: "u2", sessionId: "s2" });
+
+    const response = await POST(
+      new Request("http://localhost/oauth/authorize", {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          "sec-fetch-site": "same-origin",
+          ...sessionCookie(),
+        },
+        body: new URLSearchParams({ phase: "consent", ticket: "t1", access: "all" }),
+      })
+    );
+
+    expect(response.status).toBe(403);
+    expect(oauthCodeCreate).not.toHaveBeenCalled();
+  });
+
+  it("lets the session it was issued to redeem it", async () => {
+    oauthConsentFindOne.mockResolvedValue({
+      _id: "cs1",
+      clientId: "c1",
+      user: "u1",
+      session: "s1",
+      redirectUri: REDIRECT_URI,
+      codeChallenge: "challenge",
+      state: "s",
+      scope: "mcp",
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    resolveSession.mockResolvedValue({ userId: "u1", sessionId: "s1" });
+
+    const response = await POST(
+      new Request("http://localhost/oauth/authorize", {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          "sec-fetch-site": "same-origin",
+          ...sessionCookie(),
+        },
+        body: new URLSearchParams({ phase: "consent", ticket: "t1", access: "all" }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(oauthCodeCreate).toHaveBeenCalledTimes(1);
+  });
+
+  // RFC 6749 4.1.2.1 — refusing is an answer the client is owed
+  it("tells the client when the person says no", async () => {
+    const body = await (await POST(consent({ decision: "deny", access: "all" }))).text();
+
+    expect(body).toMatch(
+      /href="https:\/\/client\.example\/callback\?error=access_denied&amp;state=s"/
+    );
+    expect(oauthCodeCreate).not.toHaveBeenCalled();
+  });
+
+  it("refuses an expired ticket", async () => {
+    oauthConsentFindOne.mockResolvedValue({
+      _id: "cs1",
+      clientId: "c1",
+      user: "u1",
+      session: null,
+      redirectUri: REDIRECT_URI,
+      codeChallenge: "challenge",
+      state: "s",
+      scope: "mcp",
+      expiresAt: new Date(Date.now() - 1),
+    });
+
+    const body = await (await POST(consent({ access: "all" }))).text();
+
+    expect(body).toContain("Your session expired");
+    expect(oauthCodeCreate).not.toHaveBeenCalled();
+  });
+
+  it("refuses when the client was deleted between the screens", async () => {
+    oauthClientFindOne.mockResolvedValue(null);
+
+    const body = await (await POST(consent({ access: "all" }))).text();
+
+    expect(body).toContain("Client is no longer valid");
+    expect(oauthCodeCreate).not.toHaveBeenCalled();
+  });
+
+  it("refuses when the account was deleted between the screens", async () => {
+    userFindById.mockResolvedValue(null);
+
+    const body = await (await POST(consent({ access: "all" }))).text();
+
+    expect(body).toContain("Account no longer exists");
     expect(oauthCodeCreate).not.toHaveBeenCalled();
   });
 });

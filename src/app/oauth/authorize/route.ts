@@ -1,7 +1,14 @@
 import { connectDB } from "@/lib/db";
 import { getClientIp, verifyCredentials } from "@/lib/auth";
 import { checkProvenance, readSessionCookie, resolveSession } from "@/lib/session";
-import { lockoutKey, sourceKey, withLockout } from "@/lib/rate-limit";
+import {
+  anonymousMultiplier,
+  isRateLimited,
+  lockoutKey,
+  recordFailedAttempt,
+  sourceKey,
+  withLockout,
+} from "@/lib/rate-limit";
 import { accessibleProjectIds } from "@/lib/grants";
 import { notifyCredentialCreated } from "@/lib/security-mail";
 import { User } from "@/models/user";
@@ -9,14 +16,15 @@ import { OAuthClient } from "@/models/oauthClient";
 import { OAuthCode } from "@/models/oauthCode";
 import { OAuthConsent } from "@/models/oauthConsent";
 import { Project } from "@/models/project";
-import { randomToken, sha256, AUTH_CODE_TTL_SECONDS } from "@/lib/oauth";
-import { IOAuthClient, IUser } from "@/types";
+import { randomToken, sha256, isValidRedirectUri, AUTH_CODE_TTL_SECONDS } from "@/lib/oauth";
+import { IOAuthClient, IOAuthConsent, IUser } from "@/types";
 import { APP_NAME } from "@/lib/brand";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const CONSENT_TTL_SECONDS = 600; // 10 min to log in + pick projects
+const CONSENTS_PER_WINDOW = 30;
 
 function escapeHtml(s: string): string {
   return s
@@ -71,6 +79,8 @@ function htmlPage(body: string, status = 200, head = ""): Response {
       input[type=text],input[type=password]{width:100%;box-sizing:border-box;padding:10px 12px;background:#0f1115;border:1px solid #2a2e37;border-radius:8px;color:#e6e6e6;font-size:14px}
       button{width:100%;margin-top:20px;padding:11px;border:0;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer}
       .primary{background:#5b7cfa;color:#fff}
+      .secondary{background:#22262f;color:#c3c8d1;border:1px solid #2a2e37}
+      .row{display:flex;gap:10px}
       .err{background:#3a1d1d;border:1px solid #6b2b2b;color:#f0b0b0;padding:8px 12px;border-radius:8px;font-size:13px;margin-bottom:12px}
       .app{color:#5b7cfa;font-weight:600}
       .mode{display:flex;align-items:center;gap:8px;margin:8px 0;font-size:14px;cursor:pointer;border:1px solid #2a2e37;border-radius:8px;padding:10px 12px}
@@ -79,6 +89,9 @@ function htmlPage(body: string, status = 200, head = ""): Response {
       .projects[data-ignored=true]{opacity:.4}
       .proj{display:flex;align-items:center;gap:8px;font-size:14px;padding:5px 0;cursor:pointer}
       .projects[data-ignored=true] .proj{cursor:not-allowed}
+      /* A disabled control dispatches no click and bubbles nothing, so without this the square
+         itself — the thing a person aims at — is the one dead spot in the list (BP-383 review). */
+      .projects[data-ignored=true] input{pointer-events:none}
       a{color:#5b7cfa}
       .key{color:#9aa0aa;font-family:ui-monospace,monospace;font-size:12px}
       .hint{color:#9aa0aa;font-size:12px;margin-top:10px;line-height:1.5}
@@ -88,7 +101,18 @@ function htmlPage(body: string, status = 200, head = ""): Response {
       .warn{background:#3a2f1d;border:1px solid #6b552b;color:#f0d9a8;padding:8px 12px;border-radius:8px;font-size:12px;margin-bottom:12px;line-height:1.5}
       input[type=radio],input[type=checkbox]{accent-color:#5b7cfa}
     </style></head><body><div class="card">${body}</div></body></html>`,
-    { status, headers: { "content-type": "text/html; charset=utf-8" } }
+    {
+      status,
+      headers: {
+        "content-type": "text/html; charset=utf-8",
+        // These pages carry a live consent ticket, the account's username, the list of every board
+        // it can reach, and finally the authorization code. next.config.ts scopes no-store to
+        // /api/*, so without this a shared cache is free to hand one person's ticket to the next
+        // (BP-383 review).
+        "cache-control": "private, no-store",
+        vary: "Cookie",
+      },
+    }
   );
 }
 
@@ -160,6 +184,7 @@ const CONSENT_SCRIPT = `
     if (!form) return;
     var all = form.querySelector('input[name="access"][value="all"]');
     var limited = form.querySelector('input[name="access"][value="limited"]');
+    if (!all || !limited || limited.disabled) return;
     var list = document.getElementById("projects");
     var boxes = list ? list.querySelectorAll('input[name="projects"]') : [];
     function sync() {
@@ -174,6 +199,9 @@ const CONSENT_SCRIPT = `
     if (list) list.addEventListener("click", function () {
       if (all.checked) { limited.checked = true; sync(); }
     });
+    // Restoring a page from history reinstates the radios without firing "change", so a page that
+    // ran sync() only at parse time came back with "All projects" picked and the list live again.
+    window.addEventListener("pageshow", sync);
     sync();
   })();`;
 
@@ -185,6 +213,9 @@ function consentForm(
   options: { signedInAs?: string; switchAccountHref?: string; error?: string } = {}
 ): Response {
   const label = clientName ? escapeHtml(clientName) : "An application";
+  // With nothing to select, "Only selected projects" is a dead end: it is the default, and the only
+  // way out of the "select at least one" refusal is the wide grant anyway (BP-383 review).
+  const empty = projects.length === 0;
   const rows = projects
     .map(
       (p) => `<label class="proj"><input type="checkbox" name="projects" value="${escapeHtml(p._id)}">
@@ -206,11 +237,24 @@ function consentForm(
     <form id="consent" method="post" action="/oauth/authorize">
       <input type="hidden" name="phase" value="consent">
       <input type="hidden" name="ticket" value="${escapeHtml(ticket)}">
-      <label class="mode"><input type="radio" name="access" value="limited" checked> Only selected projects</label>
-      <label class="mode"><input type="radio" name="access" value="all"> All projects — full account access</label>
-      <div class="projects" id="projects" data-ignored="false">${rows || '<span class="key">No projects</span>'}</div>
-      <p class="hint">If you pick specific projects, this connection is limited to them (tasks, comments, sprints) and cannot perform admin actions.</p>
-      <button class="primary" type="submit">Authorize</button>
+      <label class="mode"><input type="radio" name="access" value="limited"${
+        empty ? " disabled" : " checked"
+      }> Only selected projects</label>
+      <label class="mode"><input type="radio" name="access" value="all"${
+        empty ? " checked" : ""
+      }> All projects — full account access</label>
+      <div class="projects" id="projects" data-ignored="${empty}">${
+        rows || '<span class="key">No projects</span>'
+      }</div>
+      <p class="hint">${
+        empty
+          ? "This account can reach no boards, so a limited connection would have nothing in it."
+          : "If you pick specific projects, this connection is limited to them (tasks, comments, sprints) and cannot perform admin actions."
+      }</p>
+      <div class="row">
+        <button class="secondary" type="submit" name="decision" value="deny">Deny</button>
+        <button class="primary" type="submit" name="decision" value="allow">Authorize</button>
+      </div>
     </form>
     ${identity}
     <script>${CONSENT_SCRIPT}</script>`);
@@ -220,20 +264,15 @@ function consentForm(
 // enforced across the redirect chain, so the 302 this used to answer with was blocked by the
 // browser — the whole flow died at the Authorize button with a CSP error and no navigation
 // (BP-383). A navigation the page performs itself is not a form submission, so no directive covers
-// it. Meta refresh first for a browser with scripting off, then the script, then a link to click.
-function returnToClient(target: string, clientName: string): Response {
-  // A page navigating itself is not a Location header: a browser ignores `Location: javascript:…`,
-  // but `location.replace` on one runs it in THIS origin. /oauth/register already refuses to store
-  // anything but https or loopback http, and this is the second lock on the same door.
-  const scheme = new URL(target).protocol;
-  if (scheme !== "https:" && scheme !== "http:") {
-    return errorPage("This client's redirect address is not a web address.");
-  }
-
+// it. Both mechanisms are declared and they do not collide: the script runs during parsing, while
+// the zero-second refresh cannot start its timer until the frame completes, so location.replace
+// wins and cancels it — measured as exactly one request at the client. The link covers the case
+// where neither ran.
+function returnToClient(target: string, clientName: string, headline = "Authorized"): Response {
   const href = escapeHtml(target);
   const label = clientName ? escapeHtml(clientName) : "the application";
   return htmlPage(
-    `<h1>Authorized</h1>
+    `<h1>${headline}</h1>
     <p class="sub">Returning you to ${label}…</p>
     <p class="hint"><a id="return" href="${href}">Continue</a> if nothing happens.</p>
     <script>location.replace(document.getElementById("return").href);</script>`,
@@ -244,6 +283,11 @@ function returnToClient(target: string, clientName: string): Response {
 
 async function validateClientAndRedirect(p: AuthParams): Promise<IOAuthClient | null> {
   if (!p.clientId || !p.redirectUri) return null;
+  // Registration's rule, applied again to what registration stored. Rows written before BP-302
+  // accepted http on any host and nothing purged them — and the consent page now hands the code to
+  // the client by navigating there itself, where a `javascript:` URI would run in THIS origin
+  // rather than being ignored the way a Location header is (BP-383 review).
+  if (!isValidRedirectUri(p.redirectUri)) return null;
   const client = await OAuthClient.findOne({ clientId: p.clientId });
   if (!client) return null;
   if (!client.redirectUris.includes(p.redirectUri)) return null;
@@ -259,20 +303,25 @@ async function accessibleProjects(user: IUser): Promise<{ _id: string; name: str
 
 // Only the browser session counts here. A Bearer token belongs to an application, and an
 // application must not be able to authorize itself a second credential.
-async function signedInUser(req: Request): Promise<IUser | null> {
+async function browserSession(req: Request): Promise<{ sessionId: string; userId: string } | null> {
   const token = readSessionCookie(req.headers.get("cookie"));
   if (!token) return null;
   const session = await resolveSession(token);
   if (!session) return null;
-  return User.findById(session.userId);
+  return { sessionId: String(session.sessionId), userId: String(session.userId) };
 }
 
-async function issueTicket(p: AuthParams, user: IUser): Promise<string> {
+async function issueTicket(
+  p: AuthParams,
+  user: IUser,
+  sessionId: string | null
+): Promise<string> {
   const ticket = randomToken("cpct_");
   await OAuthConsent.create({
     ticketHash: sha256(ticket),
     clientId: p.clientId,
     user: user._id,
+    session: sessionId,
     redirectUri: p.redirectUri,
     codeChallenge: p.codeChallenge,
     state: p.state,
@@ -280,6 +329,20 @@ async function issueTicket(p: AuthParams, user: IUser): Promise<string> {
     expiresAt: new Date(Date.now() + CONSENT_TTL_SECONDS * 1000),
   });
   return ticket;
+}
+
+// A consent row holds everything the authorization started with except response_type and
+// code_challenge_method, of which this endpoint accepts exactly one value each.
+function paramsOfConsent(consent: IOAuthConsent): AuthParams {
+  return {
+    clientId: consent.clientId,
+    redirectUri: consent.redirectUri,
+    state: consent.state,
+    codeChallenge: consent.codeChallenge,
+    codeChallengeMethod: "S256",
+    responseType: "code",
+    scope: consent.scope,
+  };
 }
 
 // `prompt=login` is how OpenID Connect says "ask again anyway", and it is what the consent screen's
@@ -314,10 +377,21 @@ export async function GET(req: Request) {
   // proves nothing the cookie has not already proven (BP-383). The consent screen still stands:
   // what is being asked for is the grant, not the identity.
   if (query.get("prompt") !== "login") {
-    const user = await signedInUser(req);
-    if (user) {
+    const session = await browserSession(req);
+    const user = session ? await User.findById(session.userId) : null;
+    if (session && user) {
+      // A GET that writes a row is a GET that can be looped. The login POST pays for its ticket
+      // with a bcrypt and a lockout; this one pays with the same per-address budget /oauth/register
+      // uses (BP-383 review).
+      const clientIp = getClientIp(req);
+      const throttleKey = sourceKey(clientIp ?? "-", "oauth_consent");
+      if (await isRateLimited(throttleKey, anonymousMultiplier(clientIp, CONSENTS_PER_WINDOW))) {
+        return errorPage("Too many authorization attempts from this address. Try again later.", 429);
+      }
+      await recordFailedAttempt(throttleKey);
+
       return consentForm(
-        await issueTicket(p, user),
+        await issueTicket(p, user, session.sessionId),
         client.clientName,
         p.redirectUri,
         await accessibleProjects(user),
@@ -359,7 +433,7 @@ export async function POST(req: Request) {
   const phase = String(form.get("phase") || "login");
 
   if (phase === "consent") {
-    return handleConsent(form);
+    return handleConsent(req, form);
   }
 
   // --- Login phase ---
@@ -384,23 +458,36 @@ export async function POST(req: Request) {
   if (!user) return loginForm(p, client.clientName, "Invalid username or password.");
 
   return consentForm(
-    await issueTicket(p, user),
+    await issueTicket(p, user, null),
     client.clientName,
     p.redirectUri,
     await accessibleProjects(user),
-    { signedInAs: user.username }
+    { signedInAs: user.username, switchAccountHref: switchAccountHref(p) }
   );
 }
 
-async function handleConsent(form: FormData): Promise<Response> {
+async function handleConsent(req: Request, form: FormData): Promise<Response> {
   const ticket = String(form.get("ticket") || "");
-  // Absent means the narrow grant: a request that never made the choice must not get the wide one
-  const access = String(form.get("access") || "limited");
+  // Only "all" is the wide grant. Absent, misspelt, or anything a hand-built form put there is the
+  // narrow one: an authorization decision must not fail open on a value nobody recognises.
+  const wide = String(form.get("access") || "") === "all";
   const selected = form.getAll("projects").map((v) => String(v));
 
   const consent = await OAuthConsent.findOne({ ticketHash: sha256(ticket) });
   if (!consent || consent.expiresAt.getTime() < Date.now()) {
     return errorPage("Your session expired. Please start the authorization again.");
+  }
+
+  // The ticket is the whole authority here, and since BP-383 it is minted on a GET and rendered
+  // into a page a browser will restore from history. Bind it: whoever redeems it must be the
+  // session it was issued to. A ticket earned by typing a password is backed by no session and
+  // keeps its old rule — that page is a POST result, which no history restore re-runs for free.
+  if (consent.session) {
+    const holder = await browserSession(req);
+    if (!holder || holder.sessionId !== String(consent.session)) {
+      await OAuthConsent.deleteOne({ _id: consent._id });
+      return errorPage("This authorization belongs to a different sign-in. Start it again.", 403);
+    }
   }
 
   const client = await OAuthClient.findOne({ clientId: consent.clientId });
@@ -415,9 +502,18 @@ async function handleConsent(form: FormData): Promise<Response> {
     return errorPage("Account no longer exists.");
   }
 
+  // RFC 6749 §4.1.2.1: refusing is an answer the client is owed, not a dead end in the browser.
+  if (String(form.get("decision") || "allow") === "deny") {
+    await OAuthConsent.deleteOne({ _id: consent._id });
+    const denied = new URL(consent.redirectUri);
+    denied.searchParams.set("error", "access_denied");
+    if (consent.state) denied.searchParams.set("state", consent.state);
+    return returnToClient(denied.toString(), client.clientName, "Not authorized");
+  }
+
   let allowedProjects: string[] = [];
   let scopeLabel = "every board this account can reach";
-  if (access === "limited") {
+  if (!wide) {
     const accessible = await accessibleProjects(user);
     const accessibleIds = new Set(accessible.map((p) => p._id));
     allowedProjects = [...new Set(selected)].filter((id) => accessibleIds.has(id));
@@ -428,6 +524,7 @@ async function handleConsent(form: FormData): Promise<Response> {
     if (allowedProjects.length === 0) {
       return consentForm(ticket, client.clientName, consent.redirectUri, accessible, {
         signedInAs: user.username,
+        switchAccountHref: switchAccountHref(paramsOfConsent(consent)),
         error: "Select at least one project, or choose “All projects”.",
       });
     }
