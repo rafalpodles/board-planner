@@ -289,6 +289,22 @@ describe("GET /oauth/authorize", () => {
     expect(body).not.toContain('value="all" checked');
   });
 
+  // Third iteration of this counter and the first test of it. The point is the dimension: one
+  // account exhausting its budget must not refuse a second account, which is what an
+  // address-keyed counter does behind a proxy or a NAT (BP-383 review).
+  it("bounds ticket issuance per account, without touching another account", async () => {
+    resolveSession.mockResolvedValue({ userId: "u1", sessionId: "s1" });
+    for (let i = 0; i < 61; i++) await GET(authorizeGet({}, sessionCookie()));
+
+    const exhausted = await GET(authorizeGet({}, sessionCookie()));
+    expect(exhausted.status).toBe(429);
+
+    resolveSession.mockResolvedValue({ userId: "u2", sessionId: "s2" });
+    const bystander = await GET(authorizeGet({}, sessionCookie()));
+    expect(bystander.status).toBe(200);
+    expect(await bystander.text()).toContain("Grant access");
+  });
+
   it("asks anyway when the request says prompt=login", async () => {
     resolveSession.mockResolvedValue({ userId: "u1", sessionId: "s1" });
 
