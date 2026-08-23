@@ -235,10 +235,11 @@ and `SIGINT` both finish the task in flight before the loop exits.
   argument after that separator which begins with a dash — so a future call site inherits the rule
   instead of having to remember it.
 
-  **What this sweep does not cover.** The menubar app is a separate package and was not touched:
-  `menubar/Sources/CPMenubarCore/CloneStep.swift` passes the server's `repositoryUrl` to
-  `git clone` as a bare positional and builds the destination from the server's project key, which
-  is this same class of finding in Swift rather than TypeScript.
+  **The menubar app is swept separately**, in [`menubar/README.md`](../menubar/README.md). It had
+  the same two shapes — the server's `repositoryUrl` as a bare positional to `git clone`, and the
+  destination built from the server's project key — and one this package does not: a transport that
+  runs a program can be reached from a well-formed `https://` remote, because the operator's own
+  `url.*.insteadOf` rewrites it (BP-399).
 - **The executor runs with `bypassPermissions` inside the worktree**, so the worktree is checked
   for uncommitted files before the gates run — an agent cannot hide a change from the gates by
   never staging it.
