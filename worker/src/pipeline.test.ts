@@ -595,7 +595,7 @@ describe("runTask", () => {
     const h = harness({ gateFor: () => rejectingGate("diff-size", "too big") });
     await runTask(h.deps, running("implement", "diff-size"));
 
-    expect(h.delivery.push).toHaveBeenCalledWith("/wt", "cp-158/worker");
+    expect(h.delivery.push).toHaveBeenCalledWith("/wt", "cp-158/worker", "");
     expect(h.workspace.destroy).toHaveBeenCalledWith("CP-158");
   });
 

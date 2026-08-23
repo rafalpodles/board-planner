@@ -61,10 +61,12 @@ function valueOf(args: string[], flag: string): string {
   return args[args.indexOf(flag) + 1];
 }
 
+const COMMIT = "sha1";
+
 describe("push", () => {
-  it("pushes the branch upstream", async () => {
+  it("pushes the commit into the branch, so the ref store cannot decide what is sent", async () => {
     const run = vi.fn().mockResolvedValue(ok);
-    await createDelivery({ run }).push("/wt", "cp-158/worker");
+    await createDelivery({ run }).push("/wt", "cp-158/worker", COMMIT);
 
     expect(run).toHaveBeenCalledWith(
       "git",
@@ -76,15 +78,30 @@ describe("push", () => {
         "-u",
         "origin",
         "--",
-        "cp-158/worker",
+        "sha1:refs/heads/cp-158/worker",
       ],
       expect.objectContaining({ cwd: "/wt" })
     );
   });
 
+  it("does not send the bare branch name as its own argument", async () => {
+    const run = vi.fn().mockResolvedValue(ok);
+    await createDelivery({ run }).push("/wt", "cp-158/worker", COMMIT);
+
+    expect(argsOf(run)).not.toContain("cp-158/worker");
+  });
+
+  it("refuses to push without a commit to name", async () => {
+    const run = vi.fn().mockResolvedValue(ok);
+    await expect(createDelivery({ run }).push("/wt", "cp-158/worker", "")).rejects.toThrow(
+      /commit/i
+    );
+    expect(run).not.toHaveBeenCalled();
+  });
+
   it("replaces the branch a previous attempt pushed, under a lease rather than a blind force", async () => {
     const run = vi.fn().mockResolvedValue(ok);
-    await createDelivery({ run }).push("/wt", "cp-158/worker");
+    await createDelivery({ run }).push("/wt", "cp-158/worker", COMMIT);
 
     const args = argsOf(run);
     expect(args).toContain("--force-with-lease");
@@ -93,14 +110,16 @@ describe("push", () => {
 
   it("throws when the push is rejected", async () => {
     const { runner } = fakeCli({ "git push": { code: 1, stderr: "! [rejected] (non-fast-forward)" } });
-    await expect(createDelivery(runner).push("/wt", "cp-158/worker")).rejects.toThrow(
+    await expect(createDelivery(runner).push("/wt", "cp-158/worker", COMMIT)).rejects.toThrow(
       /non-fast-forward/
     );
   });
 
   it("names the timeout instead of throwing an empty error when the push hangs", async () => {
     const { runner } = fakeCli({ "git push": { code: -1, timedOut: true } });
-    await expect(createDelivery(runner).push("/wt", "cp-158/worker")).rejects.toThrow(/timed out/);
+    await expect(createDelivery(runner).push("/wt", "cp-158/worker", COMMIT)).rejects.toThrow(
+      /timed out/
+    );
   });
 
   // bindRepository scanned this config before the agent ever saw the checkout, and the agent holds
@@ -109,14 +128,16 @@ describe("push", () => {
     const { runner } = fakeCli({
       "git config --local --list": { stdout: "core.sshcommand=curl attacker\n" },
     });
-    await expect(createDelivery(runner).push("/wt", "cp-158/worker")).rejects.toThrow(
+    await expect(createDelivery(runner).push("/wt", "cp-158/worker", COMMIT)).rejects.toThrow(
       /core\.sshcommand/
     );
   });
 
   it("does not push when the config cannot be read at all", async () => {
     const { runner, run } = fakeCli({ "git config --local --list": { code: 128 } });
-    await expect(createDelivery(runner).push("/wt", "cp-158/worker")).rejects.toThrow(/refusing/);
+    await expect(createDelivery(runner).push("/wt", "cp-158/worker", COMMIT)).rejects.toThrow(
+      /refusing/
+    );
     expect(run.mock.calls.some(([, args]) => (args as string[]).includes("push"))).toBe(false);
   });
 
@@ -125,7 +146,7 @@ describe("push", () => {
   // against a real git and a really planted hook.
   it("neutralises every config file git would otherwise read", async () => {
     const run = vi.fn().mockResolvedValue(ok);
-    await createDelivery({ run }).push("/wt", "cp-158/worker");
+    await createDelivery({ run }).push("/wt", "cp-158/worker", COMMIT);
 
     const env = envOf(run);
     expect(env.GIT_CONFIG_NOSYSTEM).toBe("1");
@@ -140,7 +161,7 @@ describe("push", () => {
     ["core.pager", "cat"],
   ])("overrides %s, which the repository config could otherwise point at a program", async (key, value) => {
     const run = vi.fn().mockResolvedValue(ok);
-    await createDelivery({ run }).push("/wt", "cp-158/worker");
+    await createDelivery({ run }).push("/wt", "cp-158/worker", COMMIT);
 
     expect(configuredBy(envOf(run))).toContainEqual([key, value]);
   });
@@ -152,7 +173,7 @@ describe("push", () => {
     ["protocol.file.allow", "never"],
   ])("refuses the %s transport, whichever way the remote url was rewritten", async (key, value) => {
     const run = vi.fn().mockResolvedValue(ok);
-    await createDelivery({ run }).push("/wt", "cp-158/worker");
+    await createDelivery({ run }).push("/wt", "cp-158/worker", COMMIT);
 
     expect(configuredBy(envOf(run))).toContainEqual([key, value]);
   });
@@ -162,7 +183,7 @@ describe("push", () => {
   // The environment is where it is won, and empty there means no proxy rather than fall through.
   it("empties the proxy command in the environment, where config cannot outrank it", async () => {
     const run = vi.fn().mockResolvedValue(ok);
-    await createDelivery({ run }).push("/wt", "cp-158/worker");
+    await createDelivery({ run }).push("/wt", "cp-158/worker", COMMIT);
 
     const env = envOf(run);
     expect(env.GIT_PROXY_COMMAND).toBe("");
@@ -173,7 +194,7 @@ describe("push", () => {
   // setting outranks any override and only the command line wins
   it("names the receive-pack on the command line, where config cannot outrank it", async () => {
     const run = vi.fn().mockResolvedValue(ok);
-    await createDelivery({ run }).push("/wt", "cp-158/worker");
+    await createDelivery({ run }).push("/wt", "cp-158/worker", COMMIT);
 
     expect(argsOf(run)).toContain("--receive-pack=git-receive-pack");
     expect(configuredBy(envOf(run)).map(([key]) => key)).not.toContain("remote.origin.receivepack");
@@ -183,7 +204,7 @@ describe("push", () => {
   // what keeps an https remote authenticating once the global file is gone
   it("clears inherited credential helpers and names the one it trusts, in that order", async () => {
     const run = vi.fn().mockResolvedValue(ok);
-    await createDelivery({ run }).push("/wt", "cp-158/worker");
+    await createDelivery({ run }).push("/wt", "cp-158/worker", COMMIT);
 
     const helpers = configuredBy(envOf(run)).filter(([key]) => key === "credential.helper");
     expect(helpers).toEqual([
@@ -406,13 +427,14 @@ describe("merge", () => {
 });
 
 describe("push argument boundaries", () => {
-  it("separates the branch from git's options with --", async () => {
+  it("separates the refspec from git's options with --", async () => {
     const run = vi.fn().mockResolvedValue(ok);
-    await createDelivery({ run }).push("/wt", "--receive-pack=/bin/echo");
+    await createDelivery({ run }).push("/wt", "--receive-pack=/bin/echo", COMMIT);
 
     const args = argsOf(run);
+    const refspec = `${COMMIT}:refs/heads/--receive-pack=/bin/echo`;
     expect(args).toContain("--");
-    expect(args.indexOf("--")).toBeLessThan(args.indexOf("--receive-pack=/bin/echo"));
+    expect(args.indexOf("--")).toBeLessThan(args.indexOf(refspec));
   });
 });
 
@@ -424,7 +446,7 @@ describe("the github identity delivery acts as", () => {
 
   it("carries the pinned account's token on the push", async () => {
     const run = vi.fn().mockResolvedValue(ok);
-    await createDelivery({ run }, "main", PINNED).push("/wt", "bp-373/pin");
+    await createDelivery({ run }, "main", PINNED).push("/wt", "bp-373/pin", COMMIT);
 
     expect(envOf(run).GH_TOKEN).toBe(PINNED);
   });
@@ -446,7 +468,7 @@ describe("the github identity delivery acts as", () => {
   // back — the failure being pushing as an account that does have access, under the wrong name.
   it("overrides an inherited GITHUB_TOKEN rather than letting it win", async () => {
     const run = vi.fn().mockResolvedValue(ok);
-    await createDelivery({ run }, "main", PINNED).push("/wt", "bp-373/pin");
+    await createDelivery({ run }, "main", PINNED).push("/wt", "bp-373/pin", COMMIT);
 
     expect(envOf(run).GITHUB_TOKEN).toBe(PINNED);
   });
@@ -455,7 +477,7 @@ describe("the github identity delivery acts as", () => {
   // behaviour it had — gh resolves its own identity from the keyring.
   it("sets no token at all when no account is pinned", async () => {
     const run = vi.fn().mockResolvedValue(ok);
-    await createDelivery({ run }, "main").push("/wt", "bp-373/pin");
+    await createDelivery({ run }, "main").push("/wt", "bp-373/pin", COMMIT);
 
     const env = envOf(run);
     expect("GH_TOKEN" in env).toBe(false);
