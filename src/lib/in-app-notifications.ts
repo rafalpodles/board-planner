@@ -169,6 +169,8 @@ function reasonFor(
       return `You're getting this because ${taskKey} was assigned to you.`;
     case "mentioned":
       return `You're getting this because you were mentioned in a comment on ${taskKey}.`;
+    case "task_created":
+      return "You're getting this because you asked to hear about every task created on this board.";
     default:
       return isAssignee
         ? `You're getting this because you're the assignee on ${taskKey}.`

@@ -7,6 +7,13 @@ const ROW_LABEL: Record<NotificationType, string> = {
   mentioned: "Somebody mentions you",
   status_changed: "A task you follow changes column",
   comment_added: "A task you follow gets a comment",
+  // Replaced on the project screen, where "a board" has an answer — see PROJECT_ROW_LABEL
+  task_created: "Anybody creates a task on a board",
+};
+
+/** The rows whose wording depends on which screen the grid is on. */
+const PROJECT_ROW_LABEL: Partial<Record<NotificationType, string>> = {
+  task_created: "Anybody creates a task on this board",
 };
 
 const COLUMNS = [
@@ -21,6 +28,7 @@ export function NotificationMatrixEditor({
   disabled = false,
   chatDisabled = false,
   chatDisabledHint,
+  scope = "global",
 }: {
   value: NotificationMatrix;
   onChange: (next: NotificationMatrix) => void;
@@ -28,7 +36,12 @@ export function NotificationMatrixEditor({
   /** No personal webhook configured: ticking the column would deliver nowhere, which fails silently */
   chatDisabled?: boolean;
   chatDisabledHint?: string;
+  /** Which board the grid is being read against, for the rows that say "a board" otherwise */
+  scope?: "global" | "project";
 }) {
+  const labelOf = (type: NotificationType) =>
+    (scope === "project" && PROJECT_ROW_LABEL[type]) || ROW_LABEL[type];
+
   function toggle(type: NotificationType, column: (typeof COLUMNS)[number]["key"]) {
     onChange({ ...value, [type]: { ...value[type], [column]: !value[type][column] } });
   }
@@ -52,14 +65,14 @@ export function NotificationMatrixEditor({
         <tbody>
           {NOTIFICATION_TYPES.map((type) => (
             <tr key={type} className="border-b border-border last:border-0">
-              <td className="py-2.5 pr-4">{ROW_LABEL[type]}</td>
+              <td className="py-2.5 pr-4">{labelOf(type)}</td>
               {COLUMNS.map((c) => {
                 const off = disabled || (c.key === "chat" && chatDisabled);
                 return (
                   <td key={c.key} className="py-2.5 text-center">
                     <input
                       type="checkbox"
-                      aria-label={`${ROW_LABEL[type]} — ${c.label}`}
+                      aria-label={`${labelOf(type)} — ${c.label}`}
                       checked={!!value[type]?.[c.key]}
                       disabled={off}
                       onChange={() => toggle(type, c.key)}

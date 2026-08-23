@@ -19,6 +19,7 @@ import {
   resolveMentions,
   assigneeIdOf,
 } from "@/lib/in-app-notifications";
+import { notifyBoardFeed } from "@/lib/board-feed";
 import { pillToneForRole } from "@/lib/email-template";
 import { parseChecklistString } from "@/lib/checklist";
 import {
@@ -338,6 +339,33 @@ export async function createTask(
   };
   dispatchWebhooks(projectId, "task_created", eventPayload);
   dispatchNotifications(projectId, "task_created", eventPayload);
+
+  const createdKey = `${project.key}-${task.taskNumber}`;
+  // The personal counterpart of the shared team channel two lines up. Same event, different
+  // audience: that one announces the board to a room nobody subscribed to individually, this one
+  // reaches the people who ticked the row for themselves.
+  notifyBoardFeed({
+    taskId: String(task._id),
+    projectId,
+    actorId,
+    title: `New task ${createdKey} in ${project.name}`,
+    body: task.title,
+    email: async () => {
+      const column = getProjectColumns(project).find((c) => c.id === status);
+      return {
+        kicker: "New on the board",
+        taskKey: createdKey,
+        taskTitle: task.title,
+        taskPills: [
+          { label: column?.label ?? status, tone: pillToneForRole(column?.role) },
+          { label: capitalise(String(task.priority ?? DEFAULT_PRIORITY)), tone: "neutral" },
+        ],
+        taskMeta: [project.name, `created by ${await usernameOf(actorId)}`].filter(Boolean).join(" · "),
+        projectRef: project.key,
+        taskNumber: task.taskNumber,
+      };
+    },
+  });
 
   // Assigning an existing task told the assignee; creating one already assigned to them said
   // nothing, which is how the MCP, the PM agent and a worker all hand work over.

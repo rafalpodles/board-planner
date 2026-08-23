@@ -1300,14 +1300,22 @@ export interface ApiProjectAuditLog {
 }
 
 // In-app notification types
-export type NotificationType = "task_assigned" | "status_changed" | "comment_added" | "mentioned";
+export type NotificationType =
+  | "task_assigned"
+  | "status_changed"
+  | "comment_added"
+  | "mentioned"
+  | "task_created";
 
-// The order the settings grid renders them in
+// The order the settings grid renders them in. task_created is last because it is the only row
+// whose recipients are not derived from a task: the other four filter a list the system already
+// computed from an assignee and watchers, this one selects people by the tick itself.
 export const NOTIFICATION_TYPES: NotificationType[] = [
   "task_assigned",
   "mentioned",
   "status_changed",
   "comment_added",
+  "task_created",
 ];
 
 export const PERSONAL_CHAT_KINDS = ["slack", "discord"] as const;

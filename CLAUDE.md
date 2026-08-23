@@ -219,7 +219,11 @@ mcp-server/           # Standalone MCP server (stdio transport)
   shared team channel in `project.notificationChannels`, which is unchanged and has no recipient.
   Accounts with no stored grid fall back to the old `emailNotifications` boolean, so nothing was
   migrated. The bell hides rows rather than skipping the write — `Notification.inApp` — because the
-  digest is assembled from those documents
+  digest is assembled from those documents. Four of the five rows *filter* a recipient list built
+  from a task's assignee and watchers; `task_created` has no such list and instead *selects* its
+  audience from the ticks themselves (`src/lib/board-feed.ts`), bounded by
+  `BOARD_FEED_FANOUT_LIMIT`. It is the one row the legacy fallback leaves off, so adding it
+  subscribed nobody
 - **Recurrence**: When task → done with recurrence config, auto-creates next task
 - **GitHub PR linking**: Matches PRs by branch/title pattern `BP-5`, and by any key the project used to have (case-insensitive)
 - **Autonomous workers**: Opt-in per project (Settings → Workers, instance admin). Enrolling a
