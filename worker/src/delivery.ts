@@ -14,7 +14,7 @@ const MAX_OUTPUT_CHARS = 2000;
 const PR_URL = /https?:\/\/[^\s"'<>]*\/pull\/\d+/g;
 
 export interface Delivery {
-  push(worktreePath: string, branch: string): Promise<void>;
+  push(worktreePath: string, branch: string, commit: string): Promise<void>;
   openPr(worktreePath: string, task: ClaimedTask, summary: string): Promise<string>;
   merge(worktreePath: string, prUrl: string): Promise<void>;
 }
@@ -200,14 +200,38 @@ export function createDelivery(runner: Runner, baseBranch?: string, githubToken?
   }
 
   return {
-    async push(worktreePath, branch) {
+    async push(worktreePath, branch, commit) {
+      // Refused rather than falling back to the branch name: the worktree's ref store is exactly
+      // what an agent running inside it can rewrite, so a push that trusts the branch name sends
+      // whatever that store now says HEAD is, not what a reviewer approved (BP-382).
+      if (!commit) throw new Error("refusing to push: no commit was named");
+      // BP-327's refusal, preserved across BP-382's refspec form: refuseOptionShapedPositionals
+      // only ever sees the composed refspec, whose first character is the commit's, so an
+      // option-shaped branch would slip past a guard that used to catch it. Refused on the name
+      // itself rather than trusting where it happens to land inside the string.
+      //
+      // The whole ref-name shape rather than the leading dash alone, because the refspec form gave
+      // the string a second way to be read: git splits a push refspec at its **last** colon, so a
+      // branch carrying one re-splits `<commit>:refs/heads/<branch>` and sends a different source
+      // to a different destination. Measured on git 2.50.1 — with a colon in the branch the src
+      // refspec git reported was neither the commit nor the branch. isGitRefName is the same check
+      // applyPolicy spends on baseBranch, and a branch here is always `<taskKey>/worker`.
+      if (!isGitRefName(branch)) {
+        throw new Error(
+          `refusing to push: ${JSON.stringify(branch)} is not a git ref name, and the push refspec is built from it`
+        );
+      }
       // a retried attempt rebuilds the branch off the base, so what the previous attempt pushed is
       // a diverged history a plain push rejects; the lease still refuses to overwrite commits this
       // clone has never seen
-      // -- keeps the branch in git's positional slot: without it a name beginning with a dash is
+      // -- keeps the refspec in git's positional slot: without it a name beginning with a dash is
       // read as an option, and --receive-pack=<cmd> would run that command on the remote
       // --no-verify says the same thing as core.hooksPath above, in the one place it matters most:
       // two independent ways for a planted pre-push to be skipped, rather than one
+      // No -u: git declines to set an upstream when the refspec's source is a raw object id, and
+      // does so silently, exit 0 and no message. Keeping the flag would only claim a tracking
+      // branch the operator does not get — and the worktree this run keeps on failure is exactly
+      // where somebody would type `git push` and find out.
       await refuseIfPlanted(worktreePath);
       const result = await run(
         "git",
@@ -216,10 +240,9 @@ export function createDelivery(runner: Runner, baseBranch?: string, githubToken?
           "--no-verify",
           RECEIVE_PACK,
           "--force-with-lease",
-          "-u",
           "origin",
           "--",
-          branch,
+          `${commit}:refs/heads/${branch}`,
         ]),
         worktreePath
       );

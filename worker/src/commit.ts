@@ -9,7 +9,7 @@ export async function commitAll(
   runner: Runner,
   worktreePath: string,
   message: string
-): Promise<void> {
+): Promise<string> {
   const git = (args: string[]) =>
     runner.run("git", gitArgs(args), {
       cwd: worktreePath,
@@ -19,11 +19,15 @@ export async function commitAll(
 
   const status = await git(["status", "--porcelain"]);
   if (status.code !== 0) throw new Error(`git status failed: ${status.stderr || status.stdout}`);
-  if (!status.stdout.trim()) return;
+  if (!status.stdout.trim()) return "";
 
   const add = await git(["add", "--all", "--"]);
   if (add.code !== 0) throw new Error(`git add failed: ${add.stderr || add.stdout}`);
 
   const commit = await git(["commit", "--no-verify", "-m", message]);
   if (commit.code !== 0) throw new Error(`git commit failed: ${commit.stderr || commit.stdout}`);
+
+  const head = await git(["rev-parse", "HEAD"]);
+  if (head.code !== 0) throw new Error(`git rev-parse failed: ${head.stderr || head.stdout}`);
+  return head.stdout.trim();
 }

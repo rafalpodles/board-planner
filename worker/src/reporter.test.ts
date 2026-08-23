@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { StatusIds } from "./api.js";
-import { createReporter } from "./reporter.js";
+import { createReporter, ReleaseMemory } from "./reporter.js";
 import { ClaimedTask } from "./types.js";
 import { claimedTask } from "./__fixtures__/task.js";
 
@@ -214,6 +214,32 @@ describe("createReporter", () => {
 
     expect(api.comment).toHaveBeenCalledTimes(1);
     expect(api.release).toHaveBeenCalledTimes(2);
+  });
+
+  // The reporter is built per run (pipeline.ts), so a dedupe that lives inside one can never fire
+  // across runs — which is the only place it matters. A base that cannot be resolved recurs on
+  // every poll: at the default 30 s that is ~120 identical comments an hour on one card, each
+  // dispatching a webhook and a notification.
+  it("does not repeat the release comment across runs, given the memory that outlives them", async () => {
+    const api = apiSpy();
+    const memory: ReleaseMemory = new Map();
+
+    await createReporter(api, statuses, vi.fn(), undefined, memory).released(task, "no route to host");
+    await createReporter(api, statuses, vi.fn(), undefined, memory).released(task, "no route to host");
+    await createReporter(api, statuses, vi.fn(), undefined, memory).released(task, "no route to host");
+
+    expect(api.comment).toHaveBeenCalledTimes(1);
+    expect(api.release).toHaveBeenCalledTimes(3);
+  });
+
+  it("comments again across runs when the fault itself changes", async () => {
+    const api = apiSpy();
+    const memory: ReleaseMemory = new Map();
+
+    await createReporter(api, statuses, vi.fn(), undefined, memory).released(task, "no route to host");
+    await createReporter(api, statuses, vi.fn(), undefined, memory).released(task, "usage limit reached");
+
+    expect(api.comment).toHaveBeenCalledTimes(2);
   });
 
   it("comments for every task released for the same reason, not just the first", async () => {
