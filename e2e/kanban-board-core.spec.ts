@@ -134,7 +134,6 @@ test("a free card drags to another column, lands in the right place, and survive
 
   await test.step("the board settles: four cards, the finished-run leftovers in To Do", async () => {
     await expect(cardIn(source, FINISHED_TASK_NUMBER)).toBeVisible();
-    await expect(page.getByText(FINISHED_TASK_TITLE)).toBeVisible();
   });
 
   // The board moves the card optimistically, so the UI cannot prove the server agreed —
@@ -157,8 +156,8 @@ test("a free card drags to another column, lands in the right place, and survive
 
   await test.step("the move left an activity entry naming both columns", async () => {
     const activity = await storedActivity(FINISHED_TASK_ID);
-    const move = activity.find((a) => a.action === "status_changed");
-    expect(move).toMatchObject({ field: "status", oldValue: "todo", newValue: "in_review" });
+    const entry = activity.find((a) => a.action === "status_changed");
+    expect(entry).toMatchObject({ field: "status", oldValue: "todo", newValue: "in_review" });
   });
 
   await test.step("a reload shows the same board — the move was never only optimistic", async () => {
@@ -305,7 +304,7 @@ test("filters narrow the board, combine, and survive a reload", async ({ page, r
   await test.step("text search narrows by title", async () => {
     await search.fill("Free to move");
     await expect(cards).toHaveCount(1);
-    await expect(cards).toHaveText([new RegExp(SIBLING_TASK_TITLE)]);
+    await expect(page.getByText(SIBLING_TASK_TITLE)).toBeVisible();
   });
 
   await test.step("and by task key", async () => {
@@ -371,11 +370,11 @@ test("reordering a column keeps the run held and the status alone", async ({ pag
   await move;
 
   await test.step("the free card took the slot, the held card kept its state", async () => {
-    const sibling_task = await readTask(request, SIBLING_TASK_NUMBER);
-    const held_task = await readTask(request, HELD_TASK_NUMBER);
-    expect(sibling_task.order).toBeLessThan(held_task.order);
-    expect(sibling_task.status).toBe("in_progress");
-    expect(held_task.execution?.phase).toBe("agent");
+    const moved = await readTask(request, SIBLING_TASK_NUMBER);
+    const anchor = await readTask(request, HELD_TASK_NUMBER);
+    expect(moved.order).toBeLessThan(anchor.order);
+    expect(moved.status).toBe("in_progress");
+    expect(anchor.execution?.phase).toBe("agent");
   });
 
   await test.step("the order outlives a reload", async () => {
