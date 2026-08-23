@@ -155,11 +155,32 @@ describe("runStep — a model step", () => {
 
 describe("runStep — a worker action", () => {
   it("pushes on the push step and calls no model", async () => {
+    const c = ctx({ state: { committed: true, commits: ["sha1"], pushed: false, prUrl: "", merged: false, summary: "", lastResult: completed } });
+    await runStep(entry({ key: "push", deterministic: true }), c);
+
+    expect(c.delivery.push).toHaveBeenCalledWith("/wt", "cp-1/x", "sha1");
+    expect(c.executor.execute).not.toHaveBeenCalled();
+  });
+
+  it("refuses nothing itself when no commit was recorded, leaving delivery to say so", async () => {
     const c = ctx();
     await runStep(entry({ key: "push", deterministic: true }), c);
 
-    expect(c.delivery.push).toHaveBeenCalledWith("/wt", "cp-1/x");
-    expect(c.executor.execute).not.toHaveBeenCalled();
+    expect(c.delivery.push).toHaveBeenCalledWith("/wt", "cp-1/x", "");
+  });
+
+  // RunState.commits is documented "oldest first", and the push step reads its *last* element —
+  // so that ordering is load-bearing, not incidental
+  it("pushes the newest of several commits, not the first", async () => {
+    const c = ctx({ commit: vi.fn().mockResolvedValueOnce("sha1").mockResolvedValueOnce("sha2") });
+
+    await runStep(entry({ capability: "edit" }), c);
+    await runStep(entry({ capability: "edit" }), c);
+    expect(c.state.commits).toEqual(["sha1", "sha2"]);
+
+    await runStep(entry({ key: "push", deterministic: true }), c);
+
+    expect(c.delivery.push).toHaveBeenCalledWith("/wt", "cp-1/x", "sha2");
   });
 
   it("remembers the pull request url, and that a merge happened", async () => {
