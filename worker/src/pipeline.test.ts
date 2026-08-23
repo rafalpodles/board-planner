@@ -8,7 +8,7 @@ import { Executor } from "./executor.js";
 import { gitArgs } from "./git-safety.js";
 import { Reporter } from "./reporter.js";
 import { createTelemetry, isOutcome, isQuota, Progress, TelemetryUpdate } from "./telemetry.js";
-import { Workspace } from "./workspace.js";
+import { BaseUnavailableError, Workspace } from "./workspace.js";
 import { ClaimedTask, DiffStats, ExecutionResult, Gate, SnapshotEntry } from "./types.js";
 import { PipelineDeps, resolveStatusIds, runTask } from "./pipeline.js";
 
@@ -91,6 +91,27 @@ function shell(stdout = "", overrides: Partial<CommandResult> = {}): CommandResu
   return { code: 0, stdout, stderr: "", timedOut: false, ...overrides };
 }
 
+const IMPLEMENT_COMMIT_SHA = "sha-implement001";
+
+// A worktree that starts dirty, the way the implement step actually leaves one, and goes clean the
+// moment commitAll's own `git commit` runs — so the sha it hands back is what reaches push, and the
+// unfinishedWork check right after it does not mistake the just-committed tree for leftover work.
+function defaultRunner(): { run: ReturnType<typeof vi.fn> } {
+  let committed = false;
+  const run = vi.fn<Runner["run"]>(async (_command, args) => {
+    if (args.includes("status")) return shell(committed ? "" : " M a.ts\n");
+    if (args.includes("commit")) {
+      committed = true;
+      return shell();
+    }
+    // The provenance guard's range: exactly the commit the mock above made, once it made it.
+    if (args.includes("rev-list")) return shell(committed ? `${IMPLEMENT_COMMIT_SHA}\n` : "");
+    if (args.includes("rev-parse")) return shell(IMPLEMENT_COMMIT_SHA);
+    return shell();
+  });
+  return { run };
+}
+
 function passingGate(name: string) {
   return { name, run: vi.fn<Gate["run"]>().mockResolvedValue({ ok: true, reason: "" }) };
 }
@@ -133,7 +154,7 @@ function harness(overrides: Partial<PipelineDeps> = {}) {
   const delivery = deliverySpy();
   const createDelivery = vi.fn<PipelineDeps["createDelivery"]>(() => delivery);
   const workspace = {
-    create: vi.fn<Workspace["create"]>().mockResolvedValue("/wt"),
+    create: vi.fn<Workspace["create"]>().mockResolvedValue({ path: "/wt", baseSha: "base1" }),
     destroy: vi.fn<Workspace["destroy"]>().mockResolvedValue(undefined),
     listWorktrees: vi.fn<Workspace["listWorktrees"]>().mockResolvedValue([]),
   };
@@ -143,7 +164,7 @@ function harness(overrides: Partial<PipelineDeps> = {}) {
       .mockResolvedValue({ kind: "result", result: completed }),
   };
   const collectDiff = vi.fn<PipelineDeps["collectDiff"]>().mockResolvedValue(diff);
-  const runner = { run: vi.fn<Runner["run"]>().mockResolvedValue(shell()) };
+  const runner = defaultRunner();
   // Every gate passes unless a test says otherwise. What each kind actually does is
   // gates/from-entry.test.ts's subject; this file is about the order they run in.
   const gateFor = vi.fn<PipelineDeps["gateFor"]>((entry) => passingGate(entry.key));
@@ -186,6 +207,15 @@ function gateForOnly(key: string, gate: Gate): PipelineDeps["gateFor"] {
   return (entry) => (entry.key === key ? gate : passingGate(entry.key));
 }
 
+// reporter.gateRejected is mocked throughout this file, so nothing here exercises reporter.ts's
+// own composition. This mirrors it (reporter.ts:107-116) to catch pipeline.ts handing it a branch
+// that contradicts the reason it just gave — reporter.ts's own comment names the hazard directly.
+function composedGateRejectedComment(call: unknown[]): string {
+  const [, gate, reason, branch] = call as [ClaimedTask, string, string, string];
+  const where = branch ? `\n\nThe work is pushed to \`${branch}\` for inspection.` : "";
+  return `The execution worker blocked the merge at the **${gate}** gate.\n\n${reason}${where}`;
+}
+
 describe("resolveStatusIds", () => {
   it("returns the ids when every role maps to a column the board carries", async () => {
     const resolved = await resolveStatusIds(
@@ -210,11 +240,11 @@ describe("resolveStatusIds", () => {
 });
 
 describe("runTask", () => {
-  it("merges and reports done on the happy path", async () => {
+  it("merges and reports done on the happy path, pushing the sha the implement step committed", async () => {
     const h = harness();
     await runTask(h.deps, merging);
 
-    expect(h.delivery.push).toHaveBeenCalledWith("/wt", "cp-158/worker");
+    expect(h.delivery.push).toHaveBeenCalledWith("/wt", "cp-158/worker", IMPLEMENT_COMMIT_SHA);
     expect(h.delivery.openPr).toHaveBeenCalledWith("/wt", merging, "did it");
     expect(h.delivery.merge).toHaveBeenCalledWith("/wt", "https://x/pull/7");
     expect(h.reporter.merged).toHaveBeenCalledWith(merging, "https://x/pull/7", "did it");
@@ -228,11 +258,74 @@ describe("runTask", () => {
     expect(h.createDelivery).toHaveBeenCalledWith(h.runner, "develop");
   });
 
-  it("diffs against the configured base branch", async () => {
+  it("diffs against the worktree's captured base sha, not the configured branch name", async () => {
     const h = harness({ config: { ...config, baseBranch: "develop" } });
+    h.workspace.create.mockResolvedValue({ path: "/wt", baseSha: "base111" });
     await runTask(h.deps, task);
 
-    expect(h.collectDiff).toHaveBeenCalledWith(h.runner, "/wt", "develop");
+    expect(h.collectDiff).toHaveBeenCalledWith(h.runner, "/wt", "base111");
+  });
+
+  // A base that could not be established is the machine's failure, not the task's. requeued charges
+  // the attempt and nothing ever resets execution.attempts, so charging one unreachable remote to
+  // the queue parks every task in it in front of a human, permanently, for a network problem.
+  it("releases the task with its attempt refunded when the base cannot be established", async () => {
+    const h = harness();
+    h.workspace.create.mockRejectedValue(
+      new BaseUnavailableError("could not resolve base branch main: no route to host")
+    );
+
+    const disposition = await runTask(h.deps, task);
+
+    expect(disposition).toBe("machine-fault");
+    expect(h.reporter.released).toHaveBeenCalled();
+    expect(h.reporter.requeued).not.toHaveBeenCalled();
+    expect(h.reporter.released.mock.calls[0][1]).toMatch(/no route to host/);
+  });
+
+  // The other half of the taxonomy. A remote that answers and reports no such ref is this project's
+  // configuration — a default branch of master under a policy default of main, a branch renamed
+  // away, an empty repository. Refunding that would circle the task through the approved column for
+  // ever with nothing on the machine able to fix it, and would end every pass on a project that is
+  // merely misconfigured. It spends the attempt so a human eventually sees it.
+  it("charges the attempt, and reports no machine fault, when the remote has no such base branch", async () => {
+    const h = harness();
+    h.workspace.create.mockRejectedValue(
+      new BaseUnavailableError(
+        "could not resolve base branch main: ssh://git@github.com/x/y did not report refs/heads/main",
+        "configuration"
+      )
+    );
+
+    const disposition = await runTask(h.deps, task);
+
+    expect(disposition).toBeUndefined();
+    expect(h.reporter.requeued).toHaveBeenCalled();
+    expect(h.reporter.released).not.toHaveBeenCalled();
+    expect(h.reporter.requeued.mock.calls[0][1]).toMatch(/did not report refs\/heads\/main/);
+  });
+
+  it("writes the machine fault to the worker's own log, not only to the board", async () => {
+    const logError = vi.fn();
+    const h = harness({ logError });
+    h.workspace.create.mockRejectedValue(new BaseUnavailableError("no route to host"));
+
+    await runTask(h.deps, task);
+
+    expect(logError).toHaveBeenCalledWith(expect.stringMatching(/CP-158.*no route to host/));
+  });
+
+  // Everything else that can go wrong creating a worktree is still the task's problem and still
+  // spends the attempt — a task whose own key or branch breaks the worktree must run out of retries.
+  it("still charges the attempt when the worktree fails for a reason that is not the base", async () => {
+    const h = harness();
+    h.workspace.create.mockRejectedValue(new Error("worktree add failed"));
+
+    const disposition = await runTask(h.deps, task);
+
+    expect(disposition).toBeUndefined();
+    expect(h.reporter.requeued).toHaveBeenCalled();
+    expect(h.reporter.released).not.toHaveBeenCalled();
   });
 
   it("resolves the board and builds a reporter for every task, not once per process", async () => {
@@ -593,12 +686,61 @@ describe("runTask", () => {
     expect(h.reporter.requeued).not.toHaveBeenCalled();
   });
 
-  it("pushes the rejected branch before discarding the worktree", async () => {
+  it("pushes the rejected branch before discarding the worktree, naming the sha it committed", async () => {
     const h = harness({ gateFor: () => rejectingGate("diff-size", "too big") });
     await runTask(h.deps, running("implement", "diff-size"));
 
-    expect(h.delivery.push).toHaveBeenCalledWith("/wt", "cp-158/worker");
+    expect(h.delivery.push).toHaveBeenCalledWith("/wt", "cp-158/worker", IMPLEMENT_COMMIT_SHA);
     expect(h.workspace.destroy).toHaveBeenCalledWith("CP-158");
+  });
+
+  // Every other test in this file runs a single writing step, where commits[0] and the last commit
+  // are the same value — so none of them can tell a correct index from a stale one. Two writing
+  // steps is the smallest arrangement where the difference exists at all.
+  it("pushes the last commit the run made, not its first, when a gate rejects after two writing steps", async () => {
+    const FIRST = "sha-first00001";
+    const LAST = "sha-last000001";
+    let statusCalls = 0;
+    let commitsMade = 0;
+    const runner = {
+      run: vi.fn<Runner["run"]>(async (_command, args) => {
+        // dirty before each commit, clean at the check that follows it
+        if (args.includes("status")) {
+          statusCalls += 1;
+          return shell(statusCalls % 2 === 1 ? " M a.ts\n" : "");
+        }
+        if (args.includes("commit")) {
+          commitsMade += 1;
+          return shell();
+        }
+        // the provenance guard's range: newest first, exactly the commits made so far
+        if (args.includes("rev-list")) {
+          return shell(commitsMade >= 2 ? `${LAST}\n${FIRST}\n` : commitsMade === 1 ? `${FIRST}\n` : "");
+        }
+        if (args.includes("rev-parse")) return shell(commitsMade >= 2 ? LAST : FIRST);
+        return shell();
+      }),
+    };
+    const second: SnapshotEntry = {
+      key: "polish",
+      kind: "step",
+      name: "Polish",
+      prompt: "tidy it",
+      capability: "edit",
+    };
+    const h = harness({ runner, gateFor: () => rejectingGate("diff-size", "too big") });
+    const twoWrites = {
+      ...task,
+      agent: agentOf([
+        KNOWN.get("implement")!,
+        second,
+        { key: "diff-size", kind: "gate", name: "diff-size", gateKind: "diff-size" },
+      ]),
+    };
+
+    await runTask(h.deps, twoWrites);
+
+    expect(h.delivery.push).toHaveBeenCalledWith("/wt", "cp-158/worker", LAST);
   });
 
   it("says so in the comment and keeps the worktree when the rejected branch will not push", async () => {
@@ -611,10 +753,45 @@ describe("runTask", () => {
     });
     await runTask(h.deps, running("implement", "diff-size"));
 
-    const reason = h.reporter.gateRejected.mock.calls[0][2];
+    const call = h.reporter.gateRejected.mock.calls[0];
+    const [, , reason, branch] = call;
     expect(reason).toMatch(/too big/);
     expect(reason).toMatch(/stale info/);
     expect(reason).toMatch(/not on the remote/);
+    // The bug this guards: a failed push must not also promise the branch is there to inspect.
+    expect(branch).toBe("");
+    expect(composedGateRejectedComment(call)).not.toMatch(/is pushed to/);
+    expect(h.workspace.destroy).not.toHaveBeenCalled();
+  });
+
+  it("refuses to push the rejected branch too when the range carries a commit this run did not make", async () => {
+    let committed = false;
+    const runner = {
+      run: vi.fn<Runner["run"]>(async (_command, args) => {
+        if (args.includes("status")) return shell(committed ? "" : " M a.ts\n");
+        if (args.includes("commit")) {
+          committed = true;
+          return shell();
+        }
+        // A foreign sha alongside the real one — planted the way an agent with Write under .git
+        // could, not something this run's own commit() calls ever produced.
+        if (args.includes("rev-list")) return shell(`shaX\n${IMPLEMENT_COMMIT_SHA}\n`);
+        if (args.includes("rev-parse")) return shell(IMPLEMENT_COMMIT_SHA);
+        return shell();
+      }),
+    };
+    const h = harness({ runner, gateFor: () => rejectingGate("diff-size", "too big") });
+    await runTask(h.deps, running("implement", "diff-size"));
+
+    expect(h.delivery.push).not.toHaveBeenCalled();
+    const call = h.reporter.gateRejected.mock.calls[0];
+    const [, , reason, branch] = call;
+    expect(reason).toMatch(/too big/);
+    expect(reason).toMatch(/refusing to push/);
+    expect(reason).toMatch(/shaX/);
+    expect(reason).toMatch(/not on the remote/);
+    expect(branch).toBe("");
+    expect(composedGateRejectedComment(call)).not.toMatch(/is pushed to/);
     expect(h.workspace.destroy).not.toHaveBeenCalled();
   });
 
@@ -681,7 +858,7 @@ describe("runTask", () => {
 
   it("never rejects, even when the cleanup itself throws", async () => {
     const workspace = {
-      create: vi.fn<Workspace["create"]>().mockResolvedValue("/wt"),
+      create: vi.fn<Workspace["create"]>().mockResolvedValue({ path: "/wt", baseSha: "base1" }),
       destroy: vi.fn<Workspace["destroy"]>(() => {
         throw new Error("worktree is locked");
       }),
@@ -760,7 +937,11 @@ describe("runTask", () => {
   it("does not judge the tree after a gate, only after a step that could write", async () => {
     let calls = 0;
     const runner = {
-      run: vi.fn<Runner["run"]>(async () => {
+      run: vi.fn<Runner["run"]>(async (_command, args) => {
+        // The provenance guard's rev-list/rev-parse are not the "is the tree dirty" check this
+        // test is about — an untampered range with no commits made must still pass it.
+        if (args.includes("rev-list")) return shell("");
+        if (args.includes("rev-parse")) return shell("base1");
         calls += 1;
         return shell(calls > 2 ? "?? dist/main.js\n" : "");
       }),
@@ -930,8 +1111,12 @@ describe("runTask", () => {
   it("keeps the worktree when a later step blocks after an earlier one committed", async () => {
     let calls = 0;
     const runner = {
-      run: vi.fn<Runner["run"]>(async () => {
+      run: vi.fn<Runner["run"]>(async (_command, args) => {
         calls += 1;
+        // rev-parse HEAD is what commitAll hands back as the sha it made — a real commit always
+        // resolves it, so a mock that left it empty would prove nothing about state.committed
+        // beyond what an unconditional flag already faked.
+        if (args.includes("rev-parse")) return shell(IMPLEMENT_COMMIT_SHA);
         // 1: the commit's status, dirty so a commit happens; the rest clean
         return calls === 1 ? shell(" M src/a.ts\n") : shell("");
       }),
