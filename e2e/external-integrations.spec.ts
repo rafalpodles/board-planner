@@ -22,14 +22,21 @@ import {
  *
  * **Two of the four scenarios the task lists cannot be driven here, and are not faked.**
  *
- * *Webhook delivery to a local receiver.* `dispatchWebhooks` goes through `safeFetch`, which
- * accepts https and a public address only, with no loopback carve-out (BP-303, and the sibling
- * `isAllowedMcpServerUrl` shows the carve-out was a deliberate choice made for MCP and not for
- * webhooks). Every route to a receiver on this machine is closed: http is refused by scheme,
- * 127.0.0.1 by literal, `localhost` and `*.local` by name, and a public name that resolves inward
- * by the DNS check at every redirect hop. So a delivery cannot be received here, and the header it
- * would carry cannot be inspected — which leaves the guard itself as the thing worth asserting,
- * and it is asserted below with a receiver that demonstrably records what it is sent.
+ * *Webhook delivery to a local receiver.* A receiver on this machine cannot be delivered to at
+ * all. `dispatchWebhooks` gates on `isAllowedWebhookUrl`, whose first line refuses anything that is
+ * not https (`src/lib/url-validation.ts`), and `safeFetch` behind it refuses loopback and private
+ * addresses by literal, by name, and by resolving every redirect hop (BP-303 — the sibling
+ * `isAllowedMcpServerUrl` shows the loopback carve-out was a deliberate choice made for MCP and not
+ * for webhooks). So no delivery can be received here and the signature it would carry cannot be
+ * inspected.
+ *
+ * **Exactly one of those layers is asserted below, and it is the scheme.** A plain-HTTP receiver is
+ * refused before the address is ever looked at, and giving the receiver an https face does not help:
+ * with the address guards removed the app would open TLS against a plain-HTTP socket and record
+ * nothing, so a delivered/not-delivered instrument cannot tell a fired guard from a failed
+ * handshake. The address and name branches are unit-tested in `src/lib/safe-fetch.test.ts` and
+ * `src/lib/private-address.ts`'s callers; claiming them here would be a second copy of a test this
+ * file cannot actually run.
  *
  * There is also no retry to test: `dispatchWebhooks` fires once and swallows the outcome
  * (`.catch(() => {})`). The task's "retry after failure" describes behaviour the code does not
@@ -81,7 +88,7 @@ test.describe("webhook delivery", () => {
     await request.post(`${WEBHOOK_RECEIVER_URL}/reset`);
   });
 
-  test("a board event is never delivered to an address on this machine", async ({ request }) => {
+  test("a board event is never delivered to an http endpoint", async ({ request }) => {
     // The control, first: the receiver records what reaches it, so the silence below is the app's
     // silence rather than an instrument that was never listening.
     const direct = await request.post(`${WEBHOOK_RECEIVER_URL}/control`, {
@@ -91,6 +98,8 @@ test.describe("webhook delivery", () => {
     expect(direct.status()).toBe(200);
     expect(await deliveries(request)).toHaveLength(1);
 
+    // http, so `isAllowedWebhookUrl` refuses it on the scheme — see the note at the top of this
+    // file for the layers below that one, and why they cannot be reached from here
     await seedWebhook(`${WEBHOOK_RECEIVER_URL}/hook`);
 
     const created = await request.post(`/api/projects/${PROJECT_KEY}/tasks`, {
@@ -111,19 +120,6 @@ test.describe("webhook delivery", () => {
     expect((await deliveries(request)).filter((d) => d.url === "/control")).toHaveLength(2);
   });
 
-  test("a name that resolves inward is refused too, before DNS", async ({ request }) => {
-    await seedWebhook(`${WEBHOOK_RECEIVER_URL.replace("127.0.0.1", "localhost")}/hook`);
-
-    const created = await request.post(`/api/projects/${PROJECT_KEY}/tasks`, {
-      headers: ADMIN_AUTH,
-      data: { title: "A second event", status: "todo" },
-    });
-    expect(created.status()).toBe(201);
-
-    await new Promise((resolve) => setTimeout(resolve, SETTLE_MS));
-
-    expect(await deliveries(request)).toHaveLength(0);
-  });
 });
 
 test.describe("repository sync", () => {
@@ -135,7 +131,11 @@ test.describe("repository sync", () => {
       data: {},
     });
     expect(response.status()).toBe(400);
-    expect((await response.json()).error).toContain("must be configured");
+    // The whole sentence: the route answers this for a missing repository AND for a missing token,
+    // so a fragment cannot tell which condition fired
+    expect((await response.json()).error).toBe(
+      "A repository URL and a GitHub token must be configured in project settings"
+    );
   });
 
   test("a GitLab repository is not synced as a GitHub one", async ({ request }) => {
@@ -166,7 +166,9 @@ test.describe("repository sync", () => {
     expect((await response.json()).error).toContain("is not a GitLab repository");
   });
 
-  test("a sync a person cannot reach the project for is refused", async ({ request }) => {
+  test("an unauthenticated sync is refused", async ({ request }) => {
+    // No credential at all, so this is `withAuth` refusing — the grant check behind it is not
+    // reached and is not claimed
     const response = await request.post(`/api/projects/${PROJECT_KEY}/github/sync`, {
       headers: { "Sec-Fetch-Site": "same-origin" },
       data: {},
@@ -200,39 +202,38 @@ test.describe("repository sync", () => {
     );
   });
 
-  test("the sync button appears only once a repository and a token are configured", async ({
-    page,
-  }) => {
+  test("the sync button follows the token, and not the repository", async ({ page }) => {
     await signIn(page);
 
     // The catalogue offers the GitHub card behind a picker on a board with nothing connected, and
     // beside the connected ones otherwise — the same two shapes openWebhooks handles in
     // settings-save.spec.ts
+    const cardBody = page.getByText("Links pull requests to tasks by task key", { exact: false });
+
     async function openGitHubCard() {
       await page.goto(SETTINGS);
       await page.getByRole("button", { name: "Integrations", exact: true }).first().click();
       const picker = page.getByRole("button", { name: /Add integration/ });
       if (await picker.isVisible().catch(() => false)) await picker.click();
-      const token = page.getByPlaceholder(/ghp_|token/i).first();
-      if (!(await token.isVisible().catch(() => false))) {
+      if (!(await cardBody.isVisible().catch(() => false))) {
         await page.getByRole("button", { name: /GitHub/ }).first().click();
       }
-      // The card is open: its own field is on screen, so an absent Sync button below is a reading
-      // of the card rather than of a page that never rendered it
-      await expect(page.getByPlaceholder("https://github.com/owner/repo")).toBeVisible();
+      // The card's own body, not the repository field beside it: that field renders whether or not
+      // this card was ever opened, so an absent button below would otherwise be a reading of the
+      // page rather than of the card
+      await expect(cardBody).toBeVisible();
     }
 
-    // Nothing configured: the action that would call GitHub is not offered
-    await openGitHubCard();
-    await expect(page.getByRole("button", { name: "Sync pull requests now" })).toHaveCount(0);
+    const syncButton = page.getByRole("button", { name: "Sync pull requests now" });
 
-    // The control. Without it "the button is absent" is satisfied by a settings page that failed
-    // to render the GitHub card at all, which is the same reading for a different reason.
-    await seedRepository({
-      repositoryUrl: "https://github.com/example/board",
-      githubToken: "e2e-token-never-called",
-    });
     await openGitHubCard();
-    await expect(page.getByRole("button", { name: "Sync pull requests now" })).toBeVisible();
+    await expect(syncButton).toHaveCount(0);
+
+    // A token and no repository. The component's condition is `githubTokenSet` alone, so the button
+    // appears here — the missing repository is caught by the route, which answers 400 (asserted
+    // above) rather than by hiding the button.
+    await seedRepository({ githubToken: "e2e-token-never-called" });
+    await openGitHubCard();
+    await expect(syncButton).toBeVisible();
   });
 });

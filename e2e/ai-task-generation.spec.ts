@@ -113,8 +113,8 @@ test("a generated task fills the form, is stored with the project's own option i
   await signIn(page);
   const modal = await openNewTaskForm(page);
 
-  // The block is rendered only when the server reports AI configured, so its presence is also the
-  // control for the stub being wired up at all
+  // Rendered only when the server reports AI configured — which is the key's presence and nothing
+  // about the stub. What proves the stub is reached is the round trip below.
   const assist = modal.getByPlaceholder("Describe what you need");
   await expect(assist).toBeVisible();
 
@@ -139,7 +139,10 @@ test("a generated task fills the form, is stored with the project's own option i
     await expect(modal.getByText(`Possible duplicate of ${PROJECT_KEY}-2`)).toBeVisible();
     await expect(modal.getByText(GENERATED.duplicateReason)).toBeVisible();
     await expect(modal.getByText(GENERATED.dependencyReason)).toBeVisible();
-    await expect(modal.getByText(`${PROJECT_KEY}-1`, { exact: false }).first()).toBeVisible();
+    // The rows themselves. A bare `TP-1` would also match TP-10 and says nothing about which
+    // direction the dependency was suggested in.
+    await expect(modal.getByText(`Blocked by: ${PROJECT_KEY}-1`)).toBeVisible();
+    await expect(modal.getByText(`Would block: ${PROJECT_KEY}-3`)).toBeVisible();
   });
 
   await test.step("the prompt was built from this project, not from a template", async () => {

@@ -6,23 +6,27 @@ const PORT = Number(process.env.E2E_PORT ?? 3987);
 export const BASE_URL = `http://localhost:${PORT}`;
 
 // The PM agent's model, replaced by a local script. Its own port so the dev server's is free.
-const PM_STUB_PORT = Number(process.env.PM_STUB_PORT ?? 3988);
+const PM_STUB_PORT = Number(process.env.PM_STUB_PORT ?? PORT + 1);
 const PM_STUB_URL = `http://localhost:${PM_STUB_PORT}`;
 
-// The model behind AI task generation, replaced the same way. Derived from the PM stub's port
-// rather than given a default of its own, so isolating a run — machines here are shared — stays
-// two environment variables rather than three.
-const AI_STUB_PORT = Number(process.env.AI_STUB_PORT ?? PM_STUB_PORT + 1);
+// The model behind AI task generation, replaced the same way.
+//
+// A run owns E2E_PORT through E2E_PORT+3, and every stub derives from that one number so setting
+// it reserves the whole block. Giving each stub a default of its own is what makes two operators
+// following the same "pick two adjacent numbers" habit collide on a port neither of them typed.
+const AI_STUB_PORT = Number(process.env.AI_STUB_PORT ?? PORT + 2);
 export const AI_STUB_URL = `http://localhost:${AI_STUB_PORT}`;
 
-// A secret is set for the same reason PUBLIC_ORIGIN is: signatureHeaders() sends nothing at all
-// without one, so a run that never set it would assert the absence of a header and call it a pass.
+// No test asserts a signature: no delivery can be received here, so there is no header to read
+// (see the note at the top of external-integrations.spec.ts, and BP-408). It is set because
+// signatureHeaders() sends nothing at all without one — so the day a delivery can be received, the
+// first run would otherwise read an unsigned one and call that the behaviour.
 export const WEBHOOK_SECRET = "e2e-webhook-signing-secret";
 
 // A webhook endpoint on this machine, in its own process. A receiver hosted inside the Playwright
 // worker is reachable from the browser and not from the dev server, so a test that opened one
 // would read an empty delivery log whatever the app did.
-const WEBHOOK_RECEIVER_PORT = Number(process.env.WEBHOOK_RECEIVER_PORT ?? AI_STUB_PORT + 1);
+const WEBHOOK_RECEIVER_PORT = Number(process.env.WEBHOOK_RECEIVER_PORT ?? PORT + 3);
 export const WEBHOOK_RECEIVER_URL = `http://127.0.0.1:${WEBHOOK_RECEIVER_PORT}`;
 
 export default defineConfig({

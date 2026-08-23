@@ -8,7 +8,10 @@ import {
   HELD_TASK_TITLE,
   PROJECT_ID,
   PROJECT_KEY,
+  PROJECT_NAME,
+  SECOND_PROJECT_ID,
   SECOND_PROJECT_KEY,
+  SECOND_PROJECT_NAME,
   seed,
   seedSecondProject,
 } from "./seed";
@@ -49,23 +52,11 @@ function pkce(): { verifier: string; challenge: string } {
  */
 async function redirectReceiver(): Promise<{
   url: string;
-  captured: Promise<URLSearchParams>;
+  waitForRedirect: (ms?: number) => Promise<URLSearchParams>;
   close: () => Promise<void>;
 }> {
   let land!: (params: URLSearchParams) => void;
-  let giveUp!: (reason: Error) => void;
-  const captured = new Promise<URLSearchParams>((resolve, reject) => {
-    land = resolve;
-    giveUp = reject;
-  });
-  // A flow that never redirects — a consent screen that re-renders with an error, say — would
-  // otherwise hang here until the test's own 3-minute timeout, which says nothing about where it
-  // stopped
-  const abandon = setTimeout(
-    () => giveUp(new Error("the client was never redirected back to its redirect_uri")),
-    30_000
-  );
-  captured.catch(() => {}).finally(() => clearTimeout(abandon));
+  const captured = new Promise<URLSearchParams>((resolve) => (land = resolve));
 
   const server = createServer((req, res) => {
     land(new URL(req.url ?? "/", "http://127.0.0.1").searchParams);
@@ -76,7 +67,25 @@ async function redirectReceiver(): Promise<{
 
   return {
     url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/callback`,
-    captured,
+    /**
+     * A flow that never redirects — a consent screen that re-renders with an error, say — would
+     * otherwise hang until the test's own timeout, which says nothing about where it stopped.
+     *
+     * The clock starts here rather than when the receiver is built: everything before this point
+     * is Turbopack compiling /oauth/register, /oauth/authorize and the login POST on first use,
+     * which is why the config allows 90s for a navigation. A timer armed at construction would
+     * expire during a legitimate cold start and report it as a missing redirect.
+     */
+    waitForRedirect: (ms = 30_000) =>
+      Promise.race([
+        captured,
+        new Promise<URLSearchParams>((_, reject) =>
+          setTimeout(
+            () => reject(new Error("the client was never redirected back to its redirect_uri")),
+            ms
+          ).unref()
+        ),
+      ]),
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
   };
 }
@@ -84,13 +93,20 @@ async function redirectReceiver(): Promise<{
 /** The transport answers JSON or an SSE frame depending on the call; both carry one JSON-RPC message. */
 function rpcMessage(body: string): { result?: Record<string, unknown>; error?: { message: string } } {
   const trimmed = body.trim();
-  if (trimmed.startsWith("{")) return JSON.parse(trimmed);
-  const data = trimmed
-    .split("\n")
-    .filter((line) => line.startsWith("data:"))
-    .map((line) => line.slice(5).trim())
-    .join("");
-  return JSON.parse(data);
+  const payload = trimmed.startsWith("{")
+    ? trimmed
+    : trimmed
+        .split("\n")
+        .filter((line) => line.startsWith("data:"))
+        .map((line) => line.slice(5).trim())
+        .join("");
+  try {
+    return JSON.parse(payload);
+  } catch {
+    // A refusal's body is composed by mcp-handler, not by this repo, and a test that only wants
+    // the status must not die parsing it
+    return {};
+  }
 }
 
 class McpSession {
@@ -183,13 +199,16 @@ async function authorize(
       await page.check('input[name="access"][value="all"]');
     } else {
       await page.check('input[name="access"][value="limited"]');
+      // Every board this account reaches is offered. Asserted rather than assumed: the point of
+      // ticking one is that another was there to leave unticked.
+      await expect(page.locator('input[name="projects"]')).toHaveCount(2);
       for (const projectId of options.projects) {
         await page.check(`input[name="projects"][value="${projectId}"]`);
       }
     }
     await page.click('button[name="decision"][value="allow"]');
 
-    const params = await receiver.captured;
+    const params = await receiver.waitForRedirect();
     expect(params.get("error"), params.toString()).toBeNull();
     expect(params.get("state")).toBe(state);
     const code = params.get("code") ?? "";
@@ -310,6 +329,12 @@ test.describe("MCP OAuth handshake", () => {
 
     const tasks = await session.callTool("list_tasks", { project: PROJECT_KEY });
     expect(tasks.text).toContain(HELD_TASK_TITLE);
+
+    // The control for the limited-token test below: authorized for everything, this account
+    // reaches both seeded boards
+    const projects = await session.callTool("list_projects");
+    const keys = ((projects.parsed ?? []) as { key: string }[]).map((p) => p.key);
+    expect(keys).toEqual(expect.arrayContaining([PROJECT_KEY, SECOND_PROJECT_KEY]));
   });
 
   test("a token limited to one project reaches only that project's board", async ({
@@ -325,10 +350,67 @@ test.describe("MCP OAuth handshake", () => {
 
     const projects = await session.callTool("list_projects");
     const keys = ((projects.parsed ?? []) as { key: string }[]).map((p) => p.key);
-    // The control: this account is an instance admin and reaches both boards. Only the one ticked
-    // on the consent screen may come back.
+    // This account is an instance admin and reaches both boards — the test above proves it with
+    // the same call. Only the one ticked on the consent screen may come back here.
     expect(keys).toContain(PROJECT_KEY);
     expect(keys).not.toContain(SECOND_PROJECT_KEY);
+
+    // Naming the board by key only re-tests the filter above — `getProjectByKey` resolves through
+    // the listing (`PlannerClient`), so a key it cannot see is a key it cannot use. Worth one
+    // assertion for the user-visible outcome, no more than that.
+    const byKey = await session.callTool("list_tasks", { project: SECOND_PROJECT_KEY });
+    expect(byKey.raw.result?.isError ?? byKey.raw.error).toBeTruthy();
+    expect(JSON.stringify(byKey.raw)).not.toContain(SECOND_PROJECT_NAME);
+
+    // Naming it by id is the independent one: `get_project` tries /api/projects/:id first, which is
+    // the per-project route and its own access check, reached without the listing having any say.
+    const byId = await session.callTool("get_project", { identifier: String(SECOND_PROJECT_ID) });
+    expect(byId.raw.result?.isError ?? byId.raw.error).toBeTruthy();
+    expect(JSON.stringify(byId.raw)).not.toContain(SECOND_PROJECT_NAME);
+
+    // The same two calls at the granted board work, so the refusals are the scope and not a broken
+    // tool
+    const grantedTasks = await session.callTool("list_tasks", { project: PROJECT_KEY });
+    expect(grantedTasks.text).toContain(HELD_TASK_TITLE);
+    const grantedProject = await session.callTool("get_project", { identifier: String(PROJECT_ID) });
+    expect(grantedProject.text).toContain(PROJECT_NAME);
+  });
+
+  test("an authorization naming a redirect address the client never registered is refused", async ({
+    page,
+    request,
+  }) => {
+    const receiver = await redirectReceiver();
+    try {
+      const registration = await request.post("/oauth/register", {
+        data: { client_name: "E2E MCP Client", redirect_uris: [receiver.url] },
+      });
+      const { client_id: clientId } = await registration.json();
+
+      const elsewhere = `${new URL(receiver.url).origin.replace(/:\d+$/, ":1")}/callback`;
+      const query = new URLSearchParams({
+        response_type: "code",
+        client_id: clientId,
+        redirect_uri: elsewhere,
+        code_challenge: pkce().challenge,
+        code_challenge_method: "S256",
+        scope: "mcp",
+        state: "stolen",
+      });
+
+      await page.goto(`/oauth/authorize?${query.toString()}`);
+      await expect(page.getByRole("heading", { name: "Authorization error" })).toBeVisible();
+      await expect(page.getByText("Unknown client or unregistered redirect_uri.")).toBeVisible();
+      // Not a sign-in form: the refusal comes before anybody is asked for a password
+      await expect(page.locator("#u")).toHaveCount(0);
+
+      // The control: the same request with the registered address gets the sign-in form
+      query.set("redirect_uri", receiver.url);
+      await page.goto(`/oauth/authorize?${query.toString()}`);
+      await expect(page.locator("#u")).toBeVisible();
+    } finally {
+      await receiver.close();
+    }
   });
 
   test("the authorization code is single-use and PKCE is verified", async ({ page, request }) => {
@@ -373,7 +455,7 @@ test.describe("MCP OAuth handshake", () => {
       await page.check('input[name="access"][value="all"]');
       await page.click('button[name="decision"][value="allow"]');
 
-      const code = (await receiver.captured).get("code") ?? "";
+      const code = (await receiver.waitForRedirect()).get("code") ?? "";
       expect(code).not.toBe("");
 
       const exchanged = await request.post("/oauth/token", {
@@ -452,7 +534,7 @@ test.describe("MCP OAuth handshake", () => {
       await page.getByRole("button", { name: "Continue" }).click();
       await page.click('button[name="decision"][value="deny"]');
 
-      const params = await receiver.captured;
+      const params = await receiver.waitForRedirect();
       expect(params.get("code")).toBeNull();
       expect(params.get("error")).toBe("access_denied");
       expect(params.get("state")).toBe("denied");
