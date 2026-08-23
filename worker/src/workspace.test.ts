@@ -6,6 +6,7 @@ import { gitArgs } from "./git-safety.js";
 const config = {
   repoPath: "/repo",
   worktreeRoot: "/worktrees",
+  baseBranch: "main",
 } as never;
 
 function runnerReturning(stdout = "") {
@@ -28,13 +29,14 @@ function fakeGit(responses: Record<string, Partial<CommandResult>>) {
 
 describe("createWorkspace", () => {
   it("creates a worktree on a task-keyed branch", async () => {
-    const { runner, run } = runnerReturning();
-    const path = await createWorkspace(config, runner).create("CP-158", "worker");
+    const { runner, run } = runnerReturning("base1\n");
+    const result = await createWorkspace(config, runner).create("CP-158", "worker");
 
-    expect(path).toBe("/worktrees/CP-158");
+    expect(result.path).toBe("/worktrees/CP-158");
+    expect(result.baseSha).toBe("base1");
     expect(run).toHaveBeenCalledWith(
       "git",
-      [...HARDENING_PREFIX, "worktree", "add", "-B", "cp-158/worker", "/worktrees/CP-158"],
+      [...HARDENING_PREFIX, "worktree", "add", "-B", "cp-158/worker", "/worktrees/CP-158", "base1"],
       expect.objectContaining({ cwd: "/repo", env: expect.objectContaining({ GIT_CONFIG_NOSYSTEM: "1" }) }),
     );
     expect(run).not.toHaveBeenCalledWith(
@@ -42,6 +44,29 @@ describe("createWorkspace", () => {
       [...HARDENING_PREFIX, "worktree", "remove", "--force", "/worktrees/CP-158"],
       expect.anything(),
     );
+  });
+
+  it("creates the worktree at a sha resolved before the agent could run", async () => {
+    const { runner, run } = fakeGit({
+      "rev-parse --verify main^{commit}": { stdout: "base111\n" },
+      "worktree list --porcelain": { stdout: "" },
+    });
+    const result = await createWorkspace(config, runner).create("BP-1", "worker");
+
+    expect(result.baseSha).toBe("base111");
+    expect(run).toHaveBeenCalledWith(
+      "git",
+      [...HARDENING_PREFIX, "worktree", "add", "-B", "bp-1/worker", "/worktrees/BP-1", "base111"],
+      expect.anything(),
+    );
+  });
+
+  it("refuses when the base branch does not resolve", async () => {
+    const { runner } = fakeGit({
+      "rev-parse --verify main^{commit}": { code: 128, stderr: "unknown revision" },
+      "worktree list --porcelain": { stdout: "" },
+    });
+    await expect(createWorkspace(config, runner).create("BP-1", "worker")).rejects.toThrow(/base/i);
   });
 
   it("neutralises system and repository git config on every call it makes", async () => {
@@ -56,7 +81,8 @@ describe("createWorkspace", () => {
 
   it("throws when git fails to create the worktree", async () => {
     const { runner } = fakeGit({
-      "worktree add -B cp-158/worker /worktrees/CP-158": { code: 1, stderr: "exists" },
+      "rev-parse --verify main^{commit}": { stdout: "base1\n" },
+      "worktree add -B cp-158/worker /worktrees/CP-158 base1": { code: 1, stderr: "exists" },
     });
     await expect(createWorkspace(config, runner).create("CP-158", "worker")).rejects.toThrow(
       /exists/,
@@ -67,6 +93,9 @@ describe("createWorkspace", () => {
     let worktreeExists = true;
     const run = vi.fn(async (_command: string, rawArgs: string[]): Promise<CommandResult> => {
       const args = rawArgs.slice(HARDENING_PREFIX.length);
+      if (args[0] === "rev-parse") {
+        return { code: 0, stdout: "base9\n", stderr: "", timedOut: false };
+      }
       if (args[0] === "worktree" && args[1] === "list") {
         return {
           code: 0,
@@ -93,9 +122,9 @@ describe("createWorkspace", () => {
       return { code: 0, stdout: "", stderr: "", timedOut: false };
     });
 
-    const path = await createWorkspace(config, { run }).create("CP-158", "worker");
+    const result = await createWorkspace(config, { run }).create("CP-158", "worker");
 
-    expect(path).toBe("/worktrees/CP-158");
+    expect(result.path).toBe("/worktrees/CP-158");
     expect(run).toHaveBeenCalledWith(
       "git",
       [...HARDENING_PREFIX, "worktree", "remove", "--force", "/worktrees/CP-158"],
@@ -103,7 +132,7 @@ describe("createWorkspace", () => {
     );
     expect(run).toHaveBeenCalledWith(
       "git",
-      [...HARDENING_PREFIX, "worktree", "add", "-B", "cp-158/worker", "/worktrees/CP-158"],
+      [...HARDENING_PREFIX, "worktree", "add", "-B", "cp-158/worker", "/worktrees/CP-158", "base9"],
       expect.anything(),
     );
   });
