@@ -293,9 +293,9 @@ test("a row edited in the list view really edits the task", async ({ page, reque
 
 test("filters narrow the board, combine, and survive a reload", async ({ page, request }) => {
   // Give the filters something real to chew on: one high-priority bug, one assigned task
-  await patchTask(request, DECOY_TASK_ID, { priority: "high" });
-  await patchTask(request, FINISHED_TASK_ID, { category: "bug" });
-  await patchTask(request, SIBLING_TASK_ID, { assignee: "admin" });
+  await patchTask(request, String(DECOY_TASK_ID), { priority: "high" });
+  await patchTask(request, String(FINISHED_TASK_ID), { category: "bug" });
+  await patchTask(request, String(SIBLING_TASK_ID), { assignee: "admin" });
 
   await signIn(page);
 
