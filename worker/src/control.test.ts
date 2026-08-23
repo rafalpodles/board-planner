@@ -33,7 +33,7 @@ function handlerStub() {
 function depsWith(overrides: Partial<ControlDeps> = {}): ControlDeps {
   return {
     apiBaseUrl: "https://app.example.com",
-    identitySource: { read: () => JSON.stringify({ workerId: "w1", credential: "cpw_x" }) },
+    identitySource: { read: () => JSON.stringify({ workerId: "6a7c686f70ed274cf658b1b3", credential: "cpw_x" }) },
     handlers: handlerStub(),
     log: vi.fn(),
     ...overrides,
@@ -168,9 +168,9 @@ describe("connectControl — frame parsing", () => {
 
     await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(1));
     const [url, init] = fetchImpl.mock.calls[0];
-    expect(url).toBe("https://app.example.com/api/workers/w1/stream");
+    expect(url).toBe("https://app.example.com/api/workers/6a7c686f70ed274cf658b1b3/stream");
     expect(init.headers.Authorization).toBe("Bearer cpw_x");
-    expect(init.headers["X-Worker-Id"]).toBe("w1");
+    expect(init.headers["X-Worker-Id"]).toBe("6a7c686f70ed274cf658b1b3");
     expect(init.headers["X-CP-Protocol"]).toBe("1");
     control.close();
   });
@@ -269,7 +269,7 @@ describe("connectControl — reconnect scheduling", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(fetchImpl).not.toHaveBeenCalled();
 
-    text = JSON.stringify({ workerId: "w1", credential: "cpw_x" });
+    text = JSON.stringify({ workerId: "6a7c686f70ed274cf658b1b3", credential: "cpw_x" });
     await vi.advanceTimersByTimeAsync(1000);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
 

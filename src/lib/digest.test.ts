@@ -7,6 +7,9 @@ const userFind = vi.fn();
 const userFindOneAndUpdate = vi.fn();
 const notificationFind = vi.fn();
 const notificationCount = vi.fn();
+const grantFind = vi.fn();
+
+let grantedProjects: string[] = [];
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/email", () => ({
@@ -17,6 +20,14 @@ vi.mock("@/lib/session", () => ({ selfOrigin: () => selfOrigin() }));
 vi.mock("@/models/user", () => ({
   User: { find: (...a: unknown[]) => userFind(...a), findOneAndUpdate: (...a: unknown[]) => userFindOneAndUpdate(...a) },
 }));
+vi.mock("@/models/grant", () => ({
+  Grant: {
+    find: (...a: unknown[]) => {
+      grantFind(...a);
+      return { select: () => ({ lean: async () => grantedProjects.map((id) => ({ object: id })) }) };
+    },
+  },
+}));
 vi.mock("@/models/notification", () => ({
   Notification: {
     find: (...a: unknown[]) => notificationFind(...a),
@@ -24,27 +35,44 @@ vi.mock("@/models/notification", () => ({
   },
 }));
 
-const { digestTick, dueDigestDay, digestHour, digestTimezone, DIGEST_ROW_LIMIT } = await import(
+const { digestTick, dueDigestDay, digestHour, digestTimezone, DIGEST_ROW_LIMIT, DIGEST_SCAN_LIMIT } = await import(
   "@/lib/digest"
 );
 
-const WAITING = [{ _id: "u1", email: "rpo@example.com", username: "rpo" }];
+const BOARD = "69a52e3b399b27d3cbb2c5a5";
+const SECOND_BOARD = "69a52e3b399b27d3cbb2c5a7";
+// `role` is what the grant lookup reads; `emailNotifications` is what the grid falls back to for
+// an account that predates it. The digest asks both questions, so the fixture answers both.
+const WAITING = [
+  { _id: "u1", email: "rpo@example.com", username: "rpo", role: "member", emailNotifications: true },
+];
 
-/** `shown` rows come back from the page; `total` is what the count says is really waiting. */
+const PROJECT = "507f1f77bcf86cd799439021";
+
+/**
+ * Rows are stamped oldest-first, and the mock honours BOTH `sort` and `limit`. A mock that ignores
+ * either can only ever confirm the chain resolves: ignoring `limit` hid the scan ceiling, and
+ * ignoring `sort` let a test named for the ordering pass with the ordering reverted.
+ */
 function notifications(shown: number, total = shown) {
-  const rows = Array.from({ length: shown }, (_, i) => ({
+  const rows = Array.from({ length: total }, (_, i) => ({
     title: `BP-${i + 1} moved to In Review`,
+    type: "status_changed" as const,
     task: { taskNumber: i + 1 },
-    project: { key: "BP" },
+    project: { _id: PROJECT, key: "BP" },
+    createdAt: new Date(Date.UTC(2026, 7, 17, 0, i)),
   }));
   notificationFind.mockReturnValue({
-    sort: () => ({
-      limit: () => ({
-        populate: () => ({ populate: () => ({ lean: async () => rows }) }),
-      }),
-    }),
+    sort: (spec: Record<string, number>) => {
+      const ordered = spec.createdAt === -1 ? [...rows].reverse() : rows;
+      return {
+        limit: (n: number) => ({
+          populate: () => ({ populate: () => ({ lean: async () => ordered.slice(0, n) }) }),
+        }),
+      };
+    },
   });
-  notificationCount.mockResolvedValue(total);
+  void shown;
 }
 
 const sent = () => sendEmail.mock.calls.at(-1)?.[0] as {
@@ -61,6 +89,7 @@ beforeEach(() => {
   userFind.mockReturnValue({ lean: async () => WAITING });
   userFindOneAndUpdate.mockResolvedValue({ _id: "u1" });
   notifications(3);
+  grantedProjects = [BOARD, SECOND_BOARD];
   delete process.env.DIGEST_HOUR;
   delete process.env.DIGEST_TIMEZONE;
 });
@@ -110,7 +139,7 @@ describe("digestTick", () => {
     expect(sent().html).toContain('href="https://app.example.com/projects/BP/tasks/2"');
     expect(sent().text).toContain("Open my tasks: https://app.example.com/my-tasks");
     expect(sent().headers?.["List-Unsubscribe"]).toBe(
-      "<https://app.example.com/settings/profile>"
+      "<https://app.example.com/settings/notifications>"
     );
   });
 
@@ -167,23 +196,163 @@ describe("digestTick", () => {
 
     const [filter] = userFind.mock.calls.at(-1) ?? [];
     expect(filter).toEqual({
-      // Turning email notifications off means no email, digest included
-      emailNotifications: true,
       emailDigest: true,
       email: { $ne: "" },
       lastDigestDay: { $ne: "2026-08-17" },
     });
   });
 
+  // Turning mail off means no mail, digest included — decided in code now, because the condition
+  // reads over a grid keyed by event
+  it("leaves out somebody whose grid has mail off everywhere", async () => {
+    userFind.mockReturnValue({
+      lean: async () => [{ ...WAITING[0], emailNotifications: false }],
+    });
+
+    expect(await digestTick(morning)).toBe(0);
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  // The point of storing rows the bell hides: turning the in-app column off must not empty the
+  // morning mail as well, or the two switches would silently cancel each other out
+  it("lists a row the bell was told to hide, when the mail column is on", async () => {
+    userFind.mockReturnValue({
+      lean: async () => [
+        {
+          ...WAITING[0],
+          notifications: {
+            defaults: { status_changed: { inApp: false, email: true, chat: false } },
+            projects: [],
+          },
+        },
+      ],
+    });
+
+    expect(await digestTick(morning)).toBe(1);
+    expect(sent().text).toContain("BP-1: moved to In Review");
+  });
+
+  // Muting a project has to hold in the morning too, or it only silences the day
+  it("drops the rows belonging to a project muted in the mail column", async () => {
+    userFind.mockReturnValue({
+      lean: async () => [
+        {
+          ...WAITING[0],
+          notifications: {
+            defaults: { status_changed: { inApp: true, email: true, chat: false } },
+            projects: [
+              {
+                project: PROJECT,
+                matrix: { status_changed: { inApp: true, email: false, chat: false } },
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+    expect(await digestTick(morning)).toBe(0);
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
   // One person's mail server refusing must not cost everybody else their digest
   it("keeps going when a send fails", async () => {
     userFind.mockReturnValue({
-      lean: async () => [...WAITING, { _id: "u2", email: "b@example.com", username: "b" }],
+      lean: async () => [
+        ...WAITING,
+        { _id: "u2", email: "b@example.com", username: "b", emailNotifications: true },
+      ],
     });
     userFindOneAndUpdate.mockResolvedValue({ _id: "x" });
     sendEmail.mockRejectedValueOnce(new Error("smtp down"));
 
     expect(await digestTick(morning)).toBe(1);
     expect(sendEmail).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("past the scan ceiling", () => {
+  const morning = new Date("2026-08-17T05:30:00Z");
+
+  // The count stops being a count once the read is capped, and a mail that prints a precise
+  // number nobody computed is the silent cap this file already warns about, wearing a number.
+  // Asserted on the SUBJECT: the "and N more" line contains the same words, so a body assertion
+  // passed with the heading reverted to an exact figure.
+  it("says the remainder is a floor rather than a total", async () => {
+    notifications(DIGEST_SCAN_LIMIT + 200);
+
+    expect(await digestTick(morning)).toBe(1);
+    expect(sent().subject).toContain("at least");
+    expect(sent().text).toContain("at least");
+  });
+
+  it("keeps the newest rows rather than the start of the day", async () => {
+    const total = DIGEST_SCAN_LIMIT + 200;
+    notifications(total);
+    await digestTick(morning);
+
+    // Ascending, the ceiling kept the first 500 of the day and the reader never saw what had just
+    // happened. The newest row must be in the mail and the oldest must not.
+    expect(sent().text).toContain(`BP-${total}:`);
+    expect(sent().text).not.toContain("BP-1:");
+  });
+
+  it("says nothing about a floor when everything fitted", async () => {
+    notifications(3);
+    await digestTick(morning);
+
+    expect(sent().subject).not.toContain("at least");
+    expect(sent().text).not.toContain("at least");
+  });
+});
+
+// BP-328. The digest is the one channel that reads the backlog straight out of the collection, so
+// a row banked while somebody still held a grant would be mailed to them the morning after it was
+// revoked — task keys, titles and links included.
+describe("a digest for somebody who lost the board", () => {
+  const DUE = new Date("2026-08-17T06:00:00Z");
+
+  function digestFilter() {
+    return (notificationFind.mock.calls.at(-1) ?? [])[0] as Record<string, unknown>;
+  }
+
+  // Two boards, so a digest that quietly covers only the first is a failure and not a pass.
+  it("carries every board the reader can still reach", async () => {
+    await digestTick(DUE);
+
+    expect(digestFilter().project).toEqual({ $in: [BOARD, SECOND_BOARD] });
+  });
+
+  it("keeps the board they still hold when the other one is taken away", async () => {
+    grantedProjects = [SECOND_BOARD];
+
+    await digestTick(DUE);
+
+    expect(digestFilter().project).toEqual({ $in: [SECOND_BOARD] });
+  });
+
+  it("sends nothing at all to somebody who holds no grant anywhere", async () => {
+    grantedProjects = [];
+
+    await digestTick(DUE);
+
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("leaves an instance admin's digest unconstrained, since they reach every board", async () => {
+    userFind.mockReturnValue({
+      lean: async () => [{ ...WAITING[0], role: "admin" }],
+    });
+
+    await digestTick(DUE);
+
+    expect(digestFilter()).not.toHaveProperty("project");
+  });
+
+  it("asks for the role it needs to tell an admin from a member", async () => {
+    await digestTick(DUE);
+
+    const [, projection] = userFind.mock.calls[0] ?? [];
+    expect(String(projection)).toContain("role");
   });
 });

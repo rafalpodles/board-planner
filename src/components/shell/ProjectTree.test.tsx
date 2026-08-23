@@ -122,13 +122,20 @@ describe("ProjectTree", () => {
     expect(screen.getByText("PM agent")).toBeTruthy();
   });
 
-  it("shows Settings only to admins", () => {
+  /**
+   * Until BP-371 this link was admin-only, and rightly: the page held nothing else. It now holds
+   * each member's own notification settings for the board — `access: "member"` — so hiding the
+   * only route to them would have left the feature reachable by typed URL alone. The page decides
+   * what each person may open, and tells a non-admin in as many words that the rest needs access;
+   * the sub-nav no longer decides it a second time.
+   */
+  it("shows Settings to everyone, because everyone has something on that page", () => {
     renderTree();
     expect(screen.getByText("Settings")).toBeTruthy();
 
     cleanup();
     renderTree({ isAdmin: false });
-    expect(screen.queryByText("Settings")).toBeNull();
+    expect(screen.getByText("Settings")).toBeTruthy();
   });
 
   it("shows Settings to a project admin who is not an instance admin", () => {
@@ -139,12 +146,12 @@ describe("ProjectTree", () => {
     expect(screen.getByText("Settings")).toBeTruthy();
   });
 
-  it("hides Settings from a member of a project they cannot administer", () => {
+  it("shows Settings to a member of a project they cannot administer", () => {
     renderTree({
       isAdmin: false,
       projects: [project({ _id: "1", key: "TP", canAdmin: false })],
     });
-    expect(screen.queryByText("Settings")).toBeNull();
+    expect(screen.getByText("Settings")).toBeTruthy();
   });
 
   it("still keeps New project to instance admins even for a project admin", () => {

@@ -52,6 +52,29 @@ describe("bindRepository", () => {
     expect((a as { worktreeRoot: string }).worktreeRoot).not.toBe((b as { worktreeRoot: string }).worktreeRoot);
   });
 
+  // BP-327, belt and braces: registration.ts refuses a workerId that is not an ObjectId, and this
+  // is the sink that would suffer if anything ever got past it. `join` normalises "..", so the
+  // root has to be checked after it is computed, not before.
+  it.each([
+    "../../../../Users/rpo/Library/LaunchAgents",
+    "..",
+    "../sibling",
+    "/etc",
+  ])("refuses a workerId that puts the worktree root outside cp-worktrees: %s", async (workerId) => {
+    const result = await bindRepository(depsWith({ workerId }), "/repo");
+
+    expect(result.ok).toBe(false);
+    expect((result as { reason: string }).reason).toMatch(/outside/i);
+  });
+
+  it("still nests the worktree root under cp-worktrees for the ids the server actually mints", async () => {
+    const result = await bindRepository(depsWith({ workerId: "6a7c686f70ed274cf658b1b3" }), "/repo");
+
+    expect((result as { worktreeRoot: string }).worktreeRoot).toBe(
+      join("/", "cp-worktrees", "6a7c686f70ed274cf658b1b3")
+    );
+  });
+
   it("refuses a path the operator never allowed", async () => {
     const result = await bindRepository(depsWith({ allowlist: ["/repo"] }), "/tmp/evil");
 
