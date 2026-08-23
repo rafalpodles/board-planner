@@ -76,6 +76,9 @@ describe("delivery does not execute what the agent left in the repository", () =
   const pushedRefs = (): string =>
     execFileSync("git", ["ls-remote", origin], { encoding: "utf8" });
 
+  const headSha = (): string =>
+    execFileSync("git", ["rev-parse", "HEAD"], { cwd: work, encoding: "utf8" }).trim();
+
   const plantProgram = (name: string): string =>
     writeProgram(join(dir, name), `touch ${JSON.stringify(marker)}\nexit 0`);
 
@@ -134,7 +137,7 @@ describe("delivery does not execute what the agent left in the repository", () =
 
   // Hardening that also stopped the branch reaching the remote would be found in production
   it("still pushes the branch", async () => {
-    await createDelivery(createRunner()).push(work, "feature");
+    await createDelivery(createRunner()).push(work, "feature", headSha());
 
     expect(pushedRefs()).toContain("refs/heads/feature");
   });
@@ -144,7 +147,7 @@ describe("delivery does not execute what the agent left in the repository", () =
   it("pushes past a pre-push hook the agent planted, without running it", async () => {
     plantHook(join(work, ".git", "hooks", "pre-push"));
 
-    await createDelivery(createRunner()).push(work, "feature");
+    await createDelivery(createRunner()).push(work, "feature", headSha());
 
     expect(existsSync(marker)).toBe(false);
     expect(pushedRefs()).toContain("refs/heads/feature");
@@ -154,7 +157,7 @@ describe("delivery does not execute what the agent left in the repository", () =
     plantHook(join(dir, "elsewhere", "pre-push"));
     git(work, "config", "core.hooksPath", join(dir, "elsewhere"));
 
-    await createDelivery(pastTheGuard()).push(work, "feature");
+    await createDelivery(pastTheGuard()).push(work, "feature", headSha());
 
     expect(existsSync(marker)).toBe(false);
     expect(pushedRefs()).toContain("refs/heads/feature");
@@ -183,7 +186,7 @@ describe("delivery does not execute what the agent left in the repository", () =
     );
     git(work, "config", "remote.origin.receivepack", planted);
 
-    await createDelivery(pastTheGuard()).push(work, "feature");
+    await createDelivery(pastTheGuard()).push(work, "feature", headSha());
 
     expect(existsSync(marker)).toBe(false);
     expect(pushedRefs()).toContain("refs/heads/feature");
@@ -194,7 +197,7 @@ describe("delivery does not execute what the agent left in the repository", () =
     git(work, "remote", "set-url", "origin", unauthorized);
 
     await createDelivery(pastTheGuard())
-      .push(work, "feature")
+      .push(work, "feature", headSha())
       .catch(() => undefined);
 
     expect(existsSync(marker)).toBe(false);
@@ -205,7 +208,7 @@ describe("delivery does not execute what the agent left in the repository", () =
     git(work, "remote", "set-url", "origin", unauthorized);
 
     await createDelivery(pastTheGuard())
-      .push(work, "feature")
+      .push(work, "feature", headSha())
       .catch(() => undefined);
 
     expect(existsSync(marker)).toBe(false);
@@ -223,7 +226,7 @@ describe("delivery does not execute what the agent left in the repository", () =
     git(work, ...configure(payload));
 
     await createDelivery(pastTheGuard())
-      .push(work, "feature")
+      .push(work, "feature", headSha())
       .catch(() => undefined);
 
     expect(existsSync(marker)).toBe(false);
@@ -237,7 +240,7 @@ describe("delivery does not execute what the agent left in the repository", () =
   it("does not run a proxy command the agent set, and still pushes over it", async () => {
     git(work, "config", "core.gitProxy", plantProgram("planted-proxy"));
 
-    await createDelivery(pastTheGuard()).push(work, "feature");
+    await createDelivery(pastTheGuard()).push(work, "feature", headSha());
 
     expect(existsSync(marker)).toBe(false);
     expect(pushedRefs()).toContain("refs/heads/feature");
@@ -261,7 +264,7 @@ describe("delivery does not execute what the agent left in the repository", () =
     ])("names %s, and the remote never hears from it", async (key, plant) => {
       plant();
 
-      await expect(createDelivery(createRunner()).push(work, "feature")).rejects.toThrow(
+      await expect(createDelivery(createRunner()).push(work, "feature", headSha())).rejects.toThrow(
         new RegExp(key.toLowerCase().replace(/\./g, "\\."))
       );
 
@@ -277,7 +280,7 @@ describe("delivery does not execute what the agent left in the repository", () =
             : createRunner().run(command, args, opts),
       };
 
-      await expect(createDelivery(runner).push(work, "feature")).rejects.toThrow(/unreadable/);
+      await expect(createDelivery(runner).push(work, "feature", headSha())).rejects.toThrow(/unreadable/);
 
       expect(pushedRefs()).not.toContain("refs/heads/feature");
     });
@@ -290,7 +293,7 @@ describe("delivery does not execute what the agent left in the repository", () =
     git(work, "config", "remote.origin.pushurl", destination);
 
     await createDelivery(pastTheGuard())
-      .push(work, "feature")
+      .push(work, "feature", headSha())
       .catch(() => undefined);
 
     expect(existsSync(marker)).toBe(false);

@@ -134,10 +134,11 @@ async function unfinishedWork(runner: Runner, worktreePath: string): Promise<str
 async function pushFailure(
   delivery: Delivery,
   worktreePath: string,
-  branch: string
+  branch: string,
+  commit: string
 ): Promise<string | null> {
   try {
-    await delivery.push(worktreePath, branch);
+    await delivery.push(worktreePath, branch, commit);
     return null;
   } catch (error) {
     return String(error);
@@ -377,7 +378,12 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
           // Otherwise the worktree goes next, so the pushed branch is the only copy a human reaches
           const pushFailed = withholdsPush
             ? null
-            : await pushFailure(delivery, worktree.path, branch);
+            : await pushFailure(
+                delivery,
+                worktree.path,
+                branch,
+                state.commits[state.commits.length - 1] ?? ""
+              );
           if (withholdsPush || pushFailed) keepWorktree = true;
 
           settle("gateRejected", gate.name);

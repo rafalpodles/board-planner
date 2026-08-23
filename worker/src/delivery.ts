@@ -13,7 +13,7 @@ const MAX_OUTPUT_CHARS = 2000;
 const PR_URL = /https?:\/\/[^\s"'<>]*\/pull\/\d+/g;
 
 export interface Delivery {
-  push(worktreePath: string, branch: string): Promise<void>;
+  push(worktreePath: string, branch: string, commit?: string): Promise<void>;
   openPr(worktreePath: string, task: ClaimedTask, summary: string): Promise<string>;
   merge(worktreePath: string, prUrl: string): Promise<void>;
 }
@@ -195,18 +195,31 @@ export function createDelivery(runner: Runner, baseBranch?: string, githubToken?
   }
 
   return {
-    async push(worktreePath, branch) {
+    async push(worktreePath, branch, commit) {
+      // Refused rather than falling back to the branch name: the worktree's ref store is exactly
+      // what an agent running inside it can rewrite, so a push that trusts the branch name sends
+      // whatever that store now says HEAD is, not what a reviewer approved (BP-382).
+      if (!commit) throw new Error("refusing to push: no commit was named");
       // a retried attempt rebuilds the branch off the base, so what the previous attempt pushed is
       // a diverged history a plain push rejects; the lease still refuses to overwrite commits this
       // clone has never seen
-      // -- keeps the branch in git's positional slot: without it a name beginning with a dash is
+      // -- keeps the refspec in git's positional slot: without it a name beginning with a dash is
       // read as an option, and --receive-pack=<cmd> would run that command on the remote
       // --no-verify says the same thing as core.hooksPath above, in the one place it matters most:
       // two independent ways for a planted pre-push to be skipped, rather than one
       await refuseIfPlanted(worktreePath);
       const result = await run(
         "git",
-        ["push", "--no-verify", RECEIVE_PACK, "--force-with-lease", "-u", "origin", "--", branch],
+        [
+          "push",
+          "--no-verify",
+          RECEIVE_PACK,
+          "--force-with-lease",
+          "-u",
+          "origin",
+          "--",
+          `${commit}:refs/heads/${branch}`,
+        ],
         worktreePath
       );
       if (result.code !== 0) throw failure("git push", result);
