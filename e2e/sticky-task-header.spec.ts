@@ -9,6 +9,7 @@ import {
   SIBLING_TASK_ID,
   SIBLING_TASK_KEY,
   SIBLING_TASK_NUMBER,
+  TARGET_COLUMN,
   seed,
 } from "./seed";
 
@@ -189,6 +190,33 @@ test("the close button works from the bottom of a long task", async ({ page }) =
   await page.getByRole("button", { name: "Close task" }).click();
 
   await expect(page).toHaveURL(new RegExp(`/projects/${PROJECT_KEY}$`));
+});
+
+// Pinning the bar gave it a z-index and a container-query containment context, and both are
+// ways to trap a dropdown that used to escape fine
+test("the status menu opens from the pinned header and paints over the task", async ({ page }) => {
+  await signIn(page);
+  await makeTaskTall(page);
+  await page.goto(TASK_URL);
+  await waitForTask(page);
+  await scrollToBottom(scrollport(page, false));
+
+  await bar(page).getByRole("combobox", { name: "Status" }).click();
+
+  const option = page.getByRole("option", { name: TARGET_COLUMN.label });
+  await expect(option).toBeVisible();
+  await expect(option).toBeInViewport();
+
+  // Visible is not the same as reachable: an ancestor could be painting over it
+  const box = (await option.boundingBox())!;
+  const onTop = await page.evaluate(
+    ({ x, y }) => {
+      const el = document.elementFromPoint(x, y);
+      return !!el?.closest("[role=option]");
+    },
+    { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+  );
+  expect(onTop).toBe(true);
 });
 
 test("the header stays pinned inside the modal the board opens", async ({ page }) => {
