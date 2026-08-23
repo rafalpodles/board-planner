@@ -207,6 +207,10 @@ export function createDelivery(runner: Runner, baseBranch?: string, githubToken?
       // read as an option, and --receive-pack=<cmd> would run that command on the remote
       // --no-verify says the same thing as core.hooksPath above, in the one place it matters most:
       // two independent ways for a planted pre-push to be skipped, rather than one
+      // No -u: git declines to set an upstream when the refspec's source is a raw object id, and
+      // does so silently, exit 0 and no message. Keeping the flag would only claim a tracking
+      // branch the operator does not get — and the worktree this run keeps on failure is exactly
+      // where somebody would type `git push` and find out.
       await refuseIfPlanted(worktreePath);
       const result = await run(
         "git",
@@ -215,7 +219,6 @@ export function createDelivery(runner: Runner, baseBranch?: string, githubToken?
           "--no-verify",
           RECEIVE_PACK,
           "--force-with-lease",
-          "-u",
           "origin",
           "--",
           `${commit}:refs/heads/${branch}`,

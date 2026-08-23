@@ -277,6 +277,11 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
           }
           return { code: 0, stdout: AGENT_STREAM, stderr: "", timedOut: false };
         }
+        // The base is resolved off the wire now, so ls-remote has to answer with the ref it was
+        // asked for; whether the *right* ref is picked out is gate-integrity's subject, on real git
+        if (args[0] === "ls-remote") {
+          return { code: 0, stdout: `${REPO}\t${args[args.length - 1]}\n`, stderr: "", timedOut: false };
+        }
         // bindRepository insists the path is its own toplevel; every other git call is content-free
         return {
           code: 0,
@@ -457,6 +462,9 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
           }
           sawAbort = opts.signal?.aborted === true;
           return { code: 143, stdout: "", stderr: "aborted", timedOut: false };
+        }
+        if (args[0] === "ls-remote") {
+          return { code: 0, stdout: `${REPO}\t${args[args.length - 1]}\n`, stderr: "", timedOut: false };
         }
         return { code: 0, stdout: args.includes("rev-parse") ? REPO : args.includes("get-url") ? REMOTE : "", stderr: "", timedOut: false };
       },

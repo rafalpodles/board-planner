@@ -629,6 +629,55 @@ describe("runTask", () => {
     expect(h.workspace.destroy).toHaveBeenCalledWith("CP-158");
   });
 
+  // Every other test in this file runs a single writing step, where commits[0] and the last commit
+  // are the same value — so none of them can tell a correct index from a stale one. Two writing
+  // steps is the smallest arrangement where the difference exists at all.
+  it("pushes the last commit the run made, not its first, when a gate rejects after two writing steps", async () => {
+    const FIRST = "sha-first00001";
+    const LAST = "sha-last000001";
+    let statusCalls = 0;
+    let commitsMade = 0;
+    const runner = {
+      run: vi.fn<Runner["run"]>(async (_command, args) => {
+        // dirty before each commit, clean at the check that follows it
+        if (args.includes("status")) {
+          statusCalls += 1;
+          return shell(statusCalls % 2 === 1 ? " M a.ts\n" : "");
+        }
+        if (args.includes("commit")) {
+          commitsMade += 1;
+          return shell();
+        }
+        // the provenance guard's range: newest first, exactly the commits made so far
+        if (args.includes("rev-list")) {
+          return shell(commitsMade >= 2 ? `${LAST}\n${FIRST}\n` : commitsMade === 1 ? `${FIRST}\n` : "");
+        }
+        if (args.includes("rev-parse")) return shell(commitsMade >= 2 ? LAST : FIRST);
+        return shell();
+      }),
+    };
+    const second: SnapshotEntry = {
+      key: "polish",
+      kind: "step",
+      name: "Polish",
+      prompt: "tidy it",
+      capability: "edit",
+    };
+    const h = harness({ runner, gateFor: () => rejectingGate("diff-size", "too big") });
+    const twoWrites = {
+      ...task,
+      agent: agentOf([
+        KNOWN.get("implement")!,
+        second,
+        { key: "diff-size", kind: "gate", name: "diff-size", gateKind: "diff-size" },
+      ]),
+    };
+
+    await runTask(h.deps, twoWrites);
+
+    expect(h.delivery.push).toHaveBeenCalledWith("/wt", "cp-158/worker", LAST);
+  });
+
   it("says so in the comment and keeps the worktree when the rejected branch will not push", async () => {
     const delivery = deliverySpy({
       push: vi.fn<Delivery["push"]>().mockRejectedValue(new Error("stale info")),
