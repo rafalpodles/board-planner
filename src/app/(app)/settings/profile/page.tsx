@@ -15,6 +15,8 @@ export default function ProfilePage() {
 
   const [email, setEmail] = useState("");
   const [savedEmail, setSavedEmail] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [savedFullName, setSavedFullName] = useState("");
   const [currentPassword, setCurrentPassword] = useState("");
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -23,15 +25,18 @@ export default function ProfilePage() {
   // Trimmed and lowercased the way the server normalises it, so the password prompt does not
   // appear for a stray capital that will not change anything
   const emailChanged = loadFailed ? false : email.trim().toLowerCase() !== savedEmail;
+  const fullNameChanged = loadFailed ? false : fullName.trim() !== savedFullName.trim();
 
   useEffect(() => {
     if (!user) return;
     // Fetch fresh user data
     api
       .get("/api/auth/me")
-      .then((data: { email?: string }) => {
+      .then((data: { email?: string; fullName?: string }) => {
         setEmail(data.email || "");
         setSavedEmail(data.email || "");
+        setFullName(data.fullName || "");
+        setSavedFullName(data.fullName || "");
         setLoaded(true);
       })
       .catch(() => {
@@ -50,8 +55,10 @@ export default function ProfilePage() {
       await api.put("/api/users/me", {
         email,
         ...(emailChanged ? { currentPassword } : {}),
+        ...(fullNameChanged ? { fullName: fullName.trim() } : {}),
       });
       setSavedEmail(email.trim().toLowerCase());
+      setSavedFullName(fullName.trim());
       setCurrentPassword("");
       toast("Profile updated", "success");
     } catch (err) {
@@ -91,7 +98,11 @@ export default function ProfilePage() {
 
         <div>
           <label className="block text-sm font-medium mb-1">Full Name</label>
-          <p className="text-sm text-text-muted">{user?.fullName}</p>
+          <Input
+            value={fullName}
+            onChange={(e) => setFullName(e.target.value)}
+            aria-label="Full name"
+          />
         </div>
 
         <Input
@@ -126,7 +137,15 @@ export default function ProfilePage() {
           page — one switch for e-mail could not say &quot;mentions yes, status changes no&quot;.
         </p>
 
-        <Button onClick={handleSave} disabled={saving || loadFailed || (emailChanged && !currentPassword.trim())}>
+        <Button
+          onClick={handleSave}
+          disabled={
+            saving ||
+            loadFailed ||
+            (emailChanged && !currentPassword.trim()) ||
+            (fullNameChanged && !emailChanged && fullName.trim() === "")
+          }
+        >
           {saving ? "Saving..." : "Save"}
         </Button>
       </div>

@@ -125,14 +125,26 @@ export const PUT = withAuth(async (request, { user }) => {
       updates.email = email;
     }
   }
-  if (typeof body.emailDigest === "boolean") {
+  if (body.emailDigest === true || body.emailDigest === false) {
     updates.emailDigest = body.emailDigest;
   }
-
-  if (typeof body.emailNotifications === "boolean") {
+  if (body.emailNotifications === true || body.emailNotifications === false) {
     updates.emailNotifications = body.emailNotifications;
   }
-  if (typeof body.collapseEmptyColumns === "boolean") {
+  if (body.fullName !== undefined) {
+    if (typeof body.fullName !== "string") {
+      return NextResponse.json({ error: "Invalid fullName" }, { status: 400 });
+    }
+    const name = body.fullName.trim();
+    if (name.length === 0) {
+      return NextResponse.json({ error: "Full name cannot be empty" }, { status: 400 });
+    }
+    if (name.length > 100) {
+      return NextResponse.json({ error: "Full name is too long" }, { status: 400 });
+    }
+    updates.fullName = name;
+  }
+  if (body.collapseEmptyColumns === true || body.collapseEmptyColumns === false) {
     updates.collapseEmptyColumns = body.collapseEmptyColumns;
   }
 
