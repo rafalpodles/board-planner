@@ -290,6 +290,7 @@ function TaskDetailView({
         onToggleWatch={handleToggleWatch}
         onDuplicate={handleDuplicate}
         onAddChild={() => setAddingChild(true)}
+        onDelete={requestDelete}
         onClose={onClose}
       />
 
