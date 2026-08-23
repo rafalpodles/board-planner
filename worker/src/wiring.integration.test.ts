@@ -421,6 +421,7 @@ async function runWorkerAgainstTheBoard(opts: { takeTheTask: boolean }): Promise
         );
       }
       if (command === "claude") return agent(runOpts);
+      if (args[0] === "ls-remote") return ok(`${REPO}\t${args[args.length - 1]}\n`);
       // bindRepository insists the path is its own toplevel; the inventory needs the remote
       if (args.includes("rev-parse")) return ok(REPO);
       if (args.includes("get-url")) return ok(REMOTE);

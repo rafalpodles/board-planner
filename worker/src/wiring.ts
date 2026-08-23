@@ -497,13 +497,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
           createReporter: (client, statusIds) =>
             createReporter(client, statusIds, (message) => deps.logError(message), outbox),
           createDelivery: (runner, baseBranch) => createDelivery(runner, baseBranch, githubToken),
-          workspace: createWorkspace(
-            taskConfig,
-            deps.runner,
-            remoteFetchEnv(githubToken),
-            remoteUrl,
-            deps.logError
-          ),
+          workspace: createWorkspace(taskConfig, deps.runner, remoteFetchEnv(githubToken), remoteUrl),
           executor: createExecutor(taskConfig, deps.runner),
           collectDiff,
           gateFor: gateFromEntry,

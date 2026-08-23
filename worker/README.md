@@ -33,8 +33,8 @@ The gates run in cost order, cheapest first, and the first rejection stops the r
 | `test-run` | the test suite fails |
 | `review` | a second Claude, with a clean context, rejects the diff |
 
-A rejection pushes the branch, comments which gate said no, and routes the task to the review
-column. A usage limit returns the task to the queue with its attempt refunded — it is not the
+A rejection pushes the branch — unless the run committed nothing, or the provenance check refuses
+the history — comments which gate said no, and routes the task to the review column. A usage limit returns the task to the queue with its attempt refunded — it is not the
 task's failure. A crash or timeout also returns it to the queue, but spends the attempt, so a
 repeating failure runs out of retries and lands in front of a human instead of cycling forever.
 
@@ -211,8 +211,29 @@ and `SIGINT` both finish the task in flight before the loop exits.
 - **The executor runs with `bypassPermissions` inside the worktree**, so the worktree is checked
   for uncommitted files before the gates run — an agent cannot hide a change from the gates by
   never staging it.
-- **A rejected branch is always pushed** before its worktree is discarded; if the push fails the
-  worktree is kept and the comment says where it is.
+- **A rejected branch is pushed** before its worktree is discarded, unless the run made no commit
+  at all or its history fails the provenance check below; if the push fails the worktree is kept
+  and the comment says where it is. The push names the commit (`<sha>:refs/heads/<branch>`) rather
+  than the branch, so the shared ref store cannot decide what is sent — which also means the
+  pushed branch gets no upstream in that kept worktree, because git ignores `-u` for a refspec
+  whose source is an object id.
+- **The base a run is judged against comes off the wire, every run.** Before the agent starts, the
+  worker asks the project's own remote for `refs/heads/<baseBranch>`, fetches that exact object,
+  and holds the sha in memory; the worktree is created at it and every gate diffs against it. The
+  local ref is never read, because an agent of any earlier run on this checkout can write it and
+  that writing outlives the run — a poisoned base would put a payload *underneath* an innocent
+  run's own change, where no gate looks. The call that decides the base runs outside the
+  repository, since a repository-local `url.<x>.insteadOf` rewrites even a URL given literally on
+  the command line and no `GIT_CONFIG_*` variable turns that off.
+- **A base that cannot be verified fails the run**, deliberately, rather than falling back to the
+  local ref: a machine that cannot reach the remote is a machine that cannot gate anything, and an
+  agent able to break the fetch would otherwise choose which of the two paths the next run takes.
+  So a worker that is offline, or whose credentials do not cover the transport the server recorded
+  for the project, stops taking work and says why on each attempt — check `bindingError` and the
+  run's own failure detail before assuming the network is at fault.
+- **The worktree is based on `<baseBranch>`, not on whatever the checkout has checked out.** A
+  clone parked on a feature branch used to hand the agent that branch while the gates diffed
+  against the base; runs on such a checkout now start from the base instead.
 - **Worktrees left by a killed worker are reaped**, the first time this process binds each
   project's repository, but only under that project's own derived worktree root (`<repo
   parent>/cp-worktrees/<workerId>`) — the repository checkout and any worktree of your own are

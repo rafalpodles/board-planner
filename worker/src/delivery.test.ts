@@ -75,13 +75,22 @@ describe("push", () => {
         "--no-verify",
         "--receive-pack=git-receive-pack",
         "--force-with-lease",
-        "-u",
         "origin",
         "--",
         "sha1:refs/heads/cp-158/worker",
       ],
       expect.objectContaining({ cwd: "/wt" })
     );
+  });
+
+  // git declines to set an upstream when the refspec's source is a raw object id, and says
+  // nothing about it — exit 0, no message. Carrying -u would advertise a tracking branch the
+  // operator never gets, in the worktree a failed run keeps for them to work in.
+  it("does not carry -u, which a sha refspec silently ignores", async () => {
+    const run = vi.fn().mockResolvedValue(ok);
+    await createDelivery({ run }).push("/wt", "cp-158/worker", COMMIT);
+
+    expect(argsOf(run)).not.toContain("-u");
   });
 
   it("does not send the bare branch name as its own argument", async () => {
