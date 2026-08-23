@@ -292,6 +292,8 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
           timeoutMs: budget.forEntry(config.taskTimeoutMs),
           signal: deps.signal,
           onEvent,
+          baseSha: worktree.baseSha,
+          runner,
         });
         // Never once the merge has landed — see the same guard after the loop. gh pr merge runs
         // without a signal, so the stop is only ever observed after the change is on the base

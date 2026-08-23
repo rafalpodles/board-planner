@@ -104,6 +104,8 @@ function defaultRunner(): { run: ReturnType<typeof vi.fn> } {
       committed = true;
       return shell();
     }
+    // The provenance guard's range: exactly the commit the mock above made, once it made it.
+    if (args.includes("rev-list")) return shell(committed ? `${IMPLEMENT_COMMIT_SHA}\n` : "");
     if (args.includes("rev-parse")) return shell(IMPLEMENT_COMMIT_SHA);
     return shell();
   });
@@ -777,7 +779,11 @@ describe("runTask", () => {
   it("does not judge the tree after a gate, only after a step that could write", async () => {
     let calls = 0;
     const runner = {
-      run: vi.fn<Runner["run"]>(async () => {
+      run: vi.fn<Runner["run"]>(async (_command, args) => {
+        // The provenance guard's rev-list/rev-parse are not the "is the tree dirty" check this
+        // test is about — an untampered range with no commits made must still pass it.
+        if (args.includes("rev-list")) return shell("");
+        if (args.includes("rev-parse")) return shell("base1");
         calls += 1;
         return shell(calls > 2 ? "?? dist/main.js\n" : "");
       }),

@@ -13,6 +13,29 @@ const completed: ExecutionResult = {
 };
 
 function ctx(over: Partial<StepContext> = {}) {
+  const state = over.state ?? {
+    committed: false,
+    commits: [],
+    pushed: false,
+    prUrl: "",
+    merged: false,
+    summary: "",
+    lastResult: completed,
+  };
+  const baseSha = over.baseSha ?? "base";
+  // Mirrors an untampered checkout: the range holds exactly state.commits, and HEAD is their
+  // newest — or baseSha itself when this run made none. Individual tests override `runner` when
+  // they need to exercise the guard's refusal path.
+  const runner = {
+    run: vi.fn(async (_command: string, args: string[]) => {
+      if (args.includes("rev-list")) {
+        const stdout = state.commits.length ? [...state.commits].reverse().join("\n") + "\n" : "";
+        return { code: 0, stdout, stderr: "", timedOut: false };
+      }
+      const head = state.commits[state.commits.length - 1] ?? baseSha;
+      return { code: 0, stdout: `${head}\n`, stderr: "", timedOut: false };
+    }),
+  };
   const context = {
     worktreePath: "/wt",
     branch: "cp-1/x",
@@ -24,9 +47,11 @@ function ctx(over: Partial<StepContext> = {}) {
       merge: vi.fn(async () => {}),
     },
     commit: vi.fn(async () => "sha1"),
-    state: { committed: false, commits: [], pushed: false, prUrl: "", merged: false, summary: "", lastResult: completed },
+    state,
     timeoutMs: 1000,
     onEvent: vi.fn(),
+    baseSha,
+    runner,
     ...over,
   } as unknown as StepContext;
   return context as StepContext & {
@@ -205,5 +230,27 @@ describe("runStep — a worker action", () => {
     const outcome = await runStep(entry({ key: "deploy", deterministic: true }), ctx());
 
     expect(outcome).toEqual({ kind: "error", message: expect.stringContaining("deploy") });
+  });
+
+  it("refuses to push a history it did not write", async () => {
+    const c = ctx({
+      state: { committed: true, commits: ["sha1"], pushed: false, prUrl: "", merged: false, summary: "", lastResult: completed },
+      runner: {
+        run: vi.fn(async (_command: string, args: string[]) =>
+          args.includes("rev-list")
+            ? { code: 0, stdout: "shaX\nsha1\n", stderr: "", timedOut: false }
+            : { code: 0, stdout: "shaX\n", stderr: "", timedOut: false }
+        ),
+      } as never,
+    });
+
+    const outcome = await runStep(entry({ key: "push", deterministic: true }), c);
+
+    expect(outcome).toEqual({
+      kind: "error",
+      message: expect.stringContaining("refusing to push"),
+    });
+    expect(c.delivery.push).not.toHaveBeenCalled();
+    expect(c.state.pushed).toBe(false);
   });
 });
