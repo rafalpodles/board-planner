@@ -6,6 +6,8 @@ import { gitArgs, GIT_SAFE_ENV } from "./git-safety.js";
 
 const GIT_TIMEOUT_MS = 60_000;
 
+type Log = (message: string) => void;
+
 export interface Worktree {
   path: string;
   /** Resolved before the agent runs and held in this process: a ref name is rewritable by the run. */
@@ -36,7 +38,9 @@ export async function reapOrphans(workspace: Workspace, worktreeRoot: string): P
 export function createWorkspace(
   config: WorkerConfig,
   runner: Runner,
-  remoteEnv?: () => NodeJS.ProcessEnv
+  remoteEnv?: () => NodeJS.ProcessEnv,
+  remoteUrl?: string,
+  log: Log = (message) => console.error(message)
 ): Workspace {
   // api.ts refuses a key that is not a name; this is the sink where a key becomes a path, and the
   // only place that can still tell a traversal from a directory name
@@ -80,11 +84,30 @@ export function createWorkspace(
     }
   }
 
-  async function runRemote(args: string[]): Promise<CommandResult> {
-    return runner.run("git", gitArgs(args), {
+  // Neither the transport nor the answer this returns comes from anything the shared, agent-
+  // writable repoPath/.git can redirect:
+  //
+  // - The destination is `url`, not a remote *name*. `origin` would resolve through
+  //   remote.origin.url/pushurl and url.<x>.insteadOf in repoPath/.git/config — the same config
+  //   file repos.ts's dangerousConfigEntry scan never inspects for an ordinary https rewrite
+  //   (it only flags command-executing keys and ext::/file:: transports), so a planted origin
+  //   could point fetch at a server the agent controls, which would then hand back a plausible
+  //   sha with matching objects. `url` is the value the server matched against the project's own
+  //   configured repository (WorkerConfig never carries a path the agent could point elsewhere).
+  //
+  // - No `-c` flags ride along. gitArgs()'s `-c credential.helper=` is the *last* thing git
+  //   evaluates, and for this specific multi-valued key that means it silently discards whatever
+  //   remoteEnv() installed by environment — verified empirically (git-credential-fill only ever
+  //   ran the env-installed helper without a trailing `-c credential.helper=`; adding one back
+  //   made both the planted and the trusted helper go silent, and https fetch always fails).
+  //   remoteEnv() is what these two calls actually need: hardenedGitConfig() already hardens
+  //   hooksPath/fsmonitor/pager/protocol transports for exactly this class of call, same as
+  //   delivery's own push.
+  async function runRemote(env: () => NodeJS.ProcessEnv, args: string[]): Promise<CommandResult> {
+    return runner.run("git", args, {
       cwd: config.repoPath,
       timeoutMs: GIT_TIMEOUT_MS,
-      env: { ...childEnv(["SSH_AUTH_SOCK", "GH_TOKEN", "GITHUB_TOKEN"]), ...remoteEnv!() },
+      env: { ...childEnv(["SSH_AUTH_SOCK", "GH_TOKEN", "GITHUB_TOKEN"]), ...env(), ...GIT_SAFE_ENV },
     });
   }
 
@@ -94,20 +117,20 @@ export function createWorkspace(
   // for a rewritable file next to it. ls-remote's answer is instead read straight off this
   // process's own stdout, in memory, before anything is written to disk; rev-parse is then asked
   // about that exact object id, a content-addressed lookup no planted ref can redirect.
-  async function resolveFreshBase(): Promise<string | null> {
-    const lsRemote = await runRemote(["ls-remote", "--exit-code", "origin", `refs/heads/${config.baseBranch}`]);
+  async function resolveFreshBase(env: () => NodeJS.ProcessEnv, url: string): Promise<string | null> {
+    const lsRemote = await runRemote(env, ["ls-remote", "--exit-code", url, `refs/heads/${config.baseBranch}`]);
     const remoteSha = lsRemote.code === 0 ? lsRemote.stdout.trim().split(/\s+/)[0] : "";
     if (!remoteSha) {
-      console.error(
-        `could not read origin/${config.baseBranch} (${lsRemote.stderr || lsRemote.stdout || "ls-remote failed"}); using the local ref instead`
+      log(
+        `could not read the pinned remote for ${config.baseBranch} (${lsRemote.stderr || lsRemote.stdout || "ls-remote failed"}); using the local ref instead`
       );
       return null;
     }
 
-    const fetched = await runRemote(["fetch", "--no-tags", "origin", config.baseBranch]);
+    const fetched = await runRemote(env, ["fetch", "--no-tags", url, config.baseBranch]);
     if (fetched.code !== 0) {
-      console.error(
-        `could not fetch origin/${config.baseBranch} (${fetched.stderr || fetched.stdout || "fetch failed"}); using the local ref instead`
+      log(
+        `could not fetch ${config.baseBranch} from the pinned remote (${fetched.stderr || fetched.stdout || "fetch failed"}); using the local ref instead`
       );
       return null;
     }
@@ -115,15 +138,15 @@ export function createWorkspace(
     try {
       return (await git(["rev-parse", "--verify", `${remoteSha}^{commit}`])).trim();
     } catch (error) {
-      console.error(
-        `fetched origin/${config.baseBranch} but ${remoteSha} did not resolve locally afterwards (${String(error)}); using the local ref instead`
+      log(
+        `fetched ${config.baseBranch} but ${remoteSha} did not resolve locally afterwards (${String(error)}); using the local ref instead`
       );
       return null;
     }
   }
 
   async function resolveBase(): Promise<string> {
-    const fresh = remoteEnv ? await resolveFreshBase() : null;
+    const fresh = remoteEnv && remoteUrl ? await resolveFreshBase(remoteEnv, remoteUrl) : null;
     if (fresh) return fresh;
     return (await git(["rev-parse", "--verify", `${config.baseBranch}^{commit}`])).trim();
   }

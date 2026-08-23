@@ -14,14 +14,19 @@ function runnerReturning(stdout = "") {
   return { runner: { run }, run };
 }
 
-// Every call carries the hardening flags gitArgs prepends — stripped here so the response maps
-// below keep naming the real git subcommand. What those flags ARE is git-safety.test.ts's subject;
-// taking them from the same source is what stops this file breaking every time one is added.
+// Every local call carries the hardening flags gitArgs prepends — stripped here so the response
+// maps below keep naming the real git subcommand. What those flags ARE is git-safety.test.ts's
+// subject; taking them from the same source is what stops this file breaking every time one is
+// added. The ls-remote/fetch calls carry no such prefix (workspace.ts composes their env instead
+// of their args — see workspace.ts's runRemote), so responses key on the raw args for those.
 const HARDENING_PREFIX = gitArgs([]);
+const REMOTE_URL = "https://git.example/acme/repo.git";
 
 function fakeGit(responses: Record<string, Partial<CommandResult>>) {
   const run = vi.fn(async (_command: string, args: string[], _opts: RunOpts): Promise<CommandResult> => {
-    const override = responses[args.slice(HARDENING_PREFIX.length).join(" ")];
+    const hardened = HARDENING_PREFIX.every((flag, index) => args[index] === flag);
+    const key = (hardened ? args.slice(HARDENING_PREFIX.length) : args).join(" ");
+    const override = responses[key];
     return { code: 0, stdout: "", stderr: "", timedOut: false, ...override };
   });
   return { runner: { run }, run };
@@ -79,19 +84,19 @@ describe("createWorkspace", () => {
     }
   });
 
-  it("fetches the base before resolving it, when given a remote env provider", async () => {
+  it("fetches the base before resolving it, when given a remote env provider and a pinned URL", async () => {
     const { runner, run } = fakeGit({
-      "ls-remote --exit-code origin refs/heads/main": { stdout: "fresh1\trefs/heads/main\n" },
-      "fetch --no-tags origin main": { stdout: "" },
+      [`ls-remote --exit-code ${REMOTE_URL} refs/heads/main`]: { stdout: "fresh1\trefs/heads/main\n" },
+      [`fetch --no-tags ${REMOTE_URL} main`]: { stdout: "" },
       "rev-parse --verify fresh1^{commit}": { stdout: "fresh1\n" },
       "worktree list --porcelain": { stdout: "" },
     });
-    const workspace = createWorkspace(config, runner, () => ({}));
+    const workspace = createWorkspace(config, runner, () => ({}), REMOTE_URL);
 
     const result = await workspace.create("BP-1", "worker");
 
     expect(run.mock.calls.map((call) => call[1].join(" "))).toContainEqual(
-      expect.stringContaining("fetch --no-tags origin main"),
+      expect.stringContaining(`fetch --no-tags ${REMOTE_URL} main`),
     );
     expect(result.baseSha).toBe("fresh1");
   });
@@ -101,25 +106,45 @@ describe("createWorkspace", () => {
       "rev-parse --verify main^{commit}": { stdout: "local1\n" },
       "worktree list --porcelain": { stdout: "" },
     });
-    const result = await createWorkspace(config, runner).create("BP-1", "worker");
+    const result = await createWorkspace(config, runner, undefined, REMOTE_URL).create("BP-1", "worker");
 
     expect(result.baseSha).toBe("local1");
     expect(run.mock.calls.some((call) => call[1].includes("fetch"))).toBe(false);
   });
 
-  it("resolves the sha ls-remote reported, not whatever fetch left behind in FETCH_HEAD or the remote-tracking ref — both are files the agent can also write", async () => {
+  it("does not fetch at all without a pinned URL, even with a remote env provider", async () => {
     const { runner, run } = fakeGit({
-      "ls-remote --exit-code origin refs/heads/main": { stdout: "genuine1\trefs/heads/main\n" },
-      "fetch --no-tags origin main": { stdout: "" },
+      "rev-parse --verify main^{commit}": { stdout: "local1\n" },
+      "worktree list --porcelain": { stdout: "" },
+    });
+    const result = await createWorkspace(config, runner, () => ({})).create("BP-1", "worker");
+
+    expect(result.baseSha).toBe("local1");
+    expect(run.mock.calls.some((call) => call[1].includes("fetch"))).toBe(false);
+  });
+
+  it("fetches the pinned URL directly rather than a remote name — a name would resolve through repoPath/.git/config's own remote.origin.url, which the agent can rewrite", async () => {
+    const { runner, run } = fakeGit({
+      [`ls-remote --exit-code ${REMOTE_URL} refs/heads/main`]: { stdout: "genuine1\trefs/heads/main\n" },
+      [`fetch --no-tags ${REMOTE_URL} main`]: { stdout: "" },
+      "rev-parse --verify genuine1^{commit}": { stdout: "genuine1\n" },
+      "worktree list --porcelain": { stdout: "" },
+    });
+    await createWorkspace(config, runner, () => ({}), REMOTE_URL).create("BP-1", "worker");
+
+    expect(run.mock.calls.some((call) => call[1].includes("origin"))).toBe(false);
+  });
+
+  it("resolves the sha ls-remote reported, not whatever fetch left behind in FETCH_HEAD or a remote-tracking ref — both are files the agent can also write", async () => {
+    const { runner, run } = fakeGit({
+      [`ls-remote --exit-code ${REMOTE_URL} refs/heads/main`]: { stdout: "genuine1\trefs/heads/main\n" },
+      [`fetch --no-tags ${REMOTE_URL} main`]: { stdout: "" },
       "rev-parse --verify genuine1^{commit}": { stdout: "genuine1\n" },
       "rev-parse --verify FETCH_HEAD^{commit}": { stdout: "planted1\n" },
       "rev-parse --verify refs/remotes/origin/main^{commit}": { stdout: "planted1\n" },
       "worktree list --porcelain": { stdout: "" },
     });
-    const result = await createWorkspace(config, runner, () => ({})).create(
-      "BP-1",
-      "worker",
-    );
+    const result = await createWorkspace(config, runner, () => ({}), REMOTE_URL).create("BP-1", "worker");
 
     expect(result.baseSha).toBe("genuine1");
     expect(run.mock.calls.some((call) => call[1].join(" ").includes("FETCH_HEAD"))).toBe(false);
@@ -127,58 +152,100 @@ describe("createWorkspace", () => {
 
   it("falls back to the local ref when the fetch fails, rather than stopping the run", async () => {
     const { runner } = fakeGit({
-      "ls-remote --exit-code origin refs/heads/main": { stdout: "fresh1\trefs/heads/main\n" },
-      "fetch --no-tags origin main": { code: 1, stderr: "could not resolve host" },
+      [`ls-remote --exit-code ${REMOTE_URL} refs/heads/main`]: { stdout: "fresh1\trefs/heads/main\n" },
+      [`fetch --no-tags ${REMOTE_URL} main`]: { code: 1, stderr: "could not resolve host" },
       "rev-parse --verify main^{commit}": { stdout: "local1\n" },
       "worktree list --porcelain": { stdout: "" },
     });
-    const workspace = createWorkspace(config, runner, () => ({}));
+    const workspace = createWorkspace(config, runner, () => ({}), REMOTE_URL);
 
     expect((await workspace.create("BP-1", "worker")).baseSha).toBe("local1");
   });
 
   it("falls back to the local ref when ls-remote itself fails, rather than stopping the run", async () => {
     const { runner } = fakeGit({
-      "ls-remote --exit-code origin refs/heads/main": { code: 128, stderr: "could not resolve host" },
+      [`ls-remote --exit-code ${REMOTE_URL} refs/heads/main`]: { code: 128, stderr: "could not resolve host" },
       "rev-parse --verify main^{commit}": { stdout: "local1\n" },
       "worktree list --porcelain": { stdout: "" },
     });
-    const workspace = createWorkspace(config, runner, () => ({}));
+    const workspace = createWorkspace(config, runner, () => ({}), REMOTE_URL);
 
     expect((await workspace.create("BP-1", "worker")).baseSha).toBe("local1");
   });
 
   it("falls back to the local ref when the fetched sha does not verify locally afterwards", async () => {
     const { runner } = fakeGit({
-      "ls-remote --exit-code origin refs/heads/main": { stdout: "unreachable1\trefs/heads/main\n" },
-      "fetch --no-tags origin main": { stdout: "" },
+      [`ls-remote --exit-code ${REMOTE_URL} refs/heads/main`]: { stdout: "unreachable1\trefs/heads/main\n" },
+      [`fetch --no-tags ${REMOTE_URL} main`]: { stdout: "" },
       "rev-parse --verify unreachable1^{commit}": { code: 128, stderr: "unknown revision" },
       "rev-parse --verify main^{commit}": { stdout: "local1\n" },
       "worktree list --porcelain": { stdout: "" },
     });
-    const workspace = createWorkspace(config, runner, () => ({}));
+    const workspace = createWorkspace(config, runner, () => ({}), REMOTE_URL);
 
     expect((await workspace.create("BP-1", "worker")).baseSha).toBe("local1");
   });
 
-  it("carries the given remote env and network-only credentials on the ls-remote and fetch calls, but not on local git calls", async () => {
+  it("logs through the injected log function, defaulting to none of the above, when the fetch falls back", async () => {
+    const { runner } = fakeGit({
+      [`ls-remote --exit-code ${REMOTE_URL} refs/heads/main`]: { code: 128, stderr: "could not resolve host" },
+      "rev-parse --verify main^{commit}": { stdout: "local1\n" },
+      "worktree list --porcelain": { stdout: "" },
+    });
+    const log = vi.fn();
+    const workspace = createWorkspace(config, runner, () => ({}), REMOTE_URL, log);
+
+    await workspace.create("BP-1", "worker");
+
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(log.mock.calls[0][0]).toMatch(/could not resolve host/);
+  });
+
+  // The regression this exists to catch: workspace.ts used to build these two calls with
+  // gitArgs(), which appends `-c credential.helper=` as the last thing git evaluates. For this
+  // specific multi-valued key that silently discards whatever the env-based provider installed —
+  // verified empirically against a real git binary (see task-8 fix-round report) — so the fetch
+  // could never authenticate over https and always, silently, fell back. A test that only checks
+  // "fetch was called" cannot see this; it has to look at the actual argument vector.
+  it("composes the ls-remote and fetch calls without any -c flags, so a credential helper the env provider installs cannot be reset by one riding along", async () => {
     const { runner, run } = fakeGit({
-      "ls-remote --exit-code origin refs/heads/main": { stdout: "fresh1\trefs/heads/main\n" },
-      "fetch --no-tags origin main": { stdout: "" },
+      [`ls-remote --exit-code ${REMOTE_URL} refs/heads/main`]: { stdout: "fresh1\trefs/heads/main\n" },
+      [`fetch --no-tags ${REMOTE_URL} main`]: { stdout: "" },
       "rev-parse --verify fresh1^{commit}": { stdout: "fresh1\n" },
       "worktree list --porcelain": { stdout: "" },
     });
-    await createWorkspace(config, runner, () => ({ GH_TOKEN: "tok" })).create(
-      "BP-1",
-      "worker",
-    );
+    await createWorkspace(config, runner, () => ({ GH_TOKEN: "tok" }), REMOTE_URL).create("BP-1", "worker");
+
+    const remoteCallArgs = run.mock.calls
+      .filter((call) => call[1][0] === "ls-remote" || call[1][0] === "fetch")
+      .map((call) => call[1]);
+    expect(remoteCallArgs).toEqual([
+      ["ls-remote", "--exit-code", REMOTE_URL, "refs/heads/main"],
+      ["fetch", "--no-tags", REMOTE_URL, "main"],
+    ]);
+
+    for (const call of run.mock.calls.filter((c) => c[1][0] === "ls-remote" || c[1][0] === "fetch")) {
+      expect(call[2].env?.GH_TOKEN).toBe("tok");
+    }
+  });
+
+  it("carries the given remote env and network-only credentials on the ls-remote and fetch calls, but not on local git calls, and keeps GIT_NO_REPLACE_OBJECTS even when the caller's env provider forgets it", async () => {
+    const { runner, run } = fakeGit({
+      [`ls-remote --exit-code ${REMOTE_URL} refs/heads/main`]: { stdout: "fresh1\trefs/heads/main\n" },
+      [`fetch --no-tags ${REMOTE_URL} main`]: { stdout: "" },
+      "rev-parse --verify fresh1^{commit}": { stdout: "fresh1\n" },
+      "worktree list --porcelain": { stdout: "" },
+    });
+    await createWorkspace(config, runner, () => ({ GH_TOKEN: "tok" }), REMOTE_URL).create("BP-1", "worker");
 
     const remoteCalls = run.mock.calls.filter(
-      (call) => call[1].includes("ls-remote") || (call[1].includes("fetch") && call[1].includes("origin")),
+      (call) => call[1][0] === "ls-remote" || call[1][0] === "fetch",
     );
     expect(remoteCalls).not.toHaveLength(0);
     for (const call of remoteCalls) {
       expect(call[2].env?.GH_TOKEN).toBe("tok");
+      expect(call[2].env?.GIT_NO_REPLACE_OBJECTS).toBe("1");
+      expect(call[2].env?.GIT_CONFIG_NOSYSTEM).toBe("1");
     }
 
     const localCalls = run.mock.calls.filter((call) => call[1].includes("worktree"));
