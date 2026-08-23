@@ -5,6 +5,8 @@ import {
   matrixInForce,
   normaliseMatrix,
   hasOverride,
+  wantsMailSomewhere,
+  wantsChat,
 } from "@/lib/notification-prefs";
 import { NOTIFICATION_TYPES, NotificationMatrix } from "@/types";
 
@@ -107,5 +109,42 @@ describe("normalising what a client sends", () => {
 
   it("returns an all-off grid for a body that is not an object", () => {
     expect(normaliseMatrix(null).mentioned).toEqual({ inApp: false, email: false, chat: false });
+  });
+});
+
+// The digest asks this before it builds anything. Asking only the global grid dropped anyone who
+// had switched mail off globally and on for one project — and since the immediate mail is already
+// suppressed for a digest subscriber, they got nothing at all.
+describe("whether any grid asks for mail", () => {
+  it("counts a project override that turns mail on, with the global grid silent", () => {
+    const user = {
+      emailNotifications: false,
+      notifications: {
+        defaults: allOff(),
+        projects: [
+          { project: P1, matrix: { ...allOff(), comment_added: { inApp: true, email: true, chat: false } } },
+        ],
+      },
+    };
+
+    expect(wantsMailSomewhere(user)).toBe(true);
+  });
+
+  it("is false when nothing anywhere asks for mail", () => {
+    expect(
+      wantsMailSomewhere({ emailNotifications: false, notifications: { defaults: allOff(), projects: [] } })
+    ).toBe(false);
+  });
+
+  it("still follows the legacy boolean for an account with no grid", () => {
+    expect(wantsMailSomewhere({ emailNotifications: true })).toBe(true);
+    expect(wantsMailSomewhere({ emailNotifications: false })).toBe(false);
+  });
+});
+
+describe("whether a grid asks for chat", () => {
+  it("is true for any row, and false for none", () => {
+    expect(wantsChat({ ...allOff(), mentioned: { inApp: false, email: false, chat: true } })).toBe(true);
+    expect(wantsChat(allOff())).toBe(false);
   });
 });

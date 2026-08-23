@@ -7,14 +7,15 @@ import { dayKeyInTimezone, hourInTimezone, isValidTimezone } from "@/lib/time";
 import { taskPath } from "@/lib/urls";
 import { Notification } from "@/models/notification";
 import { User } from "@/models/user";
-import { defaultMatrix, resolveChannels, PrefsSource } from "@/lib/notification-prefs";
-import { NOTIFICATION_TYPES } from "@/types";
+import { resolveChannels, wantsMailSomewhere, PrefsSource } from "@/lib/notification-prefs";
 
 const TICK_MS = Number(process.env.DIGEST_TICK_MS) || 5 * 60 * 1000;
 const DEFAULT_TIMEZONE = "Europe/Warsaw";
 
 /** How many lines the mail carries before it says "and N more". */
 export const DIGEST_ROW_LIMIT = 25;
+/** How deep into a day's unread rows the digest will read before giving up on counting. */
+export const DIGEST_SCAN_LIMIT = 500;
 
 export function digestHour(): number {
   const raw = Math.trunc(Number(process.env.DIGEST_HOUR));
@@ -67,13 +68,18 @@ export async function buildDigestFor(
   prefs?: PrefsSource
 ): Promise<{ lines: DigestLine[]; total: number }> {
   const filter = { recipient: userId, read: false, createdAt: { $gte: since } };
-  // Read whole rather than paged, because which of them belong in the mail is decided per row
-  // below and a page of 25 could be 25 muted ones. DIGEST_ROW_LIMIT still bounds what is listed.
+  // Which rows belong in the mail is decided per row below, so a page of DIGEST_ROW_LIMIT could be
+  // DIGEST_ROW_LIMIT muted ones — but reading the day unbounded lets anyone who can comment on a
+  // watched task decide how much this process hydrates at 07:00. DIGEST_SCAN_LIMIT is the ceiling
+  // on that; past it the count says "at least", because nobody counted the rest.
   const notifications = await Notification.find(filter)
     .sort({ createdAt: 1 })
+    .limit(DIGEST_SCAN_LIMIT + 1)
     .populate("task", "taskNumber")
     .populate("project", "key")
     .lean();
+  const truncated = notifications.length > DIGEST_SCAN_LIMIT;
+  if (truncated) notifications.length = DIGEST_SCAN_LIMIT;
 
   // A project muted in the mail column drops out here too. Without this, muting would silence the
   // mail during the day and deliver it anyway the next morning.
@@ -83,6 +89,9 @@ export async function buildDigestFor(
   });
 
   const origin = selfOrigin();
+  if (truncated) {
+    console.warn(`Digest for ${userId} scanned the first ${DIGEST_SCAN_LIMIT} unread rows only`);
+  }
   return {
     lines: wanted.slice(0, DIGEST_ROW_LIMIT).map((n) => lineFor(n, origin)),
     // Counted rather than inferred from the page: a digest that lists 25 and says "and 1 more"
@@ -97,7 +106,7 @@ async function sendDigest(
   total: number
 ): Promise<void> {
   const origin = selfOrigin();
-  const settingsUrl = origin ? `${origin}/settings/profile` : undefined;
+  const settingsUrl = origin ? `${origin}/settings/notifications` : undefined;
   const hidden = total - lines.length;
   const count = `${total} update${total === 1 ? "" : "s"}`;
 
@@ -143,9 +152,10 @@ export async function digestTick(now = new Date()): Promise<number> {
     },
     "email username emailNotifications notifications"
   ).lean();
-  const waiting = candidates.filter((user) =>
-    NOTIFICATION_TYPES.some((type) => defaultMatrix(user)[type].email)
-  );
+  // Any grid that turns mail on anywhere — the global one or a project's — qualifies. Asking only
+  // the global grid dropped anyone who had switched mail off globally and back on for one project:
+  // the immediate mail is suppressed for a digest subscriber, so they would have got nothing at all.
+  const waiting = candidates.filter((user) => wantsMailSomewhere(user));
   if (waiting.length === 0) return 0;
 
   const since = new Date(now.getTime() - 24 * 60 * 60 * 1000);

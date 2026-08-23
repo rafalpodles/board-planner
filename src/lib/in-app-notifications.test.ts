@@ -81,9 +81,9 @@ describe("notification emails", () => {
     const [mail] = await sentMails();
 
     expect(mail.headers?.["List-Unsubscribe"]).toBe(
-      "<https://app.example.com/settings/profile>"
+      "<https://app.example.com/settings/notifications>"
     );
-    expect(mail.html).toContain("https://app.example.com/settings/profile");
+    expect(mail.html).toContain("https://app.example.com/settings/notifications");
   });
 
   it("tells each recipient why they got it", async () => {

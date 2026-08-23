@@ -110,10 +110,19 @@ const userSchema = new Schema<IUser>({
 // accounts could hold one address, the lookup a password reset by email depends on.
 userSchema.index({ email: 1 }, { unique: true, partialFilterExpression: { email: { $gt: "" } } });
 
-// Remove password from JSON output
+// Remove the credentials from JSON output. The webhook is encrypted at rest, but it rides on the
+// user document, and three routes serialise a whole user — the admin list, the admin single fetch
+// and the caller's own PUT — so without this an admin's user list would carry every colleague's
+// stored chat destination. Projects strip theirs the same way, in sanitizeProjectSecrets.
 userSchema.set("toJSON", {
   transform: (_doc, ret) => {
-    const { password: _, ...rest } = ret;
+    const { password: _, ...rest } = ret as unknown as Record<string, unknown> & {
+      notifications?: { chat?: { webhookUrl?: string } };
+    };
+    if (rest.notifications?.chat) {
+      const { webhookUrl: _url, ...chat } = rest.notifications.chat;
+      rest.notifications = { ...rest.notifications, chat };
+    }
     return rest;
   },
 });

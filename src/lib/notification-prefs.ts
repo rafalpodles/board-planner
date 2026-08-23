@@ -74,6 +74,22 @@ export function resolveChannels(
   return matrixInForce(user, projectId)[type] ?? { ...OFF };
 }
 
+/**
+ * Whether any grid this person has — the global one or any project's — lets mail through. The
+ * digest asks this before building anything, and it has to consider the overrides: mail switched
+ * off globally and on for one project is a real answer, and the immediate mail is already
+ * suppressed for a digest subscriber.
+ */
+export function wantsMailSomewhere(user: PrefsSource | null | undefined): boolean {
+  const grids = [defaultMatrix(user), ...(user?.notifications?.projects ?? []).map((p) => p.matrix)];
+  return grids.some((grid) => NOTIFICATION_TYPES.some((type) => grid?.[type]?.email));
+}
+
+/** Whether a grid asks for chat anywhere — the one thing that needs a connection to exist first. */
+export function wantsChat(matrix: NotificationMatrix): boolean {
+  return NOTIFICATION_TYPES.some((type) => matrix[type]?.chat);
+}
+
 /** Whatever a client sent, reduced to a grid of exactly the rows we know and exactly booleans. */
 export function normaliseMatrix(input: unknown): NotificationMatrix {
   const source = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;

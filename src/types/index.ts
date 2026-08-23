@@ -1346,6 +1346,8 @@ export interface INotification {
   /** Whether the bell shows this row. The document is stored either way, because the digest is
    *  assembled from these and hiding one must not empty tomorrow's mail. */
   inApp: boolean;
+  /** Set only on hidden rows, which nothing can mark read — it is what expires them. */
+  hiddenAt?: Date;
   createdAt: Date;
 }
 

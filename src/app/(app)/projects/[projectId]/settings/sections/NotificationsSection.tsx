@@ -15,7 +15,7 @@ interface Prefs {
   chat: { configured: boolean };
 }
 
-export function NotificationsSection({ projectId }: SectionProps) {
+export function NotificationsSection({ project }: SectionProps) {
   const api = useApi();
   const { toast } = useToast();
 
@@ -25,34 +25,51 @@ export function NotificationsSection({ projectId }: SectionProps) {
   const [chatConfigured, setChatConfigured] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
+
+  // The id, not the URL segment. Every link into a board is built from the project key
+  // (`/projects/BP/settings`), and the stored override names an ObjectId — comparing the two
+  // silently reported "following your global settings" over a live override nobody could clear.
+  const id = String(project._id);
 
   useEffect(() => {
     api
       .get("/api/users/me/notifications")
       .then((prefs: Prefs) => {
-        const own = prefs.projects.find((p) => p.project === projectId);
+        const own = prefs.projects.find((p) => p.project === id);
         setGlobalMatrix(prefs.defaults);
         setMatrix(own?.matrix ?? prefs.defaults);
         setOverriding(!!own);
         setChatConfigured(prefs.chat.configured);
       })
+      .catch(() => setLoadFailed(true))
       .finally(() => setLoaded(true));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId]);
+  }, [id]);
 
   // Switching on copies what is in force right now, rather than following the global grid
-  // afterwards: a project somebody has tuned should not shift under them later.
+  // afterwards: a project somebody has tuned should not shift under them later. It is written
+  // immediately, so the switch means the same thing after a reload as it did before one.
   async function toggleOverride(next: boolean) {
+    const previous = matrix;
     setOverriding(next);
-    if (!next) {
-      setMatrix(globalMatrix);
+    if (next) {
       try {
-        await api.del(`/api/users/me/notifications/${projectId}`);
-        toast("Following your global settings again", "success");
+        await api.put(`/api/users/me/notifications/${id}`, { matrix });
       } catch {
-        setOverriding(true);
+        setOverriding(false);
         toast("Failed to save", "error");
       }
+      return;
+    }
+    setMatrix(globalMatrix);
+    try {
+      await api.del(`/api/users/me/notifications/${id}`);
+      toast("Following your global settings again", "success");
+    } catch {
+      setOverriding(true);
+      setMatrix(previous);
+      toast("Failed to save", "error");
     }
   }
 
@@ -60,13 +77,22 @@ export function NotificationsSection({ projectId }: SectionProps) {
     if (!matrix) return;
     setSaving(true);
     try {
-      await api.put(`/api/users/me/notifications/${projectId}`, { matrix });
+      await api.put(`/api/users/me/notifications/${id}`, { matrix });
       toast("Saved for this project", "success");
     } catch {
       toast("Failed to save", "error");
     } finally {
       setSaving(false);
     }
+  }
+
+  if (loadFailed || (loaded && !matrix)) {
+    return (
+      <p className="max-w-2xl rounded-lg border border-danger/40 bg-danger/10 p-3 text-sm">
+        Your notification settings could not be loaded, so they cannot be changed from here right
+        now. Reload the page to try again.
+      </p>
+    );
   }
 
   if (!loaded || !matrix) {

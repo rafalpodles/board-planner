@@ -45,7 +45,9 @@ function notifications(shown: number, total = shown) {
     project: { _id: PROJECT, key: "BP" },
   }));
   notificationFind.mockReturnValue({
-    sort: () => ({ populate: () => ({ populate: () => ({ lean: async () => rows }) }) }),
+    sort: () => ({
+      limit: () => ({ populate: () => ({ populate: () => ({ lean: async () => rows }) }) }),
+    }),
   });
   void shown;
 }
@@ -113,7 +115,7 @@ describe("digestTick", () => {
     expect(sent().html).toContain('href="https://app.example.com/projects/BP/tasks/2"');
     expect(sent().text).toContain("Open my tasks: https://app.example.com/my-tasks");
     expect(sent().headers?.["List-Unsubscribe"]).toBe(
-      "<https://app.example.com/settings/profile>"
+      "<https://app.example.com/settings/notifications>"
     );
   });
 

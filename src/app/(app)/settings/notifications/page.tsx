@@ -25,6 +25,10 @@ export default function NotificationsPage() {
   const [emailDigest, setEmailDigest] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
+
+  // Delivery needs both a service and an address; either alone sends nothing and says nothing
+  const chatReady = !!chatKind && (chatConfigured || !!webhookUrl.trim());
 
   useEffect(() => {
     if (!user) return;
@@ -38,6 +42,7 @@ export default function NotificationsPage() {
         setChatConfigured(prefs.chat.configured);
         setEmailDigest(me.emailDigest ?? false);
       })
+      .catch(() => setLoadFailed(true))
       .finally(() => setLoaded(true));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -77,6 +82,18 @@ export default function NotificationsPage() {
     }
   }
 
+  if (loadFailed || (loaded && !matrix)) {
+    return (
+      <div className="w-full max-w-2xl mx-auto">
+        <h2 className="text-lg font-semibold mb-6">Notifications</h2>
+        <p className="rounded-lg border border-danger/40 bg-danger/10 p-3 text-sm">
+          Your notification settings could not be loaded, so they cannot be saved from here right
+          now. Reload the page to try again.
+        </p>
+      </div>
+    );
+  }
+
   if (!loaded || !matrix) {
     return (
       <div className="flex justify-center py-12">
@@ -95,7 +112,7 @@ export default function NotificationsPage() {
       <NotificationMatrixEditor
         value={matrix}
         onChange={setMatrix}
-        chatDisabled={!chatConfigured && !webhookUrl.trim()}
+        chatDisabled={!chatReady}
         chatDisabledHint="Connect Slack or Discord below before sending anything there."
       />
 

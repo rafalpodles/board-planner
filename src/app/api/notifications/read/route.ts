@@ -11,8 +11,10 @@ export const PATCH = withAuth(async (request, { user }) => {
 
   if (id) {
     // Mark single notification as read
+    // Same guard as the branch below: a row the bell never showed cannot have been read here, and
+    // marking it read would take it out of tomorrow's digest
     await Notification.findOneAndUpdate(
-      { _id: id, recipient: user._id },
+      { _id: id, recipient: user._id, inApp: { $ne: false } },
       { $set: { read: true } }
     );
   } else {

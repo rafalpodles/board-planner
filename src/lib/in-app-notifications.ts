@@ -91,8 +91,12 @@ async function notify({
   ).lean();
 
   const wants = new Map(
-    recipients.map((user) => [String(user._id), resolveChannels(user, projectId, type)])
+    // Lower-cased on both sides: OBJECT_ID accepts upper-case hex, and a miss here would
+    // silently fall back to "show it", which is the opposite of what the reader asked for.
+    recipients.map((user) => [String(user._id).toLowerCase(), resolveChannels(user, projectId, type)])
   );
+
+  const shown = (recipientId: string) => wants.get(recipientId.toLowerCase())?.inApp ?? true;
 
   try {
     await Notification.insertMany(
@@ -106,7 +110,9 @@ async function notify({
         body: body || "",
         // Stored regardless, hidden if the bell is off for this row: the digest reads these
         // documents, and skipping the write would take the morning mail down with the bell.
-        inApp: wants.get(recipientId)?.inApp ?? true,
+        inApp: shown(recipientId),
+        // Stamped only when hidden, so the TTL that collects these can key on its presence
+        hiddenAt: shown(recipientId) ? undefined : new Date(),
       }))
     );
   } catch (err) {
@@ -116,7 +122,7 @@ async function notify({
   // Fire-and-forget email notifications
   if (isEmailConfigured()) {
     const mailTo = recipients.filter((user) => {
-      if (!wants.get(String(user._id))?.email) return false;
+      if (!wants.get(String(user._id).toLowerCase())?.email) return false;
       if (!user.email) return false;
       // Somebody on the digest hears about this tomorrow morning, in one message. Sending both
       // would make the digest a duplicate rather than a replacement.
@@ -130,7 +136,7 @@ async function notify({
   }
 
   const chatTo = recipients.filter(
-    (user) => wants.get(String(user._id))?.chat && user.notifications?.chat?.kind
+    (user) => wants.get(String(user._id).toLowerCase())?.chat && user.notifications?.chat?.kind
   );
   if (chatTo.length > 0) {
     sendPersonalChat({ users: chatTo, type, title, email }).catch((err) =>
@@ -174,7 +180,7 @@ async function sendEmailNotifications(n: {
     origin && e?.projectRef && e?.taskNumber !== undefined
       ? `${origin}${taskPath(e.projectRef, e.taskNumber)}`
       : undefined;
-  const settingsUrl = origin ? `${origin}/settings/profile` : undefined;
+  const settingsUrl = origin ? `${origin}/settings/notifications` : undefined;
 
   for (const user of users) {
     const taskKey = e?.taskKey ?? "";

@@ -23,8 +23,18 @@ const HEADLINE: Record<NotificationType, string> = {
   comment_added: "New comment on a task you follow",
 };
 
+/**
+ * Slack reads `<url|text>` as a link, so a title carrying `>` closes it and anything after can
+ * open a second link the reader has no reason to distrust — in their own private channel, from a
+ * sender they trust. Escaping the three characters Slack treats as markup is the documented fix.
+ */
+function escapeSlack(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 function line(type: NotificationType, title: string, url?: string): string {
-  const subject = url ? `<${url}|${title}>` : title;
+  const safe = escapeSlack(title);
+  const subject = url ? `<${url}|${safe}>` : safe;
   return `*${HEADLINE[type]}*\n${subject}`;
 }
 
