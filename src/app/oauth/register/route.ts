@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { OAuthClient } from "@/models/oauthClient";
-import { newClientId } from "@/lib/oauth";
+import { isValidRedirectUri, newClientId } from "@/lib/oauth";
 import { getClientIp } from "@/lib/auth";
 import {
   anonymousMultiplier,
@@ -22,27 +22,6 @@ const CORS = {
 const MAX_CLIENT_NAME = 80;
 const MAX_REDIRECT_URIS = 10;
 const REGISTRATIONS_PER_WINDOW = 10;
-
-function isLoopback(hostname: string): boolean {
-  const host = hostname.replace(/^\[|\]$/g, "").toLowerCase();
-  // Anchored at both ends: 127.0.0.1.attacker.example starts with "127." and is not loopback
-  return host === "localhost" || host === "::1" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host);
-}
-
-/**
- * RFC 8252: `http` only for loopback. Anything else must be `https`, or the
- * authorization code travels in cleartext to a host the user never sees.
- */
-function isValidRedirectUri(value: unknown): value is string {
-  if (typeof value !== "string" || value.length > 500) return false;
-  try {
-    const u = new URL(value);
-    if (u.protocol === "https:") return true;
-    return u.protocol === "http:" && isLoopback(u.hostname);
-  } catch {
-    return false;
-  }
-}
 
 // No provenance check: RFC 7591 registration is meant to be called cross-origin and by non-browser
 // clients, which send neither Sec-Fetch-Site nor a matching Origin. Refusing them breaks MCP
