@@ -9,14 +9,25 @@ import { gitArgs, GIT_SAFE_ENV } from "./git-safety.js";
 const GIT_TIMEOUT_MS = 60_000;
 
 /**
- * The base could not be established from the remote. This is the machine's fault, not the task's —
- * the run is released with its attempt refunded and the worker backs off, rather than charging a
- * task for a network its own host could not reach.
+ * Which of the two things went wrong, because they are owed opposite treatment.
+ *
+ * `transport` — the remote could not be reached, or would not serve what it was asked for. Nothing
+ * about the task caused it and the next task would fail identically, so the run is released with
+ * its attempt refunded and the worker backs off.
+ * `configuration` — the remote answered, and this repository has no such base branch. That belongs
+ * to the project rather than the machine, it repeats until a human changes something, and every
+ * other project on this worker is unaffected: the attempt is charged so the task escalates.
  */
+export type BaseFaultKind = "transport" | "configuration";
+
+/** The base could not be established from the remote. */
 export class BaseUnavailableError extends Error {
-  constructor(message: string) {
+  readonly kind: BaseFaultKind;
+
+  constructor(message: string, kind: BaseFaultKind = "transport") {
     super(message);
     this.name = "BaseUnavailableError";
+    this.kind = kind;
   }
 }
 
@@ -197,7 +208,7 @@ export function createWorkspace(
 
     const remoteSha = shaForExactRef(lsRemote.stdout, ref);
     if (!remoteSha) {
-      throw new BaseUnavailableError(`${url} did not report ${ref}`);
+      throw new BaseUnavailableError(`${url} did not report ${ref}`, "configuration");
     }
 
     // `--` guards both positional arguments: without it a value beginning with a dash is read as
@@ -239,7 +250,8 @@ export function createWorkspace(
   async function resolveBase(): Promise<string> {
     if (!remoteEnv || !remoteUrl) {
       throw new BaseUnavailableError(
-        `no remote is configured for this checkout, so ${config.baseBranch} could only be read from the local ref store, which a previous run's agent can write`
+        `no remote is configured for this checkout, so ${config.baseBranch} could only be read from the local ref store, which a previous run's agent can write`,
+        "configuration"
       );
     }
     return resolveFreshBase(remoteEnv, remoteUrl);
@@ -253,10 +265,12 @@ export function createWorkspace(
       try {
         baseSha = await resolveBase();
       } catch (error) {
-        // Kept as BaseUnavailableError: the pipeline tells a machine fault from a task fault by
-        // this type, and wrapping it in a plain Error would charge the task for the machine.
+        // Kept as BaseUnavailableError, and its kind with it: the pipeline tells a machine fault
+        // from a project's own misconfiguration by those two, and flattening either here would
+        // charge the wrong party.
         throw new BaseUnavailableError(
-          `could not resolve base branch ${config.baseBranch}: ${String(error)}`
+          `could not resolve base branch ${config.baseBranch}: ${String(error)}`,
+          error instanceof BaseUnavailableError ? error.kind : "transport"
         );
       }
 

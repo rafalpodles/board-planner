@@ -35,6 +35,17 @@ export function createLoop(deps: LoopDeps): Loop {
   const stopping = new AbortController();
   let running = true;
   let pausedState = false;
+  // The assignment whose run reported the last machine fault. assignments() is stable in order, so
+  // without this a project that faults on every pass keeps the head of the list and no assignment
+  // behind it is ever claimed for again — starvation for as long as the fault lasts, not for one
+  // pass. Starting the next pass after that project puts it last instead.
+  let faultedLast: string | null = null;
+
+  function passOrder(assignments: string[]): string[] {
+    const at = faultedLast === null ? -1 : assignments.indexOf(faultedLast);
+    if (at < 0) return assignments;
+    return [...assignments.slice(at + 1), ...assignments.slice(0, at + 1)];
+  }
 
   return {
     async start() {
@@ -51,17 +62,22 @@ export function createLoop(deps: LoopDeps): Loop {
         }
 
         if (!pausedState) {
-          // Every assignment gets its own attempt and its own try/catch, in order: a project that
-          // cannot be claimed from, or a task that blows up, must not cost a sibling project its
-          // turn in this pass — that would starve whichever assignment comes last in the list.
-          for (const projectId of deps.assignments()) {
+          // Every assignment gets its own attempt and its own try/catch: a project that cannot be
+          // claimed from, or a task that blows up, must not cost a sibling project its turn in this
+          // pass — that would starve whichever assignment comes last in the list. A machine fault
+          // is the one thing that does end the pass, because it is the machine and not the project
+          // that is broken; passOrder is what keeps that from starving a sibling across passes.
+          for (const projectId of passOrder(deps.assignments())) {
             if (!running) return;
-            if (machineFault) break;
             try {
               const task = await deps.api.claim(projectId, randomUUID());
               if (task) {
-                if ((await deps.execute(task)) === "machine-fault") machineFault = true;
-                else claimedAny = true;
+                if ((await deps.execute(task)) === "machine-fault") {
+                  machineFault = true;
+                  faultedLast = projectId;
+                  break;
+                }
+                claimedAny = true;
               }
             } catch (error) {
               // runTask reports its own failures to the board, so anything reaching here is the

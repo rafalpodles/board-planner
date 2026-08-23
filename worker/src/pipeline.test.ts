@@ -283,6 +283,28 @@ describe("runTask", () => {
     expect(h.reporter.released.mock.calls[0][1]).toMatch(/no route to host/);
   });
 
+  // The other half of the taxonomy. A remote that answers and reports no such ref is this project's
+  // configuration — a default branch of master under a policy default of main, a branch renamed
+  // away, an empty repository. Refunding that would circle the task through the approved column for
+  // ever with nothing on the machine able to fix it, and would end every pass on a project that is
+  // merely misconfigured. It spends the attempt so a human eventually sees it.
+  it("charges the attempt, and reports no machine fault, when the remote has no such base branch", async () => {
+    const h = harness();
+    h.workspace.create.mockRejectedValue(
+      new BaseUnavailableError(
+        "could not resolve base branch main: ssh://git@github.com/x/y did not report refs/heads/main",
+        "configuration"
+      )
+    );
+
+    const disposition = await runTask(h.deps, task);
+
+    expect(disposition).toBeUndefined();
+    expect(h.reporter.requeued).toHaveBeenCalled();
+    expect(h.reporter.released).not.toHaveBeenCalled();
+    expect(h.reporter.requeued.mock.calls[0][1]).toMatch(/did not report refs\/heads\/main/);
+  });
+
   it("writes the machine fault to the worker's own log, not only to the board", async () => {
     const logError = vi.fn();
     const h = harness({ logError });

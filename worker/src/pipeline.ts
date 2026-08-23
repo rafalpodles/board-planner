@@ -259,14 +259,23 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<Ru
     worktree = await workspace.create(task.taskKey, SLUG);
   } catch (error) {
     await quietly(() => workspace.destroy(task.taskKey));
-    // A base that could not be established is this machine's failure, not the task's, and it will
-    // fail identically for the next task and the one after it. Charging the attempt would walk the
-    // whole approved queue into the escalation column over one unreachable remote — and nothing
-    // ever resets execution.attempts, so a human moving those tasks back gets cards no worker will
-    // look at again. Released with the attempt refunded, and the loop is told to stop claiming.
     if (error instanceof BaseUnavailableError) {
-      settle("released", "the base branch could not be established");
       deps.logError?.(`${task.taskKey}: ${String(error)}`);
+      // The remote answered and this repository has no such base branch — a default branch of
+      // master against a policy default of main, a branch renamed away, an empty repository.
+      // Nothing on this machine will change that, and no other project on it is affected, so the
+      // attempt is spent and the task escalates to whoever can fix the setting.
+      if (error.kind === "configuration") {
+        settle("requeued", "the base branch is not configured for this repository");
+        await reporter.requeued(task, String(error));
+        return;
+      }
+      // A transport failure is this machine's, not the task's, and it will fail identically for the
+      // next task and the one after it. Charging the attempt would walk the whole approved queue
+      // into the escalation column over one unreachable remote — and nothing ever resets
+      // execution.attempts, so a human moving those tasks back gets cards no worker will look at
+      // again. Released with the attempt refunded, and the loop is told to stop claiming.
+      settle("released", "the base branch could not be established");
       await reporter.released(task, String(error));
       return "machine-fault";
     }

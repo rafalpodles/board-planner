@@ -112,17 +112,56 @@ describe("createLoop", () => {
 
   // A fault outranks work that already succeeded in the same pass: the fault is what the next
   // claim would hit, so it decides whether the pass continues.
+  //
+  // Both projects have endless work on purpose. With a draining queue this test could not fail:
+  // a loop that took the earlier success as licence to carry on would sleep on the next pass
+  // anyway, once there was nothing left to claim, and the assertion would still be met. The
+  // executed list is what pins it — a loop that does not stop on the fault runs straight into the
+  // stop() below and shows more than the one pass's worth of work.
   it("sleeps after a machine fault even when an earlier task in the pass succeeded", async () => {
-    const api = apiStub(queue(task, { ...task, taskId: "t2", taskKey: "CP-159" }));
-    let call = 0;
+    const api = apiStub(async (projectId: string) => ({ ...task, taskId: projectId, projectId }));
+    const executed: string[] = [];
     const { loop, sleep } = loopOver(api, {
       assignments: ["P1", "P2"],
-      execute: async () => (++call === 1 ? undefined : ("machine-fault" as const)),
+      execute: async (claimed) => {
+        executed.push(claimed.projectId);
+        if (executed.length >= 8) loop.stop();
+        return claimed.projectId === "P2" ? ("machine-fault" as const) : undefined;
+      },
     });
 
     await loop.start();
 
+    expect(executed).toEqual(["P1", "P2"]);
     expect(sleep).toHaveBeenCalledWith(30_000, expect.any(AbortSignal));
+  });
+
+  // The starvation the per-assignment try/catch above exists to prevent, one level up: assignments()
+  // is stable in order, and a project whose base cannot be resolved faults on every single pass. If
+  // that project keeps the head of the list, the pass ends on it every time and nothing behind it is
+  // ever claimed for again — not for one pass, but for as long as the misconfiguration lasts.
+  it("keeps serving a sibling project across passes while one project faults on every pass", async () => {
+    const api = apiStub(async (projectId: string) => ({ ...task, taskId: projectId, projectId }));
+    const served: string[] = [];
+    let passes = 0;
+    const { loop } = loopOver(api, {
+      assignments: ["P1", "P2"],
+      execute: async (claimed) => {
+        if (claimed.projectId === "P1") return "machine-fault" as const;
+        served.push(claimed.projectId);
+        // The sleep below is the only other way out, and a loop that stopped sleeping altogether
+        // would never reach it — this makes that show up as a failed expectation, not a hang.
+        if (served.length > 4) loop.stop();
+        return undefined;
+      },
+      sleep: async () => {
+        if (++passes >= 3) loop.stop();
+      },
+    });
+
+    await loop.start();
+
+    expect(served).toEqual(["P2", "P2"]);
   });
 
   it("sleeps for the configured interval when the queue is empty", async () => {
