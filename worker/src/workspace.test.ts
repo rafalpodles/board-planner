@@ -1,3 +1,4 @@
+import { existsSync } from "fs";
 import { tmpdir } from "os";
 import { describe, it, expect, vi } from "vitest";
 import { createWorkspace, reapOrphans, Workspace } from "./workspace.js";
@@ -121,25 +122,60 @@ describe("createWorkspace", () => {
   });
 
   // A repository-local url.<x>.insteadOf rewrites even a URL given literally in argv, and no
-  // GIT_CONFIG_* variable disables it. The only thing that does is having no repository to read a
-  // config from — so the call that decides the base has to run somewhere else.
-  it("asks the remote from outside the repository, where no repo-local config can rewrite the URL", async () => {
+  // GIT_CONFIG_* variable disables it. The only thing that does is giving git no repository to
+  // read a config from — and `os.tmpdir()` itself will not do, because the agent is handed TMPDIR
+  // and a `.git` planted there survives between runs. GIT_CEILING_DIRECTORIES cannot save that:
+  // git never excludes the working directory itself, and an entry equal to cwd is not a proper
+  // ancestor of anything. Hence a fresh directory plus an explicit GIT_DIR, which skips discovery
+  // rather than bounding it. The behavioural proof is in gate-integrity.integration.test.ts.
+  it("asks the remote from a directory it creates, with discovery switched off", async () => {
     const { runner, run } = fakeGit(baseFromRemote("fresh1"));
     await withRemote(runner).create("BP-1", "worker");
 
     const [, , opts] = run.mock.calls.find((call) => call[1][0] === "ls-remote")!;
     expect(opts.cwd).not.toBe("/repo");
-    expect(opts.cwd).toBe(tmpdir());
-    // and discovery must not walk up out of it into one either
+    // not the shared temp directory itself — a fresh child of it
+    expect(opts.cwd).not.toBe(tmpdir());
+    expect(opts.cwd?.startsWith(tmpdir())).toBe(true);
+    expect(opts.env?.GIT_DIR?.startsWith(opts.cwd!)).toBe(true);
+    // the ceiling is a proper ancestor, the only shape git honours
     expect(opts.env?.GIT_CEILING_DIRECTORIES).toBe(tmpdir());
   });
 
+  it("removes the directory it created for the lookup", async () => {
+    const { runner, run } = fakeGit(baseFromRemote("fresh1"));
+    await withRemote(runner).create("BP-1", "worker");
+
+    const [, , opts] = run.mock.calls.find((call) => call[1][0] === "ls-remote")!;
+    expect(existsSync(opts.cwd!)).toBe(false);
+  });
+
+  it("removes that directory even when the lookup fails", async () => {
+    const { runner, run } = fakeGit(
+      baseFromRemote("fresh1", { [LS_REMOTE]: { code: 128, stderr: "boom" } })
+    );
+    await expect(withRemote(runner).create("BP-1", "worker")).rejects.toThrow(/boom/);
+
+    const [, , opts] = run.mock.calls.find((call) => call[1][0] === "ls-remote")!;
+    expect(existsSync(opts.cwd!)).toBe(false);
+  });
+
+  // A hang and an instant refusal by the server are the same exit code with no stderr, and the
+  // local git() helper next door has said so since it was written.
+  it("says a remote call timed out rather than reporting an empty failure", async () => {
+    const { runner } = fakeGit(
+      baseFromRemote("fresh1", { [LS_REMOTE]: { code: 143, timedOut: true } })
+    );
+
+    await expect(withRemote(runner).create("BP-1", "worker")).rejects.toThrow(/timed out after/);
+  });
+
   it("refuses to run at all when no remote is configured, rather than reading the local ref", async () => {
-    for (const workspace of [
-      createWorkspace(config, fakeGit(baseFromRemote("local1")).runner, undefined, REMOTE_URL),
-      createWorkspace(config, fakeGit(baseFromRemote("local1")).runner, () => ({}), undefined),
-    ]) {
+    for (const env of [undefined, () => ({})]) {
+      const { runner, run } = fakeGit(baseFromRemote("local1"));
+      const workspace = createWorkspace(config, runner, env, env ? undefined : REMOTE_URL);
       await expect(workspace.create("BP-1", "worker")).rejects.toThrow(/no remote is configured/);
+      expect(readsLocalRef(run)).toBe(false);
     }
   });
 
@@ -147,6 +183,13 @@ describe("createWorkspace", () => {
     const { runner, run } = fakeGit(baseFromRemote("genuine1"));
     await withRemote(runner).create("BP-1", "worker");
 
+    // The positive half first: a bare "the word origin is absent" assertion is satisfied by an
+    // implementation that makes no calls at all, and was.
+    const remoteCalls = run.mock.calls.filter(
+      (call) => call[1][0] === "ls-remote" || call[1][0] === "fetch"
+    );
+    expect(remoteCalls).toHaveLength(2);
+    for (const call of remoteCalls) expect(call[1]).toContain(REMOTE_URL);
     expect(run.mock.calls.some((call) => call[1].includes("origin"))).toBe(false);
   });
 

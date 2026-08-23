@@ -218,19 +218,24 @@ and `SIGINT` both finish the task in flight before the loop exits.
   pushed branch gets no upstream in that kept worktree, because git ignores `-u` for a refspec
   whose source is an object id.
 - **The base a run is judged against comes off the wire, every run.** Before the agent starts, the
-  worker asks the project's own remote for `refs/heads/<baseBranch>`, fetches that exact object,
-  and holds the sha in memory; the worktree is created at it and every gate diffs against it. The
-  local ref is never read, because an agent of any earlier run on this checkout can write it and
-  that writing outlives the run — a poisoned base would put a payload *underneath* an innocent
-  run's own change, where no gate looks. The call that decides the base runs outside the
-  repository, since a repository-local `url.<x>.insteadOf` rewrites even a URL given literally on
-  the command line and no `GIT_CONFIG_*` variable turns that off.
-- **A base that cannot be verified fails the run**, deliberately, rather than falling back to the
-  local ref: a machine that cannot reach the remote is a machine that cannot gate anything, and an
-  agent able to break the fetch would otherwise choose which of the two paths the next run takes.
-  So a worker that is offline, or whose credentials do not cover the transport the server recorded
-  for the project, stops taking work and says why on each attempt — check `bindingError` and the
-  run's own failure detail before assuming the network is at fault.
+  worker asks the project's own remote for `refs/heads/<baseBranch>`, keeps the sha that answer
+  carried, fetches the branch, and then requires that exact object to be present locally; the
+  worktree is created at it and every gate diffs against it. The local ref is never read, because
+  an agent of any earlier run on this checkout can write it and that writing outlives the run — a
+  poisoned base would put a payload *underneath* an innocent run's own change, where no gate looks.
+  The lookup runs in a fresh directory the worker creates, with `GIT_DIR` set so git skips
+  repository discovery entirely: a repository-local `url.<x>.insteadOf` rewrites even a URL given
+  literally on the command line, no `GIT_CONFIG_*` variable turns that off, and `$TMPDIR` is not a
+  safe place to run it either — the agent is given `TMPDIR` and what it writes there persists.
+- **A base that cannot be established releases the task and pauses the worker**, rather than
+  falling back to the local ref: a machine that cannot reach the remote is a machine that cannot
+  gate anything, and an agent able to break the fetch would otherwise choose which of the two paths
+  the next run takes. The failure is charged to the machine, not the task — the attempt is
+  refunded, the task returns to its column, and the worker stops claiming for the rest of the pass
+  and waits out its poll interval. It says why in three places: the board comment, the worker's own
+  stderr, and the run record. `bindingError` is **not** one of them; that field is about repository
+  binding and stays empty for this. A worker whose credentials do not cover the transport the
+  server recorded for a project will do this on every pass until that is fixed.
 - **The worktree is based on `<baseBranch>`, not on whatever the checkout has checked out.** A
   clone parked on a feature branch used to hand the agent that branch while the gates diffed
   against the base; runs on such a checkout now start from the base instead.

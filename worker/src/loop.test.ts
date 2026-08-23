@@ -32,7 +32,7 @@ function loopOver(
   api: ReturnType<typeof apiStub>,
   overrides: {
     assignments?: string[];
-    execute?: (task: ClaimedTask) => Promise<void>;
+    execute?: (task: ClaimedTask) => Promise<void | "machine-fault">;
     sleep?: (ms: number) => Promise<void>;
   } = {}
 ): { loop: Loop; execute: ReturnType<typeof vi.fn>; sleep: ReturnType<typeof vi.fn> } {
@@ -78,6 +78,51 @@ describe("createLoop", () => {
 
     expect(execute.mock.calls.map(([t]) => t.taskKey)).toEqual(["CP-158", "CP-159"]);
     expect(sleep).toHaveBeenCalledTimes(1);
+  });
+
+  // An unreachable remote fails every task identically. Claiming onward would march the whole
+  // approved queue through a failure none of those tasks caused — and since a released attempt is
+  // refunded but a charged one is never reset, the charged version parks them in front of a human
+  // permanently. So the pass ends and the worker waits.
+  it("stops claiming for the rest of the pass when a run reports a machine fault", async () => {
+    const second = { ...task, taskId: "t2", taskKey: "CP-159" };
+    const api = apiStub(queue(task, second));
+    const { loop, execute, sleep } = loopOver(api, {
+      execute: async () => "machine-fault" as const,
+    });
+
+    await loop.start();
+
+    expect(execute.mock.calls.map(([t]) => t.taskKey)).toEqual(["CP-158"]);
+    expect(sleep).toHaveBeenCalledWith(30_000, expect.any(AbortSignal));
+  });
+
+  it("does not claim a sibling project after a machine fault either", async () => {
+    const api = apiStub(queue(task, { ...task, taskId: "t2", taskKey: "CP-159" }));
+    const { loop, execute } = loopOver(api, {
+      assignments: ["P1", "P2"],
+      execute: async () => "machine-fault" as const,
+    });
+
+    await loop.start();
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(api.claim).toHaveBeenCalledTimes(1);
+  });
+
+  // A fault outranks work that already succeeded in the same pass: the fault is what the next
+  // claim would hit, so it decides whether the pass continues.
+  it("sleeps after a machine fault even when an earlier task in the pass succeeded", async () => {
+    const api = apiStub(queue(task, { ...task, taskId: "t2", taskKey: "CP-159" }));
+    let call = 0;
+    const { loop, sleep } = loopOver(api, {
+      assignments: ["P1", "P2"],
+      execute: async () => (++call === 1 ? undefined : ("machine-fault" as const)),
+    });
+
+    await loop.start();
+
+    expect(sleep).toHaveBeenCalledWith(30_000, expect.any(AbortSignal));
   });
 
   it("sleeps for the configured interval when the queue is empty", async () => {

@@ -502,6 +502,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
           collectDiff,
           gateFor: gateFromEntry,
           recordRun: (project, record) => outbox.add({ kind: "run", projectId: project, record }),
+          logError: deps.logError,
           runner: deps.runner,
           signal,
           telemetry,

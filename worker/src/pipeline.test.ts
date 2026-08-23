@@ -8,7 +8,7 @@ import { Executor } from "./executor.js";
 import { gitArgs } from "./git-safety.js";
 import { Reporter } from "./reporter.js";
 import { createTelemetry, isOutcome, isQuota, Progress, TelemetryUpdate } from "./telemetry.js";
-import { Workspace } from "./workspace.js";
+import { BaseUnavailableError, Workspace } from "./workspace.js";
 import { ClaimedTask, DiffStats, ExecutionResult, Gate, SnapshotEntry } from "./types.js";
 import { PipelineDeps, resolveStatusIds, runTask } from "./pipeline.js";
 
@@ -264,6 +264,46 @@ describe("runTask", () => {
     await runTask(h.deps, task);
 
     expect(h.collectDiff).toHaveBeenCalledWith(h.runner, "/wt", "base111");
+  });
+
+  // A base that could not be established is the machine's failure, not the task's. requeued charges
+  // the attempt and nothing ever resets execution.attempts, so charging one unreachable remote to
+  // the queue parks every task in it in front of a human, permanently, for a network problem.
+  it("releases the task with its attempt refunded when the base cannot be established", async () => {
+    const h = harness();
+    h.workspace.create.mockRejectedValue(
+      new BaseUnavailableError("could not resolve base branch main: no route to host")
+    );
+
+    const disposition = await runTask(h.deps, task);
+
+    expect(disposition).toBe("machine-fault");
+    expect(h.reporter.released).toHaveBeenCalled();
+    expect(h.reporter.requeued).not.toHaveBeenCalled();
+    expect(h.reporter.released.mock.calls[0][1]).toMatch(/no route to host/);
+  });
+
+  it("writes the machine fault to the worker's own log, not only to the board", async () => {
+    const logError = vi.fn();
+    const h = harness({ logError });
+    h.workspace.create.mockRejectedValue(new BaseUnavailableError("no route to host"));
+
+    await runTask(h.deps, task);
+
+    expect(logError).toHaveBeenCalledWith(expect.stringMatching(/CP-158.*no route to host/));
+  });
+
+  // Everything else that can go wrong creating a worktree is still the task's problem and still
+  // spends the attempt — a task whose own key or branch breaks the worktree must run out of retries.
+  it("still charges the attempt when the worktree fails for a reason that is not the base", async () => {
+    const h = harness();
+    h.workspace.create.mockRejectedValue(new Error("worktree add failed"));
+
+    const disposition = await runTask(h.deps, task);
+
+    expect(disposition).toBeUndefined();
+    expect(h.reporter.requeued).toHaveBeenCalled();
+    expect(h.reporter.released).not.toHaveBeenCalled();
   });
 
   it("resolves the board and builds a reporter for every task, not once per process", async () => {
