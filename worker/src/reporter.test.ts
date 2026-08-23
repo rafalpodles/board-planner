@@ -402,3 +402,58 @@ describe("secrets in free text bound for the board", () => {
     expect(body).toContain("[redacted]");
   });
 });
+
+// BP-380 follow-up. Two tasks in an afternoon were refused by protected-paths, and both times the
+// work the gate wanted a human to read existed only in a worktree on one machine. A patch in a
+// comment executes nothing, so the reading can happen where the task is.
+describe("a refusal that withholds the branch carries the change itself", () => {
+  const body = (api: ReturnType<typeof apiSpy>) => api.comment.mock.calls[0][2];
+
+  it("puts the refused patch in the comment", async () => {
+    const api = apiSpy();
+
+    await createReporter(api, statuses).gateRejected(
+      task,
+      "protected-paths",
+      "the change touches files later steps execute (Dockerfile)",
+      "",
+      "diff --git a/Dockerfile b/Dockerfile\n-FROM node:20-slim\n+FROM node:22-slim\n"
+    );
+
+    expect(body(api)).toContain("```diff");
+    expect(body(api)).toContain("+FROM node:22-slim");
+  });
+
+  // A pushed branch is the better copy — it has history and can be checked out. Repeating it as a
+  // patch would double every rejection comment for no reader's benefit.
+  it("says nothing extra when the branch was pushed", async () => {
+    const api = apiSpy();
+
+    await createReporter(api, statuses).gateRejected(
+      task,
+      "build",
+      "npm run build failed",
+      "bp-1/x",
+      "diff --git a/x b/x\n"
+    );
+
+    expect(body(api)).not.toContain("```diff");
+    expect(body(api)).toContain("bp-1/x");
+  });
+
+  // The same redaction every other agent-authored string gets. A patch is the likeliest place for a
+  // credential to appear, because it is the one thing quoted verbatim.
+  it("redacts a secret the patch happens to carry", async () => {
+    const api = apiSpy();
+
+    await createReporter(api, statuses).gateRejected(
+      task,
+      "protected-paths",
+      "refused",
+      "",
+      "diff --git a/.npmrc b/.npmrc\n+_authToken=ghp_abcdefghijklmnopqrstuvwxyz0123456789\n"
+    );
+
+    expect(body(api)).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz0123456789");
+  });
+});
