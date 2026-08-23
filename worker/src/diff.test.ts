@@ -6,6 +6,7 @@ import { collectDiff } from "./diff.js";
 // Every call carries the hardening flags gitArgs prepends — stripped here so recorded calls and
 // response keys stay about the git subcommand, the same convention workspace.test.ts uses.
 const HARDENING_PREFIX = gitArgs([]);
+const BASE_SHA = "abc1234";
 
 function recordingRunner(calls: string[][], responses: Record<string, Partial<CommandResult>> = {}) {
   const run = vi.fn(async (_command: string, args: string[]): Promise<CommandResult> => {
@@ -28,7 +29,7 @@ describe("collectDiff", () => {
       })
       .mockResolvedValueOnce({ code: 0, stdout: "diff --git ...", stderr: "", timedOut: false });
 
-    const diff = await collectDiff({ run }, "/wt", "main");
+    const diff = await collectDiff({ run }, "/wt", BASE_SHA);
 
     expect(diff.changedFiles).toEqual(["src/a.ts", "src/a.test.ts"]);
     expect(diff.changedLines).toBe(14);
@@ -42,7 +43,7 @@ describe("collectDiff", () => {
       .mockResolvedValueOnce({ code: 0, stdout: "-\t-\timage.png\n", stderr: "", timedOut: false })
       .mockResolvedValueOnce({ code: 0, stdout: "", stderr: "", timedOut: false });
 
-    const diff = await collectDiff({ run }, "/wt", "main");
+    const diff = await collectDiff({ run }, "/wt", BASE_SHA);
 
     expect(diff.changedLines).toBe(0);
     expect(diff.changedFiles).toEqual(["image.png"]);
@@ -59,7 +60,7 @@ describe("collectDiff", () => {
       })
       .mockResolvedValueOnce({ code: 0, stdout: "diff --git ...", stderr: "", timedOut: false });
 
-    const diff = await collectDiff({ run }, "/wt", "main");
+    const diff = await collectDiff({ run }, "/wt", BASE_SHA);
 
     expect(diff.changedFiles).toEqual(["src/new/a.ts", "new-name.ts"]);
     expect(diff.changedLines).toBe(3);
@@ -69,17 +70,17 @@ describe("collectDiff", () => {
     const run = vi.fn().mockResolvedValue({
       code: 128,
       stdout: "",
-      stderr: "fatal: ambiguous argument 'main...HEAD': unknown revision or path not in the working tree",
+      stderr: "fatal: ambiguous argument 'abc1234': unknown revision or path not in the working tree",
       timedOut: false,
     });
 
-    await expect(collectDiff({ run }, "/wt", "main")).rejects.toThrow(/unknown revision/);
+    await expect(collectDiff({ run }, "/wt", BASE_SHA)).rejects.toThrow(/unknown revision/);
   });
 
   it("throws when a git call times out, instead of silently returning empty output", async () => {
     const run = vi.fn().mockResolvedValue({ code: -1, stdout: "", stderr: "", timedOut: true });
 
-    await expect(collectDiff({ run }, "/wt", "main")).rejects.toThrow(/timed out/);
+    await expect(collectDiff({ run }, "/wt", BASE_SHA)).rejects.toThrow(/timed out/);
   });
 
   it("throws when the patch call fails, instead of silently returning a truncated patch", async () => {
@@ -88,7 +89,7 @@ describe("collectDiff", () => {
       .mockResolvedValueOnce({ code: 0, stdout: "1\t0\tsrc/a.ts\n", stderr: "", timedOut: false })
       .mockResolvedValueOnce({ code: 1, stdout: "", stderr: "out of memory", timedOut: false });
 
-    await expect(collectDiff({ run }, "/wt", "main")).rejects.toThrow(/out of memory/);
+    await expect(collectDiff({ run }, "/wt", BASE_SHA)).rejects.toThrow(/out of memory/);
   });
 
   it("does not truncate a patch exactly at the size limit", async () => {
@@ -98,7 +99,7 @@ describe("collectDiff", () => {
       .mockResolvedValueOnce({ code: 0, stdout: "1\t0\tsrc/a.ts\n", stderr: "", timedOut: false })
       .mockResolvedValueOnce({ code: 0, stdout: patchAtLimit, stderr: "", timedOut: false });
 
-    const diff = await collectDiff({ run }, "/wt", "main");
+    const diff = await collectDiff({ run }, "/wt", BASE_SHA);
 
     expect(diff.patch).toBe(patchAtLimit);
     expect(diff.truncated).toBe(false);
@@ -111,7 +112,7 @@ describe("collectDiff", () => {
       .mockResolvedValueOnce({ code: 0, stdout: "1\t0\tsrc/a.ts\n", stderr: "", timedOut: false })
       .mockResolvedValueOnce({ code: 0, stdout: oversizedPatch, stderr: "", timedOut: false });
 
-    const diff = await collectDiff({ run }, "/wt", "main");
+    const diff = await collectDiff({ run }, "/wt", BASE_SHA);
 
     expect(diff.patch).toBe(
       `${"x".repeat(200_000)}\n\n[patch truncated: exceeded 200000 characters]`,
@@ -123,10 +124,14 @@ describe("collectDiff", () => {
     const calls: string[][] = [];
     const runner = recordingRunner(calls, { diff: { stdout: "" } });
 
-    await collectDiff(runner, "/wt", "base111");
+    await collectDiff(runner, "/wt", BASE_SHA);
 
-    const ranges = calls.filter((c) => c[0] === "diff").map((c) => c.slice(-2).join(" "));
-    expect(ranges).toEqual(["base111 HEAD", "base111 HEAD"]);
+    const diffCalls = calls.filter((c) => c[0] === "diff");
+    expect(diffCalls).toHaveLength(2);
+    for (const call of diffCalls) {
+      expect(call[call.length - 1]).toBe("--");
+      expect(call.slice(-3, -1)).toEqual([BASE_SHA, "HEAD"]);
+    }
     expect(calls.flat().join(" ")).not.toContain("...");
   });
 
@@ -137,12 +142,62 @@ describe("collectDiff", () => {
   // two things it actually asserts.
   it("passes -c core.pager=cat and GIT_CONFIG_NOSYSTEM=1 on every call it makes", async () => {
     const run = vi.fn().mockResolvedValue({ code: 0, stdout: "", stderr: "", timedOut: false });
-    await collectDiff({ run }, "/wt", "main");
+    await collectDiff({ run }, "/wt", BASE_SHA);
 
     expect(run.mock.calls.length).toBeGreaterThan(0);
     for (const call of run.mock.calls) {
       expect(call[1]).toEqual(expect.arrayContaining(["-c", "core.pager=cat"]));
       expect(call[2].env.GIT_CONFIG_NOSYSTEM).toBe("1");
+    }
+  });
+
+  // BP-327. baseBranch used to be project policy: free text on the server, and the first
+  // positional here. Measured on git 2.50.1 — `git diff --numstat '--output=/tmp/pwned...HEAD'`
+  // exits 0 and creates the file, under the operator's own uid on their own laptop. BP-382 changed
+  // what arrives at this parameter to an object id resolved off the wire, but every one of these
+  // values is still refused: none of them is hex, so the shape check below catches them before the
+  // option-shaped ones would even reach a `--`.
+  it.each([
+    "--output=/tmp/pwned",
+    "-o/tmp/pwned",
+    "--ext-diff",
+    "main; touch /tmp/pwned",
+    "main branch",
+    "",
+    "  ",
+  ])("refuses a base that is not an object id: %j", async (baseSha) => {
+    const run = vi.fn();
+
+    await expect(collectDiff({ run }, "/wt", baseSha)).rejects.toThrow(/object id/i);
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  // BP-382 retargeted this guard from "is it a ref name" to "is it an object id":
+  // workspace.ts now resolves the base off the wire and hands collectDiff `rev-parse --verify`'s
+  // own output, so a ref name reaching here would mean some caller went back to naming something
+  // the agent can rewrite. The ref names main's test list accepted are exactly what must now be
+  // refused.
+  it("accepts an object id but refuses a ref name, even one branches actually have", async () => {
+    for (const ref of ["main", "develop", "release/1.2", "v1.0", "feature/BP-327_fix"]) {
+      const run = vi.fn();
+      await expect(collectDiff({ run }, "/wt", ref)).rejects.toThrow(/object id/i);
+      expect(run).not.toHaveBeenCalled();
+    }
+
+    const run = vi.fn().mockResolvedValue({ code: 0, stdout: "", stderr: "", timedOut: false });
+    await expect(collectDiff({ run }, "/wt", BASE_SHA)).resolves.toBeDefined();
+  });
+
+  // Second line behind the shape check: nothing after `--` can be read as a revision or an option
+  it("closes the positional list with --", async () => {
+    const run = vi.fn().mockResolvedValue({ code: 0, stdout: "", stderr: "", timedOut: false });
+
+    await collectDiff({ run }, "/wt", BASE_SHA);
+
+    for (const call of run.mock.calls) {
+      expect(call[1][call[1].length - 1]).toBe("--");
+      expect(call[1]).toContain(BASE_SHA);
+      expect(call[1]).toContain("HEAD");
     }
   });
 });

@@ -431,7 +431,11 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<Ru
             // Neither refusal reached the remote, so neither may promise a branch there — the
             // pushFailed message already says as much, and repeating it as "pushed for inspection"
             // is the exact contradiction a human reading the comment would have to untangle.
-            withholdsPush || pushFailed ? "" : branch
+            withholdsPush || pushFailed ? "" : branch,
+            // Only where no branch carries it. A patch in a comment executes nothing, and this
+            // gate's demand is that a human read the change — which otherwise means a shell on
+            // whichever machine happened to claim the task.
+            diff.patch
           );
           return;
         }

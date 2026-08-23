@@ -72,6 +72,11 @@ reason costs real time. **This app has no server session and no cookies** — br
 credentials in `sessionStorage`. That is exactly why `oauth/authorize` is a hand-rolled HTML page
 carrying its own username and password form: it had no session to lean on.
 
+> **Superseded (BP-383, 2026-08-23.)** BP-293 gave the app a server session in an httpOnly cookie,
+> and `oauth/authorize` now uses it: a browser that is already signed in goes straight to the
+> consent screen, and the password form is what `prompt=login` asks for. The paragraph above is
+> kept because the argument it makes about *this* PRD's approval page still stands on its own.
+
 Copying it means rebuilding a bespoke login form for the approval page. The cheaper precedent is the
 one enrolment already uses: an ordinary React page behind `AuthGuard`, calling a route guarded by
 `withAdmin` plus the `viaMachineCredential` refusal. Reusable from OAuth: the token helpers and the

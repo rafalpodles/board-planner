@@ -22,7 +22,7 @@ const ENV = {
   CP_STATE_DIR: STATE_DIR,
 };
 
-const IDENTITY = JSON.stringify({ workerId: "w1", credential: "cpw_x", heartbeatMs: 60_000 });
+const IDENTITY = JSON.stringify({ workerId: "6a7c686f70ed274cf658b1b3", credential: "cpw_x", heartbeatMs: 60_000 });
 
 function memoryStore(contents: string): Store {
   let text = contents;
@@ -180,6 +180,7 @@ describe("the worker's lifecycle", () => {
 describe("telemetry, from the agent's stdout to the two sinks", () => {
   const REPO = "/repos/demo";
   const REMOTE = "git@github.com:owner/repo.git";
+  const BASE_SHA = "cafef00d";
   const SERVER_RUN_ID = "run-minted-by-the-server";
   const AGENT_SECRET = "cpw_deadbeef0123456789abcdef01234567";
 
@@ -280,7 +281,13 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         // The base is resolved off the wire now, so ls-remote has to answer with the ref it was
         // asked for; whether the *right* ref is picked out is gate-integrity's subject, on real git
         if (args[0] === "ls-remote") {
-          return { code: 0, stdout: `${REPO}\t${args[args.length - 1]}\n`, stderr: "", timedOut: false };
+          return { code: 0, stdout: `${BASE_SHA}\t${args[args.length - 1]}\n`, stderr: "", timedOut: false };
+        }
+        // workspace.ts verifies the fetched sha with `rev-parse --verify <sha>^{commit}` before
+        // trusting it as the base; collectDiff then refuses anything that is not an object id, so
+        // this has to answer with one rather than the content-free "" every other call gets
+        if (args.includes("--verify")) {
+          return { code: 0, stdout: `${BASE_SHA}\n`, stderr: "", timedOut: false };
         }
         // bindRepository insists the path is its own toplevel; every other git call is content-free
         return {

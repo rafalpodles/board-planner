@@ -25,6 +25,7 @@ const MINTED_CREDENTIAL = "cpw_minted_by_the_board";
 const REPO = "/repos/demo";
 const REMOTE = "git@github.com:owner/repo.git";
 const TOOL_DIR = "/opt/cp-integration-bin";
+const BASE_SHA = "cafef00d";
 
 // What the board resolves the project's default agent into, and sends whole on the claim
 const CLAIMED_AGENT = {
@@ -421,7 +422,11 @@ async function runWorkerAgainstTheBoard(opts: { takeTheTask: boolean }): Promise
         );
       }
       if (command === "claude") return agent(runOpts);
-      if (args[0] === "ls-remote") return ok(`${REPO}\t${args[args.length - 1]}\n`);
+      if (args[0] === "ls-remote") return ok(`${BASE_SHA}\t${args[args.length - 1]}\n`);
+      // workspace.ts verifies the fetched sha with `rev-parse --verify <sha>^{commit}` before
+      // trusting it as the base; collectDiff then refuses anything that is not an object id, so
+      // this has to answer with one rather than the toplevel path every other rev-parse call gets
+      if (args.includes("--verify")) return ok(`${BASE_SHA}\n`);
       // bindRepository insists the path is its own toplevel; the inventory needs the remote
       if (args.includes("rev-parse")) return ok(REPO);
       if (args.includes("get-url")) return ok(REMOTE);

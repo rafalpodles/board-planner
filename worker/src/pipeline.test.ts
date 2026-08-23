@@ -493,7 +493,10 @@ describe("runTask", () => {
       running("implement", "diff-size", "review"),
       "diff-size",
       "too big",
-      "cp-158/worker"
+      "cp-158/worker",
+      // The refused change travels with the refusal now; the reporter only renders it where no
+      // branch carries it, which for this gate is not the case.
+      expect.anything()
     );
     expect(later.run).not.toHaveBeenCalled();
     expect(h.delivery.merge).not.toHaveBeenCalled();

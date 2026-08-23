@@ -144,8 +144,10 @@ export interface IUser {
   password: string;
   fullName: string;
   email: string;
+  /** @deprecated Superseded by `notifications`. Kept as the fallback for accounts that predate it. */
   emailNotifications: boolean;
   emailDigest: boolean;
+  notifications?: UserNotificationPrefs;
   lastDigestDay: string;
   collapseEmptyColumns: boolean;
   role: UserRole;
@@ -238,6 +240,7 @@ export interface IOAuthConsent {
   ticketHash: string;
   clientId: string;
   user: Types.ObjectId | IUser;
+  session: Types.ObjectId | null;
   redirectUri: string;
   codeChallenge: string;
   state: string;
@@ -1299,6 +1302,38 @@ export interface ApiProjectAuditLog {
 // In-app notification types
 export type NotificationType = "task_assigned" | "status_changed" | "comment_added" | "mentioned";
 
+// The order the settings grid renders them in
+export const NOTIFICATION_TYPES: NotificationType[] = [
+  "task_assigned",
+  "mentioned",
+  "status_changed",
+  "comment_added",
+];
+
+export const PERSONAL_CHAT_KINDS = ["slack", "discord"] as const;
+export type PersonalChatKind = (typeof PERSONAL_CHAT_KINDS)[number];
+
+/** One row of the grid: where a single event is allowed to go. */
+export interface NotificationChannels {
+  inApp: boolean;
+  email: boolean;
+  chat: boolean;
+}
+
+export type NotificationMatrix = Record<NotificationType, NotificationChannels>;
+
+export interface ProjectNotificationOverride {
+  project: Types.ObjectId;
+  matrix: NotificationMatrix;
+}
+
+export interface UserNotificationPrefs {
+  defaults?: NotificationMatrix;
+  /** A row here IS the override switch for that project — there is no separate flag to disagree with. */
+  projects: ProjectNotificationOverride[];
+  chat: { kind: PersonalChatKind | ""; webhookUrl: string };
+}
+
 export interface INotification {
   _id: Types.ObjectId;
   recipient: Types.ObjectId;
@@ -1309,6 +1344,11 @@ export interface INotification {
   title: string;
   body: string;
   read: boolean;
+  /** Whether the bell shows this row. The document is stored either way, because the digest is
+   *  assembled from these and hiding one must not empty tomorrow's mail. */
+  inApp: boolean;
+  /** Set only on hidden rows, which nothing can mark read — it is what expires them. */
+  hiddenAt?: Date;
   createdAt: Date;
 }
 

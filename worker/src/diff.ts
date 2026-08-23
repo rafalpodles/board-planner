@@ -4,6 +4,7 @@ import { gitArgs, GIT_SAFE_ENV } from "./git-safety.js";
 import { DiffStats } from "./types.js";
 
 const GIT_TIMEOUT_MS = 60_000;
+const BASE_OBJECT_ID = /^[0-9a-f]{7,64}$/;
 const MAX_PATCH_CHARS = 200_000;
 
 async function git(runner: Runner, args: string[], opts: RunOpts): Promise<string> {
@@ -63,12 +64,24 @@ export async function collectDiff(
   worktreePath: string,
   baseSha: string
 ): Promise<DiffStats> {
+  // BP-327 put a guard here because the base arrived as free policy text: `--output=<path>` in
+  // git's option slot writes that file under the operator's uid, and a positional that no `--` can
+  // protect has to be refused before it reaches the command line. BP-382 changed what arrives —
+  // workspace.ts resolves the base off the wire and hands over `rev-parse --verify`'s own output —
+  // so the guard tightens from "is it a ref name" to "is it an object id". A ref name reaching
+  // here would mean some caller went back to naming something the agent can rewrite.
+  if (!BASE_OBJECT_ID.test(baseSha)) {
+    throw new Error(
+      `refusing base ${JSON.stringify(baseSha)}: git would not read it as an object id`
+    );
+  }
+
   const opts: RunOpts = { cwd: worktreePath, timeoutMs: GIT_TIMEOUT_MS };
   // Two trees, not a range: a merge-base is computed from history, and history is what the agent
   // rewrites to hide a file from this diff (BP-382).
   const numstatOutput = await git(
     runner,
-    ["diff", "--no-ext-diff", "--no-textconv", "--numstat", baseSha, "HEAD"],
+    ["diff", "--no-ext-diff", "--no-textconv", "--numstat", baseSha, "HEAD", "--"],
     opts
   );
   const { changedLines, changedFiles } = parseNumstat(numstatOutput);
@@ -83,7 +96,7 @@ export async function collectDiff(
   // instead of a blanket repo setting — measured with the attribute and driver both planted: an
   // unguarded call returns an empty patch and runs the textconv program, which is Bash back under
   // an agent this pipeline took Bash away from.
-  const patchOutput = await git(runner, ["diff", "--no-ext-diff", "--no-textconv", baseSha, "HEAD"], opts);
+  const patchOutput = await git(runner, ["diff", "--no-ext-diff", "--no-textconv", baseSha, "HEAD", "--"], opts);
   const { patch, truncated } = boundPatch(patchOutput);
 
   return { changedLines, changedFiles, patch, truncated };

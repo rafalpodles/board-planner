@@ -1,12 +1,22 @@
-import { PROJECT_POLICY_DEFAULTS, isProjectPolicyField } from "@/lib/worker-policy";
+import {
+  PROJECT_POLICY_DEFAULTS,
+  isGitRefName,
+  isModelName,
+  isProjectPolicyField,
+} from "@/lib/worker-policy";
 
 const BOOLEAN_FIELDS: ReadonlySet<string> = new Set<string>();
-const STRING_FIELDS: ReadonlySet<string> = new Set([
-  "baseBranch",
-  "model",
-  "fallbackModel",
-  "reviewModel",
-]);
+
+// Each string field with the shape its value has to have, because none of them stays data: they
+// reach a worker in the assignment policy and are spent as arguments to git and to the CLI. A
+// non-empty string was the only check, which let an option through — see worker-policy.ts.
+const STRING_FIELDS: ReadonlyMap<string, { valid: (value: string) => boolean; expected: string }> =
+  new Map([
+    ["baseBranch", { valid: isGitRefName, expected: "a git branch name" }],
+    ["model", { valid: isModelName, expected: "a model name" }],
+    ["fallbackModel", { valid: isModelName, expected: "a model name" }],
+    ["reviewModel", { valid: isModelName, expected: "a model name" }],
+  ]);
 
 export type WorkerConfigPatch =
   | { ok: true; update: Record<string, unknown> }
@@ -71,8 +81,12 @@ export function parseProjectWorkerConfig(
           return { ok: false, error: `${field} must be a boolean` };
         }
       } else if (STRING_FIELDS.has(field)) {
+        const shape = STRING_FIELDS.get(field)!;
         if (typeof value !== "string" || !value.trim()) {
           return { ok: false, error: `${field} must be a non-empty string` };
+        }
+        if (!shape.valid(value.trim())) {
+          return { ok: false, error: `${field} must be ${shape.expected}` };
         }
       } else if (!isPositiveInt(value)) {
         return { ok: false, error: `${field} must be a positive integer` };

@@ -32,6 +32,24 @@ function withConfig(config: string[], args: string[]): string[] {
   return [...config.flatMap((entry) => ["-c", entry]), ...args];
 }
 
+// git reads an option-shaped positional as an option, and none of this package's calls ever mean
+// one: `git diff --numstat '--output=/tmp/pwned...HEAD'` exits 0 and writes that file. `--` is
+// where a caller has already said "everything after this is a positional", so it is the one place
+// the rule can be enforced once for every call site instead of at each sink. Exported because
+// delivery.ts hardens through the environment rather than through gitArgs and still has a
+// positional of its own.
+export function refuseOptionShapedPositionals(args: string[]): string[] {
+  const separator = args.indexOf("--");
+  if (separator === -1) return args;
+  const offender = args.slice(separator + 1).find((arg) => arg.startsWith("-"));
+  if (offender !== undefined) {
+    throw new Error(
+      `refusing git argument ${JSON.stringify(offender)}: git reads a leading dash as an option`
+    );
+  }
+  return args;
+}
+
 export function gitArgs(args: string[]): string[] {
-  return withConfig(SAFE_CONFIG, args);
+  return withConfig(SAFE_CONFIG, refuseOptionShapedPositionals(args));
 }

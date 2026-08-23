@@ -4,10 +4,21 @@ import { scrub } from "./scrub.js";
 import { ClaimedTask } from "./types.js";
 
 const MAX_REASON_CHARS = 2000;
+// A patch is not a reason and does not fit in one. This is the refused change itself, and a human
+// reading it on the board is the whole point of putting it there — cutting it to a reason's length
+// would leave the first file and none of the rest.
+const MAX_PATCH_COMMENT_CHARS = 12_000;
 
 export interface Reporter {
   blocked(task: ClaimedTask, reason: string): Promise<void>;
-  gateRejected(task: ClaimedTask, gate: string, reason: string, branch: string): Promise<void>;
+  gateRejected(
+    task: ClaimedTask,
+    gate: string,
+    reason: string,
+    branch: string,
+    /** The refused change itself, for a rejection whose branch is deliberately not pushed. */
+    patch?: string
+  ): Promise<void>;
   released(task: ClaimedTask, reason: string): Promise<void>;
   requeued(task: ClaimedTask, reason: string): Promise<void>;
   merged(task: ClaimedTask, prUrl: string, summary: string): Promise<void>;
@@ -26,6 +37,15 @@ function safeText(text: string): string {
   const safe = scrub(text);
   if (safe.length <= MAX_REASON_CHARS) return safe;
   return `${safe.slice(0, MAX_REASON_CHARS)}\n[truncated to ${MAX_REASON_CHARS} characters]`;
+}
+
+// Same redaction as every other agent-authored string, a different bound. Scrubbed before the cut
+// for the reason safeText gives: a secret straddling the cut would survive as an unmatched prefix.
+function safePatch(patch: string): string {
+  const safe = scrub(patch);
+  if (safe.length <= MAX_PATCH_COMMENT_CHARS) return safe;
+  const cut = safe.lastIndexOf("\n", MAX_PATCH_COMMENT_CHARS);
+  return `${safe.slice(0, cut > 0 ? cut : MAX_PATCH_COMMENT_CHARS)}\n[patch truncated]`;
 }
 
 export function createReporter(
@@ -106,14 +126,18 @@ export function createReporter(
       );
     },
 
-    async gateRejected(task, gate, reason, branch) {
+    async gateRejected(task, gate, reason, branch, patch) {
       // Conditional: a protected-paths refusal deliberately does not push, and the reason already
       // says where the work is. Promising a branch that is not on the remote sends a human looking.
       const where = branch ? `\n\nThe work is pushed to \`${branch}\` for inspection.` : "";
+      // Without a branch, the refused change existed only in a worktree on one machine — and this
+      // gate's entire demand is that a human read it. A patch in a comment executes nothing, so
+      // the review can happen where the task is rather than requiring a shell on that laptop.
+      const proposed = !branch && patch?.trim() ? `\n\nThe change it refused:\n\n\`\`\`diff\n${safePatch(patch)}\n\`\`\`` : "";
       await report(
         task,
         statusIds.review,
-        `The execution worker blocked the merge at the **${gate}** gate.\n\n${safeText(reason)}${where}`
+        `The execution worker blocked the merge at the **${gate}** gate.\n\n${safeText(reason)}${where}${proposed}`
       );
     },
 

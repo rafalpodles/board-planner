@@ -65,12 +65,12 @@ describe("createWorkspace", () => {
     expect(result.baseSha).toBe("base1");
     expect(run).toHaveBeenCalledWith(
       "git",
-      [...HARDENING_PREFIX, "worktree", "add", "-B", "cp-158/worker", "/worktrees/CP-158", "base1"],
+      [...HARDENING_PREFIX, "worktree", "add", "-B", "cp-158/worker", "--", "/worktrees/CP-158", "base1"],
       expect.objectContaining({ cwd: "/repo", env: expect.objectContaining({ GIT_CONFIG_NOSYSTEM: "1" }) }),
     );
     expect(run).not.toHaveBeenCalledWith(
       "git",
-      [...HARDENING_PREFIX, "worktree", "remove", "--force", "/worktrees/CP-158"],
+      [...HARDENING_PREFIX, "worktree", "remove", "--force", "--", "/worktrees/CP-158"],
       expect.anything(),
     );
   });
@@ -82,7 +82,7 @@ describe("createWorkspace", () => {
     expect(result.baseSha).toBe("base111");
     expect(run).toHaveBeenCalledWith(
       "git",
-      [...HARDENING_PREFIX, "worktree", "add", "-B", "bp-1/worker", "/worktrees/BP-1", "base111"],
+      [...HARDENING_PREFIX, "worktree", "add", "-B", "bp-1/worker", "--", "/worktrees/BP-1", "base111"],
       expect.anything(),
     );
   });
@@ -312,7 +312,7 @@ describe("createWorkspace", () => {
   it("throws when git fails to create the worktree", async () => {
     const { runner } = fakeGit(
       baseFromRemote("base1", {
-        "worktree add -B cp-158/worker /worktrees/CP-158 base1": { code: 1, stderr: "exists" },
+        "worktree add -B cp-158/worker -- /worktrees/CP-158 base1": { code: 1, stderr: "exists" },
       })
     );
     await expect(withRemote(runner).create("CP-158", "worker")).rejects.toThrow(/exists/);
@@ -362,12 +362,12 @@ describe("createWorkspace", () => {
     expect(result.path).toBe("/worktrees/CP-158");
     expect(run).toHaveBeenCalledWith(
       "git",
-      [...HARDENING_PREFIX, "worktree", "remove", "--force", "/worktrees/CP-158"],
+      [...HARDENING_PREFIX, "worktree", "remove", "--force", "--", "/worktrees/CP-158"],
       expect.anything(),
     );
     expect(run).toHaveBeenCalledWith(
       "git",
-      [...HARDENING_PREFIX, "worktree", "add", "-B", "cp-158/worker", "/worktrees/CP-158", "base9"],
+      [...HARDENING_PREFIX, "worktree", "add", "-B", "cp-158/worker", "--", "/worktrees/CP-158", "base9"],
       expect.anything(),
     );
   });
@@ -380,7 +380,7 @@ describe("createWorkspace", () => {
 
     expect(run).toHaveBeenCalledWith(
       "git",
-      [...HARDENING_PREFIX, "worktree", "remove", "--force", "/worktrees/CP-158"],
+      [...HARDENING_PREFIX, "worktree", "remove", "--force", "--", "/worktrees/CP-158"],
       expect.anything(),
     );
   });
@@ -391,7 +391,7 @@ describe("createWorkspace", () => {
 
     expect(run).not.toHaveBeenCalledWith(
       "git",
-      [...HARDENING_PREFIX, "worktree", "remove", "--force", "/worktrees/CP-158"],
+      [...HARDENING_PREFIX, "worktree", "remove", "--force", "--", "/worktrees/CP-158"],
       expect.anything(),
     );
   });
@@ -399,7 +399,7 @@ describe("createWorkspace", () => {
   it("propagates a genuine removal failure instead of swallowing it", async () => {
     const { runner } = fakeGit({
       "worktree list --porcelain": { stdout: "worktree /worktrees/CP-158\n" },
-      "worktree remove --force /worktrees/CP-158": { code: 1, stderr: "permission denied" },
+      "worktree remove --force -- /worktrees/CP-158": { code: 1, stderr: "permission denied" },
     });
     await expect(createWorkspace(config, runner).destroy("CP-158")).rejects.toThrow(
       /permission denied/,

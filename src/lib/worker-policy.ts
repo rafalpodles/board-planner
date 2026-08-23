@@ -41,3 +41,30 @@ export function isWorkerPolicyField(name: string): name is WorkerPolicyField {
 export function isProjectPolicyField(name: string): name is ProjectPolicyField {
   return PROJECT_FIELD_NAMES.has(name);
 }
+
+// The three free-text policy fields do not stay data: they travel in the assignment and become
+// arguments to a program on somebody's laptop — baseBranch as a revision on `git diff`, the model
+// names as `--model`'s value. git reads an option-shaped positional as an option, and
+// `git diff --numstat '--output=/tmp/pwned...HEAD'` exits 0 having written that file under the
+// operator's own uid. Refused where an admin sets it, and again in the worker's own
+// applyPolicy — a value this instance never stored can still reach a worker from somewhere else.
+// Mirrored in worker/src/config.ts; server-values.contract.test.ts holds the two together.
+const GIT_REF_NAME = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
+const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/;
+const MAX_VALUE_CHARS = 255;
+
+export function isGitRefName(value: string): boolean {
+  return (
+    value.length <= MAX_VALUE_CHARS &&
+    GIT_REF_NAME.test(value) &&
+    !value.includes("..") &&
+    !value.includes("//") &&
+    !value.endsWith("/") &&
+    !value.endsWith(".") &&
+    !value.endsWith(".lock")
+  );
+}
+
+export function isModelName(value: string): boolean {
+  return value.length <= MAX_VALUE_CHARS && MODEL_NAME.test(value);
+}

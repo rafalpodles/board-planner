@@ -429,12 +429,35 @@ describe("merge", () => {
 describe("push argument boundaries", () => {
   it("separates the refspec from git's options with --", async () => {
     const run = vi.fn().mockResolvedValue(ok);
-    await createDelivery({ run }).push("/wt", "--receive-pack=/bin/echo", COMMIT);
+    await createDelivery({ run }).push("/wt", "bp-327/fix", COMMIT);
 
     const args = argsOf(run);
-    const refspec = `${COMMIT}:refs/heads/--receive-pack=/bin/echo`;
+    const refspec = `${COMMIT}:refs/heads/bp-327/fix`;
     expect(args).toContain("--");
     expect(args.indexOf("--")).toBeLessThan(args.indexOf(refspec));
+  });
+
+  // BP-327. `--` used to be the whole answer here, and it is the weaker half: git would still have
+  // been handed the string, and only its own parsing decided what to do with it. The branch is
+  // built from a server-supplied task key, so the option shape is refused outright now.
+  it("refuses an option-shaped branch rather than trusting -- to contain it", async () => {
+    const run = vi.fn().mockResolvedValue(ok);
+
+    await expect(
+      createDelivery({ run }).push("/wt", "--receive-pack=/bin/echo", COMMIT)
+    ).rejects.toThrow(/leading dash/i);
+  });
+
+  it("passes --base only for a branch name, so a bad one opens against the default instead", async () => {
+    const run = vi.fn().mockResolvedValue({ ...ok, stdout: "https://github.com/x/y/pull/1" });
+    const task = { taskKey: "BP-1", title: "t" } as never;
+
+    await createDelivery({ run }, "--output=/tmp/pwned").openPr("/wt", task, "s");
+    expect(argsOf(run)).not.toContain("--base");
+
+    run.mockClear();
+    await createDelivery({ run }, "develop").openPr("/wt", task, "s");
+    expect(argsOf(run)).toEqual(expect.arrayContaining(["--base", "develop"]));
   });
 });
 

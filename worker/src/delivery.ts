@@ -1,6 +1,7 @@
+import { isGitRefName } from "./config.js";
 import { childEnv } from "./env.js";
 import { CommandResult, Runner } from "./exec.js";
-import { GIT_SAFE_ENV } from "./git-safety.js";
+import { GIT_SAFE_ENV, refuseOptionShapedPositionals } from "./git-safety.js";
 import { plantedConfig } from "./repos.js";
 import { ClaimedTask } from "./types.js";
 import { scrub } from "./scrub.js";
@@ -135,7 +136,11 @@ export function hardenedGitConfig(): NodeJS.ProcessEnv {
 // another terminal — global machine state, shared with every process on the box — cannot decide
 // mid-run who this worker pushes as (BP-373).
 export function createDelivery(runner: Runner, baseBranch?: string, githubToken?: string): Delivery {
-  const baseArgs = baseBranch?.trim() ? ["--base", baseBranch.trim()] : [];
+  // The second sink baseBranch reaches, after `git diff`. applyPolicy already refuses anything
+  // that is not a ref name; dropping the flag here rather than passing it on means the worst a
+  // value that got past it can do is open the pull request against the repository's own default.
+  const trimmedBase = baseBranch?.trim() ?? "";
+  const baseArgs = trimmedBase && isGitRefName(trimmedBase) ? ["--base", trimmedBase] : [];
   // Both names, not just the one gh prefers: an inherited GITHUB_TOKEN would otherwise decide the
   // identity behind the pin's back, and the failure it produces is a push that succeeds as the
   // wrong account rather than one that fails.
@@ -200,6 +205,15 @@ export function createDelivery(runner: Runner, baseBranch?: string, githubToken?
       // what an agent running inside it can rewrite, so a push that trusts the branch name sends
       // whatever that store now says HEAD is, not what a reviewer approved (BP-382).
       if (!commit) throw new Error("refusing to push: no commit was named");
+      // BP-327's refusal, preserved across BP-382's refspec form: refuseOptionShapedPositionals
+      // only ever sees the composed refspec, whose first character is the commit's, so an
+      // option-shaped branch would slip past a guard that used to catch it. Refused on the name
+      // itself rather than trusting where it happens to land inside the string.
+      if (branch.startsWith("-")) {
+        throw new Error(
+          `refusing git argument ${JSON.stringify(branch)}: git reads a leading dash as an option`
+        );
+      }
       // a retried attempt rebuilds the branch off the base, so what the previous attempt pushed is
       // a diverged history a plain push rejects; the lease still refuses to overwrite commits this
       // clone has never seen
@@ -214,7 +228,7 @@ export function createDelivery(runner: Runner, baseBranch?: string, githubToken?
       await refuseIfPlanted(worktreePath);
       const result = await run(
         "git",
-        [
+        refuseOptionShapedPositionals([
           "push",
           "--no-verify",
           RECEIVE_PACK,
@@ -222,7 +236,7 @@ export function createDelivery(runner: Runner, baseBranch?: string, githubToken?
           "origin",
           "--",
           `${commit}:refs/heads/${branch}`,
-        ],
+        ]),
         worktreePath
       );
       if (result.code !== 0) throw failure("git push", result);
