@@ -72,4 +72,32 @@ describe("unexpectedHistory against a real repository", () => {
 
     expect(reason).toContain(plantedSha);
   });
+  // A graft is one file under .git — refs/replace/<sha> — and it re-parents a commit for every
+  // read that walks history. Measured on git 2.50.1: `rev-list <base>..HEAD` reports both commits
+  // before `git replace --graft <own> <base>` and only the run's own commit after it, so the
+  // foreign commit carrying the payload leaves the range while HEAD still reads back as the sha
+  // this run committed. GIT_SAFE_ENV's GIT_NO_REPLACE_OBJECTS is what puts it back; the planted
+  // second commit above is caught with or without that variable, so this is the only test here
+  // that can tell whether it is still being passed.
+  it("refuses a foreign commit hidden behind a replace graft", async () => {
+    writeFileSync(join(work, "b.txt"), "planted\n");
+    git(work, "add", "b.txt");
+    git(work, "commit", "--quiet", "-m", "not tracked by this run");
+    const foreignSha = git(work, "rev-parse", "HEAD").trim();
+
+    writeFileSync(join(work, "a.txt"), "changed\n");
+    git(work, "add", "a.txt");
+    git(work, "commit", "--quiet", "-m", "implement");
+    const ownSha = git(work, "rev-parse", "HEAD").trim();
+
+    git(work, "replace", "--graft", ownSha, baseSha);
+
+    // The attack works: without this, a green test would prove only that the graft never took.
+    expect(git(work, "rev-list", `${baseSha}..HEAD`).trim().split("\n")).toEqual([ownSha]);
+    expect(git(work, "rev-parse", "HEAD").trim()).toBe(ownSha);
+
+    const reason = await unexpectedHistory(createRunner(), work, baseSha, [ownSha]);
+
+    expect(reason).toContain(foreignSha);
+  });
 });

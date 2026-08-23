@@ -445,7 +445,21 @@ describe("push argument boundaries", () => {
 
     await expect(
       createDelivery({ run }).push("/wt", "--receive-pack=/bin/echo", COMMIT)
-    ).rejects.toThrow(/leading dash/i);
+    ).rejects.toThrow(/not a git ref name/i);
+  });
+
+  // BP-382 gave the branch a second way to be misread, which a leading-dash check cannot see: git
+  // splits a push refspec at its **last** colon, so a colon in the branch re-splits
+  // `<commit>:refs/heads/<branch>` into a different source and a different destination. Measured
+  // on git 2.50.1 against a real remote: with the branch `evil:<older sha>`, git reported a src
+  // refspec that was neither the commit nor the branch, and nothing landed on the remote.
+  it("refuses a branch carrying a colon, which would re-split the refspec it is built into", async () => {
+    const run = vi.fn().mockResolvedValue(ok);
+
+    await expect(
+      createDelivery({ run }).push("/wt", `evil:refs/heads/other`, COMMIT)
+    ).rejects.toThrow(/not a git ref name/i);
+    expect(run).not.toHaveBeenCalled();
   });
 
   it("passes --base only for a branch name, so a bad one opens against the default instead", async () => {
