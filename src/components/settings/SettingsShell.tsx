@@ -165,7 +165,7 @@ export function SettingsShell({
             is measured from its padding edge — so `top-0` alone parks the row 24px down and
             leaves a band above it that page content scrolls through, sliced. Pulling the row up
             by that padding and paying it back as padding puts the pills flush against the top. */}
-        <SectionPillsNav className="sticky -top-6 z-30 -mx-4 -mt-6 mb-3 border-b border-border bg-bg px-4 pb-2.5 pt-7 md:hidden">
+        <SectionPillsNav className="sticky -top-6 z-30 -mx-4 -mt-6 mb-3 border-b border-border bg-bg px-4 py-3 md:hidden">
           {pills.map(pill)}
         </SectionPillsNav>
 
