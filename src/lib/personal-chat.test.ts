@@ -48,3 +48,46 @@ describe("a personal chat message", () => {
     expect(bodySent().text).toContain("<https://app.example.com/projects/BP/tasks/1|Ordinary title>");
   });
 });
+
+describe("what the message may not do", () => {
+  // The URL half carries project.key, which this instance constrains nowhere — so a project owner
+  // choosing a key is choosing part of the link expression
+  it("cannot close the link from the URL half either", async () => {
+    safeFetch.mockClear();
+
+    await sendPersonalChat({
+      users: [slackUser],
+      type: "mentioned",
+      title: "Ordinary title",
+      email: {
+        kicker: "",
+        taskKey: "X-1",
+        taskTitle: "",
+        projectRef: "A><https://phish.example|Reset your password",
+        taskNumber: 1,
+      },
+    });
+
+    const text = bodySent().text as string;
+    expect(text).not.toContain("><https://phish.example|");
+  });
+
+  it("does not let a title ping a Discord channel", async () => {
+    safeFetch.mockClear();
+    const discordUser = {
+      _id: "u2",
+      notifications: { chat: { kind: "discord" as const, webhookUrl: "https://hooks.example/d" } },
+    };
+
+    await sendPersonalChat({
+      users: [discordUser],
+      type: "task_assigned",
+      title: "@everyone **Assigned to you** look here",
+      email: { kicker: "", taskKey: "BP-1", taskTitle: "", projectRef: "BP", taskNumber: 1 },
+    });
+
+    const body = bodySent();
+    expect(body.allowed_mentions).toEqual({ parse: [] });
+    expect(body.content).not.toContain("**Assigned to you** look here");
+  });
+});

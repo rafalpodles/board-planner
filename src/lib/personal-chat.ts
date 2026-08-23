@@ -24,9 +24,12 @@ const HEADLINE: Record<NotificationType, string> = {
 };
 
 /**
- * Slack reads `<url|text>` as a link, so a title carrying `>` closes it and anything after can
- * open a second link the reader has no reason to distrust — in their own private channel, from a
- * sender they trust. Escaping the three characters Slack treats as markup is the documented fix.
+ * Slack reads `<url|text>` as a link, so a `>` anywhere inside closes it and whatever follows can
+ * open a second link the reader has no reason to distrust — in their own channel, from a sender
+ * they trust. Escaping the three characters Slack treats as markup is the documented fix.
+ *
+ * Both halves need it. The URL half carries `project.key`, which this instance does not constrain
+ * to a format anywhere, so a project owner choosing a key is choosing part of this expression.
  */
 function escapeSlack(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -34,8 +37,18 @@ function escapeSlack(text: string): string {
 
 function line(type: NotificationType, title: string, url?: string): string {
   const safe = escapeSlack(title);
-  const subject = url ? `<${url}|${safe}>` : safe;
+  const subject = url ? `<${escapeSlack(url)}|${safe}>` : safe;
   return `*${HEADLINE[type]}*\n${subject}`;
+}
+
+/**
+ * Discord has no link syntax in `content`, but it has its own ways to be somebody else: `@everyone`
+ * and `@here` ping the channel a personal webhook points at — often a team room — and `**bold**`
+ * forges a second headline. The mentions are refused at the API rather than escaped, which is what
+ * `allowed_mentions` is for; the markup characters are escaped.
+ */
+function escapeDiscord(text: string): string {
+  return text.replace(/([*_~`|\\>])/g, "\\$1");
 }
 
 function urlFor(email?: NotificationEmail): string | undefined {
@@ -52,8 +65,9 @@ function bodyFor(
 ): string {
   if (kind === "slack") return JSON.stringify({ text: line(type, title, url) });
   // Discord has no link syntax inside content, so the URL goes on its own line and unfurls
-  const content = url ? `**${HEADLINE[type]}**\n${title}\n${url}` : `**${HEADLINE[type]}**\n${title}`;
-  return JSON.stringify({ content });
+  const safe = escapeDiscord(title);
+  const content = url ? `**${HEADLINE[type]}**\n${safe}\n${url}` : `**${HEADLINE[type]}**\n${safe}`;
+  return JSON.stringify({ content, allowed_mentions: { parse: [] } });
 }
 
 export async function sendPersonalChat(n: {

@@ -40,5 +40,12 @@ notificationSchema.index(
 // keys on a different field.
 notificationSchema.index({ hiddenAt: 1 }, { expireAfterSeconds: 7 * 24 * 60 * 60 });
 
+// Mongoose builds indexes in the background and keeps the failure to itself, which is how BP-281's
+// uniqueness rule enforced nothing for months. A TTL that never gets built is the same shape of
+// silence: the collection simply grows.
+notificationSchema.on("index", (err) => {
+  if (err) console.error("Notification index build failed:", err);
+});
+
 export const Notification: Model<INotification> =
   mongoose.models.Notification || mongoose.model<INotification>("Notification", notificationSchema);

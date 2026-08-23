@@ -7,6 +7,12 @@ import { useToast } from "@/components/ui/Toast";
 import { Button } from "@/components/ui/Button";
 import { NotificationMatrixEditor } from "@/components/settings/NotificationMatrix";
 import { NotificationMatrix, PERSONAL_CHAT_KINDS, PersonalChatKind } from "@/types";
+import { withoutChat } from "@/lib/notification-prefs";
+
+function messageOf(err: unknown, fallback: string): string {
+  const message = err instanceof Error ? err.message.trim() : "";
+  return message || fallback;
+}
 
 interface Loaded {
   defaults: NotificationMatrix;
@@ -63,8 +69,10 @@ export default function NotificationsPage() {
       setWebhookUrl("");
       setChatConfigured(chatConfigured || !!webhookUrl.trim());
       toast("Notification settings saved", "success");
-    } catch {
-      toast("Failed to save notification settings", "error");
+    } catch (err) {
+      // The server's refusals name what to do — "connect Slack or Discord first", "that service
+      // needs its own webhook address". Swallowing them left every one reading as a shrug.
+      toast(messageOf(err, "Failed to save notification settings"), "error");
     } finally {
       setSaving(false);
     }
@@ -76,9 +84,9 @@ export default function NotificationsPage() {
     try {
       await api.put("/api/users/me", { emailDigest: next });
       await refreshUser();
-    } catch {
+    } catch (err) {
       setEmailDigest(previous);
-      toast("Failed to save preference", "error");
+      toast(messageOf(err, "Failed to save preference"), "error");
     }
   }
 
@@ -146,7 +154,13 @@ export default function NotificationsPage() {
             <button
               key={kind}
               type="button"
-              onClick={() => setChatKind(chatKind === kind ? "" : kind)}
+              onClick={() => {
+                const next = chatKind === kind ? "" : kind;
+                setChatKind(next);
+                // Otherwise the column is disabled while the grid still asks for chat, and every
+                // save is refused by a control the screen has just taken away
+                if (!next && matrix) setMatrix(withoutChat(matrix));
+              }}
               className={`focus-ring rounded-lg border px-3 py-1.5 text-sm capitalize transition-colors ${
                 chatKind === kind
                   ? "border-primary bg-primary/10"

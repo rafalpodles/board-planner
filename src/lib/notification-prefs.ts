@@ -85,6 +85,13 @@ export function wantsMailSomewhere(user: PrefsSource | null | undefined): boolea
   return grids.some((grid) => NOTIFICATION_TYPES.some((type) => grid?.[type]?.email));
 }
 
+/** Strips chat from every row — what disconnecting a service has to do to the grids that named it. */
+export function withoutChat(matrix: NotificationMatrix): NotificationMatrix {
+  return Object.fromEntries(
+    NOTIFICATION_TYPES.map((type) => [type, { ...matrix[type], chat: false }])
+  ) as NotificationMatrix;
+}
+
 /** Whether a grid asks for chat anywhere — the one thing that needs a connection to exist first. */
 export function wantsChat(matrix: NotificationMatrix): boolean {
   return NOTIFICATION_TYPES.some((type) => matrix[type]?.chat);

@@ -66,14 +66,17 @@ export async function buildDigestFor(
   userId: string,
   since: Date,
   prefs?: PrefsSource
-): Promise<{ lines: DigestLine[]; total: number }> {
+): Promise<{ lines: DigestLine[]; total: number; atLeast: boolean }> {
   const filter = { recipient: userId, read: false, createdAt: { $gte: since } };
   // Which rows belong in the mail is decided per row below, so a page of DIGEST_ROW_LIMIT could be
   // DIGEST_ROW_LIMIT muted ones — but reading the day unbounded lets anyone who can comment on a
   // watched task decide how much this process hydrates at 07:00. DIGEST_SCAN_LIMIT is the ceiling
   // on that; past it the count says "at least", because nobody counted the rest.
+  // Newest first, so the ceiling below drops the oldest rather than everything recent. Ascending
+  // meant that past the ceiling a reader saw only the start of their day and never what just
+  // happened — the opposite of what a morning summary is for.
   const notifications = await Notification.find(filter)
-    .sort({ createdAt: 1 })
+    .sort({ createdAt: -1 })
     .limit(DIGEST_SCAN_LIMIT + 1)
     .populate("task", "taskNumber")
     .populate("project", "key")
@@ -97,13 +100,17 @@ export async function buildDigestFor(
     // Counted rather than inferred from the page: a digest that lists 25 and says "and 1 more"
     // when 40 are waiting is a silent cap wearing a number
     total: wanted.length,
+    // Past the scan ceiling this count is a floor, and the mail has to say so rather than print a
+    // precise-looking number nobody computed
+    atLeast: truncated,
   };
 }
 
 async function sendDigest(
   user: { _id: unknown; email: string; username: string },
   lines: DigestLine[],
-  total: number
+  total: number,
+  atLeast = false
 ): Promise<void> {
   const origin = selfOrigin();
   const settingsUrl = origin ? `${origin}/settings/notifications` : undefined;
@@ -116,7 +123,10 @@ async function sendDigest(
     heading: `${count} on your tasks`,
     rows: lines.map((line) => ({ label: line.key, value: line.title, url: line.url })),
     proseRows: true,
-    outro: hidden > 0 ? [`And ${hidden} more waiting on the board.`] : undefined,
+    outro:
+      hidden > 0
+        ? [`And ${atLeast ? "at least " : ""}${hidden} more waiting on the board.`]
+        : undefined,
     button: origin ? { label: "Open my tasks", url: `${origin}/my-tasks` } : undefined,
     footer: [
       "You get one digest a day instead of a mail for every event, because that is what you asked for.",
@@ -171,10 +181,10 @@ export async function digestTick(now = new Date()): Promise<number> {
     if (!claimed) continue;
 
     try {
-      const { lines, total } = await buildDigestFor(String(user._id), since, user);
+      const { lines, total, atLeast } = await buildDigestFor(String(user._id), since, user);
       // A quiet day is not worth a mail saying so
       if (lines.length === 0) continue;
-      await sendDigest(user, lines, total);
+      await sendDigest(user, lines, total, atLeast);
       sent++;
     } catch (err) {
       console.error(`Digest failed for ${user.username}:`, err);

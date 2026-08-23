@@ -24,7 +24,7 @@ vi.mock("@/models/notification", () => ({
   },
 }));
 
-const { digestTick, dueDigestDay, digestHour, digestTimezone, DIGEST_ROW_LIMIT } = await import(
+const { digestTick, dueDigestDay, digestHour, digestTimezone, DIGEST_ROW_LIMIT, DIGEST_SCAN_LIMIT } = await import(
   "@/lib/digest"
 );
 
@@ -45,8 +45,12 @@ function notifications(shown: number, total = shown) {
     project: { _id: PROJECT, key: "BP" },
   }));
   notificationFind.mockReturnValue({
+    // Honours its argument: a mock that returns everything regardless can never show the scan
+    // ceiling working, and the largest fixture here sits far below it
     sort: () => ({
-      limit: () => ({ populate: () => ({ populate: () => ({ lean: async () => rows }) }) }),
+      limit: (n: number) => ({
+        populate: () => ({ populate: () => ({ lean: async () => rows.slice(0, n) }) }),
+      }),
     }),
   });
   void shown;
@@ -244,5 +248,33 @@ describe("digestTick", () => {
 
     expect(await digestTick(morning)).toBe(1);
     expect(sendEmail).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("past the scan ceiling", () => {
+  const morning = new Date("2026-08-17T05:30:00Z");
+
+  // The count stops being a count once the read is capped, and a mail that prints a precise
+  // number nobody computed is the silent cap this file already warns about, wearing a number
+  it("says the remainder is a floor rather than a total", async () => {
+    notifications(DIGEST_SCAN_LIMIT + 200);
+
+    expect(await digestTick(morning)).toBe(1);
+    expect(sent().text).toContain("at least");
+  });
+
+  it("keeps the newest rows rather than the start of the day", async () => {
+    notifications(DIGEST_SCAN_LIMIT + 200);
+    await digestTick(morning);
+
+    // rows are built newest-first, so the first listed is the first row the query returned
+    expect(sent().text).toContain("BP-1:");
+  });
+
+  it("says nothing about a floor when everything fitted", async () => {
+    notifications(3);
+    await digestTick(morning);
+
+    expect(sent().text).not.toContain("at least");
   });
 });

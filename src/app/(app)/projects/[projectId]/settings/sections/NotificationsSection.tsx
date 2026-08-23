@@ -6,8 +6,14 @@ import { useToast } from "@/components/ui/Toast";
 import { Button } from "@/components/ui/Button";
 import { NotificationMatrixEditor } from "@/components/settings/NotificationMatrix";
 import { NotificationMatrix } from "@/types";
+import { withoutChat } from "@/lib/notification-prefs";
 import Link from "next/link";
 import { SectionProps } from "./types";
+
+function messageOf(err: unknown, fallback: string): string {
+  const message = err instanceof Error ? err.message.trim() : "";
+  return message || fallback;
+}
 
 interface Prefs {
   defaults: NotificationMatrix;
@@ -38,7 +44,10 @@ export function NotificationsSection({ project }: SectionProps) {
       .then((prefs: Prefs) => {
         const own = prefs.projects.find((p) => p.project === id);
         setGlobalMatrix(prefs.defaults);
-        setMatrix(own?.matrix ?? prefs.defaults);
+        // A grid that still names chat after the connection went away would arrive here ticked and
+        // disabled, and every save would be refused by a checkbox nobody can reach
+        const inForce = own?.matrix ?? prefs.defaults;
+        setMatrix(prefs.chat.configured ? inForce : withoutChat(inForce));
         setOverriding(!!own);
         setChatConfigured(prefs.chat.configured);
       })
@@ -56,9 +65,9 @@ export function NotificationsSection({ project }: SectionProps) {
     if (next) {
       try {
         await api.put(`/api/users/me/notifications/${id}`, { matrix });
-      } catch {
+      } catch (err) {
         setOverriding(false);
-        toast("Failed to save", "error");
+        toast(messageOf(err, "Failed to save"), "error");
       }
       return;
     }
@@ -66,10 +75,10 @@ export function NotificationsSection({ project }: SectionProps) {
     try {
       await api.del(`/api/users/me/notifications/${id}`);
       toast("Following your global settings again", "success");
-    } catch {
+    } catch (err) {
       setOverriding(true);
       setMatrix(previous);
-      toast("Failed to save", "error");
+      toast(messageOf(err, "Failed to save"), "error");
     }
   }
 
@@ -79,8 +88,8 @@ export function NotificationsSection({ project }: SectionProps) {
     try {
       await api.put(`/api/users/me/notifications/${id}`, { matrix });
       toast("Saved for this project", "success");
-    } catch {
-      toast("Failed to save", "error");
+    } catch (err) {
+      toast(messageOf(err, "Failed to save"), "error");
     } finally {
       setSaving(false);
     }

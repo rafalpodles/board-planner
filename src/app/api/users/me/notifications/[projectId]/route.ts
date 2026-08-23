@@ -18,8 +18,14 @@ export const PUT = withProjectAccess(async (request, { user, params }) => {
   const body = await request.json().catch(() => ({}));
   const matrix = normaliseMatrix(body?.matrix);
 
-  const stored = await User.findById(user._id, "notifications").lean();
-  if (wantsChat(matrix) && !stored?.notifications?.chat?.kind) {
+  // Only the two fields this decision needs — the credential beside them has no business being
+  // read into a request that never sends anything
+  const stored = await User.findById(
+    user._id,
+    "notifications.chat.kind notifications.chat.webhookUrl"
+  ).lean();
+  const chat = stored?.notifications?.chat;
+  if (wantsChat(matrix) && !(chat?.kind && chat?.webhookUrl)) {
     // Storing this would tick a column that delivers nowhere, and nothing downstream would say so
     return NextResponse.json(
       { error: "Connect Slack or Discord before sending anything there" },
@@ -27,29 +33,41 @@ export const PUT = withProjectAccess(async (request, { user, params }) => {
     );
   }
 
-  // Updating in place first, then inserting only where no row exists yet. Two round trips, but
-  // each one is atomic and the insert is guarded, so two tabs saving at once cannot leave two
-  // rows for one project — which the earlier $pull-then-$push could, and `overrideFor` would then
-  // obey whichever landed first.
+  // Update in place first. If there is no row yet, insert one — guarded both against a racing
+  // insert (so two tabs cannot leave two rows for one project) and against the array's ceiling,
+  // in the filter rather than from a count read beforehand, which bounded nothing under
+  // concurrency because every racer saw the same pre-write length.
   const updated = await User.findOneAndUpdate(
     { _id: user._id, "notifications.projects.project": projectId },
     { $set: { "notifications.projects.$.matrix": matrix } }
   );
-  if (!updated) {
-    const count = stored?.notifications?.projects?.length ?? 0;
-    if (count >= MAX_OVERRIDES) {
-      return NextResponse.json(
-        { error: `A person may tune at most ${MAX_OVERRIDES} projects` },
-        { status: 400 }
-      );
-    }
-    await User.findOneAndUpdate(
-      { _id: user._id, "notifications.projects.project": { $ne: projectId } },
-      { $push: { "notifications.projects": { project: projectId, matrix } } }
+  if (updated) return NextResponse.json({ ok: true });
+
+  const inserted = await User.findOneAndUpdate(
+    {
+      _id: user._id,
+      "notifications.projects.project": { $ne: projectId },
+      $expr: { $lt: [{ $size: { $ifNull: ["$notifications.projects", []] } }, MAX_OVERRIDES] },
+    },
+    { $push: { "notifications.projects": { project: projectId, matrix } } }
+  );
+  if (inserted) return NextResponse.json({ ok: true });
+
+  // Nothing was written. Either a racing request inserted the row between the two statements — in
+  // which case answering {ok:true} would report a save that did not happen — or the ceiling is
+  // reached. Distinguishing them costs one read and is worth it: the two need different words.
+  const after = await User.findById(user._id, "notifications.projects.project").lean();
+  const count = after?.notifications?.projects?.length ?? 0;
+  if (count >= MAX_OVERRIDES) {
+    return NextResponse.json(
+      { error: `A person may tune at most ${MAX_OVERRIDES} projects` },
+      { status: 400 }
     );
   }
-
-  return NextResponse.json({ ok: true });
+  return NextResponse.json(
+    { error: "Somebody else saved this at the same moment — reload and try again" },
+    { status: 409 }
+  );
 });
 
 export const DELETE = withProjectAccess(async (_request, { user, params }) => {
