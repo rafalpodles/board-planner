@@ -4,6 +4,7 @@ import {
   buildSessionCookie,
   checkProvenance,
   createSession,
+  legacySessionCookies,
   readSessionCookie,
   resolveSession,
 } from "@/lib/session";
@@ -323,10 +324,12 @@ async function browserSession(req: Request): Promise<{ sessionId: string; userId
   return { sessionId: String(session.sessionId), userId: String(session.userId) };
 }
 
-// Keyed on the account: an address is shared and, with no proxy hop configured, getClientIp
-// returns null for everybody, which would make one bucket for the whole instance.
-function consentKey(req: Request, userId: string): string {
-  return sourceKey(getClientIp(req) ?? `user:${userId}`, "oauth_consent");
+// Keyed on the account and nothing else. An address is the wrong dimension twice over: with no
+// proxy hop configured getClientIp returns null for everybody, which is one bucket for the whole
+// instance — and behind a proxy it is one bucket per NAT, so a single caller can shut the consent
+// screen for every colleague sharing the egress. The account is in hand here; use it.
+function consentKey(userId: string): string {
+  return sourceKey(`user:${userId}`, "oauth_consent");
 }
 
 async function issueTicket(p: AuthParams, user: IUser, sessionId: string): Promise<string> {
@@ -402,10 +405,10 @@ export async function GET(req: Request) {
       // than the address: getClientIp returns null unless a proxy hop is configured, so an
       // address key would be one bucket for the whole instance, and a single caller could hold
       // the consent screen shut for everybody (BP-383 review).
-      if (await isRateLimited(consentKey(req, session.userId), CONSENTS_PER_WINDOW)) {
+      if (await isRateLimited(consentKey(session.userId), CONSENTS_PER_WINDOW)) {
         return errorPage("Too many authorization attempts on this account. Try again later.", 429);
       }
-      await recordFailedAttempt(consentKey(req, session.userId));
+      await recordFailedAttempt(consentKey(session.userId));
 
       return consentForm(
         await issueTicket(p, user, session.sessionId),
@@ -485,14 +488,16 @@ export async function POST(req: Request) {
     userAgent: req.headers.get("user-agent"),
     ip: clientIp,
   });
-  return new Response(null, {
-    status: 303,
-    headers: {
-      location: authorizeHref(p),
-      "set-cookie": buildSessionCookie(session.token, session.absoluteExpiresAt),
-      "cache-control": "private, no-store",
-    },
+  // Headers, not an object literal: a second `set-cookie` key would collapse into the first, and
+  // this has to clear the cookie under the name this instance is not using, exactly as
+  // /api/auth/login does.
+  const headers = new Headers({
+    location: authorizeHref(p),
+    "cache-control": "private, no-store",
   });
+  headers.append("set-cookie", buildSessionCookie(session.token, session.absoluteExpiresAt));
+  for (const stale of legacySessionCookies()) headers.append("set-cookie", stale);
+  return new Response(null, { status: 303, headers });
 }
 
 async function handleConsent(req: Request, form: FormData): Promise<Response> {
@@ -555,7 +560,7 @@ async function handleConsent(req: Request, form: FormData): Promise<Response> {
     if (allowedProjects.length === 0) {
       // This branch re-renders without consuming the ticket, and costs more than the GET that
       // issued it, so it answers to the same budget.
-      await recordFailedAttempt(consentKey(req, String(consent.user)));
+      await recordFailedAttempt(consentKey(String(consent.user)));
       return consentForm(ticket, client.clientName, consent.redirectUri, accessible, {
         signedInAs: user.username,
         switchAccountHref: switchAccountHref(paramsOfConsent(consent)),
