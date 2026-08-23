@@ -1,6 +1,7 @@
+import { isGitRefName } from "./config.js";
 import { childEnv } from "./env.js";
 import { CommandResult, Runner } from "./exec.js";
-import { GIT_SAFE_ENV } from "./git-safety.js";
+import { GIT_SAFE_ENV, refuseOptionShapedPositionals } from "./git-safety.js";
 import { plantedConfig } from "./repos.js";
 import { ClaimedTask } from "./types.js";
 import { scrub } from "./scrub.js";
@@ -135,7 +136,11 @@ export function hardenedGitConfig(): NodeJS.ProcessEnv {
 // another terminal — global machine state, shared with every process on the box — cannot decide
 // mid-run who this worker pushes as (BP-373).
 export function createDelivery(runner: Runner, baseBranch?: string, githubToken?: string): Delivery {
-  const baseArgs = baseBranch?.trim() ? ["--base", baseBranch.trim()] : [];
+  // The second sink baseBranch reaches, after `git diff`. applyPolicy already refuses anything
+  // that is not a ref name; dropping the flag here rather than passing it on means the worst a
+  // value that got past it can do is open the pull request against the repository's own default.
+  const trimmedBase = baseBranch?.trim() ?? "";
+  const baseArgs = trimmedBase && isGitRefName(trimmedBase) ? ["--base", trimmedBase] : [];
   // Both names, not just the one gh prefers: an inherited GITHUB_TOKEN would otherwise decide the
   // identity behind the pin's back, and the failure it produces is a push that succeeds as the
   // wrong account rather than one that fails.
@@ -206,7 +211,16 @@ export function createDelivery(runner: Runner, baseBranch?: string, githubToken?
       await refuseIfPlanted(worktreePath);
       const result = await run(
         "git",
-        ["push", "--no-verify", RECEIVE_PACK, "--force-with-lease", "-u", "origin", "--", branch],
+        refuseOptionShapedPositionals([
+          "push",
+          "--no-verify",
+          RECEIVE_PACK,
+          "--force-with-lease",
+          "-u",
+          "origin",
+          "--",
+          branch,
+        ]),
         worktreePath
       );
       if (result.code !== 0) throw failure("git push", result);
