@@ -142,6 +142,27 @@ describe("delivery does not execute what the agent left in the repository", () =
     expect(pushedRefs()).toContain("refs/heads/feature");
   });
 
+  // The property this whole task adds, proved over a real transport rather than a mocked runner:
+  // refs/heads/feature is rewritten to point at a second commit the run never verified, and the
+  // worktree is left detached at the first — the same shape a compromised agent leaves the worktree
+  // in. What reaches the remote is the sha delivery was given, not whatever the ref store says now.
+  it("pushes the commit it was given, not whatever the branch ref was rewritten to point at", async () => {
+    const first = headSha();
+    writeFileSync(join(work, "b.txt"), "second\n");
+    git(work, "add", "b.txt");
+    git(work, "commit", "-m", "second");
+    const second = headSha();
+
+    git(work, "update-ref", "refs/heads/feature", second);
+    git(work, "checkout", "--detach", first);
+
+    await createDelivery(createRunner()).push(work, "feature", first);
+
+    const refs = pushedRefs();
+    expect(refs).toContain(first);
+    expect(refs).not.toContain(second);
+  });
+
   // A gate rejection pushes too, so a planted hook must neither run nor keep the branch back. The
   // hook refuses the push, which is what makes the second assertion bite.
   it("pushes past a pre-push hook the agent planted, without running it", async () => {

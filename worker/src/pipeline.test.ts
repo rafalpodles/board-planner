@@ -91,6 +91,25 @@ function shell(stdout = "", overrides: Partial<CommandResult> = {}): CommandResu
   return { code: 0, stdout, stderr: "", timedOut: false, ...overrides };
 }
 
+const IMPLEMENT_COMMIT_SHA = "sha-implement001";
+
+// A worktree that starts dirty, the way the implement step actually leaves one, and goes clean the
+// moment commitAll's own `git commit` runs — so the sha it hands back is what reaches push, and the
+// unfinishedWork check right after it does not mistake the just-committed tree for leftover work.
+function defaultRunner(): { run: ReturnType<typeof vi.fn> } {
+  let committed = false;
+  const run = vi.fn<Runner["run"]>(async (_command, args) => {
+    if (args.includes("status")) return shell(committed ? "" : " M a.ts\n");
+    if (args.includes("commit")) {
+      committed = true;
+      return shell();
+    }
+    if (args.includes("rev-parse")) return shell(IMPLEMENT_COMMIT_SHA);
+    return shell();
+  });
+  return { run };
+}
+
 function passingGate(name: string) {
   return { name, run: vi.fn<Gate["run"]>().mockResolvedValue({ ok: true, reason: "" }) };
 }
@@ -143,7 +162,7 @@ function harness(overrides: Partial<PipelineDeps> = {}) {
       .mockResolvedValue({ kind: "result", result: completed }),
   };
   const collectDiff = vi.fn<PipelineDeps["collectDiff"]>().mockResolvedValue(diff);
-  const runner = { run: vi.fn<Runner["run"]>().mockResolvedValue(shell()) };
+  const runner = defaultRunner();
   // Every gate passes unless a test says otherwise. What each kind actually does is
   // gates/from-entry.test.ts's subject; this file is about the order they run in.
   const gateFor = vi.fn<PipelineDeps["gateFor"]>((entry) => passingGate(entry.key));
@@ -210,11 +229,11 @@ describe("resolveStatusIds", () => {
 });
 
 describe("runTask", () => {
-  it("merges and reports done on the happy path", async () => {
+  it("merges and reports done on the happy path, pushing the sha the implement step committed", async () => {
     const h = harness();
     await runTask(h.deps, merging);
 
-    expect(h.delivery.push).toHaveBeenCalledWith("/wt", "cp-158/worker", "");
+    expect(h.delivery.push).toHaveBeenCalledWith("/wt", "cp-158/worker", IMPLEMENT_COMMIT_SHA);
     expect(h.delivery.openPr).toHaveBeenCalledWith("/wt", merging, "did it");
     expect(h.delivery.merge).toHaveBeenCalledWith("/wt", "https://x/pull/7");
     expect(h.reporter.merged).toHaveBeenCalledWith(merging, "https://x/pull/7", "did it");
@@ -591,11 +610,11 @@ describe("runTask", () => {
     expect(h.reporter.requeued).not.toHaveBeenCalled();
   });
 
-  it("pushes the rejected branch before discarding the worktree", async () => {
+  it("pushes the rejected branch before discarding the worktree, naming the sha it committed", async () => {
     const h = harness({ gateFor: () => rejectingGate("diff-size", "too big") });
     await runTask(h.deps, running("implement", "diff-size"));
 
-    expect(h.delivery.push).toHaveBeenCalledWith("/wt", "cp-158/worker", "");
+    expect(h.delivery.push).toHaveBeenCalledWith("/wt", "cp-158/worker", IMPLEMENT_COMMIT_SHA);
     expect(h.workspace.destroy).toHaveBeenCalledWith("CP-158");
   });
 
