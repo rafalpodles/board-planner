@@ -18,12 +18,10 @@ import { IntegrationsSection } from "./sections/IntegrationsSection";
 import { PmAgentSection } from "./sections/PmAgentSection";
 import { WorkersSection } from "./sections/WorkersSection";
 import { AuditSection } from "./sections/AuditSection";
-import { PageHeader } from "@/components/shell/PageHeader";
 import {
-  SectionPillsNav,
-  pillClass,
-  useScrollActivePillIntoView,
-} from "@/components/settings/SectionPills";
+  SettingsShell,
+  type SettingsNavGroup,
+} from "@/components/settings/SettingsShell";
 import { SettingsStats } from "./sections/types";
 
 type Access = "member" | "projectAdmin" | "instanceAdmin";
@@ -222,8 +220,6 @@ export default function ProjectSettingsPage() {
     return visible[0]?.id ?? "";
   }, [visible, section]);
 
-  const activePill = useScrollActivePillIntoView<HTMLButtonElement>(active);
-
   const goToSection = useCallback((id: string, scroll = true) => {
     setSection(id);
     window.history.replaceState(
@@ -278,147 +274,81 @@ export default function ProjectSettingsPage() {
     stats,
   };
 
-  function navButton(s: SectionMeta, mobile: boolean) {
-    if (mobile) {
-      return (
-        <button
-          key={s.id}
-          ref={s.id === active ? activePill : undefined}
-          onClick={() => goToSection(s.id)}
-          aria-current={s.id === active}
-          className={pillClass(s.id === active)}
-        >
-          {s.label}
-          {dirtySections.has(s.id) && (
-            <span
-              className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-warning align-middle"
-              title="Unsaved changes"
-            />
-          )}
-        </button>
-      );
-    }
-    return (
-      <button
-        key={s.id}
-        onClick={() => goToSection(s.id)}
-        aria-current={s.id === active}
-        className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-colors ${
-          s.id === active
-            ? "bg-primary/15 font-semibold text-text"
-            : "text-text-muted hover:bg-bg-hover hover:text-text"
-        }`}
-      >
-        <span className={s.id === active ? "text-primary" : ""}>{s.icon}</span>
-        <span className="flex-1 truncate">{s.label}</span>
-        {dirtySections.has(s.id) && (
-          <span
-            className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning"
-            title="Unsaved changes"
-          />
-        )}
-      </button>
-    );
-  }
+  const navItem = (s: SectionMeta) => ({
+    id: s.id,
+    label: s.label,
+    icon: s.icon,
+    dirty: dirtySections.has(s.id),
+  });
 
-  const projectSections = matches;
+  const groups: SettingsNavGroup[] =
+    matches.length > 0 ? [{ title: "Project", items: matches.map(navItem) }] : [];
 
   return (
-    <>
-      <div className="pb-8">
-        <PageHeader title="Settings" />
-
-        <div className="md:grid md:grid-cols-[236px_minmax(0,1fr)] md:gap-7">
-          <nav
-            className="hidden md:block md:sticky md:top-4 md:self-start"
-            aria-label="Settings sections"
-          >
-            <div className="relative mb-3">
-              <input
-                type="search"
-                value={query}
-                onChange={(e) => {
-                  setQuery(e.target.value);
-                  const q = e.target.value.trim().toLowerCase();
-                  if (!q) return;
-                  const first = visible.find((s) =>
-                    `${s.label} ${s.keywords}`.toLowerCase().includes(q),
-                  );
-                  if (first) goToSection(first.id, false);
-                }}
-                placeholder="Search settings..."
-                aria-label="Search settings"
-                className="focus-ring w-full rounded-lg border border-border bg-bg-input px-3 py-2 text-sm placeholder:text-text-muted"
-              />
-            </div>
-
-            {projectSections.length > 0 && (
-              <div className="mb-4">
-                <h2 className="mb-1.5 ml-2.5 text-[10.5px] font-bold uppercase tracking-wider text-text-muted">
-                  Project
-                </h2>
-                {projectSections.map((s) => navButton(s, false))}
-              </div>
-            )}
-
-
-            {matches.length === 0 && (
-              <p className="px-2.5 text-sm text-text-muted">
-                Nothing matches &ldquo;{query}&rdquo;.
-              </p>
-            )}
-
-            {!project.canAdmin && (
-              <p className="mt-4 px-2.5 text-[11.5px] leading-snug text-text-muted">
-                The rest of this project&apos;s settings need admin access.
-              </p>
-            )}
-          </nav>
-
-          {/* The scroll container is `main`, which is padded, and a sticky offset is measured
-              from its padding edge — so `top-0` alone parks the row 24px down and leaves a band
-              above it that page content scrolls through, sliced. Pulling the row up by that
-              padding and paying it back as padding puts the pills flush against the top. */}
-          <SectionPillsNav className="sticky -top-6 z-30 -mx-4 -mt-6 mb-4 border-b border-border bg-bg px-4 pb-3 pt-9 md:hidden">
-            {visible.map((s) => navButton(s, true))}
-          </SectionPillsNav>
-
-          <main>
-            {activeMeta && (
-              <header className="mb-4">
-                <h2 className="text-xl font-bold tracking-tight">
-                  {activeMeta.title}
-                </h2>
-                <p className="max-w-[62ch] text-sm text-text-muted">
-                  {activeMeta.blurb}
-                </p>
-              </header>
-            )}
-
-            <SettingsProvider register={register} unregister={unregister}>
-              {visible.map((s) => (
-                <div key={s.id} className={s.id === active ? "" : "hidden"}>
-                  {s.id === "general" && <GeneralSection {...sectionProps} />}
-                  {s.id === "board" && <BoardSection {...sectionProps} />}
-                  {s.id === "fields" && <TaskFieldsSection {...sectionProps} />}
-                  {s.id === "integrations" && (
-                    <IntegrationsSection {...sectionProps} />
-                  )}
-                  {s.id === "workers" && <WorkersSection {...sectionProps} />}
-                  {s.id === "pm" && <PmAgentSection {...sectionProps} />}
-                  {s.id === "audit" && (
-                    <AuditSection
-                      projectId={projectId}
-                      active={active === "audit"}
-                    />
-                  )}
-                </div>
-              ))}
-            </SettingsProvider>
-            <SaveBar pending={pending} total={total} onGoToSection={goToSection} />
-          </main>
+    <SettingsShell
+      groups={groups}
+      pillItems={visible.map(navItem)}
+      active={active}
+      onSelect={goToSection}
+      sidebarTop={
+        <div className="relative mb-3">
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              const q = e.target.value.trim().toLowerCase();
+              if (!q) return;
+              const first = visible.find((s) =>
+                `${s.label} ${s.keywords}`.toLowerCase().includes(q),
+              );
+              if (first) goToSection(first.id, false);
+            }}
+            placeholder="Search settings..."
+            aria-label="Search settings"
+            className="focus-ring w-full rounded-lg border border-border bg-bg-input px-3 py-2 text-sm placeholder:text-text-muted"
+          />
         </div>
-      </div>
-    </>
+      }
+      sidebarFooter={
+        <>
+          {matches.length === 0 && (
+            <p className="px-2.5 text-sm text-text-muted">
+              Nothing matches &ldquo;{query}&rdquo;.
+            </p>
+          )}
+
+          {!project.canAdmin && (
+            <p className="mt-4 px-2.5 text-[11.5px] leading-snug text-text-muted">
+              The rest of this project&apos;s settings need admin access.
+            </p>
+          )}
+        </>
+      }
+    >
+      {activeMeta && (
+        <header className="mb-4">
+          <h2 className="text-xl font-bold tracking-tight">{activeMeta.title}</h2>
+          <p className="max-w-[62ch] text-sm text-text-muted">{activeMeta.blurb}</p>
+        </header>
+      )}
+
+      <SettingsProvider register={register} unregister={unregister}>
+        {visible.map((s) => (
+          <div key={s.id} className={s.id === active ? "" : "hidden"}>
+            {s.id === "general" && <GeneralSection {...sectionProps} />}
+            {s.id === "board" && <BoardSection {...sectionProps} />}
+            {s.id === "fields" && <TaskFieldsSection {...sectionProps} />}
+            {s.id === "integrations" && <IntegrationsSection {...sectionProps} />}
+            {s.id === "workers" && <WorkersSection {...sectionProps} />}
+            {s.id === "pm" && <PmAgentSection {...sectionProps} />}
+            {s.id === "audit" && (
+              <AuditSection projectId={projectId} active={active === "audit"} />
+            )}
+          </div>
+        ))}
+      </SettingsProvider>
+      <SaveBar pending={pending} total={total} onGoToSection={goToSection} />
+    </SettingsShell>
   );
 }

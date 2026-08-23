@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
 /**
  * The horizontal section switcher shown below md on both settings surfaces.
@@ -19,6 +19,7 @@ export function SectionPillsNav({
 }) {
   return (
     <nav
+      data-settings-nav="pills"
       className={`flex shrink-0 items-center gap-2 overflow-x-auto ${className}`}
       aria-label="Settings sections"
     >
@@ -37,13 +38,16 @@ export const pillClass = (active: boolean) =>
 /**
  * Tapping a pill switches the section, but the row does not follow — on a phone the pill
  * you just chose is routinely scrolled off-screen, so you lose your place in the row.
+ * A callback ref, because the pill is an anchor on one surface and a button on the other.
  */
-export function useScrollActivePillIntoView<T extends HTMLElement>(active: string) {
-  const ref = useRef<T | null>(null);
+export function useScrollActivePillIntoView(active: string) {
+  const ref = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     ref.current?.scrollIntoView({ block: "nearest", inline: "center" });
   }, [active]);
 
-  return ref;
+  return useCallback((el: HTMLElement | null) => {
+    ref.current = el;
+  }, []);
 }
