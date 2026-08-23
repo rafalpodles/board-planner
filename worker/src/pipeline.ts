@@ -409,7 +409,10 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
               : pushFailed
                 ? `${verdict.reason}\n\n**The branch was not pushed**: ${pushFailed}. \`${branch}\` is not on the remote — this work exists only in the worktree at \`${worktree.path}\` on the worker host.`
                 : verdict.reason,
-            withholdsPush ? "" : branch
+            // Neither refusal reached the remote, so neither may promise a branch there — the
+            // pushFailed message already says as much, and repeating it as "pushed for inspection"
+            // is the exact contradiction a human reading the comment would have to untangle.
+            withholdsPush || pushFailed ? "" : branch
           );
           return;
         }

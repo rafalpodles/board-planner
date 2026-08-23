@@ -207,6 +207,15 @@ function gateForOnly(key: string, gate: Gate): PipelineDeps["gateFor"] {
   return (entry) => (entry.key === key ? gate : passingGate(entry.key));
 }
 
+// reporter.gateRejected is mocked throughout this file, so nothing here exercises reporter.ts's
+// own composition. This mirrors it (reporter.ts:107-116) to catch pipeline.ts handing it a branch
+// that contradicts the reason it just gave — reporter.ts's own comment names the hazard directly.
+function composedGateRejectedComment(call: unknown[]): string {
+  const [, gate, reason, branch] = call as [ClaimedTask, string, string, string];
+  const where = branch ? `\n\nThe work is pushed to \`${branch}\` for inspection.` : "";
+  return `The execution worker blocked the merge at the **${gate}** gate.\n\n${reason}${where}`;
+}
+
 describe("resolveStatusIds", () => {
   it("returns the ids when every role maps to a column the board carries", async () => {
     const resolved = await resolveStatusIds(
@@ -630,10 +639,14 @@ describe("runTask", () => {
     });
     await runTask(h.deps, running("implement", "diff-size"));
 
-    const reason = h.reporter.gateRejected.mock.calls[0][2];
+    const call = h.reporter.gateRejected.mock.calls[0];
+    const [, , reason, branch] = call;
     expect(reason).toMatch(/too big/);
     expect(reason).toMatch(/stale info/);
     expect(reason).toMatch(/not on the remote/);
+    // The bug this guards: a failed push must not also promise the branch is there to inspect.
+    expect(branch).toBe("");
+    expect(composedGateRejectedComment(call)).not.toMatch(/is pushed to/);
     expect(h.workspace.destroy).not.toHaveBeenCalled();
   });
 
@@ -657,11 +670,14 @@ describe("runTask", () => {
     await runTask(h.deps, running("implement", "diff-size"));
 
     expect(h.delivery.push).not.toHaveBeenCalled();
-    const reason = h.reporter.gateRejected.mock.calls[0][2];
+    const call = h.reporter.gateRejected.mock.calls[0];
+    const [, , reason, branch] = call;
     expect(reason).toMatch(/too big/);
     expect(reason).toMatch(/refusing to push/);
     expect(reason).toMatch(/shaX/);
     expect(reason).toMatch(/not on the remote/);
+    expect(branch).toBe("");
+    expect(composedGateRejectedComment(call)).not.toMatch(/is pushed to/);
     expect(h.workspace.destroy).not.toHaveBeenCalled();
   });
 
