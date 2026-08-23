@@ -732,3 +732,112 @@ export async function seed() {
 
   await mongoose.disconnect();
 }
+
+// BP-396. A second board the consent screen offers and the test deliberately leaves unticked, so
+// "the token sees only what was granted" has something it could have seen and did not. Without it
+// the assertion holds on a board of one project whatever the scope does.
+export const SECOND_PROJECT_ID = id("e2e00000000000000000c601");
+export const SECOND_PROJECT_KEY = "IB";
+export const SECOND_PROJECT_NAME = "E2E Board Nobody Granted";
+
+export async function seedSecondProject() {
+  const db = (await connect()).db!;
+  const now = new Date();
+
+  await db.collection("projects").insertOne({
+    _id: SECOND_PROJECT_ID,
+    name: SECOND_PROJECT_NAME,
+    key: SECOND_PROJECT_KEY,
+    description: "",
+    icon: "",
+    categories: CATEGORIES,
+    columns: COLUMNS,
+    taskTemplates: [],
+    customFields: [],
+    webhooks: [],
+    notificationChannels: [],
+    worker: { enabled: false, policy: {}, policyOverrides: [] },
+    repositoryUrl: "",
+    githubRepo: "",
+    githubToken: "",
+    gitlabRepo: "",
+    gitlabHost: "https://gitlab.com",
+    gitlabToken: "",
+    taskCounter: 0,
+    sortOrder: 1,
+    createdBy: ADMIN_ID,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  await mongoose.disconnect();
+}
+
+/** A webhook on the seeded project, written straight in: adding one through the settings screen is
+ * settings-save.spec.ts's subject, and this file's tests are about what happens afterwards. */
+export async function seedWebhook(
+  url: string,
+  events: string[] = ["task_created", "status_changed", "comment_added"]
+) {
+  const db = (await connect()).db!;
+  await db.collection("projects").updateOne(
+    { _id: PROJECT_ID },
+    { $set: { webhooks: [{ _id: new mongoose.Types.ObjectId(), url, events, enabled: true }] } }
+  );
+  await mongoose.disconnect();
+}
+
+/** What a project names as its repository. No token: storing one needs ENCRYPTION_KEY, which this
+ * run deliberately does not set, and every assertion here is reached before a token is read. */
+export async function seedRepository(fields: {
+  repositoryUrl?: string;
+  githubToken?: string;
+  gitlabToken?: string;
+  gitlabHost?: string;
+}) {
+  const db = (await connect()).db!;
+  await db.collection("projects").updateOne({ _id: PROJECT_ID }, { $set: fields });
+  await mongoose.disconnect();
+}
+
+// What a sync leaves on a task once a pull request has been matched to its key. Written here
+// rather than fetched, because the fetch is the one hop of this integration that cannot be run
+// locally: fetchPullRequests names api.github.com in the code, and safe-fetch refuses a loopback
+// address for GitLab — see the note at the top of external-integrations.spec.ts.
+export const LINKED_PR_NUMBER = 178;
+export const LINKED_PR_TITLE = "fix(board): keep the header visible";
+export const LINKED_MR_NUMBER = 9;
+export const LINKED_MR_TITLE = "TP-3 mirror the fix on the mirror";
+
+export async function seedLinkedPRs() {
+  const db = (await connect()).db!;
+  const now = new Date();
+  await db.collection("tasks").updateOne(
+    { _id: SIBLING_TASK_ID },
+    {
+      $set: {
+        linkedPRs: [
+          {
+            provider: "github",
+            number: LINKED_PR_NUMBER,
+            title: LINKED_PR_TITLE,
+            state: "open",
+            url: `https://github.com/example/board/pull/${LINKED_PR_NUMBER}`,
+            mergedAt: null,
+            updatedAt: now,
+          },
+          {
+            provider: "gitlab",
+            number: LINKED_MR_NUMBER,
+            title: LINKED_MR_TITLE,
+            state: "merged",
+            url: `https://gitlab.com/example/board/-/merge_requests/${LINKED_MR_NUMBER}`,
+            mergedAt: now,
+            updatedAt: now,
+          },
+        ],
+      },
+    }
+  );
+  await mongoose.disconnect();
+}
