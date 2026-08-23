@@ -190,7 +190,9 @@ src/
     db.ts             # MongoDB connection (cached)
     middleware.ts     # withAuth, withAdmin, withProjectAccess
     ai.ts             # OpenAI task generation
-    notifications.ts  # Slack/Discord webhooks
+    notifications.ts  # a project's shared Slack/Discord channel
+    notification-prefs.ts # resolveChannels: which channels an event may use, per project
+    personal-chat.ts  # the reader's own Slack/Discord webhook
     in-app-notifications.ts
     github.ts         # GitHub PR linking
     custom-fields.ts  # Custom field validation
@@ -210,7 +212,14 @@ mcp-server/           # Standalone MCP server (stdio transport)
 - **Task numbers**: Auto-increment per project via atomic `$inc` on `Project.taskCounter`
 - **Task keys**: `PROJECT_KEY-NUMBER` (e.g., `CP-5`), used in MCP and GitHub matching
 - **Activity logging**: Fire-and-forget, doesn't block the main request
-- **Notifications**: In-app + optional Slack/Discord webhooks + optional email
+- **Notifications**: a per-user grid of `event × channel` (`src/lib/notification-prefs.ts`),
+  resolved by `resolveChannels(user, projectId, event)` — global, with a per-project override whose
+  presence in `user.notifications.projects` *is* the override switch. Channels are the bell, e-mail
+  and a **personal** Slack/Discord webhook (`src/lib/personal-chat.ts`), distinct from a project's
+  shared team channel in `project.notificationChannels`, which is unchanged and has no recipient.
+  Accounts with no stored grid fall back to the old `emailNotifications` boolean, so nothing was
+  migrated. The bell hides rows rather than skipping the write — `Notification.inApp` — because the
+  digest is assembled from those documents
 - **Recurrence**: When task → done with recurrence config, auto-creates next task
 - **GitHub PR linking**: Matches PRs by branch/title pattern `BP-5`, and by any key the project used to have (case-insensitive)
 - **Autonomous workers**: Opt-in per project (Settings → Workers, instance admin). Enrolling a

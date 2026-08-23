@@ -7,6 +7,7 @@ import { dayKeyInTimezone, hourInTimezone, isValidTimezone } from "@/lib/time";
 import { taskPath } from "@/lib/urls";
 import { Notification } from "@/models/notification";
 import { User } from "@/models/user";
+import { resolveChannels, wantsMailSomewhere, PrefsSource } from "@/lib/notification-prefs";
 import { accessibleProjectIds } from "@/lib/grants";
 
 const TICK_MS = Number(process.env.DIGEST_TICK_MS) || 5 * 60 * 1000;
@@ -14,6 +15,8 @@ const DEFAULT_TIMEZONE = "Europe/Warsaw";
 
 /** How many lines the mail carries before it says "and N more". */
 export const DIGEST_ROW_LIMIT = 25;
+/** How deep into a day's unread rows the digest will read before giving up on counting. */
+export const DIGEST_SCAN_LIMIT = 500;
 
 export function digestHour(): number {
   const raw = Math.trunc(Number(process.env.DIGEST_HOUR));
@@ -63,40 +66,72 @@ function lineFor(notification: any, origin: string | null): DigestLine {
 export async function buildDigestFor(
   userId: string,
   since: Date,
-  projectIds: string[] | null
-): Promise<{ lines: DigestLine[]; total: number }> {
-  // This is the one channel that reads the backlog straight out of the collection, so a row
-  // banked while the grant still stood would be mailed the morning after it was revoked (BP-328).
-  // Required rather than optional: a caller that forgets is the leak.
-  if (projectIds !== null && projectIds.length === 0) return { lines: [], total: 0 };
+  projectIds: string[] | null,
+  prefs?: PrefsSource
+): Promise<{ lines: DigestLine[]; total: number; atLeast: boolean }> {
+  // Two independent questions, and both have to be asked. Whether this person may still see the
+  // board at all is the grant (BP-328) — this is the one channel that reads the backlog straight
+  // out of the collection, so a row banked while the grant stood would be mailed the morning after
+  // it was revoked. Whether they asked to hear about it is the grid, below.
+  if (projectIds !== null && projectIds.length === 0) return { lines: [], total: 0, atLeast: false };
 
-  const filter: Record<string, unknown> = { recipient: userId, read: false, createdAt: { $gte: since } };
+  const filter: Record<string, unknown> = {
+    recipient: userId,
+    read: false,
+    createdAt: { $gte: since },
+  };
   if (projectIds !== null) filter.project = { $in: projectIds };
-  // Counted rather than inferred from the page: a digest that lists 25 and says "and 1 more" when
-  // 40 are waiting is a silent cap wearing a number
-  const [notifications, total] = await Promise.all([
-    Notification.find(filter)
-      .sort({ createdAt: 1 })
-      .limit(DIGEST_ROW_LIMIT)
-      .populate("task", "taskNumber")
-      .populate("project", "key")
-      .lean(),
-    Notification.countDocuments(filter),
-  ]);
+  // Which rows belong in the mail is decided per row below, so a page of DIGEST_ROW_LIMIT could be
+  // DIGEST_ROW_LIMIT muted ones — but reading the day unbounded lets anyone who can comment on a
+  // watched task decide how much this process hydrates at 07:00. DIGEST_SCAN_LIMIT is the ceiling
+  // on that; past it the count says "at least", because nobody counted the rest.
+  // Newest first, so the ceiling below drops the oldest rather than everything recent. Ascending
+  // meant that past the ceiling a reader saw only the start of their day and never what just
+  // happened — the opposite of what a morning summary is for.
+  const notifications = await Notification.find(filter)
+    .sort({ createdAt: -1 })
+    .limit(DIGEST_SCAN_LIMIT + 1)
+    .populate("task", "taskNumber")
+    .populate("project", "key")
+    .lean();
+  const truncated = notifications.length > DIGEST_SCAN_LIMIT;
+  if (truncated) notifications.length = DIGEST_SCAN_LIMIT;
+
+  // A project muted in the mail column drops out here too. Without this, muting would silence the
+  // mail during the day and deliver it anyway the next morning.
+  const wanted = notifications.filter((n) => {
+    const projectId = (n.project as { _id?: unknown })?._id ?? n.project;
+    return resolveChannels(prefs, String(projectId), n.type).email;
+  });
 
   const origin = selfOrigin();
-  return { lines: notifications.map((n) => lineFor(n, origin)), total };
+  if (truncated) {
+    console.warn(`Digest for ${userId} scanned the first ${DIGEST_SCAN_LIMIT} unread rows only`);
+  }
+  return {
+    lines: wanted.slice(0, DIGEST_ROW_LIMIT).map((n) => lineFor(n, origin)),
+    // Counted rather than inferred from the page: a digest that lists 25 and says "and 1 more"
+    // when 40 are waiting is a silent cap wearing a number
+    total: wanted.length,
+    // Past the scan ceiling this count is a floor, and the mail has to say so rather than print a
+    // precise-looking number nobody computed
+    atLeast: truncated,
+  };
 }
 
 async function sendDigest(
   user: { _id: unknown; email: string; username: string },
   lines: DigestLine[],
-  total: number
+  total: number,
+  atLeast = false
 ): Promise<void> {
   const origin = selfOrigin();
-  const settingsUrl = origin ? `${origin}/settings/profile` : undefined;
+  const settingsUrl = origin ? `${origin}/settings/notifications` : undefined;
   const hidden = total - lines.length;
-  const count = `${total} update${total === 1 ? "" : "s"}`;
+  // Past the scan ceiling nobody counted the rest, so the headline says so too — putting "at least"
+  // only in the "and N more" line left the subject and heading printing an exact figure, and that
+  // line does not even render when everything that survived the filter fitted.
+  const count = `${atLeast ? "at least " : ""}${total} update${total === 1 ? "" : "s"}`;
 
   const { html, text } = renderEmail({
     preheader: `${count} on your tasks.`,
@@ -104,7 +139,10 @@ async function sendDigest(
     heading: `${count} on your tasks`,
     rows: lines.map((line) => ({ label: line.key, value: line.title, url: line.url })),
     proseRows: true,
-    outro: hidden > 0 ? [`And ${hidden} more waiting on the board.`] : undefined,
+    outro:
+      hidden > 0
+        ? [`And ${atLeast ? "at least " : ""}${hidden} more waiting on the board.`]
+        : undefined,
     button: origin ? { label: "Open my tasks", url: `${origin}/my-tasks` } : undefined,
     footer: [
       "You get one digest a day instead of a mail for every event, because that is what you asked for.",
@@ -129,17 +167,22 @@ export async function digestTick(now = new Date()): Promise<number> {
   if (!day) return 0;
 
   await connectDB();
-  // Both switches, not just the digest one: turning email notifications off has to mean no email,
-  // and the API accepts the two fields independently even though the screen ties them together
-  const waiting = await User.find(
+  // "Mail is on somewhere" now reads over a grid keyed by event, which Mongo 4.4 expresses badly,
+  // so the query narrows to the digest switch and resolveChannels does the rest in code. One
+  // source of truth beats a denormalised flag that would drift from the grid it summarises.
+  const candidates = await User.find(
     {
-      emailNotifications: true,
       emailDigest: true,
       email: { $ne: "" },
       lastDigestDay: { $ne: day },
     },
-    "email username role"
+    // `role` for the grant lookup, `notifications` for the grid — the two questions the loop asks
+    "email username role emailNotifications notifications"
   ).lean();
+  // Any grid that turns mail on anywhere — the global one or a project's — qualifies. Asking only
+  // the global grid dropped anyone who had switched mail off globally and back on for one project:
+  // the immediate mail is suppressed for a digest subscriber, so they would have got nothing at all.
+  const waiting = candidates.filter((user) => wantsMailSomewhere(user));
   if (waiting.length === 0) return 0;
 
   const since = new Date(now.getTime() - 24 * 60 * 60 * 1000);
@@ -156,10 +199,15 @@ export async function digestTick(now = new Date()): Promise<number> {
 
     try {
       const projectIds = await accessibleProjectIds(user);
-      const { lines, total } = await buildDigestFor(String(user._id), since, projectIds);
+      const { lines, total, atLeast } = await buildDigestFor(
+        String(user._id),
+        since,
+        projectIds,
+        user
+      );
       // A quiet day is not worth a mail saying so
       if (lines.length === 0) continue;
-      await sendDigest(user, lines, total);
+      await sendDigest(user, lines, total, atLeast);
       sent++;
     } catch (err) {
       console.error(`Digest failed for ${user.username}:`, err);

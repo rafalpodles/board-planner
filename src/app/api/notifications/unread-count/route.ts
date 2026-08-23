@@ -12,7 +12,12 @@ export const GET = withAuth(async (_request, { user }) => {
   const projectIds = await accessibleProjectIds(user);
   if (projectIds !== null && projectIds.length === 0) return NextResponse.json({ count: 0 });
 
-  const filter: Record<string, unknown> = { recipient: user._id, read: false };
+  // Counting rows the list will not show would also put a number on an empty bell
+  const filter: Record<string, unknown> = {
+    recipient: user._id,
+    read: false,
+    inApp: { $ne: false },
+  };
   if (projectIds !== null) filter.project = { $in: projectIds };
 
   const count = await Notification.countDocuments(filter);
