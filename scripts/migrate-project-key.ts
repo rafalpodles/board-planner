@@ -19,6 +19,7 @@
 
 import { MongoClient } from "mongodb";
 import { resolveUri, dbName } from "./mongo-uri";
+import { isValidProjectKey, PROJECT_KEY_RULE } from "../src/lib/identifiers";
 
 interface Rewrite {
   collection: string;
@@ -69,6 +70,10 @@ async function main() {
   const apply = args.includes("--apply");
   if (!from || !to) throw new Error("Usage: migrate-project-key.ts <FROM> <TO> [--apply]");
   if (from === to) throw new Error("The two keys are the same");
+  // The API refuses a key the router could not route, or one carrying chat-message markup
+  // (BP-401). This script writes through the driver, so it is the one remaining way to install
+  // such a key — and an operator typing it by hand is exactly who would.
+  if (!isValidProjectKey(to)) throw new Error(PROJECT_KEY_RULE);
 
   const { uri, source } = resolveUri();
   const client = new MongoClient(uri);

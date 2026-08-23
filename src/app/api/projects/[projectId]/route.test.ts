@@ -283,3 +283,44 @@ describe("PUT /api/projects/[projectId] and a repointed integration host", () =>
     ).toBe(true);
   });
 });
+
+/**
+ * A key reaches a task URL and from there Slack and Discord message markup (BP-401). The empty
+ * string mattered most: the first version validated only a truthy, changed key, and
+ * findByIdAndUpdate runs no validators, so `{"key":"  "}` erased the stored key — task keys
+ * rendering as `-12`, and the old key never reaching formerKeys, which is what keeps existing
+ * pull requests matching.
+ */
+describe("the key a project may be renamed to", () => {
+  beforeEach(() => {
+    check.mockResolvedValue(true);
+    projectFindById.mockReturnValue({
+      toObject: () => ({ _id: PROJECT_ID }),
+      select: () => Promise.resolve({ customFields: PROJECT_CUSTOM_FIELDS }),
+      lean: () => Promise.resolve({ key: "TP", formerKeys: [] }),
+    });
+  });
+
+  it.each([
+    ["a Slack link closer", "A><HTTPS://PHISH.EXAMPLE|RESET"],
+    ["a Discord heading", "A#URGENT"],
+    ["the empty string", "   "],
+    ["a number", 123],
+    ["an array", ["A"]],
+  ])("refuses %s, and writes nothing", async (_label, key) => {
+    const res = await PUT(putRequest({ key }), ctx());
+
+    expect(res.status).toBe(400);
+    expect(projectFindByIdAndUpdate).not.toHaveBeenCalled();
+  });
+
+  // Without this the refusals above would pass on a route that refuses every rename
+  it("accepts an ordinary rename, normalises it, and remembers the old key", async () => {
+    const res = await PUT(putRequest({ key: " bp " }), ctx());
+
+    expect(res.status).toBe(200);
+    const [, updates] = projectFindByIdAndUpdate.mock.calls[0];
+    expect(updates.key).toBe("BP");
+    expect(updates.formerKeys).toEqual(["TP"]);
+  });
+});

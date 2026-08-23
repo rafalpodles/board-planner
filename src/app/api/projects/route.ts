@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isValidProjectKey, PROJECT_KEY_RULE } from "@/lib/identifiers";
 import { connectDB } from "@/lib/db";
 import { withAuth, withAdmin } from "@/lib/middleware";
 import { check, accessibleProjectIds } from "@/lib/grants";
@@ -68,9 +69,15 @@ export const POST = withAdmin(async (request, { user }) => {
     );
   }
 
+  // Stored uppercase, so validate what will be stored rather than what was typed
+  const storedKey = String(key).trim().toUpperCase();
+  if (!isValidProjectKey(storedKey)) {
+    return NextResponse.json({ error: PROJECT_KEY_RULE }, { status: 400 });
+  }
+
   const project = await Project.create({
     name,
-    key,
+    key: storedKey,
     description: description || "",
     createdBy: user._id,
     // A fresh project looks like a fresh project always did — the difference is
