@@ -16,6 +16,9 @@ interface TaskTopBarProps {
   projectRef: string;
   taskKey: string;
   taskNumber: number;
+  title: string;
+  /** The body's own heading has scrolled away, so the bar carries the title instead */
+  showTitle: boolean;
   columns: Column[];
   status: string;
   onStatusChange: (status: string) => void;
@@ -33,6 +36,8 @@ export function TaskTopBar({
   projectRef,
   taskKey,
   taskNumber,
+  title,
+  showTitle,
   columns,
   status,
   onStatusChange,
@@ -47,8 +52,16 @@ export function TaskTopBar({
   const ghost =
     "focus-ring rounded-lg border border-border px-2.5 py-1.5 text-xs text-text-muted transition-colors hover:bg-bg-hover hover:text-text";
 
+  // Not sticky, deliberately: a sticky header is still part of the scrolled content, so it
+  // travels the length of any padding above it before it engages, loses the card's border and
+  // corner when it does, and an elastic overscroll drags it along with everything else. The
+  // task scrolls in a box below this bar instead.
   return (
-    <div className="flex items-center gap-3 border-b border-border bg-bg-card px-4 py-2.5 sm:px-5">
+    <div
+      data-testid="task-top-bar"
+      className="@container flex shrink-0 items-center gap-3 border-b border-border
+        bg-bg-card px-4 py-2.5 sm:px-5"
+    >
       <button
         type="button"
         onClick={onClose}
@@ -70,7 +83,21 @@ export function TaskTopBar({
 
       <StatusPill columns={columns} status={status} onChange={onStatusChange} />
 
-      <div className="flex-1" />
+      {/* Always laid out, only faded: revealing it by adding an element would reflow the bar
+          mid-scroll, which is the one thing a pinned header must never do. The bar's own width
+          decides whether it appears, not the viewport's — the same viewport gives this bar
+          ~500px behind the sidebar and ~1240px in the modal. Under 600px the key, the status
+          pill and the actions already fill the row, and the key carries the context alone. */}
+      <span
+        data-testid="task-top-bar-title"
+        aria-hidden={!showTitle}
+        className={`hidden min-w-0 flex-1 truncate text-sm font-medium text-text
+          transition-opacity duration-150 @min-[600px]:block
+          ${showTitle ? "opacity-100" : "opacity-0"}`}
+      >
+        {title}
+      </span>
+      <div className="flex-1 @min-[600px]:hidden" />
 
       <button type="button" onClick={onToggleWatch} className={`hidden lg:block ${ghost}`}>
         {watching ? "Watching" : "Watch"}
