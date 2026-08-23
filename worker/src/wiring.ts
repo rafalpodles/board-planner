@@ -30,7 +30,7 @@ import {
   WorkerConfig,
 } from "./config.js";
 import { connectControl, ControlDeps } from "./control.js";
-import { createDelivery } from "./delivery.js";
+import { createDelivery, hardenedGitConfig } from "./delivery.js";
 import { collectDiff } from "./diff.js";
 import { pinnedAccount, resolveGhToken } from "./github-account.js";
 import { gateFromEntry } from "./gates/from-entry.js";
@@ -103,6 +103,16 @@ export interface WorkerDeps {
 export interface WorkerRuntime {
   run(): Promise<void>;
   shutdown(): void;
+}
+
+// The workspace freshens its base with the same pinned credential delivery pushes with, composed
+// here rather than in workspace.ts: that module resolves task keys into filesystem paths and must
+// not also learn what an operator's GitHub identity is.
+function remoteFetchEnv(githubToken: string): () => NodeJS.ProcessEnv {
+  return () => ({
+    ...hardenedGitConfig(),
+    ...(githubToken ? { GH_TOKEN: githubToken, GITHUB_TOKEN: githubToken } : {}),
+  });
 }
 
 function fileStore(path: string): Store {
@@ -332,8 +342,10 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       reapedProjects.add(projectId);
       const taskConfig = configFor(projectId);
       if (!taskConfig) continue;
+      // reapOrphans only lists and destroys — it never calls create() — so this provider is never
+      // actually invoked; passed anyway so every workspace this file builds carries the same shape.
       const reaped = await reapOrphans(
-        createWorkspace(taskConfig, deps.runner),
+        createWorkspace(taskConfig, deps.runner, remoteFetchEnv("")),
         taskConfig.worktreeRoot
       ).catch(() => 0);
       if (reaped > 0) {
@@ -478,7 +490,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
           createReporter: (client, statusIds) =>
             createReporter(client, statusIds, (message) => deps.logError(message), outbox),
           createDelivery: (runner, baseBranch) => createDelivery(runner, baseBranch, githubToken),
-          workspace: createWorkspace(taskConfig, deps.runner),
+          workspace: createWorkspace(taskConfig, deps.runner, remoteFetchEnv(githubToken)),
           executor: createExecutor(taskConfig, deps.runner),
           collectDiff,
           gateFor: gateFromEntry,

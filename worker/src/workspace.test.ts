@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { createWorkspace, reapOrphans, Workspace } from "./workspace.js";
-import { CommandResult } from "./exec.js";
+import { CommandResult, RunOpts } from "./exec.js";
 import { gitArgs } from "./git-safety.js";
 
 const config = {
@@ -20,7 +20,7 @@ function runnerReturning(stdout = "") {
 const HARDENING_PREFIX = gitArgs([]);
 
 function fakeGit(responses: Record<string, Partial<CommandResult>>) {
-  const run = vi.fn(async (_command: string, args: string[]): Promise<CommandResult> => {
+  const run = vi.fn(async (_command: string, args: string[], _opts: RunOpts): Promise<CommandResult> => {
     const override = responses[args.slice(HARDENING_PREFIX.length).join(" ")];
     return { code: 0, stdout: "", stderr: "", timedOut: false, ...override };
   });
@@ -76,6 +76,114 @@ describe("createWorkspace", () => {
     for (const call of run.mock.calls) {
       expect(call[1]).toEqual(expect.arrayContaining(["-c", "core.pager=cat"]));
       expect(call[2].env.GIT_CONFIG_NOSYSTEM).toBe("1");
+    }
+  });
+
+  it("fetches the base before resolving it, when given a remote env provider", async () => {
+    const { runner, run } = fakeGit({
+      "ls-remote --exit-code origin refs/heads/main": { stdout: "fresh1\trefs/heads/main\n" },
+      "fetch --no-tags origin main": { stdout: "" },
+      "rev-parse --verify fresh1^{commit}": { stdout: "fresh1\n" },
+      "worktree list --porcelain": { stdout: "" },
+    });
+    const workspace = createWorkspace(config, runner, () => ({}));
+
+    const result = await workspace.create("BP-1", "worker");
+
+    expect(run.mock.calls.map((call) => call[1].join(" "))).toContainEqual(
+      expect.stringContaining("fetch --no-tags origin main"),
+    );
+    expect(result.baseSha).toBe("fresh1");
+  });
+
+  it("does not fetch at all without a remote env provider", async () => {
+    const { runner, run } = fakeGit({
+      "rev-parse --verify main^{commit}": { stdout: "local1\n" },
+      "worktree list --porcelain": { stdout: "" },
+    });
+    const result = await createWorkspace(config, runner).create("BP-1", "worker");
+
+    expect(result.baseSha).toBe("local1");
+    expect(run.mock.calls.some((call) => call[1].includes("fetch"))).toBe(false);
+  });
+
+  it("resolves the sha ls-remote reported, not whatever fetch left behind in FETCH_HEAD or the remote-tracking ref — both are files the agent can also write", async () => {
+    const { runner, run } = fakeGit({
+      "ls-remote --exit-code origin refs/heads/main": { stdout: "genuine1\trefs/heads/main\n" },
+      "fetch --no-tags origin main": { stdout: "" },
+      "rev-parse --verify genuine1^{commit}": { stdout: "genuine1\n" },
+      "rev-parse --verify FETCH_HEAD^{commit}": { stdout: "planted1\n" },
+      "rev-parse --verify refs/remotes/origin/main^{commit}": { stdout: "planted1\n" },
+      "worktree list --porcelain": { stdout: "" },
+    });
+    const result = await createWorkspace(config, runner, () => ({})).create(
+      "BP-1",
+      "worker",
+    );
+
+    expect(result.baseSha).toBe("genuine1");
+    expect(run.mock.calls.some((call) => call[1].join(" ").includes("FETCH_HEAD"))).toBe(false);
+  });
+
+  it("falls back to the local ref when the fetch fails, rather than stopping the run", async () => {
+    const { runner } = fakeGit({
+      "ls-remote --exit-code origin refs/heads/main": { stdout: "fresh1\trefs/heads/main\n" },
+      "fetch --no-tags origin main": { code: 1, stderr: "could not resolve host" },
+      "rev-parse --verify main^{commit}": { stdout: "local1\n" },
+      "worktree list --porcelain": { stdout: "" },
+    });
+    const workspace = createWorkspace(config, runner, () => ({}));
+
+    expect((await workspace.create("BP-1", "worker")).baseSha).toBe("local1");
+  });
+
+  it("falls back to the local ref when ls-remote itself fails, rather than stopping the run", async () => {
+    const { runner } = fakeGit({
+      "ls-remote --exit-code origin refs/heads/main": { code: 128, stderr: "could not resolve host" },
+      "rev-parse --verify main^{commit}": { stdout: "local1\n" },
+      "worktree list --porcelain": { stdout: "" },
+    });
+    const workspace = createWorkspace(config, runner, () => ({}));
+
+    expect((await workspace.create("BP-1", "worker")).baseSha).toBe("local1");
+  });
+
+  it("falls back to the local ref when the fetched sha does not verify locally afterwards", async () => {
+    const { runner } = fakeGit({
+      "ls-remote --exit-code origin refs/heads/main": { stdout: "unreachable1\trefs/heads/main\n" },
+      "fetch --no-tags origin main": { stdout: "" },
+      "rev-parse --verify unreachable1^{commit}": { code: 128, stderr: "unknown revision" },
+      "rev-parse --verify main^{commit}": { stdout: "local1\n" },
+      "worktree list --porcelain": { stdout: "" },
+    });
+    const workspace = createWorkspace(config, runner, () => ({}));
+
+    expect((await workspace.create("BP-1", "worker")).baseSha).toBe("local1");
+  });
+
+  it("carries the given remote env and network-only credentials on the ls-remote and fetch calls, but not on local git calls", async () => {
+    const { runner, run } = fakeGit({
+      "ls-remote --exit-code origin refs/heads/main": { stdout: "fresh1\trefs/heads/main\n" },
+      "fetch --no-tags origin main": { stdout: "" },
+      "rev-parse --verify fresh1^{commit}": { stdout: "fresh1\n" },
+      "worktree list --porcelain": { stdout: "" },
+    });
+    await createWorkspace(config, runner, () => ({ GH_TOKEN: "tok" })).create(
+      "BP-1",
+      "worker",
+    );
+
+    const remoteCalls = run.mock.calls.filter(
+      (call) => call[1].includes("ls-remote") || (call[1].includes("fetch") && call[1].includes("origin")),
+    );
+    expect(remoteCalls).not.toHaveLength(0);
+    for (const call of remoteCalls) {
+      expect(call[2].env?.GH_TOKEN).toBe("tok");
+    }
+
+    const localCalls = run.mock.calls.filter((call) => call[1].includes("worktree"));
+    for (const call of localCalls) {
+      expect(call[2].env?.GH_TOKEN).toBeUndefined();
     }
   });
 
