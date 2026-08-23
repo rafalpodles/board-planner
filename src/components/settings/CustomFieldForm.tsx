@@ -111,7 +111,7 @@ export function CustomFieldForm({ field, onSubmit, onCancel }: CustomFieldFormPr
           value={draft.fieldType}
           disabled={editing}
           onChange={(e) => set("fieldType", e.target.value as CustomFieldType)}
-          className="focus-ring w-full rounded-lg border border-border bg-bg-input px-3 py-2 text-sm disabled:opacity-60"
+          className="focus-ring w-full rounded-lg border border-border bg-bg-input min-h-11 px-3 py-2 text-sm sm:min-h-0 disabled:opacity-60"
         >
           {CUSTOM_FIELD_TYPES.map((t) => (
             <option key={t} value={t}>
@@ -139,7 +139,7 @@ export function CustomFieldForm({ field, onSubmit, onCancel }: CustomFieldFormPr
                       type="button"
                       onClick={toggle}
                       aria-label={`Colour for ${option.value || "this option"}`}
-                      className="focus-ring h-9 w-9 shrink-0 rounded-lg border border-border"
+                      className="focus-ring h-11 w-11 shrink-0 rounded-lg border border-border sm:h-9 sm:w-9"
                       style={{ backgroundColor: option.color }}
                     />
                   )}
@@ -161,7 +161,7 @@ export function CustomFieldForm({ field, onSubmit, onCancel }: CustomFieldFormPr
                   value={option.value}
                   onChange={(e) => setOption(i, { value: e.target.value })}
                   placeholder="Option name"
-                  className="min-h-[38px] py-1.5"
+                  className="py-1.5"
                 />
                 <Button
                   variant="ghost"

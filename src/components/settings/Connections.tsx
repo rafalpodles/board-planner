@@ -169,7 +169,7 @@ export function Connections({
                     type="button"
                     onClick={() => onRemove(integration.id)}
                     aria-label={`Remove ${integration.name}`}
-                    className="focus-ring shrink-0 rounded px-1 text-text-muted hover:text-danger"
+                    className="focus-ring shrink-0 inline-flex h-11 w-11 items-center justify-center rounded text-text-muted sm:h-6 sm:w-auto sm:px-1 hover:text-danger"
                   >
                     ✕
                   </button>
@@ -178,7 +178,7 @@ export function Connections({
                   type="button"
                   onClick={() => onExpand(open ? null : integration.id)}
                   aria-label={`${open ? "Collapse" : "Configure"} ${integration.name}`}
-                  className="focus-ring shrink-0 rounded px-1 text-text-muted hover:text-text"
+                  className="focus-ring shrink-0 inline-flex h-11 w-11 items-center justify-center rounded text-text-muted sm:h-6 sm:w-auto sm:px-1 hover:text-text"
                 >
                   {open ? "▴" : "▾"}
                 </button>

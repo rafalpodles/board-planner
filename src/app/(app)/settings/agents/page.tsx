@@ -246,7 +246,7 @@ export default function AdminAgentsPage() {
                       <button
                         onClick={() => patch(row, { lockedByInstance: !row.lockedByInstance })}
                         disabled={savingId === row._id}
-                        className={`text-xs px-2 py-1 rounded border transition-colors cursor-pointer ${
+                        className={`inline-flex min-h-11 cursor-pointer items-center rounded border px-3 text-xs transition-colors sm:min-h-0 sm:px-2 sm:py-1 ${
                           row.lockedByInstance
                             ? "border-danger bg-danger/10 text-danger"
                             : "border-border text-text-muted hover:text-text"

@@ -19,6 +19,11 @@ import { PmAgentSection } from "./sections/PmAgentSection";
 import { WorkersSection } from "./sections/WorkersSection";
 import { AuditSection } from "./sections/AuditSection";
 import { PageHeader } from "@/components/shell/PageHeader";
+import {
+  SectionPillsNav,
+  pillClass,
+  useScrollActivePillIntoView,
+} from "@/components/settings/SectionPills";
 import { SettingsStats } from "./sections/types";
 
 type Access = "member" | "projectAdmin" | "instanceAdmin";
@@ -217,6 +222,8 @@ export default function ProjectSettingsPage() {
     return visible[0]?.id ?? "";
   }, [visible, section]);
 
+  const activePill = useScrollActivePillIntoView<HTMLButtonElement>(active);
+
   const goToSection = useCallback((id: string, scroll = true) => {
     setSection(id);
     window.history.replaceState(
@@ -276,13 +283,10 @@ export default function ProjectSettingsPage() {
       return (
         <button
           key={s.id}
+          ref={s.id === active ? activePill : undefined}
           onClick={() => goToSection(s.id)}
           aria-current={s.id === active}
-          className={`shrink-0 rounded-full border px-3.5 py-1.5 text-sm transition-colors ${
-            s.id === active
-              ? "border-primary bg-primary-solid font-semibold text-white"
-              : "border-border bg-bg-card text-text-muted"
-          }`}
+          className={pillClass(s.id === active)}
         >
           {s.label}
           {dirtySections.has(s.id) && (
@@ -371,12 +375,13 @@ export default function ProjectSettingsPage() {
             )}
           </nav>
 
-          <nav
-            className="sticky top-0 z-30 -mx-4 mb-4 flex gap-2 overflow-x-auto border-b border-border bg-bg/95 px-4 py-3 backdrop-blur md:hidden"
-            aria-label="Settings sections"
-          >
+          {/* The scroll container is `main`, which is padded, and a sticky offset is measured
+              from its padding edge — so `top-0` alone parks the row 24px down and leaves a band
+              above it that page content scrolls through, sliced. Pulling the row up by that
+              padding and paying it back as padding puts the pills flush against the top. */}
+          <SectionPillsNav className="sticky -top-6 z-30 -mx-4 -mt-6 mb-4 border-b border-border bg-bg px-4 pb-3 pt-9 md:hidden">
             {visible.map((s) => navButton(s, true))}
-          </nav>
+          </SectionPillsNav>
 
           <main>
             {activeMeta && (
