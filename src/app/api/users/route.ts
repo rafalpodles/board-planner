@@ -1,5 +1,11 @@
 import { NextResponse } from "next/server";
-import { isValidUsername, USERNAME_RULE } from "@/lib/identifiers";
+import {
+  FULL_NAME_RULE,
+  isValidFullName,
+  isValidUsername,
+  normaliseFullName,
+  USERNAME_RULE,
+} from "@/lib/identifiers";
 import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
 import { getAuthUser, MIN_PASSWORD_LENGTH, PASSWORD_COST_FACTOR } from "@/lib/auth";
@@ -37,6 +43,13 @@ export async function POST(request: Request) {
   const storedUsername = String(username).trim().toLowerCase();
   if (!isValidUsername(storedUsername)) {
     return NextResponse.json({ error: USERNAME_RULE }, { status: 400 });
+  }
+  // Same rule the account itself gets under Settings → Profile, and for the same sinks. The
+  // truthiness check above passes a name of nothing but spaces, which the schema then trims to ""
+  // and refuses as `required` — a 400 arriving as a 500 (BP-410).
+  const storedFullName = normaliseFullName(String(fullName));
+  if (!isValidFullName(storedFullName)) {
+    return NextResponse.json({ error: FULL_NAME_RULE }, { status: 400 });
   }
   // Optional: an instance with no mail server has no use for it, and demanding one would mean
   // inventing addresses. The cost of leaving it out is stated on the form — that account cannot
@@ -92,7 +105,7 @@ export async function POST(request: Request) {
     const user = await User.create({
       username: storedUsername,
       password: hashedPassword,
-      fullName,
+      fullName: storedFullName,
       email,
       role: isBootstrap ? "admin" : "member",
     });

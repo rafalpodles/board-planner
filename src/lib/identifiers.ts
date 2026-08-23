@@ -30,3 +30,38 @@ export function isValidProjectKey(key: string): boolean {
 export function isValidUsername(username: string): boolean {
   return USERNAME_PATTERN.test(username);
 }
+
+/**
+ * A display name is free text — it has to hold anybody's name, in any script, so a pattern that
+ * enumerated the allowed characters would refuse somebody theirs. What it may not hold is a
+ * control character. The sinks BP-401 constrained a username for read this field too: a
+ * notification title on its way into a Slack or Discord message, and the PM agent's system prompt
+ * (`src/lib/pm/agent.ts`), where a newline ends the line the instruction was written on.
+ *
+ * A source constraint, not an escaping layer: these characters never reach a sink because they are
+ * never stored. It says nothing about the characters that are — a name is still text somebody
+ * chose, and every renderer still has to treat it as text.
+ */
+export const FULL_NAME_MAX_LENGTH = 80;
+
+export const FULL_NAME_RULE = `A name cannot be blank, must be at most ${FULL_NAME_MAX_LENGTH} characters, and cannot contain line breaks or other control characters`;
+
+// C0, DEL and C1, plus the two Unicode separators that break a line in a renderer without being
+// matched by \s in a JavaScript regex.
+function isControlCodePoint(code: number): boolean {
+  return code < 0x20 || (code >= 0x7f && code <= 0x9f) || code === 0x2028 || code === 0x2029;
+}
+
+// The schema trims, so validate what will be stored — checking the untrimmed string is what let a
+// name of nothing but spaces past the admin form's `!fullName` check and into a 500 (BP-410).
+export function normaliseFullName(fullName: string): string {
+  return fullName.trim();
+}
+
+export function isValidFullName(fullName: string): boolean {
+  if (fullName.length === 0 || fullName.length > FULL_NAME_MAX_LENGTH) return false;
+  for (const character of fullName) {
+    if (isControlCodePoint(character.codePointAt(0) ?? 0)) return false;
+  }
+  return true;
+}
