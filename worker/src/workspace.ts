@@ -66,7 +66,7 @@ export function createWorkspace(config: WorkerConfig, runner: Runner): Workspace
 
   async function removeIfRegistered(path: string): Promise<void> {
     if ((await registeredWorktreePaths()).includes(path)) {
-      await git(["worktree", "remove", "--force", path]);
+      await git(["worktree", "remove", "--force", "--", path]);
     }
   }
 
@@ -77,7 +77,7 @@ export function createWorkspace(config: WorkerConfig, runner: Runner): Workspace
 
       await removeIfRegistered(path);
       // -B resets the branch instead of failing if a crashed previous attempt already created it
-      await git(["worktree", "add", "-B", branch, path]);
+      await git(["worktree", "add", "-B", branch, "--", path]);
       return path;
     },
 
