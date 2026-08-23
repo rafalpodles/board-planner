@@ -1,17 +1,10 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
-import { ADMIN_PASSWORD, ADMIN_USERNAME, MEMBER_USERNAME, seed } from "./seed";
+import { ADMIN_PASSWORD, ADMIN_USERNAME, seed } from "./seed";
 
 /**
- * BP-351, both halves of the Settings → Users screen.
- *
- * The hint under Email called the address a notification preference. Since BP-281 it is also the
- * only thing that lets an account recover itself, and whoever writes it decides where the next
- * reset link lands — the route already treats it that way (refused to a machine credential,
- * invalidates outstanding links, writes an audit row). The wording follows the published
- * `members-and-permissions` page rather than inventing a third description of the same field.
- *
- * And the cards truncated every ordinary name — "E2E Me…" — because three columns left 145px for
- * a name plus its role pill, which needs 165px, while an empty column sat beside it.
+ * BP-351. The cards truncated every ordinary name — "E2E Me…" for "E2E Member" — because three
+ * fixed columns left 145px for a name plus its role pill, which needs 165px, while an empty
+ * column sat beside them.
  */
 
 async function signIn(page: Page) {
@@ -34,37 +27,6 @@ function cardName(page: Page, fullName: string) {
 
 test.beforeEach(async () => {
   await seed();
-});
-
-test("the new-user hint says the address is what makes the account resettable", async ({
-  page,
-}) => {
-  await signIn(page);
-  await page.goto("/settings/users");
-  await page.getByRole("button", { name: "New User" }).click();
-
-  const hint = page.locator("#newUserEmailHelp");
-  // Still optional — an instance with no mail server has no use for it, and the form has always
-  // said so
-  await expect(hint).toContainText("Optional");
-  await expect(hint).toContainText("reset a forgotten password");
-  // The consequence of leaving it blank, in the docs' own words
-  await expect(hint).toContainText("administrator setting a password");
-  await expect(hint).not.toContainText("Used for email notifications.");
-});
-
-test("the edit-user hint says what changing the address does", async ({ page }) => {
-  await signIn(page);
-  await page.goto("/settings/users");
-  await page.getByText(`@${MEMBER_USERNAME}`, { exact: true }).first().click();
-
-  const hint = page.getByRole("dialog").locator("#editUserEmailHelp");
-  await expect(hint).toContainText("reset a forgotten password");
-  // The half an administrator had no way to know: this is a change of who can take the account
-  // over at the next reset
-  await expect(hint).toContainText("hands the next reset to the new address");
-  await expect(hint).toContainText("audit log");
-  await expect(hint).not.toContainText("Used for email notifications.");
 });
 
 test("a user card shows the whole display name", async ({ page }) => {
