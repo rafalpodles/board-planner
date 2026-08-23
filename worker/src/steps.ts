@@ -1,5 +1,7 @@
 import { Delivery } from "./delivery.js";
 import { Executor } from "./executor.js";
+import { Runner } from "./exec.js";
+import { unexpectedHistory } from "./provenance.js";
 import { StreamEvent } from "./stream.js";
 import { ClaimedTask, ExecutionResult, SnapshotEntry } from "./types.js";
 
@@ -35,6 +37,8 @@ export interface StepContext {
   timeoutMs: number;
   signal?: AbortSignal;
   onEvent?: (event: StreamEvent) => void;
+  baseSha: string;
+  runner: Runner;
 }
 
 // A push or a merge that throws must not reach the pipeline's outer catch: that requeues and
@@ -49,7 +53,9 @@ async function runWorkerAction(entry: SnapshotEntry, ctx: StepContext): Promise<
 
 async function deliver(entry: SnapshotEntry, ctx: StepContext): Promise<StepOutcome> {
   switch (entry.key) {
-    case "push":
+    case "push": {
+      const wrong = await unexpectedHistory(ctx.runner, ctx.worktreePath, ctx.baseSha, ctx.state.commits);
+      if (wrong) return { kind: "error", message: `refusing to push: ${wrong}` };
       await ctx.delivery.push(
         ctx.worktreePath,
         ctx.branch,
@@ -57,6 +63,7 @@ async function deliver(entry: SnapshotEntry, ctx: StepContext): Promise<StepOutc
       );
       ctx.state.pushed = true;
       return { kind: "ok" };
+    }
 
     case "pull-request":
       ctx.state.prUrl = await ctx.delivery.openPr(ctx.worktreePath, ctx.task, ctx.state.summary);
