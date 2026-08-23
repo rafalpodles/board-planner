@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
+import { FULL_NAME_MAX_LENGTH } from "@/lib/identifiers";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { useToast } from "@/components/ui/Toast";
@@ -10,11 +11,13 @@ import Link from "next/link";
 
 export default function ProfilePage() {
   const api = useApi();
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
   const { toast } = useToast();
 
   const [email, setEmail] = useState("");
   const [savedEmail, setSavedEmail] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [savedFullName, setSavedFullName] = useState("");
   const [currentPassword, setCurrentPassword] = useState("");
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -23,15 +26,20 @@ export default function ProfilePage() {
   // Trimmed and lowercased the way the server normalises it, so the password prompt does not
   // appear for a stray capital that will not change anything
   const emailChanged = loadFailed ? false : email.trim().toLowerCase() !== savedEmail;
+  // Trimmed the way the server normalises it, so trailing whitespace is not a change to refresh
+  // the shell over
+  const nameChanged = loadFailed ? false : fullName.trim() !== savedFullName;
 
   useEffect(() => {
     if (!user) return;
     // Fetch fresh user data
     api
       .get("/api/auth/me")
-      .then((data: { email?: string }) => {
+      .then((data: { email?: string; fullName?: string }) => {
         setEmail(data.email || "");
         setSavedEmail(data.email || "");
+        setFullName(data.fullName || "");
+        setSavedFullName(data.fullName || "");
         setLoaded(true);
       })
       .catch(() => {
@@ -49,10 +57,16 @@ export default function ProfilePage() {
     try {
       await api.put("/api/users/me", {
         email,
+        fullName,
         ...(emailChanged ? { currentPassword } : {}),
       });
       setSavedEmail(email.trim().toLowerCase());
+      setSavedFullName(fullName.trim());
+      setFullName(fullName.trim());
       setCurrentPassword("");
+      // The shell renders the name from the cached user, so without this it keeps showing the old
+      // one until a full reload — on the one screen where somebody is watching for it to change
+      if (nameChanged) await refreshUser();
       toast("Profile updated", "success");
     } catch (err) {
       // The server's own words: "Current password is incorrect" is worth reading, where a generic
@@ -85,14 +99,17 @@ export default function ProfilePage() {
 
       <div className="space-y-4">
         <div>
-          <label className="block text-sm font-medium mb-1">Username</label>
+          <label className="block text-sm font-medium text-text-muted mb-1">Username</label>
           <p className="text-sm text-text-muted">{user?.username}</p>
         </div>
 
-        <div>
-          <label className="block text-sm font-medium mb-1">Full Name</label>
-          <p className="text-sm text-text-muted">{user?.fullName}</p>
-        </div>
+        <Input
+          label="Full Name"
+          value={fullName}
+          onChange={(e) => setFullName(e.target.value)}
+          maxLength={FULL_NAME_MAX_LENGTH}
+          placeholder="How you appear on tasks and comments"
+        />
 
         <Input
           label="Email"
@@ -126,7 +143,15 @@ export default function ProfilePage() {
           page — one switch for e-mail could not say &quot;mentions yes, status changes no&quot;.
         </p>
 
-        <Button onClick={handleSave} disabled={saving || loadFailed || (emailChanged && !currentPassword.trim())}>
+        <Button
+          onClick={handleSave}
+          disabled={
+            saving ||
+            loadFailed ||
+            !fullName.trim() ||
+            (emailChanged && !currentPassword.trim())
+          }
+        >
           {saving ? "Saving..." : "Save"}
         </Button>
       </div>

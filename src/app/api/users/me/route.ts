@@ -6,6 +6,7 @@ import { isValidEmail, normaliseEmail } from "@/lib/email";
 import { notifyAddressChanged } from "@/lib/security-mail";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { withAuth } from "@/lib/middleware";
+import { FULL_NAME_RULE, isValidFullName, normaliseFullName } from "@/lib/identifiers";
 import { duplicateKeyField } from "@/lib/mongo-errors";
 import { invalidateResetTokens } from "@/lib/password-reset";
 import {
@@ -125,6 +126,24 @@ export const PUT = withAuth(async (request, { user }) => {
       updates.email = email;
     }
   }
+
+  const previousFullName = user.fullName ?? "";
+
+  if (body.fullName !== undefined) {
+    if (typeof body.fullName !== "string") {
+      return NextResponse.json({ error: FULL_NAME_RULE }, { status: 400 });
+    }
+    const fullName = normaliseFullName(body.fullName);
+    if (!isValidFullName(fullName)) {
+      return NextResponse.json({ error: FULL_NAME_RULE }, { status: 400 });
+    }
+    // No password gate, unlike the address above: a name receives no reset link and takes no
+    // account over. What it does do is sign a comment, which is why the change is audited below.
+    if (fullName !== previousFullName) {
+      updates.fullName = fullName;
+    }
+  }
+
   if (typeof body.emailDigest === "boolean") {
     updates.emailDigest = body.emailDigest;
   }
@@ -137,9 +156,9 @@ export const PUT = withAuth(async (request, { user }) => {
   }
 
   if (Object.keys(updates).length === 0) {
-    // Submitting the address already on the account is a no-op, not a malformed request: it is
-    // what a client sending the whole profile back does when only the address was left alone.
-    if (body.email !== undefined) {
+    // Submitting the address or the name already on the account is a no-op, not a malformed
+    // request: it is what a client sending the whole profile back does when neither was touched.
+    if (body.email !== undefined || body.fullName !== undefined) {
       return NextResponse.json(await User.findById(user._id));
     }
     return NextResponse.json({ error: "No valid fields to update" }, { status: 400 });
@@ -173,6 +192,18 @@ export const PUT = withAuth(async (request, { user }) => {
   // caller it worked, and would have audited and mailed about a write that matched nothing.
   if (!updated) {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
+  }
+
+  if (typeof updates.fullName === "string") {
+    // Not a takeover the way the address is, so no mail and no session revoke — but a name is what
+    // a comment and a task card are signed with, and there is nowhere else it is recorded that the
+    // name on yesterday's comment and the name on the account are no longer the same string.
+    void logInstanceAudit({
+      action: "user_full_name_changed_self",
+      user: user._id,
+      target: user.username,
+      detail: `${previousFullName || "none"} → ${updates.fullName}`,
+    });
   }
 
   if (typeof updates.email === "string" && updates.email !== previousEmail) {
