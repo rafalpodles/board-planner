@@ -761,6 +761,23 @@ export const OTHER_HIT_KEY = `${OTHER_PROJECT_KEY}-${OTHER_HIT_NUMBER}`;
 // A word no seeded task carries, for the no-results state
 export const ABSENT_WORD = "quokka";
 
+// Its priority key is deliberately absent, the way a task predating the field is stored. The
+// endpoint applies the default on the way out and the page renders a badge from it, so a corpus
+// where every task already carries one leaves both unexercised.
+export const LEGACY_HIT_ID = id("e2e00000000000000000d304");
+export const LEGACY_HIT_NUMBER = 12;
+export const LEGACY_HIT_WORD = "dirigible";
+export const LEGACY_HIT_TITLE = "Dirigible logbook from before priorities";
+
+// Regex metacharacters in a title people would actually type. Escaped, "[v2]" finds this one
+// task; unescaped it is a character class and matches every title holding a "v" or a "2".
+export const META_HIT_ID = id("e2e00000000000000000d305");
+export const META_HIT_NUMBER = 13;
+export const META_HIT_TITLE = "Rewrite the (old) mast [v2]";
+export const META_QUERY = "[v2]";
+// Escaped this matches nothing; unescaped it matches everything
+export const META_WILDCARD = ".*";
+
 export async function seedSearchCorpus() {
   const db = (await connect()).db!;
   const now = new Date();
@@ -842,9 +859,30 @@ export async function seedSearchCorpus() {
       order: 0,
       updatedAt: new Date(now.getTime() - 3_000),
     }),
+    task({
+      _id: META_HIT_ID,
+      taskNumber: META_HIT_NUMBER,
+      title: META_HIT_TITLE,
+      status: SPARE_COLUMN.id,
+      order: 13,
+      updatedAt: new Date(now.getTime() - 4_000),
+    }),
   ]);
 
-  await db.collection("projects").updateOne({ _id: PROJECT_ID }, { $max: { taskCounter: BODY_HIT_NUMBER } });
+  // Inserted separately because the factory supplies a priority and this task is defined by not
+  // having one — deleting the key is the only way to store the shape the default exists for.
+  const legacy: Record<string, unknown> = task({
+    _id: LEGACY_HIT_ID,
+    taskNumber: LEGACY_HIT_NUMBER,
+    title: LEGACY_HIT_TITLE,
+    status: SPARE_COLUMN.id,
+    order: 12,
+    updatedAt: new Date(now.getTime() - 5_000),
+  });
+  delete legacy.priority;
+  await db.collection("tasks").insertOne(legacy);
+
+  await db.collection("projects").updateOne({ _id: PROJECT_ID }, { $max: { taskCounter: META_HIT_NUMBER } });
 
   await mongoose.disconnect();
 }

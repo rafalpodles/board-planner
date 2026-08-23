@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Locator, type Page } from "@playwright/test";
 import {
   ABSENT_WORD,
   ADMIN_PASSWORD,
@@ -6,10 +6,16 @@ import {
   BODY_HIT_NUMBER,
   BODY_HIT_TITLE,
   HELD_TASK_TITLE,
+  LEGACY_HIT_TITLE,
+  LEGACY_HIT_WORD,
   MEMBER_PASSWORD,
   MEMBER_USERNAME,
+  META_HIT_TITLE,
+  META_QUERY,
+  META_WILDCARD,
   OTHER_HIT_KEY,
   OTHER_HIT_TITLE,
+  OTHER_PROJECT_KEY,
   OTHER_PROJECT_NAME,
   PROJECT_KEY,
   PROJECT_NAME,
@@ -26,13 +32,34 @@ import {
  * admin control that sees the same task — a silent list caused by a mis-wired fixture reads
  * exactly like a silent list caused by the filter.
  *
- * The /search page has no filter controls: it is a query box, a grouped result list and the three
- * states around them. The task's "page filters" is covered as the only filtering that page
- * performs — by grant, and by the query itself — because there is nothing else there to drive.
+ * Two grant surfaces, not one: task hits are filtered by the endpoint, project hits are filtered
+ * out of what /api/projects hands the client. They are driven separately.
+ *
+ * The task's "/search page filters" names something that does not exist — that page has a query
+ * box and a list grouped by project, and no filter controls of any kind. The clause is covered
+ * only in the sense that the two things which do narrow that list, the grant and the query, are
+ * both driven. Nothing was written for the clause itself.
  */
 
 const TITLE_HIT_KEY = `${PROJECT_KEY}-${TITLE_HIT_NUMBER}`;
 const BODY_HIT_KEY = `${PROJECT_KEY}-${BODY_HIT_NUMBER}`;
+
+/**
+ * A 500 is a response too, and both consumers swallow a failed search into an empty list — so a
+ * predicate matching on the URL alone lets "the search is broken" pass as "nothing matched".
+ * Pinning the query as well keeps a stale answer from satisfying the next question.
+ */
+const searchFor = (text: string) => (r: { url(): string; status(): number }) => {
+  const url = new URL(r.url());
+  return (
+    url.pathname === "/api/search" && url.searchParams.get("q") === text && r.status() === 200
+  );
+};
+
+const searchRequestFor = (text: string) => (url: string) => {
+  const parsed = new URL(url);
+  return parsed.pathname === "/api/search" && parsed.searchParams.get("q") === text;
+};
 
 async function signIn(page: Page, username: string, password: string) {
   await page.goto("/login");
@@ -43,37 +70,47 @@ async function signIn(page: Page, username: string, password: string) {
 }
 
 const layerOf = (page: Page) => page.getByRole("dialog", { name: "Search" });
+const options = (page: Page) => layerOf(page).getByRole("option");
+const layerInput = (page: Page) => layerOf(page).getByLabel("Search tasks and projects");
 
 /**
  * The ⌘K listener is registered in a client effect, so the shortcut does nothing against a page
  * that has merely been painted. The board's cards arrive from a client fetch, which is what says
- * React is running here — five tests failed on the race before this wait existed.
+ * React is running here — five tests failed on that race before this wait existed.
  */
 async function openBoard(page: Page) {
   await page.goto(`/projects/${PROJECT_KEY}`);
   await expect(page.getByText(HELD_TASK_TITLE).first()).toBeVisible();
 }
 
+/**
+ * Same problem on a page with no cards to wait for: /api/projects is fetched by the shell's own
+ * client hook, so its answer is the signal that the root is hydrated and the form is wired up.
+ */
+async function openSearchPage(page: Page, url = "/search") {
+  const shellReady = page.waitForResponse(
+    (r) => new URL(r.url()).pathname === "/api/projects" && r.status() === 200
+  );
+  await page.goto(url);
+  await shellReady;
+}
+
 async function openLayer(page: Page) {
+  // Hovering an option moves the cursor, and Playwright leaves the pointer wherever the last
+  // click put it — which is inside the dialog's box at this viewport
+  await page.mouse.move(0, 0);
   await page.keyboard.press("ControlOrMeta+k");
   const layer = layerOf(page);
   await expect(layer).toBeVisible();
   return layer;
 }
 
-/**
- * Results render optimistically off whatever the hook is holding, so the text is on screen before
- * the server has answered. Every query below waits for the response it is actually about.
- */
+/** Results render off whatever the hook is already holding, so every query waits for its answer */
 async function query(page: Page, text: string) {
-  const answered = page.waitForResponse(
-    (r) => r.url().includes("/api/search?q=") && r.request().method() === "GET"
-  );
-  await layerOf(page).getByLabel("Search tasks and projects").fill(text);
+  const answered = page.waitForResponse(searchFor(text));
+  await layerInput(page).fill(text);
   await answered;
 }
-
-const options = (page: Page) => layerOf(page).getByRole("option");
 
 test.beforeEach(async () => {
   await seed();
@@ -81,7 +118,9 @@ test.beforeEach(async () => {
 });
 
 test.describe("the ⌘K layer", () => {
-  test("opens on ⌘K, closes on Escape, and reopens on /", async ({ page }) => {
+  test("opens on ⌘K, toggles closed on ⌘K, closes on Escape, and reopens on /", async ({
+    page,
+  }) => {
     await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);
     await openBoard(page);
 
@@ -89,13 +128,33 @@ test.describe("the ⌘K layer", () => {
     // Nothing typed yet: the layer says what it wants rather than showing an empty list
     await expect(layerOf(page).getByText("Type at least 2 characters to search")).toBeVisible();
 
+    await page.keyboard.press("ControlOrMeta+k");
+    await expect(layerOf(page)).toBeHidden();
+
+    await openLayer(page);
+    // Two independent handlers close on Escape — the input's own onKeyDown and useFocusTrap — so
+    // what this proves is that one of them is live, never which. Deleting either leaves it green.
     await page.keyboard.press("Escape");
     await expect(layerOf(page)).toBeHidden();
 
-    // The other way in, and the one that would break if the shortcut handler stopped
-    // distinguishing a typing target from the page
     await page.keyboard.press("/");
     await expect(layerOf(page)).toBeVisible();
+    // The slash opened the layer instead of being typed into it
+    await expect(layerInput(page)).toHaveValue("");
+  });
+
+  test("/ pressed inside a text field types, and does not open the layer", async ({ page }) => {
+    await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);
+    await openSearchPage(page);
+
+    // The guard this drives is the one that keeps a slash typed into a task title from hijacking
+    // the keystroke. Nothing else in either suite reaches it.
+    const input = page.getByPlaceholder("Search tasks by title, description, or key");
+    await input.click();
+    await page.keyboard.press("/");
+
+    await expect(layerOf(page)).toBeHidden();
+    await expect(input).toHaveValue("/");
   });
 
   test("one character is still the empty state; two search", async ({ page }) => {
@@ -103,21 +162,20 @@ test.describe("the ⌘K layer", () => {
     await openBoard(page);
     await openLayer(page);
 
-    const input = layerOf(page).getByLabel("Search tasks and projects");
     let requested = false;
     page.on("request", (r) => {
-      if (r.url().includes("/api/search?q=")) requested = true;
+      if (searchRequestFor("z")(r.url())) requested = true;
     });
 
-    await input.fill("z");
+    await layerInput(page).fill("z");
     await expect(layerOf(page).getByText("Type at least 2 characters to search")).toBeVisible();
     // Long enough for the 250ms debounce to have fired if the floor were not enforced
     await page.waitForTimeout(1_000);
     expect(requested).toBe(false);
 
+    // The control: the same input, one character longer, does reach the server
     await query(page, SEARCH_WORD);
     await expect(options(page).first()).toBeVisible();
-    expect(requested).toBe(true);
   });
 
   test("finds a task by title, by body, and by key", async ({ page }) => {
@@ -134,6 +192,21 @@ test.describe("the ⌘K layer", () => {
     await query(page, TITLE_HIT_KEY);
     await expect(options(page)).toHaveCount(1);
     await expect(options(page).first()).toContainText(TITLE_HIT_TITLE);
+  });
+
+  test("a query made of regex metacharacters is matched literally", async ({ page }) => {
+    await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);
+    await openBoard(page);
+    await openLayer(page);
+
+    // Unescaped this is a character class and matches every title holding a "v" or a "2"
+    await query(page, META_QUERY);
+    await expect(options(page)).toHaveCount(1);
+    await expect(options(page).first()).toContainText(META_HIT_TITLE);
+
+    // And the other polarity: unescaped this matches the whole board
+    await query(page, META_WILDCARD);
+    await expect(layerOf(page).getByText("No matches")).toBeVisible();
   });
 
   test("↑↓ move the cursor and Enter opens what it is on", async ({ page }) => {
@@ -166,8 +239,21 @@ test.describe("the ⌘K layer", () => {
     await openLayer(page);
     await query(page, SEARCH_WORD);
 
+    // Enter is swallowed while the list is empty, and the response lands before React commits it
+    await expect(options(page).nth(0)).toContainText(TITLE_HIT_TITLE);
+
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(new RegExp(`/projects/${PROJECT_KEY}/tasks/${TITLE_HIT_NUMBER}$`));
+  });
+
+  test("clicking a hit opens it too", async ({ page }) => {
+    await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);
+    await openBoard(page);
+    await openLayer(page);
+    await query(page, SEARCH_WORD);
+
+    await options(page).filter({ hasText: BODY_HIT_TITLE }).click();
+    await expect(page).toHaveURL(new RegExp(`/projects/${PROJECT_KEY}/tasks/${BODY_HIT_NUMBER}$`));
   });
 
   test("a word nothing carries says so", async ({ page }) => {
@@ -177,16 +263,31 @@ test.describe("the ⌘K layer", () => {
 
     await query(page, ABSENT_WORD);
     await expect(layerOf(page).getByText("No matches")).toBeVisible();
-    await expect(options(page)).toHaveCount(0);
   });
 
-  test("the admin sees the other board's task", async ({ page }) => {
+  test("See all results carries the query to the page", async ({ page }) => {
+    await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);
+    await openBoard(page);
+    await openLayer(page);
+    await query(page, SEARCH_WORD);
+
+    const arrived = page.waitForResponse(searchFor(SEARCH_WORD));
+    await layerOf(page).getByRole("link", { name: "See all results" }).click();
+    await arrived;
+
+    await expect(page).toHaveURL(new RegExp(`/search\\?q=${SEARCH_WORD}$`));
+    await expect(layerOf(page)).toBeHidden();
+    await expect(page.getByRole("main").getByText(TITLE_HIT_TITLE)).toBeVisible();
+  });
+
+  test("the admin sees the other board's task, under its own heading", async ({ page }) => {
     await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);
     await openBoard(page);
     await openLayer(page);
     await query(page, SEARCH_WORD);
 
     await expect(options(page).filter({ hasText: OTHER_HIT_TITLE })).toHaveCount(1);
+    await expect(layerOf(page).getByText("In this project")).toBeVisible();
     await expect(layerOf(page).getByText("Other projects")).toBeVisible();
   });
 
@@ -215,32 +316,82 @@ test.describe("the ⌘K layer", () => {
 
     await query(page, OTHER_HIT_KEY);
     await expect(layerOf(page).getByText("No matches")).toBeVisible();
-    await expect(options(page)).toHaveCount(0);
+  });
+
+  test("a project the admin may see is a hit, and opens", async ({ page }) => {
+    await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);
+    await openBoard(page);
+    await openLayer(page);
+
+    // Project hits never touch /api/search — they are matched client-side out of what
+    // /api/projects handed the shell, which is the second place a grant has to hold
+    await query(page, "Second");
+    await expect(options(page)).toHaveCount(1);
+    await expect(options(page).first()).toContainText(OTHER_PROJECT_NAME);
+
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(new RegExp(`/projects/${OTHER_PROJECT_KEY}$`));
+  });
+
+  test("and is not a hit for the member, who cannot see that project", async ({ page }) => {
+    await signIn(page, MEMBER_USERNAME, MEMBER_PASSWORD);
+    await openBoard(page);
+    await openLayer(page);
+
+    // The control that this reader's project list is not simply empty
+    await query(page, PROJECT_NAME.slice(0, 7));
+    await expect(options(page).filter({ hasText: PROJECT_NAME })).toHaveCount(1);
+
+    await query(page, "Second");
+    await expect(layerOf(page).getByText("No matches")).toBeVisible();
   });
 });
 
 test.describe("the /search page", () => {
+  const pageInput = (page: Page) =>
+    page.getByPlaceholder("Search tasks by title, description, or key");
+
+  /** The rows under one project's heading, rather than every link on the page */
+  const group = (page: Page, projectName: string): Locator =>
+    page
+      .getByRole("heading", { name: new RegExp(projectName) })
+      .locator("xpath=following-sibling::div[1]");
+
   const results = (page: Page) => page.getByRole("main").getByRole("link");
 
-  test("a ?q link arrives with its results already grouped by project", async ({ page }) => {
-    await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);
-
-    const answered = page.waitForResponse((r) => r.url().includes("/api/search?q="));
-    await page.goto(`/search?q=${SEARCH_WORD}`);
+  async function arriveWith(page: Page, q: string) {
+    const answered = page.waitForResponse(searchFor(q));
+    await page.goto(`/search?q=${encodeURIComponent(q)}`);
     await answered;
+  }
 
-    await expect(page.getByRole("heading", { name: new RegExp(PROJECT_NAME) })).toBeVisible();
-    await expect(page.getByRole("heading", { name: new RegExp(OTHER_PROJECT_NAME) })).toBeVisible();
+  test("a ?q link arrives with its results already under the right project", async ({ page }) => {
+    await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);
+    await arriveWith(page, SEARCH_WORD);
 
-    await expect(results(page).filter({ hasText: TITLE_HIT_TITLE })).toHaveCount(1);
-    await expect(results(page).filter({ hasText: OTHER_HIT_TITLE })).toHaveCount(1);
+    // Scoped to the group, not the page: two headings and two page-wide counts would still pass
+    // with every hit filed under the wrong board
+    await expect(group(page, PROJECT_NAME).getByRole("link")).toHaveCount(2);
+    await expect(group(page, PROJECT_NAME).getByText(TITLE_HIT_TITLE)).toBeVisible();
+    await expect(group(page, PROJECT_NAME).getByText(OTHER_HIT_TITLE)).toHaveCount(0);
+
+    await expect(group(page, OTHER_PROJECT_NAME).getByRole("link")).toHaveCount(1);
+    await expect(group(page, OTHER_PROJECT_NAME).getByText(OTHER_HIT_TITLE)).toBeVisible();
+  });
+
+  test("a task stored before priorities existed still renders one", async ({ page }) => {
+    await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);
+    await arriveWith(page, LEGACY_HIT_WORD);
+
+    // Nothing wrote a priority on this task; the endpoint applies the default on the way out
+    const row = results(page).filter({ hasText: LEGACY_HIT_TITLE });
+    await expect(row).toHaveCount(1);
+    await expect(row).toContainText("Medium");
   });
 
   test("a result opens the task it names", async ({ page }) => {
     await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);
-    const answered = page.waitForResponse((r) => r.url().includes("/api/search?q="));
-    await page.goto(`/search?q=${SEARCH_WORD}`);
-    await answered;
+    await arriveWith(page, SEARCH_WORD);
 
     await results(page).filter({ hasText: BODY_HIT_TITLE }).click();
     await expect(page).toHaveURL(new RegExp(`/projects/${PROJECT_KEY}/tasks/${BODY_HIT_NUMBER}$`));
@@ -249,12 +400,11 @@ test.describe("the /search page", () => {
 
   test("typing a query and submitting it puts the query in the address", async ({ page }) => {
     await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);
-    await page.goto("/search");
+    await openSearchPage(page);
 
-    const input = page.getByPlaceholder("Search tasks by title, description, or key");
-    const answered = page.waitForResponse((r) => r.url().includes("/api/search?q="));
-    await input.fill(BODY_HIT_KEY);
-    await input.press("Enter");
+    const answered = page.waitForResponse(searchFor(BODY_HIT_KEY));
+    await pageInput(page).fill(BODY_HIT_KEY);
+    await pageInput(page).press("Enter");
     await answered;
 
     await expect(page).toHaveURL(new RegExp(`/search\\?q=${PROJECT_KEY}-${BODY_HIT_NUMBER}$`));
@@ -264,28 +414,34 @@ test.describe("the /search page", () => {
 
   test("a one-character query is not submitted at all", async ({ page }) => {
     await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);
-    await page.goto("/search");
+    await openSearchPage(page);
+
+    // The control first: this form does submit, so the silence below is the floor and not a page
+    // that never woke up
+    const answered = page.waitForResponse(searchFor(SEARCH_WORD));
+    await pageInput(page).fill(SEARCH_WORD);
+    await pageInput(page).press("Enter");
+    await answered;
+    await expect(page).toHaveURL(new RegExp(`/search\\?q=${SEARCH_WORD}$`));
+    await expect(results(page).filter({ hasText: TITLE_HIT_TITLE })).toHaveCount(1);
 
     let requested = false;
     page.on("request", (r) => {
-      if (r.url().includes("/api/search?q=")) requested = true;
+      if (searchRequestFor("z")(r.url())) requested = true;
     });
 
-    const input = page.getByPlaceholder("Search tasks by title, description, or key");
-    await input.fill("z");
-    await input.press("Enter");
+    await pageInput(page).fill("z");
+    await pageInput(page).press("Enter");
     await page.waitForTimeout(1_000);
 
     expect(requested).toBe(false);
-    await expect(page).toHaveURL(/\/search$/);
-    await expect(page.getByText("No tasks found")).toBeHidden();
+    // The address still names the query that was allowed through
+    await expect(page).toHaveURL(new RegExp(`/search\\?q=${SEARCH_WORD}$`));
   });
 
   test("a word nothing carries says so", async ({ page }) => {
     await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);
-    const answered = page.waitForResponse((r) => r.url().includes("/api/search?q="));
-    await page.goto(`/search?q=${ABSENT_WORD}`);
-    await answered;
+    await arriveWith(page, ABSENT_WORD);
 
     await expect(page.getByText("No tasks found")).toBeVisible();
     await expect(results(page)).toHaveCount(0);
@@ -293,9 +449,7 @@ test.describe("the /search page", () => {
 
   test("the member's results stop at the board they hold a grant on", async ({ page }) => {
     await signIn(page, MEMBER_USERNAME, MEMBER_PASSWORD);
-    const answered = page.waitForResponse((r) => r.url().includes("/api/search?q="));
-    await page.goto(`/search?q=${SEARCH_WORD}`);
-    await answered;
+    await arriveWith(page, SEARCH_WORD);
 
     await expect(page.getByRole("heading", { name: new RegExp(PROJECT_NAME) })).toBeVisible();
     await expect(results(page).filter({ hasText: TITLE_HIT_TITLE })).toHaveCount(1);
