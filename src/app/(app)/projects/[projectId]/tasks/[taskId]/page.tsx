@@ -17,11 +17,12 @@ export default function TaskDetailPage() {
   // The same card the intercepting modal draws, so both routes render one view.
   // `shrink-0`: the card is a flex child of a scrolling <main>, and without it the card
   // is squeezed to the viewport and the rest of the task is unreachable.
-  // The clipping is `lg:` only: an overflow-hidden ancestor becomes the scrollport for
-  // anything sticky inside it, which would strand the phone's comment bar at the very
-  // bottom of the page. Above lg the bar is hidden, so the clip is free there.
+  // `overflow-clip`, never `overflow-hidden`: hidden makes this card a scrollport, and a
+  // scrollport that cannot scroll strands everything sticky inside it — the phone's comment
+  // bar at the page's very bottom, and the task's own top bar off the top. Clip rounds the
+  // property rail's corner without claiming the sticky elements.
   return (
-    <div className="mx-auto w-full max-w-[1240px] shrink-0 rounded-2xl border border-border bg-bg-card lg:overflow-hidden">
+    <div className="mx-auto w-full max-w-[1240px] shrink-0 overflow-clip rounded-2xl border border-border bg-bg-card">
       <TaskDetail
         projectId={projectId}
         taskId={taskId}

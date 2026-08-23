@@ -70,9 +70,11 @@ export function Modal({
         animate-in slide-in-from-bottom sm:slide-in-from-bottom-0
         ${
           bare
-            ? // A phone has no room to spend on a backdrop around a whole page of content
-              `h-dvh overflow-hidden rounded-none border-0
-               sm:h-auto sm:max-h-[90vh] sm:rounded-2xl sm:border sm:border-border`
+            ? // A phone has no room to spend on a backdrop around a whole page of content.
+              // Only this variant reaches the top of the screen, so it is the only one that
+              // owes the notch any room — and the child's own header sticks right under it.
+              `h-dvh overflow-hidden rounded-none border-0 pt-[env(safe-area-inset-top)]
+               sm:h-auto sm:max-h-[90vh] sm:rounded-2xl sm:border sm:border-border sm:pt-0`
             : "max-h-[90vh] rounded-t-2xl border border-border p-4 sm:rounded-2xl sm:p-6"
         }`}>
         {!bare && (

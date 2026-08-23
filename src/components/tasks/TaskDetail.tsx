@@ -25,9 +25,13 @@ import { MobileCommentBar } from "@/components/tasks/detail/MobileCommentBar";
 import { MobileSummary } from "@/components/tasks/detail/MobileSummary";
 import { PropertyRail } from "@/components/tasks/detail/PropertyRail";
 import { TaskTopBar } from "@/components/tasks/detail/TaskTopBar";
+import { useScrolledBehind } from "@/components/tasks/detail/atoms";
 import { useTaskEditor } from "@/components/tasks/detail/useTaskEditor";
 import type { Trigger } from "@/hooks/use-trigger-autocomplete";
 import { useEditorTriggers } from "@/hooks/use-editor-triggers";
+
+/** The sticky bar's own height, so the title hands over exactly as it passes underneath */
+const TOP_BAR_HEIGHT = 56;
 
 interface TaskDetailProps {
   projectId: string;
@@ -137,6 +141,7 @@ function TaskDetailView({
   const { toast } = useToast();
 
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [titleBehindBar, watchTitle] = useScrolledBehind(TOP_BAR_HEIGHT);
   // A status change the server refused because a worker holds this task, parked for the dialog
   const [heldStatus, setHeldStatus] = useState<{
     conflict: RunConflict;
@@ -282,6 +287,8 @@ function TaskDetailView({
         projectRef={project.key}
         taskKey={taskKey}
         taskNumber={task.taskNumber}
+        title={draft.title}
+        showTitle={titleBehindBar}
         columns={columns}
         status={task.status}
         onStatusChange={handleStatusChange}
@@ -300,7 +307,9 @@ function TaskDetailView({
             lg:border-r lg:border-border lg:pb-6"
         >
           <div className="flex flex-col gap-2">
-            <InlineTitle value={draft.title} onChange={(value) => set("title", value)} />
+            <div ref={watchTitle}>
+              <InlineTitle value={draft.title} onChange={(value) => set("title", value)} />
+            </div>
             <div className="flex flex-wrap items-center gap-2 px-1.5 text-xs text-text-muted">
               <span>
                 Created{" "}

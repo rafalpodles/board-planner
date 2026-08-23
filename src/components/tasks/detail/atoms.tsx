@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, type RefObject, useRef, type CSSProperties, type ReactNode } from "react";
+import {
+  useEffect,
+  useState,
+  type RefObject,
+  useRef,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import { PRIORITIES, Priority } from "@/types";
 
 /**
@@ -161,4 +168,32 @@ export function ProgressBar({ done, total }: { done: number; total: number }) {
       />
     </div>
   );
+}
+
+/**
+ * True once the watched element has scrolled up behind a bar `barHeight` tall. An
+ * IntersectionObserver rather than a scroll listener: it fires twice per crossing instead
+ * of once per frame, so nothing recomputes while the page is moving. A callback ref, not a
+ * RefObject, because the element this watches only mounts once the task has loaded.
+ */
+export function useScrolledBehind(barHeight: number) {
+  const [node, setNode] = useState<Element | null>(null);
+  const [behind, setBehind] = useState(false);
+
+  useEffect(() => {
+    if (!node) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        // Scrolled off the top and merely below the fold both read as "not intersecting"
+        const above = entry.boundingClientRect.top < (entry.rootBounds?.top ?? 0);
+        setBehind(!entry.isIntersecting && above);
+      },
+      { rootMargin: `-${barHeight}px 0px 0px 0px`, threshold: 0 },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [node, barHeight]);
+
+  return [behind, setNode] as const;
 }
