@@ -30,7 +30,8 @@ import { useTaskEditor } from "@/components/tasks/detail/useTaskEditor";
 import type { Trigger } from "@/hooks/use-trigger-autocomplete";
 import { useEditorTriggers } from "@/hooks/use-editor-triggers";
 
-/** The sticky bar's own height, so the title hands over exactly as it passes underneath */
+// Roughly the sticky bar's height (53px wide, 65px on a phone). It only decides when the
+// hand-over happens, so being a few pixels out costs a few pixels of scroll, nothing more.
 const TOP_BAR_HEIGHT = 56;
 
 interface TaskDetailProps {
