@@ -133,7 +133,7 @@ function harness(overrides: Partial<PipelineDeps> = {}) {
   const delivery = deliverySpy();
   const createDelivery = vi.fn<PipelineDeps["createDelivery"]>(() => delivery);
   const workspace = {
-    create: vi.fn<Workspace["create"]>().mockResolvedValue("/wt"),
+    create: vi.fn<Workspace["create"]>().mockResolvedValue({ path: "/wt", baseSha: "base1" }),
     destroy: vi.fn<Workspace["destroy"]>().mockResolvedValue(undefined),
     listWorktrees: vi.fn<Workspace["listWorktrees"]>().mockResolvedValue([]),
   };
@@ -678,7 +678,7 @@ describe("runTask", () => {
 
   it("never rejects, even when the cleanup itself throws", async () => {
     const workspace = {
-      create: vi.fn<Workspace["create"]>().mockResolvedValue("/wt"),
+      create: vi.fn<Workspace["create"]>().mockResolvedValue({ path: "/wt", baseSha: "base1" }),
       destroy: vi.fn<Workspace["destroy"]>(() => {
         throw new Error("worktree is locked");
       }),

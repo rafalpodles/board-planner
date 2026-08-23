@@ -6,8 +6,14 @@ import { gitArgs, GIT_SAFE_ENV } from "./git-safety.js";
 
 const GIT_TIMEOUT_MS = 60_000;
 
+export interface Worktree {
+  path: string;
+  /** Resolved before the agent runs and held in this process: a ref name is rewritable by the run. */
+  baseSha: string;
+}
+
 export interface Workspace {
-  create(taskKey: string, slug: string): Promise<string>;
+  create(taskKey: string, slug: string): Promise<Worktree>;
   destroy(taskKey: string): Promise<void>;
   listWorktrees(): Promise<string[]>;
 }
@@ -74,11 +80,17 @@ export function createWorkspace(config: WorkerConfig, runner: Runner): Workspace
     async create(taskKey, slug) {
       const path = pathFor(taskKey);
       const branch = `${taskKey.toLowerCase()}/${slug}`;
+      let baseSha: string;
+      try {
+        baseSha = (await git(["rev-parse", "--verify", `${config.baseBranch}^{commit}`])).trim();
+      } catch (error) {
+        throw new Error(`could not resolve base branch ${config.baseBranch}: ${String(error)}`);
+      }
 
       await removeIfRegistered(path);
       // -B resets the branch instead of failing if a crashed previous attempt already created it
-      await git(["worktree", "add", "-B", branch, path]);
-      return path;
+      await git(["worktree", "add", "-B", branch, path, baseSha]);
+      return { path, baseSha };
     },
 
     async destroy(taskKey) {
