@@ -3,6 +3,7 @@ import { createBudget } from "./budget.js";
 import { commitAll } from "./commit.js";
 import { WorkerConfig } from "./config.js";
 import { GateFallbacks } from "./gates/from-entry.js";
+import { unexpectedHistory } from "./provenance.js";
 import { RunState, runStep } from "./steps.js";
 import { recordFor, RunRecord } from "./run-record.js";
 import { isResultEvent, StreamEvent } from "./stream.js";
@@ -131,12 +132,20 @@ async function unfinishedWork(runner: Runner, worktreePath: string): Promise<str
   return result.stdout.trim() || null;
 }
 
+// The gate-rejected branch is still delivered for a human to see, so it gets the same provenance
+// check the push step does — a gate can reject on a diff that is not what actually reaches the
+// remote otherwise (BP-382).
 async function pushFailure(
+  runner: Runner,
+  baseSha: string,
+  expected: string[],
   delivery: Delivery,
   worktreePath: string,
   branch: string,
   commit: string
 ): Promise<string | null> {
+  const wrong = await unexpectedHistory(runner, worktreePath, baseSha, expected);
+  if (wrong) return `refusing to push: ${wrong}`;
   try {
     await delivery.push(worktreePath, branch, commit);
     return null;
@@ -381,6 +390,9 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
           const pushFailed = withholdsPush
             ? null
             : await pushFailure(
+                runner,
+                worktree.baseSha,
+                state.commits,
                 delivery,
                 worktree.path,
                 branch,

@@ -637,6 +637,34 @@ describe("runTask", () => {
     expect(h.workspace.destroy).not.toHaveBeenCalled();
   });
 
+  it("refuses to push the rejected branch too when the range carries a commit this run did not make", async () => {
+    let committed = false;
+    const runner = {
+      run: vi.fn<Runner["run"]>(async (_command, args) => {
+        if (args.includes("status")) return shell(committed ? "" : " M a.ts\n");
+        if (args.includes("commit")) {
+          committed = true;
+          return shell();
+        }
+        // A foreign sha alongside the real one — planted the way an agent with Write under .git
+        // could, not something this run's own commit() calls ever produced.
+        if (args.includes("rev-list")) return shell(`shaX\n${IMPLEMENT_COMMIT_SHA}\n`);
+        if (args.includes("rev-parse")) return shell(IMPLEMENT_COMMIT_SHA);
+        return shell();
+      }),
+    };
+    const h = harness({ runner, gateFor: () => rejectingGate("diff-size", "too big") });
+    await runTask(h.deps, running("implement", "diff-size"));
+
+    expect(h.delivery.push).not.toHaveBeenCalled();
+    const reason = h.reporter.gateRejected.mock.calls[0][2];
+    expect(reason).toMatch(/too big/);
+    expect(reason).toMatch(/refusing to push/);
+    expect(reason).toMatch(/shaX/);
+    expect(reason).toMatch(/not on the remote/);
+    expect(h.workspace.destroy).not.toHaveBeenCalled();
+  });
+
   it("returns the task to the queue when a gate could not run because of a usage limit", async () => {
     const gate = rejectingGate(
       "review",
