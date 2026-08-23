@@ -22,7 +22,7 @@ const ENV = {
   CP_STATE_DIR: STATE_DIR,
 };
 
-const IDENTITY = JSON.stringify({ workerId: "w1", credential: "cpw_x", heartbeatMs: 60_000 });
+const IDENTITY = JSON.stringify({ workerId: "6a7c686f70ed274cf658b1b3", credential: "cpw_x", heartbeatMs: 60_000 });
 
 function memoryStore(contents: string): Store {
   let text = contents;
