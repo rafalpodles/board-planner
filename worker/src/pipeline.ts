@@ -26,7 +26,7 @@ export interface PipelineDeps {
   createDelivery: (runner: Runner, baseBranch?: string) => Delivery;
   workspace: Workspace;
   executor: Executor;
-  collectDiff: (runner: Runner, worktreePath: string, baseBranch: string) => Promise<DiffStats>;
+  collectDiff: (runner: Runner, worktreePath: string, baseSha: string) => Promise<DiffStats>;
   // Injected like every other collaborator here, so a test can watch what a gate was given without
   // standing up the gate itself. wiring.ts supplies the real one.
   gateFor: (
@@ -353,7 +353,7 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
           return;
         }
 
-        const diff = await deps.collectDiff(runner, worktree.path, config.baseBranch);
+        const diff = await deps.collectDiff(runner, worktree.path, worktree.baseSha);
         const verdict = await gate.run({
           worktreePath: worktree.path,
           task,

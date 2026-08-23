@@ -1,5 +1,20 @@
 import { describe, it, expect, vi } from "vitest";
+import { CommandResult } from "./exec.js";
+import { gitArgs } from "./git-safety.js";
 import { collectDiff } from "./diff.js";
+
+// Every call carries the hardening flags gitArgs prepends — stripped here so recorded calls and
+// response keys stay about the git subcommand, the same convention workspace.test.ts uses.
+const HARDENING_PREFIX = gitArgs([]);
+
+function recordingRunner(calls: string[][], responses: Record<string, Partial<CommandResult>> = {}) {
+  const run = vi.fn(async (_command: string, args: string[]): Promise<CommandResult> => {
+    const stripped = args.slice(HARDENING_PREFIX.length);
+    calls.push(stripped);
+    return { code: 0, stdout: "", stderr: "", timedOut: false, ...responses[stripped[0]] };
+  });
+  return { run };
+}
 
 describe("collectDiff", () => {
   it("counts changed lines and files from numstat", async () => {
@@ -102,6 +117,17 @@ describe("collectDiff", () => {
       `${"x".repeat(200_000)}\n\n[patch truncated: exceeded 200000 characters]`,
     );
     expect(diff.truncated).toBe(true);
+  });
+
+  it("compares the two trees directly, so no history can narrow it", async () => {
+    const calls: string[][] = [];
+    const runner = recordingRunner(calls, { diff: { stdout: "" } });
+
+    await collectDiff(runner, "/wt", "base111");
+
+    const ranges = calls.filter((c) => c[0] === "diff").map((c) => c.slice(-2).join(" "));
+    expect(ranges).toEqual(["base111 HEAD", "base111 HEAD"]);
+    expect(calls.flat().join(" ")).not.toContain("...");
   });
 
   // A repository's own gitconfig (diff.*.textconv, filter.*.clean, ...) fires on `git diff` just
