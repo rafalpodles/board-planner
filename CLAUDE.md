@@ -74,6 +74,7 @@ Size comes from the project's **Difficulty** field — an ordinary project-defin
 
 **2. in_progress → in_review (Implementation done)**
 - Run `npm run build` to verify the build passes.
+- **Cover the behaviour with an end-to-end test** — see *End-to-end coverage is not optional* below.
 - Commit changes to the feature branch (conventional commits).
 - Add a comment: summary of what was done, any decisions made.
 - Change status to `in_review`.
@@ -91,6 +92,39 @@ Size comes from the project's **Difficulty** field — an ordinary project-defin
 - Delete the feature branch.
 - Add a closing comment on the task.
 - Change status to `done`.
+
+#### End-to-end coverage is not optional
+
+**If a task touches functionality a person can reach — a screen, a route, a flow — it ships with an
+end-to-end test in `e2e/`.** Not instead of unit tests: as well as them. Unit tests answer whether a
+function does what its author meant; the e2e answers whether the feature works, and the bugs that
+reach the product live in the seam between the two.
+
+Skip it only for work with no user-reachable surface at all — a build script, a type-only change, a
+refactor with no behavioural delta. "The unit tests cover it" is not a reason; neither is "the flow is
+fiddly to drive". The friction is where the bugs are.
+
+**The test has to be able to fail.** Before calling it done, remove the fix, run the spec, and watch
+it go red for the right reason — then put the fix back. A spec that passes against the broken code
+proves nothing, and that is the ordinary outcome of writing it afterwards.
+
+**Include a control.** Assert the thing works in the case it is *supposed* to work, next to the case
+it must refuse. Otherwise a silence caused by a mis-wired fixture reads exactly like a silence caused
+by the fix.
+
+Practicalities that cost real time to rediscover:
+
+- Run one spec with `npx playwright test e2e/<name>.spec.ts`. Machines here are shared, so give a run
+  its own ports and database: `E2E_PORT=…  PM_STUB_PORT=…  E2E_MONGODB_URI=mongodb://localhost:27017/<name>_e2e`.
+  The fixture refuses any database whose name does not end in `_e2e`, deliberately.
+- A git worktree needs its own `npm ci`. A symlinked `node_modules` fails: Turbopack refuses a symlink
+  pointing outside the project root, and the dev server dies before the first test runs.
+- **Do not synchronise on rendered text.** Lists here render optimistically, so the text is on screen
+  before the server has done anything. Wait for the response (`page.waitForResponse`) whenever the
+  server-side effect is what the test is about. This exact mistake made BP-328's spec pass and fail at
+  random, because a comment's `watchers` write had not landed when the next request read the task.
+- Notification writes are deliberately fire-and-forget, so a feed assertion needs `toPass` retries
+  rather than a single load.
 
 #### Blocker handling
 - If Claude gets stuck (missing info, external dependency, unclear requirements): stay in `in_progress`, add a comment describing the blocker, and **stop working on the task**.
