@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { protectedPathsGate } from "./protected-paths.js";
+import { protectedPathsGate, PROTECTED_PATHS_BRIEF } from "./protected-paths.js";
 import { GateContext } from "../types.js";
 
 function context(changedFiles: string[]): GateContext {
@@ -145,5 +145,52 @@ describe("protectedPathsGate", () => {
     "public/logo.svg",
   ])("still passes %s", async (file) => {
     expect((await gate.run(context([file]))).ok).toBe(true);
+  });
+});
+
+// BP-380. The gate's patterns and the sentence the agent is given are two descriptions of one
+// rule. Two descriptions drift, and the way this one would drift is silent: a family added to the
+// patterns and not to the brief means an agent confidently editing a file that will be refused —
+// which is the failure this whole thing exists to stop, reintroduced by a rename.
+describe("what the agent is told matches what the gate refuses", () => {
+  const refusedExamples = [
+    "package.json",
+    "pnpm-lock.yaml",
+    "vitest.config.ts",
+    "scripts/build.js",
+    ".github/workflows/ci.yml",
+    ".husky/pre-commit",
+    "CLAUDE.md",
+    ".mcp.json",
+    "Dockerfile",
+    "docker-compose.yml",
+    "pyproject.toml",
+    "Cargo.toml",
+    "go.mod",
+  ];
+
+  it("warns about every family the gate actually refuses", async () => {
+    const brief = PROTECTED_PATHS_BRIEF.toLowerCase();
+
+    for (const path of refusedExamples) {
+      // the gate refuses it...
+      // awaited inside the loop on purpose: the failure message has to name the path
+      // ...and the agent was told the name of the thing it is
+      // A family is named either by a filename or by the directory it lives in — `.husky/` covers
+      // every hook inside it, and the brief says so rather than listing them
+      const lower = path.toLowerCase();
+      const filename = lower.split("/").pop()!;
+      const directory = lower.includes("/") ? `${lower.split("/")[0]}/` : "";
+      const named =
+        brief.includes(lower) ||
+        brief.includes(filename) ||
+        brief.includes(filename.split(".")[0]) ||
+        (!!directory && brief.includes(directory));
+      expect(named, `the brief never mentions ${path}`).toBe(true);
+    }
+  });
+
+  it("tells the agent what to do instead, since a rule with no alternative is one it will break", () => {
+    expect(PROTECTED_PATHS_BRIEF).toMatch(/blocked/);
   });
 });

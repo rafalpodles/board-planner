@@ -2,6 +2,26 @@ import { Gate } from "../types.js";
 
 // The CLI loads these from its cwd as instructions and configuration, above any "untrusted data"
 // boundary a prompt can draw
+// The same rule in the words the agent gets, and deliberately in this file: a list of patterns the
+// gate enforces and a sentence the agent is told are two descriptions of one rule, and two
+// descriptions in two files drift. protected-paths.test.ts holds them together.
+//
+// It exists because the agent never knew. MP-71 was a task ABOUT the Dockerfile, so it edited the
+// Dockerfile and lost a full run to a gate whose answer was decided before it started; MP-75 added
+// a `test` script so its own tests could run, and lost one the same way. `blocked` was always the
+// right answer for those — it just had no way to know it was the answer.
+export const PROTECTED_PATHS_BRIEF = [
+  "You may not create, edit or delete files that a later step executes or loads as instructions:",
+  "package manifests and lockfiles (package.json, package-lock.json, pnpm-lock.yaml, yarn.lock, .npmrc),",
+  "build and test tool configs (vite, vitest, next, webpack, jest, babel, playwright, tailwind and the like),",
+  "anything under scripts/, .husky/, .github/workflows/ or .claude/,",
+  "agent instruction files (CLAUDE.md, AGENTS.md, .mcp.json),",
+  "container and CI manifests (Dockerfile, docker-compose.yml, .gitlab-ci.yml, Jenkinsfile),",
+  "and the build manifests of other ecosystems (pyproject.toml, Cargo.toml, go.mod, pom.xml, Gemfile and their lockfiles).",
+  "If the task cannot be finished without touching one of those, do not touch it: return status 'blocked' naming the file and what you would have changed in it.",
+  "A human does that part.",
+].join(" ");
+
 export const AGENT_INSTRUCTION_FILE =
   /(^|\/)(CLAUDE(\.local)?\.md|AGENTS(\.local)?\.md|\.mcp\.json)$|(^|\/)\.claude\//i;
 
