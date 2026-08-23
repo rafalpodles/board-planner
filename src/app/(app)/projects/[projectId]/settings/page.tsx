@@ -327,7 +327,7 @@ export default function ProjectSettingsPage() {
       }
     >
       {activeMeta && (
-        <header className="mb-4">
+        <header className="mb-3">
           <h2 className="text-xl font-bold tracking-tight">{activeMeta.title}</h2>
           <p className="max-w-[62ch] text-sm text-text-muted">{activeMeta.blurb}</p>
         </header>

@@ -138,7 +138,7 @@ export function SettingsShell({
   }
 
   return (
-    <div className="pb-8">
+    <div className="-mt-6 pb-8 md:mt-0">
       <PageHeader title={title} subtitle={subtitle} />
 
       <div className="md:grid md:grid-cols-[236px_minmax(0,1fr)] md:gap-7">
@@ -165,7 +165,7 @@ export function SettingsShell({
             is measured from its padding edge — so `top-0` alone parks the row 24px down and
             leaves a band above it that page content scrolls through, sliced. Pulling the row up
             by that padding and paying it back as padding puts the pills flush against the top. */}
-        <SectionPillsNav className="sticky -top-6 z-30 -mx-4 -mt-6 mb-4 border-b border-border bg-bg px-4 pb-3 pt-9 md:hidden">
+        <SectionPillsNav className="sticky -top-6 z-30 -mx-4 -mt-6 mb-3 border-b border-border bg-bg px-4 pb-2.5 pt-7 md:hidden">
           {pills.map(pill)}
         </SectionPillsNav>
 
