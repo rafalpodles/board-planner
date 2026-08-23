@@ -130,9 +130,12 @@ describe("collectDiff", () => {
     expect(calls.flat().join(" ")).not.toContain("...");
   });
 
-  // A repository's own gitconfig (diff.*.textconv, filter.*.clean, ...) fires on `git diff` just
-  // as easily as on the checks that ran once at bind time — every call here must be protected too
-  it("neutralises system and repository git config on every call it makes", async () => {
+  // GIT_CONFIG_NOSYSTEM neutralises only the *system* gitconfig. It says nothing about a
+  // repository's own .git/config or .git/info/attributes — diff.external and diff.*.textconv,
+  // both live there, are what --no-ext-diff and --no-textconv exist to close (see collectDiff and
+  // the real-git tests in diff.ext-diff-and-textconv.integration.test.ts). This test only pins the
+  // two things it actually asserts.
+  it("passes -c core.pager=cat and GIT_CONFIG_NOSYSTEM=1 on every call it makes", async () => {
     const run = vi.fn().mockResolvedValue({ code: 0, stdout: "", stderr: "", timedOut: false });
     await collectDiff({ run }, "/wt", "main");
 

@@ -525,6 +525,96 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     expect(reachedSleep).toBe(false);
   });
 
+  // runTask signals "machine-fault" when the base branch cannot be resolved — the loop is meant to
+  // read that off the seam this worker wires them together through and end the pass without
+  // sleeping. A wiring bug that drops the disposition (`execute` declared Promise<void> and the
+  // pipeline's return value never handed back) type-checks silently, because Promise<void> is
+  // assignable to Promise<void | "machine-fault">, and produces a hot loop instead: the worker
+  // claims again immediately with no poll interval on an unreachable remote.
+  it("stops claiming for the cycle, without sleeping mid-pass, when the base branch cannot be resolved", async () => {
+    const stateDir = mkdtempSync(join(tmpdir(), "cp-machine-fault-"));
+    writeFileSync(join(stateDir, "repos.json"), JSON.stringify({ repos: [REPO] }), { mode: 0o600 });
+
+    let claimCalls = 0;
+    let sleepCalls = 0;
+    let stop = (): void => {};
+
+    // ls-remote is where resolveFreshBase reads the base branch off the wire; failing it is what
+    // turns workspace.create's failure into a BaseUnavailableError, i.e. a machine fault. Every
+    // other call is the content-free catch-all the rest of this file's runners use to satisfy
+    // bindRepository/checkRepo.
+    const faultyRunner: Runner = {
+      async run(_command, args) {
+        if (args[0] === "ls-remote") {
+          return { code: 1, stdout: "", stderr: "unreachable", timedOut: false };
+        }
+        return {
+          code: 0,
+          stdout: args.includes("rev-parse") ? REPO : args.includes("get-url") ? REMOTE : "",
+          stderr: "",
+          timedOut: false,
+        };
+      },
+    };
+
+    const worker = createWorker({
+      env: { ...ENV, CP_STATE_DIR: stateDir },
+      runner: faultyRunner,
+      hostname: () => "host-1",
+      sleep: async () => {
+        sleepCalls++;
+        stop();
+      },
+      log: vi.fn(),
+      logError: vi.fn(),
+      uid: 501,
+      realpath: (path) => path,
+      stat: () => ({ uid: 501, mode: 0o40700 }),
+      readFile: (path: string) =>
+        path.endsWith("package-lock.json")
+          ? "{}"
+          : path.endsWith("package.json")
+            ? JSON.stringify({ scripts: { build: "tsc", test: "vitest" } })
+            : null,
+      fetchImpl: vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ assignments: [{ project: "p1", remote: REMOTE }] }),
+      }) as unknown as typeof fetch,
+      createStore: (path) => memoryStore(path.endsWith("worker.json") ? IDENTITY : ""),
+      createApi: () =>
+        ({
+          claim: vi.fn(async () => {
+            claimCalls++;
+            return claimCalls === 1 ? CLAIMED : null;
+          }),
+          setStatus: vi.fn().mockResolvedValue(undefined),
+          comment: vi.fn().mockResolvedValue(undefined),
+          release: vi.fn().mockResolvedValue(undefined),
+          statusIds: vi.fn().mockResolvedValue({ approved: "todo", review: "in_review", done: "done" }),
+          columnIds: vi.fn().mockResolvedValue(["todo", "in_progress", "in_review", "done"]),
+          postEvent: async () => ({ applied: true }),
+        }) as unknown as ApiClient,
+      startHeartbeat: () => fakeHeartbeat(),
+      connectControl: () => ({ close: vi.fn() }),
+      startLocalServer: () => ({ ready: Promise.resolve(), close: vi.fn().mockResolvedValue(undefined) }),
+    });
+    stop = () => worker.shutdown();
+
+    try {
+      await worker.run();
+    } finally {
+      rmSync(stateDir, { recursive: true, force: true });
+    }
+
+    // A propagated machine-fault ends the pass on the very claim that hit it: one claim, then
+    // sleep. The bug this guards claims a fault as ordinary work instead, so the loop skips the
+    // sleep and claims again immediately — it would only give up once the queue itself ran dry,
+    // claiming a second time (and finding nothing left) before ever sleeping.
+    expect(claimCalls).toBe(1);
+    expect(sleepCalls).toBe(1);
+  });
+
   // The whole run, as the board would see it: the three stage boundaries it got past, the three
   // events its own agent produced, and the three gates it reached before the empty diff was
   // rejected. Nothing is dropped here because every emission is separated by at least one await,
