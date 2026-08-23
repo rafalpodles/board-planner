@@ -16,6 +16,9 @@ interface TaskTopBarProps {
   projectRef: string;
   taskKey: string;
   taskNumber: number;
+  title: string;
+  /** The body's own heading has scrolled away, so the bar carries the title instead */
+  showTitle: boolean;
   columns: Column[];
   status: string;
   onStatusChange: (status: string) => void;
@@ -33,6 +36,8 @@ export function TaskTopBar({
   projectRef,
   taskKey,
   taskNumber,
+  title,
+  showTitle,
   columns,
   status,
   onStatusChange,
@@ -48,7 +53,11 @@ export function TaskTopBar({
     "focus-ring rounded-lg border border-border px-2.5 py-1.5 text-xs text-text-muted transition-colors hover:bg-bg-hover hover:text-text";
 
   return (
-    <div className="flex items-center gap-3 border-b border-border bg-bg-card px-4 py-2.5 sm:px-5">
+    <div
+      data-testid="task-top-bar"
+      className="sticky top-0 z-20 flex items-center gap-3 border-b border-border bg-bg-card
+        px-4 py-2.5 sm:px-5"
+    >
       <button
         type="button"
         onClick={onClose}
@@ -70,7 +79,16 @@ export function TaskTopBar({
 
       <StatusPill columns={columns} status={status} onChange={onStatusChange} />
 
-      <div className="flex-1" />
+      {/* Always laid out, only faded: revealing it by adding an element would reflow the
+          bar mid-scroll, which is the one thing a fixed header must never do */}
+      <span
+        data-testid="task-top-bar-title"
+        aria-hidden={!showTitle}
+        className={`min-w-0 flex-1 truncate text-sm font-medium text-text transition-opacity
+          duration-150 ${showTitle ? "opacity-100" : "opacity-0"}`}
+      >
+        {title}
+      </span>
 
       <button type="button" onClick={onToggleWatch} className={`hidden lg:block ${ghost}`}>
         {watching ? "Watching" : "Watch"}
