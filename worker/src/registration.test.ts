@@ -21,7 +21,7 @@ function depsWith(
     forgetEnrolmentToken?: () => void;
   } = {}
 ): HeartbeatDeps {
-  const initialStored = opts.stored === undefined ? { workerId: "w1", credential: "cpw_existing", heartbeatMs: 60_000 } : opts.stored;
+  const initialStored = opts.stored === undefined ? { workerId: "6a7c686f70ed274cf658b1b3", credential: "cpw_existing", heartbeatMs: 60_000 } : opts.stored;
 
   let text = initialStored ? JSON.stringify(initialStored) : "";
   const write = vi.fn((value: string) => {
@@ -38,7 +38,7 @@ function depsWith(
       return {
         ok: true,
         status: 200,
-        json: async () => ({ workerId: "w1", credential: "cpw_new", heartbeatMs: 60_000, ...opts.registerResponse }),
+        json: async () => ({ workerId: "6a7c686f70ed274cf658b1b3", credential: "cpw_new", heartbeatMs: 60_000, ...opts.registerResponse }),
       };
     }
     const status = opts.status ?? 200;
@@ -71,12 +71,66 @@ describe("loadIdentity", () => {
   });
 
   it("returns null when a required field is missing", () => {
-    expect(loadIdentity({ read: () => JSON.stringify({ workerId: "w1" }) })).toBeNull();
+    expect(loadIdentity({ read: () => JSON.stringify({ workerId: "6a7c686f70ed274cf658b1b3" }) })).toBeNull();
   });
 
   it("returns the identity when both fields are present, ignoring extra fields", () => {
-    const text = JSON.stringify({ workerId: "w1", credential: "cpw_x", heartbeatMs: 60_000 });
-    expect(loadIdentity({ read: () => text })).toEqual({ workerId: "w1", credential: "cpw_x" });
+    const text = JSON.stringify({ workerId: "6a7c686f70ed274cf658b1b3", credential: "cpw_x", heartbeatMs: 60_000 });
+    expect(loadIdentity({ read: () => text })).toEqual({ workerId: "6a7c686f70ed274cf658b1b3", credential: "cpw_x" });
+  });
+
+  // The identity file lives under the state directory, which the agent reaches through its own
+  // HOME. A still-valid credential paired with a rewritten workerId is the reachable half of it.
+  it("returns null when the stored workerId is not the ObjectId the server mints", () => {
+    const text = JSON.stringify({ workerId: "../../evil", credential: "cpw_x", heartbeatMs: 60_000 });
+    expect(loadIdentity({ read: () => text })).toBeNull();
+  });
+});
+
+// BP-327: the register response's workerId becomes a filesystem path — repos.ts derives the
+// worktree root from it — so "a non-empty string" was never a strong enough shape for it.
+describe("the workerId a registration hands back", () => {
+  it("is refused when it would traverse out of the worktree root", async () => {
+    const deps = depsWith({
+      stored: null,
+      registerResponse: { workerId: "../../../../Users/rpo/Library/LaunchAgents" },
+    });
+
+    await startHeartbeat(deps).tick();
+
+    expect(loadIdentity(deps.store)).toBeNull();
+    expect(calls(deps).some(([url]) => String(url).includes("/heartbeat"))).toBe(false);
+  });
+
+  it("is refused when it is an ObjectId of the wrong length", async () => {
+    const deps = depsWith({ stored: null, registerResponse: { workerId: "6a7c686f70ed274cf658b1" } });
+
+    await startHeartbeat(deps).tick();
+
+    expect(loadIdentity(deps.store)).toBeNull();
+  });
+
+  // The enrolment token is spent by the registration that returned the bad id, so forgetting it
+  // here would strand the worker with no way to try again
+  it("leaves the enrolment token in place when it refuses", async () => {
+    const forgetEnrolmentToken = vi.fn();
+    const deps = depsWith({
+      stored: null,
+      forgetEnrolmentToken,
+      registerResponse: { workerId: "../evil" },
+    });
+
+    await startHeartbeat(deps).tick();
+
+    expect(forgetEnrolmentToken).not.toHaveBeenCalled();
+  });
+
+  it("is accepted when it is one", async () => {
+    const deps = depsWith({ stored: null, registerResponse: { workerId: "6a7c686f70ed274cf658b1b3" } });
+
+    await startHeartbeat(deps).tick();
+
+    expect(loadIdentity(deps.store)?.workerId).toBe("6a7c686f70ed274cf658b1b3");
   });
 });
 
@@ -171,7 +225,7 @@ describe("startHeartbeat", () => {
 
     const [, init] = calls(deps)[0];
     expect(init.headers.Authorization).toBe("Bearer cpw_existing");
-    expect(init.headers["X-Worker-Id"]).toBe("w1");
+    expect(init.headers["X-Worker-Id"]).toBe("6a7c686f70ed274cf658b1b3");
     expect(init.headers["X-CP-Protocol"]).toBe("1");
   });
 

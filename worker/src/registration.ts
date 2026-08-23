@@ -66,13 +66,23 @@ interface StoredIdentity extends Identity {
 // a real registration response, so it can't drift from the server's staleness window
 const REGISTER_RETRY_MS = 30_000;
 
+// The server mints this as a Mongo ObjectId, and repos.ts interpolates it into a filesystem path —
+// `join` normalises "..", so a workerId of "../../../../Users/rpo/Library/LaunchAgents" relocated
+// the worktree root outside the repos.json allowlist, which is the worker's whole containment
+// story. Checked on both sides of the disk: whoever controls the API answers the registration, and
+// the identity file itself sits under a state directory the agent's own HOME reaches.
+const WORKER_ID = /^[a-f0-9]{24}$/;
+
+export function isWorkerId(value: unknown): value is string {
+  return typeof value === "string" && WORKER_ID.test(value);
+}
+
 function parseIdentity(text: string): Identity | null {
   try {
     const parsed = JSON.parse(text) as Partial<Identity> | null;
     if (
       parsed &&
-      typeof parsed.workerId === "string" &&
-      parsed.workerId &&
+      isWorkerId(parsed.workerId) &&
       typeof parsed.credential === "string" &&
       parsed.credential
     ) {
@@ -135,9 +145,9 @@ export function startHeartbeat(deps: HeartbeatDeps): Heartbeat {
         heartbeatMs?: unknown;
       };
       if (
-        typeof body.workerId !== "string" ||
         typeof body.credential !== "string" ||
-        typeof body.heartbeatMs !== "number"
+        typeof body.heartbeatMs !== "number" ||
+        !isWorkerId(body.workerId)
       ) {
         log("worker registration returned a malformed response");
         return null;

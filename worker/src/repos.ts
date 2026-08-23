@@ -1,6 +1,6 @@
 import { readFileSync, statSync } from "fs";
 import { homedir } from "os";
-import { dirname, isAbsolute, join, sep } from "path";
+import { dirname, isAbsolute, join, resolve, sep } from "path";
 import { childEnv } from "./env.js";
 import { RepoInventory } from "./config.js";
 import { Runner } from "./exec.js";
@@ -205,7 +205,17 @@ export async function bindRepository(deps: RepoDeps, proposedPath: string): Prom
     };
   }
 
-  const worktreeRoot = join(dirname(proposedPath), "cp-worktrees", deps.workerId);
+  // registration.ts refuses a workerId that is not an ObjectId; this is the sink that would suffer
+  // if anything ever got past it, and the only place that can still tell. `join` normalises "..",
+  // so containment has to be judged after the path is built rather than on the segment before it.
+  const container = join(dirname(proposedPath), "cp-worktrees");
+  const worktreeRoot = resolve(container, deps.workerId);
+  if (!worktreeRoot.startsWith(`${container}${sep}`)) {
+    return {
+      ok: false,
+      reason: `worker id ${JSON.stringify(deps.workerId)} puts the worktree root at ${worktreeRoot}, outside ${container}`,
+    };
+  }
   return { ok: true, path: proposedPath, worktreeRoot };
 }
 
