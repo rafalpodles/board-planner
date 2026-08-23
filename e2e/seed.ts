@@ -732,3 +732,119 @@ export async function seed() {
 
   await mongoose.disconnect();
 }
+
+// BP-386. Search answers differently depending on who is asking, so the corpus is two boards
+// sharing one word: the member holds a grant on TP only, and SEARCH_WORD matches a task on each.
+// A single-board fixture cannot tell an enforced project filter from an absent one.
+export const OTHER_PROJECT_ID = id("e2e00000000000000000c301");
+export const OTHER_PROJECT_KEY = "SB";
+export const OTHER_PROJECT_NAME = "E2E Second Search Board";
+
+// Stored capitalised and queried in lower case, so a search that only matches literally cannot pass
+export const SEARCH_WORD = "zeppelin";
+
+export const TITLE_HIT_ID = id("e2e00000000000000000d301");
+export const TITLE_HIT_NUMBER = 10;
+export const TITLE_HIT_TITLE = "Zeppelin mooring mast";
+
+// The word appears nowhere in the title: this is the hit that only a description search finds
+export const BODY_HIT_ID = id("e2e00000000000000000d302");
+export const BODY_HIT_NUMBER = 11;
+export const BODY_HIT_TITLE = "Airship paperwork";
+export const BODY_HIT_DESCRIPTION = "Ordered a new Zeppelin cable for the mast.";
+
+export const OTHER_HIT_ID = id("e2e00000000000000000d303");
+export const OTHER_HIT_NUMBER = 1;
+export const OTHER_HIT_TITLE = "Zeppelin hangar on the other board";
+export const OTHER_HIT_KEY = `${OTHER_PROJECT_KEY}-${OTHER_HIT_NUMBER}`;
+
+// A word no seeded task carries, for the no-results state
+export const ABSENT_WORD = "quokka";
+
+export async function seedSearchCorpus() {
+  const db = (await connect()).db!;
+  const now = new Date();
+
+  await db.collection("projects").insertOne({
+    _id: OTHER_PROJECT_ID,
+    name: OTHER_PROJECT_NAME,
+    key: OTHER_PROJECT_KEY,
+    description: "",
+    icon: "",
+    categories: CATEGORIES.map((c) => ({ ...c, _id: new mongoose.Types.ObjectId() })),
+    columns: COLUMNS.map((c) => ({ ...c, _id: new mongoose.Types.ObjectId() })),
+    taskTemplates: [],
+    customFields: [],
+    webhooks: [],
+    notificationChannels: [],
+    pm: {
+      enabled: false,
+      lockedByInstance: false,
+      model: "e2e/stub-model",
+      contextNotes: "",
+      dailyTurnCap: 50,
+      autonomy: {
+        dailyReview: false,
+        reviewHour: 9,
+        reviewIntervalHours: 24,
+        timezone: "Europe/Warsaw",
+        handleNeedsHumanReview: false,
+        lastReviewSlot: "",
+      },
+      links: [],
+      mcpServers: [],
+    },
+    worker: { enabled: false, policy: {}, policyOverrides: [] },
+    repositoryUrl: "",
+    githubRepo: "",
+    githubToken: "",
+    gitlabRepo: "",
+    gitlabHost: "https://gitlab.com",
+    gitlabToken: "",
+    codaHost: "https://coda.io",
+    codaDocId: "",
+    codaTableId: "",
+    codaToken: "",
+    taskCounter: OTHER_HIT_NUMBER,
+    sortOrder: 1,
+    createdBy: ADMIN_ID,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  // Distinct updatedAt, because the API sorts on it: the arrow-key test needs to know which hit
+  // the cursor starts on and which one it lands on.
+  const task = taskFactory(now);
+  await db.collection("tasks").insertMany([
+    task({
+      _id: TITLE_HIT_ID,
+      taskNumber: TITLE_HIT_NUMBER,
+      title: TITLE_HIT_TITLE,
+      status: SPARE_COLUMN.id,
+      order: 10,
+      updatedAt: new Date(now.getTime() - 1_000),
+    }),
+    task({
+      _id: BODY_HIT_ID,
+      taskNumber: BODY_HIT_NUMBER,
+      title: BODY_HIT_TITLE,
+      description: BODY_HIT_DESCRIPTION,
+      status: SPARE_COLUMN.id,
+      order: 11,
+      updatedAt: new Date(now.getTime() - 2_000),
+    }),
+    task({
+      _id: OTHER_HIT_ID,
+      project: OTHER_PROJECT_ID,
+      taskNumber: OTHER_HIT_NUMBER,
+      title: OTHER_HIT_TITLE,
+      status: SPARE_COLUMN.id,
+      order: 0,
+      updatedAt: new Date(now.getTime() - 3_000),
+    }),
+  ]);
+
+  await db.collection("projects").updateOne({ _id: PROJECT_ID }, { $max: { taskCounter: BODY_HIT_NUMBER } });
+
+  await mongoose.disconnect();
+}
