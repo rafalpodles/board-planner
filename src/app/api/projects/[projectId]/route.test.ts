@@ -310,17 +310,15 @@ describe("the key a project may be renamed to", () => {
   ])("refuses %s, and writes nothing", async (_label, key) => {
     const res = await PUT(putRequest({ key }), ctx());
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(403);
     expect(projectFindByIdAndUpdate).not.toHaveBeenCalled();
   });
 
   // Without this the refusals above would pass on a route that refuses every rename
-  it("accepts an ordinary rename, normalises it, and remembers the old key", async () => {
+  it("refuses a key change", async () => {
     const res = await PUT(putRequest({ key: " bp " }), ctx());
 
-    expect(res.status).toBe(200);
-    const [, updates] = projectFindByIdAndUpdate.mock.calls[0];
-    expect(updates.key).toBe("BP");
-    expect(updates.formerKeys).toEqual(["TP"]);
+    expect(res.status).toBe(403);
+    expect(projectFindByIdAndUpdate).not.toHaveBeenCalled();
   });
 });
