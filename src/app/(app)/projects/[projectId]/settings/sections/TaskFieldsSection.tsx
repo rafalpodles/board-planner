@@ -326,12 +326,12 @@ export function TaskFieldsSection({
             <>
               {/* Input renders a w-full wrapper, so it needs a sized box or it pushes
                   everything after it onto the next line */}
-              <div className="w-[240px] shrink-0">
+              <div className="min-w-0 flex-1 sm:w-[240px] sm:flex-none sm:shrink-0">
                 <Input
                   value={cat.name}
                   aria-label="Category name"
                   placeholder="Category name..."
-                  className="min-h-[38px] py-1.5"
+                  className="py-1.5"
                   onChange={(e) =>
                     categories.set(
                       "categories",
@@ -349,7 +349,7 @@ export function TaskFieldsSection({
                     type="button"
                     onClick={toggle}
                     aria-label={`Colour for ${cat.name || "this category"}`}
-                    className="focus-ring h-9 w-9 shrink-0 rounded-lg border border-border"
+                    className="focus-ring h-11 w-11 shrink-0 rounded-lg border border-border sm:h-9 sm:w-9"
                     style={{ backgroundColor: cat.color }}
                   />
                 )}
@@ -500,12 +500,12 @@ export function TaskFieldsSection({
             const open = expandedTemplate === key;
             return (
               <>
-                <div className="w-[220px] shrink-0">
+                <div className="min-w-0 flex-1 sm:w-[220px] sm:flex-none sm:shrink-0">
                   <Input
                     value={tpl.name}
                     aria-label="Template name"
                     placeholder="Template name..."
-                    className="min-h-[38px] py-1.5"
+                    className="py-1.5"
                     onChange={(e) => editTemplate(i, { name: e.target.value })}
                   />
                 </div>

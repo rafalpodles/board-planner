@@ -48,7 +48,7 @@ export function SaveBar({ pending, total, onGoToSection }: SaveBarProps) {
     // than a transform so a closed bar reserves no space in the flow.
     <div
       className={`sticky bottom-0 z-40 overflow-hidden transition-[max-height] duration-200
-        ${open ? "max-h-40" : "max-h-0 pointer-events-none"}`}
+        ${open ? "max-h-56" : "max-h-0 pointer-events-none"}`}
       aria-hidden={!open}
     >
       {/* Padded so the card floats clear of the bottom edge — flush against it, the frame
@@ -64,7 +64,7 @@ export function SaveBar({ pending, total, onGoToSection }: SaveBarProps) {
               <button
                 type="button"
                 onClick={() => onGoToSection(view.section)}
-                className="block text-xs text-text-muted hover:text-text hover:underline"
+                className="flex min-h-11 items-center text-xs text-text-muted hover:text-text hover:underline sm:min-h-0"
               >
                 {view.label}
                 {view.more > 0 ? ` and ${view.more} more` : ""}
