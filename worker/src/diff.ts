@@ -1,3 +1,4 @@
+import { isGitRefName } from "./config.js";
 import { childEnv } from "./env.js";
 import { Runner, RunOpts } from "./exec.js";
 import { gitArgs, GIT_SAFE_ENV } from "./git-safety.js";
@@ -63,14 +64,23 @@ export async function collectDiff(
   worktreePath: string,
   baseBranch: string
 ): Promise<DiffStats> {
+  // applyPolicy already refuses anything that is not a ref name; this is the sink, and the sink is
+  // where the damage would be done. `--output=<path>` in git's option slot writes that file under
+  // the operator's uid, and the range is a positional no `--` can protect — it has to precede one.
+  if (!isGitRefName(baseBranch)) {
+    throw new Error(
+      `refusing base branch ${JSON.stringify(baseBranch)}: git would not read it as a ref name`
+    );
+  }
+
   const opts: RunOpts = { cwd: worktreePath, timeoutMs: GIT_TIMEOUT_MS };
   // three-dot: diffs from the merge-base, so a baseBranch that keeps moving concurrently doesn't pollute the diff
   const range = `${baseBranch}...HEAD`;
 
-  const numstatOutput = await git(runner, ["diff", "--numstat", range], opts);
+  const numstatOutput = await git(runner, ["diff", "--numstat", range, "--"], opts);
   const { changedLines, changedFiles } = parseNumstat(numstatOutput);
 
-  const patchOutput = await git(runner, ["diff", range], opts);
+  const patchOutput = await git(runner, ["diff", range, "--"], opts);
   const { patch, truncated } = boundPatch(patchOutput);
 
   return { changedLines, changedFiles, patch, truncated };

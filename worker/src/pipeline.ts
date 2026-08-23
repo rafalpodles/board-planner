@@ -388,7 +388,11 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
               : pushFailed
                 ? `${verdict.reason}\n\n**The branch was not pushed**: ${pushFailed}. \`${branch}\` is not on the remote — this work exists only in the worktree at \`${worktreePath}\` on the worker host.`
                 : verdict.reason,
-            withholdsPush ? "" : branch
+            withholdsPush ? "" : branch,
+            // Only where no branch carries it. A patch in a comment executes nothing, and this
+            // gate's demand is that a human read the change — which otherwise means a shell on
+            // whichever machine happened to claim the task.
+            diff.patch
           );
           return;
         }

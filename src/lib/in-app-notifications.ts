@@ -9,6 +9,7 @@ import { APP_NAME } from "@/lib/brand";
 import { Pill, renderEmail } from "@/lib/email-template";
 import { selfOrigin } from "@/lib/session";
 import { taskPath } from "@/lib/urls";
+import { recipientsWithAccess } from "@/lib/grants";
 
 /**
  * What the mail version of a notification shows beyond the one-line title the in-app list uses.
@@ -82,11 +83,24 @@ async function notify({
   }
   if (unique.length === 0) return;
 
-  // One read of everyone's preferences, then one decision per recipient. The switch used to be a
-  // clause inside the recipient query, which is why nothing could depend on the project or the
-  // event; resolveChannels can, so it has to run out here.
+  // Two questions, both of which have to be asked. May this person still see the board? Watchers
+  // accumulate by commenting and outlive the grant that justified them, so it is decided here
+  // rather than trusted from the task (BP-328), and an error refuses rather than delivers: a
+  // dropped notification is recoverable, a leaked task title is not.
+  let allowed: string[];
+  try {
+    allowed = await recipientsWithAccess(unique, projectId);
+  } catch (err) {
+    console.error("Failed to resolve notification recipients:", err);
+    return;
+  }
+  if (allowed.length === 0) return;
+
+  // And: did they ask to hear about it? One read of the preferences of the people who passed the
+  // first question, then one decision each. This used to be a clause inside the recipient query,
+  // which is why nothing could depend on the project or the event; resolveChannels can.
   const recipients = await User.find(
-    { _id: { $in: unique.map((id) => new Types.ObjectId(id)) } },
+    { _id: { $in: allowed.map((id) => new Types.ObjectId(id)) } },
     "email fullName emailNotifications emailDigest notifications"
   ).lean();
 
@@ -100,7 +114,7 @@ async function notify({
 
   try {
     await Notification.insertMany(
-      unique.map((recipientId) => ({
+      allowed.map((recipientId) => ({
         recipient: new Types.ObjectId(recipientId),
         type,
         task: new Types.ObjectId(taskId),

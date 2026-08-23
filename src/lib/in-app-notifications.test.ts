@@ -4,23 +4,95 @@ const sendEmail = vi.fn().mockResolvedValue(true);
 const selfOrigin = vi.fn<() => string | null>(() => "https://app.example.com");
 const insertMany = vi.fn().mockResolvedValue([]);
 const userFind = vi.fn();
+const grantFind = vi.fn();
 
 const ASSIGNEE = "507f1f77bcf86cd799439011";
 const WATCHER = "507f1f77bcf86cd799439012";
 const ACTOR = "507f1f77bcf86cd799439013";
+const ADMIN = "507f1f77bcf86cd799439014";
+const NOTIFICATION_PROJECT = "507f1f77bcf86cd799439021";
+
+/** Who holds a grant on the project, per test. The delivery filter reads this through grants.ts. */
+let granted: string[] = [];
+/** Stored role per recipient. "admin" reaches every board without a grant row existing. */
+let roles: Record<string, string> = {};
+/** Makes the access lookup reject, so the fail-closed branch can be exercised. */
+let accessLookupFails = false;
+
+/** Per-test notification preferences, layered over the mailbox fixture. */
+let prefs: Record<string, Record<string, unknown>> = {};
+
+const MAILBOXES: Record<string, { email: string; fullName: string }> = {
+  [ASSIGNEE]: { email: "assignee@example.com", fullName: "Ann" },
+  [WATCHER]: { email: "watcher@example.com", fullName: "Wes" },
+  [ADMIN]: { email: "admin@example.com", fullName: "Ada" },
+};
 
 vi.mock("@/models/notification", () => ({ Notification: { insertMany: (...a: unknown[]) => insertMany(...a) } }));
-// Preferences now decide per recipient rather than filtering inside the query, so the fixture has
-// to carry them. Both of these are ordinary accounts that predate the grid: emailNotifications is
-// their stored preference and nothing has been migrated.
-let users: Record<string, unknown>[] = [];
-const ordinaryUsers = () => [
-  { _id: ASSIGNEE, email: "assignee@example.com", fullName: "Ann", emailNotifications: true },
-  { _id: WATCHER, email: "watcher@example.com", fullName: "Wes", emailNotifications: true },
-];
+vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
+vi.mock("@/models/grant", () => ({
+  Grant: {
+    find: (...a: unknown[]) => {
+      grantFind(...a);
+      const filter = a[0] as { subject?: { $in?: string[] }; objectType?: string; object?: string };
+      const asked = filter?.subject?.$in ?? [];
+      if (accessLookupFails) {
+        return { select: () => ({ lean: async () => { throw new Error("no database"); } }) };
+      }
+      // Honours objectType and object, so a query that forgot either would return grants it has
+      // no business returning and the tests below would notice.
+      if (filter?.objectType !== "project" || filter?.object !== NOTIFICATION_PROJECT) {
+        return { select: () => ({ lean: async () => [] }) };
+      }
+      return {
+        select: () => ({
+          lean: async () =>
+            asked
+              .filter((id) => granted.includes(id))
+              .map((id) => ({ subject: id, relation: "member" })),
+        }),
+      };
+    },
+  },
+}));
+// Query-aware because two callers share it: grants.ts asks for stored roles, the mail fan-out
+// asks who wants mail and passes a projection as the second argument. Answering both with one
+// list would make the access filter untestable.
 vi.mock("@/models/user", () => ({
   User: {
-    find: (...a: unknown[]) => (userFind(...a), { lean: async () => users }),
+    find: (...a: unknown[]) => {
+      userFind(...a);
+      const filter = a[0] as { _id?: { $in?: string[] }; role?: string };
+      const asked = filter?._id?.$in ?? [];
+      if (a[1] === undefined) {
+        return {
+          select: () => ({
+            lean: async () =>
+              asked
+                .filter((id) => roles[id])
+                // Honoured, so re-adding `role: "admin"` to the access query — which would make
+                // every recipient an admin and the filter a no-op — fails here too, not only in
+                // grants.test.ts.
+                .filter((id) => filter.role === undefined || filter.role === roles[id])
+                .map((id) => ({ _id: id, role: roles[id] })),
+          }),
+        };
+      }
+      return {
+        lean: async () =>
+          asked
+            .filter((id) => MAILBOXES[id])
+            // Preferences decide per recipient now rather than filtering inside the query, so the
+            // fan-out fixture carries them. The default is an ordinary account that predates the
+            // grid: emailNotifications is its stored preference and nothing has been migrated.
+            .map((id) => ({
+              _id: id,
+              ...MAILBOXES[id],
+              emailNotifications: true,
+              ...(prefs[id] ?? {}),
+            })),
+      };
+    },
   },
 }));
 vi.mock("@/lib/email", () => ({
@@ -62,8 +134,13 @@ async function sentMails() {
 beforeEach(() => {
   sendEmail.mockClear();
   insertMany.mockClear();
-  users = ordinaryUsers();
+  prefs = {};
+  userFind.mockClear();
+  grantFind.mockClear();
   selfOrigin.mockReturnValue("https://app.example.com");
+  granted = [ASSIGNEE, WATCHER];
+  roles = { [ASSIGNEE]: "member", [WATCHER]: "member", [ADMIN]: "admin" };
+  accessLookupFails = false;
 });
 
 describe("notification emails", () => {
@@ -123,10 +200,7 @@ describe("notification emails", () => {
   // Somebody on the digest hears about this in one message tomorrow morning; sending both would
   // make the digest a duplicate rather than a replacement
   it("skips the people who chose the daily digest", async () => {
-    users = [
-      { ...ordinaryUsers()[0], emailDigest: true },
-      ordinaryUsers()[1],
-    ];
+    prefs[ASSIGNEE] = { emailDigest: true };
 
     await createNotifications(NOTIFICATION);
     await sentMails();
@@ -138,18 +212,12 @@ describe("notification emails", () => {
   // The bell hides the row; it does not stop the write. The digest is assembled from these
   // documents, so a skipped insert would take tomorrow's mail down with today's bell.
   it("still stores a notification the bell is not allowed to show", async () => {
-    users = [
-      {
-        _id: WATCHER,
-        email: "watcher@example.com",
-        notifications: {
-          defaults: {
-            comment_added: { inApp: false, email: true, chat: false },
-          },
-          projects: [],
-        },
+    prefs[WATCHER] = {
+      notifications: {
+        defaults: { comment_added: { inApp: false, email: true, chat: false } },
+        projects: [],
       },
-    ];
+    };
 
     await createNotifications({ ...NOTIFICATION, recipientIds: [WATCHER] });
 
@@ -158,30 +226,26 @@ describe("notification emails", () => {
   });
 
   it("sends no mail for a project the recipient muted, while another project still arrives", async () => {
-    users = [
-      {
-        _id: WATCHER,
-        email: "watcher@example.com",
-        emailNotifications: true,
-        notifications: {
-          projects: [
-            {
-              project: NOTIFICATION.projectId,
-              matrix: { comment_added: { inApp: true, email: false, chat: false } },
-            },
-          ],
-        },
+    prefs[WATCHER] = {
+      notifications: {
+        projects: [
+          {
+            project: NOTIFICATION.projectId,
+            matrix: { comment_added: { inApp: true, email: false, chat: false } },
+          },
+        ],
       },
-    ];
+    };
 
     await createNotifications({ ...NOTIFICATION, recipientIds: [WATCHER] });
     expect(sendEmail).not.toHaveBeenCalled();
 
-    await createNotifications({
-      ...NOTIFICATION,
-      recipientIds: [WATCHER],
-      projectId: "507f1f77bcf86cd799439099",
-    });
+    // The bell still rings for it — one channel muted for one board is not the whole row
+    expect(insertMany.mock.calls[0][0][0]).toMatchObject({ inApp: true });
+
+    // And with the override gone, the same event reaches them
+    prefs[WATCHER] = {};
+    await createNotifications({ ...NOTIFICATION, recipientIds: [WATCHER] });
     await sentMails();
   });
 
@@ -230,5 +294,71 @@ describe("assigneeIdOf", () => {
       ASSIGNEE,
       WATCHER,
     ]);
+  });
+});
+
+// BP-328. Watch membership is acquired by commenting and never expires, so a contractor removed
+// from the board keeps every watch they accumulated. The rows are kept deliberately — a re-add
+// restores the feed — which is exactly why delivery, not the watcher list, has to do the refusing.
+describe("delivery to somebody who can no longer reach the board", () => {
+  function recipientIdsOf(call: unknown[]) {
+    return (call[0] as { recipient: string }[]).map((row) => String(row.recipient));
+  }
+
+  it("writes no row for a recipient whose grant on the project is gone", async () => {
+    granted = [ASSIGNEE];
+
+    await createNotifications(NOTIFICATION);
+
+    expect(insertMany).toHaveBeenCalledTimes(1);
+    expect(recipientIdsOf(insertMany.mock.calls[0])).toEqual([ASSIGNEE]);
+  });
+
+  it("sends no mail to a recipient whose grant on the project is gone", async () => {
+    granted = [ASSIGNEE];
+
+    await createNotifications(NOTIFICATION);
+    const mails = await sentMails();
+
+    expect(mails.map((m) => m.to)).toEqual(["assignee@example.com"]);
+  });
+
+  it("still notifies an instance admin, who reaches the board without a grant row", async () => {
+    granted = [];
+
+    await createNotifications({ ...NOTIFICATION, recipientIds: [WATCHER, ADMIN] });
+
+    expect(recipientIdsOf(insertMany.mock.calls[0])).toEqual([ADMIN]);
+  });
+
+  it("writes nothing and mails nobody when no recipient can reach the board", async () => {
+    granted = [];
+
+    await createNotifications(NOTIFICATION);
+
+    expect(insertMany).not.toHaveBeenCalled();
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  // The choice is stated in a comment in the source and was defended by nothing: turning the
+  // refusal back into delivery-to-everybody kept every test green, which is exactly the edit
+  // somebody chasing "notifications go missing when Mongo hiccups" would make.
+  it("delivers to nobody when it cannot find out who may be told", async () => {
+    accessLookupFails = true;
+
+    await createNotifications(NOTIFICATION);
+
+    expect(insertMany).not.toHaveBeenCalled();
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("asks about the project the notification is about, not some other one", async () => {
+    granted = [ASSIGNEE, WATCHER];
+
+    await createNotifications(NOTIFICATION);
+
+    expect(grantFind).toHaveBeenCalledWith(
+      expect.objectContaining({ objectType: "project", object: NOTIFICATION.projectId })
+    );
   });
 });

@@ -7,6 +7,9 @@ const userFind = vi.fn();
 const userFindOneAndUpdate = vi.fn();
 const notificationFind = vi.fn();
 const notificationCount = vi.fn();
+const grantFind = vi.fn();
+
+let grantedProjects: string[] = [];
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/email", () => ({
@@ -16,6 +19,14 @@ vi.mock("@/lib/email", () => ({
 vi.mock("@/lib/session", () => ({ selfOrigin: () => selfOrigin() }));
 vi.mock("@/models/user", () => ({
   User: { find: (...a: unknown[]) => userFind(...a), findOneAndUpdate: (...a: unknown[]) => userFindOneAndUpdate(...a) },
+}));
+vi.mock("@/models/grant", () => ({
+  Grant: {
+    find: (...a: unknown[]) => {
+      grantFind(...a);
+      return { select: () => ({ lean: async () => grantedProjects.map((id) => ({ object: id })) }) };
+    },
+  },
 }));
 vi.mock("@/models/notification", () => ({
   Notification: {
@@ -28,10 +39,12 @@ const { digestTick, dueDigestDay, digestHour, digestTimezone, DIGEST_ROW_LIMIT, 
   "@/lib/digest"
 );
 
-// An ordinary account that predates the grid: emailNotifications is still its stored preference,
-// and the digest now reads that through resolveChannels rather than through the query.
+const BOARD = "69a52e3b399b27d3cbb2c5a5";
+const SECOND_BOARD = "69a52e3b399b27d3cbb2c5a7";
+// `role` is what the grant lookup reads; `emailNotifications` is what the grid falls back to for
+// an account that predates it. The digest asks both questions, so the fixture answers both.
 const WAITING = [
-  { _id: "u1", email: "rpo@example.com", username: "rpo", emailNotifications: true },
+  { _id: "u1", email: "rpo@example.com", username: "rpo", role: "member", emailNotifications: true },
 ];
 
 const PROJECT = "507f1f77bcf86cd799439021";
@@ -76,6 +89,7 @@ beforeEach(() => {
   userFind.mockReturnValue({ lean: async () => WAITING });
   userFindOneAndUpdate.mockResolvedValue({ _id: "u1" });
   notifications(3);
+  grantedProjects = [BOARD, SECOND_BOARD];
   delete process.env.DIGEST_HOUR;
   delete process.env.DIGEST_TIMEZONE;
 });
@@ -289,5 +303,56 @@ describe("past the scan ceiling", () => {
 
     expect(sent().subject).not.toContain("at least");
     expect(sent().text).not.toContain("at least");
+  });
+});
+
+// BP-328. The digest is the one channel that reads the backlog straight out of the collection, so
+// a row banked while somebody still held a grant would be mailed to them the morning after it was
+// revoked — task keys, titles and links included.
+describe("a digest for somebody who lost the board", () => {
+  const DUE = new Date("2026-08-17T06:00:00Z");
+
+  function digestFilter() {
+    return (notificationFind.mock.calls.at(-1) ?? [])[0] as Record<string, unknown>;
+  }
+
+  // Two boards, so a digest that quietly covers only the first is a failure and not a pass.
+  it("carries every board the reader can still reach", async () => {
+    await digestTick(DUE);
+
+    expect(digestFilter().project).toEqual({ $in: [BOARD, SECOND_BOARD] });
+  });
+
+  it("keeps the board they still hold when the other one is taken away", async () => {
+    grantedProjects = [SECOND_BOARD];
+
+    await digestTick(DUE);
+
+    expect(digestFilter().project).toEqual({ $in: [SECOND_BOARD] });
+  });
+
+  it("sends nothing at all to somebody who holds no grant anywhere", async () => {
+    grantedProjects = [];
+
+    await digestTick(DUE);
+
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("leaves an instance admin's digest unconstrained, since they reach every board", async () => {
+    userFind.mockReturnValue({
+      lean: async () => [{ ...WAITING[0], role: "admin" }],
+    });
+
+    await digestTick(DUE);
+
+    expect(digestFilter()).not.toHaveProperty("project");
+  });
+
+  it("asks for the role it needs to tell an admin from a member", async () => {
+    await digestTick(DUE);
+
+    const [, projection] = userFind.mock.calls[0] ?? [];
+    expect(String(projection)).toContain("role");
   });
 });

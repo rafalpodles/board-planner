@@ -8,6 +8,7 @@ import { taskPath } from "@/lib/urls";
 import { Notification } from "@/models/notification";
 import { User } from "@/models/user";
 import { resolveChannels, wantsMailSomewhere, PrefsSource } from "@/lib/notification-prefs";
+import { accessibleProjectIds } from "@/lib/grants";
 
 const TICK_MS = Number(process.env.DIGEST_TICK_MS) || 5 * 60 * 1000;
 const DEFAULT_TIMEZONE = "Europe/Warsaw";
@@ -65,9 +66,21 @@ function lineFor(notification: any, origin: string | null): DigestLine {
 export async function buildDigestFor(
   userId: string,
   since: Date,
+  projectIds: string[] | null,
   prefs?: PrefsSource
 ): Promise<{ lines: DigestLine[]; total: number; atLeast: boolean }> {
-  const filter = { recipient: userId, read: false, createdAt: { $gte: since } };
+  // Two independent questions, and both have to be asked. Whether this person may still see the
+  // board at all is the grant (BP-328) — this is the one channel that reads the backlog straight
+  // out of the collection, so a row banked while the grant stood would be mailed the morning after
+  // it was revoked. Whether they asked to hear about it is the grid, below.
+  if (projectIds !== null && projectIds.length === 0) return { lines: [], total: 0, atLeast: false };
+
+  const filter: Record<string, unknown> = {
+    recipient: userId,
+    read: false,
+    createdAt: { $gte: since },
+  };
+  if (projectIds !== null) filter.project = { $in: projectIds };
   // Which rows belong in the mail is decided per row below, so a page of DIGEST_ROW_LIMIT could be
   // DIGEST_ROW_LIMIT muted ones — but reading the day unbounded lets anyone who can comment on a
   // watched task decide how much this process hydrates at 07:00. DIGEST_SCAN_LIMIT is the ceiling
@@ -163,7 +176,8 @@ export async function digestTick(now = new Date()): Promise<number> {
       email: { $ne: "" },
       lastDigestDay: { $ne: day },
     },
-    "email username emailNotifications notifications"
+    // `role` for the grant lookup, `notifications` for the grid — the two questions the loop asks
+    "email username role emailNotifications notifications"
   ).lean();
   // Any grid that turns mail on anywhere — the global one or a project's — qualifies. Asking only
   // the global grid dropped anyone who had switched mail off globally and back on for one project:
@@ -184,7 +198,13 @@ export async function digestTick(now = new Date()): Promise<number> {
     if (!claimed) continue;
 
     try {
-      const { lines, total, atLeast } = await buildDigestFor(String(user._id), since, user);
+      const projectIds = await accessibleProjectIds(user);
+      const { lines, total, atLeast } = await buildDigestFor(
+        String(user._id),
+        since,
+        projectIds,
+        user
+      );
       // A quiet day is not worth a mail saying so
       if (lines.length === 0) continue;
       await sendDigest(user, lines, total, atLeast);
