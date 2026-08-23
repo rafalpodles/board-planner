@@ -66,9 +66,20 @@ async function makeTaskTall(page: Page) {
 const bar = (page: Page) => page.getByTestId("task-top-bar");
 const barTitle = (page: Page) => page.getByTestId("task-top-bar-title");
 
+// Next's own dev-error overlay is also a role=dialog, so the task's modal is the one holding
+// the task, never the first match
+const taskDialog = (page: Page) =>
+  page.locator("div[role=dialog]").filter({ has: page.getByTestId("task-top-bar") });
+
 /** The element the task actually scrolls inside — the page's <main>, or the modal's own box */
 function scrollport(page: Page, inModal: boolean): Locator {
-  return inModal ? page.locator("div[role=dialog] .overflow-y-auto") : page.locator("#main-content");
+  return inModal ? taskDialog(page).locator(".overflow-y-auto") : page.locator("#main-content");
+}
+
+/** The task arrives over the network; scrolling before it lands scrolls nothing */
+async function waitForTask(page: Page) {
+  await expect(bar(page)).toBeVisible();
+  await expect(page.getByLabel("Task title")).toHaveValue(LONG_TITLE);
 }
 
 async function scrollToBottom(port: Locator) {
@@ -77,6 +88,8 @@ async function scrollToBottom(port: Locator) {
   });
   // The reveal runs off an IntersectionObserver, which is delivered on the next frame
   await port.evaluate(() => new Promise((r) => requestAnimationFrame(() => r(null))));
+  // Nothing below this point means anything if the task was too short to scroll
+  expect(await port.evaluate((el) => el.scrollTop)).toBeGreaterThan(400);
 }
 
 /** Where the scroll container's visible area starts, in viewport coordinates */
@@ -92,14 +105,11 @@ test("the task header stays in view once the task has scrolled past it", async (
   await signIn(page);
   await makeTaskTall(page);
   await page.goto(TASK_URL);
-  await expect(bar(page)).toBeVisible();
+  await waitForTask(page);
 
   const port = scrollport(page, false);
   await expect(port).toHaveCount(1);
   await scrollToBottom(port);
-
-  // Something actually scrolled, or the rest of this test proves nothing
-  expect(await port.evaluate((el) => el.scrollTop)).toBeGreaterThan(400);
 
   await expect(bar(page)).toBeInViewport();
   await expect(page.getByRole("button", { name: "Close task" })).toBeInViewport();
@@ -110,6 +120,7 @@ test("nothing scrolls through the gap above the pinned header", async ({ page })
   await signIn(page);
   await makeTaskTall(page);
   await page.goto(TASK_URL);
+  await waitForTask(page);
 
   const port = scrollport(page, false);
   await scrollToBottom(port);
@@ -124,6 +135,7 @@ test("the header takes over the title only once the body's title has gone", asyn
   await signIn(page);
   await makeTaskTall(page);
   await page.goto(TASK_URL);
+  await waitForTask(page);
 
   await expect(barTitle(page)).toHaveText(LONG_TITLE);
   await expect(barTitle(page)).toHaveCSS("opacity", "0");
@@ -139,6 +151,7 @@ test("a long title truncates in the header and stays whole in the body", async (
   await signIn(page);
   await makeTaskTall(page);
   await page.goto(TASK_URL);
+  await waitForTask(page);
 
   const overflows = await barTitle(page).evaluate((el) => el.scrollWidth > el.clientWidth);
   expect(overflows).toBe(true);
@@ -151,6 +164,7 @@ test("revealing the title moves nothing in the header", async ({ page }) => {
   await signIn(page);
   await makeTaskTall(page);
   await page.goto(TASK_URL);
+  await waitForTask(page);
 
   const measure = () =>
     bar(page).evaluate((el) => {
@@ -169,6 +183,7 @@ test("the close button works from the bottom of a long task", async ({ page }) =
   await signIn(page);
   await makeTaskTall(page);
   await page.goto(TASK_URL);
+  await waitForTask(page);
 
   await scrollToBottom(scrollport(page, false));
   await page.getByRole("button", { name: "Close task" }).click();
@@ -182,13 +197,11 @@ test("the header stays pinned inside the modal the board opens", async ({ page }
   await page.goto(BOARD_URL);
   await page.locator(`a[href$="/tasks/${SIBLING_TASK_NUMBER}"]`).first().click();
 
-  const dialog = page.locator("div[role=dialog]");
-  await expect(dialog).toBeVisible();
-  await expect(bar(page)).toBeVisible();
+  await expect(taskDialog(page)).toBeVisible();
+  await waitForTask(page);
 
   const port = scrollport(page, true);
   await scrollToBottom(port);
-  expect(await port.evaluate((el) => el.scrollTop)).toBeGreaterThan(400);
 
   await expect(bar(page)).toBeInViewport();
   // The modal's scroll box pads itself by 5px for focus rings — the same gap, five pixels wide
@@ -201,11 +214,12 @@ test("Escape still closes the task from the bottom of the scroll", async ({ page
   await makeTaskTall(page);
   await page.goto(BOARD_URL);
   await page.locator(`a[href$="/tasks/${SIBLING_TASK_NUMBER}"]`).first().click();
-  await expect(page.locator("div[role=dialog]")).toBeVisible();
+  await expect(taskDialog(page)).toBeVisible();
+  await waitForTask(page);
 
   await scrollToBottom(scrollport(page, true));
   await page.keyboard.press("Escape");
 
-  await expect(page.locator("div[role=dialog]")).toHaveCount(0);
+  await expect(taskDialog(page)).toHaveCount(0);
   await expect(page).toHaveURL(new RegExp(`/projects/${PROJECT_KEY}$`));
 });
