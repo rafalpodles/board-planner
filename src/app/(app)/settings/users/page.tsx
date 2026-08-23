@@ -197,7 +197,10 @@ export default function UsersPage() {
         <Button onClick={() => setShowNew(true)}>New User</Button>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      {/* auto-fill rather than a fixed 1/2/3: at this content width three columns left each card
+          145px for a name and its role pill, which needs 165px, so every ordinary name truncated
+          while a whole empty column sat beside it (BP-351) */}
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-4">
         {users.map((u) => (
           <Card
             key={u._id}
@@ -211,7 +214,7 @@ export default function UsersPage() {
                 <div className="flex items-center gap-2">
                   <p className="font-medium truncate">{u.fullName}</p>
                   <span
-                    className={`text-xs px-2 py-0.5 rounded-full ${
+                    className={`shrink-0 text-xs px-2 py-0.5 rounded-full ${
                       u.role === "admin"
                         ? "bg-primary/20 text-primary"
                         : "bg-bg-input text-text-muted"
@@ -269,7 +272,8 @@ export default function UsersPage() {
               onChange={(e) => setNewUserEmail(e.target.value)}
             />
             <p id="newUserEmailHelp" className="mt-1 text-sm text-text-muted">
-              Optional. Used for email notifications.
+              Optional. Used for notifications, and to reset a forgotten password — without one,
+              the only way back in is an administrator setting a password.
             </p>
           </div>
 
@@ -338,7 +342,9 @@ export default function UsersPage() {
                 onChange={(e) => setEditEmail(e.target.value)}
               />
               <p id="editUserEmailHelp" className="mt-1 text-sm text-text-muted">
-                Used for email notifications.
+                Used for notifications, and to reset a forgotten password. Changing it hands the
+                next reset to the new address, stops any link already sent to the old one, and is
+                recorded in the audit log.
               </p>
             </div>
 
