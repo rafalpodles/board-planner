@@ -19,6 +19,9 @@ let roles: Record<string, string> = {};
 /** Makes the access lookup reject, so the fail-closed branch can be exercised. */
 let accessLookupFails = false;
 
+/** Per-test notification preferences, layered over the mailbox fixture. */
+let prefs: Record<string, Record<string, unknown>> = {};
+
 const MAILBOXES: Record<string, { email: string; fullName: string }> = {
   [ASSIGNEE]: { email: "assignee@example.com", fullName: "Ann" },
   [WATCHER]: { email: "watcher@example.com", fullName: "Wes" },
@@ -77,7 +80,17 @@ vi.mock("@/models/user", () => ({
       }
       return {
         lean: async () =>
-          asked.filter((id) => MAILBOXES[id]).map((id) => ({ _id: id, ...MAILBOXES[id] })),
+          asked
+            .filter((id) => MAILBOXES[id])
+            // Preferences decide per recipient now rather than filtering inside the query, so the
+            // fan-out fixture carries them. The default is an ordinary account that predates the
+            // grid: emailNotifications is its stored preference and nothing has been migrated.
+            .map((id) => ({
+              _id: id,
+              ...MAILBOXES[id],
+              emailNotifications: true,
+              ...(prefs[id] ?? {}),
+            })),
       };
     },
   },
@@ -121,6 +134,7 @@ async function sentMails() {
 beforeEach(() => {
   sendEmail.mockClear();
   insertMany.mockClear();
+  prefs = {};
   userFind.mockClear();
   grantFind.mockClear();
   selfOrigin.mockReturnValue("https://app.example.com");
@@ -144,9 +158,9 @@ describe("notification emails", () => {
     const [mail] = await sentMails();
 
     expect(mail.headers?.["List-Unsubscribe"]).toBe(
-      "<https://app.example.com/settings/profile>"
+      "<https://app.example.com/settings/notifications>"
     );
-    expect(mail.html).toContain("https://app.example.com/settings/profile");
+    expect(mail.html).toContain("https://app.example.com/settings/notifications");
   });
 
   it("tells each recipient why they got it", async () => {
@@ -186,12 +200,78 @@ describe("notification emails", () => {
   // Somebody on the digest hears about this in one message tomorrow morning; sending both would
   // make the digest a duplicate rather than a replacement
   it("skips the people who chose the daily digest", async () => {
+    prefs[ASSIGNEE] = { emailDigest: true };
+
     await createNotifications(NOTIFICATION);
     await sentMails();
 
-    const [filter] = userFind.mock.calls.at(-1) ?? [];
-    expect(filter.emailNotifications).toBe(true);
-    expect(filter.emailDigest).toEqual({ $ne: true });
+    const to = sendEmail.mock.calls.map(([p]) => (p as { to: string }).to);
+    expect(to).toEqual(["watcher@example.com"]);
+  });
+
+  // The bell hides the row; it does not stop the write. The digest is assembled from these
+  // documents, so a skipped insert would take tomorrow's mail down with today's bell.
+  it("still stores a notification the bell is not allowed to show", async () => {
+    prefs[WATCHER] = {
+      notifications: {
+        defaults: { comment_added: { inApp: false, email: true, chat: false } },
+        projects: [],
+      },
+    };
+
+    await createNotifications({ ...NOTIFICATION, recipientIds: [WATCHER] });
+
+    expect(insertMany.mock.calls[0][0][0]).toMatchObject({ inApp: false });
+    await sentMails();
+  });
+
+  it("sends no mail for a project the recipient muted, while another project still arrives", async () => {
+    prefs[WATCHER] = {
+      notifications: {
+        projects: [
+          {
+            project: NOTIFICATION.projectId,
+            matrix: { comment_added: { inApp: true, email: false, chat: false } },
+          },
+        ],
+      },
+    };
+
+    await createNotifications({ ...NOTIFICATION, recipientIds: [WATCHER] });
+    expect(sendEmail).not.toHaveBeenCalled();
+
+    // The bell still rings for it — one channel muted for one board is not the whole row
+    expect(insertMany.mock.calls[0][0][0]).toMatchObject({ inApp: true });
+
+    // And with the override gone, the same event reaches them
+    prefs[WATCHER] = {};
+    await createNotifications({ ...NOTIFICATION, recipientIds: [WATCHER] });
+    await sentMails();
+  });
+
+  // Every writer calls createNotifications without awaiting it, so anything that escapes is an
+  // unhandled rejection — which ends the process rather than losing one notification. A username
+  // reaching the recipient list is enough to cast: `new ObjectId("admin")` throws.
+  it("does not reject when a recipient is not an id", async () => {
+    await expect(
+      createNotifications({ ...NOTIFICATION, recipientIds: ["admin"] })
+    ).resolves.toBeUndefined();
+  });
+
+  it("still writes to the recipients that are ids when one of them is not", async () => {
+    await createNotifications({ ...NOTIFICATION, recipientIds: ["admin", WATCHER] });
+
+    expect(insertMany.mock.calls[0][0]).toHaveLength(1);
+    expect(insertMany.mock.calls[0][0][0]).toMatchObject({ title: NOTIFICATION.title });
+  });
+
+  // Anything the notification path throws is the notification's problem, not the caller's
+  it("does not reject when the preference read fails", async () => {
+    userFind.mockImplementationOnce(() => {
+      throw new Error("mongo is having a bad afternoon");
+    });
+
+    await expect(createNotifications(NOTIFICATION)).resolves.toBeUndefined();
   });
 
   it("never writes to the person who caused the notification", async () => {

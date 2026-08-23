@@ -291,7 +291,11 @@ export function ProjectTree({
                     dot={project.pm?.enabled}
                   />
                 )}
-                {(project.canAdmin ?? isAdmin) && (
+                {/* Not gated on canAdmin since BP-371. That gate encoded a premise which has
+                    stopped being true — that this page holds nothing for a member — now that
+                    their own notification settings live there. The page hides every section they
+                    may not open and says so in as many words. */}
+                {(
                   <SubItem
                     href={`${base}/settings`}
                     icon={SUB_ICONS.settings}

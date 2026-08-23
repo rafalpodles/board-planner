@@ -16,7 +16,9 @@ export const GET = withAuth(async (request, { user }) => {
   const projectIds = await accessibleProjectIds(user);
   if (projectIds !== null && projectIds.length === 0) return NextResponse.json([]);
 
-  const filter: Record<string, unknown> = { recipient: user._id };
+  // And rows the grid hid from the bell are still stored, because the digest is built from them.
+  // `$ne: false` rather than `true`: everything written before BP-371 has no field at all.
+  const filter: Record<string, unknown> = { recipient: user._id, inApp: { $ne: false } };
   if (projectIds !== null) filter.project = { $in: projectIds };
   if (before) {
     filter.createdAt = { $lt: new Date(before) };
