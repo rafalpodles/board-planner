@@ -15,18 +15,13 @@ export default function TaskDetailPage() {
   useCanonicalUrl(loaded?.project.key, loaded?.task.taskNumber);
 
   // The same card the intercepting modal draws, so both routes render one view.
-  // `shrink-0`: the card is a flex child of a scrolling <main>, and without it the card
-  // is squeezed to the viewport and the rest of the task is unreachable.
-  // `overflow-clip`, never `overflow-hidden`: hidden makes this card a scrollport, and a
-  // scrollport that cannot scroll strands everything sticky inside it — the phone's comment
-  // bar at the page's very bottom, and the task's own top bar off the top. Clip rounds the
-  // property rail's corner without claiming the sticky elements.
+  // `flex-1 min-h-0`: the card takes the height <main> has and the task scrolls inside the
+  // card, which is what holds the header still. <main> is left with nothing to scroll, so
+  // there is no page-level overscroll to drag the header either.
   return (
     <div
-      // -1.5rem cancels the scrolling <main>'s own py-6, which the task's sticky bar would
-      // otherwise leave as a gap with the task scrolling through it
-      className="mx-auto w-full max-w-[1240px] shrink-0 overflow-clip rounded-2xl border
-        border-border bg-bg-card [--task-bar-top:-1.5rem]"
+      className="mx-auto flex min-h-0 w-full max-w-[1240px] flex-1 flex-col overflow-clip
+        rounded-2xl border border-border bg-bg-card"
     >
       <TaskDetail
         projectId={projectId}

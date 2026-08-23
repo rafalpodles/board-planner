@@ -14,14 +14,16 @@ import {
 } from "./seed";
 
 /**
- * BP-398. Every claim here is about what the browser does with `position: sticky`, and none of
- * it survives a unit test: JSDOM and happy-dom lay nothing out, so a header that has scrolled
- * out of sight measures exactly like one that has not.
+ * BP-398. Every claim here is about where the browser puts the header while the task moves, and
+ * none of it survives a unit test: JSDOM and happy-dom lay nothing out, so a header that has
+ * scrolled out of sight measures exactly like one that has not.
  *
- * The regression that makes this file worth its runtime: a sticky `top` anchors to the scroll
- * container's *content* box, so the container's own top padding leaves a strip the task scrolls
- * through above the header — and an `overflow: hidden` ancestor makes itself the scrollport and
- * strands the header off the top of the page entirely.
+ * The regression that makes this file worth its runtime: the header used to be `sticky` inside
+ * the scrolled content, which looks pinned in a screenshot taken at the bottom and is not. It
+ * travelled the length of the scrollport's own top padding — 24px on the page, 5px in the modal
+ * — before it engaged, took the card's border and rounded corner out of view when it did, and an
+ * elastic overscroll dragged it along with the rest of the content. Hence `headerTravel` below,
+ * which samples the whole range rather than trusting the end state.
  */
 
 const TASK_URL = `${BASE_URL}/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`;
@@ -72,9 +74,10 @@ const barTitle = (page: Page) => page.getByTestId("task-top-bar-title");
 const taskDialog = (page: Page) =>
   page.locator("div[role=dialog]").filter({ has: page.getByTestId("task-top-bar") });
 
-/** The element the task actually scrolls inside — the page's <main>, or the modal's own box */
+/** The task scrolls in a box of its own, below the header, on both routes */
 function scrollport(page: Page, inModal: boolean): Locator {
-  return inModal ? taskDialog(page).locator(".overflow-y-auto") : page.locator("#main-content");
+  const scope = inModal ? taskDialog(page) : page.locator("#main-content");
+  return scope.getByTestId("task-scroll");
 }
 
 /** The task arrives over the network; scrolling before it lands scrolls nothing */
@@ -98,6 +101,34 @@ async function scrollportTop(port: Locator) {
   return port.evaluate((el) => el.getBoundingClientRect().top);
 }
 
+/**
+ * Every header position the task passes through, other than the one it holds at rest — so an
+ * empty list is the whole claim: the header did not move. Sampling is the point. A sticky header
+ * reaches the right place eventually, so a measurement taken at the bottom passes over the 24px
+ * of travel it never looked at.
+ *
+ * What this cannot do: `scrollTop` clamps, so the past-the-end offsets pin the scroll at its
+ * limit rather than reproducing an elastic overscroll — that bounce is a compositor effect no
+ * script can drive. The guarantee against it is structural and asserted separately: the page
+ * has nothing to scroll, and the header is not inside the box that does.
+ */
+async function headerTravel(page: Page, port: Locator) {
+  const resting = await bar(page).evaluate((el) => el.getBoundingClientRect().top);
+  const max = await port.evaluate((el) => el.scrollHeight - el.clientHeight);
+  expect(max, "the task was too short to scroll, so this proves nothing").toBeGreaterThan(400);
+
+  const moved: number[] = [];
+  for (const offset of [0, 1, 3, 5, 12, 24, 25, 40, 200, max - 1, max, max + 2000]) {
+    const top = await port.evaluate((el, y) => {
+      el.scrollTop = y;
+      const header = el.parentElement!.querySelector('[data-testid="task-top-bar"]')!;
+      return header.getBoundingClientRect().top;
+    }, offset);
+    if (Math.abs(top - resting) > 0.5) moved.push(Math.round(top));
+  }
+  return moved;
+}
+
 test.beforeEach(async () => {
   await seed();
 });
@@ -117,19 +148,37 @@ test("the task header stays in view once the task has scrolled past it", async (
   await expect(page.getByText(SIBLING_TASK_KEY, { exact: true })).toBeInViewport();
 });
 
-test("nothing scrolls through the gap above the pinned header", async ({ page }) => {
+test("the header does not move at any point in the scroll, page route", async ({ page }) => {
   await signIn(page);
   await makeTaskTall(page);
   await page.goto(TASK_URL);
   await waitForTask(page);
 
-  const port = scrollport(page, false);
-  await scrollToBottom(port);
+  expect(await headerTravel(page, scrollport(page, false))).toEqual([]);
+});
 
-  // <main> carries py-6, and a sticky `top: 0` anchors to its content box — so without the
-  // compensation the header sits 24px down and the task scrolls visibly through the gap
-  const barTop = await bar(page).evaluate((el) => el.getBoundingClientRect().top);
-  expect(barTop).toBeCloseTo(await scrollportTop(port), 0);
+test("the header does not move at any point in the scroll, modal route", async ({ page }) => {
+  await signIn(page);
+  await makeTaskTall(page);
+  await page.goto(BOARD_URL);
+  await page.locator(`a[href$="/tasks/${SIBLING_TASK_NUMBER}"]`).first().click();
+  await expect(taskDialog(page)).toBeVisible();
+  await waitForTask(page);
+
+  expect(await headerTravel(page, scrollport(page, true))).toEqual([]);
+});
+
+// The other half of the same claim: a header cannot be dragged by a scroll that cannot happen
+test("the page itself never scrolls, so nothing can drag the header", async ({ page }) => {
+  await signIn(page);
+  await makeTaskTall(page);
+  await page.goto(TASK_URL);
+  await waitForTask(page);
+
+  const overflow = await page
+    .locator("#main-content")
+    .evaluate((el) => el.scrollHeight - el.clientHeight);
+  expect(overflow).toBe(0);
 });
 
 test("the header takes over the title only once the body's title has gone", async ({ page }) => {
@@ -232,9 +281,9 @@ test("the header stays pinned inside the modal the board opens", async ({ page }
   await scrollToBottom(port);
 
   await expect(bar(page)).toBeInViewport();
-  // The modal's scroll box pads itself by 5px for focus rings — the same gap, five pixels wide
-  const barTop = await bar(page).evaluate((el) => el.getBoundingClientRect().top);
-  expect(barTop).toBeCloseTo(await scrollportTop(port), 0);
+  // Flush on the box it sits above: no strip between them for the task to scroll through
+  const barBottom = await bar(page).evaluate((el) => el.getBoundingClientRect().bottom);
+  expect(barBottom).toBeCloseTo(await scrollportTop(port), 0);
 });
 
 test("Escape still closes the task from the bottom of the scroll", async ({ page }) => {
