@@ -6,7 +6,7 @@ import { useToast } from "@/components/ui/Toast";
 import { Button } from "@/components/ui/Button";
 import { NotificationMatrixEditor } from "@/components/settings/NotificationMatrix";
 import { NotificationMatrix } from "@/types";
-import { withoutChat } from "@/lib/notification-prefs";
+
 import Link from "next/link";
 import { SectionProps } from "./types";
 
@@ -44,10 +44,10 @@ export function NotificationsSection({ project }: SectionProps) {
       .then((prefs: Prefs) => {
         const own = prefs.projects.find((p) => p.project === id);
         setGlobalMatrix(prefs.defaults);
-        // A grid that still names chat after the connection went away would arrive here ticked and
-        // disabled, and every save would be refused by a checkbox nobody can reach
-        const inForce = own?.matrix ?? prefs.defaults;
-        setMatrix(prefs.chat.configured ? inForce : withoutChat(inForce));
+        // Shown as stored, chat included. With nothing connected it does not deliver — that is
+        // decided at send time now — and quietly rewriting somebody's grid on the way to the
+        // screen would misreport what they chose.
+        setMatrix(own?.matrix ?? prefs.defaults);
         setOverriding(!!own);
         setChatConfigured(prefs.chat.configured);
       })

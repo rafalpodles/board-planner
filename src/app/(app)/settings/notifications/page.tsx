@@ -7,7 +7,7 @@ import { useToast } from "@/components/ui/Toast";
 import { Button } from "@/components/ui/Button";
 import { NotificationMatrixEditor } from "@/components/settings/NotificationMatrix";
 import { NotificationMatrix, PERSONAL_CHAT_KINDS, PersonalChatKind } from "@/types";
-import { withoutChat } from "@/lib/notification-prefs";
+
 
 function messageOf(err: unknown, fallback: string): string {
   const message = err instanceof Error ? err.message.trim() : "";
@@ -157,9 +157,10 @@ export default function NotificationsPage() {
               onClick={() => {
                 const next = chatKind === kind ? "" : kind;
                 setChatKind(next);
-                // Otherwise the column is disabled while the grid still asks for chat, and every
-                // save is refused by a control the screen has just taken away
-                if (!next && matrix) setMatrix(withoutChat(matrix));
+                // The ticks stay: with nothing connected they simply do not deliver, and they
+                // start working again if a webhook comes back. Clearing the address field matters
+                // though — it is about to be hidden, and sending one for no service is refused.
+                if (!next) setWebhookUrl("");
               }}
               className={`focus-ring rounded-lg border px-3 py-1.5 text-sm capitalize transition-colors ${
                 chatKind === kind

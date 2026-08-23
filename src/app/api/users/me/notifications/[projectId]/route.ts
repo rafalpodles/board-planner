@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
 import { User } from "@/models/user";
-import { normaliseMatrix, wantsChat } from "@/lib/notification-prefs";
+import { normaliseMatrix } from "@/lib/notification-prefs";
 
 // Personal settings behind withProjectAccess rather than withProjectOwner: this is the reader's
 // own preference, so every member has one. The gate is there to stop overrides being stored for
@@ -11,36 +11,30 @@ import { normaliseMatrix, wantsChat } from "@/lib/notification-prefs";
 /** Enough for anyone tuning real boards, and a bound on a document every dispatch reads. */
 const MAX_OVERRIDES = 200;
 
+/**
+ * Same rule as the global route, on both verbs. Removing an override widens delivery just as
+ * surely as ticking a box does — the board falls back to the global grid — so gating only the
+ * write left the other half open.
+ */
+function interactiveOnly(user: { viaMachineCredential?: boolean }) {
+  return user.viaMachineCredential
+    ? NextResponse.json({ error: "This action requires an interactive session" }, { status: 403 })
+    : null;
+}
+
 export const PUT = withProjectAccess(async (request, { user, params }) => {
+  const refusal = interactiveOnly(user);
+  if (refusal) return refusal;
+
   const { projectId } = await params;
   await connectDB();
 
   const body = await request.json().catch(() => ({}));
   const matrix = normaliseMatrix(body?.matrix);
 
-  // Only the two fields this decision needs — the credential beside them has no business being
-  // read into a request that never sends anything
-  const stored = await User.findById(
-    user._id,
-    "notifications.chat.kind notifications.chat.webhookUrl"
-  ).lean();
-  const chat = stored?.notifications?.chat;
-  // Same rule as the global route, for the same reason: switching the column on against an address
-  // the owner already stored creates the standing outbound copy, and doing it one board at a time
-  // is the same act. Turning it off stays open.
-  if (wantsChat(matrix) && user.viaMachineCredential) {
-    return NextResponse.json(
-      { error: "This action requires an interactive session" },
-      { status: 403 }
-    );
-  }
-  if (wantsChat(matrix) && !(chat?.kind && chat?.webhookUrl)) {
-    // Storing this would tick a column that delivers nowhere, and nothing downstream would say so
-    return NextResponse.json(
-      { error: "Connect Slack or Discord before sending anything there" },
-      { status: 400 }
-    );
-  }
+  // Whether chat can deliver is derived at read time from the connection, so an override may name
+  // it freely: with nothing connected it simply resolves to off, and starts working if a webhook
+  // appears. Refusing it here is what produced a screen that disabled the box it demanded you clear.
 
   // Update in place first. If there is no row yet, insert one — guarded both against a racing
   // insert (so two tabs cannot leave two rows for one project) and against the array's ceiling,
@@ -80,6 +74,9 @@ export const PUT = withProjectAccess(async (request, { user, params }) => {
 });
 
 export const DELETE = withProjectAccess(async (_request, { user, params }) => {
+  const refusal = interactiveOnly(user);
+  if (refusal) return refusal;
+
   const { projectId } = await params;
   await connectDB();
 

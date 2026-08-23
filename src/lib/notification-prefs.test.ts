@@ -142,6 +142,52 @@ describe("whether any grid asks for mail", () => {
   });
 });
 
+/**
+ * Whether chat can deliver is derived here rather than written into the grids. Storing it meant
+ * disconnecting had to rewrite the global grid and every project override, and each attempt cost
+ * something — a wholesale $set regenerated subdocument ids, a row-by-row one wrote by an index a
+ * concurrent request could shift, and the screen disabled the checkbox that would have undone it.
+ */
+describe("chat delivery follows the connection, not the stored tick", () => {
+  const ticked = {
+    notifications: {
+      defaults: { ...allOff(), mentioned: { inApp: true, email: false, chat: true } },
+      projects: [],
+    },
+  };
+
+  it("does not deliver to chat when nothing is connected", () => {
+    expect(resolveChannels(ticked, P1, "mentioned").chat).toBe(false);
+  });
+
+  it("does not deliver when a service is named but no address is stored", () => {
+    const half = { ...ticked, notifications: { ...ticked.notifications, chat: { kind: "slack" as const, webhookUrl: "" } } };
+
+    expect(resolveChannels(half, P1, "mentioned").chat).toBe(false);
+  });
+
+  it("delivers once both halves are there, with the same stored tick", () => {
+    const whole = {
+      ...ticked,
+      notifications: {
+        ...ticked.notifications,
+        chat: { kind: "slack" as const, webhookUrl: "enc:x" },
+      },
+    };
+
+    expect(resolveChannels(whole, P1, "mentioned").chat).toBe(true);
+  });
+
+  // The tick itself is never rewritten — the reader's choice survives a connection coming and going
+  it("leaves the other channels of the row alone", () => {
+    expect(resolveChannels(ticked, P1, "mentioned")).toEqual({
+      inApp: true,
+      email: false,
+      chat: false,
+    });
+  });
+});
+
 describe("whether a grid asks for chat", () => {
   it("is true for any row, and false for none", () => {
     expect(wantsChat({ ...allOff(), mentioned: { inApp: false, email: false, chat: true } })).toBe(true);

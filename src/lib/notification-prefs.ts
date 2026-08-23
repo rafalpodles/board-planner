@@ -66,12 +66,25 @@ export function matrixInForce(
   return own ? { ...blankMatrix(), ...own } : defaultMatrix(user);
 }
 
+/** Delivery to chat needs a service AND an address; either alone sends nothing and says nothing. */
+export function chatConnected(user: PrefsSource | null | undefined): boolean {
+  const chat = user?.notifications?.chat;
+  return !!chat?.kind && !!chat?.webhookUrl;
+}
+
 export function resolveChannels(
   user: PrefsSource | null | undefined,
   projectId: string,
   type: NotificationType
 ): NotificationChannels {
-  return matrixInForce(user, projectId)[type] ?? { ...OFF };
+  const row = matrixInForce(user, projectId)[type] ?? { ...OFF };
+  // Whether chat can deliver is derived from the connection, not stored beside it. Writing it into
+  // the grids meant disconnecting had to rewrite the global grid and every project override, and
+  // every attempt at that rewrite cost something: a wholesale $set regenerated subdocument ids, a
+  // row-by-row one wrote by an index another request could shift, and the screen disabled the
+  // checkbox that would have undone whichever state it left behind. Nothing is rewritten now — a
+  // tick with no connection simply resolves to false, and starts working again if one appears.
+  return row.chat && !chatConnected(user) ? { ...row, chat: false } : row;
 }
 
 /**

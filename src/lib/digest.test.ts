@@ -261,11 +261,14 @@ describe("past the scan ceiling", () => {
   const morning = new Date("2026-08-17T05:30:00Z");
 
   // The count stops being a count once the read is capped, and a mail that prints a precise
-  // number nobody computed is the silent cap this file already warns about, wearing a number
+  // number nobody computed is the silent cap this file already warns about, wearing a number.
+  // Asserted on the SUBJECT: the "and N more" line contains the same words, so a body assertion
+  // passed with the heading reverted to an exact figure.
   it("says the remainder is a floor rather than a total", async () => {
     notifications(DIGEST_SCAN_LIMIT + 200);
 
     expect(await digestTick(morning)).toBe(1);
+    expect(sent().subject).toContain("at least");
     expect(sent().text).toContain("at least");
   });
 
@@ -284,6 +287,7 @@ describe("past the scan ceiling", () => {
     notifications(3);
     await digestTick(morning);
 
+    expect(sent().subject).not.toContain("at least");
     expect(sent().text).not.toContain("at least");
   });
 });
