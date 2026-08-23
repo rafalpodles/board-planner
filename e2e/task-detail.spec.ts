@@ -1,5 +1,5 @@
 import { test, expect, type APIRequestContext, type Locator, type Page } from "@playwright/test";
-import { ADMIN_AUTH, MEMBER_AUTH, signInApi } from "./api";
+import { ADMIN_AUTH, MEMBER_AUTH } from "./api";
 import {
   ADMIN_PASSWORD,
   ADMIN_USERNAME,
@@ -7,9 +7,6 @@ import {
   DECOY_TASK_NUMBER,
   FINISHED_TASK_ID,
   FINISHED_TASK_NUMBER,
-  FINISHED_TASK_TITLE,
-  MEMBER_PASSWORD,
-  MEMBER_USERNAME,
   PROJECT_KEY,
   PROJECT_NAME,
   SIBLING_TASK_ID,
@@ -169,7 +166,6 @@ test("a mention lands in the mentioned user's feed", async ({ page, request }) =
 
   // The notification is dispatched without blocking the reply, so the feed is polled until
   // the write lands rather than read once on a clock
-  await signInApi(request, MEMBER_USERNAME, MEMBER_PASSWORD);
   await expect
     .poll(async () => {
       const res = await request.get("/api/notifications", { headers: MEMBER_AUTH });
@@ -187,7 +183,6 @@ test("watching puts a person on the list and their feed keeps following the task
   page,
   request,
 }) => {
-  test.setTimeout(60_000);
   await openTask(page, DECOY_TASK_NUMBER);
 
   await test.step("watching registers and says so", async () => {
@@ -221,10 +216,10 @@ test("watching puts a person on the list and their feed keeps following the task
     await page.getByRole("option", { name: "In Progress" }).click();
     expect((await moved).status()).toBe(200);
 
-    await signInApi(request, MEMBER_USERNAME, MEMBER_PASSWORD);
     await expect
       .poll(async () => {
         const res = await request.get("/api/notifications", { headers: MEMBER_AUTH });
+        expect(res.status()).toBe(200);
         const feed = await res.json();
         return feed.some(
           (n: { type: string; task?: { taskNumber?: number } }) =>
@@ -289,7 +284,7 @@ test("acceptance criteria tick, count, persist and reach the card", async ({ pag
 
   await test.step("removing one leaves the other", async () => {
     const removed = taskWrite(page, "PUT", `/tasks/${FINISHED_TASK_ID}`);
-    await page.getByRole("button", { name: "Remove criterion 2" }).click({ force: true });
+    await page.getByRole("button", { name: "Remove criterion 2" }).click();
     await removed;
 
     await expect(detail.getByText("1/1")).toBeVisible();
@@ -318,11 +313,11 @@ test("dependencies: a blocker is linked by key, shown, and removable", async ({
   await test.step("picking a task by its key links it as a blocker", async () => {
     await page.getByRole("button", { name: "+ Add dependency" }).click();
 
-    const search = page.getByPlaceholder(/search/i);
-    await search.fill(`${PROJECT_KEY}-${SIBLING_TASK_NUMBER}`);
+    const picker = page.getByPlaceholder(/search tasks/i).locator("..");
+    await picker.getByPlaceholder(/search tasks/i).fill(`${PROJECT_KEY}-${SIBLING_TASK_NUMBER}`);
 
     const linked = taskWrite(page, "POST", `/tasks/${DECOY_TASK_ID}/links`);
-    await page.getByText(SIBLING_TASK_TITLE).first().click();
+    await picker.getByRole("button", { name: SIBLING_TASK_TITLE }).click();
     expect((await linked).status()).toBe(200);
 
     await expect(page.getByText("Dependency added")).toBeVisible(); // toast
@@ -360,9 +355,8 @@ test("uploads: an image attaches into the description, an oversized one is refus
   const fileInput = page.locator('input[type="file"]');
 
   await test.step("attaching inserts markdown and persists it", async () => {
-    await fileInput.setInputFiles({ name: "proof.png", mimeType: "image/png", buffer: TINY_PNG });
-
     const uploaded = taskWrite(page, "POST", "/api/uploads");
+    await fileInput.setInputFiles({ name: "proof.png", mimeType: "image/png", buffer: TINY_PNG });
     expectWritten((await uploaded).status());
 
     await expect(descriptionField).toHaveValue(/!\[.*\]\(.+\)/);
@@ -374,7 +368,7 @@ test("uploads: an image attaches into the description, an oversized one is refus
     expect(task.description).toMatch(/!\[.*\]\(.+\)/);
   });
 
-  await test.step("a file past the size limit answers 400 and inserts nothing", async () => {
+  await test.step("a file past the size limit answers 413 and inserts nothing", async () => {
     const before = await descriptionField.inputValue();
 
     const refused = taskWrite(page, "POST", "/api/uploads");
@@ -383,10 +377,16 @@ test("uploads: an image attaches into the description, an oversized one is refus
       mimeType: "image/png",
       buffer: Buffer.alloc(6 * 1024 * 1024, 0),
     });
-    // The body parser refuses oversized multipart uploads before the route's own check runs
-    expect([400, 413]).toContain((await refused).status());
+    // 413 specifically: the route answers 400 for a missing file, a missing projectId and a
+    // disallowed type, all before it ever reaches the size check this step is about
+    const response = await refused;
+    expect(response.status()).toBe(413);
+    expect(await response.text()).toMatch(/Maximum size is 5MB/);
 
-    await expect(descriptionField).toHaveValue(before);
+    // A one-shot check after a settle, not a retrying matcher: the value is already `before`, so
+    // toHaveValue would pass on its first poll and never see an insert landing a tick later
+    await page.waitForTimeout(1_000);
+    expect(await descriptionField.inputValue()).toBe(before);
   });
 
   await test.step("the stored file answers only to somebody carrying credentials", async () => {
@@ -394,6 +394,11 @@ test("uploads: an image attaches into the description, an oversized one is refus
     const fileId = markdown.match(/\((.+)\)/)?.[1] ?? "";
     const bare = await request.get(fileId); // no Authorization header at all
     expect([401, 403]).toContain(bare.status());
+
+    // The control: without it a route refusing everybody reads exactly like a working guard
+    const carried = await request.get(fileId, { headers: ADMIN_AUTH });
+    expect(carried.status()).toBe(200);
+    expect(carried.headers()["content-type"]).toContain("image/png");
   });
 });
 
