@@ -786,9 +786,15 @@ export const META_QUERY = "[v2]";
 export const META_WILDCARD = ".*";
 
 /**
- * Never fold this into seed(). Four more tasks on TP and a taskCounter of 13 break
- * kanban-board-core.spec.ts, which counts cards against SEEDED_TASKS = 4 and asserts the number
- * the next created task is minted with.
+ * Never fold this into seed(). What seed() lays down is a contract other specs count against, in
+ * two dimensions:
+ *
+ * - tasks — kanban-board-core.spec.ts counts cards against SEEDED_TASKS = 4 and asserts the number
+ *   the next created task is minted with, so four more tasks on TP and a taskCounter of 13 break it;
+ * - projects — a screen that lists every board the reader can reach (the OAuth consent screen is
+ *   the one that counts them) would silently gain a row for this second board.
+ *
+ * Both are elsewhere in the suite, and neither failure names this function.
  */
 export async function seedSearchCorpus() {
   const db = (await connect()).db!;
