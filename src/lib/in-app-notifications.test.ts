@@ -59,13 +59,19 @@ vi.mock("@/models/user", () => ({
   User: {
     find: (...a: unknown[]) => {
       userFind(...a);
-      const filter = a[0] as { _id?: { $in?: string[] } };
+      const filter = a[0] as { _id?: { $in?: string[] }; role?: string };
       const asked = filter?._id?.$in ?? [];
       if (a[1] === undefined) {
         return {
           select: () => ({
             lean: async () =>
-              asked.filter((id) => roles[id]).map((id) => ({ _id: id, role: roles[id] })),
+              asked
+                .filter((id) => roles[id])
+                // Honoured, so re-adding `role: "admin"` to the access query — which would make
+                // every recipient an admin and the filter a no-op — fails here too, not only in
+                // grants.test.ts.
+                .filter((id) => filter.role === undefined || filter.role === roles[id])
+                .map((id) => ({ _id: id, role: roles[id] })),
           }),
         };
       }

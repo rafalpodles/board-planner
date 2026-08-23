@@ -280,6 +280,18 @@ describe("DELETE members", () => {
     expect(notificationDeleteMany).not.toHaveBeenCalled();
   });
 
+  // The grant is already gone by the time this runs, so a failure here must not become a failed
+  // response — the caller would be told the removal did not happen when it did.
+  it("still reports the removal when it cannot tell whether they keep access", async () => {
+    recipientsWithAccess.mockRejectedValue(new Error("no database"));
+    const url = `http://x/api/projects/${PROJECT}/members?userId=${U2}`;
+
+    const res = await DELETE(new Request(url, { method: "DELETE" }), { params });
+
+    expect(res.status).toBe(200);
+    expect(notificationDeleteMany).not.toHaveBeenCalled();
+  });
+
   it("clears nothing when the removal itself was refused", async () => {
     grantCountDocuments.mockResolvedValue(1);
     grantFindLean.mockResolvedValue([{ subject: U2, relation: "owner" }]);
