@@ -4,6 +4,7 @@ import { connectDB } from "@/lib/db";
 import { withProjectOwner } from "@/lib/middleware";
 import { User } from "@/models/user";
 import { Grant } from "@/models/grant";
+import { Notification } from "@/models/notification";
 import { GRANT_RELATIONS, GrantRelation } from "@/types";
 
 async function ownerCount(projectId: string): Promise<number> {
@@ -108,6 +109,16 @@ export const DELETE = withProjectOwner(async (request, { params }) => {
   }
 
   await Grant.deleteOne({ subject: userId, objectType: "project", object: projectId });
+
+  // Their watches on this board are kept, so re-adding them restores the feed. The backlog is
+  // not: the read filter already refuses it, and leaving it to be refused forever is hoarding
+  // task titles for somebody who cannot open them (BP-328). The removal itself has succeeded by
+  // now, so a failure here is logged rather than reported as one.
+  try {
+    await Notification.deleteMany({ recipient: userId, project: projectId });
+  } catch (err) {
+    console.error("Failed to clear notifications for a removed member:", err);
+  }
 
   return NextResponse.json({ ok: true });
 });

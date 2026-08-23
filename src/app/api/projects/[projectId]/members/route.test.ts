@@ -13,6 +13,7 @@ const userFindLean = vi.fn();
 const userFindById = vi.fn();
 const userFindByIdSelect = vi.fn();
 const check = vi.fn();
+const notificationDeleteMany = vi.fn(async (_filter?: unknown) => ({ deletedCount: 0 }));
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({
@@ -40,6 +41,9 @@ vi.mock("@/models/user", () => ({
 }));
 vi.mock("@/models/project", () => ({ Project: { findOne: vi.fn() } }));
 vi.mock("@/models/task", () => ({ Task: {} }));
+vi.mock("@/models/notification", () => ({
+  Notification: { deleteMany: (filter: unknown) => notificationDeleteMany(filter) },
+}));
 
 const { GET, PUT, DELETE } = await import("./route");
 
@@ -228,5 +232,35 @@ describe("DELETE members", () => {
     const res = await DELETE(new Request(url, { method: "DELETE" }), { params });
     expect(res.status).toBe(409);
     expect(grantDeleteOne).not.toHaveBeenCalled();
+  });
+
+  // BP-328. The watcher rows stay, so a re-add restores the feed; what does not stay is the
+  // backlog already addressed to them, which the read filter would otherwise have to keep
+  // refusing forever.
+  it("clears the pending notifications this board had queued for them", async () => {
+    const url = `http://x/api/projects/${PROJECT}/members?userId=u2`;
+    await DELETE(new Request(url, { method: "DELETE" }), { params });
+
+    expect(notificationDeleteMany).toHaveBeenCalledWith({
+      recipient: "u2",
+      project: PROJECT,
+    });
+  });
+
+  it("leaves the notifications they hold from other boards alone", async () => {
+    const url = `http://x/api/projects/${PROJECT}/members?userId=u2`;
+    await DELETE(new Request(url, { method: "DELETE" }), { params });
+
+    const filter = notificationDeleteMany.mock.calls.at(-1)?.[0];
+    expect(filter).toHaveProperty("project", PROJECT);
+  });
+
+  it("clears nothing when the removal itself was refused", async () => {
+    grantCountDocuments.mockResolvedValue(1);
+    grantFindLean.mockResolvedValue([{ subject: "u2", relation: "owner" }]);
+    const url = `http://x/api/projects/${PROJECT}/members?userId=u2`;
+    await DELETE(new Request(url, { method: "DELETE" }), { params });
+
+    expect(notificationDeleteMany).not.toHaveBeenCalled();
   });
 });

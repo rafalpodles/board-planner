@@ -7,6 +7,7 @@ import { APP_NAME } from "@/lib/brand";
 import { Pill, renderEmail } from "@/lib/email-template";
 import { selfOrigin } from "@/lib/session";
 import { taskPath } from "@/lib/urls";
+import { recipientsWithAccess } from "@/lib/grants";
 
 /**
  * What the mail version of a notification shows beyond the one-line title the in-app list uses.
@@ -58,9 +59,21 @@ export async function createNotifications({
   );
   if (unique.length === 0) return;
 
+  // Watchers accumulate by commenting and outlive the grant that justified them, so who may be
+  // told is decided here rather than trusted from the task (BP-328). Refusing on error rather
+  // than delivering: a dropped notification is recoverable, a leaked task title is not.
+  let allowed: string[];
+  try {
+    allowed = await recipientsWithAccess(unique, projectId);
+  } catch (err) {
+    console.error("Failed to resolve notification recipients:", err);
+    return;
+  }
+  if (allowed.length === 0) return;
+
   try {
     await Notification.insertMany(
-      unique.map((recipientId) => ({
+      allowed.map((recipientId) => ({
         recipient: new Types.ObjectId(recipientId),
         type,
         task: new Types.ObjectId(taskId),
@@ -76,7 +89,7 @@ export async function createNotifications({
 
   // Fire-and-forget email notifications
   if (isEmailConfigured()) {
-    sendEmailNotifications({ recipientIds: unique, type, title, body: body || "", email }).catch(
+    sendEmailNotifications({ recipientIds: allowed, type, title, body: body || "", email }).catch(
       (err) => console.error("Failed to send email notifications:", err)
     );
   }

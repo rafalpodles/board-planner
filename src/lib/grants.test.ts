@@ -116,6 +116,7 @@ describe("principalOf", () => {
 
 const findOne = vi.fn();
 const find = vi.fn();
+const userFind = vi.fn();
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/grant", () => ({
   Grant: {
@@ -123,8 +124,11 @@ vi.mock("@/models/grant", () => ({
     find: (...args: unknown[]) => find(...args),
   },
 }));
+vi.mock("@/models/user", () => ({
+  User: { find: (...args: unknown[]) => userFind(...args) },
+}));
 
-const { check, accessibleProjectIds } = await import("./grants");
+const { check, accessibleProjectIds, recipientsWithAccess } = await import("./grants");
 
 function lean(value: unknown) {
   return { select: () => ({ lean: () => Promise.resolve(value) }) };
@@ -195,5 +199,48 @@ describe("accessibleProjectIds", () => {
     find.mockReturnValue(lean([{ object: P }, { object: OTHER }]));
     const user = { _id: "u1", role: "member", tokenScoped: true, tokenScope: [OTHER] } as never;
     expect(await accessibleProjectIds(user)).toEqual([OTHER]);
+  });
+});
+
+describe("recipientsWithAccess", () => {
+  const MEMBER = "507f1f77bcf86cd799439011";
+  const REMOVED = "507f1f77bcf86cd799439012";
+  const ADMIN = "507f1f77bcf86cd799439013";
+
+  beforeEach(() => {
+    find.mockReset();
+    userFind.mockReset();
+    find.mockReturnValue(lean([]));
+    userFind.mockReturnValue(lean([]));
+  });
+
+  it("keeps a recipient who holds a grant on the project", async () => {
+    find.mockReturnValue(lean([{ subject: MEMBER }]));
+    expect(await recipientsWithAccess([MEMBER], P)).toEqual([MEMBER]);
+  });
+
+  it("drops a recipient whose grant on the project is gone", async () => {
+    find.mockReturnValue(lean([{ subject: MEMBER }]));
+    expect(await recipientsWithAccess([MEMBER, REMOVED], P)).toEqual([MEMBER]);
+  });
+
+  // An instance admin reaches every board without a Grant row ever being written, so a filter
+  // written as "has a grant" would silently stop notifying them — a regression wearing the
+  // costume of a security fix.
+  it("keeps an instance admin who holds no grant at all", async () => {
+    find.mockReturnValue(lean([]));
+    userFind.mockReturnValue(lean([{ _id: ADMIN }]));
+    expect(await recipientsWithAccess([ADMIN], P)).toEqual([ADMIN]);
+  });
+
+  it("asks the database nothing when there is nobody to ask about", async () => {
+    expect(await recipientsWithAccess([], P)).toEqual([]);
+    expect(find).not.toHaveBeenCalled();
+    expect(userFind).not.toHaveBeenCalled();
+  });
+
+  it("preserves the order it was given and does not duplicate", async () => {
+    find.mockReturnValue(lean([{ subject: REMOVED }, { subject: MEMBER }]));
+    expect(await recipientsWithAccess([MEMBER, REMOVED], P)).toEqual([MEMBER, REMOVED]);
   });
 });
