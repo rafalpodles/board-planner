@@ -249,6 +249,7 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
   let keepWorktree = false;
   const state: RunState = {
     committed: false,
+    commits: [],
     pushed: false,
     prUrl: "",
     merged: false,
