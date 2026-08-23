@@ -39,7 +39,10 @@ final class ProjectSetupTests: XCTestCase {
         XCTAssertEqual(try repos.read(), ["/checkouts/SB"])
         XCTAssertEqual(
             git.calls.first,
-            ["git", "clone", "https://github.com/rafalpodles/ventures", "/checkouts/SB"])
+            [
+                "git", "-c", "protocol.ext.allow=never", "-c", "protocol.file.allow=never",
+                "clone", "--", "https://github.com/rafalpodles/ventures", "/checkouts/SB",
+            ])
     }
 
     // repos.json is the grant, so writing one for a checkout that was refused would produce a

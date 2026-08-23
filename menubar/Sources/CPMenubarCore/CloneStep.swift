@@ -31,8 +31,32 @@ public struct CloneStep: Sendable {
         (parent as NSString).appendingPathComponent(projectKey)
     }
 
+    /// `ext::` and `git://` are refused by CloneInputs before git is spawned; these close the same
+    /// two transports from the other side, because a `url.*.insteadOf` in the operator's own config
+    /// can rewrite a well-formed https remote into either and no check on the string would see it.
+    /// `-c` beats a global setting for these keys — measured, unlike core.gitProxy, which does not
+    /// and is emptied in the environment instead (GitSafeEnvironment).
+    private static let safeTransport = [
+        "-c", "protocol.ext.allow=never",
+        "-c", "protocol.file.allow=never",
+    ]
+
     public func run(repositoryURL: String, parent: String, projectKey: String) -> CloneOutcome {
+        guard CloneInputs.isProjectKey(projectKey) else {
+            return .failed(
+                reason:
+                    "Refusing the project key \(quoted(projectKey)): it has to be one directory name, not a path.")
+        }
+        guard CloneInputs.isRemote(repositoryURL) else {
+            return .failed(
+                reason:
+                    "Refusing the remote \(quoted(repositoryURL)): only https, http and ssh remotes are cloned here.")
+        }
+
         let target = CloneStep.destination(parent: parent, projectKey: projectKey)
+        guard CloneInputs.isContained(target, in: parent) else {
+            return .failed(reason: "Refusing \(target): it falls outside \(parent).")
+        }
 
         if exists((target as NSString).appendingPathComponent(".git")) {
             // Re-entering this step must not fail on its own earlier success
@@ -51,7 +75,9 @@ public struct CloneStep: Sendable {
             return .failed(reason: "\(target) already exists and is not a checkout. Move it, or pick another folder.")
         }
 
-        let cloned = run("git", ["clone", repositoryURL, target], nil)
+        // -- keeps both values in git's positional slots. The shape checks above are the gate; this
+        // is the second line, so a caller that ever loosens one does not silently reopen the other.
+        let cloned = run("git", CloneStep.safeTransport + ["clone", "--", repositoryURL, target], nil)
         guard cloned.code == 0 else {
             return .failed(reason: "Could not clone \(repositoryURL): \(cloned.output)")
         }
@@ -59,14 +85,18 @@ public struct CloneStep: Sendable {
         return pushable(at: target) ?? .cloned(path: target)
     }
 
+    private func quoted(_ value: String) -> String {
+        value.isEmpty ? "(empty)" : "\"\(value)\""
+    }
+
     // The worker pushes to origin with --force-with-lease and has no notion of a fork, so read-only
     // access is a hard failure. Today it fails late — after the agent has worked and six gates have
     // passed — which is the worst possible moment to learn it.
     //
     // Known limit, measured rather than assumed: against a remote over https or ssh, --dry-run
-    // contacts the server and a refusal really is caught here. Against a LOCAL path it does almost
-    // nothing — a bare repository chmod'd read-only still reports success. Local paths are a
-    // development case, so this is left as is rather than made to look stronger than it is.
+    // contacts the server and a refusal really is caught here. It did almost nothing against a
+    // LOCAL path — a bare repository chmod'd read-only still reported success — and that gap is
+    // now moot rather than fixed: BP-399 refuses a local path as a remote outright.
     private func pushable(at path: String) -> CloneOutcome? {
         let probe = run("git", ["-C", path, "push", "--dry-run", "origin", "HEAD"], nil)
         guard probe.code != 0 else { return nil }
