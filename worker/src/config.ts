@@ -28,10 +28,39 @@ export const DEFAULT_MODEL = "opus";
 export const DEFAULT_FALLBACK_MODEL = "sonnet";
 export const DEFAULT_REVIEW_MODEL = "opus";
 
+// The three free-text policy fields are each spent as an argument to a program on this machine:
+// baseBranch as a revision on `git diff`, the model names as `--model`'s value. Checked where the
+// value is accepted rather than at the sink, because the sink cannot tell a branch somebody chose
+// from an option somebody smuggled. Mirrored in src/lib/worker-policy.ts, which refuses the same
+// shapes server-side — see server-values.contract.test.ts.
+const GIT_REF_NAME = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
+const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/;
+const MAX_VALUE_CHARS = 255;
+
+export function isGitRefName(value: string): boolean {
+  return (
+    value.length <= MAX_VALUE_CHARS &&
+    GIT_REF_NAME.test(value) &&
+    !value.includes("..") &&
+    !value.includes("//") &&
+    !value.endsWith("/") &&
+    !value.endsWith(".") &&
+    !value.endsWith(".lock")
+  );
+}
+
+export function isModelName(value: string): boolean {
+  return value.length <= MAX_VALUE_CHARS && MODEL_NAME.test(value);
+}
+
 // Unset or blank means today's model, never `--model ""` — measured: the CLI answers
-// `400 model: String should have at least 1 character`, so a blank setting would fail every run
+// `400 model: String should have at least 1 character`, so a blank setting would fail every run.
+// The same fallback covers a value that is not a model name: the step and the review gate both
+// carry their own override (SnapshotEntry.model, the review gate's `model` param), and neither
+// travels through applyPolicy, so this is where all three meet.
 export function modelOr(value: string | undefined, fallback: string): string {
-  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+  const trimmed = typeof value === "string" ? value.trim() : "";
+  return trimmed && isModelName(trimmed) ? trimmed : fallback;
 }
 
 // What a worker needs before it can even register: where the server is, how to authenticate to it
@@ -211,7 +240,11 @@ export function applyPolicy(current: EffectiveConfig, patch: unknown): Effective
   const source = patch as Record<string, unknown>;
   const next = { ...current };
 
-  if (isNonEmptyString(source.baseBranch)) next.baseBranch = source.baseBranch.trim();
+  // Dropped like any other malformed field rather than refusing the whole patch: one project
+  // sending a value this worker will not run must not cost the machine the others it serves.
+  if (isNonEmptyString(source.baseBranch) && isGitRefName(source.baseBranch.trim())) {
+    next.baseBranch = source.baseBranch.trim();
+  }
   if (isPositiveNumber(source.pollIntervalMs)) next.pollIntervalMs = source.pollIntervalMs;
   if (isPositiveNumber(source.taskTimeoutMs)) next.taskTimeoutMs = source.taskTimeoutMs;
   // Clamped, not taken: a ceiling past the server's own lease gets the task reclaimed under a
@@ -221,9 +254,15 @@ export function applyPolicy(current: EffectiveConfig, patch: unknown): Effective
   );
   if (isPositiveNumber(source.maxDiffLines)) next.maxDiffLines = source.maxDiffLines;
   if (isPositiveNumber(source.maxDiffFiles)) next.maxDiffFiles = source.maxDiffFiles;
-  if (isNonEmptyString(source.model)) next.model = source.model.trim();
-  if (isNonEmptyString(source.fallbackModel)) next.fallbackModel = source.fallbackModel.trim();
-  if (isNonEmptyString(source.reviewModel)) next.reviewModel = source.reviewModel.trim();
+  if (isNonEmptyString(source.model) && isModelName(source.model.trim())) {
+    next.model = source.model.trim();
+  }
+  if (isNonEmptyString(source.fallbackModel) && isModelName(source.fallbackModel.trim())) {
+    next.fallbackModel = source.fallbackModel.trim();
+  }
+  if (isNonEmptyString(source.reviewModel) && isModelName(source.reviewModel.trim())) {
+    next.reviewModel = source.reviewModel.trim();
+  }
 
   return next;
 }

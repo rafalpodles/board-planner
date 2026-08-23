@@ -30,6 +30,19 @@ describe("gitArgs", () => {
   it("refuses the system config", () => {
     expect(GIT_SAFE_ENV.GIT_CONFIG_NOSYSTEM).toBe("1");
   });
+
+  // BP-327. `--` is where a caller says "everything after this is a positional", so it is the one
+  // place the rule can be applied once for every call site rather than at each sink.
+  it("refuses an option-shaped argument after the -- separator", () => {
+    expect(() => gitArgs(["push", "--", "--receive-pack=touch /tmp/pwned"])).toThrow(
+      /leading dash/i
+    );
+  });
+
+  it("leaves options before the separator alone", () => {
+    expect(() => gitArgs(["add", "--all", "--"])).not.toThrow();
+    expect(() => gitArgs(["worktree", "add", "-B", "bp-1/x", "--", "/root/bp-1"])).not.toThrow();
+  });
 });
 
 // The same shape as child-env.contract.test.ts. Keyed on the env rather than on the literal "git",
