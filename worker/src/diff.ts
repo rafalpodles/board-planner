@@ -66,10 +66,14 @@ export async function collectDiff(
   const opts: RunOpts = { cwd: worktreePath, timeoutMs: GIT_TIMEOUT_MS };
   // Two trees, not a range: a merge-base is computed from history, and history is what the agent
   // rewrites to hide a file from this diff (BP-382).
-  const numstatOutput = await git(runner, ["diff", "--numstat", baseSha, "HEAD"], opts);
+  const numstatOutput = await git(runner, ["diff", "--no-ext-diff", "--numstat", baseSha, "HEAD"], opts);
   const { changedLines, changedFiles } = parseNumstat(numstatOutput);
 
-  const patchOutput = await git(runner, ["diff", baseSha, "HEAD"], opts);
+    // --no-ext-diff: a repo-local diff.external replaces the patch git prints with a program's
+  // output, so the review gate would read attacker-chosen text while the commit held something
+  // else — measured. repos.ts flags diff.external and the push refuses on it, but that is a
+  // poisoned review followed by a refused push; this closes it where the diff is taken.
+  const patchOutput = await git(runner, ["diff", "--no-ext-diff", baseSha, "HEAD"], opts);
   const { patch, truncated } = boundPatch(patchOutput);
 
   return { changedLines, changedFiles, patch, truncated };

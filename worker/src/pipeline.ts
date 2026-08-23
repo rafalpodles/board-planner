@@ -16,7 +16,7 @@ import { Reporter } from "./reporter.js";
 import { SHUTDOWN_SIGNAL } from "./commands.js";
 import { scrub } from "./scrub.js";
 import { OutcomeKind, Phase, Telemetry } from "./telemetry.js";
-import { Workspace, Worktree } from "./workspace.js";
+import { BaseUnavailableError, Workspace, Worktree } from "./workspace.js";
 import { ClaimedTask, DiffStats, ExecutionResult, Gate, GateResult, SnapshotEntry } from "./types.js";
 
 export interface PipelineDeps {
@@ -41,6 +41,8 @@ export interface PipelineDeps {
   // into a failed one, and must not be lost to the redeploy a merge triggers either.
   recordRun: (projectId: string, record: RunRecord) => void;
   signal?: AbortSignal;
+  /** Worker-side stderr for faults an operator has to see without opening the board. */
+  logError?: (message: string) => void;
   /** Injected only so a test can move the run's clock; the run itself reads the wall clock. */
   now?: () => number;
   // Where the run says what it is doing. Left out entirely, the run behaves exactly as it did
@@ -186,7 +188,13 @@ async function releaseIfAborted(
   return true;
 }
 
-export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<void> {
+/**
+ * "machine-fault" means the run failed for a reason that has nothing to do with the task and will
+ * repeat on the next one — the loop stops claiming for a cycle rather than feeding it the queue.
+ */
+export type RunDisposition = void | "machine-fault";
+
+export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<RunDisposition> {
   const { config, workspace, executor, runner, telemetry } = deps;
   const now = deps.now ?? Date.now;
   const branch = `${task.taskKey.toLowerCase()}/${SLUG}`;
@@ -251,6 +259,17 @@ export async function runTask(deps: PipelineDeps, task: ClaimedTask): Promise<vo
     worktree = await workspace.create(task.taskKey, SLUG);
   } catch (error) {
     await quietly(() => workspace.destroy(task.taskKey));
+    // A base that could not be established is this machine's failure, not the task's, and it will
+    // fail identically for the next task and the one after it. Charging the attempt would walk the
+    // whole approved queue into the escalation column over one unreachable remote — and nothing
+    // ever resets execution.attempts, so a human moving those tasks back gets cards no worker will
+    // look at again. Released with the attempt refunded, and the loop is told to stop claiming.
+    if (error instanceof BaseUnavailableError) {
+      settle("released", "the base branch could not be established");
+      deps.logError?.(`${task.taskKey}: ${String(error)}`);
+      await reporter.released(task, String(error));
+      return "machine-fault";
+    }
     settle("requeued", "could not create a worktree");
     await reporter.requeued(task, `could not create a worktree: ${String(error)}`);
     return;

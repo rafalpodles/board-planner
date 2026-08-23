@@ -1,11 +1,24 @@
+import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
-import { resolve, sep } from "path";
+import { join, resolve, sep } from "path";
 import { WorkerConfig } from "./config.js";
 import { childEnv } from "./env.js";
 import { CommandResult, Runner } from "./exec.js";
 import { gitArgs, GIT_SAFE_ENV } from "./git-safety.js";
 
 const GIT_TIMEOUT_MS = 60_000;
+
+/**
+ * The base could not be established from the remote. This is the machine's fault, not the task's —
+ * the run is released with its attempt refunded and the worker backs off, rather than charging a
+ * task for a network its own host could not reach.
+ */
+export class BaseUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "BaseUnavailableError";
+  }
+}
 
 export interface Worktree {
   path: string;
@@ -89,28 +102,64 @@ export function createWorkspace(
   // system and global files only. Measured; the comment that used to stand here claimed the
   // opposite and the gate was reopened through it.
   //
-  // Outside any repository there is no local config to honour. GIT_CEILING_DIRECTORIES stops
-  // discovery from walking up out of the neutral directory and finding one anyway.
+  // GH_CONFIG_DIR/XDG_CONFIG_HOME travel with it for the same reason delivery.ts carries them: the
+  // credential helper is `gh`, and an operator who moved gh's config would otherwise be able to
+  // push but not to resolve a base.
   //
   // No `-c` flags ride along: gitArgs()'s `-c credential.helper=` is the last thing git evaluates,
   // and for that multi-valued key it silently discards whatever env() installed — verified
   // empirically, and it made every https fetch fail to authenticate. hardenedGitConfig() already
   // covers hooksPath/fsmonitor/pager/protocol for this class of call, same as delivery's push.
-  function remoteRun(
+  async function remoteRun(
     env: () => NodeJS.ProcessEnv,
     cwd: string,
     args: string[],
     extraEnv: NodeJS.ProcessEnv = {}
   ): Promise<CommandResult> {
-    return runner.run("git", args, {
+    const result = await runner.run("git", args, {
       cwd,
       timeoutMs: GIT_TIMEOUT_MS,
       env: {
-        ...childEnv(["SSH_AUTH_SOCK", "GH_TOKEN", "GITHUB_TOKEN"]),
+        ...childEnv([
+          "SSH_AUTH_SOCK",
+          "GH_TOKEN",
+          "GITHUB_TOKEN",
+          "GH_CONFIG_DIR",
+          "XDG_CONFIG_HOME",
+        ]),
         ...env(),
         ...GIT_SAFE_ENV,
         ...extraEnv,
       },
+    });
+    // A killed child contributes no stderr, so without this a 60 s hang and an instant refusal by
+    // the server read identically to whoever has to diagnose it.
+    if (result.timedOut) {
+      return { ...result, stderr: `git ${args[0]} timed out after ${GIT_TIMEOUT_MS}ms` };
+    }
+    return result;
+  }
+
+  // Where the call that decides the base runs. `os.tmpdir()` is NOT a safe place for it: the agent
+  // is handed TMPDIR (env.ts's allowlist) and can write there, the directory persists between
+  // runs, and a `.git` file planted in it is honoured — GIT_CEILING_DIRECTORIES cannot prevent
+  // that, because git documents that the ceiling never excludes the working directory itself, and
+  // an entry equal to cwd is not even a proper ancestor, so it matches nothing at all. Measured.
+  //
+  // So: a fresh directory this process creates (mkdtemp is 0700 and its name is unpredictable, so
+  // nothing can be lying in wait inside it), plus an explicit GIT_DIR, which makes git skip
+  // repository discovery outright rather than merely bounding it.
+  function withNeutralGitHome<T>(run: (opts: { cwd: string; env: NodeJS.ProcessEnv }) => Promise<T>): Promise<T> {
+    const dir = mkdtempSync(join(tmpdir(), "bp-worker-base-"));
+    return run({
+      cwd: dir,
+      env: { GIT_DIR: join(dir, "no-repository"), GIT_CEILING_DIRECTORIES: tmpdir() },
+    }).finally(() => {
+      try {
+        rmSync(dir, { recursive: true, force: true });
+      } catch {
+        // a leftover empty temp directory is not worth failing a run over
+      }
     });
   }
 
@@ -137,19 +186,18 @@ export function createWorkspace(
   // a server the agent points us at cannot make *this* sha appear.
   async function resolveFreshBase(env: () => NodeJS.ProcessEnv, url: string): Promise<string> {
     const ref = `refs/heads/${config.baseBranch}`;
-    const neutral = tmpdir();
-    const lsRemote = await remoteRun(env, neutral, ["ls-remote", "--", url, ref], {
-      GIT_CEILING_DIRECTORIES: neutral,
-    });
+    const lsRemote = await withNeutralGitHome(({ cwd, env: neutralEnv }) =>
+      remoteRun(env, cwd, ["ls-remote", "--", url, ref], neutralEnv)
+    );
     if (lsRemote.code !== 0) {
-      throw new Error(
+      throw new BaseUnavailableError(
         `could not read ${ref} from ${url} (${lsRemote.stderr || lsRemote.stdout || "ls-remote failed"})`
       );
     }
 
     const remoteSha = shaForExactRef(lsRemote.stdout, ref);
     if (!remoteSha) {
-      throw new Error(`${url} did not report ${ref}`);
+      throw new BaseUnavailableError(`${url} did not report ${ref}`);
     }
 
     // `--` guards both positional arguments: without it a value beginning with a dash is read as
@@ -163,14 +211,23 @@ export function createWorkspace(
       config.baseBranch,
     ]);
     if (fetched.code !== 0) {
-      throw new Error(
+      throw new BaseUnavailableError(
         `could not fetch ${config.baseBranch} from ${url} (${fetched.stderr || fetched.stdout || "fetch failed"})`
       );
     }
 
-    // `^{commit}` is load-bearing: `rev-parse --verify <sha>` exits 0 for an object that is not
-    // present, while `<sha>^{commit}` requires it locally and refuses a tag or a blob.
-    return (await git(["rev-parse", "--verify", `${remoteSha}^{commit}`])).trim();
+    // `^{commit}` is load-bearing, and it is the only thing proving the fetch actually delivered
+    // anything: `rev-parse --verify <sha>` exits 0 for an object that is NOT present and simply
+    // echoes the sha back, while `<sha>^{commit}` requires it locally. It refuses a blob or a
+    // tree; it does not refuse an annotated tag — it peels one, returning a different sha than the
+    // one asked for, which is why the result is what gets used rather than remoteSha.
+    try {
+      return (await git(["rev-parse", "--verify", `${remoteSha}^{commit}`])).trim();
+    } catch (error) {
+      throw new BaseUnavailableError(
+        `fetched ${config.baseBranch} from ${url} but ${remoteSha} did not resolve afterwards (${String(error)})`
+      );
+    }
   }
 
   // There is deliberately no fallback to the local ref. That ref is writable by the agent of any
@@ -181,7 +238,7 @@ export function createWorkspace(
   // against a base somebody else chose.
   async function resolveBase(): Promise<string> {
     if (!remoteEnv || !remoteUrl) {
-      throw new Error(
+      throw new BaseUnavailableError(
         `no remote is configured for this checkout, so ${config.baseBranch} could only be read from the local ref store, which a previous run's agent can write`
       );
     }
@@ -196,7 +253,11 @@ export function createWorkspace(
       try {
         baseSha = await resolveBase();
       } catch (error) {
-        throw new Error(`could not resolve base branch ${config.baseBranch}: ${String(error)}`);
+        // Kept as BaseUnavailableError: the pipeline tells a machine fault from a task fault by
+        // this type, and wrapping it in a plain Error would charge the task for the machine.
+        throw new BaseUnavailableError(
+          `could not resolve base branch ${config.baseBranch}: ${String(error)}`
+        );
       }
 
       await removeIfRegistered(path);
