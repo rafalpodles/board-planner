@@ -171,17 +171,20 @@ export function ProgressBar({ done, total }: { done: number; total: number }) {
 }
 
 /**
- * True once the watched element has scrolled up behind a bar `barHeight` tall. An
- * IntersectionObserver rather than a scroll listener: it fires twice per crossing instead
- * of once per frame, so nothing recomputes while the page is moving. A callback ref, not a
- * RefObject, because the element this watches only mounts once the task has loaded.
+ * True once the watched element has scrolled out of the top of `root`. Measuring against the
+ * scroll box rather than the viewport is what makes it exact: the header sits flush on that
+ * box's top edge, so "gone from the box" and "gone behind the header" are the same moment at
+ * any viewport offset. An IntersectionObserver rather than a scroll listener: it fires twice
+ * per crossing instead of once per frame, so nothing recomputes while the page is moving. A
+ * callback ref, not a RefObject, because the element this watches only mounts once the task
+ * has loaded.
  */
-export function useScrolledBehind(barHeight: number) {
+export function useScrolledBehind(root: Element | null) {
   const [node, setNode] = useState<Element | null>(null);
   const [behind, setBehind] = useState(false);
 
   useEffect(() => {
-    if (!node) return;
+    if (!node || !root) return;
 
     const observer = new IntersectionObserver(
       ([entry]) => {
@@ -189,11 +192,11 @@ export function useScrolledBehind(barHeight: number) {
         const above = entry.boundingClientRect.top < (entry.rootBounds?.top ?? 0);
         setBehind(!entry.isIntersecting && above);
       },
-      { rootMargin: `-${barHeight}px 0px 0px 0px`, threshold: 0 },
+      { root, threshold: 0 },
     );
     observer.observe(node);
     return () => observer.disconnect();
-  }, [node, barHeight]);
+  }, [node, root]);
 
   return [behind, setNode] as const;
 }

@@ -89,11 +89,15 @@ export function Modal({
             </button>
           </div>
         )}
-        {/* --task-bar-top cancels .scroll-ring-room's 0.3125rem, which a sticky header inside
-            would otherwise leave as a gap with the content scrolling through it */}
+        {/* A bare child draws its own frame, header included, and scrolls inside itself:
+            padding here would show as a strip above that header, and scrolling here would
+            move it. Every other dialog keeps the room its focus rings need. */}
         <div
-          className={`min-h-0 overflow-y-auto scroll-ring-room [--task-bar-top:-0.3125rem]
-            ${bare ? "flex-1" : ""}`}
+          className={
+            bare
+              ? "flex min-h-0 flex-1 flex-col overflow-hidden"
+              : "min-h-0 overflow-y-auto scroll-ring-room"
+          }
         >
           {children}
         </div>

@@ -52,14 +52,15 @@ export function TaskTopBar({
   const ghost =
     "focus-ring rounded-lg border border-border px-2.5 py-1.5 text-xs text-text-muted transition-colors hover:bg-bg-hover hover:text-text";
 
-  // Chrome pins a sticky `top` to the scrollport's CONTENT box, so top padding on the scroll
-  // container leaves a strip the task scrolls through above this bar. Each host cancels its
-  // own padding through --task-bar-top.
+  // Not sticky, deliberately: a sticky header is still part of the scrolled content, so it
+  // travels the length of any padding above it before it engages, loses the card's border and
+  // corner when it does, and an elastic overscroll drags it along with everything else. The
+  // task scrolls in a box below this bar instead.
   return (
     <div
       data-testid="task-top-bar"
-      className="@container sticky top-[var(--task-bar-top,0px)] z-20 flex items-center gap-3
-        border-b border-border bg-bg-card px-4 py-2.5 sm:px-5"
+      className="@container flex shrink-0 items-center gap-3 border-b border-border
+        bg-bg-card px-4 py-2.5 sm:px-5"
     >
       <button
         type="button"
