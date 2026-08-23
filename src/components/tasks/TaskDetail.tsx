@@ -25,6 +25,7 @@ import { MobileCommentBar } from "@/components/tasks/detail/MobileCommentBar";
 import { MobileSummary } from "@/components/tasks/detail/MobileSummary";
 import { PropertyRail } from "@/components/tasks/detail/PropertyRail";
 import { TaskTopBar } from "@/components/tasks/detail/TaskTopBar";
+import { useScrolledBehind } from "@/components/tasks/detail/atoms";
 import { useTaskEditor } from "@/components/tasks/detail/useTaskEditor";
 import type { Trigger } from "@/hooks/use-trigger-autocomplete";
 import { useEditorTriggers } from "@/hooks/use-editor-triggers";
@@ -137,6 +138,8 @@ function TaskDetailView({
   const { toast } = useToast();
 
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [scrollBox, setScrollBox] = useState<HTMLElement | null>(null);
+  const [titleBehindBar, watchTitle] = useScrolledBehind(scrollBox);
   // A status change the server refused because a worker holds this task, parked for the dialog
   const [heldStatus, setHeldStatus] = useState<{
     conflict: RunConflict;
@@ -276,12 +279,14 @@ function TaskDetailView({
   }
 
   return (
-    <div className="flex min-h-0 flex-col">
+    <div className="flex min-h-0 flex-1 flex-col">
       <TaskTopBar
         projectName={project.name}
         projectRef={project.key}
         taskKey={taskKey}
         taskNumber={task.taskNumber}
+        title={draft.title}
+        showTitle={titleBehindBar}
         columns={columns}
         status={task.status}
         onStatusChange={handleStatusChange}
@@ -294,120 +299,128 @@ function TaskDetailView({
         onClose={onClose}
       />
 
-      <div className="grid lg:grid-cols-[minmax(0,1fr)_312px]">
-        <div
-          className="flex min-w-0 flex-col gap-6 px-4 py-6 pb-28 sm:px-7
-            lg:border-r lg:border-border lg:pb-6"
-        >
-          <div className="flex flex-col gap-2">
-            <InlineTitle value={draft.title} onChange={(value) => set("title", value)} />
-            <div className="flex flex-wrap items-center gap-2 px-1.5 text-xs text-text-muted">
-              <span>
-                Created{" "}
-                {new Date(task.createdAt).toLocaleDateString(undefined, {
-                  day: "numeric",
-                  month: "short",
-                })}
-                {reporter ? ` by ${reporter}` : ""}
-              </span>
-              <span aria-hidden className="opacity-40">
-                •
-              </span>
-              <span>Edited {timeAgo(task.updatedAt)}</span>
-              <span aria-hidden className="opacity-40">
-                •
-              </span>
-              {autoSaveState === "error" ? (
-                <button
-                  type="button"
-                  onClick={retry}
-                  className="focus-ring rounded text-danger hover:underline"
-                >
-                  ⚠ Save failed — retry
-                </button>
-              ) : (
-                <span
-                  aria-live="polite"
-                  className={autoSaveState === "saved" ? "text-success" : ""}
-                >
-                  {autoSaveState === "saving" ? "Saving…" : "All changes saved"}
+      <div
+        ref={setScrollBox}
+        data-testid="task-scroll"
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+      >
+        <div className="grid lg:grid-cols-[minmax(0,1fr)_312px]">
+          <div
+            className="flex min-w-0 flex-col gap-6 px-4 py-6 pb-28 sm:px-7
+              lg:border-r lg:border-border lg:pb-6"
+          >
+            <div className="flex flex-col gap-2">
+              <div ref={watchTitle}>
+                <InlineTitle value={draft.title} onChange={(value) => set("title", value)} />
+              </div>
+              <div className="flex flex-wrap items-center gap-2 px-1.5 text-xs text-text-muted">
+                <span>
+                  Created{" "}
+                  {new Date(task.createdAt).toLocaleDateString(undefined, {
+                    day: "numeric",
+                    month: "short",
+                  })}
+                  {reporter ? ` by ${reporter}` : ""}
                 </span>
-              )}
+                <span aria-hidden className="opacity-40">
+                  •
+                </span>
+                <span>Edited {timeAgo(task.updatedAt)}</span>
+                <span aria-hidden className="opacity-40">
+                  •
+                </span>
+                {autoSaveState === "error" ? (
+                  <button
+                    type="button"
+                    onClick={retry}
+                    className="focus-ring rounded text-danger hover:underline"
+                  >
+                    ⚠ Save failed — retry
+                  </button>
+                ) : (
+                  <span
+                    aria-live="polite"
+                    className={autoSaveState === "saved" ? "text-success" : ""}
+                  >
+                    {autoSaveState === "saving" ? "Saving…" : "All changes saved"}
+                  </span>
+                )}
+              </div>
             </div>
+
+            <MobileSummary
+              draft={draft}
+              assignee={assignee}
+              categories={project.categories || []}
+              onOpenDetails={() => setDetailsOpen(true)}
+            />
+
+            <DescriptionSection
+              value={draft.description}
+              onChange={(value) => set("description", value)}
+              onFileUpload={handleFileUpload}
+              scope={scope}
+              triggers={triggers}
+              collapsible
+            />
+
+            <CriteriaSection
+              items={draft.checklist}
+              triggers={triggers}
+              scope={scope}
+              onChange={(items) => set("checklist", items)}
+            />
+
+            <ExecutionPanel execution={task.execution} />
+
+            <LinkedWork
+              projectId={projectId}
+              projectKey={project.key}
+              task={task}
+              columns={columns}
+              onChanged={onReload}
+              onAddChild={() => setAddingChild(true)}
+            />
+
+            <GitlabActivity projectId={projectId} taskId={task._id} />
+
+            <section className="border-t border-border pt-5">
+              <TaskActivityPanel
+                projectId={projectId}
+                taskId={task._id}
+                scope={scope}
+                commentRefreshKey={commentRefreshKey}
+              />
+            </section>
           </div>
 
-          <MobileSummary
-            draft={draft}
-            assignee={assignee}
-            categories={project.categories || []}
-            onOpenDetails={() => setDetailsOpen(true)}
-          />
-
-          <DescriptionSection
-            value={draft.description}
-            onChange={(value) => set("description", value)}
-            onFileUpload={handleFileUpload}
-            scope={scope}
-            triggers={triggers}
-            collapsible
-          />
-
-          <CriteriaSection
-            items={draft.checklist}
-            triggers={triggers}
-            scope={scope}
-            onChange={(items) => set("checklist", items)}
-          />
-
-          <ExecutionPanel execution={task.execution} />
-
-          <LinkedWork
-            projectId={projectId}
-            projectKey={project.key}
-            task={task}
-            columns={columns}
-            onChanged={onReload}
-            onAddChild={() => setAddingChild(true)}
-          />
-
-          <GitlabActivity projectId={projectId} taskId={task._id} />
-
-          <section className="border-t border-border pt-5">
-            <TaskActivityPanel
-              projectId={projectId}
-              taskId={task._id}
-              scope={scope}
-              commentRefreshKey={commentRefreshKey}
+          <aside className="hidden bg-bg px-5 py-6 lg:block">
+            <PropertyRail
+              draft={draft}
+              set={set}
+              users={users}
+              sprints={sprints}
+              agents={agents}
+              projectDefaultAgent={projectDefaultAgent}
+              stored={task}
+              columns={columns}
+              onRepairAssigner={repairAssigner}
+              currentUsername={currentUser?.username ?? null}
+              categories={project.categories || []}
+              customFields={project.customFields || []}
+              reporter={reporter}
+              onDelete={requestDelete}
             />
-          </section>
+          </aside>
         </div>
 
-        <aside className="hidden bg-bg px-5 py-6 lg:block">
-          <PropertyRail
-            draft={draft}
-            set={set}
-            users={users}
-            sprints={sprints}
-            agents={agents}
-            projectDefaultAgent={projectDefaultAgent}
-            stored={task}
-            columns={columns}
-            onRepairAssigner={repairAssigner}
-            currentUsername={currentUser?.username ?? null}
-            categories={project.categories || []}
-            customFields={project.customFields || []}
-            reporter={reporter}
-            onDelete={requestDelete}
-          />
-        </aside>
+        <MobileCommentBar
+          projectId={projectId}
+          projectKey={project.key}
+          taskId={task._id}
+          onPosted={() => setCommentRefreshKey((k) => k + 1)}
+        />
       </div>
-
-      <MobileCommentBar
-        projectId={projectId}
-        projectKey={project.key}
-        taskId={task._id}
-        onPosted={() => setCommentRefreshKey((k) => k + 1)}
-      />
 
       <Modal
         open={detailsOpen}
