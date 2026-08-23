@@ -28,7 +28,7 @@ export interface StepContext {
   task: ClaimedTask;
   executor: Executor;
   delivery: Delivery;
-  commit: (message: string) => Promise<void>;
+  commit: (message: string) => Promise<string>;
   state: RunState;
   timeoutMs: number;
   signal?: AbortSignal;
