@@ -96,10 +96,11 @@ export async function accessibleProjectIds(user: IdentifiedSubject): Promise<str
  * notified. Batched rather than one check() per recipient because this runs on every notification
  * write.
  *
- * Machine identities are out of scope by construction: PUT /members refuses to grant a
- * `kind: "machine"` account, so a worker or the PM user can never satisfy this. They accumulate
- * watches by commenting and are filtered out here. Nothing reads a feed on their behalf today; if
- * something ever needs to tell a machine anything, this is the line that will refuse it.
+ * No `kind` check happens here, and none is implied: this asks the same question check() asks and
+ * gets the same answer. In practice a worker identity holds no grant and is not an admin, so it is
+ * refused — but by the ordinary rule, not by a special case. PUT /members does refuse to grant a
+ * `kind: "machine"` account, which is why one never appears; the `pm` account is stored with the
+ * default `kind: "human"` and is not covered by that refusal at all.
  */
 export async function recipientsWithAccess(
   subjectIds: string[],
@@ -118,7 +119,10 @@ export async function recipientsWithAccess(
   const relationOf = new Map(grants.map((g) => [String(g.subject), g.relation]));
   const roleOf = new Map(users.map((u) => [String(u._id), u.role]));
 
-  return subjectIds.filter((id) => {
+  // Stringified on both sides, the way the maps are keyed: a caller handing over ObjectIds would
+  // otherwise match nothing and lose every recipient silently.
+  return subjectIds.filter((subjectId) => {
+    const id = String(subjectId);
     const role = roleOf.get(id);
     // No such user — deleted, or an id from a stale watcher list. Refused rather than resolved.
     if (!role) return false;
