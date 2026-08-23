@@ -10,10 +10,11 @@ vi.mock("@/models/user", () => ({
     findByIdAndUpdate: (...a: unknown[]) => findByIdAndUpdate(...a),
   },
 }));
+let caller: { _id: string; viaMachineCredential?: boolean } = { _id: "u1" };
 vi.mock("@/lib/middleware", () => ({
   withAuth:
-    (handler: (req: Request, ctx: { user: { _id: string } }) => unknown) => (req: Request) =>
-      handler(req, { user: { _id: "u1" } }),
+    (handler: (req: Request, ctx: { user: typeof caller }) => unknown) => (req: Request) =>
+      handler(req, { user: caller }),
 }));
 vi.mock("@/lib/encryption", () => ({
   encryptSecret: (v: string) => `enc:${v}`,
@@ -43,7 +44,32 @@ beforeEach(() => {
   findById.mockReset();
   findByIdAndUpdate.mockReset();
   findByIdAndUpdate.mockResolvedValue({});
+  caller = { _id: "u1" };
   stored({ chat: { kind: "slack", webhookUrl: "enc:x" }, projects: [] });
+});
+
+describe("who may point a webhook at themselves", () => {
+  // The same argument PUT /api/users/me makes about the address: a webhook is a standing outbound
+  // copy of everything this person is told, chosen once and never shown back, so a token able to
+  // install one is a token that becomes a listening post.
+  it("refuses a machine credential, and writes nothing", async () => {
+    caller = { _id: "u1", viaMachineCredential: true };
+
+    const res = await put({ chat: { kind: "slack", webhookUrl: "https://hooks.example/x" } });
+
+    expect(res.status).toBe(403);
+    expect(findByIdAndUpdate).not.toHaveBeenCalled();
+  });
+
+  // The grid itself is an ordinary preference — only the webhook is the standing channel
+  it("lets a machine credential change the grid", async () => {
+    caller = { _id: "u1", viaMachineCredential: true };
+
+    const res = await put({ defaults: grid(false) });
+
+    expect(res.status).toBe(200);
+    expect(written()).toHaveProperty("notifications.defaults");
+  });
 });
 
 describe("what a PUT is allowed to clear", () => {

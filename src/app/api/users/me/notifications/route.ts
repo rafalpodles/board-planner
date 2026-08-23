@@ -50,6 +50,16 @@ export const PUT = withAuth(async (request, { user }) => {
   let chatAfter = { kind: storedChat?.kind ?? "", hasUrl: !!storedChat?.webhookUrl };
 
   if (body?.chat !== undefined && body?.chat !== null) {
+    // A webhook is a standing outbound copy of everything this person is told, in every project,
+    // to an address chosen once and never shown back — the screen only ever says "a webhook is
+    // stored". That is the same argument the address change makes two files over: a stolen token
+    // able to install one is a stolen token that becomes a listening post.
+    if (user.viaMachineCredential) {
+      return NextResponse.json(
+        { error: "This action requires an interactive session" },
+        { status: 403 }
+      );
+    }
     const kind = body.chat?.kind;
     if (kind && !PERSONAL_CHAT_KINDS.includes(kind as PersonalChatKind)) {
       return NextResponse.json({ error: "Unknown chat service" }, { status: 400 });
