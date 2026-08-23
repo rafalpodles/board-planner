@@ -751,11 +751,17 @@ export const TITLE_HIT_TITLE = "Zeppelin mooring mast";
 export const BODY_HIT_ID = id("e2e00000000000000000d302");
 export const BODY_HIT_NUMBER = 11;
 export const BODY_HIT_TITLE = "Airship paperwork";
-export const BODY_HIT_DESCRIPTION = "Ordered a new Zeppelin cable for the mast.";
+export const BODY_HIT_DESCRIPTION = "Ordered a new Zeppelin cable for the gondola.";
+
+// Carried in a description and in no title anywhere, on both boards. The endpoint ORs title and
+// description together, so a project filter pushed into one arm of that $or would leak every
+// description on the instance while a title-matched leak test stayed green.
+export const BODY_ONLY_WORD = "gondola";
 
 export const OTHER_HIT_ID = id("e2e00000000000000000d303");
 export const OTHER_HIT_NUMBER = 1;
 export const OTHER_HIT_TITLE = "Zeppelin hangar on the other board";
+export const OTHER_HIT_DESCRIPTION = "Spare gondola parts live in this hangar.";
 export const OTHER_HIT_KEY = `${OTHER_PROJECT_KEY}-${OTHER_HIT_NUMBER}`;
 
 // A word no seeded task carries, for the no-results state
@@ -768,6 +774,7 @@ export const LEGACY_HIT_ID = id("e2e00000000000000000d304");
 export const LEGACY_HIT_NUMBER = 12;
 export const LEGACY_HIT_WORD = "dirigible";
 export const LEGACY_HIT_TITLE = "Dirigible logbook from before priorities";
+export const LEGACY_HIT_KEY = `${PROJECT_KEY}-${LEGACY_HIT_NUMBER}`;
 
 // Regex metacharacters in a title people would actually type. Escaped, "[v2]" finds this one
 // task; unescaped it is a character class and matches every title holding a "v" or a "2".
@@ -778,6 +785,11 @@ export const META_QUERY = "[v2]";
 // Escaped this matches nothing; unescaped it matches everything
 export const META_WILDCARD = ".*";
 
+/**
+ * Never fold this into seed(). Four more tasks on TP and a taskCounter of 13 break
+ * kanban-board-core.spec.ts, which counts cards against SEEDED_TASKS = 4 and asserts the number
+ * the next created task is minted with.
+ */
 export async function seedSearchCorpus() {
   const db = (await connect()).db!;
   const now = new Date();
@@ -830,17 +842,11 @@ export async function seedSearchCorpus() {
   });
 
   // Distinct updatedAt, because the API sorts on it: the arrow-key test needs to know which hit
-  // the cursor starts on and which one it lands on.
+  // the cursor starts on and which one it lands on. Inserted in the OPPOSITE order to the one the
+  // sort produces — a collection scan returns insertion order, so a corpus inserted newest-first
+  // lets the sort be deleted with every test still green.
   const task = taskFactory(now);
   await db.collection("tasks").insertMany([
-    task({
-      _id: TITLE_HIT_ID,
-      taskNumber: TITLE_HIT_NUMBER,
-      title: TITLE_HIT_TITLE,
-      status: SPARE_COLUMN.id,
-      order: 10,
-      updatedAt: new Date(now.getTime() - 1_000),
-    }),
     task({
       _id: BODY_HIT_ID,
       taskNumber: BODY_HIT_NUMBER,
@@ -851,10 +857,19 @@ export async function seedSearchCorpus() {
       updatedAt: new Date(now.getTime() - 2_000),
     }),
     task({
+      _id: TITLE_HIT_ID,
+      taskNumber: TITLE_HIT_NUMBER,
+      title: TITLE_HIT_TITLE,
+      status: SPARE_COLUMN.id,
+      order: 10,
+      updatedAt: new Date(now.getTime() - 1_000),
+    }),
+    task({
       _id: OTHER_HIT_ID,
       project: OTHER_PROJECT_ID,
       taskNumber: OTHER_HIT_NUMBER,
       title: OTHER_HIT_TITLE,
+      description: OTHER_HIT_DESCRIPTION,
       status: SPARE_COLUMN.id,
       order: 0,
       updatedAt: new Date(now.getTime() - 3_000),
