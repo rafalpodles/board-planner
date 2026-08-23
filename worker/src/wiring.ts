@@ -188,7 +188,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   // Why the inventory could not be read, surfaced on the heartbeat so a broken repos.json shows up
   // in the console instead of looking like a machine that simply has nothing.
   let inventoryError = "";
-  let bound = new Map<string, { path: string; worktreeRoot: string; config: EffectiveConfig }>();
+  let bound = new Map<string, { path: string; worktreeRoot: string; config: EffectiveConfig; remote: string }>();
   const reapedProjects = new Set<string>();
 
   // What this machine can actually do, established once at startup. Null until then, and reported
@@ -278,7 +278,10 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   // absent from bound, so the loop never attempts to claim from it.
   async function rebind(): Promise<void> {
     const identity = loadIdentity(identityStore);
-    const nextBound = new Map<string, { path: string; worktreeRoot: string; config: EffectiveConfig }>();
+    const nextBound = new Map<
+      string,
+      { path: string; worktreeRoot: string; config: EffectiveConfig; remote: string }
+    >();
     const errors: string[] = [];
 
     if (identity) {
@@ -308,6 +311,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
             path: result.path,
             worktreeRoot: result.worktreeRoot,
             config: applyPolicy(policy, assignment.policy),
+            remote: assignment.remote,
           });
         } else {
           errors.push(`${assignment.project}: ${result.reason}`);
@@ -342,10 +346,10 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       reapedProjects.add(projectId);
       const taskConfig = configFor(projectId);
       if (!taskConfig) continue;
-      // reapOrphans only lists and destroys — it never calls create() — so this provider is never
-      // actually invoked; passed anyway so every workspace this file builds carries the same shape.
+      // reapOrphans only lists and destroys — it never calls create() — so the fetch parameters
+      // stay absent here, same as Ruling 2 intends for any caller that has no use for them.
       const reaped = await reapOrphans(
-        createWorkspace(taskConfig, deps.runner, remoteFetchEnv("")),
+        createWorkspace(taskConfig, deps.runner),
         taskConfig.worktreeRoot
       ).catch(() => 0);
       if (reaped > 0) {
@@ -479,6 +483,9 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     }
 
     const githubToken = await githubIdentityToken();
+    // The same value rebind() matched this project's checkout against — the server's own record
+    // of the project's repository, never re-read from repoPath/.git at execution time.
+    const remoteUrl = bound.get(task.projectId)?.remote;
 
     currentRun = { taskId: task.taskId, runId: task.runId };
     try {
@@ -490,7 +497,13 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
           createReporter: (client, statusIds) =>
             createReporter(client, statusIds, (message) => deps.logError(message), outbox),
           createDelivery: (runner, baseBranch) => createDelivery(runner, baseBranch, githubToken),
-          workspace: createWorkspace(taskConfig, deps.runner, remoteFetchEnv(githubToken)),
+          workspace: createWorkspace(
+            taskConfig,
+            deps.runner,
+            remoteFetchEnv(githubToken),
+            remoteUrl,
+            deps.logError
+          ),
           executor: createExecutor(taskConfig, deps.runner),
           collectDiff,
           gateFor: gateFromEntry,
