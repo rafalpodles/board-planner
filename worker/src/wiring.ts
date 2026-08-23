@@ -49,7 +49,7 @@ import {
   PreflightReport,
   runPreflight,
 } from "./preflight.js";
-import { createReporter } from "./reporter.js";
+import { createReporter, ReleaseMemory } from "./reporter.js";
 import { abortableSleep } from "./sleep.js";
 import { HeartbeatDeps, loadIdentity, PROTOCOL_VERSION, startHeartbeat } from "./registration.js";
 import { bindRepository, createAllowlistReader, repoInventory } from "./repos.js";
@@ -170,6 +170,10 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
 
   const identityStore = deps.createStore(join(bootstrap.stateDir, "worker.json"));
   const outbox = createOutbox(deps.createStore(join(bootstrap.stateDir, "outbox.jsonl")));
+  // Outlives the run, unlike the reporter it is handed to — see ReleaseMemory. Same lesson as the
+  // once-per-binding log below: a machine parked next to a repository it cannot resolve a base in
+  // would otherwise write the same board comment, and fire the same notification, every poll.
+  const releaseComments: ReleaseMemory = new Map();
   const readAllowlist = createAllowlistReader(bootstrap.stateDir);
 
   // Everything below is worker-wide policy and the assignment list, both server-controlled and
@@ -496,7 +500,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
           api,
           columnIds: (projectId) => api.columnIds(projectId),
           createReporter: (client, statusIds) =>
-            createReporter(client, statusIds, (message) => deps.logError(message), outbox),
+            createReporter(client, statusIds, (message) => deps.logError(message), outbox, releaseComments),
           createDelivery: (runner, baseBranch) => createDelivery(runner, baseBranch, githubToken),
           workspace: createWorkspace(taskConfig, deps.runner, remoteFetchEnv(githubToken), remoteUrl),
           executor: createExecutor(taskConfig, deps.runner),

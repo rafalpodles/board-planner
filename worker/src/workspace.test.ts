@@ -1,5 +1,7 @@
-import { existsSync } from "fs";
+import { execFileSync } from "child_process";
+import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
+import { join } from "path";
 import { describe, it, expect, vi } from "vitest";
 import { createWorkspace, reapOrphans, Workspace } from "./workspace.js";
 import { CommandResult, RunOpts } from "./exec.js";
@@ -142,6 +144,48 @@ describe("createWorkspace", () => {
     expect(opts.env?.GIT_CEILING_DIRECTORIES).toBe(tmpdir());
   });
 
+  // The GIT_DIR half, which the ceiling cannot cover on its own. Measured on git 2.50.1 with a
+  // `.git` planted in the lookup's own working directory: with GIT_CEILING_DIRECTORIES alone git
+  // read the planted config, with GIT_DIR alone it did not. The ceiling stops discovery at a
+  // *proper ancestor* and git documents that it never excludes the working directory itself — the
+  // test above plants one directory higher, where either variable would have held, so nothing
+  // there could fail if GIT_DIR were dropped. mkdtemp makes reaching this directory hard rather
+  // than impossible: the agent runs at this worker's own uid, so an orphan of an earlier run can
+  // list $TMPDIR and write into the lookup's directory while the lookup is still in it.
+  it("does not read a repository planted in the lookup directory itself", async () => {
+    let discovered = "";
+    const responses = baseFromRemote("fresh1");
+    const run = vi.fn(async (_command: string, args: string[], opts: RunOpts): Promise<CommandResult> => {
+      if (args[0] === "ls-remote") {
+        const cwd = opts.cwd!;
+        mkdirSync(join(cwd, ".git", "refs"), { recursive: true });
+        writeFileSync(join(cwd, ".git", "HEAD"), "ref: refs/heads/main\n");
+        writeFileSync(
+          join(cwd, ".git", "config"),
+          "[core]\n\trepositoryformatversion = 0\n[bp]\n\tmarker = planted\n"
+        );
+        try {
+          discovered = execFileSync("git", ["config", "--get", "bp.marker"], {
+            cwd,
+            env: { PATH: process.env.PATH, ...opts.env } as NodeJS.ProcessEnv,
+            stdio: "pipe",
+          })
+            .toString()
+            .trim();
+        } catch {
+          discovered = "";
+        }
+      }
+      const hardened = HARDENING_PREFIX.every((flag, index) => args[index] === flag);
+      const key = (hardened ? args.slice(HARDENING_PREFIX.length) : args).join(" ");
+      return { code: 0, stdout: "", stderr: "", timedOut: false, ...responses[key] };
+    });
+
+    await withRemote({ run }).create("BP-1", "worker");
+
+    expect(discovered).toBe("");
+  });
+
   it("removes the directory it created for the lookup", async () => {
     const { runner, run } = fakeGit(baseFromRemote("fresh1"));
     await withRemote(runner).create("BP-1", "worker");
@@ -230,6 +274,39 @@ describe("createWorkspace", () => {
 
     await expect(withRemote(runner).create("BP-1", "worker")).rejects.toThrow(/did not report/);
     expect(readsLocalRef(run)).toBe(false);
+  });
+
+  // The kind is what the pipeline charges the attempt on. A remote that answered and has no such
+  // branch is the project's own setting — nothing on this machine will change it and no sibling
+  // project is affected — so it must not be reported as the machine being broken.
+  it("calls a remote that answered without the ref a configuration fault, not a transport one", async () => {
+    const { runner } = fakeGit(
+      baseFromRemote("genuine1", {
+        [LS_REMOTE]: { stdout: "decoy1\trefs/heads/aaa/refs/heads/main\n" },
+      })
+    );
+
+    await expect(withRemote(runner).create("BP-1", "worker")).rejects.toMatchObject({
+      kind: "configuration",
+    });
+  });
+
+  it("calls a checkout with no remote at all a configuration fault", async () => {
+    const { runner } = fakeGit(baseFromRemote("base1"));
+
+    await expect(
+      createWorkspace(config, runner).create("BP-1", "worker")
+    ).rejects.toMatchObject({ kind: "configuration" });
+  });
+
+  it("calls a remote that could not be reached a transport fault, so the worker backs off instead", async () => {
+    const { runner } = fakeGit(
+      baseFromRemote("fresh1", { [LS_REMOTE]: { code: 128, stderr: "could not resolve host" } })
+    );
+
+    await expect(withRemote(runner).create("BP-1", "worker")).rejects.toMatchObject({
+      kind: "transport",
+    });
   });
 
   // The fallback these three replace was the vulnerability handed back: the local ref is writable

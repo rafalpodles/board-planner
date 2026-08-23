@@ -538,39 +538,52 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
   // pipeline's return value never handed back) type-checks silently, because Promise<void> is
   // assignable to Promise<void | "machine-fault">, and produces a hot loop instead: the worker
   // claims again immediately with no poll interval on an unreachable remote.
-  it("stops claiming for the cycle, without sleeping mid-pass, when the base branch cannot be resolved", async () => {
+  // ls-remote is where resolveFreshBase reads the base branch off the wire; failing it is what
+  // turns workspace.create's failure into a transport-kind BaseUnavailableError, i.e. a machine
+  // fault. Every other call is the content-free catch-all the rest of this file's runners use to
+  // satisfy bindRepository/checkRepo.
+  const unreachableRemote: Runner = {
+    async run(_command, args) {
+      if (args[0] === "ls-remote") {
+        return { code: 1, stdout: "", stderr: "unreachable", timedOut: false };
+      }
+      return {
+        code: 0,
+        stdout: args.includes("rev-parse") ? REPO : args.includes("get-url") ? REMOTE : "",
+        stderr: "",
+        timedOut: false,
+      };
+    },
+  };
+
+  async function runAgainstUnreachableRemote(options: { passes: number; endlessQueue?: boolean }) {
     const stateDir = mkdtempSync(join(tmpdir(), "cp-machine-fault-"));
     writeFileSync(join(stateDir, "repos.json"), JSON.stringify({ repos: [REPO] }), { mode: 0o600 });
 
-    let claimCalls = 0;
-    let sleepCalls = 0;
+    const counts = { claims: 0, sleeps: 0 };
     let stop = (): void => {};
 
-    // ls-remote is where resolveFreshBase reads the base branch off the wire; failing it is what
-    // turns workspace.create's failure into a BaseUnavailableError, i.e. a machine fault. Every
-    // other call is the content-free catch-all the rest of this file's runners use to satisfy
-    // bindRepository/checkRepo.
-    const faultyRunner: Runner = {
-      async run(_command, args) {
-        if (args[0] === "ls-remote") {
-          return { code: 1, stdout: "", stderr: "unreachable", timedOut: false };
-        }
-        return {
-          code: 0,
-          stdout: args.includes("rev-parse") ? REPO : args.includes("get-url") ? REMOTE : "",
-          stderr: "",
-          timedOut: false,
-        };
-      },
+    const api = {
+      claim: vi.fn(async () => {
+        counts.claims++;
+        return options.endlessQueue || counts.claims === 1 ? CLAIMED : null;
+      }),
+      setStatus: vi.fn().mockResolvedValue(undefined),
+      comment: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn().mockResolvedValue(undefined),
+      statusIds: vi.fn().mockResolvedValue({ approved: "todo", review: "in_review", done: "done" }),
+      columnIds: vi.fn().mockResolvedValue(["todo", "in_progress", "in_review", "done"]),
+      postEvent: async () => ({ applied: true }),
+      postRun: vi.fn().mockResolvedValue(undefined),
     };
 
     const worker = createWorker({
       env: { ...ENV, CP_STATE_DIR: stateDir },
-      runner: faultyRunner,
+      runner: unreachableRemote,
       hostname: () => "host-1",
       sleep: async () => {
-        sleepCalls++;
-        stop();
+        counts.sleeps++;
+        if (counts.sleeps >= options.passes) stop();
       },
       log: vi.fn(),
       logError: vi.fn(),
@@ -589,19 +602,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         json: async () => ({ assignments: [{ project: "p1", remote: REMOTE }] }),
       }) as unknown as typeof fetch,
       createStore: (path) => memoryStore(path.endsWith("worker.json") ? IDENTITY : ""),
-      createApi: () =>
-        ({
-          claim: vi.fn(async () => {
-            claimCalls++;
-            return claimCalls === 1 ? CLAIMED : null;
-          }),
-          setStatus: vi.fn().mockResolvedValue(undefined),
-          comment: vi.fn().mockResolvedValue(undefined),
-          release: vi.fn().mockResolvedValue(undefined),
-          statusIds: vi.fn().mockResolvedValue({ approved: "todo", review: "in_review", done: "done" }),
-          columnIds: vi.fn().mockResolvedValue(["todo", "in_progress", "in_review", "done"]),
-          postEvent: async () => ({ applied: true }),
-        }) as unknown as ApiClient,
+      createApi: () => api as unknown as ApiClient,
       startHeartbeat: () => fakeHeartbeat(),
       connectControl: () => ({ close: vi.fn() }),
       startLocalServer: () => ({ ready: Promise.resolve(), close: vi.fn().mockResolvedValue(undefined) }),
@@ -613,13 +614,32 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     } finally {
       rmSync(stateDir, { recursive: true, force: true });
     }
+    return { api, counts };
+  }
+
+  it("stops claiming for the cycle, without sleeping mid-pass, when the base branch cannot be resolved", async () => {
+    const { counts } = await runAgainstUnreachableRemote({ passes: 1 });
 
     // A propagated machine-fault ends the pass on the very claim that hit it: one claim, then
     // sleep. The bug this guards claims a fault as ordinary work instead, so the loop skips the
     // sleep and claims again immediately — it would only give up once the queue itself ran dry,
     // claiming a second time (and finding nothing left) before ever sleeping.
-    expect(claimCalls).toBe(1);
-    expect(sleepCalls).toBe(1);
+    expect(counts.claims).toBe(1);
+    expect(counts.sleeps).toBe(1);
+  });
+
+  // Three passes over the same unresolvable base, which is what a laptop that lost its wifi does
+  // all night. The reporter dedupes a repeated release comment, but it is built per run, so the
+  // memory behind that dedupe has to be wired somewhere that outlives one — otherwise every poll
+  // writes the card another identical comment and fires another webhook, Slack message and
+  // notification with it: ~120 an hour at the default interval.
+  it("comments once about a base it cannot resolve, however many passes hit the same fault", async () => {
+    const { api, counts } = await runAgainstUnreachableRemote({ passes: 3, endlessQueue: true });
+
+    expect(counts.claims).toBe(3);
+    expect(api.release).toHaveBeenCalledTimes(3);
+    expect(api.comment).toHaveBeenCalledTimes(1);
+    expect(api.comment.mock.calls[0][2]).toMatch(/Returned to the queue: .*could not resolve base branch main/s);
   });
 
   // The whole run, as the board would see it: the three stage boundaries it got past, the three
