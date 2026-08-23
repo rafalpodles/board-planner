@@ -9,7 +9,11 @@ vi.mock("@/models/rateLimit", async () => {
 });
 
 vi.mock("@/models/oauthClient", () => ({ OAuthClient: { create } }));
-vi.mock("@/lib/oauth", () => ({ newClientId: () => "cpc_generated" }));
+// Partial: `isValidRedirectUri` is the rule these tests are about, so it stays real.
+vi.mock("@/lib/oauth", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/oauth")>()),
+  newClientId: () => "cpc_generated",
+}));
 
 const { POST } = await import("./route");
 const { resetRateLimits } = await import("@/lib/rate-limit");
