@@ -54,8 +54,10 @@ export const INTEGRATIONS: Definition[] = [
   {
     id: "channels",
     brand: "slack",
-    name: "Slack & Discord",
-    blurb: "Post board events to a channel",
+    name: "Team channels",
+    // Named apart from the personal grid under Notifications, which also says "Slack": this one
+    // posts to a shared room and does not care who is watching what
+    blurb: "Post board events to a shared Slack or Discord channel",
     isConfigured: (p) => (p.notificationChannels?.length ?? 0) > 0,
     summary: (p) => {
       const n = p.notificationChannels?.length ?? 0;

@@ -208,6 +208,38 @@ and `SIGINT` both finish the task in flight before the loop exits.
   authenticates over ssh with the agent socket, or over https through `gh auth git-credential`.
   Nothing here touches the agent's own commits, which are made in a different environment that does
   read your config.
+- **Nothing the server sends becomes a path or an option.** Everything below arrives over HTTP from
+  whichever server this worker is enrolled with, and everything past that boundary runs on somebody's
+  laptop at their uid. Two of these were live: a `workerId` of `../../../../Users/rpo/Library/LaunchAgents`
+  relocated the worktree root outside the `repos.json` allowlist, and a `baseBranch` of
+  `--output=/tmp/pwned` was read by `git diff` as an option rather than a revision — measured on git
+  2.50.1, exit 0, file created. Both are fixed; the rest of the table is the sweep that found them
+  (BP-327), including the values judged not to need a check.
+
+  | Value | Comes from | Ends up as | What holds it |
+  | --- | --- | --- | --- |
+  | `workerId` | register response | `<repo parent>/cp-worktrees/<workerId>`, and every API path | a 24-character ObjectId, checked on the wire *and* on the way back off disk; `bindRepository` then refuses a root that has left `cp-worktrees/` |
+  | `credential` | register response | an `Authorization` header | never argv, never a path; `fetch` itself refuses a header value carrying a newline |
+  | `heartbeatMs` | register response | `setTimeout` | a positive number or the bootstrap retry |
+  | `command` | heartbeat, SSE, socket | a handler name | matched against a closed list |
+  | `project`, `taskId`, `runId` | assignment, claim | path segments in a URL on this worker's own server | deliberately unchecked: whatever they contain, the request still goes to the server that sent them, and a server addressing itself is not a boundary |
+  | `remote` | assignment | compared for equality against `repos.json` | never a path — the checkout is found by lookup, and the server never names a directory |
+  | `baseBranch` | project policy | `git diff <base>...HEAD`, `gh pr create --base` | a git ref name, refused where an admin sets it, again in `applyPolicy`, and again at both sinks |
+  | `model`, `fallbackModel`, `reviewModel` | project policy, a step, a review gate's params | `claude --model` | a model name, at `modelOr` — the one place all three overrides meet |
+  | limits and timeouts | policy, gate params | numbers | parsed as numbers; a value that is not one is the default, never zero |
+  | `taskKey` | the project's key and the task number | a directory under the worktree root, and a git branch | `^[A-Za-z0-9][A-Za-z0-9_-]*-\d+$`, and `pathFor` refuses a path that leaves the root |
+  | `capability`, `gateKind` | agent snapshot | a tool list, a gate | closed maps this side, so a server cannot widen what a step may do |
+  | `title`, `description`, `prompt`, `focus`, summaries | claim, agent snapshot | prompt text, the PR title and body | option *values*, never positionals, and scrubbed before they reach a pull request. Prompt injection is a different problem and nothing here claims to solve it |
+
+  Every git call also separates its options from its positionals with `--`, and `gitArgs` refuses an
+  argument after that separator which begins with a dash — so a future call site inherits the rule
+  instead of having to remember it.
+
+  **The menubar app is swept separately**, in [`menubar/README.md`](../menubar/README.md). It had
+  the same two shapes — the server's `repositoryUrl` as a bare positional to `git clone`, and the
+  destination built from the server's project key — and one this package does not: a transport that
+  runs a program can be reached from a well-formed `https://` remote, because the operator's own
+  `url.*.insteadOf` rewrites it (BP-399).
 - **The executor runs with `bypassPermissions` inside the worktree**, so the worktree is checked
   for uncommitted files before the gates run — an agent cannot hide a change from the gates by
   never staging it.

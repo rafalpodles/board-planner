@@ -194,7 +194,7 @@ export function IntegrationsSection({
     {
       id: "integrations-channels",
       section: "integrations",
-      label: "Integrations · Slack & Discord",
+      label: "Integrations · Team channels",
       count: channels.count,
     },
     {
@@ -767,8 +767,9 @@ export function IntegrationsSection({
               return (
                 <>
                   <p className="text-sm text-text-muted">
-                    Posts a formatted message to a channel when something
-                    happens on the board.
+                    Posts a formatted message to a shared channel when something happens on the
+                    board — the same message for everyone, regardless of who watches what. For the
+                    notifications addressed to you, see My notifications.
                   </p>
                   <div className="space-y-3">
                     {channels.value.channels.map((ch) => (

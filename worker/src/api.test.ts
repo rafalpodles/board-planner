@@ -14,7 +14,7 @@ const config = {
 
 // A stored identity, injected in place of the real <stateDir>/worker.json so claim() (the only
 // method that needs one) can authenticate without touching the filesystem
-const identityStore = { read: () => JSON.stringify({ workerId: "w1", credential: "cpw_secret" }) };
+const identityStore = { read: () => JSON.stringify({ workerId: "6a7c686f70ed274cf658b1b3", credential: "cpw_secret" }) };
 
 // Every claim now carries the agent the server resolved; a claim without one is not runnable and
 // is handed straight back, so a fixture that omits it tests the refusal rather than the mapping.
@@ -222,7 +222,7 @@ describe("createApiClient", () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("https://app.example.com/api/projects/CP/runs");
     expect(init.method).toBe("POST");
-    expect(JSON.parse(init.body)).toMatchObject({ taskKey: "CP-1", workerId: "w1" });
+    expect(JSON.parse(init.body)).toMatchObject({ taskKey: "CP-1", workerId: "6a7c686f70ed274cf658b1b3" });
   });
 
   it("claims against the project-scoped url", async () => {
@@ -243,7 +243,7 @@ describe("createApiClient", () => {
     await api.setStatus("CP", "t1", "done");
     const init = fetchMock.mock.calls[0][1];
     expect(init.headers.Authorization).toBe("Bearer cpw_secret");
-    expect(init.headers["X-Worker-Id"]).toBe("w1");
+    expect(init.headers["X-Worker-Id"]).toBe("6a7c686f70ed274cf658b1b3");
     expect(init.headers["X-CP-Protocol"]).toBe("1");
   });
 
@@ -253,7 +253,7 @@ describe("createApiClient", () => {
     await api.claim("CP", "run-1");
     const init = fetchMock.mock.calls[0][1];
     expect(init.headers.Authorization).toBe("Bearer cpw_secret");
-    expect(init.headers["X-Worker-Id"]).toBe("w1");
+    expect(init.headers["X-Worker-Id"]).toBe("6a7c686f70ed274cf658b1b3");
     expect(init.headers["X-CP-Protocol"]).toBe("1");
   });
 
@@ -318,7 +318,7 @@ describe("createApiClient", () => {
     expect(init.method).toBe("POST");
     expect(init.body).toBe(JSON.stringify({ body: "hello" }));
     expect(init.headers.Authorization).toBe("Bearer cpw_secret");
-    expect(init.headers["X-Worker-Id"]).toBe("w1");
+    expect(init.headers["X-Worker-Id"]).toBe("6a7c686f70ed274cf658b1b3");
   });
 
   it("drops checklist items without a string text field", async () => {
@@ -353,7 +353,7 @@ describe("createApiClient", () => {
     expect(init.method).toBe("POST");
     expect(init.body).toBeUndefined();
     expect(init.headers.Authorization).toBe("Bearer cpw_secret");
-    expect(init.headers["X-Worker-Id"]).toBe("w1");
+    expect(init.headers["X-Worker-Id"]).toBe("6a7c686f70ed274cf658b1b3");
   });
 
   it("lists the ids of every column the board carries", async () => {
@@ -552,7 +552,7 @@ describe("createApiClient", () => {
     expect(url).toBe("https://app.example.com/api/projects/CP");
     expect(init.method).toBe("GET");
     expect(init.headers.Authorization).toBe("Bearer cpw_secret");
-    expect(init.headers["X-Worker-Id"]).toBe("w1");
+    expect(init.headers["X-Worker-Id"]).toBe("6a7c686f70ed274cf658b1b3");
     expect(init.headers["X-CP-Protocol"]).toBe("1");
   });
 
@@ -568,7 +568,7 @@ describe("createApiClient", () => {
 
     const [, init] = fetchMock.mock.calls[0];
     expect(init.headers.Authorization).toBe("Bearer cpw_secret");
-    expect(init.headers["X-Worker-Id"]).toBe("w1");
+    expect(init.headers["X-Worker-Id"]).toBe("6a7c686f70ed274cf658b1b3");
   });
 
   it("posts a phase event to the worker's own events endpoint, not a project one", async () => {
@@ -578,7 +578,7 @@ describe("createApiClient", () => {
     await api.postEvent({ taskId: "t1", runId: "run-1", phase: "gates:build" });
 
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe("https://app.example.com/api/workers/w1/events");
+    expect(url).toBe("https://app.example.com/api/workers/6a7c686f70ed274cf658b1b3/events");
     expect(init.method).toBe("POST");
     expect(JSON.parse(init.body)).toEqual({
       taskId: "t1",
@@ -596,7 +596,7 @@ describe("createApiClient", () => {
 
     const init = fetchMock.mock.calls[0][1];
     expect(init.headers.Authorization).toBe("Bearer cpw_secret");
-    expect(init.headers["X-Worker-Id"]).toBe("w1");
+    expect(init.headers["X-Worker-Id"]).toBe("6a7c686f70ed274cf658b1b3");
     expect(init.headers["X-CP-Protocol"]).toBe("1");
   });
 
@@ -751,7 +751,7 @@ describe("createApiClient's default identity file", () => {
 
   it("reads worker.json when only its owner can read it", async () => {
     const path = join(dir, "worker.json");
-    writeFileSync(path, JSON.stringify({ workerId: "w1", credential: "cpw_from_disk" }));
+    writeFileSync(path, JSON.stringify({ workerId: "6a7c686f70ed274cf658b1b3", credential: "cpw_from_disk" }));
     chmodSync(path, 0o600);
     const cfg = { ...config, stateDir: dir } as never;
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 204 });
@@ -769,7 +769,7 @@ describe("createApiClient's default identity file", () => {
     const looseDir = join(dir, "loose");
     mkdirSync(looseDir);
     const path = join(looseDir, "worker.json");
-    writeFileSync(path, JSON.stringify({ workerId: "w1", credential: "cpw_x" }));
+    writeFileSync(path, JSON.stringify({ workerId: "6a7c686f70ed274cf658b1b3", credential: "cpw_x" }));
     chmodSync(path, 0o644);
     const cfg = { ...config, stateDir: looseDir } as never;
     const fetchMock = vi.fn();
@@ -824,7 +824,7 @@ describe("the run identity, from claim through to postEvent", () => {
     await api.postEvent({ taskId: task!.taskId, runId: task!.runId, phase: "agent" });
 
     const [url, init] = fetchMock.mock.calls[fetchMock.mock.calls.length - 1];
-    expect(url).toBe("https://app.example.com/api/workers/w1/events");
+    expect(url).toBe("https://app.example.com/api/workers/6a7c686f70ed274cf658b1b3/events");
     expect(JSON.parse(init.body).taskId).toBe("t1");
     expect(JSON.parse(init.body).runId).toBe("run-the-server-recorded");
   });

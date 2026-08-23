@@ -75,6 +75,52 @@ describe("parseProjectWorkerConfig", () => {
       expect(parseProjectWorkerConfig({ policy: { baseBranch: 7 } })).toMatchObject({ ok: false });
     });
 
+    // BP-327. baseBranch travels in the assignment policy and lands as a positional argument to
+    // `git diff` on somebody's laptop. git reads an option-shaped positional as an option:
+    // `--output=<path>` writes a file there, under the operator's own uid.
+    it.each([
+      "--output=/tmp/pwned",
+      "-o/tmp/pwned",
+      ".hidden",
+      "main..evil",
+      "main//evil",
+      "release/",
+      "wip.lock",
+      "main; touch /tmp/pwned",
+      "main branch",
+      "refs/heads/main~1^{}",
+    ])("refuses a baseBranch git would not read as a ref: %j", (baseBranch) => {
+      expect(parseProjectWorkerConfig({ policy: { baseBranch } })).toEqual({
+        ok: false,
+        error: "baseBranch must be a git branch name",
+      });
+    });
+
+    it.each(["main", "develop", "release/1.2", "v1.0", "feature/BP-327_fix"])(
+      "accepts a baseBranch that is a branch name: %j",
+      (baseBranch) => {
+        expect(parseProjectWorkerConfig({ policy: { baseBranch } })).toMatchObject({ ok: true });
+      }
+    );
+
+    // Same sink, one step further along: the model names are `--model`'s value on the CLI the
+    // worker spawns, so an option-shaped one is worth refusing where it is set.
+    it.each(["model", "fallbackModel", "reviewModel"])(
+      "refuses an option-shaped %s",
+      (field) => {
+        expect(
+          parseProjectWorkerConfig({ policy: { [field]: "--dangerously-skip-permissions" } })
+        ).toEqual({ ok: false, error: `${field} must be a model name` });
+      }
+    );
+
+    it.each(["opus", "sonnet", "claude-opus-5", "moonshotai/kimi-k2.6", "us.anthropic.claude-v2:1"])(
+      "accepts a model name the CLI would take: %j",
+      (model) => {
+        expect(parseProjectWorkerConfig({ policy: { model } })).toMatchObject({ ok: true });
+      }
+    );
+
     it("refuses a non-positive-integer limit", () => {
       for (const bad of [0, -1, 1.5, "400", null]) {
         expect(parseProjectWorkerConfig({ policy: { maxDiffLines: bad } })).toMatchObject({

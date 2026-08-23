@@ -6,6 +6,7 @@ import {
   applyPolicy,
   loadBootstrap,
   localSocketPath,
+  modelOr,
   parseAssignments,
   stateDirFrom,
 } from "./config.js";
@@ -194,6 +195,73 @@ describe("applyPolicy", () => {
     const first = applyPolicy(DEFAULT_POLICY, { pollIntervalMs: 5_000 });
     const second = applyPolicy(first, { pollIntervalMs: 10_000 });
     expect(second.pollIntervalMs).toBe(10_000);
+  });
+
+  // BP-327: these three fields are the only free text in the policy, and each one is spent as an
+  // argument to a program. Dropped like any other malformed field rather than refusing the whole
+  // patch — one bad project must not cost this machine the others it serves.
+  it.each([
+    "--output=/tmp/pwned",
+    "-o/tmp/pwned",
+    ".hidden",
+    "main..evil",
+    "main//evil",
+    "release/",
+    "wip.lock",
+    "main; touch /tmp/pwned",
+    "main branch",
+  ])("ignores a baseBranch git would not read as a ref: %j", (baseBranch) => {
+    expect(applyPolicy(DEFAULT_POLICY, { baseBranch }).baseBranch).toBe(DEFAULT_POLICY.baseBranch);
+  });
+
+  it.each(["main", "develop", "release/1.2", "v1.0", "feature/BP-327_fix"])(
+    "keeps a baseBranch that is a ref name: %j",
+    (baseBranch) => {
+      expect(applyPolicy(DEFAULT_POLICY, { baseBranch }).baseBranch).toBe(baseBranch);
+    }
+  );
+
+  it.each(["--dangerously-skip-permissions", "-p", "opus; touch /tmp/pwned"])(
+    "ignores a model name that is option-shaped or not a name: %j",
+    (model) => {
+      const next = applyPolicy(DEFAULT_POLICY, {
+        model,
+        fallbackModel: model,
+        reviewModel: model,
+      });
+      expect(next.model).toBe(DEFAULT_POLICY.model);
+      expect(next.fallbackModel).toBe(DEFAULT_POLICY.fallbackModel);
+      expect(next.reviewModel).toBe(DEFAULT_POLICY.reviewModel);
+    }
+  );
+
+  it.each(["opus", "sonnet", "claude-opus-5", "moonshotai/kimi-k2.6", "us.anthropic.claude-v2:1"])(
+    "keeps a model name the CLI would accept: %j",
+    (model) => {
+      expect(applyPolicy(DEFAULT_POLICY, { model }).model).toBe(model);
+    }
+  );
+});
+
+// BP-327. A step and a review gate each carry their own model override, straight off the agent
+// snapshot the claim returned — neither goes through applyPolicy, and both end at `--model`.
+// modelOr is where all three meet, so it is the one place the shape has to hold.
+describe("modelOr", () => {
+  it("falls back for a blank value, as it always has", () => {
+    expect(modelOr("", "opus")).toBe("opus");
+    expect(modelOr("   ", "opus")).toBe("opus");
+    expect(modelOr(undefined, "opus")).toBe("opus");
+  });
+
+  it.each(["--dangerously-skip-permissions", "-p", "opus sonnet", "opus; touch /tmp/pwned"])(
+    "falls back rather than passing %j to the CLI",
+    (value) => {
+      expect(modelOr(value, "opus")).toBe("opus");
+    }
+  );
+
+  it("keeps a model name, trimmed", () => {
+    expect(modelOr("  claude-opus-5  ", "opus")).toBe("claude-opus-5");
   });
 });
 
