@@ -73,7 +73,7 @@ describe("mentioning a person", () => {
     api.get.mockImplementation((url: string) =>
       url.includes("/comments")
         ? Promise.resolve(comments)
-        : url.includes("/users/list")
+        : url.includes("/assignable-users")
           ? Promise.resolve(people)
           : Promise.resolve([])
     );
@@ -83,7 +83,7 @@ describe("mentioning a person", () => {
     serveAll();
     render(<Comments projectId="TP" taskId="t1" />);
     const box = await screen.findByPlaceholderText(/@mention someone/i);
-    await waitFor(() => expect(api.get).toHaveBeenCalledWith("/api/users/list"));
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith("/api/projects/TP/assignable-users"));
     return box as HTMLTextAreaElement;
   }
 
@@ -170,7 +170,7 @@ describe("referring to another task", () => {
     api.get.mockImplementation((url: string) =>
       url.includes("/tasks/suggest")
         ? Promise.resolve(suggestions)
-        : url.includes("/users/list")
+        : url.includes("/assignable-users")
           ? Promise.resolve(people)
           : Promise.resolve([])
     );
@@ -180,7 +180,7 @@ describe("referring to another task", () => {
     serveAll();
     render(<Comments projectId="TP" taskId="t1" scope={{ key: "TP", formerKeys: ["CP"] }} />);
     const box = await screen.findByPlaceholderText(/@mention someone/i);
-    await waitFor(() => expect(api.get).toHaveBeenCalledWith("/api/users/list"));
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith("/api/projects/TP/assignable-users"));
     return box as HTMLTextAreaElement;
   }
 

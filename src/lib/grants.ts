@@ -154,3 +154,15 @@ export async function projectAudienceFilter(
 
   return { $or: [{ role: "admin" }, { _id: { $in: grants.map((g) => g.subject) } }] };
 }
+
+/**
+ * Whether this person may be given work on this board.
+ *
+ * The same verdict decide() reaches, asked about somebody who is not the caller — so only their
+ * stored fields exist, which is exactly what recipientsWithAccess reads. Delivery has checked this
+ * since BP-328; assignment did not, so a task could be handed to somebody who would never hear
+ * about it and could not open it.
+ */
+export async function canBeAssigned(userId: string, projectId: string): Promise<boolean> {
+  return (await recipientsWithAccess([String(userId)], projectId)).length > 0;
+}

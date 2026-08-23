@@ -73,13 +73,15 @@ export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailP
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId]);
 
+  // /api/users is admin-only, so this used to leave every non-admin with an empty picker and a
+  // task that IS assigned rendering as "Unassigned" (BP-400)
   useEffect(() => {
     api
-      .get("/api/users")
+      .get(`/api/projects/${projectId}/assignable-users`)
       .then(setUsers)
       .catch(() => setUsers([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [projectId]);
 
   // The board was not the only view going stale on a PM write — this view never reloaded
   // at all, so it kept editing a task that had moved underneath it

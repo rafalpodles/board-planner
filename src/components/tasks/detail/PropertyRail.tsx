@@ -118,6 +118,17 @@ interface PropertyRailProps {
   touch?: boolean;
 }
 
+/** The stored task knows their name; the roster no longer carries them. Falls back to the handle. */
+function nameOfStoredAssignee(
+  storedAssignee: ApiTask["assignee"],
+  username: string
+): string {
+  if (storedAssignee && typeof storedAssignee === "object" && storedAssignee.username === username) {
+    return storedAssignee.fullName || username;
+  }
+  return username;
+}
+
 export function PropertyRail({
   draft,
   set,
@@ -135,7 +146,28 @@ export function PropertyRail({
   onDelete,
   touch = false,
 }: PropertyRailProps) {
-  const assignedUser = users.find((u) => u.username === draft.assignee);
+  /**
+   * Someone assigned before they lost access is still this task's assignee, and the roster this
+   * view is handed holds only people who reach the board. Combobox resolves its closed-state label
+   * out of `options` and hands `undefined` when nothing matches, so such an assignee rendered as
+   * "Unassigned" — the rail saying the task belongs to nobody while the server has it assigned.
+   * ListView has carried a comment about exactly this for as long as it has had the row.
+   *
+   * Added back as a VALUE. They stay pickable, which is deliberate and matches what the API does:
+   * re-sending the assignee already stored is allowed, and only a move to somebody who cannot
+   * reach the board is refused. Offering a control that 400s on click would be worse than either.
+   */
+  const offeredUsers =
+    !draft.assignee || users.some((u) => u.username === draft.assignee)
+      ? users
+      : [
+          ...users,
+          {
+            _id: draft.assignee,
+            username: draft.assignee,
+            fullName: nameOfStoredAssignee(stored.assignee, draft.assignee),
+          } as ApiUser,
+        ];
   const sprint = sprints.find((s) => s._id === draft.sprint);
   const fields = sortedFields(activeFields(customFields));
   const selectableSprints = sprints.filter((s) => s.status !== "completed");
@@ -190,7 +222,7 @@ export function PropertyRail({
           label="Assignee"
           touch={touch}
           value={draft.assignee || ""}
-          options={users.map((user) => ({
+          options={offeredUsers.map((user) => ({
             value: user.username,
             label: user.fullName,
             adornment: <Avatar name={user.fullName} size={20} />,

@@ -74,7 +74,7 @@ beforeEach(() => {
   api.del.mockReset();
   api.put.mockResolvedValue({});
   api.get.mockImplementation((url: string) => {
-    if (url === "/api/users") return Promise.resolve([]);
+    if (url === "/api/projects/TP/assignable-users") return Promise.resolve([]);
     if (url.startsWith("/api/agent")) return Promise.resolve([]);
     if (url.includes("/tasks/")) return Promise.resolve(task);
     if (url.includes("/sprints")) return Promise.resolve([]);
@@ -106,7 +106,7 @@ describe("TaskDetail", () => {
   // typeof null === "object", so a deleted creator used to take the populated branch and throw
   it("renders a task whose creator was deleted", async () => {
     api.get.mockImplementation((url: string) => {
-      if (url === "/api/users") return Promise.resolve([]);
+      if (url === "/api/projects/TP/assignable-users") return Promise.resolve([]);
     if (url.startsWith("/api/agent")) return Promise.resolve([]);
       if (url.includes("/tasks/")) return Promise.resolve({ ...task, createdBy: null });
       if (url.includes("/sprints")) return Promise.resolve([]);
@@ -259,7 +259,7 @@ describe("TaskDetail", () => {
     const urls = api.get.mock.calls.map((c) => c[0]);
     expect(urls.some((u: string) => u.includes("/tasks/6"))).toBe(true);
     expect(urls.some((u: string) => u.endsWith("/sprints"))).toBe(true);
-    expect(urls.some((u: string) => u === "/api/users")).toBe(true);
+    expect(urls.some((u: string) => u === "/api/projects/TP/assignable-users")).toBe(true);
   });
 });
 
@@ -332,7 +332,7 @@ describe("TaskDetail, the agent picker's project default", () => {
   beforeEach(() => {
     auth.isAdmin = true;
     api.get.mockImplementation((url: string) => {
-      if (url === "/api/users") return Promise.resolve([]);
+      if (url === "/api/projects/TP/assignable-users") return Promise.resolve([]);
       if (url === "/api/agents") return Promise.resolve(AGENTS);
       if (url.startsWith("/api/agent")) return Promise.resolve([]);
       if (url.includes("/tasks/")) return Promise.resolve(task);
@@ -395,7 +395,7 @@ describe("TaskDetail, the Agent row's handover notice", () => {
 
   function serve(over: Record<string, unknown> = {}) {
     api.get.mockImplementation((url: string) => {
-      if (url === "/api/users") return Promise.resolve([]);
+      if (url === "/api/projects/TP/assignable-users") return Promise.resolve([]);
       if (url.startsWith("/api/agent")) return Promise.resolve([]);
       if (url.includes("/tasks/")) return Promise.resolve({ ...handedOver, ...over });
       if (url.includes("/sprints")) return Promise.resolve([]);
@@ -515,7 +515,7 @@ describe("TaskDetail, re-assigning a task whose assigner was never recorded", ()
 
   function serve(over: Record<string, unknown> = {}) {
     api.get.mockImplementation((url: string) => {
-      if (url === "/api/users") return Promise.resolve([RAFAL, { _id: "u2", username: "claude", fullName: "Claude Code" }]);
+      if (url === "/api/projects/TP/assignable-users") return Promise.resolve([RAFAL, { _id: "u2", username: "claude", fullName: "Claude Code" }]);
       if (url.startsWith("/api/agent")) return Promise.resolve([]);
       if (url.includes("/tasks/")) return Promise.resolve({ ...legacy, ...over });
       if (url.includes("/sprints")) return Promise.resolve([]);
@@ -584,7 +584,7 @@ describe("TaskDetail, whether the rail knows who is reading", () => {
 
   function serve(over: Record<string, unknown> = {}) {
     api.get.mockImplementation((url: string) => {
-      if (url === "/api/users")
+      if (url === "/api/projects/TP/assignable-users")
         return Promise.resolve([{ _id: "u1", username: "rpo", fullName: "Rafal Podles" }]);
       if (url === "/api/agents") return Promise.resolve([MINE]);
       if (url.startsWith("/api/agent")) return Promise.resolve([]);

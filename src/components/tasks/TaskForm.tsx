@@ -90,7 +90,10 @@ export function TaskForm({
   const { toast } = useToast();
 
   useEffect(() => {
-    api.get("/api/users").then(setUsers).catch(() => toast("Failed to load users", "error"));
+    api
+      .get(`/api/projects/${projectId}/assignable-users`)
+      .then(setUsers)
+      .catch(() => toast("Failed to load users", "error"));
     api
       .get(`/api/projects/${projectId}/ai/generate-task`)
       .then((res: { enabled: boolean }) => setAiEnabled(res.enabled))

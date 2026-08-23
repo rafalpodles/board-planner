@@ -128,7 +128,7 @@ vi.mock("@/models/user", () => ({
   User: { find: (...args: unknown[]) => userFind(...args) },
 }));
 
-const { check, accessibleProjectIds, recipientsWithAccess } = await import("./grants");
+const { check, accessibleProjectIds, recipientsWithAccess, canBeAssigned } = await import("./grants");
 
 function lean(value: unknown) {
   return { select: () => ({ lean: () => Promise.resolve(value) }) };
@@ -273,6 +273,51 @@ describe("recipientsWithAccess", () => {
   it("does not mistake an ordinary member for an instance admin", async () => {
     roles = { [MEMBER]: "member" };
     expect(await recipientsWithAccess([MEMBER], P)).toEqual([]);
+  });
+
+  /**
+   * BP-400. Assignment asks the same question delivery has asked since BP-328, so that a task
+   * cannot be handed to somebody who will never be told about it and cannot open it.
+   */
+  describe("canBeAssigned", () => {
+    it("accepts somebody who holds a grant on this board", async () => {
+      grant(MEMBER);
+      expect(await canBeAssigned(MEMBER, P)).toBe(true);
+    });
+
+    it("refuses somebody with no grant on it", async () => {
+      expect(await canBeAssigned(REMOVED, P)).toBe(false);
+    });
+
+    it("refuses a grant held on some other board", async () => {
+      grant(MEMBER, "member", OTHER);
+      expect(await canBeAssigned(MEMBER, P)).toBe(false);
+    });
+
+    /**
+     * The acceptance case, and the one a naive "must hold a grant" rule breaks: an instance admin
+     * reaches every board from their role and never has a row written for them. On an instance with
+     * one admin, refusing this takes the only person who can see everything out of every picker.
+     */
+    it("accepts an instance admin who holds no grant at all", async () => {
+      expect(await canBeAssigned(ADMIN, P)).toBe(true);
+    });
+
+    /**
+     * `pm` is stored as an ordinary member with no grants, and the ticket asked whether it needed a
+     * carve-out. It does not: nothing in the codebase ever assigns a task TO the PM account — it
+     * appears only as the actor of a turn — so refusing it costs nothing that works today. This
+     * pins that decision, and fails the moment somebody special-cases a username here.
+     */
+    it("refuses the pm service account like any other member without a grant", async () => {
+      const PM = "507f1f77bcf86cd799439014";
+      roles[PM] = "member";
+      expect(await canBeAssigned(PM, P)).toBe(false);
+    });
+
+    it("refuses an id that matches no account", async () => {
+      expect(await canBeAssigned("507f1f77bcf86cd799439099", P)).toBe(false);
+    });
   });
 
   it("ignores a grant the recipient holds on some other project", async () => {
