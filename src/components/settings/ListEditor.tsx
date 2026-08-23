@@ -100,7 +100,7 @@ export function ListEditor<T>({
                     onClick={() => move(i, i - 1)}
                     disabled={i === 0}
                     aria-label={`Move ${name} up`}
-                    className="focus-ring rounded px-1 text-text-muted hover:text-text disabled:opacity-30"
+                    className="focus-ring inline-flex h-11 w-11 items-center justify-center rounded text-text-muted sm:h-6 sm:w-auto sm:px-1 hover:text-text disabled:opacity-30"
                   >
                     ↑
                   </button>
@@ -109,7 +109,7 @@ export function ListEditor<T>({
                     onClick={() => move(i, i + 1)}
                     disabled={i === items.length - 1}
                     aria-label={`Move ${name} down`}
-                    className="focus-ring rounded px-1 text-text-muted hover:text-text disabled:opacity-30"
+                    className="focus-ring inline-flex h-11 w-11 items-center justify-center rounded text-text-muted sm:h-6 sm:w-auto sm:px-1 hover:text-text disabled:opacity-30"
                   >
                     ↓
                   </button>
@@ -120,7 +120,7 @@ export function ListEditor<T>({
                   type="button"
                   onClick={() => onChange(items.filter((_, idx) => idx !== i))}
                   aria-label={`Remove ${name}`}
-                  className="focus-ring rounded px-1 text-text-muted hover:text-danger"
+                  className="focus-ring inline-flex h-11 w-11 items-center justify-center rounded text-text-muted sm:h-6 sm:w-auto sm:px-1 hover:text-danger"
                 >
                   ✕
                 </button>

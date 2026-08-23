@@ -196,7 +196,7 @@ export function GeneralSection({ projectId, project, replaceProject, stats }: Se
                   <select
                     value={m.relation ?? "none"}
                     onChange={(e) => setRelation(m._id, e.target.value as GrantRelation | "none")}
-                    className="focus-ring rounded-lg border border-border bg-bg-input px-2 py-1.5 text-sm"
+                    className="focus-ring rounded-lg border border-border bg-bg-input min-h-11 px-2 py-1.5 text-sm sm:min-h-0"
                     aria-label={`Access for ${m.username}`}
                   >
                     <option value="none">No access</option>

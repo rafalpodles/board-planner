@@ -124,15 +124,15 @@ export default function ProfilePage() {
           </div>
         )}
 
-        <div className="flex items-center gap-3">
+        <div className="flex min-h-11 items-center gap-3 sm:min-h-0">
           <input
             type="checkbox"
             id="emailNotifs"
             checked={emailNotifications}
             onChange={(e) => setEmailNotifications(e.target.checked)}
-            className="focus-ring rounded border-border"
+            className="focus-ring h-5 w-5 shrink-0 rounded border-border sm:h-auto sm:w-auto"
           />
-          <label htmlFor="emailNotifs" className="text-sm cursor-pointer">
+          <label htmlFor="emailNotifs" className="flex min-h-11 flex-1 cursor-pointer items-center text-sm sm:inline sm:min-h-0 sm:flex-none">
             Receive email notifications
           </label>
         </div>
@@ -144,15 +144,15 @@ export default function ProfilePage() {
 
         {emailNotifications && (
           <>
-            <div className="flex items-center gap-3">
+            <div className="flex min-h-11 items-center gap-3 sm:min-h-0">
               <input
                 type="checkbox"
                 id="emailDigest"
                 checked={emailDigest}
                 onChange={(e) => setEmailDigest(e.target.checked)}
-                className="focus-ring rounded border-border"
+                className="focus-ring h-5 w-5 shrink-0 rounded border-border sm:h-auto sm:w-auto"
               />
-              <label htmlFor="emailDigest" className="text-sm cursor-pointer">
+              <label htmlFor="emailDigest" className="flex min-h-11 flex-1 cursor-pointer items-center text-sm sm:inline sm:min-h-0 sm:flex-none">
                 Collect them into one daily digest
               </label>
             </div>
