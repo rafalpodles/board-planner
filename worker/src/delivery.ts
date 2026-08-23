@@ -13,7 +13,7 @@ const MAX_OUTPUT_CHARS = 2000;
 const PR_URL = /https?:\/\/[^\s"'<>]*\/pull\/\d+/g;
 
 export interface Delivery {
-  push(worktreePath: string, branch: string, commit?: string): Promise<void>;
+  push(worktreePath: string, branch: string, commit: string): Promise<void>;
   openPr(worktreePath: string, task: ClaimedTask, summary: string): Promise<string>;
   merge(worktreePath: string, prUrl: string): Promise<void>;
 }

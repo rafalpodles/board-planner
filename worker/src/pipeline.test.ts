@@ -214,7 +214,7 @@ describe("runTask", () => {
     const h = harness();
     await runTask(h.deps, merging);
 
-    expect(h.delivery.push).toHaveBeenCalledWith("/wt", "cp-158/worker");
+    expect(h.delivery.push).toHaveBeenCalledWith("/wt", "cp-158/worker", "");
     expect(h.delivery.openPr).toHaveBeenCalledWith("/wt", merging, "did it");
     expect(h.delivery.merge).toHaveBeenCalledWith("/wt", "https://x/pull/7");
     expect(h.reporter.merged).toHaveBeenCalledWith(merging, "https://x/pull/7", "did it");

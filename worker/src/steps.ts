@@ -50,7 +50,11 @@ async function runWorkerAction(entry: SnapshotEntry, ctx: StepContext): Promise<
 async function deliver(entry: SnapshotEntry, ctx: StepContext): Promise<StepOutcome> {
   switch (entry.key) {
     case "push":
-      await ctx.delivery.push(ctx.worktreePath, ctx.branch);
+      await ctx.delivery.push(
+        ctx.worktreePath,
+        ctx.branch,
+        ctx.state.commits[ctx.state.commits.length - 1] ?? ""
+      );
       ctx.state.pushed = true;
       return { kind: "ok" };
 
