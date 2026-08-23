@@ -10,11 +10,14 @@ const ASSIGNEE = "507f1f77bcf86cd799439011";
 const WATCHER = "507f1f77bcf86cd799439012";
 const ACTOR = "507f1f77bcf86cd799439013";
 const ADMIN = "507f1f77bcf86cd799439014";
+const NOTIFICATION_PROJECT = "507f1f77bcf86cd799439021";
 
 /** Who holds a grant on the project, per test. The delivery filter reads this through grants.ts. */
 let granted: string[] = [];
-/** Who is an instance admin, per test — access without any grant row. */
-let instanceAdmins: string[] = [];
+/** Stored role per recipient. "admin" reaches every board without a grant row existing. */
+let roles: Record<string, string> = {};
+/** Makes the access lookup reject, so the fail-closed branch can be exercised. */
+let accessLookupFails = false;
 
 const MAILBOXES: Record<string, { email: string; fullName: string }> = {
   [ASSIGNEE]: { email: "assignee@example.com", fullName: "Ann" },
@@ -28,31 +31,41 @@ vi.mock("@/models/grant", () => ({
   Grant: {
     find: (...a: unknown[]) => {
       grantFind(...a);
-      const filter = a[0] as { subject?: { $in?: string[] } };
+      const filter = a[0] as { subject?: { $in?: string[] }; objectType?: string; object?: string };
       const asked = filter?.subject?.$in ?? [];
+      if (accessLookupFails) {
+        return { select: () => ({ lean: async () => { throw new Error("no database"); } }) };
+      }
+      // Honours objectType and object, so a query that forgot either would return grants it has
+      // no business returning and the tests below would notice.
+      if (filter?.objectType !== "project" || filter?.object !== NOTIFICATION_PROJECT) {
+        return { select: () => ({ lean: async () => [] }) };
+      }
       return {
         select: () => ({
           lean: async () =>
-            asked.filter((id) => granted.includes(id)).map((id) => ({ subject: id })),
+            asked
+              .filter((id) => granted.includes(id))
+              .map((id) => ({ subject: id, relation: "member" })),
         }),
       };
     },
   },
 }));
-// Query-aware because two callers share it: grants.ts asks "which of these are instance admins",
-// the mail fan-out asks "which of these want mail". Answering both with one list would make
-// every recipient an admin and the access filter untestable.
+// Query-aware because two callers share it: grants.ts asks for stored roles, the mail fan-out
+// asks who wants mail and passes a projection as the second argument. Answering both with one
+// list would make the access filter untestable.
 vi.mock("@/models/user", () => ({
   User: {
     find: (...a: unknown[]) => {
       userFind(...a);
-      const filter = a[0] as { role?: string; _id?: { $in?: string[] } };
+      const filter = a[0] as { _id?: { $in?: string[] } };
       const asked = filter?._id?.$in ?? [];
-      if (filter?.role === "admin") {
+      if (a[1] === undefined) {
         return {
           select: () => ({
             lean: async () =>
-              asked.filter((id) => instanceAdmins.includes(id)).map((id) => ({ _id: id })),
+              asked.filter((id) => roles[id]).map((id) => ({ _id: id, role: roles[id] })),
           }),
         };
       }
@@ -106,7 +119,8 @@ beforeEach(() => {
   grantFind.mockClear();
   selfOrigin.mockReturnValue("https://app.example.com");
   granted = [ASSIGNEE, WATCHER];
-  instanceAdmins = [];
+  roles = { [ASSIGNEE]: "member", [WATCHER]: "member", [ADMIN]: "admin" };
+  accessLookupFails = false;
 });
 
 describe("notification emails", () => {
@@ -225,7 +239,6 @@ describe("delivery to somebody who can no longer reach the board", () => {
 
   it("still notifies an instance admin, who reaches the board without a grant row", async () => {
     granted = [];
-    instanceAdmins = [ADMIN];
 
     await createNotifications({ ...NOTIFICATION, recipientIds: [WATCHER, ADMIN] });
 
@@ -234,6 +247,18 @@ describe("delivery to somebody who can no longer reach the board", () => {
 
   it("writes nothing and mails nobody when no recipient can reach the board", async () => {
     granted = [];
+
+    await createNotifications(NOTIFICATION);
+
+    expect(insertMany).not.toHaveBeenCalled();
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  // The choice is stated in a comment in the source and was defended by nothing: turning the
+  // refusal back into delivery-to-everybody kept every test green, which is exactly the edit
+  // somebody chasing "notifications go missing when Mongo hiccups" would make.
+  it("delivers to nobody when it cannot find out who may be told", async () => {
+    accessLookupFails = true;
 
     await createNotifications(NOTIFICATION);
 

@@ -6,6 +6,7 @@ const grantFind = vi.fn();
 
 const READER = "507f1f77bcf86cd799439011";
 const REACHABLE = "69a52e3b399b27d3cbb2c5a5";
+const ALSO_REACHABLE = "69a52e3b399b27d3cbb2c5a7";
 
 let grantedProjects: string[] = [];
 
@@ -39,15 +40,16 @@ describe("GET /api/notifications/unread-count", () => {
   beforeEach(() => {
     getAuthUser.mockReset();
     countDocuments.mockClear();
-    grantedProjects = [REACHABLE];
+    grantedProjects = [REACHABLE, ALSO_REACHABLE];
     getAuthUser.mockImplementation(async () => ({ _id: READER, role: "member" }));
   });
 
-  it("counts only the projects the reader can still reach", async () => {
+  // Two boards, so that counting only the first stays a failure rather than a green run.
+  it("counts every project the reader can still reach, not just one", async () => {
     const res = await GET(request(), noParams);
 
     expect(res.status).toBe(200);
-    expect(filterUsed().project).toEqual({ $in: [REACHABLE] });
+    expect(filterUsed().project).toEqual({ $in: [REACHABLE, ALSO_REACHABLE] });
   });
 
   it("counts nothing for a reader who holds no grant anywhere", async () => {

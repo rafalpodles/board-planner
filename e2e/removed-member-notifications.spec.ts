@@ -1,7 +1,10 @@
 import { test, expect, type Page } from "@playwright/test";
+import mongoose from "mongoose";
 import {
   ADMIN_PASSWORD,
   ADMIN_USERNAME,
+  E2E_MONGODB_URI,
+  MEMBER_ID,
   MEMBER_PASSWORD,
   MEMBER_USERNAME,
   PROJECT_KEY,
@@ -65,16 +68,34 @@ async function expectFeedToCarry(page: Page, excerpt: string) {
   }).toPass({ timeout: 30_000 });
 }
 
+async function db() {
+  if (mongoose.connection.readyState === 0) await mongoose.connect(E2E_MONGODB_URI);
+  const handle = mongoose.connection.db;
+  if (!handle) throw new Error("no database handle");
+  return handle;
+}
+
 /**
- * Absence needs the same fire-and-forget window to have passed, or it proves only that the test
- * was quicker than the write. Loaded twice with a real round trip in between.
+ * Absence, measured at the source rather than against a clock.
+ *
+ * A single load with a fixed pause proves only that the test was quicker than the write, and the
+ * failure mode is a false pass — the assertion quietly stops meaning anything. So the row count
+ * is read straight from the collection and required to stay at zero for the whole window, and the
+ * screen is checked afterwards. If a notification does land late, the count catches it.
  */
-async function expectFeedEmpty(page: Page) {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    await page.goto("/notifications");
-    await expect(page.getByText("No notifications yet.")).toBeVisible();
-    if (attempt === 0) await page.waitForTimeout(1_500);
+async function expectNothingReachesThem(page: Page) {
+  const handle = await db();
+  const deadline = Date.now() + 6_000;
+  while (Date.now() < deadline) {
+    const rows = await handle
+      .collection("notifications")
+      .countDocuments({ recipient: MEMBER_ID });
+    expect(rows, "a notification was written for somebody removed from the board").toBe(0);
+    await page.waitForTimeout(500);
   }
+
+  await page.goto("/notifications");
+  await expect(page.getByText("No notifications yet.")).toBeVisible();
 }
 
 test.beforeEach(async () => {
@@ -109,20 +130,29 @@ test("a member removed from the board stops hearing about the task they watch", 
   await expect(admin.getByLabel(`Access for ${MEMBER_USERNAME}`)).toHaveCount(0);
 
   // 4. What was already queued goes with the grant, rather than staying readable forever.
-  await expectFeedEmpty(member);
+  await expectNothingReachesThem(member);
   await expect(member.getByText("Thanks, it is yours")).toHaveCount(0);
 
   // 5. And the board stops talking to them from here on.
   await comment(admin, "Reassigning this, since they are gone");
 
-  await expectFeedEmpty(member);
+  await expectNothingReachesThem(member);
   await expect(member.getByText("Reassigning this, since they are gone")).toHaveCount(0);
 
   await memberContext.close();
   await adminContext.close();
 });
 
-test("the board they still belong to keeps reaching them", async ({ browser }) => {
+/**
+ * The delivery control standing on its own, so a failure in the long test above can be told apart
+ * from a pipeline that was never working in this environment.
+ *
+ * NOT the cross-board case its earlier name claimed: the fixture seeds one project, so "removed
+ * from A, still hears from B" is covered at unit level only — the read routes and the digest each
+ * assert two granted boards survive independently. Proving it end to end wants a second seeded
+ * project, which is worth doing and is not done here.
+ */
+test("a member who still holds the board keeps hearing about it", async ({ browser }) => {
   const memberContext = await browser.newContext();
   const adminContext = await browser.newContext();
   const member = await memberContext.newPage();

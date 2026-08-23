@@ -6,12 +6,21 @@ import { User } from "@/models/user";
 export type Need = "access" | "admin";
 
 /**
- * The parts of a user an access decision actually reads. Narrower than IUser so a lean projection
- * — the digest loads `email username role` — can be asked about without a cast that would turn
- * type checking off at exactly the point access is decided.
+ * The parts of a user an access decision actually reads.
+ *
+ * It buys no protection against a projection that forgets a field — `lean()` is typed without
+ * regard to the projection string, so dropping `role` from the digest's query still compiles and
+ * silently makes every instance admin look like a member. The test asserting that projection
+ * contains `role` is what guards that, not this type. What it does buy is the ability to build a
+ * principal from a batch query, which is how recipientsWithAccess reaches decide().
  */
-export type AccessSubject = Pick<IUser, "_id" | "role"> &
-  Partial<Pick<IUser, "tokenScoped" | "tokenScope" | "instanceAdminBeforeScope">>;
+export type AccessSubject = Pick<
+  IUser,
+  "role" | "tokenScoped" | "tokenScope" | "instanceAdminBeforeScope"
+>;
+
+/** An AccessSubject the grant store can be queried about. principalOf never needs the id. */
+export type IdentifiedSubject = AccessSubject & Pick<IUser, "_id">;
 
 export interface Principal {
   instanceAdmin: boolean;
@@ -42,7 +51,7 @@ export function principalOf(user: AccessSubject): Principal {
   };
 }
 
-export async function check(user: AccessSubject, projectId: string, need: Need): Promise<boolean> {
+export async function check(user: IdentifiedSubject, projectId: string, need: Need): Promise<boolean> {
   const principal = principalOf(user);
   // The query is skipped where no grant can change the verdict; the verdict itself always
   // comes from decide(), so the rule ordering lives in exactly one place.
@@ -64,7 +73,7 @@ export async function check(user: AccessSubject, projectId: string, need: Need):
   return decide(principal, grant?.relation ?? null, need, projectId);
 }
 
-export async function accessibleProjectIds(user: AccessSubject): Promise<string[] | null> {
+export async function accessibleProjectIds(user: IdentifiedSubject): Promise<string[] | null> {
   const principal = principalOf(user);
   if (principal.instanceAdmin || principal.instanceAdminBeforeScope) {
     return principal.tokenScope;
@@ -80,9 +89,17 @@ export async function accessibleProjectIds(user: AccessSubject): Promise<string[
 }
 
 /**
- * Which of these people may still be told about this project. Access is a grant row OR instance
- * admin — an admin reaches every board without one ever being written, so filtering on grants
- * alone would silently stop notifying them.
+ * Which of these people may still be told about this project.
+ *
+ * The verdict comes from decide(), the same as check() — a grant row is not the only source of
+ * access, and a rule added there has to reach delivery too or somebody quietly stops being
+ * notified. Batched rather than one check() per recipient because this runs on every notification
+ * write.
+ *
+ * Machine identities are out of scope by construction: PUT /members refuses to grant a
+ * `kind: "machine"` account, so a worker or the PM user can never satisfy this. They accumulate
+ * watches by commenting and are filtered out here. Nothing reads a feed on their behalf today; if
+ * something ever needs to tell a machine anything, this is the line that will refuse it.
  */
 export async function recipientsWithAccess(
   subjectIds: string[],
@@ -91,16 +108,22 @@ export async function recipientsWithAccess(
   if (subjectIds.length === 0) return [];
 
   await connectDB();
-  const [grants, admins] = await Promise.all([
+  const [grants, users] = await Promise.all([
     Grant.find({ subject: { $in: subjectIds }, objectType: "project", object: projectId })
-      .select("subject")
+      .select("subject relation")
       .lean(),
-    User.find({ _id: { $in: subjectIds }, role: "admin" }).select("_id").lean(),
+    User.find({ _id: { $in: subjectIds } }).select("role").lean(),
   ]);
 
-  const allowed = new Set([
-    ...grants.map((g) => String(g.subject)),
-    ...admins.map((u) => String(u._id)),
-  ]);
-  return subjectIds.filter((id) => allowed.has(String(id)));
+  const relationOf = new Map(grants.map((g) => [String(g.subject), g.relation]));
+  const roleOf = new Map(users.map((u) => [String(u._id), u.role]));
+
+  return subjectIds.filter((id) => {
+    const role = roleOf.get(id);
+    // No such user — deleted, or an id from a stale watcher list. Refused rather than resolved.
+    if (!role) return false;
+    // Only the stored fields: tokenScoped and its siblings are attached at request time by
+    // applyTokenScope and can never be on a recipient loaded from the database.
+    return decide(principalOf({ role }), relationOf.get(id) ?? null, "access", projectId);
+  });
 }
