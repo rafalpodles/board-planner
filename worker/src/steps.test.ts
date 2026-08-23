@@ -23,8 +23,8 @@ function ctx(over: Partial<StepContext> = {}) {
       openPr: vi.fn(async () => "https://x/pull/7"),
       merge: vi.fn(async () => {}),
     },
-    commit: vi.fn(async () => {}),
-    state: { committed: false, pushed: false, prUrl: "", merged: false, summary: "", lastResult: completed },
+    commit: vi.fn(async () => "sha1"),
+    state: { committed: false, commits: [], pushed: false, prUrl: "", merged: false, summary: "", lastResult: completed },
     timeoutMs: 1000,
     onEvent: vi.fn(),
     ...over,
@@ -125,6 +125,22 @@ describe("runStep — a model step", () => {
     await runStep(entry({ capability: "edit" }), c);
 
     expect(c.state.committed).toBe(true);
+  });
+
+  it("records every sha it commits, oldest first", async () => {
+    const c = ctx({ commit: vi.fn(async () => "sha1") });
+
+    await runStep(entry({ capability: "edit" }), c);
+
+    expect(c.state.commits).toEqual(["sha1"]);
+  });
+
+  it("records nothing when the step committed nothing", async () => {
+    const c = ctx({ commit: vi.fn(async () => "") });
+
+    await runStep(entry({ capability: "edit" }), c);
+
+    expect(c.state.commits).toEqual([]);
   });
 
   // The gate context takes one result and a composed agent produces several

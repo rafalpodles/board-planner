@@ -13,6 +13,8 @@ export type StepOutcome =
 export interface RunState {
   /** Whether any step has committed yet — an exit after one must not destroy the worktree. */
   committed: boolean;
+  /** Every sha this run created, oldest first. The only thing that commits here is commitAll. */
+  commits: string[];
   /** What has already reached the remote, so an interrupted run can say where the work is. */
   pushed: boolean;
   prUrl: string;
@@ -104,7 +106,8 @@ export async function runStep(entry: SnapshotEntry, ctx: StepContext): Promise<S
   // only copy of the work.
   if (entry.capability === "edit") {
     try {
-      await ctx.commit(`${ctx.task.taskKey}: ${entry.name.toLowerCase()}`);
+      const sha = await ctx.commit(`${ctx.task.taskKey}: ${entry.name.toLowerCase()}`);
+      if (sha) ctx.state.commits.push(sha);
       ctx.state.committed = true;
     } catch (error) {
       return { kind: "error", message: String(error) };
