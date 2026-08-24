@@ -63,7 +63,7 @@ afterEach(cleanup);
  * on the instance's behalf. It confirms one machine, for one person, against one repository.
  */
 describe("the enrolment confirmation screen", () => {
-  it("asks which project the machine should clone", async () => {
+  it("asks which repository the machine should set up first", async () => {
     await show();
 
     expect(screen.getByText(/Which repository should it set up first/i)).toBeTruthy();
