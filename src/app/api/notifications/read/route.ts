@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { withAuth } from "@/lib/middleware";
 import { Notification } from "@/models/notification";
@@ -11,9 +12,16 @@ export const PATCH = withAuth(async (request, { user }) => {
   await connectDB();
 
   const body = await request.json().catch(() => ({}));
-  const { id } = body as { id?: string };
+  const { id } = body as { id?: unknown };
 
-  if (id) {
+  if (id !== undefined) {
+    // `id` goes straight into the query, and a JSON body carries an object as readily as a string:
+    // `{ "$ne": null }` would match an arbitrary row of the reader's own, and a string that is not
+    // an id throws a CastError out of here as a 500.
+    if (typeof id !== "string" || !isValidObjectId(id)) {
+      return NextResponse.json({ error: "Invalid notification id" }, { status: 400 });
+    }
+
     // Mark single notification as read
     // Same guard as the branch below: a row the bell never showed cannot have been read here, and
     // marking it read would take it out of tomorrow's digest
