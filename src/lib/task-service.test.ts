@@ -162,6 +162,7 @@ const {
   MAX_EXECUTION_ATTEMPTS,
   MAX_PHASE_LENGTH,
   EXECUTION_LEASE_MS,
+  personalAgentAlienTo,
 } = await import("./task-service");
 
 const { logActivity } = await import("@/lib/activity");
@@ -3071,6 +3072,51 @@ describe("what a change of hands does to the agent already on the task", () => {
     await write({ title: "renamed" }, HOLDER);
 
     expect(vi.mocked(logActivity).mock.calls.map((c) => c[3])).not.toContain("agent");
+  });
+});
+
+// BP-369. Exported so scripts/repair-recurring-agent-pairing.ts asks the same question updateTask
+// already asks live, rather than a second copy of the rule.
+describe("personalAgentAlienTo", () => {
+  beforeEach(() => agentFindById.mockReset());
+
+  // The mock resolves by projection alone and ignores which id it was asked for, so nothing above
+  // this line would notice the two arguments swapped — `agent` looked up instead of `assigneeAfter`
+  // compared, or vice versa. Asserted here once, directly, rather than trusted to a return-value
+  // check that would pass either way.
+  it("looks up the agent argument, not the assignee", async () => {
+    agentInTheCatalog({ scope: "user", owner: "u1" });
+    await personalAgentAlienTo("the-agent-id", "u1");
+    expect(agentFindById).toHaveBeenCalledWith("the-agent-id", "scope owner");
+  });
+
+  it("is not alien when the personal agent's owner is the assignee", async () => {
+    agentInTheCatalog({ scope: "user", owner: "u1" });
+    expect(await personalAgentAlienTo("a1", "u1")).toBe(false);
+  });
+
+  it("is alien when the personal agent belongs to somebody else", async () => {
+    agentInTheCatalog({ scope: "user", owner: "u1" });
+    expect(await personalAgentAlienTo("a1", "u2")).toBe(true);
+  });
+
+  // Nobody chose it: an unassigned task cannot be the reason a personal agent is still there
+  it("is alien on an unassigned task", async () => {
+    agentInTheCatalog({ scope: "user", owner: "u1" });
+    expect(await personalAgentAlienTo("a1", null)).toBe(true);
+  });
+
+  // A project or global agent is nobody's personal choice to begin with
+  it("is never alien for a project-scoped agent", async () => {
+    agentInTheCatalog({ scope: "project", owner: null });
+    expect(await personalAgentAlienTo("a1", "somebody-else")).toBe(false);
+  });
+
+  // Covers a dangling reference and a missing agent alike — neither branches before the lookup
+  it("is not alien when the agent cannot be found — missing id or dangling reference alike", async () => {
+    agentInTheCatalog(null);
+    expect(await personalAgentAlienTo("gone", "u1")).toBe(false);
+    expect(await personalAgentAlienTo(null, "u1")).toBe(false);
   });
 });
 
