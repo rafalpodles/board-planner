@@ -1048,6 +1048,76 @@ export async function seedSecondProject() {
   await mongoose.disconnect();
 }
 
+/**
+ * BP-433. A second instance admin, and a card on the second board for them to be given.
+ *
+ * The point of the shape is what happens after a demotion. This account holds a grant on
+ * SECOND_PROJECT_ID and none at all on the seeded board, so demoting it to "member" leaves its
+ * accessible list non-empty — which is what makes the read routes' `project: { $in: ... }` clause
+ * load-bearing rather than shadowed by their "no boards at all" early return. An account with no
+ * grant anywhere would take that early return instead and the filter itself would never run.
+ *
+ * A demotion is also the door: PUT /api/users/[userId] changes the role and leaves grants,
+ * sessions and notifications exactly where they were.
+ *
+ * Requires seedSecondProject() to have run — the grant and the task both point at that board.
+ */
+export const AUDITOR_USERNAME = "auditor";
+export const AUDITOR_PASSWORD = "test1234";
+export const AUDITOR_FULL_NAME = "E2E Auditor";
+export const AUDITOR_ID = id("e2e00000000000000000a007");
+
+export const KEPT_TASK_NUMBER = 1;
+export const KEPT_TASK_KEY = `${SECOND_PROJECT_KEY}-${KEPT_TASK_NUMBER}`;
+export const KEPT_TASK_ID = id("e2e00000000000000000d020");
+export const KEPT_TASK_TITLE = "On the board they keep";
+
+export async function seedDemotableAdmin() {
+  const db = (await connect()).db!;
+  const now = new Date();
+
+  await db.collection("users").insertOne({
+    _id: AUDITOR_ID,
+    username: AUDITOR_USERNAME,
+    password: bcrypt.hashSync(AUDITOR_PASSWORD, 10),
+    fullName: AUDITOR_FULL_NAME,
+    email: "",
+    emailNotifications: false,
+    collapseEmptyColumns: false,
+    kind: "human",
+    // Everything this account reaches on the seeded board, it reaches through this and nothing
+    // else. Taking it away is the whole test.
+    role: "admin",
+    createdAt: now,
+  });
+
+  await db.collection("grants").insertOne({
+    _id: id("e2e00000000000000000e003"),
+    subject: AUDITOR_ID,
+    relation: "member",
+    objectType: "project",
+    object: SECOND_PROJECT_ID,
+    createdBy: ADMIN_ID,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  await db.collection("tasks").insertOne({
+    ...taskFactory(now)({
+      _id: KEPT_TASK_ID,
+      project: SECOND_PROJECT_ID,
+      taskNumber: KEPT_TASK_NUMBER,
+      title: KEPT_TASK_TITLE,
+      status: "todo",
+    }),
+  });
+  await db
+    .collection("projects")
+    .updateOne({ _id: SECOND_PROJECT_ID }, { $max: { taskCounter: KEPT_TASK_NUMBER } });
+
+  await mongoose.disconnect();
+}
+
 /** A webhook on the seeded project, written straight in: adding one through the settings screen is
  * settings-save.spec.ts's subject, and this file's tests are about what happens afterwards. */
 export async function seedWebhook(
