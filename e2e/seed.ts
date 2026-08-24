@@ -461,33 +461,35 @@ export async function seedSprintEstimates() {
 }
 
 // BP-389. A board with a sprint history: two sprints already closed, one running with a finished
-// and an unfinished task in it, and one planned. Enough for the whole lifecycle to be driven from
+// and an unfinished task in it, and one planned. A third close puts it on OLDER_COMPLETED_THRESHOLD
+// (src/lib/sprint-selection.ts), so a fourth completed sprint hides one behind "Show N older". Enough for the whole lifecycle to be driven from
 // the screens — activate, edit, close — and for the velocity chart to have two real totals to
 // plot rather than a fixture of its own.
-export const LIFECYCLE_POINTS_FIELD_ID = id("e2e00000000000000000f009");
+const LIFECYCLE_POINTS_FIELD_ID = id("e2e00000000000000000f009");
 
-export const PAST_SPRINT_ONE_ID = id("e2e00000000000000000c401");
-export const PAST_SPRINT_ONE_NAME = "Sprint 5";
-export const PAST_SPRINT_ONE_POINTS = 8;
+export const LIFECYCLE_PAST_ONE_ID = id("e2e00000000000000000c401");
+export const LIFECYCLE_PAST_ONE_NAME = "Sprint 5";
+// Delivered, and the sprint also carries an unfinished task worth LIFECYCLE_PAST_ONE_ABANDONED —
+// so a chart plotting committed points instead of delivered ones reads a different number
+export const LIFECYCLE_PAST_ONE_DELIVERED = 8;
+export const LIFECYCLE_PAST_ONE_ABANDONED = 4;
 
-export const PAST_SPRINT_TWO_ID = id("e2e00000000000000000c402");
-export const PAST_SPRINT_TWO_NAME = "Sprint 6";
-export const PAST_SPRINT_TWO_POINTS = 2;
+const LIFECYCLE_PAST_TWO_ID = id("e2e00000000000000000c402");
+export const LIFECYCLE_PAST_TWO_NAME = "Sprint 6";
+export const LIFECYCLE_PAST_TWO_DELIVERED = 2;
 
-export const CURRENT_SPRINT_ID = id("e2e00000000000000000c403");
-export const CURRENT_SPRINT_NAME = "Sprint 7";
-export const CURRENT_SPRINT_GOAL = "Get the mooring mast up";
+export const LIFECYCLE_CURRENT_ID = id("e2e00000000000000000c403");
+export const LIFECYCLE_CURRENT_NAME = "Sprint 7";
+export const LIFECYCLE_CURRENT_GOAL = "Get the mooring mast up";
 
-export const PLANNED_SPRINT_ID = id("e2e00000000000000000c404");
-export const PLANNED_SPRINT_NAME = "Sprint 8";
+export const LIFECYCLE_PLANNED_ID = id("e2e00000000000000000c404");
+export const LIFECYCLE_PLANNED_NAME = "Sprint 8";
 
-export const SPRINT_FINISHED_TASK_ID = id("e2e00000000000000000d401");
-export const SPRINT_FINISHED_TASK_NUMBER = 120;
-export const SPRINT_FINISHED_TASK_TITLE = "Finished before the sprint closed";
+const LIFECYCLE_FINISHED_TASK_ID = id("e2e00000000000000000d401");
+export const LIFECYCLE_FINISHED_TASK_NUMBER = 120;
 
-export const SPRINT_UNFINISHED_TASK_ID = id("e2e00000000000000000d402");
-export const SPRINT_UNFINISHED_TASK_NUMBER = 121;
-export const SPRINT_UNFINISHED_TASK_TITLE = "Still unfinished when the sprint closed";
+const LIFECYCLE_UNFINISHED_TASK_ID = id("e2e00000000000000000d402");
+export const LIFECYCLE_UNFINISHED_TASK_NUMBER = 121;
 
 export async function seedSprintLifecycle() {
   const db = (await connect()).db!;
@@ -527,28 +529,28 @@ export async function seedSprintLifecycle() {
 
   await db.collection("sprints").insertMany([
     sprint({
-      _id: PAST_SPRINT_ONE_ID,
-      name: PAST_SPRINT_ONE_NAME,
+      _id: LIFECYCLE_PAST_ONE_ID,
+      name: LIFECYCLE_PAST_ONE_NAME,
       status: "completed",
       ...dates(-60, -46),
     }),
     sprint({
-      _id: PAST_SPRINT_TWO_ID,
-      name: PAST_SPRINT_TWO_NAME,
+      _id: LIFECYCLE_PAST_TWO_ID,
+      name: LIFECYCLE_PAST_TWO_NAME,
       status: "completed",
       ...dates(-45, -31),
     }),
     sprint({
-      _id: CURRENT_SPRINT_ID,
-      name: CURRENT_SPRINT_NAME,
-      goal: CURRENT_SPRINT_GOAL,
+      _id: LIFECYCLE_CURRENT_ID,
+      name: LIFECYCLE_CURRENT_NAME,
+      goal: LIFECYCLE_CURRENT_GOAL,
       status: "active",
       ...dates(-3, 11),
     }),
     // Planned, and ending last, so the new-sprint form's suggestion chains off this one
     sprint({
-      _id: PLANNED_SPRINT_ID,
-      name: PLANNED_SPRINT_NAME,
+      _id: LIFECYCLE_PLANNED_ID,
+      name: LIFECYCLE_PLANNED_NAME,
       status: "planned",
       ...dates(12, 26),
     }),
@@ -558,20 +560,20 @@ export async function seedSprintLifecycle() {
   const task = taskFactory(now);
   await db.collection("tasks").insertMany([
     task({
-      _id: SPRINT_FINISHED_TASK_ID,
-      taskNumber: SPRINT_FINISHED_TASK_NUMBER,
-      title: SPRINT_FINISHED_TASK_TITLE,
+      _id: LIFECYCLE_FINISHED_TASK_ID,
+      taskNumber: LIFECYCLE_FINISHED_TASK_NUMBER,
+      title: "Finished before the sprint closed",
       status: "done",
-      sprint: CURRENT_SPRINT_ID,
+      sprint: LIFECYCLE_CURRENT_ID,
       customFieldValues: points(5),
       order: 0,
     }),
     task({
-      _id: SPRINT_UNFINISHED_TASK_ID,
-      taskNumber: SPRINT_UNFINISHED_TASK_NUMBER,
-      title: SPRINT_UNFINISHED_TASK_TITLE,
+      _id: LIFECYCLE_UNFINISHED_TASK_ID,
+      taskNumber: LIFECYCLE_UNFINISHED_TASK_NUMBER,
+      title: "Still unfinished when the sprint closed",
       status: "in_progress",
-      sprint: CURRENT_SPRINT_ID,
+      sprint: LIFECYCLE_CURRENT_ID,
       customFieldValues: points(3),
       order: 1,
     }),
@@ -579,33 +581,39 @@ export async function seedSprintLifecycle() {
       taskNumber: 122,
       title: "Delivered in Sprint 5",
       status: "done",
-      sprint: PAST_SPRINT_ONE_ID,
-      customFieldValues: points(PAST_SPRINT_ONE_POINTS),
+      sprint: LIFECYCLE_PAST_ONE_ID,
+      customFieldValues: points(LIFECYCLE_PAST_ONE_DELIVERED),
       order: 0,
+    }),
+    task({
+      taskNumber: 124,
+      title: "Committed to Sprint 5 and never finished",
+      status: "in_progress",
+      sprint: LIFECYCLE_PAST_ONE_ID,
+      customFieldValues: points(LIFECYCLE_PAST_ONE_ABANDONED),
+      order: 1,
     }),
     task({
       taskNumber: 123,
       title: "Delivered in Sprint 6",
       status: "done",
-      sprint: PAST_SPRINT_TWO_ID,
-      customFieldValues: points(PAST_SPRINT_TWO_POINTS),
+      sprint: LIFECYCLE_PAST_TWO_ID,
+      customFieldValues: points(LIFECYCLE_PAST_TWO_DELIVERED),
       order: 0,
     }),
   ]);
-  await db.collection("projects").updateOne({ _id: PROJECT_ID }, { $max: { taskCounter: 123 } });
+  await db.collection("projects").updateOne({ _id: PROJECT_ID }, { $max: { taskCounter: 124 } });
 
   await mongoose.disconnect();
 }
 
 /**
  * Takes the `done` role off the board's only column that carries it, leaving the column itself in
- * place. Nothing a person does on this board can then finish a task, which is the state BP-389
- * closes a sprint in: every task counts as unfinished, the one sitting in the column still
- * labelled Done included.
+ * place, so nothing on this board can be finished any more.
  */
 export async function demoteDoneColumn() {
   const db = (await connect()).db!;
-  await db
+  const result = await db
     .collection("projects")
     .updateOne(
       { _id: PROJECT_ID },
@@ -613,6 +621,11 @@ export async function demoteDoneColumn() {
       { arrayFilters: [{ "column.id": "done" }] }
     );
   await mongoose.disconnect();
+  // An array filter matching nothing updates nothing and still succeeds, which would leave the
+  // board finishing tasks as usual and the failure naming the product rather than this line
+  if (result.modifiedCount !== 1) {
+    throw new Error(`demoteDoneColumn changed ${result.modifiedCount} boards, expected 1`);
+  }
 }
 
 /** A sprint as the database holds it, for assertions the API's derived counts would blur. */
