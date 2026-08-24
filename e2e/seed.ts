@@ -1102,15 +1102,15 @@ export async function seedDemotableAdmin() {
     updatedAt: now,
   });
 
-  await db.collection("tasks").insertOne({
-    ...taskFactory(now)({
+  await db.collection("tasks").insertOne(
+    taskFactory(now)({
       _id: KEPT_TASK_ID,
       project: SECOND_PROJECT_ID,
       taskNumber: KEPT_TASK_NUMBER,
       title: KEPT_TASK_TITLE,
       status: "todo",
-    }),
-  });
+    })
+  );
   await db
     .collection("projects")
     .updateOne({ _id: SECOND_PROJECT_ID }, { $max: { taskCounter: KEPT_TASK_NUMBER } });
