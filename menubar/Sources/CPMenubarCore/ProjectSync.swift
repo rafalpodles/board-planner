@@ -24,6 +24,10 @@ public struct PlannedRemoval: Equatable {
 public enum SyncStep: Equatable {
     case added(project: String, path: String)
     case removed(project: String, path: String)
+    /// The grant was dropped and nothing was deleted, because the directory had already gone.
+    /// Distinct from `.removed` because telling an operator a directory was deleted when it was
+    /// not is the kind of thing they only discover when they go looking for it.
+    case forgotten(project: String, path: String)
     /// A removal a guard said no to. Not a failure: the checkout is intact and the reason is one
     /// the operator can act on.
     case refused(project: String, reason: String)

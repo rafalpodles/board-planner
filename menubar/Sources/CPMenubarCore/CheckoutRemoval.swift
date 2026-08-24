@@ -69,7 +69,7 @@ public struct CheckoutRemoval: Sendable {
         let commits = lines(unpushed.output)
         if !commits.isEmpty {
             return .refused(
-                reason: "\(path) has \(commits.count) commit\(commits.count == 1 ? "" : "s") that are on no remote")
+                reason: "\(path) has \(commits.count) commit\(commits.count == 1 ? " that is" : "s that are") on no remote")
         }
 
         // A stash is uncommitted work that `status` does not show, and it dies with the directory
@@ -86,7 +86,31 @@ public struct CheckoutRemoval: Sendable {
             return .refused(reason: "could not list the worktrees of \(path)")
         }
 
-        return .go(worktrees: linkedWorktrees(worktrees.output, root: root))
+        // A linked worktree has its own working tree and index, so the status check above — run in
+        // the checkout — cannot see it. Refs are shared, so the unpushed and stash checks already
+        // covered every worktree; uncommitted files were the half nothing covered, and the half
+        // that exists nowhere else. Measured: `git status` in the checkout reports clean while a
+        // worktree beside it holds a day of unsaved work (CheckoutRemovalWorktreeTests, BP-418).
+        // A registration whose directory is already gone holds nothing to lose, and it is dropped
+        // from the list rather than skipped inside the loop: `.go` is what the caller deletes, and
+        // a path that is not there throws when it is removed. Skipping only the status check left
+        // one stale entry — the ordinary result of an `rm -rf` without `git worktree prune` —
+        // failing the removal on every poll, for ever, which is what the old `try?` had hidden.
+        let linked = linkedWorktrees(worktrees.output, root: root).filter(exists)
+        for worktree in linked {
+            let dirty = run(["-C", worktree, "status", "--porcelain"], worktree)
+            guard dirty.code == 0 else {
+                return .refused(
+                    reason: "could not tell whether the worktree at \(worktree) has uncommitted changes")
+            }
+            let changed = lines(dirty.output)
+            if !changed.isEmpty {
+                return .refused(
+                    reason: "the worktree at \(worktree) has \(changed.count) uncommitted change\(changed.count == 1 ? "" : "s")")
+            }
+        }
+
+        return .go(worktrees: linked)
     }
 
     private func lines(_ output: String) -> [String] {
