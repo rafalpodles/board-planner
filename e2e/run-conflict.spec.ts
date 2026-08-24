@@ -37,6 +37,7 @@ import {
   seedSecondHeldTask,
   storedExecution,
 } from "./seed";
+import { signIn as arriveSignedIn } from "./session";
 
 // Per test, not once per run: the flow ends with the run released, so a retry or a second
 // iteration would otherwise start from a task no worker is holding
@@ -109,11 +110,9 @@ function expectToast(page: Page, message: string) {
     .toContain(message);
 }
 
-async function signIn(page: Page, username = ADMIN_USERNAME, password = ADMIN_PASSWORD) {
+async function signIn(page: Page, username = ADMIN_USERNAME) {
+  await arriveSignedIn(page, username === MEMBER_USERNAME ? "member" : "admin");
   await page.goto(`/projects/${PROJECT_KEY}`);
-  await page.getByLabel("Username").fill(username);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign In" }).click();
 
   await expect(page.getByRole("heading", { name: PROJECT_NAME })).toBeVisible();
   await expect(page.getByText(HELD_TASK_TITLE)).toBeVisible();
@@ -435,7 +434,7 @@ test("a project member, holding a grant and nothing else, meets the same refusal
     ).toBe(200);
   });
 
-  await signIn(page, MEMBER_USERNAME, MEMBER_PASSWORD);
+  await signIn(page, MEMBER_USERNAME);
 
   const source = boardColumn(page, SOURCE_COLUMN.id);
   const target = boardColumn(page, TARGET_COLUMN.id);

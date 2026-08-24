@@ -1,6 +1,7 @@
 import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
 import { ADMIN_AUTH } from "./api";
 import { ADMIN_PASSWORD, ADMIN_USERNAME, PROJECT_KEY, seed } from "./seed";
+import { signIn as arriveSignedIn } from "./session";
 
 /**
  * BP-365. The fix that pinned the section switcher to the top of a phone screen was written
@@ -15,13 +16,7 @@ test.use({ viewport: { width: 390, height: 780 } });
 
 test.beforeEach(seed);
 
-async function signIn(page: Page) {
-  await page.goto("/login");
-  await page.getByLabel("Username").fill(ADMIN_USERNAME);
-  await page.getByLabel("Password").fill(ADMIN_PASSWORD);
-  await page.getByRole("button", { name: "Sign In" }).click();
-  await expect(page).toHaveURL(/\/projects/);
-}
+const signIn = arriveSignedIn;
 
 /** How far the pill row sits below the top of the scrollport, and how far the page has moved */
 async function geometry(page: Page) {

@@ -17,6 +17,7 @@ import {
   seed,
   seedSprintPlanning,
 } from "./seed";
+import { signIn as arriveSignedIn } from "./session";
 
 /**
  * BP-207: the planning view's two panes accept a dragged task, but every existing check of that
@@ -48,13 +49,7 @@ function sprintProgress(page: Page): Locator {
   return page.getByTestId("sprint-progress");
 }
 
-async function signIn(page: Page) {
-  await page.goto("/login");
-  await page.getByLabel("Username").fill(ADMIN_USERNAME);
-  await page.getByLabel("Password").fill(ADMIN_PASSWORD);
-  await page.getByRole("button", { name: "Sign In" }).click();
-  await expect(page).toHaveURL(/\/projects/);
-}
+const signIn = arriveSignedIn;
 
 async function readTask(request: APIRequestContext, taskNumber: number) {
   const res = await request.get(`/api/projects/${PROJECT_KEY}/tasks/${taskNumber}`, {

@@ -15,6 +15,7 @@ import {
   seedRepository,
   seedWebhook,
 } from "./seed";
+import { signIn as arriveSignedIn } from "./session";
 
 /**
  * BP-396 — what this instance does at its edges: webhook delivery, and the repository sync that
@@ -73,13 +74,7 @@ async function deliveries(request: APIRequestContext): Promise<Delivery[]> {
   return response.json();
 }
 
-async function signIn(page: Page) {
-  await page.goto("/login");
-  await page.getByLabel("Username").fill(ADMIN_USERNAME);
-  await page.getByLabel("Password").fill(ADMIN_PASSWORD);
-  await page.getByRole("button", { name: "Sign In" }).click();
-  await expect(page).toHaveURL(/\/projects/);
-}
+const signIn = arriveSignedIn;
 
 test.beforeEach(seed);
 
