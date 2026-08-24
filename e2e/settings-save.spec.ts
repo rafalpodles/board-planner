@@ -1,5 +1,11 @@
 import { test, expect, type Page } from "@playwright/test";
-import { ADMIN_PASSWORD, ADMIN_USERNAME, PROJECT_KEY, seed } from "./seed";
+import {
+  ADMIN_PASSWORD,
+  ADMIN_USERNAME,
+  PROJECT_KEY,
+  seed,
+  seedWebhookDeliveryOutcomes,
+} from "./seed";
 
 /**
  * BP-248. Saving an integration advanced the draft's baseline only when the save **failed**, so a
@@ -103,4 +109,20 @@ test("a save that fails keeps the edit on screen to retry", async ({ page }) => 
   // The toast carries the server's own message, not the fallback — `fail` prefers err.message
   await expect(page.getByText("nope")).toBeVisible();
   await expect(saveButton(page), "a failed save must keep the work on screen").toBeVisible();
+});
+
+/**
+ * BP-407. Delivery stays single-shot (rpo's call, see the ticket) — what changed is that the one
+ * attempt's outcome is no longer silent. Not exercised through a real delivery (BP-408 blocks
+ * that): the seed writes the outcome `dispatchWebhooks` itself would have written, and this only
+ * asserts the settings page reads it back correctly.
+ */
+test("the webhooks panel shows what the last delivery attempt did", async ({ page }) => {
+  await seedWebhookDeliveryOutcomes();
+  await signIn(page);
+  await openWebhooks(page);
+
+  await expect(page.getByText(/Last delivered/)).toBeVisible();
+  await expect(page.getByText(/Last delivery failed/)).toBeVisible();
+  await expect(page.getByText("connect ECONNREFUSED")).toBeVisible();
 });
