@@ -5,6 +5,7 @@ import {
   ADMIN_ID,
   ADMIN_PASSWORD,
   ADMIN_USERNAME,
+  AUDITOR_FULL_NAME,
   AUDITOR_ID,
   AUDITOR_PASSWORD,
   AUDITOR_USERNAME,
@@ -442,6 +443,9 @@ test("a demoted admin loses the feed for the board they no longer hold, rows and
   await test.step("the admin demotes them to a plain member", async () => {
     await admin.goto("/settings/users");
     await admin.getByText(`@${AUDITOR_USERNAME}`, { exact: true }).first().click();
+    // The dialog, before the button inside it: the card opens it in a state update, so clicking
+    // straight through races a modal that is not on screen yet.
+    await expect(admin.getByText(`Edit ${AUDITOR_FULL_NAME}`)).toBeVisible();
     await admin.getByRole("button", { name: "Member", exact: true }).click();
     const saved = admin.waitForResponse(
       (r) =>
@@ -465,14 +469,11 @@ test("a demoted admin loses the feed for the board they no longer hold, rows and
       .collection("notifications")
       .find({ recipient: AUDITOR_ID })
       .toArray();
-    expect(
-      rows.map((r) => ({ project: String(r.project), read: r.read })).sort((a, b) =>
-        a.project < b.project ? -1 : 1
-      )
-    ).toHaveLength(2);
-    expect(rows.some((r) => String(r.project) === String(PROJECT_ID) && r.read === false)).toBe(
-      true
-    );
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => ({ project: String(r.project), read: r.read }))).toContainEqual({
+      project: String(PROJECT_ID),
+      read: false,
+    });
   });
 
   await auditorContext.close();
