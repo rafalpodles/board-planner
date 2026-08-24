@@ -69,7 +69,7 @@ public struct CheckoutRemoval: Sendable {
         let commits = lines(unpushed.output)
         if !commits.isEmpty {
             return .refused(
-                reason: "\(path) has \(commits.count) commit\(commits.count == 1 ? "" : "s") that are on no remote")
+                reason: "\(path) has \(commits.count) commit\(commits.count == 1 ? " that is" : "s that are") on no remote")
         }
 
         // A stash is uncommitted work that `status` does not show, and it dies with the directory
