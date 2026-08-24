@@ -371,12 +371,18 @@ test.describe("which sprint the page opens on", () => {
     // endpoint refuses a value that is not an ObjectId with a 400. The second is why nothing here
     // can watch for a 500 — so what is watched instead is the first: any refusal at all means the
     // page asked a question it had no business asking.
+    await signIn(page);
+
+    // Attached after signing in, and only to this board's own endpoints: the login page's
+    // /api/auth/me answers 401 before there is a session, which is the app working.
     const refused: string[] = [];
     page.on("response", (response) => {
-      if (response.status() >= 400) refused.push(`${response.status()} ${response.url()}`);
+      const { pathname } = new URL(response.url());
+      if (pathname.startsWith(`/api/projects/${PROJECT_KEY}`) && response.status() >= 400) {
+        refused.push(`${response.status()} ${pathname}${new URL(response.url()).search}`);
+      }
     });
 
-    await signIn(page);
     await openSprints(page, "?sprint=not-a-real-sprint");
 
     await expect(selectedSprintName(page)).toHaveText(CURRENT_SPRINT_NAME);
