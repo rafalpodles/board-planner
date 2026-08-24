@@ -21,12 +21,9 @@ import {
  * somebody in, the preference has to change the board, and the theme has to change a painted
  * colour.
  *
- * Two clauses of the task have no counterpart in the code, and are covered as what exists rather
- * than as what was asked for:
+ * One clause of the task has no counterpart in the code, and is covered as what exists rather than
+ * as what was asked for:
  *
- * - **Editing `fullName` on the profile.** The screen renders it as text and `PUT /api/users/me`
- *   does not accept the field at all; the only place it is ever set is the admin's create-account
- *   form. What the profile does have is the address, behind the current-password gate.
  * - **Configuring SMTP.** The screen says so itself: "Configured in the environment, not here."
  *   Its configured branch needs `SMTP_HOST` for the whole run, which would turn
  *   `email-on-account.spec.ts`'s unconfigured-state assertion red. So that branch sits behind the
@@ -51,6 +48,24 @@ async function signIn(page: Page, username: string, password: string) {
  */
 async function hideDevOverlay(page: Page) {
   await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
+}
+
+/**
+ * Opens a screen and waits for it to stop fetching before anything is typed into it.
+ *
+ * These screens read their values after mounting, and in development React invokes that effect
+ * twice — so a value typed between the two answers is overwritten by the later one, and the screen
+ * then saves what was already there. Waiting for the traffic to stop is what orders "loaded" before
+ * "typed"; without it the failure is a field that silently reverts, which reads as a product bug.
+ */
+async function openSettled(page: Page, url: string) {
+  await page.goto(url);
+  await page.waitForLoadState("networkidle");
+}
+
+async function reloadSettled(page: Page) {
+  await page.reload();
+  await page.waitForLoadState("networkidle");
 }
 
 /**
@@ -112,7 +127,7 @@ test("an instance setting is stored, and a value the instance will not take is r
   page,
 }) => {
   await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);
-  await page.goto("/settings/agents");
+  await openSettled(page, "/settings/agents");
   await recordToasts(page);
 
   const model = page.getByLabel("Model", { exact: true });
@@ -125,7 +140,7 @@ test("an instance setting is stored, and a value the instance will not take is r
     await saved;
     await expectToast(page, "Model saved");
 
-    await page.reload();
+    await reloadSettled(page);
     await expect(page.getByLabel("Model", { exact: true })).toHaveValue("gpt-4o-mini-2026");
   });
 
@@ -137,7 +152,7 @@ test("an instance setting is stored, and a value the instance will not take is r
     await page.getByRole("button", { name: "Save model" }).click();
     await expectToast(page, "Give the model a name, or the AI task generator has nothing to call.");
 
-    await page.reload();
+    await reloadSettled(page);
     await expect(page.getByLabel("Model", { exact: true })).toHaveValue("gpt-4o-mini-2026");
   });
 
@@ -149,7 +164,7 @@ test("an instance setting is stored, and a value the instance will not take is r
     await page.getByRole("button", { name: "Save defaults" }).click();
     await saved;
 
-    await page.reload();
+    await reloadSettled(page);
     await expect(page.getByLabel("Default model")).toHaveValue("e2e/instance-default");
     await expect(page.getByLabel("Default daily turn cap")).toHaveValue("25");
 
@@ -158,7 +173,7 @@ test("an instance setting is stored, and a value the instance will not take is r
     await page.getByRole("button", { name: "Save defaults" }).click();
     await expectToast(page, "Default turn cap must be a whole number between 0 and 1000");
 
-    await page.reload();
+    await reloadSettled(page);
     await expect(page.getByLabel("Default daily turn cap")).toHaveValue("25");
   });
 
@@ -252,7 +267,7 @@ test("a token created here works at once, and stops the moment it is revoked", a
   request,
 }) => {
   await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);
-  await page.goto("/settings/tokens");
+  await openSettled(page, "/settings/tokens");
   await recordToasts(page);
 
   // The fixture already gives this account a token, so the interesting number is not "one" but
@@ -333,7 +348,7 @@ test("the collapse preference decides what the board does with its empty columns
   });
 
   await test.step("turning it on collapses the empty ones and only those", async () => {
-    await page.goto("/settings/preferences");
+    await openSettled(page, "/settings/preferences");
     await recordToasts(page);
     const saved = page.waitForResponse(
       (r) =>
@@ -351,10 +366,10 @@ test("the collapse preference decides what the board does with its empty columns
   });
 
   await test.step("it belongs to the account, not the page, so it survives a reload", async () => {
-    await page.reload();
+    await reloadSettled(page);
     await expect(page.getByRole("button", { name: `Expand ${EMPTY_COLUMN}` })).toBeVisible();
 
-    await page.goto("/settings/preferences");
+    await openSettled(page, "/settings/preferences");
     await expect(page.getByLabel("Collapse empty columns")).toBeChecked();
   });
 });
@@ -401,10 +416,11 @@ test("the theme follows the choice, and the choice survives a reload", async ({ 
   expect(await paintedBackground(page)).toBe(dark);
 });
 
-test("the address on the profile is guarded by the password, and is where the test mail goes", async ({
+test("the profile: the name lands in the shell, the address is guarded by the password", async ({
   page,
 }) => {
   const ADDRESS = "e2e-admin@example.test";
+  const NEW_NAME = "E2E Admin Renamed";
 
   await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);
 
@@ -415,25 +431,65 @@ test("the address on the profile is guarded by the password, and is where the te
     await expect(page.getByText(/Add an address to/)).toBeVisible();
   });
 
-  await page.goto("/settings/profile");
+  await openSettled(page, "/settings/profile");
   await recordToasts(page);
 
   // Scoped to the page body: the sidebar prints this account's name and its role in the corner, so
   // an unscoped "admin" or "E2E Admin" matches the furniture as well as the field.
-  await test.step("the profile shows the account it belongs to", async () => {
+  await test.step("the profile names the account it belongs to, and cannot rename it away", async () => {
     const main = page.locator("#main-content");
     await expect(main.getByText(ADMIN_USERNAME, { exact: true })).toBeVisible();
-    // Read-only here: the only screen that sets a full name is the admin's create-account form
-    await expect(main.getByText("E2E Admin", { exact: true })).toBeVisible();
+    await expect(page.getByLabel("Full Name")).toHaveValue("E2E Admin");
+
+    await fillStably(page.getByLabel("Full Name"), "   ");
+    await expect(page.getByRole("button", { name: "Save" })).toBeDisabled();
+    await fillStably(page.getByLabel("Full Name"), "E2E Admin");
+  });
+
+  // The name is the one field here with no password gate — it receives no reset link — so what has
+  // to be shown is simply that it lands somewhere other than its own input. The shell is that
+  // somewhere: it renders the cached account, which is why saving refreshes it.
+  await test.step("a new name reaches the shell and survives a reload", async () => {
+    const saved = page.waitForResponse(
+      (r) =>
+        r.request().method() === "PUT" &&
+        new URL(r.url()).pathname === "/api/users/me" &&
+        r.status() === 200
+    );
+    await fillStably(page.getByLabel("Full Name"), NEW_NAME);
+    await page.getByRole("button", { name: "Save" }).click();
+    await saved;
+    await expectToast(page, "Profile updated");
+
+    await expect(page.getByRole("button", { name: new RegExp(NEW_NAME) })).toBeVisible();
+
+    await reloadSettled(page);
+    await expect(page.getByLabel("Full Name")).toHaveValue(NEW_NAME);
+    await expect(page.getByRole("button", { name: new RegExp(NEW_NAME) })).toBeVisible();
+  });
+
+  // The blank name is refused by the button above, so the button is all that step can speak for.
+  // Only a request the screen cannot make asks the instance the same question.
+  await test.step("the instance refuses a blank name as well, not just the button", async () => {
+    const refused = await page.request.put("/api/users/me", {
+      headers: SAME_ORIGIN,
+      data: { fullName: "  " },
+    });
+    expect(refused.status()).toBe(400);
+
+    await reloadSettled(page);
+    await expect(page.getByLabel("Full Name")).toHaveValue(NEW_NAME);
   });
 
   await test.step("a new address without the right password is refused", async () => {
-    await page.getByLabel("Email").fill(ADDRESS);
+    // Re-armed after the reloads above: the observer that collects toasts does not survive one
+    await recordToasts(page);
+    await fillStably(page.getByLabel("Email"), ADDRESS);
     await fillStably(page.getByLabel("Current password"), "not-the-password");
     await page.getByRole("button", { name: "Save" }).click();
     await expectToast(page, "Current password is incorrect");
 
-    await page.reload();
+    await reloadSettled(page);
     await expect(page.getByLabel("Email")).toHaveValue("");
   });
 
@@ -445,13 +501,13 @@ test("the address on the profile is guarded by the password, and is where the te
         r.status() === 200
     );
     await recordToasts(page);
-    await page.getByLabel("Email").fill(ADDRESS);
+    await fillStably(page.getByLabel("Email"), ADDRESS);
     await fillStably(page.getByLabel("Current password"), ADMIN_PASSWORD);
     await page.getByRole("button", { name: "Save" }).click();
     await saved;
     await expectToast(page, "Profile updated");
 
-    await page.reload();
+    await reloadSettled(page);
     await expect(page.getByLabel("Email")).toHaveValue(ADDRESS);
   });
 
@@ -465,7 +521,7 @@ test("the address on the profile is guarded by the password, and is where the te
     });
     expect(refused.status()).toBe(400);
 
-    await page.reload();
+    await reloadSettled(page);
     await expect(page.getByLabel("Email")).toHaveValue(ADDRESS);
   });
 
