@@ -638,3 +638,42 @@ describe("TaskDetail, whether the rail knows who is reading", () => {
     expect(within(await openSheet()).queryByTestId("personal-agents-withheld")).not.toBeNull();
   });
 });
+
+/**
+ * BP-400 code review. `users` now comes from the project-scoped roster, which deliberately omits
+ * anybody who has since lost access — so a plain `.find()` against it resolves to nothing for such
+ * a task, and the mobile chip printed "Unassigned" over a task the server has assigned. This is the
+ * same defect the desktop rail was fixed for, one component over; assigneeToShow is what both now
+ * ask, so the two cannot disagree.
+ */
+describe("TaskDetail, the mobile summary's assignee chip", () => {
+  it("names an assignee the roster no longer carries, rather than reading as unassigned", async () => {
+    api.get.mockImplementation((url: string) => {
+      if (url === "/api/projects/TP/assignable-users") return Promise.resolve([]);
+      if (url.startsWith("/api/agent")) return Promise.resolve([]);
+      if (url.includes("/tasks/")) {
+        return Promise.resolve({
+          ...task,
+          assignee: { _id: "u9", username: "kasia", fullName: "Kasia Nowak" },
+        });
+      }
+      if (url.includes("/sprints")) return Promise.resolve([]);
+      return Promise.resolve(project);
+    });
+
+    renderDetail();
+    await loaded();
+
+    const chip = await screen.findByTestId("mobile-assignee-chip");
+    expect(chip.textContent).toContain("Kasia Nowak");
+    expect(chip.textContent).not.toContain("Unassigned");
+  });
+
+  it("still reads unassigned when the task genuinely has nobody on it", async () => {
+    renderDetail();
+    await loaded();
+
+    const chip = await screen.findByTestId("mobile-assignee-chip");
+    expect(chip.textContent).toContain("Unassigned");
+  });
+});

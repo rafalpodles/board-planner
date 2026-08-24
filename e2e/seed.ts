@@ -922,7 +922,9 @@ export const OUTSIDER_PASSWORD = "test1234";
 export const OUTSIDER_FULL_NAME = "E2E Outsider";
 export const OUTSIDER_ID = id("e2e00000000000000000a006");
 
-export const OUTSIDER_TASK_NUMBER = 10;
+// 14, not 10: the search fixture already seeds taskNumber 10 on this project and
+// {project, taskNumber} is a unique index, so both fixtures in one test would collide
+export const OUTSIDER_TASK_NUMBER = 14;
 export const OUTSIDER_TASK_KEY = `${PROJECT_KEY}-${OUTSIDER_TASK_NUMBER}`;
 export const OUTSIDER_TASK_TITLE = "Assigned before they lost access";
 

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { withProjectOwner } from "@/lib/middleware";
-import { projectAudienceFilter, recipientsWithAccess } from "@/lib/grants";
+import { audienceFilterFrom, recipientsWithAccess } from "@/lib/grants";
 import { User } from "@/models/user";
 import { Grant } from "@/models/grant";
 import { Notification } from "@/models/notification";
@@ -21,9 +21,10 @@ export const GET = withProjectOwner(async (_request, { params }) => {
     .lean();
 
   // The same filter the assignable-users endpoint builds on, rather than a second copy of the
-  // same $or: this list and that one are answers to the same question and must not drift.
+  // same $or: this list and that one are answers to the same question and must not drift. Built
+  // from the rows already in hand, so the grants are read once per request rather than twice.
   const users = await User.find({
-    ...(await projectAudienceFilter(projectId)),
+    ...audienceFilterFrom(grants.map((g) => g.subject)),
     kind: { $ne: "machine" },
   })
     .select("username fullName role")

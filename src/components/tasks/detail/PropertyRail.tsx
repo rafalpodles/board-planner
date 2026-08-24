@@ -5,7 +5,7 @@ import {
   ApiCustomField,
   ApiProjectCategory,
   ApiSprint,
-  ApiUser,
+  ApiUserSummary,
   Category,
   PRIORITIES,
   PRIORITY_LABELS,
@@ -28,6 +28,7 @@ import {
 import type { TaskDraft } from "./useTaskEditor";
 import type { ApiAgent, ApiTask } from "@/types";
 import { handoverOf, refIdOf, type Handover } from "@/lib/handover";
+import { assigneeToShow } from "./assignee-display";
 import type { AnyColumn } from "@/lib/columns";
 
 const RECURRENCE_UNITS: Record<RecurrenceFrequency, string> = {
@@ -85,7 +86,7 @@ function HandoverNotice({ handover }: { handover: Handover | null }) {
 interface PropertyRailProps {
   draft: TaskDraft;
   set: <K extends keyof TaskDraft>(key: K, value: TaskDraft[K]) => void;
-  users: ApiUser[];
+  users: ApiUserSummary[];
   sprints: ApiSprint[];
   agents: ApiAgent[];
   /** Offered first in the picker once a machine is being chosen; never a fallback */
@@ -118,17 +119,6 @@ interface PropertyRailProps {
   touch?: boolean;
 }
 
-/** The stored task knows their name; the roster no longer carries them. Falls back to the handle. */
-function nameOfStoredAssignee(
-  storedAssignee: ApiTask["assignee"],
-  username: string
-): string {
-  if (storedAssignee && typeof storedAssignee === "object" && storedAssignee.username === username) {
-    return storedAssignee.fullName || username;
-  }
-  return username;
-}
-
 export function PropertyRail({
   draft,
   set,
@@ -157,17 +147,9 @@ export function PropertyRail({
    * re-sending the assignee already stored is allowed, and only a move to somebody who cannot
    * reach the board is refused. Offering a control that 400s on click would be worse than either.
    */
+  const shown = assigneeToShow(users, draft.assignee, stored.assignee);
   const offeredUsers =
-    !draft.assignee || users.some((u) => u.username === draft.assignee)
-      ? users
-      : [
-          ...users,
-          {
-            _id: draft.assignee,
-            username: draft.assignee,
-            fullName: nameOfStoredAssignee(stored.assignee, draft.assignee),
-          } as ApiUser,
-        ];
+    shown && !users.some((u) => u.username === shown.username) ? [...users, shown] : users;
   const sprint = sprints.find((s) => s._id === draft.sprint);
   const fields = sortedFields(activeFields(customFields));
   const selectableSprints = sprints.filter((s) => s.status !== "completed");

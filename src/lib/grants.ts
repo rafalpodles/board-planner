@@ -152,7 +152,16 @@ export async function projectAudienceFilter(
     .select("subject")
     .lean();
 
-  return { $or: [{ role: "admin" }, { _id: { $in: grants.map((g) => g.subject) } }] };
+  return audienceFilterFrom(grants.map((g) => g.subject));
+}
+
+/**
+ * The filter, for a caller that already holds the project's grant rows. Splitting it out is not
+ * tidiness: /members reads those rows for the relation map anyway, and having it call
+ * projectAudienceFilter meant querying the same collection twice per request.
+ */
+export function audienceFilterFrom(subjects: unknown[]): Record<string, unknown> {
+  return { $or: [{ role: "admin" }, { _id: { $in: subjects } }] };
 }
 
 /**
