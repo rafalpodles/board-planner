@@ -25,6 +25,7 @@ const LABELS: Record<string, string> = {
   user_email_changed: "Address changed by an admin",
   user_email_changed_self: "Address changed by the account itself",
   user_password_reset_by_email: "Password reset by email",
+  user_full_name_changed_self: "Name changed by the account itself",
 };
 
 // The actions worth spotting at a glance: one stops a machine, one hands out the credential that

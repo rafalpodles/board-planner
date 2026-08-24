@@ -129,7 +129,7 @@ function mockHappyApi() {
     if (url === "/api/projects/p1") return Promise.resolve(project);
     if (url.startsWith("/api/projects/p1/tasks")) return Promise.resolve(tasks);
     if (url === "/api/projects/p1/sprints") return Promise.resolve([]);
-    if (url === "/api/users/list") return Promise.resolve([]);
+    if (url.endsWith("/assignable-users")) return Promise.resolve([]);
     return Promise.reject(new Error(`unexpected GET ${url}`));
   });
 }
@@ -197,7 +197,7 @@ describe("A board whose initial load fails", () => {
       if (url === "/api/projects/p1") return Promise.reject(new Error("boom"));
       if (url.startsWith("/api/projects/p1/tasks")) return Promise.resolve(tasks);
       if (url === "/api/projects/p1/sprints") return Promise.resolve([]);
-      if (url === "/api/users/list") return Promise.resolve([]);
+      if (url.endsWith("/assignable-users")) return Promise.resolve([]);
       return Promise.reject(new Error(`unexpected GET ${url}`));
     });
 
@@ -216,7 +216,7 @@ describe("A board whose initial load fails", () => {
       }
       if (url.startsWith("/api/projects/p1/tasks")) return Promise.resolve(tasks);
       if (url === "/api/projects/p1/sprints") return Promise.resolve([]);
-      if (url === "/api/users/list") return Promise.resolve([]);
+      if (url.endsWith("/assignable-users")) return Promise.resolve([]);
       return Promise.reject(new Error(`unexpected GET ${url}`));
     });
 
@@ -243,7 +243,7 @@ describe("A second load starting before the first settles", () => {
       if (url === "/api/projects/p1") return projectCalls[projectCallIndex++].promise;
       if (url.startsWith("/api/projects/p1/tasks")) return Promise.resolve(tasks);
       if (url === "/api/projects/p1/sprints") return Promise.resolve([]);
-      if (url === "/api/users/list") return Promise.resolve([]);
+      if (url.endsWith("/assignable-users")) return Promise.resolve([]);
       return Promise.reject(new Error(`unexpected GET ${url}`));
     });
 

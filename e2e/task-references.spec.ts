@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Locator, type Page } from "@playwright/test";
 import mongoose from "mongoose";
 import {
   ADMIN_ID,
@@ -50,6 +50,19 @@ async function signIn(page: Page) {
   await page.getByLabel("Password").fill(ADMIN_PASSWORD);
   await page.getByRole("button", { name: "Sign In" }).click();
   await expect(page).toHaveURL(/\/projects/);
+}
+
+// toBeVisible() retries; boundingBox() does not. If React replaces the node in the gap between
+// the two calls, boundingBox() returns null, and a bare `!` turns that into a width/height
+// TypeError two lines away from anything naming the race. Retry the read itself instead of
+// waiting harder before it.
+async function measured(locator: Locator) {
+  let box: Awaited<ReturnType<Locator["boundingBox"]>> = null;
+  await expect(async () => {
+    box = await locator.boundingBox();
+    expect(box, "element went away between the visibility check and the measurement").not.toBeNull();
+  }).toPass();
+  return box!;
 }
 
 test.beforeEach(async () => {
@@ -246,8 +259,8 @@ test.describe("where the list appears", () => {
     const list = page.getByRole("listbox");
     await expect(list).toBeVisible();
 
-    const box = (await editor.boundingBox())!;
-    const where = (await list.boundingBox())!;
+    const box = await measured(editor);
+    const where = await measured(list);
     // Below where the typing is, not floating above the whole field
     expect(where.y).toBeGreaterThan(box.y + box.height / 2);
   });
@@ -273,7 +286,7 @@ test.describe("where the list appears", () => {
 
     const criterion = page.getByLabel("Criterion 1").first();
     await expect(criterion).toBeVisible();
-    const field = (await criterion.boundingBox())!;
+    const field = await measured(criterion);
     // Against the comment box, which sits in the same column and always fills it. The first version
     // of this compared against the words "Acceptance criteria" — a 140px label — so the collapsed
     // 147px field cleared the bar and the mutation passed.
@@ -281,7 +294,7 @@ test.describe("where the list appears", () => {
     // Measured only once it is on screen. Without the wait this raced the comments load and read a
     // null box — latent since it was written, and surfaced by /api/* going no-store.
     await expect(composer).toBeVisible();
-    const reference = (await composer.boundingBox())!;
+    const reference = await measured(composer);
 
     expect(field.width).toBeGreaterThan(reference.width * 0.8);
   });

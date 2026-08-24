@@ -316,6 +316,9 @@ export interface IWebhook {
   url: string;
   events: WebhookEvent[];
   enabled: boolean;
+  lastAttemptAt: Date | null;
+  lastStatus: "ok" | "failed" | null;
+  lastError: string;
 }
 
 // The URL never reaches a client: it is a credential, so the API returns only a mask
@@ -324,6 +327,10 @@ export interface ApiWebhook {
   urlMasked: string;
   events: WebhookEvent[];
   enabled: boolean;
+  /** Single-shot delivery (BP-407) — this is the outcome of the one attempt, not a retry count. */
+  lastAttemptAt: string | null;
+  lastStatus: "ok" | "failed" | null;
+  lastError: string;
 }
 
 export type NotificationChannelType = "slack" | "discord";
@@ -893,7 +900,7 @@ export interface ApiUser {
   createdAt: string;
 }
 
-/** What GET /api/users/list returns: enough to name someone and assign them */
+/** What GET /api/projects/:id/assignable-users returns: enough to name someone and assign them */
 export interface ApiUserSummary {
   _id: string;
   username: string;
@@ -1258,6 +1265,10 @@ export const INSTANCE_AUDIT_ACTIONS = [
   // "changed by an admin" would send an investigator looking at the wrong person (BP-354)
   "user_email_changed_self",
   "user_password_reset_by_email",
+  // A display name is not authority — it is never matched on, and the username it sits beside is.
+  // It is what a comment is signed with, though, so this row is the only place the change is
+  // recorded at all (BP-410)
+  "user_full_name_changed_self",
 ] as const;
 
 export type InstanceAuditAction = (typeof INSTANCE_AUDIT_ACTIONS)[number];

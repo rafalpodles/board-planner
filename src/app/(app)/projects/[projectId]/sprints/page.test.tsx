@@ -205,7 +205,7 @@ async function renderSprints(
       return Promise.resolve(tasks.map((t) => ({ ...t })));
     }
     if (url === "/api/projects/p1/sprints") return Promise.resolve(data);
-    if (url === "/api/users/list") return Promise.resolve([]);
+    if (url.endsWith("/assignable-users")) return Promise.resolve([]);
     return Promise.reject(new Error(`unexpected GET ${url}`));
   });
 
@@ -414,7 +414,7 @@ describe("Sprints tab", () => {
       if (url === "/api/projects/p1/tasks?sprint=s2") return new Promise(() => {});
       if (url.startsWith("/api/projects/p1/tasks")) return Promise.resolve(sprintTasks);
       if (url === "/api/projects/p1/sprints") return Promise.resolve(sprints);
-      if (url === "/api/users/list") return Promise.resolve([]);
+      if (url.endsWith("/assignable-users")) return Promise.resolve([]);
       return Promise.reject(new Error(`unexpected GET ${url}`));
     });
 
@@ -444,7 +444,7 @@ describe("Sprints tab", () => {
       if (url === "/api/projects/p1") return Promise.resolve(project);
       if (url.startsWith("/api/projects/p1/tasks")) return pendingTasks;
       if (url === "/api/projects/p1/sprints") return Promise.resolve(sprints);
-      if (url === "/api/users/list") return Promise.resolve([]);
+      if (url.endsWith("/assignable-users")) return Promise.resolve([]);
       return Promise.reject(new Error(`unexpected GET ${url}`));
     });
 
@@ -600,7 +600,7 @@ describe("Board / Planning toggle", () => {
         return Promise.resolve(backlogTasks.map((t) => ({ ...t })));
       }
       if (url === "/api/projects/p1/sprints") return Promise.resolve(sprints);
-      if (url === "/api/users/list") return Promise.resolve([]);
+      if (url.endsWith("/assignable-users")) return Promise.resolve([]);
       return Promise.reject(new Error(`unexpected GET ${url}`));
     });
     api.put.mockResolvedValue({});
@@ -658,7 +658,7 @@ describe("Board / Planning toggle", () => {
         return Promise.resolve(movedIn ? [] : backlogTasks.map((t) => ({ ...t })));
       }
       if (url === "/api/projects/p1/sprints") return Promise.resolve(sprints);
-      if (url === "/api/users/list") return Promise.resolve([]);
+      if (url.endsWith("/assignable-users")) return Promise.resolve([]);
       return Promise.reject(new Error(`unexpected GET ${url}`));
     });
     api.put.mockImplementation(() => {
@@ -694,7 +694,7 @@ describe("Board / Planning toggle", () => {
       }
       if (url === "/api/projects/p1/tasks?sprint=backlog") return Promise.resolve([]);
       if (url === "/api/projects/p1/sprints") return Promise.resolve(sprints);
-      if (url === "/api/users/list") return Promise.resolve([]);
+      if (url.endsWith("/assignable-users")) return Promise.resolve([]);
       return Promise.reject(new Error(`unexpected GET ${url}`));
     });
     api.put.mockImplementation(() => new Promise(() => {}));
@@ -740,7 +740,7 @@ describe("Board / Planning toggle", () => {
       // Sprint 13's tasks never arrive, keeping the mid-switch window open under test
       if (url === "/api/projects/p1/tasks?sprint=s2") return new Promise(() => {});
       if (url === "/api/projects/p1/sprints") return Promise.resolve(planningSprints);
-      if (url === "/api/users/list") return Promise.resolve([]);
+      if (url.endsWith("/assignable-users")) return Promise.resolve([]);
       return Promise.reject(new Error(`unexpected GET ${url}`));
     });
 
@@ -790,7 +790,7 @@ describe("Board / Planning toggle", () => {
       // Sprint 13's tasks never arrive, keeping the mid-switch window open under test
       if (url === "/api/projects/p1/tasks?sprint=s2") return new Promise(() => {});
       if (url === "/api/projects/p1/sprints") return Promise.resolve(planningSprints);
-      if (url === "/api/users/list") return Promise.resolve([]);
+      if (url.endsWith("/assignable-users")) return Promise.resolve([]);
       return Promise.reject(new Error(`unexpected GET ${url}`));
     });
 
@@ -894,7 +894,7 @@ describe("Sprint header estimate", () => {
       // Sprint 13's tasks never arrive, keeping the mid-switch window open under test
       if (url === "/api/projects/p1/tasks?sprint=s2") return new Promise(() => {});
       if (url === "/api/projects/p1/sprints") return Promise.resolve(planningSprintsWithEstimate);
-      if (url === "/api/users/list") return Promise.resolve([]);
+      if (url.endsWith("/assignable-users")) return Promise.resolve([]);
       return Promise.reject(new Error(`unexpected GET ${url}`));
     });
 

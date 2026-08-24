@@ -1,6 +1,7 @@
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { connectDB } from "@/lib/db";
+import { FULL_NAME_MAX_LENGTH, stripControlCharacters } from "@/lib/identifiers";
 import { User } from "@/models/user";
 import { IUser } from "@/types";
 
@@ -13,10 +14,22 @@ export function workerUsername(workerId: string): string {
   return `worker-${workerId}`;
 }
 
+// [...string] rather than a plain slice, so a surrogate pair is kept or dropped whole rather than
+// cut in half into two unpaired halves
+function capLength(value: string, max: number): string {
+  return [...value].slice(0, max).join("");
+}
+
 export function workerDisplayName(machine: string, owner: string): string {
-  const machineName = machine.trim() || "worker";
-  const ownerName = owner.trim();
-  return ownerName ? `${ownerName} · ${machineName}` : machineName;
+  const machineName = stripControlCharacters(machine).trim() || "worker";
+  const ownerName = stripControlCharacters(owner).trim();
+  const composed = ownerName ? `${ownerName} · ${machineName}` : machineName;
+  // The cap applies to the composed string, not each half separately: the two inputs are already
+  // bounded well under it on their own (register.ts caps `name` at 120, but a display name that
+  // long has never been the point), and a name it still had to shorten is display text, not an
+  // identifier — a truncated "Rafal · MacBook P" is a worse cosmetic than a rejected enrolment
+  // would be a functional one.
+  return capLength(composed, FULL_NAME_MAX_LENGTH);
 }
 
 export async function ensureWorkerUser(input: {

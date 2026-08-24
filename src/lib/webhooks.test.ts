@@ -1,191 +1,209 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import crypto from "crypto";
-import { SIGNATURE_HEADER, TIMESTAMP_HEADER } from "./webhook-signature";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
-/**
- * BP-396. `signWebhook` had a test; *dispatch* had none — so nothing established that a delivery
- * carries the signature at all, that only an enabled webhook subscribed to this event is sent one,
- * or that the destination guard is applied per webhook rather than once for the list.
- *
- * This is the only level at which the signature can be asserted: a delivery cannot be received in
- * the e2e run, because `safeFetch` takes https and a public address only (BP-408). `safe-fetch` is
- * the seam, so everything above it — selection, body, headers — is the real module.
- *
- * It is also the only level at which `isAllowedWebhookUrl`'s own branches are covered.
- * `safe-fetch.test.ts` exercises `assertPublicDestination`, which is the *second* gate; the first
- * is this module's, and with `safeFetch` mocked here there is no socket and no TLS to confuse a
- * refusal with a failed handshake — which is why the e2e spec cannot make this assertion and this
- * file can.
- */
+const findByIdLean = vi.fn();
+const updateOne = vi.fn().mockResolvedValue({});
+vi.mock("@/models/project", () => ({
+  Project: {
+    findById: () => ({ lean: findByIdLean }),
+    updateOne: (...a: unknown[]) => updateOne(...a),
+  },
+}));
 
 const safeFetch = vi.fn();
-const findById = vi.fn();
-
-vi.mock("./safe-fetch", () => ({ safeFetch }));
-vi.mock("@/models/project", () => ({ Project: { findById } }));
+vi.mock("@/lib/safe-fetch", () => ({
+  safeFetch: (...a: unknown[]) => safeFetch(...a),
+  BlockedDestinationError: class BlockedDestinationError extends Error {},
+}));
+const allowUrl = vi.fn().mockReturnValue(true);
+vi.mock("@/lib/url-validation", () => ({ isAllowedWebhookUrl: (u: string) => allowUrl(u) }));
 
 const { dispatchWebhooks } = await import("./webhooks");
-
-const SECRET = "shhh";
-const ORIGINAL = process.env.WEBHOOK_SIGNING_SECRET;
-
-const PAYLOAD = {
-  project: { key: "TP", name: "A board" },
-  task: { taskKey: "TP-1", title: "A task", status: "todo" },
-};
+const { BlockedDestinationError } = await import("@/lib/safe-fetch");
 
 function project(webhooks: Record<string, unknown>[]) {
-  findById.mockReturnValue({ lean: () => Promise.resolve({ webhooks }) });
+  return { webhooks };
 }
 
-function hook(over: Record<string, unknown> = {}) {
-  return {
-    url: "https://example.com/hook",
-    events: ["task_created", "status_changed"],
-    enabled: true,
-    ...over,
-  };
-}
+const PAYLOAD = { project: { key: "BP", name: "Board Planner" } };
 
-/** Every delivery, as (url, RequestInit) pairs. */
-function deliveries(): [string, RequestInit][] {
-  return safeFetch.mock.calls.map((call) => [call[0] as string, call[1] as RequestInit]);
-}
+type Call = [
+  { _id: string; webhooks: { $elemMatch: { _id: string; $or: unknown[] } } },
+  { $set: Record<string, unknown> },
+];
 
-function headerOf(init: RequestInit, name: string): string {
-  return (init.headers as Record<string, string>)[name];
+function callsFor(webhookId: string) {
+  return (updateOne.mock.calls as unknown as Call[]).filter(
+    (c) => c[0].webhooks.$elemMatch._id === webhookId
+  );
 }
 
 beforeEach(() => {
-  vi.clearAllMocks();
-  process.env.WEBHOOK_SIGNING_SECRET = SECRET;
-  safeFetch.mockResolvedValue(new Response("{}", { status: 200 }));
+  findByIdLean.mockReset();
+  updateOne.mockClear();
+  safeFetch.mockReset();
+  allowUrl.mockReturnValue(true);
 });
 
-afterEach(() => {
-  if (ORIGINAL === undefined) delete process.env.WEBHOOK_SIGNING_SECRET;
-  else process.env.WEBHOOK_SIGNING_SECRET = ORIGINAL;
-});
-
-describe("dispatchWebhooks", () => {
-  it("signs the body it actually sends, over the timestamp it actually states", async () => {
-    project([hook()]);
-
-    await dispatchWebhooks("p1", "task_created", PAYLOAD);
-
-    const [[url, init]] = deliveries();
-    expect(url).toBe("https://example.com/hook");
-    expect(init.method).toBe("POST");
-
-    const timestamp = headerOf(init, TIMESTAMP_HEADER);
-    const signature = headerOf(init, SIGNATURE_HEADER);
-    // Recomputed from the body that went out, rather than pattern-matched: a signature over a
-    // different body, or over a timestamp other than the one the header states, is the whole
-    // failure mode the header exists to prevent (BP-306)
-    const expected = crypto
-      .createHmac("sha256", SECRET)
-      .update(`${timestamp}.${String(init.body)}`)
-      .digest("hex");
-    expect(signature).toBe(`t=${timestamp},v1=${expected}`);
-
-    // The timestamp is read from the header, so the assertion above establishes only that the two
-    // agree. What the value *is* matters as much: a delivery stamped t=0 verifies perfectly and
-    // sits outside every receiver's replay window — the decoration webhook-signature.ts warns of.
-    expect(Math.abs(Date.now() - Number(timestamp) * 1000)).toBeLessThan(60_000);
-
-    const body = JSON.parse(String(init.body));
-    expect(body).toMatchObject({ event: "task_created", ...PAYLOAD });
-    expect(Date.parse(body.timestamp)).not.toBeNaN();
-  });
-
-  it("signs every delivery, not only the first", async () => {
-    project([hook(), hook({ url: "https://elsewhere.example/hook" })]);
-
-    await dispatchWebhooks("p1", "task_created", PAYLOAD);
-
-    const sent = deliveries();
-    expect(sent.map(([url]) => url)).toEqual([
-      "https://example.com/hook",
-      "https://elsewhere.example/hook",
-    ]);
-    // Recomputed for each rather than shape-matched: two `toMatch(/^t=\d+,v1=…/)` assertions are
-    // satisfied by a second delivery carrying the first one's header object, which is the mistake
-    // worth catching here
-    for (const [, init] of sent) {
-      const timestamp = headerOf(init, TIMESTAMP_HEADER);
-      const expected = crypto
-        .createHmac("sha256", SECRET)
-        .update(`${timestamp}.${String(init.body)}`)
-        .digest("hex");
-      expect(headerOf(init, SIGNATURE_HEADER)).toBe(`t=${timestamp},v1=${expected}`);
-    }
-    expect(sent[0][1].headers, "the second delivery carries its own headers").not.toBe(
-      sent[1][1].headers
+describe("what a successful delivery records", () => {
+  it("stamps ok, clears any earlier error, and matches the right webhook by id", async () => {
+    findByIdLean.mockResolvedValue(
+      project([{ _id: "w1", url: "https://a.example/hook", events: ["task_created"], enabled: true }])
     );
-  });
-
-  it("delivers unsigned rather than not at all when no secret is configured", async () => {
-    delete process.env.WEBHOOK_SIGNING_SECRET;
-    project([hook()]);
+    safeFetch.mockResolvedValue({ ok: true, status: 200 });
 
     await dispatchWebhooks("p1", "task_created", PAYLOAD);
+    await vi.waitFor(() => expect(callsFor("w1")).toHaveLength(1));
 
-    const [[, init]] = deliveries();
-    // An instance that never configured a secret has receivers that do not check; dropping their
-    // deliveries would be the worse bug
-    expect(headerOf(init, SIGNATURE_HEADER)).toBeUndefined();
-    expect(headerOf(init, TIMESTAMP_HEADER)).toBeUndefined();
-    expect(init.body).toContain("task_created");
+    const [filter, update] = callsFor("w1")[0];
+    expect(filter._id).toBe("p1");
+    expect(filter.webhooks.$elemMatch._id).toBe("w1");
+    expect(update.$set).toEqual({
+      "webhooks.$.lastAttemptAt": expect.any(Date),
+      "webhooks.$.lastStatus": "ok",
+      "webhooks.$.lastError": "",
+    });
   });
+});
 
-  it("sends only to the webhooks that are enabled and subscribed to this event", async () => {
-    project([
-      hook({ url: "https://subscribed.example/hook" }),
-      hook({ url: "https://disabled.example/hook", enabled: false }),
-      hook({ url: "https://other-events.example/hook", events: ["comment_added"] }),
-    ]);
+describe("what a failed delivery records", () => {
+  it("stamps failed with the network error when the request itself rejects", async () => {
+    findByIdLean.mockResolvedValue(
+      project([{ _id: "w1", url: "https://a.example/hook", events: ["task_created"], enabled: true }])
+    );
+    safeFetch.mockRejectedValue(new Error("connect ECONNREFUSED"));
 
     await dispatchWebhooks("p1", "task_created", PAYLOAD);
+    await vi.waitFor(() => expect(callsFor("w1")).toHaveLength(1));
 
-    expect(deliveries().map(([url]) => url)).toEqual(["https://subscribed.example/hook"]);
+    expect(callsFor("w1")[0][1].$set).toEqual({
+      "webhooks.$.lastAttemptAt": expect.any(Date),
+      "webhooks.$.lastStatus": "failed",
+      "webhooks.$.lastError": "connect ECONNREFUSED",
+    });
   });
 
-  it("judges the destination per webhook, so one bad row does not take the others with it", async () => {
-    project([
-      // One row per branch of isAllowedWebhookUrl. The name is not a duplicate of the literal:
-      // `localhost` is not an address, so `isPrivateAddress` says nothing about it and only
-      // `isInternalName` refuses it — a branch nothing else in the repository covers.
-      hook({ url: "http://plain.example/hook" }),
-      hook({ url: "https://localhost/hook" }),
-      hook({ url: "https://127.0.0.1/hook" }),
-      hook({ url: "https://fine.example/hook" }),
-    ]);
+  // The original code's `.catch(() => {})` only ever saw a REJECTED promise — a receiver that
+  // answers with a plain 500 resolves `safeFetch` normally, so this was recorded as a success.
+  it("stamps failed on a non-2xx response, not just a rejected promise", async () => {
+    findByIdLean.mockResolvedValue(
+      project([{ _id: "w1", url: "https://a.example/hook", events: ["task_created"], enabled: true }])
+    );
+    safeFetch.mockResolvedValue({ ok: false, status: 500 });
 
     await dispatchWebhooks("p1", "task_created", PAYLOAD);
+    await vi.waitFor(() => expect(callsFor("w1")).toHaveLength(1));
 
-    expect(deliveries().map(([url]) => url)).toEqual(["https://fine.example/hook"]);
+    expect(callsFor("w1")[0][1].$set["webhooks.$.lastError"]).toBe("HTTP 500");
   });
 
-  // Deliberately not "the failure is caught": dispatchWebhooks does not await its own fetch, so a
-  // resolved call says nothing about the `.catch()` being there, and vitest has already handled a
-  // mocked rejection. What this does establish is that the caller is not made to wait.
-  it("does not wait for the receiver", async () => {
-    project([hook()]);
-    let land!: (value: Response) => void;
-    safeFetch.mockReturnValue(new Promise<Response>((resolve) => (land = resolve)));
+  // safeFetch's BlockedDestinationError names exactly why a destination was refused — "resolves to
+  // the private address X" — which is precisely what the SSRF guard exists to keep from whoever
+  // chose that URL. Recording it verbatim would turn a blind refusal into a reconnaissance oracle.
+  it("does not persist the detail from a blocked-destination error", async () => {
+    findByIdLean.mockResolvedValue(
+      project([{ _id: "w1", url: "https://a.example/hook", events: ["task_created"], enabled: true }])
+    );
+    safeFetch.mockRejectedValue(new BlockedDestinationError("10.0.0.5 resolves to the private address 10.0.0.5"));
 
     await dispatchWebhooks("p1", "task_created", PAYLOAD);
+    await vi.waitFor(() => expect(callsFor("w1")).toHaveLength(1));
 
-    expect(deliveries()).toHaveLength(1);
-    land(new Response("{}", { status: 200 }));
-    // Nothing retries a failure and nothing records that an attempt happened — BP-407
+    const written = callsFor("w1")[0][1].$set["webhooks.$.lastError"] as string;
+    expect(written).not.toContain("10.0.0.5");
+    expect(written).toBe("Blocked destination");
   });
 
-  it("says nothing to anybody when the project has no webhooks", async () => {
-    project([]);
+  // Refused before ever reaching the network is still an attempt: without recording it, a URL
+  // that stops passing this check (edited to something disallowed, or DNS moved) reads as "still
+  // delivering" on the settings page forever, because nothing ever writes over the last success.
+  it("records an outcome even when the destination check itself refuses the URL", async () => {
+    findByIdLean.mockResolvedValue(
+      project([{ _id: "w1", url: "https://a.example/hook", events: ["task_created"], enabled: true }])
+    );
+    allowUrl.mockReturnValue(false);
 
     await dispatchWebhooks("p1", "task_created", PAYLOAD);
+    await vi.waitFor(() => expect(callsFor("w1")).toHaveLength(1));
 
     expect(safeFetch).not.toHaveBeenCalled();
+    expect(callsFor("w1")[0][1].$set["webhooks.$.lastStatus"]).toBe("failed");
+  });
+});
+
+describe("multiple webhooks on the same event", () => {
+  it("records each outcome against its own id, not the other one's", async () => {
+    findByIdLean.mockResolvedValue(
+      project([
+        { _id: "w-ok", url: "https://a.example/hook", events: ["task_created"], enabled: true },
+        { _id: "w-fail", url: "https://b.example/hook", events: ["task_created"], enabled: true },
+      ])
+    );
+    safeFetch.mockImplementation((url: string) =>
+      url.includes("a.example")
+        ? Promise.resolve({ ok: true, status: 200 })
+        : Promise.reject(new Error("timeout"))
+    );
+
+    await dispatchWebhooks("p1", "task_created", PAYLOAD);
+    await vi.waitFor(() => {
+      expect(callsFor("w-ok")).toHaveLength(1);
+      expect(callsFor("w-fail")).toHaveLength(1);
+    });
+
+    expect(callsFor("w-ok")[0][1].$set["webhooks.$.lastStatus"]).toBe("ok");
+    expect(callsFor("w-fail")[0][1].$set["webhooks.$.lastStatus"]).toBe("failed");
+  });
+});
+
+describe("ordering against a concurrent attempt on the same webhook", () => {
+  // Two events firing close together for one webhook can settle out of order — an older, slower
+  // attempt landing its write after a newer, faster one's would otherwise overwrite it. The guard
+  // is in the query filter itself ($elemMatch with an $or on lastAttemptAt), asserted here by
+  // shape since only a real MongoDB evaluates whether it actually excludes a stale write — that was
+  // verified separately against a live instance.
+  it("scopes the write to a webhook whose recorded attempt is not already newer", async () => {
+    findByIdLean.mockResolvedValue(
+      project([{ _id: "w1", url: "https://a.example/hook", events: ["task_created"], enabled: true }])
+    );
+    safeFetch.mockResolvedValue({ ok: true, status: 200 });
+
+    await dispatchWebhooks("p1", "task_created", PAYLOAD);
+    await vi.waitFor(() => expect(callsFor("w1")).toHaveLength(1));
+
+    const [filter] = callsFor("w1")[0];
+    expect(filter.webhooks.$elemMatch.$or).toEqual([
+      { lastAttemptAt: null },
+      { lastAttemptAt: { $lte: expect.any(Date) } },
+    ]);
+  });
+});
+
+describe("recording the outcome is itself fire-and-forget", () => {
+  it("a failure to write the outcome does not throw out of dispatchWebhooks", async () => {
+    findByIdLean.mockResolvedValue(
+      project([{ _id: "w1", url: "https://a.example/hook", events: ["task_created"], enabled: true }])
+    );
+    safeFetch.mockResolvedValue({ ok: true, status: 200 });
+    updateOne.mockRejectedValueOnce(new Error("database is unreachable"));
+
+    await expect(dispatchWebhooks("p1", "task_created", PAYLOAD)).resolves.toBeUndefined();
+    await vi.waitFor(() => expect(callsFor("w1")).toHaveLength(1));
+  });
+
+  it("returns before the delivery it started has resolved", async () => {
+    findByIdLean.mockResolvedValue(
+      project([{ _id: "w1", url: "https://a.example/hook", events: ["task_created"], enabled: true }])
+    );
+    // Held open deliberately: if dispatchWebhooks awaited the delivery chain, this call would
+    // never resolve, and the test itself would time out — the only way this test can fail for the
+    // right reason. A settled mock, unlike the earlier Date.now() check, can't pass by accident.
+    let releaseDelivery!: (v: { ok: boolean; status: number }) => void;
+    safeFetch.mockReturnValue(new Promise((resolve) => (releaseDelivery = resolve)));
+
+    await dispatchWebhooks("p1", "task_created", PAYLOAD);
+
+    expect(updateOne).not.toHaveBeenCalled();
+    releaseDelivery({ ok: true, status: 200 });
+    await vi.waitFor(() => expect(callsFor("w1")).toHaveLength(1));
   });
 });

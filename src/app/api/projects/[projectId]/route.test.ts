@@ -143,6 +143,35 @@ describe("DELETE /api/projects/[projectId]", () => {
   });
 });
 
+// BP-411 made project keys immutable through this route; BP-415 found the guard written twice
+// (the second copy dead — the first already returns) and neither copy pinned by a test. Deleting
+// the *live* one by mistake would silently undo BP-411 with every check staying green.
+describe("PUT /api/projects/[projectId] key immutability", () => {
+  beforeEach(() => {
+    check.mockResolvedValue(true);
+  });
+
+  it("refuses a request that changes the project key", async () => {
+    const res = await PUT(putRequest({ key: "NEWKEY" }), ctx());
+
+    expect(res.status).toBe(403);
+    expect(projectFindByIdAndUpdate).not.toHaveBeenCalled();
+  });
+
+  // Control: an ordinary field update must still go through, so the 403 above is about `key`
+  // specifically and not the route refusing every PUT.
+  it("still allows an ordinary name update", async () => {
+    const res = await PUT(putRequest({ name: "Renamed" }), ctx());
+
+    expect(res.status).toBe(200);
+    expect(projectFindByIdAndUpdate).toHaveBeenCalledWith(
+      PROJECT_ID,
+      expect.objectContaining({ name: "Renamed" }),
+      expect.anything()
+    );
+  });
+});
+
 describe("PUT /api/projects/[projectId] estimateFieldId", () => {
   beforeEach(() => {
     check.mockResolvedValue(true);
@@ -310,17 +339,15 @@ describe("the key a project may be renamed to", () => {
   ])("refuses %s, and writes nothing", async (_label, key) => {
     const res = await PUT(putRequest({ key }), ctx());
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(403);
     expect(projectFindByIdAndUpdate).not.toHaveBeenCalled();
   });
 
   // Without this the refusals above would pass on a route that refuses every rename
-  it("accepts an ordinary rename, normalises it, and remembers the old key", async () => {
+  it("refuses a key change", async () => {
     const res = await PUT(putRequest({ key: " bp " }), ctx());
 
-    expect(res.status).toBe(200);
-    const [, updates] = projectFindByIdAndUpdate.mock.calls[0];
-    expect(updates.key).toBe("BP");
-    expect(updates.formerKeys).toEqual(["TP"]);
+    expect(res.status).toBe(403);
+    expect(projectFindByIdAndUpdate).not.toHaveBeenCalled();
   });
 });

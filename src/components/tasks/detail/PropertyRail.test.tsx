@@ -105,6 +105,33 @@ describe("PropertyRail", () => {
     expect(set).toHaveBeenCalledWith("assignee", "rpo");
   });
 
+  /**
+   * BP-400. A member's roster is not the instance's: the picker offers only people who reach this
+   * board, so the person already on the task can legitimately be absent from it. Combobox resolves
+   * its closed-state label out of `options` and hands `undefined` when nothing matches, so an
+   * absent assignee rendered as "Unassigned" — the rail saying the task belongs to nobody while the
+   * server has it assigned. ListView carries a comment about exactly this and compensates; this row
+   * did not.
+   */
+  it("names an assignee the roster does not contain, rather than reading as unassigned", () => {
+    renderRail({
+      users: [],
+      draft: { ...draft, assignee: "kasia" },
+      stored: {
+        agent: null,
+        assignee: { _id: "u9", username: "kasia", fullName: "Kasia Nowak" },
+        assignedBy: null,
+        status: "todo",
+      } as React.ComponentProps<typeof PropertyRail>["stored"],
+    });
+
+    const row = screen
+      .getAllByRole("combobox")
+      .find((b) => b.textContent?.startsWith("Assignee"))!;
+    expect(row.textContent).toContain("Kasia Nowak");
+    expect(row.textContent).not.toContain("Unassigned");
+  });
+
   it("clears the assignee to null rather than an empty string", async () => {
     const set = renderRail({ draft: { ...draft, assignee: "rpo" } });
     await openRow("Assignee");

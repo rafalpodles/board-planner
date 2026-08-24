@@ -105,6 +105,11 @@ export default defineConfig({
         // build-time literal. Setting it here is not a test convenience: this run is what proved
         // a real deployment needs it too, by 500ing three MCP specs when it was missing (BP-316).
         PUBLIC_ORIGIN: BASE_URL,
+        // The premise the session and throttle specs are written against, pinned rather than
+        // assumed: at 0 the app ignores X-Forwarded-For, so callers have no address and share the
+        // anonymous throttle bucket. A machine that happened to export this variable would
+        // otherwise move those tests onto the per-address counter (BP-395).
+        TRUSTED_PROXY_HOPS: "0",
         // Presence alone is what isPmAvailable checks; the stub never looks at it
         OPENROUTER_API_KEY: "e2e-stub-key",
         OPENROUTER_BASE_URL: `${PM_STUB_URL}/v1`,

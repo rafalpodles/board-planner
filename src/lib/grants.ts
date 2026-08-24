@@ -152,5 +152,26 @@ export async function projectAudienceFilter(
     .select("subject")
     .lean();
 
-  return { $or: [{ role: "admin" }, { _id: { $in: grants.map((g) => g.subject) } }] };
+  return audienceFilterFrom(grants.map((g) => g.subject));
+}
+
+/**
+ * The filter, for a caller that already holds the project's grant rows. Splitting it out is not
+ * tidiness: /members reads those rows for the relation map anyway, and having it call
+ * projectAudienceFilter meant querying the same collection twice per request.
+ */
+export function audienceFilterFrom(subjects: unknown[]): Record<string, unknown> {
+  return { $or: [{ role: "admin" }, { _id: { $in: subjects } }] };
+}
+
+/**
+ * Whether this person may be given work on this board.
+ *
+ * The same verdict decide() reaches, asked about somebody who is not the caller — so only their
+ * stored fields exist, which is exactly what recipientsWithAccess reads. Delivery has checked this
+ * since BP-328; assignment did not, so a task could be handed to somebody who would never hear
+ * about it and could not open it.
+ */
+export async function canBeAssigned(userId: string, projectId: string): Promise<boolean> {
+  return (await recipientsWithAccess([String(userId)], projectId)).length > 0;
 }

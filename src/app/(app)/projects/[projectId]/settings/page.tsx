@@ -20,6 +20,7 @@ import { PmAgentSection } from "./sections/PmAgentSection";
 import { WorkersSection } from "./sections/WorkersSection";
 import { AuditSection } from "./sections/AuditSection";
 import {
+  scrollSettingsToTop,
   SettingsShell,
   type SettingsNavGroup,
 } from "@/components/settings/SettingsShell";
@@ -241,7 +242,7 @@ export default function ProjectSettingsPage() {
       "",
       `${window.location.pathname}?section=${id}`,
     );
-    if (scroll) window.scrollTo({ top: 0, behavior: "smooth" });
+    if (scroll) scrollSettingsToTop();
   }, []);
 
   // /stats runs several aggregations, so it is only paid for once a section that

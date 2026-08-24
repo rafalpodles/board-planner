@@ -10,7 +10,7 @@ import { MarkdownEditor } from "@/components/ui/MarkdownEditor";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
 import {
-  ApiUser,
+  ApiUserSummary,
   ApiTaskTemplate,
   ApiSprint,
   ApiCustomField,
@@ -79,7 +79,7 @@ export function TaskForm({
   const [customFieldValues, setCustomFieldValues] = useState<Record<string, unknown>>({});
   const [recurrenceFreq, setRecurrenceFreq] = useState<RecurrenceFrequency | "">("");
   const [recurrenceInterval, setRecurrenceInterval] = useState(1);
-  const [users, setUsers] = useState<ApiUser[]>([]);
+  const [users, setUsers] = useState<ApiUserSummary[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [aiPrompt, setAiPrompt] = useState("");
@@ -90,7 +90,10 @@ export function TaskForm({
   const { toast } = useToast();
 
   useEffect(() => {
-    api.get("/api/users").then(setUsers).catch(() => toast("Failed to load users", "error"));
+    api
+      .get(`/api/projects/${projectId}/assignable-users`)
+      .then(setUsers)
+      .catch(() => toast("Failed to load users", "error"));
     api
       .get(`/api/projects/${projectId}/ai/generate-task`)
       .then((res: { enabled: boolean }) => setAiEnabled(res.enabled))

@@ -256,6 +256,29 @@ describe("PATCH /api/workers/:workerId", () => {
       expect((await PATCH(patchRequest({ name: "   " }), ctx())).status).toBe(400);
     });
 
+    // Same field, same rule as registration (BP-413): stripped, not refused, because an admin CAN
+    // retype -- but consistency matters more than a second behaviour for one field.
+    it("strips a control character from a rename rather than storing it raw", async () => {
+      const response = await PATCH(patchRequest({ name: "evil\nrig" }), ctx());
+
+      expect(response.status).toBe(200);
+      expect(workerFindByIdAndUpdate).toHaveBeenCalledWith(
+        WORKER_ID,
+        { $set: { name: "evilrig" } },
+        { new: true }
+      );
+    });
+
+    // The blank-name check above runs on the RAW string; a name of nothing but control characters
+    // passes it (they are not whitespace) and would reach the write as "" if stripping happened
+    // without a second check after it
+    it("refuses a name that is nothing but control characters once they are stripped", async () => {
+      const response = await PATCH(patchRequest({ name: "\u0000\u0000" }), ctx());
+
+      expect(response.status).toBe(400);
+      expect(workerFindByIdAndUpdate).not.toHaveBeenCalled();
+    });
+
     it("refuses a poll interval that is not a positive integer", async () => {
       for (const bad of [0, -1, 1.5, "5000"]) {
         expect((await PATCH(patchRequest({ pollIntervalMs: bad }), ctx())).status).toBe(400);
