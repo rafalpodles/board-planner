@@ -106,20 +106,33 @@ test.describe("Board · Columns", () => {
     await signIn(page);
     await openSection(page, "Board");
 
-    const inProgress = columnNames(page).nth(2);
-    await expect(inProgress).toHaveValue("In Progress");
-    await inProgress.fill("Building");
-    await save(page, "Columns saved");
+    // The empty column first, and deliberately: a column holding tasks cannot lose its id
+    // quietly, because the server reads the old id as a removal and refuses. On an empty one
+    // nothing refuses anything, so the id below is the only thing standing between a rename and
+    // a new column.
+    await test.step("a column nobody is standing in keeps its id", async () => {
+      const planned = columnNames(page).nth(0);
+      await expect(planned).toHaveValue("Planned");
+      await planned.fill("Icebox");
+      await save(page, "Columns saved");
 
-    const stored = await storedColumns(request);
-    const renamed = stored.find((c) => c.label === "Building");
-    // The id is what tasks store, so a rename that minted a new one would strand every card in
-    // the column it renamed
-    expect(renamed?.id).toBe("in_progress");
+      const stored = await storedColumns(request);
+      expect(stored.find((c) => c.label === "Icebox")?.id).toBe("planned");
+    });
 
-    await page.reload();
-    await expect(columnNames(page).nth(2)).toHaveValue("Building");
-    await expect(page.getByText("2 tasks")).toBeVisible();
+    await test.step("and so does one holding two, which stay in it", async () => {
+      const inProgress = columnNames(page).nth(2);
+      await expect(inProgress).toHaveValue("In Progress");
+      await inProgress.fill("Building");
+      await save(page, "Columns saved");
+
+      const stored = await storedColumns(request);
+      expect(stored.find((c) => c.label === "Building")?.id).toBe("in_progress");
+
+      await page.reload();
+      await expect(columnNames(page).nth(2)).toHaveValue("Building");
+      await expect(page.getByText("2 tasks")).toBeVisible();
+    });
   });
 
   test("the arrows move a column, and the new order is the order after a reload", async ({
