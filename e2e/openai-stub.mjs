@@ -16,6 +16,11 @@ import { createServer } from "node:http";
  * cannot tell a prompt built from this project's own fields from a hardcoded one.
  */
 
+// Loopback only. Bound to every interface on a machine several agents share, `/last-request`
+// hands anybody on the network the system prompt this app last sent a model — project name,
+// README, and up to fifty open task titles.
+const LOOPBACK = "127.0.0.1";
+
 const PORT = Number(process.env.AI_STUB_PORT ?? 3989);
 
 let lastRequest = null;
@@ -82,4 +87,4 @@ const server = createServer((req, res) => {
   });
 });
 
-server.listen(PORT, () => console.log(`openai stub listening on ${PORT}`));
+server.listen(PORT, LOOPBACK, () => console.log(`openai stub listening on ${PORT}`));
