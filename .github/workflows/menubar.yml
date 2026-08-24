@@ -28,7 +28,7 @@ jobs:
         run: swift test
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 26
       # Building and testing the Swift never saw the defect this covers: `make app` assembled a
       # bundle with no worker in it, which fails at the end of onboarding rather than at build time.
       # Assembling it here is the only place that difference shows.
