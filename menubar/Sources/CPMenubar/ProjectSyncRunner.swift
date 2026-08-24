@@ -61,28 +61,17 @@ final class ProjectSyncRunner {
             case .refused(let reason):
                 steps.append(.refused(project: planned.project.label, reason: reason))
             case .go(let worktrees):
-                do {
-                    // The worktrees first: they live beside the checkout, under a root shared with
-                    // every other project in that folder, so they are removed by name rather than
-                    // by deleting the root they sit in.
-                    //
-                    // Not `try?`: a worktree that will not delete used to leave no step at all,
-                    // and the loop went on to report `.removed` naming the checkout — true, and
-                    // read as "all of it went" (BP-418).
-                    for worktree in worktrees {
-                        try FileManager.default.removeItem(atPath: worktree)
+                let deletion = CheckoutDeletion(
+                    remove: { try FileManager.default.removeItem(atPath: $0) },
+                    forget: { [file] path in
+                        try file.write(((try? file.read()) ?? []).filter { $0 != path })
                     }
-                    if FileManager.default.fileExists(atPath: planned.path) {
-                        try FileManager.default.removeItem(atPath: planned.path)
-                    }
-                    // The grant goes last. Dropped first, a failed delete would leave a directory
-                    // the worker may no longer touch and nothing on screen explaining why.
-                    try file.write(((try? file.read()) ?? []).filter { $0 != planned.path })
-                    steps.append(.removed(project: planned.project.label, path: planned.path))
-                } catch {
-                    steps.append(
-                        .failed(project: planned.project.label, reason: error.localizedDescription))
-                }
+                )
+                steps.append(
+                    deletion.perform(
+                        project: planned.project.label,
+                        path: planned.path,
+                        worktrees: worktrees))
             }
         }
     }
