@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { protocolOf } from "@/lib/middleware";
+import { stripControlCharacters } from "@/lib/identifiers";
 import {
   PROTOCOL_VERSION,
   WORKER_HEARTBEAT_MS,
@@ -35,10 +36,16 @@ export async function POST(request: Request) {
   // it on a missing field would mean minting another. Nothing here discloses anything a caller
   // without a token could not already read in the error text.
   const body = await request.json().catch(() => ({}));
-  // Capped like the device flow does: whoever holds a valid enrolment token chooses these, and
-  // they now land in an audit list an operator reads when something is already wrong
-  const name = typeof body.name === "string" ? body.name.trim().slice(0, 120) : "";
-  const host = typeof body.host === "string" ? body.host.trim().slice(0, 200) : "";
+  // Capped and stripped like the device flow does: whoever holds a valid enrolment token chooses
+  // these, and they now land in an audit list an operator reads when something is already wrong —
+  // and become the machine's own fullName, so a control or bidi character has nowhere left to
+  // survive from (BP-413).
+  const name = typeof body.name === "string"
+    ? stripControlCharacters(body.name).trim().slice(0, 120)
+    : "";
+  const host = typeof body.host === "string"
+    ? stripControlCharacters(body.host).trim().slice(0, 200)
+    : "";
   if (!name || !host) {
     return NextResponse.json({ error: "name and host are required" }, { status: 400 });
   }

@@ -46,14 +46,39 @@ export const FULL_NAME_MAX_LENGTH = 80;
 
 export const FULL_NAME_RULE = `A name cannot be blank, must be at most ${FULL_NAME_MAX_LENGTH} characters, and cannot contain line breaks or other control characters`;
 
-// C0, DEL and C1, plus the two Unicode separators that break a line in a renderer without being
-// matched by \s in a JavaScript regex.
+// C0, DEL and C1; the two Unicode separators that break a line in a renderer without being matched
+// by \s in a JavaScript regex; and the bidi-override, bidi-isolate and zero-width family — the
+// characters a "Trojan Source"-style payload uses to make a name RENDER as something other than
+// what it is, which control-character stripping alone does not stop (BP-413 review). That distinct
+// risk is why this range is wider than "characters that break layout": U+202E (RTL override) does
+// not break a line or reach any script sink, it just lies to whoever reads the string with their
+// own eyes — which for an unauthenticated machine's name is the entire trust boundary a person's
+// approval click depends on.
 //
 // Exported so a writer that cannot refuse a name outright — a machine's own display name has
 // nobody to hand a 400 to and ask to retype (BP-413) — can strip the same characters this refuses,
 // rather than restating the set.
 export function isControlCodePoint(code: number): boolean {
-  return code < 0x20 || (code >= 0x7f && code <= 0x9f) || code === 0x2028 || code === 0x2029;
+  return (
+    code < 0x20 ||
+    (code >= 0x7f && code <= 0x9f) ||
+    (code >= 0x200b && code <= 0x200f) || // zero-width space/joiners, and the LTR/RTL marks
+    (code >= 0x202a && code <= 0x202e) || // bidi embeds and overrides
+    (code >= 0x2066 && code <= 0x2069) || // bidi isolates
+    code === 0x2028 ||
+    code === 0x2029 ||
+    code === 0xfeff // BOM / zero-width no-break space
+  );
+}
+
+// Dropped rather than refused: the writers that need this (a machine's own name, BP-413) have
+// nobody to hand a 400 to and ask to retype.
+export function stripControlCharacters(value: string): string {
+  let out = "";
+  for (const character of value) {
+    if (!isControlCodePoint(character.codePointAt(0) ?? 0)) out += character;
+  }
+  return out;
 }
 
 // The schema trims, so validate what will be stored — checking the untrimmed string is what let a

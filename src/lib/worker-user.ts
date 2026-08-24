@@ -1,7 +1,7 @@
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { connectDB } from "@/lib/db";
-import { FULL_NAME_MAX_LENGTH, isControlCodePoint } from "@/lib/identifiers";
+import { FULL_NAME_MAX_LENGTH, stripControlCharacters } from "@/lib/identifiers";
 import { User } from "@/models/user";
 import { IUser } from "@/types";
 
@@ -12,22 +12,6 @@ import { IUser } from "@/types";
 
 export function workerUsername(workerId: string): string {
   return `worker-${workerId}`;
-}
-
-// `machine` and `owner` both reach here from routes a stranger can reach with no session at all —
-// /api/workers/register and the device-enrolment start route take an arbitrary name, rate-limited
-// but not authenticated. BP-410 put a rule on a person's own fullName (no control characters, at
-// most FULL_NAME_MAX_LENGTH), and this field reaches the same sinks: a notification title on its
-// way into Slack or Discord markup, and a line in the PM agent's system prompt. But nobody is
-// sitting at that route to hand a 400 to and ask to retype — the request has already succeeded
-// against every check that could reject it, and refusing here would refuse the enrolment itself.
-// So this strips rather than rejects.
-function stripControlCharacters(value: string): string {
-  let out = "";
-  for (const character of value) {
-    if (!isControlCodePoint(character.codePointAt(0) ?? 0)) out += character;
-  }
-  return out;
 }
 
 // [...string] rather than a plain slice, so a surrogate pair is kept or dropped whole rather than
