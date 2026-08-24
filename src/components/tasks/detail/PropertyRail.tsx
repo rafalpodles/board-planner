@@ -5,7 +5,7 @@ import {
   ApiCustomField,
   ApiProjectCategory,
   ApiSprint,
-  ApiUser,
+  ApiUserSummary,
   Category,
   PRIORITIES,
   PRIORITY_LABELS,
@@ -28,6 +28,7 @@ import {
 import type { TaskDraft } from "./useTaskEditor";
 import type { ApiAgent, ApiTask } from "@/types";
 import { handoverOf, refIdOf, type Handover } from "@/lib/handover";
+import { assigneeToShow } from "./assignee-display";
 import type { AnyColumn } from "@/lib/columns";
 
 const RECURRENCE_UNITS: Record<RecurrenceFrequency, string> = {
@@ -85,7 +86,7 @@ function HandoverNotice({ handover }: { handover: Handover | null }) {
 interface PropertyRailProps {
   draft: TaskDraft;
   set: <K extends keyof TaskDraft>(key: K, value: TaskDraft[K]) => void;
-  users: ApiUser[];
+  users: ApiUserSummary[];
   sprints: ApiSprint[];
   agents: ApiAgent[];
   /** Offered first in the picker once a machine is being chosen; never a fallback */
@@ -135,7 +136,20 @@ export function PropertyRail({
   onDelete,
   touch = false,
 }: PropertyRailProps) {
-  const assignedUser = users.find((u) => u.username === draft.assignee);
+  /**
+   * Someone assigned before they lost access is still this task's assignee, and the roster this
+   * view is handed holds only people who reach the board. Combobox resolves its closed-state label
+   * out of `options` and hands `undefined` when nothing matches, so such an assignee rendered as
+   * "Unassigned" — the rail saying the task belongs to nobody while the server has it assigned.
+   * ListView has carried a comment about exactly this for as long as it has had the row.
+   *
+   * Added back as a VALUE. They stay pickable, which is deliberate and matches what the API does:
+   * re-sending the assignee already stored is allowed, and only a move to somebody who cannot
+   * reach the board is refused. Offering a control that 400s on click would be worse than either.
+   */
+  const shown = assigneeToShow(users, draft.assignee, stored.assignee);
+  const offeredUsers =
+    shown && !users.some((u) => u.username === shown.username) ? [...users, shown] : users;
   const sprint = sprints.find((s) => s._id === draft.sprint);
   const fields = sortedFields(activeFields(customFields));
   const selectableSprints = sprints.filter((s) => s.status !== "completed");
@@ -190,7 +204,7 @@ export function PropertyRail({
           label="Assignee"
           touch={touch}
           value={draft.assignee || ""}
-          options={users.map((user) => ({
+          options={offeredUsers.map((user) => ({
             value: user.username,
             label: user.fullName,
             adornment: <Avatar name={user.fullName} size={20} />,

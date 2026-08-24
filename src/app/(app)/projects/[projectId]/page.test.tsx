@@ -90,7 +90,7 @@ async function renderBoard() {
       return Promise.resolve(tasks.map((t) => ({ ...t })));
     }
     if (url === "/api/projects/p1/sprints") return Promise.resolve([]);
-    if (url === "/api/users/list") return Promise.resolve([]);
+    if (url.endsWith("/assignable-users")) return Promise.resolve([]);
     return Promise.reject(new Error(`unexpected GET ${url}`));
   });
   const view = render(<KanbanPage />);

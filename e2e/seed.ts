@@ -907,3 +907,57 @@ export async function seedSearchCorpus() {
 
   await mongoose.disconnect();
 }
+
+/**
+ * BP-400. Somebody with an account on this instance and no way whatsoever to reach this board:
+ * role "member", and no grant. Seeded on request rather than by seed(), so specs that count the
+ * instance's accounts keep meaning what they meant.
+ *
+ * The task comes with them, assigned while they still had access — the row the fix must leave
+ * alone, and which the detail rail used to render as "Unassigned" because the roster no longer
+ * carries the person it names.
+ */
+export const OUTSIDER_USERNAME = "outsider";
+export const OUTSIDER_PASSWORD = "test1234";
+export const OUTSIDER_FULL_NAME = "E2E Outsider";
+export const OUTSIDER_ID = id("e2e00000000000000000a006");
+
+// 14, not 10: the search fixture already seeds taskNumber 10 on this project and
+// {project, taskNumber} is a unique index, so both fixtures in one test would collide
+export const OUTSIDER_TASK_NUMBER = 14;
+export const OUTSIDER_TASK_KEY = `${PROJECT_KEY}-${OUTSIDER_TASK_NUMBER}`;
+export const OUTSIDER_TASK_TITLE = "Assigned before they lost access";
+
+export async function seedAssignmentOutsider() {
+  const db = (await connect()).db!;
+  const now = new Date();
+
+  await db.collection("users").insertOne({
+    _id: OUTSIDER_ID,
+    username: OUTSIDER_USERNAME,
+    password: bcrypt.hashSync(OUTSIDER_PASSWORD, 10),
+    fullName: OUTSIDER_FULL_NAME,
+    email: "",
+    emailNotifications: false,
+    collapseEmptyColumns: false,
+    kind: "human",
+    // No grant is written for them anywhere in this file, and "member" carries no standing on the
+    // instance — so this account reaches exactly nothing on this board.
+    role: "member",
+    createdAt: now,
+  });
+
+  await mongoose.disconnect();
+
+  await addTask(
+    {
+      _id: id("e2e00000000000000000d010"),
+      title: OUTSIDER_TASK_TITLE,
+      status: "todo",
+      assignee: OUTSIDER_ID,
+      assignedBy: ADMIN_ID,
+      order: 10,
+    },
+    OUTSIDER_TASK_NUMBER
+  );
+}
