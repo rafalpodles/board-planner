@@ -1094,23 +1094,15 @@ async function createNextRecurrence(
     // entirely normal — no error, no empty field a person would notice.
     //
     // Not re-judged against `oldTask.assignee` below — a decision, not an oversight (BP-369). This
-    // write has no actor, so there is nothing here to run `personalAgentAlienTo`/`agentUsableOnProject`
-    // ON BEHALF OF: an earlier write already chose the pairing, and the copy means to reproduce it.
-    //
-    // A pairing that was valid stays valid: `assignee`/`agent` change through `updateTask`, and
-    // `updateTask` reaches this rule via `personalAgentAlienTo` on any write that moves the
-    // assignee — the other writers of `assignee` (`changeStatus`, `releaseExpiredTasks`,
-    // `releaseTask`, via `CLEAR_WORKER_ASSIGNEE`) cannot silently drift it out of step, because
-    // their assignee-nulling branch requires `execution.assignedByRun` false-or-missing, and the
-    // only writer of `execution.runId` — `claimNextTask` — always stamps `assignedByRun: false` in
-    // that same atomic write. So that branch is dead for any task claimed under current code, and
-    // fires only for the same pre-BP-358 population this ticket already accounts for (see the
-    // comment on `execution.assignedByRun` in `src/models/task.ts`). What re-judging here cannot
-    // reach either way is a pairing that was already stale before `personalAgentAlienTo` existed —
-    // which keeps reproducing because nothing about closing an occurrence is an edit to the one
-    // being copied. `snapshotFor` still refuses to run a machine on a stale pairing at claim time,
-    // so nothing unvetted executes; this is a repair for the documents, done once, out of band —
-    // see scripts/repair-recurring-agent-pairing.ts.
+    // write has no actor, so there is nothing here to run `personalAgentAlienTo` on behalf of; an
+    // earlier write already chose the pairing and the copy means to reproduce it exactly.
+    // `CLEAR_WORKER_ASSIGNEE` above is the only other writer that could drift it without going
+    // through `updateTask`, and it can't — see the comment on `RUN_RELEASES_ASSIGNEE`. What
+    // re-judging here cannot reach is a pairing already stale before `personalAgentAlienTo`
+    // existed; that keeps reproducing because closing an occurrence is not an edit to the one being
+    // copied. `snapshotFor` still refuses to run a machine on a stale pairing at claim time, so
+    // nothing unvetted executes — this is a one-off document repair, out of band: see
+    // scripts/repair-recurring-agent-pairing.ts.
     agent: oldTask.agent ?? null,
     dueDate: nextDue,
     checklist,

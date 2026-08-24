@@ -3075,11 +3075,8 @@ describe("what a change of hands does to the agent already on the task", () => {
   });
 });
 
-/**
- * BP-369. Exported so `scripts/repair-recurring-agent-pairing.ts` asks the SAME question `updateTask`
- * already asks live, rather than a second copy of the rule that could drift from it — the exact
- * failure mode this codebase keeps naming in its own comments about writers spread across paths.
- */
+// BP-369. Exported so scripts/repair-recurring-agent-pairing.ts asks the same question updateTask
+// already asks live, rather than a second copy of the rule.
 describe("personalAgentAlienTo", () => {
   beforeEach(() => agentFindById.mockReset());
 
@@ -3115,10 +3112,7 @@ describe("personalAgentAlienTo", () => {
     expect(await personalAgentAlienTo("a1", "somebody-else")).toBe(false);
   });
 
-  // Covers both a dangling reference (DELETE /api/agents/:id refuses while any task points at one,
-  // so this is a hand-edited database rather than a state the product produces) and a task with no
-  // agent at all: neither the function nor this mock branches on the id's value before the lookup,
-  // so `Agent.findById` resolving to nothing is the one case both collapse into.
+  // Covers a dangling reference and a missing agent alike — neither branches before the lookup
   it("is not alien when the agent cannot be found — missing id or dangling reference alike", async () => {
     agentInTheCatalog(null);
     expect(await personalAgentAlienTo("gone", "u1")).toBe(false);
