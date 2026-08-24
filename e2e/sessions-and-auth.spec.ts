@@ -245,6 +245,16 @@ async function loadsAuthenticated(page: Page, path: string) {
  * code under test. Dropped once for the file and put back afterwards; both collections are emptied
  * per test anyway, and nothing else in the suite depends on either index — the application checks
  * both windows itself, in code these tests exercise.
+ *
+ * If a run is killed hard, `afterAll` does not run and this database is left without those two
+ * indexes. Nothing is harmed — it is the e2e database, and no production instance is touched — but
+ * whoever next finds `expiresAt_1` missing should read this rather than go looking for a failed
+ * migration. Re-running this file restores them.
+ *
+ * This does not make the counter assertion in the lapsed-window test redundant. That one reads the
+ * row immediately before the login and states "the window has passed and the document is still
+ * here", which holds whether or not an index was dropped — so if this block is ever removed, that
+ * assertion still refuses to be satisfied by an absence. The overlap is deliberate.
  */
 const TTL_INDEXES: [collection: string, index: string, field: string][] = [
   ["sessions", "expiresAt_1", "expiresAt"],
