@@ -980,6 +980,24 @@ async function seedBoard(withSessions: boolean) {
 
 export const seed = () => seedBoard(true);
 
+/**
+ * A board that hands off from two columns at once — a state the settings screen warns about and
+ * the product does not support. The flag used to be a per-column checkbox, so a project could
+ * carry several; the editor cannot reach the state any more, which is exactly why the fixture has
+ * to write it. `escalationColumnId` resolves the first review column carrying the flag, so this
+ * makes In Review the survivor and Needs Human Review the stranded one.
+ */
+export async function seedSecondEscalationColumn() {
+  const db = (await connect()).db!;
+  await db
+    .collection("projects")
+    .updateOne(
+      { _id: PROJECT_ID, "columns.id": "in_review" },
+      { $set: { "columns.$.triggersPmReview": true } }
+    );
+  await mongoose.disconnect();
+}
+
 /** seed(), minus the two session rows — see seedBoard. */
 export const seedWithoutSessions = () => seedBoard(false);
 
