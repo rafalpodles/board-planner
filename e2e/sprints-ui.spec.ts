@@ -24,6 +24,7 @@ import {
   storedSprint,
   storedTaskSprint,
 } from "./seed";
+import { signIn as arriveSignedIn } from "./session";
 
 /**
  * BP-389. Sprints away from the planning drag, which is e2e/sprint-planning.spec.ts: creating,
@@ -52,13 +53,7 @@ const sprintsUrl = `/projects/${PROJECT_KEY}/sprints`;
 const tasksPath = `/api/projects/${PROJECT_KEY}/tasks`;
 const boardApiPrefix = `/api/projects/${PROJECT_KEY}/`;
 
-async function signIn(page: Page) {
-  await page.goto("/login");
-  await page.getByLabel("Username").fill(ADMIN_USERNAME);
-  await page.getByLabel("Password").fill(ADMIN_PASSWORD);
-  await page.getByRole("button", { name: "Sign In" }).click();
-  await expect(page).toHaveURL(/\/projects/);
-}
+const signIn = arriveSignedIn;
 
 function sprintList(page: Page): Locator {
   return page.getByRole("navigation", { name: "Sprint list" });
