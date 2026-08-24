@@ -162,6 +162,7 @@ const {
   MAX_EXECUTION_ATTEMPTS,
   MAX_PHASE_LENGTH,
   EXECUTION_LEASE_MS,
+  personalAgentAlienTo,
 } = await import("./task-service");
 
 const { logActivity } = await import("@/lib/activity");
@@ -3071,6 +3072,51 @@ describe("what a change of hands does to the agent already on the task", () => {
     await write({ title: "renamed" }, HOLDER);
 
     expect(vi.mocked(logActivity).mock.calls.map((c) => c[3])).not.toContain("agent");
+  });
+});
+
+/**
+ * BP-369. Exported so `scripts/repair-recurring-agent-pairing.ts` asks the SAME question `updateTask`
+ * already asks live, rather than a second copy of the rule that could drift from it — the exact
+ * failure mode this codebase keeps naming in its own comments about writers spread across paths.
+ */
+describe("personalAgentAlienTo", () => {
+  beforeEach(() => agentFindById.mockReset());
+
+  it("is not alien when the personal agent's owner is the assignee", async () => {
+    agentInTheCatalog({ scope: "user", owner: "u1" });
+    expect(await personalAgentAlienTo("a1", "u1")).toBe(false);
+  });
+
+  it("is alien when the personal agent belongs to somebody else", async () => {
+    agentInTheCatalog({ scope: "user", owner: "u1" });
+    expect(await personalAgentAlienTo("a1", "u2")).toBe(true);
+  });
+
+  // Nobody chose it: an unassigned task cannot be the reason a personal agent is still there
+  it("is alien on an unassigned task", async () => {
+    agentInTheCatalog({ scope: "user", owner: "u1" });
+    expect(await personalAgentAlienTo("a1", null)).toBe(true);
+  });
+
+  // A project or global agent is nobody's personal choice to begin with
+  it("is never alien for a project-scoped agent", async () => {
+    agentInTheCatalog({ scope: "project", owner: null });
+    expect(await personalAgentAlienTo("a1", "somebody-else")).toBe(false);
+  });
+
+  // A dangling reference is not somebody's composition — DELETE /api/agents/:id refuses while any
+  // task points at one, so this is a hand-edited database rather than a state the product produces
+  it("is not alien when the agent no longer exists", async () => {
+    agentInTheCatalog(null);
+    expect(await personalAgentAlienTo("gone", "u1")).toBe(false);
+  });
+
+  // No short-circuit on a null id: `Agent.findById(null)` resolves to nothing found, the same as
+  // any other id nothing matches, so this is the "no such agent" case rather than a separate one
+  it("is not alien when the task has no agent at all", async () => {
+    agentInTheCatalog(null);
+    expect(await personalAgentAlienTo(null, "u1")).toBe(false);
   });
 });
 

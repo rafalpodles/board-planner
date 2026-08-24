@@ -240,7 +240,7 @@ async function agentUsableOnProject(
  * composition, and `DELETE /api/agents/:id` refuses while any task points at one, so this is a
  * hand-edited database rather than a state the product produces.
  */
-async function personalAgentAlienTo(agent: unknown, assigneeAfter: unknown): Promise<boolean> {
+export async function personalAgentAlienTo(agent: unknown, assigneeAfter: unknown): Promise<boolean> {
   const { Agent } = await import("@/models/agent");
   const found = await Agent.findById(agent, "scope owner").lean();
   if (!found || found.scope !== "user") return false;
@@ -1092,6 +1092,20 @@ async function createNextRecurrence(
     // of the hand-over now, so an occurrence created without one is a task no machine looks at. A
     // weekly task that had run autonomously for months would simply stop, and the card would look
     // entirely normal — no error, no empty field a person would notice.
+    //
+    // Not re-judged against `oldTask.assignee` below, though a personal agent's owner has to match
+    // whoever the task belongs to (`personalAgentAlienTo`, `snapshotFor`) — a decision, not an
+    // oversight (BP-369). This write has no actor: nobody is choosing the pairing here, an earlier
+    // one already did, and the copy is meant to reproduce it exactly — including a run stopping,
+    // which is what happens today when a person reassigns the CURRENT occurrence away from the
+    // agent's owner. A parent that was ever valid stays valid forever, because the only way to
+    // change who a series belongs to is `updateTask`, and that already clears an alien agent on the
+    // occurrence it touches. Re-judging here would just be that same check running twice. What it
+    // cannot reach is a pairing that was already stale before this guard existed — pre-BP-358 data,
+    // or a parent an old code path left inconsistent — which keeps reproducing because nothing
+    // about closing an occurrence is an edit to the one being copied. `snapshotFor` still refuses
+    // to let a machine run on a stale pairing, so nothing unvetted executes; this is a repair for
+    // the documents, done once, out of band — see scripts/repair-recurring-agent-pairing.ts.
     agent: oldTask.agent ?? null,
     dueDate: nextDue,
     checklist,
