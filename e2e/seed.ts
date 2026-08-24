@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 
 // Never the development database. The URI is passed to the dev server too, so a mistake here
@@ -840,4 +841,37 @@ export async function seedLinkedPRs() {
     }
   );
   await mongoose.disconnect();
+}
+
+// BP-396. seed()'s categories are bug/doc/user-story/idea — character for character the fallback
+// `generateTask` uses when a project offers none. A generated task landing on one of those proves
+// nothing about the project's own list having been read, which is the CP-213 defect one field
+// across. This is a category no fallback can produce.
+export const EXTRA_CATEGORY = "chore";
+
+export async function seedExtraCategory() {
+  const db = (await connect()).db!;
+  await db.collection("projects").updateOne(
+    { _id: PROJECT_ID },
+    { $set: { categories: [...CATEGORIES, { _id: new mongoose.Types.ObjectId(), name: EXTRA_CATEGORY, color: "#0ea5e9" }] } }
+  );
+  await mongoose.disconnect();
+}
+
+/**
+ * Backdates an access token's expiry and reports whether the row is still there.
+ *
+ * Only `accessExpiresAt` is moved. The TTL index sits on `refreshExpiresAt` (`models/oauthToken`),
+ * so the row is not made a candidate for the reaper — and the caller asserts it survived anyway,
+ * because a refusal caused by a missing row is not the refusal the test is about.
+ */
+export async function expireAccessToken(accessToken: string): Promise<boolean> {
+  const db = (await connect()).db!;
+  const accessTokenHash = crypto.createHash("sha256").update(accessToken).digest("hex");
+  await db
+    .collection("oauthtokens")
+    .updateOne({ accessTokenHash }, { $set: { accessExpiresAt: new Date(Date.now() - 60_000) } });
+  const still = await db.collection("oauthtokens").findOne({ accessTokenHash });
+  await mongoose.disconnect();
+  return !!still;
 }

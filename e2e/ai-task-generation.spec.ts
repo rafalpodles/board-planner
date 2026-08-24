@@ -8,8 +8,10 @@ import {
   HELD_TASK_TITLE,
   PROJECT_KEY,
   PROJECT_NAME,
+  EXTRA_CATEGORY,
   seed,
   seedCustomFields,
+  seedExtraCategory,
 } from "./seed";
 
 /**
@@ -32,7 +34,7 @@ import {
 const GENERATED = {
   title: "Add a dark mode toggle to the header",
   description: "## Why\n\nThe board is unreadable at night.\n\n## How\n\nA toggle beside the avatar.",
-  category: "bug",
+  category: EXTRA_CATEGORY,
   acceptanceCriteria: "- [ ] The toggle is reachable from the header\n- [ ] The choice survives a reload",
   // Keyed by field *name*, valued with the option *text* — the shape the model answers in
   fields: { Difficulty: "L", Platforms: ["Web"] },
@@ -103,6 +105,7 @@ async function openNewTaskForm(page: Page) {
 test.beforeEach(async () => {
   await seed();
   await seedCustomFields();
+  await seedExtraCategory();
   await fetch(`${AI_STUB_URL}/reset`);
 });
 
@@ -128,7 +131,11 @@ test("a generated task fills the form, is stored with the project's own option i
   await test.step("the form is filled from the answer", async () => {
     await expect(modal.getByLabel("Title")).toHaveValue(GENERATED.title);
     await expect(modal.getByText("The board is unreadable at night.")).toBeVisible();
-    await expect(modal.locator("div:has(> label:text-is('Category')) > select")).toHaveValue("bug");
+    // Not one of bug/doc/user-story/idea: those are also `generateTask`'s hardcoded fallback, so a
+    // task landing on one says nothing about this project's own list having been read
+    await expect(modal.locator("div:has(> label:text-is('Category')) > select")).toHaveValue(
+      EXTRA_CATEGORY
+    );
     // The acceptance criteria arrive as one markdown checklist and become checklist rows
     await expect(modal.locator('input[value="The toggle is reachable from the header"]')).toBeVisible();
     await expect(modal.locator('input[value="The choice survives a reload"]')).toBeVisible();
@@ -149,6 +156,7 @@ test("a generated task fills the form, is stored with the project's own option i
     const sent = await lastPromptSent();
     expect(sent.user).toContain("add a dark mode toggle");
     expect(sent.system).toContain(PROJECT_NAME);
+    expect(sent.system).toContain(EXTRA_CATEGORY);
     // The project's own choice fields, by name and by the values they actually accept
     expect(sent.system).toContain("Difficulty");
     expect(sent.system).toContain("Platforms");
@@ -175,7 +183,7 @@ test("a generated task fills the form, is stored with the project's own option i
     ).json();
 
     expect(stored.title).toBe(GENERATED.title);
-    expect(stored.category).toBe("bug");
+    expect(stored.category).toBe(EXTRA_CATEGORY);
     expect(stored.checklist.map((item: { text: string }) => item.text)).toEqual([
       "The toggle is reachable from the header",
       "The choice survives a reload",
@@ -193,15 +201,19 @@ test("a category the project does not have falls back rather than being stored",
   await signIn(page);
   const modal = await openNewTaskForm(page);
 
+  // user-story is also the form's own default, so a fallback asserted from an untouched form is
+  // true before the generation runs. Moved off it first.
+  const category = modal.locator("div:has(> label:text-is('Category')) > select");
+  await category.selectOption("bug");
+  await expect(category).toHaveValue("bug");
+
   await modal
     .getByPlaceholder("Describe what you need")
     .fill(scripted({ ...GENERATED, category: "epic", fields: {}, duplicateOf: null }));
   await modal.getByRole("button", { name: "Generate" }).click();
   await expectToast(page, "Fields filled by AI — review and save");
 
-  await expect(modal.locator("div:has(> label:text-is('Category')) > select")).toHaveValue(
-    "user-story"
-  );
+  await expect(category).toHaveValue("user-story");
 
   const created = page.waitForResponse(
     (res) => res.request().method() === "POST" && res.url().endsWith("/tasks")
@@ -228,6 +240,9 @@ test("an answer the app cannot read leaves the form alone and says so", async ({
   expect((await failed).status()).toBe(500);
 
   await expectToast(page, "AI generation failed");
+  // The 500 also arrives when OPENAI_BASE_URL is wrong and the key goes to the real api.openai.com;
+  // this is what says the failure came from the answer rather than from the wiring
+  expect((await lastPromptSent()).user).toContain("this is not JSON");
   // Nothing half-written: a failed generation must not leave a title the person did not type
   await expect(modal.getByLabel("Title")).toHaveValue("");
 });

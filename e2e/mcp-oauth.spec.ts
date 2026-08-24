@@ -12,6 +12,7 @@ import {
   SECOND_PROJECT_ID,
   SECOND_PROJECT_KEY,
   SECOND_PROJECT_NAME,
+  expireAccessToken,
   seed,
   seedSecondProject,
 } from "./seed";
@@ -163,6 +164,45 @@ class McpSession {
   }
 }
 
+/**
+ * Registration and consent, stopping at the code. Separate from `authorize()` because the token
+ * endpoint claims a code on its first sight of it, spent or not — so any test about what that
+ * endpoint refuses needs a code of its own.
+ */
+async function authorizationCode(
+  page: Page,
+  request: APIRequestContext,
+  receiver: { url: string; waitForRedirect: (ms?: number) => Promise<URLSearchParams> }
+): Promise<{ code: string; clientId: string; verifier: string }> {
+  const registration = await request.post("/oauth/register", {
+    data: { client_name: "E2E MCP Client", redirect_uris: [receiver.url] },
+  });
+  expect(registration.status(), await registration.text()).toBe(201);
+  const { client_id: clientId } = await registration.json();
+
+  const { verifier, challenge } = pkce();
+  const query = new URLSearchParams({
+    response_type: "code",
+    client_id: clientId,
+    redirect_uri: receiver.url,
+    code_challenge: challenge,
+    code_challenge_method: "S256",
+    scope: "mcp",
+    state: "unspent",
+  });
+
+  await page.goto(`/oauth/authorize?${query.toString()}`);
+  await page.fill("#u", ADMIN_USERNAME);
+  await page.fill("#p", ADMIN_PASSWORD);
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.check('input[name="access"][value="all"]');
+  await page.click('button[name="decision"][value="allow"]');
+
+  const code = (await receiver.waitForRedirect()).get("code") ?? "";
+  expect(code).not.toBe("");
+  return { code, clientId, verifier };
+}
+
 /** Registration, consent and the code exchange — the flow a client walks once, per test that needs a token. */
 async function authorize(
   page: Page,
@@ -200,7 +240,8 @@ async function authorize(
     } else {
       await page.check('input[name="access"][value="limited"]');
       // Every board this account reaches is offered. Asserted rather than assumed: the point of
-      // ticking one is that another was there to leave unticked.
+      // ticking one is that another was there to leave unticked. The count is seed() plus
+      // seedSecondProject() — a project added to seed() itself belongs in this number.
       await expect(page.locator('input[name="projects"]')).toHaveCount(2);
       for (const projectId of options.projects) {
         await page.check(`input[name="projects"][value="${projectId}"]`);
@@ -432,31 +473,7 @@ test.describe("MCP OAuth handshake", () => {
   test("a code exchanged with the wrong verifier is refused", async ({ page, request }) => {
     const receiver = await redirectReceiver();
     try {
-      const registration = await request.post("/oauth/register", {
-        data: { client_name: "E2E MCP Client", redirect_uris: [receiver.url] },
-      });
-      const { client_id: clientId } = await registration.json();
-
-      const { challenge } = pkce();
-      const query = new URLSearchParams({
-        response_type: "code",
-        client_id: clientId,
-        redirect_uri: receiver.url,
-        code_challenge: challenge,
-        code_challenge_method: "S256",
-        scope: "mcp",
-        state: "wrong-verifier",
-      });
-
-      await page.goto(`/oauth/authorize?${query.toString()}`);
-      await page.fill("#u", ADMIN_USERNAME);
-      await page.fill("#p", ADMIN_PASSWORD);
-      await page.getByRole("button", { name: "Continue" }).click();
-      await page.check('input[name="access"][value="all"]');
-      await page.click('button[name="decision"][value="allow"]');
-
-      const code = (await receiver.waitForRedirect()).get("code") ?? "";
-      expect(code).not.toBe("");
+      const { code, clientId } = await authorizationCode(page, request, receiver);
 
       const exchanged = await request.post("/oauth/token", {
         form: {
@@ -471,6 +488,36 @@ test.describe("MCP OAuth handshake", () => {
       expect(await exchanged.json()).toMatchObject({
         error: "invalid_grant",
         error_description: "PKCE verification failed",
+      });
+    } finally {
+      await receiver.close();
+    }
+  });
+
+  test("a code exchanged against a different redirect address is refused", async ({
+    page,
+    request,
+  }) => {
+    const receiver = await redirectReceiver();
+    try {
+      const { code, clientId, verifier } = await authorizationCode(page, request, receiver);
+
+      // RFC 6749 §4.1.3. The authorization was issued for one address; an exchange naming another
+      // is the shape of a stolen code being redeemed from somewhere else.
+      const elsewhere = `${new URL(receiver.url).origin.replace(/:\d+$/, ":1")}/callback`;
+      const exchanged = await request.post("/oauth/token", {
+        form: {
+          grant_type: "authorization_code",
+          code,
+          redirect_uri: elsewhere,
+          client_id: clientId,
+          code_verifier: verifier,
+        },
+      });
+      expect(exchanged.status()).toBe(400);
+      expect(await exchanged.json()).toMatchObject({
+        error: "invalid_grant",
+        error_description: "redirect_uri mismatch",
       });
     } finally {
       await receiver.close();
@@ -499,6 +546,24 @@ test.describe("MCP OAuth handshake", () => {
     });
     expect(replayed.status()).toBe(400);
     expect((await replayed.json()).error).toBe("invalid_grant");
+  });
+
+  test("an expired access token stops working, and the row is still there to prove why", async ({
+    page,
+    request,
+  }) => {
+    const { accessToken } = await authorize(page, request);
+
+    const working = new McpSession(request, accessToken);
+    await working.open();
+
+    expect(await expireAccessToken(accessToken), "the row was reaped, so the 401 proves nothing").toBe(
+      true
+    );
+
+    const expired = new McpSession(request, accessToken);
+    const { status } = await expired.call("tools/list");
+    expect(status).toBe(401);
   });
 
   test("a credential that was never issued is refused", async ({ request }) => {

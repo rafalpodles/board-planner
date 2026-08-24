@@ -176,7 +176,10 @@ test.describe("repository sync", () => {
     expect(response.status()).toBe(401);
   });
 
-  test("the pull requests a sync matched are on the task, both providers, with their state", async ({
+  // Named for the rendering, not for the matching: the links are written to the task by the seed,
+  // because the fetch that would produce them cannot run here. `matchPRsToTasks` could return
+  // nothing at all and this would stay green — its own tests are in src/lib/github.test.ts.
+  test("linked pull requests are shown on the task, both providers, with their state", async ({
     page,
   }) => {
     await seedLinkedPRs();
@@ -186,6 +189,9 @@ test.describe("repository sync", () => {
     const pullRequest = page.getByRole("link", { name: new RegExp(`#${LINKED_PR_NUMBER}`) });
     await expect(pullRequest).toContainText(LINKED_PR_TITLE);
     await expect(pullRequest).toContainText("open");
+    // The provider chip is GitLab's alone; a GitHub row wearing one would be the same bug read
+    // from the other side
+    await expect(pullRequest).not.toContainText("GitLab");
     await expect(pullRequest).toHaveAttribute(
       "href",
       `https://github.com/example/board/pull/${LINKED_PR_NUMBER}`
