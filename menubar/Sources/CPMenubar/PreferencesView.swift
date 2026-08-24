@@ -172,6 +172,9 @@ private struct RepositoriesTab: View {
                     Text("Set up \(project) in \(path)").font(.caption2).foregroundStyle(.secondary)
                 case .removed(let project, let path):
                     Text("Removed \(project) — deleted \(path)").font(.caption2).foregroundStyle(.secondary)
+                case .forgotten(let project, let path):
+                    Text("Dropped \(project) — \(path) was already gone")
+                        .font(.caption2).foregroundStyle(.secondary)
                 case .refused(let project, let reason):
                     Text("Left \(project) alone: \(reason)").font(.caption2).foregroundStyle(.orange)
                 case .failed(let project, let reason):

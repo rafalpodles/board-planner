@@ -73,16 +73,30 @@ final class CheckoutDeletionTests: XCTestCase {
         XCTAssertEqual(r.forgotten, [], "a directory nothing may touch, with nothing on screen, is the worse end")
     }
 
-    /// The control: a checkout already gone is not an error, and the grant still has to go.
-    func testACheckoutThatIsAlreadyGoneStillDropsItsGrant() {
+    /// A checkout already gone is not an error, and the grant still has to go — but it is not a
+    /// removal either. The first version of this test asserted `.removed`, which would have told
+    /// an operator a directory was deleted when it was still on disk under another name or on an
+    /// unmounted volume. They would find out by going to look for it.
+    func testACheckoutThatIsAlreadyGoneIsForgotten_notReported_asRemoved() {
         let r = Recorder()
 
         let step = deletion(r, exists: { _ in false }).perform(
             project: "BP", path: "/co", worktrees: [])
 
-        XCTAssertEqual(step, .removed(project: "BP", path: "/co"))
+        XCTAssertEqual(step, .forgotten(project: "BP", path: "/co"))
         XCTAssertEqual(r.removed, [], "nothing to delete")
         XCTAssertEqual(r.forgotten, ["/co"], "but the allowlist entry is still stale")
+    }
+
+    /// The other side of the same distinction, so neither outcome can drift into the other.
+    func testACheckoutThatWasThereIsReportedAsRemoved() {
+        let r = Recorder()
+
+        let step = deletion(r, exists: { _ in true }).perform(
+            project: "BP", path: "/co", worktrees: [])
+
+        XCTAssertEqual(step, .removed(project: "BP", path: "/co"))
+        XCTAssertEqual(r.removed, ["/co"])
     }
 
     // MARK: - removeIfSafe: the seam that used to live in an untested app target
