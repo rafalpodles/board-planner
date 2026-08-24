@@ -106,6 +106,29 @@ describe("a display name", () => {
     }
   });
 
+  // Widened from the range above (BP-413 review): these don't break a line or reach a script
+  // sink the way a newline does -- U+202E doesn't even render as a break. What they do is make
+  // the string paint as something other than what it is, which matters anywhere a name is the
+  // thing a reader is trusting at a glance -- an enrolment consent screen being the sharpest
+  // case, but the same deception works here too.
+  it("refuses the bidi-override and zero-width family, not only characters that break a line", () => {
+    // Written as escapes rather than the raw bytes: a bidi-override character does not only fool a
+    // reader, it can make a source file itself render out of order in an editor or a diff — the
+    // same "Trojan Source" class this refuses a name for (CVE-2021-42574).
+    const bidiAndInvisible = [
+      "\u200b", // zero-width space
+      "\u200d", // zero-width joiner
+      "\u200e", // left-to-right mark
+      "\u202e", // right-to-left override -- the character CVE-2021-42574 is about
+      "\u2066", // left-to-right isolate
+      "\ufeff", // BOM / zero-width no-break space
+    ];
+    for (const bad of bidiAndInvisible) {
+      const name = `Rafal${bad}Podles`;
+      expect(isValidFullName(name), JSON.stringify(bad)).toBe(false);
+    }
+  });
+
   // A name reaching the PM agent's system prompt is a line in a list of instructions, so a newline
   // in it writes the next instruction. Constrained at the source, per BP-401.
   it("refuses the payload that would write its own line of the PM agent's prompt", () => {
