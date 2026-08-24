@@ -31,6 +31,13 @@ export const WORKER_CREDENTIAL = "e2e-worker-credential";
 // prefix is the first 11 characters, which is what verifyBearerToken looks a candidate up by.
 export const API_TOKEN = "cp_e2e00001deadbeefdeadbeefdeadbeef";
 export const MEMBER_API_TOKEN = "cp_e2e00002deadbeefdeadbeefdeadbeef";
+
+// The browser's counterpart to the tokens above: a session row seed() lays down, so a test can
+// arrive signed in by setting one cookie instead of driving the sign-in form. 236 calls to a
+// hand-rolled signIn() across 31 specs were ~2s each, and the wipe before every test is what made
+// them unavoidable. Specs whose subject IS signing in keep the form — see e2e/session.ts.
+export const ADMIN_SESSION_TOKEN = "cps_e2e00003deadbeefdeadbeefdeadbeef";
+export const MEMBER_SESSION_TOKEN = "cps_e2e00004deadbeefdeadbeefdeadbeef";
 export const RUN_PHASE = "agent";
 
 export const HELD_TASK_NUMBER = 1;
@@ -68,6 +75,15 @@ export const TARGET_COLUMN = { id: "in_review", label: "In Review" };
 export const SPARE_COLUMN = { id: "todo", label: "To Do" };
 
 const id = (hex: string) => new mongoose.Types.ObjectId(hex);
+
+// Hashed once per worker process rather than once per seed(). bcrypt at cost 10 is ~56ms a call
+// and seed() made four of them, which was 224ms of its 378ms — paid before every one of the
+// suite's tests. The values are still computed, not pasted, so they cannot go stale.
+const ADMIN_PASSWORD_HASH = bcrypt.hashSync(ADMIN_PASSWORD, 10);
+const MEMBER_PASSWORD_HASH = bcrypt.hashSync(MEMBER_PASSWORD, 10);
+const API_TOKEN_HASH = bcrypt.hashSync(API_TOKEN, 10);
+const MEMBER_API_TOKEN_HASH = bcrypt.hashSync(MEMBER_API_TOKEN, 10);
+const WORKER_CREDENTIAL_HASH = bcrypt.hashSync(WORKER_CREDENTIAL, 10);
 
 export const ADMIN_ID = id("e2e00000000000000000a001");
 export const MEMBER_ID = id("e2e00000000000000000a002");
@@ -665,6 +681,7 @@ export async function storedTaskSprint(taskNumber: number): Promise<string | nul
 // notification pipeline that is not wired up in this environment at all.
 export const BYSTANDER_USERNAME = "bystander";
 export const BYSTANDER_PASSWORD = "test1234";
+const BYSTANDER_PASSWORD_HASH = bcrypt.hashSync(BYSTANDER_PASSWORD, 10);
 export const BYSTANDER_ID = id("e2e00000000000000000a005");
 
 export async function seedBoardFeedBystander() {
@@ -674,7 +691,7 @@ export async function seedBoardFeedBystander() {
   await db.collection("users").insertOne({
     _id: BYSTANDER_ID,
     username: BYSTANDER_USERNAME,
-    password: bcrypt.hashSync(BYSTANDER_PASSWORD, 10),
+    password: BYSTANDER_PASSWORD_HASH,
     fullName: "E2E Bystander",
     email: "",
     emailNotifications: false,
@@ -743,14 +760,14 @@ export async function seed() {
     person({
       _id: ADMIN_ID,
       username: ADMIN_USERNAME,
-      password: bcrypt.hashSync(ADMIN_PASSWORD, 10),
+      password: ADMIN_PASSWORD_HASH,
       fullName: "E2E Admin",
       role: "admin",
     }),
     person({
       _id: MEMBER_ID,
       username: MEMBER_USERNAME,
-      password: bcrypt.hashSync(MEMBER_PASSWORD, 10),
+      password: MEMBER_PASSWORD_HASH,
       fullName: "E2E Member",
       // Not "admin": this account has no standing on the instance at all, and everything it can
       // reach on this project it reaches through the grant below
@@ -837,7 +854,7 @@ export async function seed() {
       _id: id("e2e00000000000000000a003"),
       user: ADMIN_ID,
       name: "e2e mcp",
-      tokenHash: bcrypt.hashSync(API_TOKEN, 10),
+      tokenHash: API_TOKEN_HASH,
       prefix: API_TOKEN.slice(0, 11),
       allowedProjects: [],
       lastUsedAt: null,
@@ -847,13 +864,31 @@ export async function seed() {
       _id: id("e2e00000000000000000a004"),
       user: MEMBER_ID,
       name: "e2e member",
-      tokenHash: bcrypt.hashSync(MEMBER_API_TOKEN, 10),
+      tokenHash: MEMBER_API_TOKEN_HASH,
       prefix: MEMBER_API_TOKEN.slice(0, 11),
       allowedProjects: [],
       lastUsedAt: null,
       createdAt: now,
     },
   ]);
+
+  const sessionRow = (token: string, user: mongoose.Types.ObjectId) => ({
+    tokenHash: crypto.createHash("sha256").update(token).digest("hex"),
+    user,
+    expiresAt: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
+    absoluteExpiresAt: new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000),
+    lastUsedAt: now,
+    userAgent: "",
+    ip: "",
+    createdAt: now,
+  });
+
+  await db
+    .collection("sessions")
+    .insertMany([
+      sessionRow(ADMIN_SESSION_TOKEN, ADMIN_ID),
+      sessionRow(MEMBER_SESSION_TOKEN, MEMBER_ID),
+    ]);
 
   await db.collection("workers").insertOne({
     _id: WORKER_ID,
@@ -862,7 +897,7 @@ export async function seed() {
     platform: "darwin",
     version: "0.0.0-e2e",
     protocolVersion: 1,
-    credentialHash: bcrypt.hashSync(WORKER_CREDENTIAL, 10),
+    credentialHash: WORKER_CREDENTIAL_HASH,
     repos: [],
     policy: { pollIntervalMs: 30_000 },
     policyOverrides: [],
@@ -1120,6 +1155,7 @@ export async function seedSearchCorpus() {
  */
 export const OUTSIDER_USERNAME = "outsider";
 export const OUTSIDER_PASSWORD = "test1234";
+const OUTSIDER_PASSWORD_HASH = bcrypt.hashSync(OUTSIDER_PASSWORD, 10);
 export const OUTSIDER_FULL_NAME = "E2E Outsider";
 export const OUTSIDER_ID = id("e2e00000000000000000a006");
 
@@ -1136,7 +1172,7 @@ export async function seedAssignmentOutsider() {
   await db.collection("users").insertOne({
     _id: OUTSIDER_ID,
     username: OUTSIDER_USERNAME,
-    password: bcrypt.hashSync(OUTSIDER_PASSWORD, 10),
+    password: OUTSIDER_PASSWORD_HASH,
     fullName: OUTSIDER_FULL_NAME,
     email: "",
     emailNotifications: false,
@@ -1264,6 +1300,7 @@ export async function seedSecondProject() {
  */
 export const AUDITOR_USERNAME = "auditor";
 export const AUDITOR_PASSWORD = "test1234";
+const AUDITOR_PASSWORD_HASH = bcrypt.hashSync(AUDITOR_PASSWORD, 10);
 export const AUDITOR_FULL_NAME = "E2E Auditor";
 export const AUDITOR_ID = id("e2e00000000000000000a007");
 
@@ -1279,7 +1316,7 @@ export async function seedDemotableAdmin() {
   await db.collection("users").insertOne({
     _id: AUDITOR_ID,
     username: AUDITOR_USERNAME,
-    password: bcrypt.hashSync(AUDITOR_PASSWORD, 10),
+    password: AUDITOR_PASSWORD_HASH,
     fullName: AUDITOR_FULL_NAME,
     email: "",
     emailNotifications: false,

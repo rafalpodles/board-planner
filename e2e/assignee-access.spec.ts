@@ -15,6 +15,7 @@ import {
   seed,
   seedAssignmentOutsider,
 } from "./seed";
+import { signIn as arriveSignedIn, signInThroughForm } from "./session";
 
 /**
  * BP-400. A task could be handed to somebody with no way to reach the board. Since BP-328 refuses
@@ -39,10 +40,10 @@ test.beforeEach(async () => {
 const taskUrl = (taskNumber: number) => `/projects/${PROJECT_KEY}/tasks/${taskNumber}`;
 
 async function signIn(page: Page, username: string, password: string) {
+  if (username === ADMIN_USERNAME) await arriveSignedIn(page);
+  else if (username === MEMBER_USERNAME) await arriveSignedIn(page, "member");
+  else return signInThroughForm(page, username, password);
   await page.goto(`/projects/${PROJECT_KEY}`);
-  await page.getByLabel("Username").fill(username);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign In" }).click();
   await expect(page.getByRole("heading", { name: PROJECT_NAME })).toBeVisible();
 }
 

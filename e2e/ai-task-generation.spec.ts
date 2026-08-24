@@ -13,6 +13,7 @@ import {
   seedCustomFields,
   seedExtraCategory,
 } from "./seed";
+import { signIn as arriveSignedIn } from "./session";
 
 /**
  * BP-396 — AI Assist in the new-task form, driven against a local stand-in for OpenAI.
@@ -50,13 +51,7 @@ function scripted(answer: unknown): string {
   return `add a dark mode toggle <<${JSON.stringify(answer)}>>`;
 }
 
-async function signIn(page: Page) {
-  await page.goto("/login");
-  await page.getByLabel("Username").fill(ADMIN_USERNAME);
-  await page.getByLabel("Password").fill(ADMIN_PASSWORD);
-  await page.getByRole("button", { name: "Sign In" }).click();
-  await expect(page).toHaveURL(/\/projects/);
-}
+const signIn = arriveSignedIn;
 
 async function recordToasts(page: Page) {
   await page.evaluate(() => {

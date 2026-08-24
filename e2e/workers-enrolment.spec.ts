@@ -18,6 +18,7 @@ import {
   WORKER_NAME,
   seed,
 } from "./seed";
+import { signIn as arriveSignedIn, signInThroughForm } from "./session";
 
 /**
  * BP-392. What a machine costs a person: connecting one, stopping one, and reading what it did.
@@ -66,13 +67,12 @@ async function workerRow(name: string) {
   return (await db()).collection("workers").findOne({ name });
 }
 
-async function signIn(page: Page, username: string, password: string) {
-  await page.goto("/login");
-  await page.getByLabel("Username").fill(username);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign In" }).click();
-  await expect(page).toHaveURL(/\/projects/);
-}
+const signIn = (page: Page, username: string, password: string) =>
+  username === ADMIN_USERNAME
+    ? arriveSignedIn(page)
+    : username === MEMBER_USERNAME
+      ? arriveSignedIn(page, "member")
+      : signInThroughForm(page, username, password);
 
 /** The machine's half: it has nothing to authenticate with yet, which is the point of this route. */
 async function machineAsksToEnrol(request: APIRequestContext, machine = MACHINE) {

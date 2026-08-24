@@ -6,6 +6,7 @@ import {
   seed,
   seedWebhookDeliveryOutcomes,
 } from "./seed";
+import { signIn as arriveSignedIn } from "./session";
 
 /**
  * BP-248. Saving an integration advanced the draft's baseline only when the save **failed**, so a
@@ -24,13 +25,7 @@ const SETTINGS = `/projects/${PROJECT_KEY}/settings`;
 
 test.beforeEach(seed);
 
-async function signIn(page: Page) {
-  await page.goto("/login");
-  await page.getByLabel("Username").fill(ADMIN_USERNAME);
-  await page.getByLabel("Password").fill(ADMIN_PASSWORD);
-  await page.getByRole("button", { name: "Sign In" }).click();
-  await expect(page).toHaveURL(/\/projects/);
-}
+const signIn = arriveSignedIn;
 
 const saveButton = (page: Page) => page.getByRole("button", { name: "Save changes" });
 
