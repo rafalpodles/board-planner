@@ -111,7 +111,12 @@ function Enrol({ params }: { params: Promise<{ userCode: string }> }) {
   }
 
   if (done === "approved") {
-    return <Outcome title="Connected" detail="The machine has its credential. You can close this tab." />;
+    return (
+      <Outcome
+        title="Connected"
+        detail="The machine has its credential and sets up that repository next. More projects are added any time under Settings → Workers. You can close this tab."
+      />
+    );
   }
 
   if (done === "denied") {
@@ -168,7 +173,13 @@ function Enrol({ params }: { params: Promise<{ userCode: string }> }) {
         )}
 
         <section className="mt-8">
-          <h2 className="text-sm font-medium text-text">Which project should it work on?</h2>
+          <h2 className="text-sm font-medium text-text">Which repository should it set up first?</h2>
+          {/* Where a scope list would be, so it is read as one: this pick is a first checkout, and
+              the machine's reach is this account's, whatever is ticked here. */}
+          <p className="mt-1 text-sm text-text-muted">
+            Not a limit on what it may work on — the machine acts under your account and reaches
+            every project you can.
+          </p>
           <div className="mt-3 space-y-2">
             {usable.length === 0 && (
               <p className="text-sm text-text-muted">
@@ -225,8 +236,7 @@ function Enrol({ params }: { params: Promise<{ userCode: string }> }) {
       {/* The machine belongs to whoever connects it, so say whose name it will carry */}
       {user && (
         <p className="mt-4 text-center text-xs text-text-muted">
-          Connecting as {user.fullName || user.username}. The machine acts under this account, and
-          reaches exactly the projects you can.
+          Connecting as {user.fullName || user.username}. The machine acts under this account.
         </p>
       )}
     </ConsentScreen>

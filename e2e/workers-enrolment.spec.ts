@@ -268,6 +268,48 @@ test("a project that names no repository cannot be chosen, and says why", async 
   await expect(page.getByRole("button", { name: "Connect it" })).toBeDisabled();
 });
 
+test("the project pick is framed as a first checkout, not as what the machine may work on", async ({
+  page,
+  request,
+}) => {
+  // BP-374. Nothing here is about mechanism — `assignmentsFor` recomputes a machine's reach on
+  // every heartbeat and no test of that changes. It is about a screen that sits where an OAuth
+  // scope list sits and asked a scope-shaped question above a control that grants no scope.
+  const started = await machineAsksToEnrol(request);
+  await signIn(page, MEMBER_USERNAME, MEMBER_PASSWORD);
+  await page.goto(started.path);
+
+  const pick = page.locator("section").filter({ has: page.getByRole("radio") });
+  await expect(
+    pick.getByRole("heading", { name: "Which repository should it set up first?" })
+  ).toBeVisible();
+  await expect(page.getByText(/which project should it work on/i)).toHaveCount(0);
+
+  // Read where a reader looks for the scope list. The footer said this before and still may; what
+  // this asserts is that the sentence is beside the control it qualifies, which is the whole ticket
+  await expect(pick.getByText(/reaches every project you can/)).toBeVisible();
+
+  // Still a choice of one. The wording moved towards "first", which is exactly the direction that
+  // invites somebody to make this a multi-select the approve route cannot honour — it takes one id
+  await expect(pick.getByRole("radio")).toHaveCount(1);
+  await expect(pick.getByRole("checkbox")).toHaveCount(0);
+
+  await pick.getByRole("radio").first().check();
+  await page.getByRole("button", { name: "Connect it" }).click();
+
+  // And the question the operator was left holding is answered where they end up, naming the screen
+  // that answers it — the ticked list BP-378 added, not the Preferences pane it replaced
+  await expect(page.getByRole("heading", { name: "Connected" })).toBeVisible();
+  await expect(page.getByText(/Settings . Workers/)).toBeVisible();
+
+  // The control: saying a different thing is not the same as granting a different thing. The
+  // machine still gets one project's repository, and it is the one that was ticked.
+  const collected = await machineCollects(request, started.deviceCode);
+  const enrolled = await collected.json();
+  expect(enrolled.projectKey).toBe(PROJECT_KEY);
+  expect(enrolled.repositoryUrl).toBe(REPOSITORY);
+});
+
 test("the kill switch stops a credential that was working a moment ago", async ({
   page,
   request,
