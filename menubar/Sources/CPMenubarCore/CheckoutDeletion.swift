@@ -56,7 +56,8 @@ public struct CheckoutDeletion: Sendable {
                 try remove(worktree)
             }
 
-            if exists(path) {
+            let wasThere = exists(path)
+            if wasThere {
                 try remove(path)
             }
 
@@ -64,7 +65,9 @@ public struct CheckoutDeletion: Sendable {
             // worker may no longer touch and nothing on screen explaining why.
             try forget(path)
 
-            return .removed(project: project, path: path)
+            return wasThere
+                ? .removed(project: project, path: path)
+                : .forgotten(project: project, path: path)
         } catch {
             return .failed(project: project, reason: error.localizedDescription)
         }
