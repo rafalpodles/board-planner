@@ -44,8 +44,8 @@ export default function SprintsPage() {
   const requestedView = searchParams.get("view") === "planning" ? "planning" : "board";
 
   // Starts null on purpose: passing `requested` straight through would fire
-  // /tasks?sprint=<unvalidated>, and that endpoint casts the value into a Mongoose filter
-  // with no validation, so a stale bookmark is a 500 rather than a fallback.
+  // /tasks?sprint=<unvalidated>, which the endpoint refuses with a 400 — so a stale bookmark
+  // would be an error rather than a fallback.
   const [scope, setScope] = useState<string | null>(null);
   const board = useProjectBoard(projectId, scope);
 
