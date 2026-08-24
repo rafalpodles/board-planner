@@ -316,6 +316,9 @@ export interface IWebhook {
   url: string;
   events: WebhookEvent[];
   enabled: boolean;
+  lastAttemptAt: Date | null;
+  lastStatus: "ok" | "failed" | null;
+  lastError: string;
 }
 
 // The URL never reaches a client: it is a credential, so the API returns only a mask
@@ -324,6 +327,10 @@ export interface ApiWebhook {
   urlMasked: string;
   events: WebhookEvent[];
   enabled: boolean;
+  /** Single-shot delivery (BP-407) — this is the outcome of the one attempt, not a retry count. */
+  lastAttemptAt: string | null;
+  lastStatus: "ok" | "failed" | null;
+  lastError: string;
 }
 
 export type NotificationChannelType = "slack" | "discord";
