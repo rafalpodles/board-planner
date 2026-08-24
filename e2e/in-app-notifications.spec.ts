@@ -5,16 +5,28 @@ import {
   ADMIN_ID,
   ADMIN_PASSWORD,
   ADMIN_USERNAME,
+  AUDITOR_FULL_NAME,
+  AUDITOR_ID,
+  AUDITOR_PASSWORD,
+  AUDITOR_USERNAME,
   E2E_MONGODB_URI,
   FINISHED_TASK_ID,
+  KEPT_TASK_ID,
+  KEPT_TASK_KEY,
   MEMBER_ID,
   MEMBER_PASSWORD,
   MEMBER_USERNAME,
+  OUTSIDER_ID,
+  OUTSIDER_USERNAME,
   PROJECT_ID,
   PROJECT_KEY,
+  SECOND_PROJECT_KEY,
   SIBLING_TASK_ID,
   SIBLING_TASK_NUMBER,
   seed,
+  seedAssignmentOutsider,
+  seedDemotableAdmin,
+  seedSecondProject,
 } from "./seed";
 
 /**
@@ -26,14 +38,60 @@ import {
  * different person hears about it. A single-context test could write the rows itself and would
  * then be asserting on its own fixture rather than on the dispatch.
  *
- * Three properties of these routes need a second person or a second row to be visible at all, and
- * each gets its own test below: who a row is addressed to, who may mark it read, and what happens
- * to a row the notification grid hides from the bell but the digest still needs.
+ * Five properties of these routes need a second person or a second row to be visible at all, and
+ * each gets its own test below: who a row is addressed to, who may reach the board it came from,
+ * who may mark it read, what happens to a row the notification grid hides from the bell but the
+ * digest still needs, and who an @mention may name.
  *
  * What this file does NOT cover, so the next reader does not assume it: the badge is only ever
  * read after a reload, so the thirty-second poll that keeps it moving for somebody sitting on the
  * board is not exercised; and pagination (`before`, `limit`, "Load more") needs more rows than
  * these tests create.
+ *
+ * ## Mutation registry
+ *
+ * Every entry was applied to HEAD, run, and reverted — the harness is in the task's comments, and
+ * so is the run log naming the failing assertion for each. Nothing here is a guess: an entry says
+ * "killed by" only where the mutant was actually applied and the named test actually went red for
+ * the reason the entry gives. Tests are referred to by their opening words.
+ *
+ * `src/app/api/notifications/route.ts`
+ *  1. drop `filter.project = { $in: projectIds }`   → "a demoted admin…": the lost board's row
+ *                                                     comes back into the feed
+ *  2. `inApp: { $ne: false }` → `inApp: true`       → "a row the bell hides…": the row that omits
+ *                                                     the key stops being listed
+ *  3. drop `.sort({ createdAt: -1 })`               → "the bell counts…", "a row the bell hides…"
+ *  4. `.sort({ createdAt: -1 })` → `{ createdAt: 1 }` → the same two, on order
+ *  5. drop `.populate("actor", …)`                  → "the bell counts…": the actor's full name
+ *  6. drop `.populate("task", …)`                   → "the bell counts…": the row's href
+ *  7. drop `.populate("project", …)`                → "the bell counts…": the row's href
+ *  8. drop `recipient: user._id`                    → "the bell counts…": the actor's own feed
+ *
+ * `src/app/api/notifications/unread-count/route.ts`
+ *  9. drop `filter.project = { $in: projectIds }`   → "a demoted admin…": the badge stays at two
+ * 10. `inApp: { $ne: false }` → `inApp: true`       → "a row the bell hides…": badge two → one
+ * 11. drop `read: false`                            → all three mark-read tests
+ *
+ * `src/app/api/notifications/read/route.ts`
+ * 12. `findOneAndUpdate` → `findOneAndDelete`       → "the bell counts…": the row is gone from the
+ *                                                     feed. Only the toBeVisible above the dot
+ *                                                     count catches this; the dot count alone
+ *                                                     passes on a row that no longer exists.
+ * 13. single-id: drop `recipient: user._id`         → "a row can only be read…": a stranger reads it
+ * 14. single-id: drop `inApp: { $ne: false }`       → "a row the bell hides…": the hidden row reads
+ * 15. single-id branch → mark-all over everything   → all three of the above
+ * 16. mark-all: drop `recipient: user._id`          → "a row can only be read…"
+ * 17. mark-all: drop `inApp: { $ne: false }`        → "a row the bell hides…"
+ * 18. drop the `isValidObjectId` guard              → "a row can only be read…": 500 rather than
+ *                                                     400, plus three unit tests beside the route
+ * 19. `id !== undefined` → `if (id)`                → unit tests only: `""` and `null` fall
+ *                                                     through to a mark-all. No e2e sends one, and
+ *                                                     the cost of one that did is a whole feed
+ *                                                     read, so the unit test is the guard.
+ *
+ * `src/lib/grants.ts`
+ * 20. `recipientsWithAccess` refuses nobody         → "a mention cannot reach…": the stranger gets
+ *                                                     a row written for them
  */
 
 const TASK_KEY = `${PROJECT_KEY}-${SIBLING_TASK_NUMBER}`;
@@ -46,6 +104,7 @@ const ADMIN_FULL_NAME = "E2E Admin";
 const ASSIGNED = `${TASK_KEY} assigned to you`;
 const COMMENTED = `New comment on ${TASK_KEY}`;
 const MENTIONED = `${ADMIN_USERNAME} mentioned you in ${TASK_KEY}`;
+const KEPT_ASSIGNED = `${KEPT_TASK_KEY} assigned to you`;
 
 test.beforeEach(seed);
 
@@ -55,6 +114,24 @@ async function signIn(page: Page, username: string, password: string) {
   await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: "Sign In" }).click();
   await expect(page).toHaveURL(/\/projects/);
+}
+
+/**
+ * Both API routes compiled and answered once, before anything is timed against them.
+ *
+ * A bare `goto` is not this. It resolves at `load`, which is before the page's own fetches have
+ * come back, so the route behind them compiles inside the first assertion's window instead — on
+ * whatever budget that assertion happens to carry, which for a cold Turbopack build is not enough.
+ * Waiting for the responses is what makes the warm-up warm the thing that is about to be measured.
+ */
+async function warmNotificationRoutes(page: Page) {
+  const answered = Promise.all(
+    ["/api/notifications", "/api/notifications/unread-count"].map((pathname) =>
+      page.waitForResponse((r) => new URL(r.url()).pathname === pathname, { timeout: 120_000 })
+    )
+  );
+  await page.goto("/notifications");
+  await answered;
 }
 
 /** The sidebar's Notifications link; its text is the label plus whatever the badge says. */
@@ -79,6 +156,10 @@ const badgeText = (count: number) =>
  * so a bare `toHaveText(/^Notifications$/)` matches at t=0 and never observes the server at all.
  * Two assertions in the first draft of this file were vacuous for exactly that reason, including
  * one described as a control.
+ *
+ * It syncs on the count route and nothing else, so it says nothing about the list: the two are
+ * separate requests from one page load, and a caller that reads rows off the screen afterwards is
+ * reading a response this never waited for. Every list assertion below reloads for itself.
  */
 async function expectUnreadBadge(page: Page, count: number) {
   await expect(async () => {
@@ -101,15 +182,19 @@ function feedRow(page: Page, title: string) {
 }
 
 /**
- * The rows on screen, reloaded until they are exactly these, newest first.
+ * The rows on screen, reloaded until they are exactly these, newest first — and none of `omits`.
  *
  * The badge and the list are two different requests answered by one page load, so a row that
  * commits between them leaves a count of three standing above a list of two — and this page
  * fetches once and never again, so that state is terminal rather than something the next
  * assertion outwaits. Retrying the whole load is what keeps the race from reading as an
  * ordering bug.
+ *
+ * `omits` is checked inside the same retry rather than after it. An absence read from a load that
+ * beat the write is permanent for the same reason, and it is the polarity that fails silently:
+ * "the hidden row is not here" holds trivially on a feed that has not loaded anything at all.
  */
-async function expectFeedRows(page: Page, titles: string[]) {
+async function expectFeedRows(page: Page, titles: string[], omits: string[] = []) {
   await expect(async () => {
     await page.goto("/notifications");
     // Scoped to the page body, not the document: a count taken globally would also collect a
@@ -117,6 +202,28 @@ async function expectFeedRows(page: Page, titles: string[]) {
     const rows = page.locator("#main-content").locator(`a[href="${TASK_URL}"]`);
     await expect(rows).toHaveCount(titles.length, { timeout: 3_000 });
     expect((await rows.allInnerTexts()).map((t) => t.split("\n")[0])).toEqual(titles);
+    for (const title of omits) {
+      await expect(page.getByText(title)).toHaveCount(0);
+    }
+  }).toPass({ timeout: 30_000 });
+}
+
+/**
+ * The same idea for a feed whose rows point at more than one board, where counting hrefs against a
+ * single task URL says nothing. Both halves inside one retry, for the reason above.
+ */
+async function expectFeed(
+  page: Page,
+  { carries, omits }: { carries: string[]; omits: string[] }
+) {
+  await expect(async () => {
+    await page.goto("/notifications");
+    for (const title of carries) {
+      await expect(feedRow(page, title)).toBeVisible({ timeout: 3_000 });
+    }
+    for (const title of omits) {
+      await expect(page.getByText(title)).toHaveCount(0);
+    }
   }).toPass({ timeout: 30_000 });
 }
 
@@ -152,9 +259,10 @@ async function assign(
   request: APIRequestContext,
   taskId: unknown,
   username: string,
-  auth: Record<string, string>
+  auth: Record<string, string>,
+  projectKey: string = PROJECT_KEY
 ) {
-  const res = await request.put(`/api/projects/${PROJECT_KEY}/tasks/${taskId}`, {
+  const res = await request.put(`/api/projects/${projectKey}/tasks/${taskId}`, {
     headers: auth,
     data: { assignee: username },
   });
@@ -170,9 +278,7 @@ test("the bell counts assign, comment and mention, and reading them takes them o
   const admin = await adminContext.newPage();
 
   await signIn(member, MEMBER_USERNAME, MEMBER_PASSWORD);
-  // Compiled here rather than inside the first assertion that depends on it: a cold Turbopack
-  // build of this route is slower than any wait that assertion should be allowed.
-  await member.goto("/notifications");
+  await warmNotificationRoutes(member);
 
   await test.step("before anything happens the bell is bare and the feed says so", async () => {
     await expect(member.getByText("No notifications yet.")).toBeVisible();
@@ -252,6 +358,10 @@ test("the bell counts assign, comment and mention, and reading them takes them o
   await test.step("opening it read that row and left the other two alone", async () => {
     await expectUnreadBadge(member, 2);
     await expect(member.getByText("2 unread")).toBeVisible();
+    // The row itself first. `unreadDot` is scoped to it, so a route that deleted the row instead
+    // of marking it read resolves the dot to nothing and satisfies the count below either way —
+    // swapping findOneAndUpdate for findOneAndDelete used to leave this whole test green.
+    await expect(feedRow(member, COMMENTED)).toBeVisible();
     await expect(unreadDot(member, COMMENTED)).toHaveCount(0);
     await expect(unreadDot(member, ASSIGNED)).toHaveCount(1);
     await expect(unreadDot(member, MENTIONED)).toHaveCount(1);
@@ -285,6 +395,92 @@ test("the bell counts assign, comment and mention, and reading them takes them o
 });
 
 /**
+ * BP-433. Which board a row came from, asked of both read routes at once.
+ *
+ * `recipient` is not the whole question. A row is addressed to a person *about a board*, and the
+ * grant that justified sending it can go away while the row stays — so both GETs narrow to the
+ * reader's accessible projects (BP-328). Nothing exercised that clause end to end: the only spec
+ * that removes access goes through DELETE /members, which *deletes* the rows on its way out, so
+ * the read-time filter never had to refuse anything.
+ *
+ * The door that leaves the rows behind is a demotion. PUT /api/users/[userId] changes a role and
+ * touches neither grants nor sessions nor notifications, so an instance admin dropped to "member"
+ * keeps a live session and a feed full of task titles and comment excerpts from boards they can no
+ * longer open.
+ *
+ * Two rows, on two boards, because one would not tell the filter from a switch. The auditor keeps
+ * a grant on the second board, so their accessible list stays non-empty after the demotion and the
+ * routes' "no boards at all" early return never fires — `$in` is the only thing left doing the
+ * work. The kept row is the control: without it, an empty feed is equally consistent with a route
+ * that answers nothing to anybody who is not an admin.
+ */
+test("a demoted admin loses the feed for the board they no longer hold, rows and all", async ({
+  browser,
+  request,
+}) => {
+  await seedSecondProject();
+  await seedDemotableAdmin();
+
+  const auditorContext = await browser.newContext();
+  const adminContext = await browser.newContext();
+  const auditor = await auditorContext.newPage();
+  const admin = await adminContext.newPage();
+
+  await signIn(auditor, AUDITOR_USERNAME, AUDITOR_PASSWORD);
+  await warmNotificationRoutes(auditor);
+  await signIn(admin, ADMIN_USERNAME, ADMIN_PASSWORD);
+
+  // One row from each board, both by ordinary assignment rather than written in: what the ticket
+  // is about is a real notification surviving a change of role.
+  await assign(request, SIBLING_TASK_ID, AUDITOR_USERNAME, ADMIN_AUTH);
+  await assign(request, KEPT_TASK_ID, AUDITOR_USERNAME, ADMIN_AUTH, SECOND_PROJECT_KEY);
+
+  await test.step("while they are an admin both boards reach them", async () => {
+    await expectUnreadBadge(auditor, 2);
+    await expectFeed(auditor, { carries: [ASSIGNED, KEPT_ASSIGNED], omits: [] });
+  });
+
+  await test.step("the admin demotes them to a plain member", async () => {
+    await admin.goto("/settings/users");
+    await admin.getByText(`@${AUDITOR_USERNAME}`, { exact: true }).first().click();
+    // The dialog, before the button inside it: the card opens it in a state update, so clicking
+    // straight through races a modal that is not on screen yet.
+    await expect(admin.getByText(`Edit ${AUDITOR_FULL_NAME}`)).toBeVisible();
+    await admin.getByRole("button", { name: "Member", exact: true }).click();
+    const saved = admin.waitForResponse(
+      (r) =>
+        r.request().method() === "PUT" &&
+        /\/api\/users\/\w+$/.test(new URL(r.url()).pathname) &&
+        r.status() < 400
+    );
+    await admin.getByRole("button", { name: "Save", exact: true }).click();
+    await saved;
+  });
+
+  await test.step("the board they lost goes quiet; the one they kept does not", async () => {
+    await expectUnreadBadge(auditor, 1);
+    await expectFeed(auditor, { carries: [KEPT_ASSIGNED], omits: [ASSIGNED] });
+  });
+
+  // The point of the whole test. Removal-by-DELETE-members would leave nothing here, and an
+  // assertion that the rows are gone would then pass without the read filter existing at all.
+  await test.step("and the row is still in the collection, unread, waiting for the digest", async () => {
+    const rows = await (await db())
+      .collection("notifications")
+      .find({ recipient: AUDITOR_ID })
+      .toArray();
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => ({ project: String(r.project), read: r.read }))).toContainEqual({
+      project: String(PROJECT_ID),
+      read: false,
+    });
+  });
+
+  await auditorContext.close();
+  await adminContext.close();
+});
+
+/**
  * Who a row belongs to, asked of both branches of the read route.
  *
  * It answers a constant `{ok:true}` by design (BP-328) — whether the row exists is not something
@@ -306,8 +502,8 @@ test("a row can only be read by the person it was addressed to", async ({ browse
   await signIn(member, MEMBER_USERNAME, MEMBER_PASSWORD);
   await signIn(admin, ADMIN_USERNAME, ADMIN_PASSWORD);
   // Compiled before anything is timed against it, so this test still stands up when run alone
-  await member.goto("/notifications");
-  await admin.goto("/notifications");
+  await warmNotificationRoutes(member);
+  await warmNotificationRoutes(admin);
 
   // One row each, dispatched by the other person so neither is its own actor
   await assign(request, SIBLING_TASK_ID, MEMBER_USERNAME, ADMIN_AUTH);
@@ -325,6 +521,21 @@ test("a row can only be read by the person it was addressed to", async ({ browse
     });
     expect(attempt.status()).toBe(200);
     await expectUnreadBadge(member, 1);
+  });
+
+  // `id` reaches the query directly, and a JSON body can carry an object where a string was meant.
+  // Both shapes are refused rather than cast: one used to pick an arbitrary row of the caller's
+  // own, the other used to throw a CastError out of the route as a 500.
+  await test.step("an id that is not one is refused instead of being cast", async () => {
+    for (const id of ["nope", { $ne: null }]) {
+      const attempt = await request.patch("/api/notifications/read", {
+        headers: ADMIN_AUTH,
+        data: { id },
+      });
+      expect(attempt.status(), await attempt.text()).toBe(400);
+    }
+    // The admin's own row is the one `{ $ne: null }` would have marked read
+    await expectUnreadBadge(admin, 1);
   });
 
   await test.step("mark all as read reaches the reader's own rows and stops there", async () => {
@@ -347,47 +558,81 @@ test("a row can only be read by the person it was addressed to", async ({ browse
 
 /**
  * A row the grid hides from the bell. The write happens either way on purpose — the morning digest
- * is assembled from these documents — so all three routes carry the same `inApp` clause, and all
- * three are asked about it here: it must not be counted, must not be listed, and must not be
- * marked read by a mark-all, because a read row is one the digest has already decided to drop.
+ * is assembled from these documents — so all four `inApp` clauses across the three routes say the
+ * same thing, and all four are asked about it here: the row must not be counted, must not be
+ * listed, must not be marked read by a mark-all, and must not be marked read by a PATCH naming its
+ * id either.
+ *
+ * Three rows, not two. The clause is `$ne: false` rather than `true` because everything written
+ * before BP-371 carries no `inApp` key at all, and a fixture where every row states the field can
+ * only falsify `!== true` — flipping all four clauses to `inApp: true` left this test green. So
+ * one row omits the key entirely and is required to behave exactly like a visible one.
  *
  * Inserted directly. Reaching this state through the screens means ticking a cell on the project's
  * notification grid, which is BP-402's subject and its spec's; what these three routes need is
- * simply a row in the state that tick produces.
+ * simply a row in each state that tick produces.
  */
 test("a row the bell hides is not counted, not listed, and survives mark all", async ({
   browser,
   request,
 }) => {
   const HIDDEN_TITLE = "Hidden from the bell, kept for the digest";
+  const LEGACY_TITLE = "Written before the grid existed";
 
   const memberContext = await browser.newContext();
   const member = await memberContext.newPage();
   await signIn(member, MEMBER_USERNAME, MEMBER_PASSWORD);
-  await member.goto("/notifications");
+  await warmNotificationRoutes(member);
 
-  await (await db()).collection("notifications").insertOne({
+  // Backdated, so the row dispatched below is unambiguously the newest and the order asserted on
+  // the feed is a reading of the sort rather than of two writes landing in the same millisecond.
+  const banked = new Date(Date.now() - 60_000);
+  const stored = (title: string, over: Record<string, unknown>) => ({
     recipient: MEMBER_ID,
     type: "comment_added",
     task: SIBLING_TASK_ID,
     project: PROJECT_ID,
     actor: ADMIN_ID,
-    title: HIDDEN_TITLE,
+    title,
     body: "",
     read: false,
-    inApp: false,
-    hiddenAt: new Date(),
-    createdAt: new Date(),
+    createdAt: banked,
+    ...over,
   });
 
-  // The visible row beside it, dispatched for real. Without it a quiet bell would prove only that
-  // nothing was delivered in this environment.
+  const written = await (await db())
+    .collection("notifications")
+    .insertMany([
+      stored(HIDDEN_TITLE, { inApp: false, hiddenAt: new Date() }),
+      // No `inApp` key, and the schema's `default: true` cannot put one here — a driver insert is
+      // exactly the shape a row banked before the field existed still has in production.
+      stored(LEGACY_TITLE, {}),
+    ]);
+  const hiddenId = String(written.insertedIds[0]);
+
+  // The visible row beside them, dispatched for real. Without it a quiet bell would prove only
+  // that nothing was delivered in this environment.
   await assign(request, SIBLING_TASK_ID, MEMBER_USERNAME, ADMIN_AUTH);
 
-  await test.step("the bell counts one of the two, and lists that one", async () => {
-    await expectUnreadBadge(member, 1);
-    await expect(feedRow(member, ASSIGNED)).toBeVisible();
-    await expect(member.getByText(HIDDEN_TITLE)).toHaveCount(0);
+  await test.step("the bell counts two of the three, and lists those two", async () => {
+    await expectUnreadBadge(member, 2);
+    // The list, reloaded for itself: the badge above synced on the count route only, and the rows
+    // come back from a different request of the same load.
+    await expectFeedRows(member, [ASSIGNED, LEGACY_TITLE], [HIDDEN_TITLE]);
+  });
+
+  await test.step("naming the hidden row's id does not read it either", async () => {
+    const attempt = await request.patch("/api/notifications/read", {
+      headers: MEMBER_AUTH,
+      data: { id: hiddenId },
+    });
+    expect(attempt.status()).toBe(200);
+
+    const hidden = await (await db())
+      .collection("notifications")
+      .findOne({ _id: written.insertedIds[0] });
+    expect(hidden?.read).toBe(false);
+    await expectUnreadBadge(member, 2);
   });
 
   await test.step("mark all as read leaves the hidden row unread", async () => {
@@ -411,10 +656,56 @@ test("a row the bell hides is not counted, not listed, and survives mark all", a
     ).toEqual([
       { title: HIDDEN_TITLE, read: false },
       { title: ASSIGNED, read: true },
+      { title: LEGACY_TITLE, read: true },
     ]);
   });
 
   await memberContext.close();
+});
+
+/**
+ * BP-433. An @mention naming somebody who cannot reach the board.
+ *
+ * `resolveMentions` looks a username up across the whole instance and knows nothing about grants —
+ * by design, because deciding who may hear about a board belongs to one place. That place is
+ * `recipientsWithAccess`, one call later, and nothing here proved it was in the path: every
+ * account the fixture had held either a grant on this board or the instance-admin role, so a
+ * mention could not be aimed at anybody the check would refuse.
+ *
+ * The control is in the same act rather than beside it. Both usernames are mentioned in one
+ * comment, so both go into one dispatch — the member's row landing is what says the mention path
+ * ran at all, and it is the same call that had to drop the stranger.
+ */
+test("a mention cannot reach somebody who has no grant on the board", async ({ browser }) => {
+  await seedAssignmentOutsider();
+
+  const adminContext = await browser.newContext();
+  const admin = await adminContext.newPage();
+  await signIn(admin, ADMIN_USERNAME, ADMIN_PASSWORD);
+  await admin.goto(TASK_URL);
+  await expect(admin.getByText(TASK_KEY).first()).toBeVisible();
+
+  await comment(admin, `@${MEMBER_USERNAME} @${OUTSIDER_USERNAME} either of you free for this?`);
+
+  const memberContext = await browser.newContext();
+  const member = await memberContext.newPage();
+  await signIn(member, MEMBER_USERNAME, MEMBER_PASSWORD);
+
+  await test.step("the person with a grant is told", async () => {
+    await expectUnreadBadge(member, 1);
+    await expectFeed(member, { carries: [MENTIONED], omits: [] });
+  });
+
+  // Measured at the source. The stranger has no board to open and no screen to check, and an empty
+  // feed would in any case be indistinguishable from a session that had not loaded one.
+  await test.step("the stranger has nothing written for them at all", async () => {
+    expect(
+      await (await db()).collection("notifications").countDocuments({ recipient: OUTSIDER_ID })
+    ).toBe(0);
+  });
+
+  await memberContext.close();
+  await adminContext.close();
 });
 
 async function theOnlyRowAddressedTo(
