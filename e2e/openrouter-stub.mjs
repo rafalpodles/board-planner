@@ -15,6 +15,9 @@ import { createServer } from "node:http";
  * fallback when a message carries no directive.
  */
 
+// Loopback only, on a machine several agents share.
+const LOOPBACK = "127.0.0.1";
+
 const PORT = Number(process.env.PM_STUB_PORT ?? 3988);
 
 function reply(res, body) {
@@ -81,4 +84,4 @@ const server = createServer((req, res) => {
   });
 });
 
-server.listen(PORT, () => console.log(`openrouter stub listening on ${PORT}`));
+server.listen(PORT, LOOPBACK, () => console.log(`openrouter stub listening on ${PORT}`));
