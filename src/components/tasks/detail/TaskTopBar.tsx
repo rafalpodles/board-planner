@@ -1,6 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { Popover } from "@/components/ui/Popover";
+import { projectPath } from "@/lib/urls";
 import { CopyTaskLink } from "../CopyTaskLink";
 import { StatusPill } from "./StatusPill";
 import { OptionItem, OptionList } from "./FieldRow";
@@ -73,7 +75,20 @@ export function TaskTopBar({
       </button>
 
       <div className="flex min-w-0 items-center gap-2 font-mono text-xs text-text-muted">
-        <span className="hidden truncate sm:inline">{projectName}</span>
+        <Link
+          href={projectPath(projectRef)}
+          onClick={(e) => {
+            // A plain click goes back to the board exactly as the Close button does, which
+            // restores its scroll/filter state; a modified click (new tab, etc.) needs the
+            // real href instead, so only intercept the plain case
+            if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+            e.preventDefault();
+            onClose();
+          }}
+          className="focus-ring hidden truncate rounded transition-colors hover:text-text sm:inline"
+        >
+          {projectName}
+        </Link>
         <span aria-hidden className="hidden opacity-40 sm:inline">
           /
         </span>
