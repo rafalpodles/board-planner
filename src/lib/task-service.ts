@@ -253,6 +253,15 @@ async function sprintBelongsToProject(projectId: string, sprint: unknown): Promi
   return (await Sprint.exists({ _id: sprint, project: projectId })) !== null;
 }
 
+/** A title both writers must agree on: the schema marks it `required` and trims it, so anything
+ *  blank is a refusal rather than a write, and the trimmed string is what gets stored. */
+function titleOrRefusal(value: unknown): string | TaskServiceResult {
+  if (typeof value !== "string" || value.trim() === "") {
+    return { ok: false, error: "Title cannot be empty", status: 400 };
+  }
+  return value.trim();
+}
+
 export async function createTask(
   projectId: string,
   actorId: string,
@@ -260,6 +269,12 @@ export async function createTask(
 ): Promise<TaskServiceResult> {
   await connectDB();
 
+  const title = titleOrRefusal(body.title);
+  if (typeof title !== "string") return title;
+
+  // Checked before the counter moves, not after: the `$inc` below is what mints the task number,
+  // and a create refused past this point spends one on a task that never exists, leaving a hole in
+  // the board's numbering that nothing fills.
   const project = await Project.findOneAndUpdate(
     { _id: projectId },
     { $inc: { taskCounter: 1 } },
@@ -308,7 +323,7 @@ export async function createTask(
   const task = await Task.create({
     project: projectId,
     taskNumber: project.taskCounter,
-    title: body.title,
+    title,
     description: body.description ?? "",
     priority: body.priority ?? DEFAULT_PRIORITY,
     category,
@@ -619,6 +634,17 @@ export async function updateTask(
       updates[field] = body[field];
     }
   }
+  // `title` is `required` on the schema, so an empty one is not refused here but by Mongoose's
+  // updateValidators, and a ValidationError nobody catches leaves the route as a 500. Same shape as
+  // the two normalisations below, one field earlier — and the easiest of the three to reach, because
+  // the task screen saves on every keystroke, so clearing the field to retype it is the ordinary way
+  // in. Trimmed to match the schema, so the value compared and the value stored are one string.
+  if (updates.title !== undefined) {
+    const title = titleOrRefusal(updates.title);
+    if (typeof title !== "string") return title;
+    updates.title = title;
+  }
+
   // "" is what a cleared <select> sends, and it is not a value this field can hold: `sprint` is an
   // ObjectId, so an empty string casts to a CastError and surfaces as a 500. Normalise first, then
   // there is exactly one way to say "no sprint" and one check for everything else.

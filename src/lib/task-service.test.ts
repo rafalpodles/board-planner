@@ -3414,3 +3414,62 @@ describe("what a status change tells a watcher", () => {
     expect(notification.email.projectRef).toBe("TP");
   });
 });
+
+/**
+ * BP-437. `title` is `required` on the schema, so a blank one was refused by Mongoose's
+ * updateValidators rather than by either writer — and a ValidationError nobody catches leaves the
+ * route as a 500. Found by clearing the title on the task screen, which is what a person does on
+ * the way to typing a new one: the screen saves on every keystroke, so the empty value is sent.
+ *
+ * Both writers are covered because both reached the schema, and `createTask` had the sharper
+ * consequence: it spends a task number with `$inc` before it writes, so a refusal past that point
+ * leaves a permanent hole in the board's numbering.
+ */
+describe("a title neither writer will store", () => {
+  const WHO = "u-actor";
+
+  beforeEach(() => {
+    findOneAndUpdate.mockClear();
+    taskCreate.mockClear();
+    projectFindOneAndUpdate.mockClear();
+    projectFindOneAndUpdate.mockResolvedValue({ _id: "p1", key: "TP", taskCounter: 8, ...customBoard });
+    taskCreate.mockImplementation(async (doc: Record<string, unknown>) => ({ ...doc, _id: "new" }));
+  });
+
+  describe.each([
+    ["an empty string", ""],
+    ["only whitespace", "   "],
+    ["a newline and nothing else", "\n"],
+    ["a number", 7],
+    ["null", null],
+  ])("%s", (_label, title) => {
+    it("is refused by updateTask with a 400, and nothing is written", async () => {
+      const result = await updateTask("p1", "t1", { title } as never, WHO);
+
+      expect(result).toMatchObject({ ok: false, status: 400 });
+      expect(findOneAndUpdate, "the update reached the model anyway").not.toHaveBeenCalled();
+    });
+
+    it("is refused by createTask before the task number is spent", async () => {
+      const result = await createTask("p1", WHO, { title } as never);
+
+      expect(result).toMatchObject({ ok: false, status: 400 });
+      expect(taskCreate).not.toHaveBeenCalled();
+      // The counter is minted by this call, so a refusal after it burns a number on nothing
+      expect(projectFindOneAndUpdate, "a refused create still spent a task number").not.toHaveBeenCalled();
+    });
+  });
+
+  // The control both halves rest on. Without it, "nothing was written" is equally true of a guard
+  // that refuses every title, and the surrounding padding proves the value is normalised rather
+  // than merely accepted — the schema trims, so an untrimmed write would disagree with it.
+  it("stores an ordinary title, trimmed the way the schema would", async () => {
+    const updated = await updateTask("p1", "t1", { title: "  Renamed by hand  " }, WHO);
+    expect(updated.ok).toBe(true);
+    expect(setStage(findOneAndUpdate.mock.calls[0][1])).toMatchObject({ title: "Renamed by hand" });
+
+    const created = await createTask("p1", WHO, { title: "  Brand new  " });
+    expect(created.ok).toBe(true);
+    expect(taskCreate.mock.calls[0][0]).toMatchObject({ title: "Brand new" });
+  });
+});

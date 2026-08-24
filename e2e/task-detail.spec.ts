@@ -446,3 +446,41 @@ test("the history tab narrates a status change with both columns named", async (
     });
   });
 });
+
+/**
+ * BP-437. `title` is `required` on the schema, so a blank one used to be refused by Mongoose's
+ * updateValidators rather than by the route, and the ValidationError nobody catches left as a 500.
+ *
+ * Driven as the gesture that finds it: this field saves on change, so selecting the title and
+ * deleting it — what a person does on the way to typing a new one — sends the empty value. The
+ * status is the whole subject, so it is read off the response rather than inferred from the screen.
+ */
+test("clearing the title is refused rather than crashing, and the stored one survives", async ({
+  page,
+  request,
+}) => {
+  await openTask(page, SIBLING_TASK_NUMBER);
+  const field = page.getByLabel("Task title");
+  await expect(field).toHaveValue(SIBLING_TASK_TITLE);
+
+  await test.step("emptying it answers 400, not 500", async () => {
+    const refused = taskWrite(page, "PUT", `/tasks/${SIBLING_TASK_ID}`);
+    await field.fill("");
+    expect((await refused).status()).toBe(400);
+  });
+
+  await test.step("and the title on the server is untouched", async () => {
+    // Read from the API, not from the field: what the field holds is the text this test typed,
+    // which is true whether the write was refused or lost.
+    expect((await readTask(request, SIBLING_TASK_NUMBER)).title).toBe(SIBLING_TASK_TITLE);
+  });
+
+  // The control. Without it, "the write was refused" is equally consistent with a guard that
+  // refuses every title, and this screen would be broken rather than fixed.
+  await test.step("an ordinary rename still saves", async () => {
+    const saved = taskWrite(page, "PUT", `/tasks/${SIBLING_TASK_ID}`);
+    await field.fill("Renamed after the refusal");
+    expect((await saved).status()).toBe(200);
+    expect((await readTask(request, SIBLING_TASK_NUMBER)).title).toBe("Renamed after the refusal");
+  });
+});
