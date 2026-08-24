@@ -25,6 +25,24 @@ public struct CheckoutDeletion: Sendable {
         self.forget = forget
     }
 
+    /// The whole removal: ask the guards, and delete only what they allowed. One entry point
+    /// because the seam between the two used to be a call site in the app target, where nothing
+    /// is tested — the list `check` returns and the list `perform` deletes could drift apart and
+    /// every test would stay green.
+    public func removeIfSafe(
+        project: String,
+        path: String,
+        workerIsBusy: Bool,
+        checking removal: CheckoutRemoval
+    ) -> SyncStep {
+        switch removal.check(path: path, workerIsBusy: workerIsBusy) {
+        case .refused(let reason):
+            return .refused(project: project, reason: reason)
+        case .go(let worktrees):
+            return perform(project: project, path: path, worktrees: worktrees)
+        }
+    }
+
     public func perform(project: String, path: String, worktrees: [String]) -> SyncStep {
         do {
             // The worktrees first: they live beside the checkout, under a root shared with every

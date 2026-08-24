@@ -104,6 +104,27 @@ final class CheckoutRemovalWorktreeTests: XCTestCase {
             "the refusal has to name the worktree the operator never chose: \(reason)")
     }
 
+
+    /// The guard has to look at every worktree, not the first one. A machine that works this
+    /// repository's way has one per task, so "checks the first" and "checks them all" differ by
+    /// exactly the work that gets deleted.
+    func testItLooksPastTheFirstWorktree() {
+        let (checkout, first) = repoWithWorktree()
+        let second = dir + "/cp-worktrees/BP-2"
+        _ = git(checkout, ["worktree", "add", "-q", "-b", "bp-2/worker", second])
+        _ = git(second, ["push", "-q", "-u", "origin", "bp-2/worker"])
+
+        // The first stays clean on purpose: a guard that stopped after it would say go.
+        FileManager.default.createFile(
+            atPath: second + "/unsaved.txt", contents: Data("the second worktree's work\n".utf8))
+
+        guard case .refused(let reason) = removal().check(path: checkout, workerIsBusy: false) else {
+            return XCTFail("the dirty worktree is the second one, and it still has to be found")
+        }
+        XCTAssertTrue(reason.contains(second), "names the worktree that is actually dirty: \(reason)")
+        XCTAssertFalse(reason.contains(first), "and not the clean one")
+    }
+
     /// The control. Without it, a guard that refused everything would pass the test above and this
     /// file would prove nothing.
     func testItStillAllowsRemovingACheckoutWhoseWorktreesAreClean() {

@@ -56,23 +56,20 @@ final class ProjectSyncRunner {
             }
         }
 
-        for planned in plan.remove {
-            switch removal.check(path: planned.path, workerIsBusy: busy) {
-            case .refused(let reason):
-                steps.append(.refused(project: planned.project.label, reason: reason))
-            case .go(let worktrees):
-                let deletion = CheckoutDeletion(
-                    remove: { try FileManager.default.removeItem(atPath: $0) },
-                    forget: { [file] path in
-                        try file.write(((try? file.read()) ?? []).filter { $0 != path })
-                    }
-                )
-                steps.append(
-                    deletion.perform(
-                        project: planned.project.label,
-                        path: planned.path,
-                        worktrees: worktrees))
+        let deletion = CheckoutDeletion(
+            remove: { try FileManager.default.removeItem(atPath: $0) },
+            forget: { [file] path in
+                try file.write(((try? file.read()) ?? []).filter { $0 != path })
             }
+        )
+
+        for planned in plan.remove {
+            steps.append(
+                deletion.removeIfSafe(
+                    project: planned.project.label,
+                    path: planned.path,
+                    workerIsBusy: busy,
+                    checking: removal))
         }
     }
 
