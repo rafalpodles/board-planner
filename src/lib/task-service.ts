@@ -240,7 +240,7 @@ async function agentUsableOnProject(
  * composition, and `DELETE /api/agents/:id` refuses while any task points at one, so this is a
  * hand-edited database rather than a state the product produces.
  */
-async function personalAgentAlienTo(agent: unknown, assigneeAfter: unknown): Promise<boolean> {
+export async function personalAgentAlienTo(agent: unknown, assigneeAfter: unknown): Promise<boolean> {
   const { Agent } = await import("@/models/agent");
   const found = await Agent.findById(agent, "scope owner").lean();
   if (!found || found.scope !== "user") return false;
@@ -1092,6 +1092,17 @@ async function createNextRecurrence(
     // of the hand-over now, so an occurrence created without one is a task no machine looks at. A
     // weekly task that had run autonomously for months would simply stop, and the card would look
     // entirely normal — no error, no empty field a person would notice.
+    //
+    // Not re-judged against `oldTask.assignee` below — a decision, not an oversight (BP-369). This
+    // write has no actor, so there is nothing here to run `personalAgentAlienTo` on behalf of; an
+    // earlier write already chose the pairing and the copy means to reproduce it exactly.
+    // `CLEAR_WORKER_ASSIGNEE` above is the only other writer that could drift it without going
+    // through `updateTask`, and it can't — see the comment on `RUN_RELEASES_ASSIGNEE`. What
+    // re-judging here cannot reach is a pairing already stale before `personalAgentAlienTo`
+    // existed; that keeps reproducing because closing an occurrence is not an edit to the one being
+    // copied. `snapshotFor` still refuses to run a machine on a stale pairing at claim time, so
+    // nothing unvetted executes — this is a one-off document repair, out of band: see
+    // scripts/repair-recurring-agent-pairing.ts.
     agent: oldTask.agent ?? null,
     dueDate: nextDue,
     checklist,
