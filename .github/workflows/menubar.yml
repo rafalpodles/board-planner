@@ -21,12 +21,12 @@ jobs:
       run:
         working-directory: menubar
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build
         run: swift build
       - name: Tests
         run: swift test
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       # Building and testing the Swift never saw the defect this covers: `make app` assembled a
