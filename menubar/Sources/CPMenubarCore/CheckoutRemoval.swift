@@ -86,7 +86,30 @@ public struct CheckoutRemoval: Sendable {
             return .refused(reason: "could not list the worktrees of \(path)")
         }
 
-        return .go(worktrees: linkedWorktrees(worktrees.output, root: root))
+        // A linked worktree has its own working tree and index, so the status check above — run in
+        // the checkout — cannot see it. Refs are shared, so the unpushed and stash checks already
+        // covered every worktree; uncommitted files were the half nothing covered, and the half
+        // that exists nowhere else. Measured: `git status` in the checkout reports clean while a
+        // worktree beside it holds a day of unsaved work (CheckoutRemovalWorktreeTests, BP-418).
+        let linked = linkedWorktrees(worktrees.output, root: root)
+        for worktree in linked {
+            // A registration whose directory is already gone holds nothing to lose, and refusing
+            // on it would let one stale entry block the removal for ever.
+            guard exists(worktree) else { continue }
+
+            let dirty = run(["-C", worktree, "status", "--porcelain"], worktree)
+            guard dirty.code == 0 else {
+                return .refused(
+                    reason: "could not tell whether the worktree at \(worktree) has uncommitted changes")
+            }
+            let changed = lines(dirty.output)
+            if !changed.isEmpty {
+                return .refused(
+                    reason: "the worktree at \(worktree) has \(changed.count) uncommitted change\(changed.count == 1 ? "" : "s")")
+            }
+        }
+
+        return .go(worktrees: linked)
     }
 
     private func lines(_ output: String) -> [String] {

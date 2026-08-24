@@ -65,8 +65,12 @@ final class ProjectSyncRunner {
                     // The worktrees first: they live beside the checkout, under a root shared with
                     // every other project in that folder, so they are removed by name rather than
                     // by deleting the root they sit in.
+                    //
+                    // Not `try?`: a worktree that will not delete used to leave no step at all,
+                    // and the loop went on to report `.removed` naming the checkout — true, and
+                    // read as "all of it went" (BP-418).
                     for worktree in worktrees {
-                        try? FileManager.default.removeItem(atPath: worktree)
+                        try FileManager.default.removeItem(atPath: worktree)
                     }
                     if FileManager.default.fileExists(atPath: planned.path) {
                         try FileManager.default.removeItem(atPath: planned.path)
