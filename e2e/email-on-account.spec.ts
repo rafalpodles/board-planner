@@ -188,6 +188,11 @@ test("an admin API token cannot change an address", async ({ request }) => {
 // CI has no mail server, which is the state most self-hosted instances start in. The screen has to
 // say so rather than offer a button that silently does nothing.
 test("the email screen says plainly when no mail server is configured", async ({ page }) => {
+  // Stated rather than assumed, in the same shape as reset-by-email.spec.ts: this asserts the
+  // unconfigured state, so anybody who gives the run an SMTP_HOST would otherwise get a red here
+  // in a file they never touched.
+  test.skip(!!process.env.SMTP_HOST, "this asserts the unconfigured state");
+
   await signInAsAdmin(page);
   await page.goto("/settings/email");
 

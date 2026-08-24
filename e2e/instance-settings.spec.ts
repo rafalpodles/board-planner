@@ -29,6 +29,17 @@ import {
  *   `email-on-account.spec.ts`'s unconfigured-state assertion red. So that branch sits behind the
  *   same guard inverted, and what runs everywhere is the part needing no mail server: who the test
  *   message would go to, and the profile round trip that decides it.
+ *
+ * Every assertion here was watched failing against a deliberately broken copy of the code it
+ * covers, in three flavours, because they ask different questions. Removing a clause: the model
+ * never written, the instance's cap range check gone, the address change no longer needing a
+ * password, the name never written, a blank name accepted. Inverting a condition: the password
+ * never actually compared, the board ignoring the preference. Swapping the operation: the new
+ * password never stored, Revoke answering ok without deleting, the theme choice never persisted.
+ * Ten for ten, and three of them only started failing after the assertions they broke were added —
+ * the screen-side refusals said nothing about the instance, and the theme survived a reload
+ * because Playwright emulates a light OS preference, which is what an unremembered choice falls
+ * back to.
  */
 
 test.beforeEach(seed);
