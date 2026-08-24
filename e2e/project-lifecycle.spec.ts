@@ -165,9 +165,10 @@ test.describe("renaming a board", () => {
     await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);
     await openSettings(page, PROJECT_KEY);
 
-    // A deliberate product decision, not an oversight: the endpoint accepts a key change and keeps
-    // the old one in formerKeys, and this screen declines to offer it. Locked here so that turning
-    // the field on becomes a decision somebody has to make on purpose.
+    // A deliberate product decision, not an oversight, and now agreed on both sides: the PUT
+    // endpoint stopped accepting `key` at all (BP-415 and the immutability fix before it), and
+    // this field is disabled to match. Locked here so that turning it back on becomes a decision
+    // somebody has to make on purpose, on both sides rather than one.
     await expect(page.getByLabel("Project key")).toBeDisabled();
     await expect(page.getByLabel("Project key")).toHaveValue(PROJECT_KEY);
     // The control: the card is live, and "disabled" is a property of this field alone
