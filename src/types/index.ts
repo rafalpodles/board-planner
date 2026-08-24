@@ -324,6 +324,10 @@ export interface ApiWebhook {
   urlMasked: string;
   events: WebhookEvent[];
   enabled: boolean;
+  /** Single-shot delivery (BP-407) — this is the outcome of the one attempt, not a retry count. */
+  lastAttemptAt: string | null;
+  lastStatus: "ok" | "failed" | null;
+  lastError: string;
 }
 
 export type NotificationChannelType = "slack" | "discord";

@@ -961,3 +961,48 @@ export async function seedAssignmentOutsider() {
     OUTSIDER_TASK_NUMBER
   );
 }
+
+/**
+ * BP-407. Delivery itself needs a real receiver, which loopback-blocked `safeFetch` refuses under
+ * BP-408 — so what this seeds is the OUTCOME of an attempt, the shape `dispatchWebhooks` writes
+ * back onto a webhook row after one, not a delivery this fixture actually performs.
+ *
+ * Both rows, not just the failed one: a page that always prints "Last delivery failed" regardless
+ * of what is stored would pass a fixture carrying only the negative case.
+ */
+export const WEBHOOK_OK_ID = id("e2e00000000000000000f001");
+export const WEBHOOK_FAILED_ID = id("e2e00000000000000000f002");
+
+export async function seedWebhookDeliveryOutcomes() {
+  const db = (await connect()).db!;
+
+  await db.collection("projects").updateOne(
+    { _id: PROJECT_ID },
+    {
+      $set: {
+        webhooks: [
+          {
+            _id: WEBHOOK_OK_ID,
+            url: "https://e2e-receiver.example/ok",
+            events: ["task_created"],
+            enabled: true,
+            lastAttemptAt: new Date(Date.now() - 5 * 60_000),
+            lastStatus: "ok",
+            lastError: "",
+          },
+          {
+            _id: WEBHOOK_FAILED_ID,
+            url: "https://e2e-receiver.example/fails",
+            events: ["task_created"],
+            enabled: true,
+            lastAttemptAt: new Date(Date.now() - 5 * 60_000),
+            lastStatus: "failed",
+            lastError: "connect ECONNREFUSED",
+          },
+        ],
+      },
+    }
+  );
+
+  await mongoose.disconnect();
+}

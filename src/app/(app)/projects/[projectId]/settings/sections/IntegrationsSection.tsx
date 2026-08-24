@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { useApi } from "@/hooks/use-api";
+import { timeAgo } from "@/lib/time";
 import { useDraft } from "@/hooks/use-draft";
 import { CODA_COLUMNS, CODA_KEY_COLUMN } from "@/lib/coda";
 import { clearsStoredToken } from "@/lib/host-bound-secrets";
@@ -970,6 +971,22 @@ export function IntegrationsSection({
                             </button>
                           ))}
                         </div>
+                        {wh._id && (
+                          <p className="mt-2 text-xs text-text-muted">
+                            {wh.lastAttemptAt ? (
+                              wh.lastStatus === "failed" ? (
+                                <span className="text-danger">
+                                  Last delivery failed {timeAgo(wh.lastAttemptAt)}
+                                  {wh.lastError ? ` — ${wh.lastError}` : ""}
+                                </span>
+                              ) : (
+                                <>Last delivered {timeAgo(wh.lastAttemptAt)}</>
+                              )
+                            ) : (
+                              "Not delivered yet"
+                            )}
+                          </p>
+                        )}
                       </div>
                     ))}
                     {webhooks.value.webhooks.length === 0 && (
