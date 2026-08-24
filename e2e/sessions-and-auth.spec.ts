@@ -14,7 +14,7 @@ import {
   PROJECT_KEY,
   SIBLING_TASK_NUMBER,
   SIBLING_TASK_TITLE,
-  seed,
+  seedWithoutSessions,
 } from "./seed";
 
 /**
@@ -281,7 +281,9 @@ test.afterAll(async () => {
 });
 
 test.beforeEach(async () => {
-  await seed();
+  // Not seed(): this suite counts session rows to say what a sign-in or a logout did, and the
+  // session every other spec arrives on would be a second row those counts cannot tell apart.
+  await seedWithoutSessions();
 });
 
 test.afterEach(async () => {

@@ -540,7 +540,14 @@ export async function seedQuietTask(quietForMs: number) {
   );
 }
 
-export async function seed() {
+/**
+ * The board every spec starts from.
+ *
+ * `withSessions` is what the auth suite turns off: it counts the rows in `sessions` to say what a
+ * sign-in, a logout or a password change did, and a session seeded for the convenience of every
+ * other spec is a second row those counts cannot tell from the one under test.
+ */
+async function seedBoard(withSessions: boolean) {
   const db = (await connect()).db!;
   await empty(db);
 
@@ -683,12 +690,14 @@ export async function seed() {
     createdAt: now,
   });
 
-  await db
-    .collection("sessions")
-    .insertMany([
-      sessionRow(ADMIN_SESSION_TOKEN, ADMIN_ID),
-      sessionRow(MEMBER_SESSION_TOKEN, MEMBER_ID),
-    ]);
+  if (withSessions) {
+    await db
+      .collection("sessions")
+      .insertMany([
+        sessionRow(ADMIN_SESSION_TOKEN, ADMIN_ID),
+        sessionRow(MEMBER_SESSION_TOKEN, MEMBER_ID),
+      ]);
+  }
 
   await db.collection("workers").insertOne({
     _id: WORKER_ID,
@@ -768,6 +777,11 @@ export async function seed() {
 
   await mongoose.disconnect();
 }
+
+export const seed = () => seedBoard(true);
+
+/** seed(), minus the two session rows — see seedBoard. */
+export const seedWithoutSessions = () => seedBoard(false);
 
 // BP-386. Search answers differently depending on who is asking, so the corpus is two boards
 // sharing one word: the member holds a grant on TP only, and SEARCH_WORD matches a task on each.
