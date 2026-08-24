@@ -155,9 +155,12 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
 
   // Once, not on the board poll: the roster does not change while you work
   useEffect(() => {
-    api.get("/api/users/list").then(setAssignableUsers).catch(() => setAssignableUsers([]));
+    api
+      .get(`/api/projects/${projectId}/assignable-users`)
+      .then(setAssignableUsers)
+      .catch(() => setAssignableUsers([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [projectId]);
 
   usePollWhileVisible(loadData, 10_000);
 

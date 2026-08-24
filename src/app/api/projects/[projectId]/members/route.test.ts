@@ -101,7 +101,7 @@ describe("GET members", () => {
     await GET(new Request("http://x"), { params });
     expect(userFind).toHaveBeenCalledWith({
       kind: { $ne: "machine" },
-      $or: [{ _id: { $in: [] } }, { role: "admin" }],
+      $or: [{ role: "admin" }, { _id: { $in: [] } }],
     });
   });
 
@@ -116,7 +116,7 @@ describe("GET members", () => {
     await GET(new Request("http://x"), { params });
     expect(userFind).toHaveBeenCalledWith({
       kind: { $ne: "machine" },
-      $or: [{ _id: { $in: ["u1"] } }, { role: "admin" }],
+      $or: [{ role: "admin" }, { _id: { $in: ["u1"] } }],
     });
   });
 });

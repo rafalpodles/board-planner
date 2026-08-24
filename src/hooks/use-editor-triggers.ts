@@ -22,9 +22,12 @@ export function useEditorTriggers(projectId: string, projectKey?: string): Trigg
   const [people, setPeople] = useState<Person[]>([]);
 
   useEffect(() => {
-    api.get("/api/users/list").then(setPeople).catch(() => {});
+    api
+      .get(`/api/projects/${projectId}/assignable-users`)
+      .then(setPeople)
+      .catch(() => setPeople([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [projectId]);
 
   return useMemo(
     () => [

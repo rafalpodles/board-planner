@@ -893,7 +893,7 @@ export interface ApiUser {
   createdAt: string;
 }
 
-/** What GET /api/users/list returns: enough to name someone and assign them */
+/** What GET /api/projects/:id/assignable-users returns: enough to name someone and assign them */
 export interface ApiUserSummary {
   _id: string;
   username: string;

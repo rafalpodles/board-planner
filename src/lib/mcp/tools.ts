@@ -128,9 +128,17 @@ export function registerPlannerTools(server: McpServer): void {
       }
 
       if (assignee) {
-        const users = (await client.listUsers()) as { username: string }[];
+        // Scoped to the board, not the instance. A username that is not on this list may be a typo
+        // or somebody with no access, and the two are deliberately NOT told apart: doing so would
+        // mean answering "does this account exist elsewhere", which is the instance-wide roster
+        // BP-400 removed.
+        const users = (await client.listAssignableUsers(proj._id)) as { username: string }[];
         const user = users.find((u) => u.username === assignee.toLowerCase());
-        if (!user) throw new Error(`User "${assignee}" not found`);
+        if (!user) {
+          throw new Error(
+            `"${assignee}" is not someone this board can be assigned to — only people with access to it are.`
+          );
+        }
         data.assignee = user.username;
       }
 
@@ -195,9 +203,14 @@ export function registerPlannerTools(server: McpServer): void {
 
       if (assignee !== undefined) {
         if (assignee) {
-          const users = (await client.listUsers()) as { username: string }[];
+          // See create_task: the roster is the board's, and a miss is not split into typo vs no-access.
+          const users = (await client.listAssignableUsers(projectId)) as { username: string }[];
           const user = users.find((u) => u.username === assignee.toLowerCase());
-          if (!user) throw new Error(`User "${assignee}" not found`);
+          if (!user) {
+            throw new Error(
+              `"${assignee}" is not someone this board can be assigned to — only people with access to it are.`
+            );
+          }
           data.assignee = user.username;
         } else {
           data.assignee = null;
