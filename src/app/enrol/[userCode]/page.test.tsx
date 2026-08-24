@@ -63,10 +63,10 @@ afterEach(cleanup);
  * on the instance's behalf. It confirms one machine, for one person, against one repository.
  */
 describe("the enrolment confirmation screen", () => {
-  it("asks which project the machine should clone", async () => {
+  it("asks which repository the machine should set up first", async () => {
     await show();
 
-    expect(screen.getByText(/Which project should it work on/i)).toBeTruthy();
+    expect(screen.getByText(/Which repository should it set up first/i)).toBeTruthy();
     expect(screen.getByText("rig-laptop")).toBeTruthy();
   });
 
@@ -161,8 +161,9 @@ describe("the enrolment confirmation screen", () => {
   it("says whose account the machine will act under, and what it will reach", async () => {
     await show();
 
-    expect(screen.getByText(/Connecting as Rafal Podles/i).textContent).toMatch(
-      /reaches exactly the projects you can/i
-    );
+    expect(screen.getByText(/Connecting as Rafal Podles/i)).toBeTruthy();
+    // BP-374: the reach sits with the project list, where a reader looks for a scope list, rather
+    // than in the footer below the buttons — which is the half of the screen it contradicted
+    expect(screen.getByText(/reaches every project you can/i).closest("section")).toBeTruthy();
   });
 });
