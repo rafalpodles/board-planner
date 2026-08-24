@@ -391,6 +391,9 @@ const paintedBackground = (page: Page) =>
 
 test("the theme follows the choice, and the choice survives a reload", async ({ page }) => {
   await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);
+  // The only test here that reads the shell rather than a settings screen, so it is the only one
+  // that has to say where it is: signIn sets a cookie and navigates nowhere.
+  await page.goto("/projects");
   await hideDevOverlay(page);
 
   // Choosing does not close the menu, so a second choice must not toggle it shut on the way in
