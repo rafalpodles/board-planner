@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { protocolOf } from "@/lib/middleware";
 import { PROTOCOL_VERSION } from "@/lib/worker-service";
+import { stripControlCharacters } from "@/lib/identifiers";
 import {
   DEVICE_ENROLMENT_TTL_MS,
   TooManyPendingEnrolments,
@@ -25,8 +26,17 @@ export async function POST(request: Request) {
   await connectDB();
 
   const body = await request.json().catch(() => ({}));
-  const machineName = typeof body.name === "string" ? body.name.trim().slice(0, 120) : "";
-  const machineHost = typeof body.host === "string" ? body.host.trim().slice(0, 200) : "";
+  // Stripped before it is ever stored, not only where it becomes a User's fullName: this value is
+  // rendered raw on /enrol/[userCode] BEFORE anyone approves it, and a bidi-override or zero-width
+  // character does not break a line or reach a script sink — it just makes the string on screen
+  // lie to whoever is deciding whether to trust it, which is the entire control this unauthenticated
+  // route has (BP-413 review).
+  const machineName = typeof body.name === "string"
+    ? stripControlCharacters(body.name).trim().slice(0, 120)
+    : "";
+  const machineHost = typeof body.host === "string"
+    ? stripControlCharacters(body.host).trim().slice(0, 200)
+    : "";
   if (!machineName) {
     return NextResponse.json({ error: "name is required" }, { status: 400 });
   }
