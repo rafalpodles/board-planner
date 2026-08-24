@@ -56,6 +56,17 @@ async function typeName(page: Page, value: string) {
   const field = page.getByLabel("Full Name");
   const save = page.getByRole("button", { name: "Save" });
 
+  // The screen's own load, waited for before anything is typed. It fetches a fresh copy of the
+  // account and calls setFullName with it, so a fill that lands first would be overwritten — and
+  // Save could not show that, being disabled only on an *empty* name. The field is `useState("")`
+  // until that response sets it, so a non-empty value here is the response and nothing else.
+  //
+  // Insurance, not a demonstrated fix. BP-435 saw a save answer 200 having written nothing, and
+  // this ordering is the mechanism that would explain it — but removing this line and forcing the
+  // load to land late did NOT reproduce it, including with the response held until after the fill.
+  // So the flake's cause is still open; what closes the hole it exposed is `saveName` below.
+  await expect(field).not.toHaveValue("");
+
   // A second, not the suite's 15 — the inner assertion is a poll for hydration, so waiting the
   // full expect timeout on the first attempt spends fifteen seconds to learn one thing
   await expect(async () => {
@@ -75,6 +86,26 @@ function savedName(page: Page) {
       new URL(r.url()).pathname === "/api/users/me" &&
       r.request().method() === "PUT" &&
       r.status() === 200
+  );
+}
+
+/**
+ * Clicks Save and requires the answer to carry the name that was typed.
+ *
+ * The status alone is not that. The route writes only when the value actually differs from what is
+ * stored, so a request that carried the *old* name — which is what the load-versus-fill race in
+ * `typeName` used to produce — is answered 200 with nothing written. Waiting on the status made
+ * that read as success and the test then died fifteen seconds later on a database poll, naming the
+ * stored name rather than the request that failed to change it. The body is the route's own account
+ * of what it saved, so the failure lands on the click and says which name went up.
+ */
+async function saveName(page: Page, expected: string) {
+  const [response] = await Promise.all([
+    savedName(page),
+    page.getByRole("button", { name: "Save" }).click(),
+  ]);
+  expect((await response.json()).fullName, "the save answered 200 but with the old name").toBe(
+    expected
   );
 }
 
@@ -104,7 +135,7 @@ test("changing your own name stores it and updates the shell without a reload", 
   await expect(page.getByText(SEEDED_NAME)).toBeVisible();
 
   await typeName(page, `  ${NEW_NAME}  `);
-  await Promise.all([savedName(page), page.getByRole("button", { name: "Save" }).click()]);
+  await saveName(page, NEW_NAME);
 
   // Stored trimmed, the way the schema would have
   await expect.poll(storedName).toBe(NEW_NAME);
@@ -119,7 +150,7 @@ test("the account answers with the new name straight away", async ({ page }) => 
   await signIn(page);
   await page.goto(PROFILE);
   await typeName(page, NEW_NAME);
-  await Promise.all([savedName(page), page.getByRole("button", { name: "Save" }).click()]);
+  await saveName(page, NEW_NAME);
   await expect.poll(storedName).toBe(NEW_NAME);
 
   const me = await page.request.get("/api/auth/me");
@@ -172,7 +203,7 @@ test("the change leaves an audit row naming the account itself", async ({ page }
   await signIn(page);
   await page.goto(PROFILE);
   await typeName(page, NEW_NAME);
-  await Promise.all([savedName(page), page.getByRole("button", { name: "Save" }).click()]);
+  await saveName(page, NEW_NAME);
 
   // The audit write is deliberately fire-and-forget, so this retries rather than reading once
   await expect
@@ -198,7 +229,7 @@ test("saving the name alone never asks for a password", async ({ page }) => {
   await typeName(page, NEW_NAME);
 
   await expect(page.getByLabel("Current password")).toHaveCount(0);
-  await Promise.all([savedName(page), page.getByRole("button", { name: "Save" }).click()]);
+  await saveName(page, NEW_NAME);
   await expect.poll(storedName).toBe(NEW_NAME);
 });
 
@@ -213,7 +244,7 @@ test("an ordinary member renames themselves too", async ({ page }) => {
 
   await expect(page.getByLabel("Full Name")).toHaveValue("E2E Member");
   await typeName(page, "Anna Nowak");
-  await Promise.all([savedName(page), page.getByRole("button", { name: "Save" }).click()]);
+  await saveName(page, "Anna Nowak");
 
   await expect
     .poll(async () => {
