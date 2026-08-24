@@ -316,6 +316,9 @@ export interface IWebhook {
   url: string;
   events: WebhookEvent[];
   enabled: boolean;
+  lastAttemptAt: Date | null;
+  lastStatus: "ok" | "failed" | null;
+  lastError: string;
 }
 
 // The URL never reaches a client: it is a credential, so the API returns only a mask

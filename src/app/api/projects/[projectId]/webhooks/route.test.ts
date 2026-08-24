@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const findById = vi.fn();
-const save = vi.fn();
+const findOne = vi.fn();
+const findOneAndUpdate = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
-vi.mock("@/models/project", () => ({ Project: { findById } }));
+vi.mock("@/models/project", () => ({ Project: { findById, findOne, findOneAndUpdate } }));
 vi.mock("@/lib/projectAudit", () => ({ logProjectAudit: vi.fn() }));
 vi.mock("@/lib/project-secrets", () => ({
   maskSecretUrl: (u: string) => u,
@@ -17,32 +18,43 @@ vi.mock("@/lib/middleware", () => ({
       handler(req, { ...(ctx as object), user: { _id: "owner1" } }),
 }));
 
-const { POST, PUT } = await import("./route");
+const { GET, POST, PUT, DELETE } = await import("./route");
 
-function request(method: string, body: unknown) {
+function request(method: string, body?: unknown) {
   return new Request("https://app.example.com/api/projects/p1/webhooks", {
     method,
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
+    body: body === undefined ? undefined : JSON.stringify(body),
   });
 }
 
 const ctx = () => ({ params: Promise.resolve({ projectId: "p1" }) });
 
-let webhook: { _id: { toString(): string }; url: string; events: string[]; enabled: boolean };
+const webhook = {
+  _id: { toString: () => "w1" },
+  url: "https://hooks.example.com/a",
+  events: ["task_created"],
+  enabled: true,
+};
+
+function projectDoc(webhooks: unknown[]) {
+  return { webhooks, toObject: () => ({ webhooks }) };
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
-  webhook = {
-    _id: { toString: () => "w1" },
-    url: "https://hooks.example.com/a",
-    events: ["task_created"],
-    enabled: true,
-  };
-  findById.mockResolvedValue({
-    webhooks: [webhook],
-    save,
-    toObject: () => ({ webhooks: [webhook] }),
+  findById.mockResolvedValue(projectDoc([webhook]));
+  findOneAndUpdate.mockResolvedValue(projectDoc([webhook]));
+  findOne.mockReturnValue({ lean: () => Promise.resolve({ webhooks: [webhook] }) });
+});
+
+describe("GET /api/projects/:projectId/webhooks", () => {
+  it("404s when the project does not exist", async () => {
+    findById.mockResolvedValue(null);
+
+    const res = await GET(request("GET"), ctx());
+
+    expect(res.status).toBe(404);
   });
 });
 
@@ -51,54 +63,125 @@ describe("POST /api/projects/:projectId/webhooks", () => {
     const res = await POST(request("POST", { url: " https://hooks.example.com/b " }), ctx());
 
     expect(res.status).toBe(201);
-    expect(save).toHaveBeenCalled();
+    expect(findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: "p1" },
+      {
+        $push: {
+          webhooks: { url: "https://hooks.example.com/b", events: expect.any(Array), enabled: true },
+        },
+      },
+      { returnDocument: "after" }
+    );
   });
 
-  it("refuses an unknown event name", async () => {
+  it("refuses an unknown event name, without writing anything", async () => {
     const res = await POST(
       request("POST", { url: "https://hooks.example.com/b", events: ["not_an_event"] }),
       ctx()
     );
 
     expect(res.status).toBe(400);
-    expect(save).not.toHaveBeenCalled();
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  // The $push is atomic and single-round-trip on purpose (BP-407): the old load→mutate→save()
+  // shape re-sent the whole array on every write, which raced dispatchWebhooks recording a
+  // delivery outcome on a different webhook in the same project and silently dropped it.
+  it("never loads the project into memory first", async () => {
+    await POST(request("POST", { url: "https://hooks.example.com/b" }), ctx());
+
+    expect(findById).not.toHaveBeenCalled();
+  });
+
+  it("404s when the project does not exist", async () => {
+    findOneAndUpdate.mockResolvedValue(null);
+
+    const res = await POST(request("POST", { url: "https://hooks.example.com/b" }), ctx());
+
+    expect(res.status).toBe(404);
   });
 });
 
 // BP-304: the POST path parsed the url, the PUT path assigned it straight from the body
 describe("PUT /api/projects/:projectId/webhooks", () => {
-  it("refuses a non-string url", async () => {
+  it("refuses a non-string url, without writing anything", async () => {
     const res = await PUT(request("PUT", { webhookId: "w1", url: { $ne: null } }), ctx());
 
     expect(res.status).toBe(400);
-    expect(webhook.url).toBe("https://hooks.example.com/a");
-    expect(save).not.toHaveBeenCalled();
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it("refuses a url that does not parse", async () => {
     const res = await PUT(request("PUT", { webhookId: "w1", url: "not a url" }), ctx());
 
     expect(res.status).toBe(400);
-    expect(save).not.toHaveBeenCalled();
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it("refuses events that are not a list of known events", async () => {
     const res = await PUT(request("PUT", { webhookId: "w1", events: ["nope"] }), ctx());
 
     expect(res.status).toBe(400);
-    expect(webhook.events).toEqual(["task_created"]);
-    expect(save).not.toHaveBeenCalled();
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
   });
 
-  it("accepts a valid update", async () => {
+  it("accepts a valid update, targeting the one webhook by id atomically", async () => {
     const res = await PUT(
       request("PUT", { webhookId: "w1", url: "https://hooks.example.com/c", events: ["comment_added"] }),
       ctx()
     );
 
     expect(res.status).toBe(200);
-    expect(webhook.url).toBe("https://hooks.example.com/c");
-    expect(webhook.events).toEqual(["comment_added"]);
-    expect(save).toHaveBeenCalled();
+    expect(findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: "p1", "webhooks._id": "w1" },
+      {
+        $set: {
+          "webhooks.$.url": "https://hooks.example.com/c",
+          "webhooks.$.events": ["comment_added"],
+        },
+      },
+      { returnDocument: "after" }
+    );
+  });
+
+  it("never loads the project into memory first", async () => {
+    await PUT(request("PUT", { webhookId: "w1", enabled: false }), ctx());
+
+    expect(findById).not.toHaveBeenCalled();
+  });
+
+  it("404s when the id matches no webhook on this project", async () => {
+    findOneAndUpdate.mockResolvedValue(null);
+
+    const res = await PUT(request("PUT", { webhookId: "gone", enabled: false }), ctx());
+
+    expect(res.status).toBe(404);
+  });
+});
+
+describe("DELETE /api/projects/:projectId/webhooks", () => {
+  it("removes the named webhook atomically", async () => {
+    const res = await DELETE(request("DELETE", { webhookId: "w1" }), ctx());
+
+    expect(res.status).toBe(200);
+    expect(findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: "p1" },
+      { $pull: { webhooks: { _id: "w1" } } },
+      { returnDocument: "after" }
+    );
+  });
+
+  it("never loads the project into memory first", async () => {
+    await DELETE(request("DELETE", { webhookId: "w1" }), ctx());
+
+    expect(findById).not.toHaveBeenCalled();
+  });
+
+  it("404s when the project does not exist", async () => {
+    findOneAndUpdate.mockResolvedValue(null);
+
+    const res = await DELETE(request("DELETE", { webhookId: "w1" }), ctx());
+
+    expect(res.status).toBe(404);
   });
 });

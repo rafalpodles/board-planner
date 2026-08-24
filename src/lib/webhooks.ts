@@ -1,7 +1,7 @@
 import { Project } from "@/models/project";
 import { WebhookEvent } from "@/types";
 import { isAllowedWebhookUrl } from "./url-validation";
-import { safeFetch } from "./safe-fetch";
+import { safeFetch, BlockedDestinationError } from "./safe-fetch";
 import { signatureHeaders } from "./webhook-signature";
 
 interface WebhookPayload {
@@ -22,19 +22,33 @@ interface WebhookPayload {
  *
  * Never awaited by dispatchWebhooks or its callers — recording the outcome happens on its own
  * time, after the response the caller was never going to wait for either.
+ *
+ * `attemptStartedAt` orders concurrent attempts against the SAME webhook: two events firing close
+ * together can settle out of order (a slow failure started first landing its write after a fast
+ * success started second), and without a guard the older, slower attempt's outcome would overwrite
+ * the newer one's. The query only applies when nothing newer has already been recorded.
  */
 async function recordDelivery(
   projectId: string,
   webhookId: string,
+  attemptStartedAt: Date,
   status: "ok" | "failed",
   error: string
 ): Promise<void> {
   try {
     await Project.updateOne(
-      { _id: projectId, "webhooks._id": webhookId },
+      {
+        _id: projectId,
+        webhooks: {
+          $elemMatch: {
+            _id: webhookId,
+            $or: [{ lastAttemptAt: null }, { lastAttemptAt: { $lte: attemptStartedAt } }],
+          },
+        },
+      },
       {
         $set: {
-          "webhooks.$.lastAttemptAt": new Date(),
+          "webhooks.$.lastAttemptAt": attemptStartedAt,
           "webhooks.$.lastStatus": status,
           "webhooks.$.lastError": error,
         },
@@ -46,6 +60,19 @@ async function recordDelivery(
     // downstream is waiting to catch.
     console.warn("Failed to record webhook delivery outcome");
   }
+}
+
+/**
+ * `BlockedDestinationError` names exactly why a destination was refused — "resolves to the private
+ * address X", "Refusing internal hostname X" — which is precisely the information safeFetch exists
+ * to keep from a caller who chose that URL. The old `.catch(() => {})` discarded it entirely; a
+ * generic message here keeps the record honest (delivery failed) without turning it into a
+ * reconnaissance oracle for whoever can create a webhook on this project. The real message still
+ * reaches the server log, for an operator who can read it.
+ */
+function messageFor(err: unknown): string {
+  if (err instanceof BlockedDestinationError) return "Blocked destination";
+  return err instanceof Error ? err.message : String(err);
 }
 
 export async function dispatchWebhooks(
@@ -70,8 +97,16 @@ export async function dispatchWebhooks(
 
     // Fire-and-forget, don't block the main request
     for (const webhook of activeWebhooks) {
-      if (!isAllowedWebhookUrl(webhook.url)) continue;
       const webhookId = String(webhook._id);
+      const attemptStartedAt = new Date();
+
+      // Refused before ever reaching the network — still an attempt whose outcome must be
+      // recorded, or a URL that stops passing this check reads as "still delivering" forever.
+      if (!isAllowedWebhookUrl(webhook.url)) {
+        recordDelivery(projectId, webhookId, attemptStartedAt, "failed", "Blocked destination");
+        continue;
+      }
+
       safeFetch(webhook.url, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...signatureHeaders(body) },
@@ -82,8 +117,14 @@ export async function dispatchWebhooks(
         // whose status isn't 2xx is the receiver saying no — the original `.catch(() => {})` only
         // ever saw the first kind, so a webhook receiver answering 500 read as delivered.
         (response) =>
-          recordDelivery(projectId, webhookId, response.ok ? "ok" : "failed", response.ok ? "" : `HTTP ${response.status}`),
-        (err) => recordDelivery(projectId, webhookId, "failed", err instanceof Error ? err.message : String(err))
+          recordDelivery(
+            projectId,
+            webhookId,
+            attemptStartedAt,
+            response.ok ? "ok" : "failed",
+            response.ok ? "" : `HTTP ${response.status}`
+          ),
+        (err) => recordDelivery(projectId, webhookId, attemptStartedAt, "failed", messageFor(err))
       );
     }
   } catch {
