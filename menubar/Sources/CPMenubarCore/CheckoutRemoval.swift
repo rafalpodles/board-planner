@@ -91,12 +91,13 @@ public struct CheckoutRemoval: Sendable {
         // covered every worktree; uncommitted files were the half nothing covered, and the half
         // that exists nowhere else. Measured: `git status` in the checkout reports clean while a
         // worktree beside it holds a day of unsaved work (CheckoutRemovalWorktreeTests, BP-418).
-        let linked = linkedWorktrees(worktrees.output, root: root)
+        // A registration whose directory is already gone holds nothing to lose, and it is dropped
+        // from the list rather than skipped inside the loop: `.go` is what the caller deletes, and
+        // a path that is not there throws when it is removed. Skipping only the status check left
+        // one stale entry — the ordinary result of an `rm -rf` without `git worktree prune` —
+        // failing the removal on every poll, for ever, which is what the old `try?` had hidden.
+        let linked = linkedWorktrees(worktrees.output, root: root).filter(exists)
         for worktree in linked {
-            // A registration whose directory is already gone holds nothing to lose, and refusing
-            // on it would let one stale entry block the removal for ever.
-            guard exists(worktree) else { continue }
-
             let dirty = run(["-C", worktree, "status", "--porcelain"], worktree)
             guard dirty.code == 0 else {
                 return .refused(

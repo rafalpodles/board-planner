@@ -84,4 +84,47 @@ final class CheckoutDeletionTests: XCTestCase {
         XCTAssertEqual(r.removed, [], "nothing to delete")
         XCTAssertEqual(r.forgotten, ["/co"], "but the allowlist entry is still stale")
     }
+
+    // MARK: - removeIfSafe: the seam that used to live in an untested app target
+
+    private func alwaysRefusing() -> CheckoutRemoval {
+        CheckoutRemoval(run: { _, _ in (128, "nope") }, exists: { _ in true })
+    }
+
+    private func allowing(_ worktrees: [String]) -> CheckoutRemoval {
+        CheckoutRemoval(
+            run: { args, _ in
+                if args.contains("--show-toplevel") { return (0, "/co\n") }
+                if args.contains("worktree") {
+                    let listed = (["/co"] + worktrees).map { "worktree \($0)" }.joined(separator: "\n\n")
+                    return (0, listed)
+                }
+                return (0, "")
+            },
+            exists: { _ in true })
+    }
+
+    func testARefusalNeverReachesTheDisk() {
+        let r = Recorder()
+
+        let step = deletion(r).removeIfSafe(
+            project: "BP", path: "/co", workerIsBusy: false, checking: alwaysRefusing())
+
+        guard case .refused = step else { return XCTFail("expected the guard's refusal, got \(step)") }
+        XCTAssertEqual(r.removed, [], "nothing is deleted when the guard says no")
+        XCTAssertEqual(r.forgotten, [], "and the grant stays, so the worker may still clean up")
+    }
+
+    /// What the guard found is what gets deleted. The two used to be wired together by hand in the
+    /// app target, where passing an empty list would have deleted no worktrees and told nobody.
+    func testItDeletesExactlyTheWorktreesTheGuardFound() {
+        let r = Recorder()
+
+        let step = deletion(r).removeIfSafe(
+            project: "BP", path: "/co", workerIsBusy: false,
+            checking: allowing(["/wt/one", "/wt/two"]))
+
+        XCTAssertEqual(step, .removed(project: "BP", path: "/co"))
+        XCTAssertEqual(r.removed, ["/wt/one", "/wt/two", "/co"])
+    }
 }
