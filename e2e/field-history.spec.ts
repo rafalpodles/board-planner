@@ -13,6 +13,7 @@ import {
   seedCustomFields,
   storedActivity,
 } from "./seed";
+import { signIn as arriveSignedIn } from "./session";
 
 /**
  * CP-250: a task's history ignored every field the project defines, which since CP-213 is most of
@@ -33,13 +34,7 @@ test.beforeEach(async () => {
   await seed();
 });
 
-async function signIn(page: Page) {
-  await page.goto("/login");
-  await page.getByLabel("Username").fill(ADMIN_USERNAME);
-  await page.getByLabel("Password").fill(ADMIN_PASSWORD);
-  await page.getByRole("button", { name: "Sign In" }).click();
-  await expect(page).toHaveURL(/\/projects/);
-}
+const signIn = arriveSignedIn;
 
 /** Only the entries this suite is about: the fixture's own edits, never the seed's own noise. */
 async function fieldEntries(name?: string): Promise<Entry[]> {

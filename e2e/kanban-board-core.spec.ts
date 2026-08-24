@@ -19,6 +19,7 @@ import {
   storedActivity,
   seed,
 } from "./seed";
+import { signIn as arriveSignedIn } from "./session";
 
 /**
  * BP-384: the board is the product's most-used surface and until now had no coverage of its
@@ -49,10 +50,8 @@ function cardIn(column: Locator, taskNumber: number): Locator {
 }
 
 async function signIn(page: Page) {
+  await arriveSignedIn(page);
   await page.goto(boardUrl);
-  await page.getByLabel("Username").fill(ADMIN_USERNAME);
-  await page.getByLabel("Password").fill(ADMIN_PASSWORD);
-  await page.getByRole("button", { name: "Sign In" }).click();
   await expect(page.getByRole("heading", { name: PROJECT_NAME })).toBeVisible();
   // The heading comes from the project request and the cards from their own, so waiting only
   // for the heading hands the test a board that has not loaded its tasks yet

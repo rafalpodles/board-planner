@@ -11,6 +11,7 @@ import {
   MEMBER_USERNAME,
   seed,
 } from "./seed";
+import { signIn as arriveSignedIn, signInThroughForm } from "./session";
 
 /**
  * BP-410. `/settings/profile` rendered `fullName` as plain text and `PUT /api/users/me` did not
@@ -39,13 +40,12 @@ async function storedName() {
   return admin?.fullName;
 }
 
-async function signIn(page: Page, username = ADMIN_USERNAME, password = ADMIN_PASSWORD) {
-  await page.goto("/login");
-  await page.getByLabel("Username").fill(username);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign In" }).click();
-  await expect(page).toHaveURL(/\/projects/);
-}
+const signIn = (page: Page, username: string = ADMIN_USERNAME, password = ADMIN_PASSWORD) =>
+  username === ADMIN_USERNAME
+    ? arriveSignedIn(page)
+    : username === MEMBER_USERNAME
+      ? arriveSignedIn(page, "member")
+      : signInThroughForm(page, username, password);
 
 // The field is on screen before React has hydrated it, and a fill inside that window is dropped —
 // silently, and in a way the DOM cannot show, because Playwright's own write is still sitting in
