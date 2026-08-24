@@ -61,8 +61,9 @@ function sprintRow(page: Page, name: string): Locator {
   return sprintList(page).getByRole("button", { name: new RegExp(`^${name}\\b`) });
 }
 
+/** The sprint's own name in the header. `.first()`: an empty sprint's board draws an h2 too. */
 function selectedSprintName(page: Page): Locator {
-  return page.getByRole("heading", { level: 2 });
+  return page.getByRole("heading", { level: 2 }).first();
 }
 
 /** The status chip beside the sprint's name — Planned, Active or Completed. */
@@ -362,19 +363,26 @@ test.describe("which sprint the page opens on", () => {
     await expect(sprintRow(page, PAST_SPRINT_ONE_NAME)).toHaveAttribute("aria-current", "true");
   });
 
-  test("a sprint id that is no longer real falls back instead of failing", async ({ page }) => {
-    const failed: string[] = [];
+  test("a sprint id that is no longer real is never asked for, and falls back", async ({
+    page,
+  }) => {
+    // Two independent guards stand between a stale bookmark and the database: this page validates
+    // the id against the sprints it fetched before it scopes anything to it, and the tasks
+    // endpoint refuses a value that is not an ObjectId with a 400. The second is why nothing here
+    // can watch for a 500 — so what is watched instead is the first: any refusal at all means the
+    // page asked a question it had no business asking.
+    const refused: string[] = [];
     page.on("response", (response) => {
-      if (response.status() >= 500) failed.push(`${response.status()} ${response.url()}`);
+      if (response.status() >= 400) refused.push(`${response.status()} ${response.url()}`);
     });
 
     await signIn(page);
-    // Not an ObjectId at all: /tasks?sprint= casts what it is given straight into a Mongoose
-    // filter, so a stale bookmark reaching the fetch is a 500 rather than a fallback
     await openSprints(page, "?sprint=not-a-real-sprint");
 
     await expect(selectedSprintName(page)).toHaveText(CURRENT_SPRINT_NAME);
     await expect(page).toHaveURL(new RegExp(`sprint=${CURRENT_SPRINT_ID}`));
-    expect(failed).toEqual([]);
+    // Settled, so a fetch fired late has somewhere to land before the list below is read
+    await expect(progress(page)).toHaveText("1/2");
+    expect(refused).toEqual([]);
   });
 });
