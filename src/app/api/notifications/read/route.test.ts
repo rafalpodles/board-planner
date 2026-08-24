@@ -20,8 +20,6 @@ const { PATCH } = await import("./route");
 
 const noParams = { params: Promise.resolve({}) };
 
-// Not JSON.stringify on a plain object: `{ $ne: null }` is exactly the shape this route has to
-// refuse, and a body built by the test the way a caller would build it is the only way to send it.
 const request = (body: unknown) =>
   new Request("https://app.example.com/api/notifications/read", {
     method: "PATCH",
@@ -83,8 +81,8 @@ describe("PATCH /api/notifications/read", () => {
     expect(updateMany).not.toHaveBeenCalled();
   });
 
-  // The control for the three above. Without it, "nothing was queried" also describes a route
-  // that refuses everything, and the mark-all branch is one `id !== undefined` away from that.
+  // The control for the refusals above: without it, "nothing was queried" equally describes a
+  // route that refuses everything, and the mark-all branch is one edit away from being one.
   it("still reaches the mark-all branch for a body carrying no id at all", async () => {
     await PATCH(request({ somethingElse: true }), noParams);
 
