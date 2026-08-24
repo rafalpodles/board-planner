@@ -1586,6 +1586,29 @@ describe("a status change announces the same things whichever path made it", () 
   const webhookPayloads = () =>
     (dispatchWebhooks as ReturnType<typeof vi.fn>).mock.calls.map((c) => [c[1], c[2]]);
 
+  // BP-396. `status_changed` had this assertion and `task_created` did not, so deleting the
+  // dispatch from createTask left every test in the repository green — the e2e specs written for
+  // webhooks included, because their subject is a delivery being *refused*. Silence reads the same
+  // whether the guard stopped it or nobody ever announced it.
+  it("dispatches a webhook when a task is created", async () => {
+    setup();
+    projectFindOneAndUpdate.mockResolvedValue({ _id: "p1", key: "TP", name: "A board", taskCounter: 8 });
+    taskCreate.mockImplementation(async (doc: Record<string, unknown>) => ({ ...doc, _id: "new", taskNumber: 8 }));
+    taskFindById.mockReturnValue({ populate: () => ({ lean: async () => ({ _id: "new" }) }) });
+
+    await createTask("p1", "actor", { title: "Announced to the room", status: "todo" });
+
+    expect(webhookPayloads()).toHaveLength(1);
+    const [event, payload] = webhookPayloads()[0];
+    expect(event).toBe("task_created");
+    // The payload too: an event announcing the wrong task is its own bug, and the receiver has
+    // nothing else to go on
+    expect(payload).toMatchObject({
+      project: { key: "TP", name: "A board" },
+      task: { taskKey: "TP-8", title: "Announced to the room", status: "todo" },
+    });
+  });
+
   it("dispatches a webhook from the board path", async () => {
     setup();
     await changeStatus("p1", "t1", "shipped", "actor");

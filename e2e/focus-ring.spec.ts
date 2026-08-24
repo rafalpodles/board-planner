@@ -202,6 +202,9 @@ const SCREENS: { name: string; open: (page: Page) => Promise<unknown> }[] = [
     open: async (page) => {
       await page.goto(`/projects/${PROJECT_KEY}`);
       await page.getByRole("button", { name: /New task/ }).click();
+      // AI Assist renders only once /ai/generate-task has answered, and it contributes a field of
+      // its own — so collecting the inventory before it lands audits a different screen
+      await expect(page.getByPlaceholder("Describe what you need")).toBeVisible();
       await expect(page.getByRole("dialog")).toBeVisible();
     },
   },
