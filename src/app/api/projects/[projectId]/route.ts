@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { isValidProjectKey, PROJECT_KEY_RULE } from "@/lib/identifiers";
 import { connectDB } from "@/lib/db";
 import { withProjectAccess, withProjectOwner, withProjectAccessOrWorker } from "@/lib/middleware";
 import { check } from "@/lib/grants";
@@ -141,13 +140,6 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
       existing as never,
       updates,
       existing.key || String(projectId)
-    );
-  }
-
-  if (body.key !== undefined) {
-    return NextResponse.json(
-      { error: "Project key cannot be changed" },
-      { status: 403 }
     );
   }
 
