@@ -49,36 +49,48 @@ import {
  *
  * ## Mutation registry
  *
- * Every entry below was applied to HEAD, run, and reverted. See the task's comments for the run
- * log. `killed by` names the assertion that went red; a mutant nothing kills is recorded as such
- * rather than left out, because the gap is the useful part.
+ * Every entry was applied to HEAD, run, and reverted — the harness is in the task's comments, and
+ * so is the run log naming the failing assertion for each. Nothing here is a guess: an entry says
+ * "killed by" only where the mutant was actually applied and the named test actually went red for
+ * the reason the entry gives. Tests are referred to by their opening words.
  *
  * `src/app/api/notifications/route.ts`
- *  1. drop `filter.project = { $in: projectIds }`      → killed: "the demoted admin" leak assert
- *  2. `inApp: { $ne: false }` → `inApp: true`           → killed: badge 2→1, LEGACY row missing
- *  3. drop `.sort({ createdAt: -1 })`                   → killed: expectFeedRows order
- *  4. `.sort({ createdAt: 1 })`                         → killed: expectFeedRows order
- *  5. drop `.populate("actor", …)`                      → killed: ADMIN_FULL_NAME on the row
- *  6. drop `.populate("task", …)`                       → killed: href assertion added by 17f9a01
- *  7. drop `.populate("project", …)`                    → killed: href assertion added by 17f9a01
- *  8. `recipient: user._id` → drop the clause           → killed: the admin's own feed is empty
+ *  1. drop `filter.project = { $in: projectIds }`   → "a demoted admin…": the lost board's row
+ *                                                     comes back into the feed
+ *  2. `inApp: { $ne: false }` → `inApp: true`       → "a row the bell hides…": the row that omits
+ *                                                     the key stops being listed
+ *  3. drop `.sort({ createdAt: -1 })`               → "the bell counts…", "a row the bell hides…"
+ *  4. `.sort({ createdAt: -1 })` → `{ createdAt: 1 }` → the same two, on order
+ *  5. drop `.populate("actor", …)`                  → "the bell counts…": the actor's full name
+ *  6. drop `.populate("task", …)`                   → "the bell counts…": the row's href
+ *  7. drop `.populate("project", …)`                → "the bell counts…": the row's href
+ *  8. drop `recipient: user._id`                    → "the bell counts…": the actor's own feed
  *
  * `src/app/api/notifications/unread-count/route.ts`
- *  9. drop `filter.project = { $in: projectIds }`       → killed: "the demoted admin" badge
- * 10. `inApp: { $ne: false }` → `inApp: true`           → killed: badge 2→1
- * 11. drop `read: false`                                → killed: badge after mark-all
+ *  9. drop `filter.project = { $in: projectIds }`   → "a demoted admin…": the badge stays at two
+ * 10. `inApp: { $ne: false }` → `inApp: true`       → "a row the bell hides…": badge two → one
+ * 11. drop `read: false`                            → all three mark-read tests
  *
  * `src/app/api/notifications/read/route.ts`
- * 12. `findOneAndUpdate` → `findOneAndDelete`           → killed: the row is still visible
- * 13. single-id: drop `recipient: user._id`             → killed: a stranger reads the row
- * 14. single-id: drop `inApp: { $ne: false }`           → killed: the hidden row goes read
- * 15. single-id branch → `updateMany` over everything   → killed: the other two stay unread
- * 16. mark-all: drop `recipient: user._id`              → killed: the admin's row stays unread
- * 17. mark-all: drop `inApp: { $ne: false }`            → killed: the hidden row goes read
- * 18. drop the `isValidObjectId` guard                  → killed: `{"id":"nope"}` answers 500
+ * 12. `findOneAndUpdate` → `findOneAndDelete`       → "the bell counts…": the row is gone from the
+ *                                                     feed. Only the toBeVisible above the dot
+ *                                                     count catches this; the dot count alone
+ *                                                     passes on a row that no longer exists.
+ * 13. single-id: drop `recipient: user._id`         → "a row can only be read…": a stranger reads it
+ * 14. single-id: drop `inApp: { $ne: false }`       → "a row the bell hides…": the hidden row reads
+ * 15. single-id branch → mark-all over everything   → all three of the above
+ * 16. mark-all: drop `recipient: user._id`          → "a row can only be read…"
+ * 17. mark-all: drop `inApp: { $ne: false }`        → "a row the bell hides…"
+ * 18. drop the `isValidObjectId` guard              → "a row can only be read…": 500 rather than
+ *                                                     400, plus three unit tests beside the route
+ * 19. `id !== undefined` → `if (id)`                → unit tests only: `""` and `null` fall
+ *                                                     through to a mark-all. No e2e sends one, and
+ *                                                     the cost of one that did is a whole feed
+ *                                                     read, so the unit test is the guard.
  *
  * `src/lib/grants.ts`
- * 19. `recipientsWithAccess` returns `subjectIds`       → killed: the stranger gets a mention
+ * 20. `recipientsWithAccess` refuses nobody         → "a mention cannot reach…": the stranger gets
+ *                                                     a row written for them
  */
 
 const TASK_KEY = `${PROJECT_KEY}-${SIBLING_TASK_NUMBER}`;
