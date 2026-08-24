@@ -3083,6 +3083,16 @@ describe("what a change of hands does to the agent already on the task", () => {
 describe("personalAgentAlienTo", () => {
   beforeEach(() => agentFindById.mockReset());
 
+  // The mock resolves by projection alone and ignores which id it was asked for, so nothing above
+  // this line would notice the two arguments swapped — `agent` looked up instead of `assigneeAfter`
+  // compared, or vice versa. Asserted here once, directly, rather than trusted to a return-value
+  // check that would pass either way.
+  it("looks up the agent argument, not the assignee", async () => {
+    agentInTheCatalog({ scope: "user", owner: "u1" });
+    await personalAgentAlienTo("the-agent-id", "u1");
+    expect(agentFindById).toHaveBeenCalledWith("the-agent-id", "scope owner");
+  });
+
   it("is not alien when the personal agent's owner is the assignee", async () => {
     agentInTheCatalog({ scope: "user", owner: "u1" });
     expect(await personalAgentAlienTo("a1", "u1")).toBe(false);
@@ -3105,17 +3115,13 @@ describe("personalAgentAlienTo", () => {
     expect(await personalAgentAlienTo("a1", "somebody-else")).toBe(false);
   });
 
-  // A dangling reference is not somebody's composition — DELETE /api/agents/:id refuses while any
-  // task points at one, so this is a hand-edited database rather than a state the product produces
-  it("is not alien when the agent no longer exists", async () => {
+  // Covers both a dangling reference (DELETE /api/agents/:id refuses while any task points at one,
+  // so this is a hand-edited database rather than a state the product produces) and a task with no
+  // agent at all: neither the function nor this mock branches on the id's value before the lookup,
+  // so `Agent.findById` resolving to nothing is the one case both collapse into.
+  it("is not alien when the agent cannot be found — missing id or dangling reference alike", async () => {
     agentInTheCatalog(null);
     expect(await personalAgentAlienTo("gone", "u1")).toBe(false);
-  });
-
-  // No short-circuit on a null id: `Agent.findById(null)` resolves to nothing found, the same as
-  // any other id nothing matches, so this is the "no such agent" case rather than a separate one
-  it("is not alien when the task has no agent at all", async () => {
-    agentInTheCatalog(null);
     expect(await personalAgentAlienTo(null, "u1")).toBe(false);
   });
 });

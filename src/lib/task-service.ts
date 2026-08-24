@@ -1093,19 +1093,24 @@ async function createNextRecurrence(
     // weekly task that had run autonomously for months would simply stop, and the card would look
     // entirely normal — no error, no empty field a person would notice.
     //
-    // Not re-judged against `oldTask.assignee` below, though a personal agent's owner has to match
-    // whoever the task belongs to (`personalAgentAlienTo`, `snapshotFor`) — a decision, not an
-    // oversight (BP-369). This write has no actor: nobody is choosing the pairing here, an earlier
-    // one already did, and the copy is meant to reproduce it exactly — including a run stopping,
-    // which is what happens today when a person reassigns the CURRENT occurrence away from the
-    // agent's owner. A parent that was ever valid stays valid forever, because the only way to
-    // change who a series belongs to is `updateTask`, and that already clears an alien agent on the
-    // occurrence it touches. Re-judging here would just be that same check running twice. What it
-    // cannot reach is a pairing that was already stale before this guard existed — pre-BP-358 data,
-    // or a parent an old code path left inconsistent — which keeps reproducing because nothing
-    // about closing an occurrence is an edit to the one being copied. `snapshotFor` still refuses
-    // to let a machine run on a stale pairing, so nothing unvetted executes; this is a repair for
-    // the documents, done once, out of band — see scripts/repair-recurring-agent-pairing.ts.
+    // Not re-judged against `oldTask.assignee` below — a decision, not an oversight (BP-369). This
+    // write has no actor, so there is nothing here to run `personalAgentAlienTo`/`agentUsableOnProject`
+    // ON BEHALF OF: an earlier write already chose the pairing, and the copy means to reproduce it.
+    //
+    // A pairing that was valid stays valid: `assignee`/`agent` change through `updateTask`, and
+    // `updateTask` reaches this rule via `personalAgentAlienTo` on any write that moves the
+    // assignee — the other writers of `assignee` (`changeStatus`, `releaseExpiredTasks`,
+    // `releaseTask`, via `CLEAR_WORKER_ASSIGNEE`) cannot silently drift it out of step, because
+    // their assignee-nulling branch requires `execution.assignedByRun` false-or-missing, and the
+    // only writer of `execution.runId` — `claimNextTask` — always stamps `assignedByRun: false` in
+    // that same atomic write. So that branch is dead for any task claimed under current code, and
+    // fires only for the same pre-BP-358 population this ticket already accounts for (see the
+    // comment on `execution.assignedByRun` in `src/models/task.ts`). What re-judging here cannot
+    // reach either way is a pairing that was already stale before `personalAgentAlienTo` existed —
+    // which keeps reproducing because nothing about closing an occurrence is an edit to the one
+    // being copied. `snapshotFor` still refuses to run a machine on a stale pairing at claim time,
+    // so nothing unvetted executes; this is a repair for the documents, done once, out of band —
+    // see scripts/repair-recurring-agent-pairing.ts.
     agent: oldTask.agent ?? null,
     dueDate: nextDue,
     checklist,

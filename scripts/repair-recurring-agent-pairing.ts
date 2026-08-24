@@ -62,24 +62,51 @@ async function main() {
   }
 
   let affected = 0;
+  let cleared = 0;
+  let failed = 0;
   for (const task of candidates) {
-    const alien = await personalAgentAlienTo(task.agent, task.assignee);
+    let alien: boolean;
+    try {
+      alien = await personalAgentAlienTo(task.agent, task.assignee);
+    } catch (err) {
+      // A malformed `agent` — a stray legacy value that isn't a valid ObjectId — is exactly the
+      // kind of irregular data this script exists to find. One bad row must not take the rest of
+      // the batch down with it: report it and keep going, the same as any other row.
+      failed++;
+      console.error(`could not judge the pairing on task ${task._id} (agent=${task.agent}):`, err);
+      continue;
+    }
     if (!alien) continue;
 
     affected++;
     const key = await keyFor(String(task.project));
-    console.log(
-      `${DRY_RUN ? "would clear" : "clearing"} agent on ${key}-${task.taskNumber} ("${task.title}")`
-    );
 
-    if (!DRY_RUN) {
-      await Task.updateOne({ _id: task._id }, { $set: { agent: null } });
+    if (DRY_RUN) {
+      console.log(`would clear agent on ${key}-${task.taskNumber} ("${task.title}")`);
+      continue;
+    }
+
+    // Checked, not assumed: the candidate list is a snapshot taken before this loop started, and
+    // the row it names may have been edited or deleted by the running app in the meantime. A
+    // report that counts a no-op as a fix is worse than one that under-counts and says so.
+    const result = await Task.updateOne({ _id: task._id }, { $set: { agent: null } });
+    if (result.matchedCount === 0) {
+      console.log(`skipped ${key}-${task.taskNumber} — no longer exists`);
+    } else if (result.modifiedCount === 0) {
+      console.log(`skipped ${key}-${task.taskNumber} — already changed since this run started`);
+    } else {
+      cleared++;
+      console.log(`cleared agent on ${key}-${task.taskNumber} ("${task.title}")`);
     }
   }
 
   console.log(
-    `\nDone. ${affected} of ${candidates.length} carried a stale pairing.` +
-      (DRY_RUN ? " Re-run without --dry-run to clear them." : " Cleared.")
+    `\nDone. ${affected} of ${candidates.length} carried a stale pairing` +
+      (failed > 0 ? `, ${failed} could not be judged (see above)` : "") +
+      "." +
+      (DRY_RUN
+        ? " Re-run without --dry-run to clear them."
+        : ` ${cleared} cleared.`)
   );
   await mongoose.disconnect();
 }
