@@ -23,6 +23,7 @@ export const GROUPS = {
     "column-roles.spec.ts",
     "sprint-planning.spec.ts",
     "sprint-estimates.spec.ts",
+    "sprints-ui.spec.ts",
     "focus-ring.spec.ts",
   ],
   project: [
