@@ -54,6 +54,12 @@ final class CheckoutRemovalWorktreeTests: XCTestCase {
     /// so a refusal from `check` can only be about the worktree. The first attempt at this file
     /// skipped the remote and both tests refused for "commits on no remote": a fixture that cannot
     /// isolate the guard under test proves nothing about it.
+    /// git reports `/private/var/…` where NSTemporaryDirectory gives `/var/…`, so an unresolved
+    /// comparison passes on a substring and reads stricter than it is.
+    private func resolved(_ path: String) -> String {
+        (path as NSString).resolvingSymlinksInPath
+    }
+
     private func repoWithWorktree() -> (checkout: String, worktree: String) {
         let origin = dir + "/origin.git"
         let checkout = dir + "/checkout"
@@ -66,7 +72,6 @@ final class CheckoutRemovalWorktreeTests: XCTestCase {
         _ = git(checkout, ["remote", "add", "origin", origin])
         _ = git(checkout, ["push", "-q", "-u", "origin", "HEAD"])
         _ = git(checkout, ["worktree", "add", "-q", "-b", "bp-1/worker", worktree])
-        _ = git(worktree, ["push", "-q", "-u", "origin", "bp-1/worker"])
         return (checkout, worktree)
     }
 
@@ -100,7 +105,7 @@ final class CheckoutRemovalWorktreeTests: XCTestCase {
             return
         }
         XCTAssertTrue(
-            reason.contains(worktree),
+            reason.contains(resolved(worktree)),
             "the refusal has to name the worktree the operator never chose: \(reason)")
     }
 
@@ -112,7 +117,6 @@ final class CheckoutRemovalWorktreeTests: XCTestCase {
         let (checkout, first) = repoWithWorktree()
         let second = dir + "/cp-worktrees/BP-2"
         _ = git(checkout, ["worktree", "add", "-q", "-b", "bp-2/worker", second])
-        _ = git(second, ["push", "-q", "-u", "origin", "bp-2/worker"])
 
         // The first stays clean on purpose: a guard that stopped after it would say go.
         FileManager.default.createFile(
@@ -121,8 +125,9 @@ final class CheckoutRemovalWorktreeTests: XCTestCase {
         guard case .refused(let reason) = removal().check(path: checkout, workerIsBusy: false) else {
             return XCTFail("the dirty worktree is the second one, and it still has to be found")
         }
-        XCTAssertTrue(reason.contains(second), "names the worktree that is actually dirty: \(reason)")
-        XCTAssertFalse(reason.contains(first), "and not the clean one")
+        XCTAssertTrue(
+            reason.contains(resolved(second)), "names the worktree that is actually dirty: \(reason)")
+        XCTAssertFalse(reason.contains(resolved(first)), "and not the clean one")
     }
 
     /// The control. Without it, a guard that refused everything would pass the test above and this

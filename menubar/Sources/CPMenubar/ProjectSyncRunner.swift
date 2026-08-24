@@ -58,6 +58,7 @@ final class ProjectSyncRunner {
 
         let deletion = CheckoutDeletion(
             remove: { try FileManager.default.removeItem(atPath: $0) },
+            exists: { FileManager.default.fileExists(atPath: $0) },
             forget: { [file] path in
                 try file.write(((try? file.read()) ?? []).filter { $0 != path })
             }

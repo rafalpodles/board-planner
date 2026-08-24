@@ -17,7 +17,7 @@ public struct CheckoutDeletion: Sendable {
 
     public init(
         remove: @escaping Remove,
-        exists: @escaping Exists = { FileManager.default.fileExists(atPath: $0) },
+        exists: @escaping Exists,
         forget: @escaping Forget
     ) {
         self.remove = remove
