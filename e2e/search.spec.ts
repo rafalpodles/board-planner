@@ -438,12 +438,6 @@ test.describe("the /search page", () => {
 
   const results = (page: Page) => page.getByRole("main").getByRole("link");
 
-  /**
-   * BP-406: submitting this form fires the same request twice — once from handleSubmit and once
-   * from the effect watching ?q. Both waits here take the first. If BP-406 is fixed by changing
-   * which query is sent rather than by dropping the duplicate, these time out, and the failure
-   * will read as a broken search rather than as a changed contract.
-   */
   async function arriveWith(page: Page, q: string) {
     const answered = page.waitForResponse(searchFor(q));
     await page.goto(`/search?q=${encodeURIComponent(q)}`);
@@ -502,6 +496,31 @@ test.describe("the /search page", () => {
     await expect(page).toHaveURL(new RegExp(`/search\\?q=${PROJECT_KEY}-${BODY_HIT_NUMBER}$`));
     await expect(results(page)).toHaveCount(1);
     await expect(results(page).first()).toContainText(BODY_HIT_TITLE);
+  });
+
+  /**
+   * BP-406: handleSubmit used to fire performSearch itself, on top of the effect that watches
+   * ?q — the same request twice for one submit, both landing, the second silently replacing the
+   * first's identical answer. waitForResponse elsewhere in this file takes the first match, so
+   * it would not have caught a duplicate; only a count does.
+   */
+  test("submitting the form fires exactly one request", async ({ page }) => {
+    await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);
+    await openSearchPage(page);
+
+    let count = 0;
+    page.on("request", (r) => {
+      if (searchRequestFor(SEARCH_WORD)(r.url())) count++;
+    });
+
+    const answered = page.waitForResponse(searchFor(SEARCH_WORD));
+    await pageInput(page).fill(SEARCH_WORD);
+    await pageInput(page).press("Enter");
+    await answered;
+    // A duplicate fired by the effect re-running would land within one tick of the first
+    await page.waitForTimeout(500);
+
+    expect(count).toBe(1);
   });
 
   test("a one-character query is not submitted at all", async ({ page }) => {
