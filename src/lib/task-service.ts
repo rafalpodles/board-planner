@@ -28,6 +28,7 @@ import {
   customFieldActivityChanges,
 } from "@/lib/custom-fields";
 import { onTaskStatusChanged } from "@/lib/pm/triggers";
+import { canBeAssigned } from "@/lib/grants";
 import { workerUsername } from "@/lib/worker-user";
 
 export const MAX_EXECUTION_ATTEMPTS = 3;
@@ -96,6 +97,14 @@ const STILL_HELD = { "execution.runId": { $nin: ["", null] } };
 // Four times the worker's default task timeout. A worker killed mid-run leaves its task in the
 // active column, where claimNextTask can never see it again — nothing else reclaims it.
 export const EXECUTION_LEASE_MS = 2 * 60 * 60 * 1000;
+
+// Named rather than inlined so the board, both forms, MCP and the PM agent all refuse in the same
+// words — the message is the only thing telling an agent that the account exists and the access
+// does not, which is a different repair from a misspelt username.
+function noAccessToAssign(username?: string | null): string {
+  const who = username ? `@${username}` : "That account";
+  return `${who} has no access to this board, so the task cannot be assigned to them. A board owner can add them in the project's Members settings.`;
+}
 
 // The one list, used by task-service's own writes and by both task routes. It was three copies
 // until BP-358's review: `assignedBy` had to be added to each, and dropping it from any one left
@@ -231,7 +240,7 @@ async function agentUsableOnProject(
  * composition, and `DELETE /api/agents/:id` refuses while any task points at one, so this is a
  * hand-edited database rather than a state the product produces.
  */
-async function personalAgentAlienTo(agent: unknown, assigneeAfter: unknown): Promise<boolean> {
+export async function personalAgentAlienTo(agent: unknown, assigneeAfter: unknown): Promise<boolean> {
   const { Agent } = await import("@/models/agent");
   const found = await Agent.findById(agent, "scope owner").lean();
   if (!found || found.scope !== "user") return false;
@@ -289,6 +298,9 @@ export async function createTask(
       username: String(body.assignee).toLowerCase(),
     });
     if (assigneeUser) {
+      if (!(await canBeAssigned(String(assigneeUser._id), projectId))) {
+        return { ok: false, error: noAccessToAssign(assigneeUser.username), status: 400 };
+      }
       assigneeId = assigneeUser._id;
     }
   }
@@ -695,6 +707,20 @@ export async function updateTask(
   // exactly as it did.
   const before = oldTask.assignee as { _id?: unknown } | null | undefined;
   const storedAssignee = String((before && before._id) ?? before ?? "");
+
+  // Only a MOVE is judged, never an echo of what is already stored. A REST or MCP client that GETs
+  // a task, edits one field and PUTs the whole object back sends the assignee too — so judging
+  // every incoming value would make a task assigned before that person lost access refuse every
+  // unrelated edit anyone made to it afterwards. Unassigning is never refused: taking work away
+  // from somebody who cannot reach the board is the repair, not the mistake.
+  if (
+    updates.assignee != null &&
+    String(updates.assignee) !== storedAssignee &&
+    !(await canBeAssigned(String(updates.assignee), projectId))
+  ) {
+    const who = await User.findById(updates.assignee, "username").lean();
+    return { ok: false, error: noAccessToAssign(who?.username), status: 400 };
+  }
   if (updates.assignee !== undefined) {
     const moved = storedAssignee !== String(updates.assignee ?? "");
     // Or when nothing is recorded yet, which is every task stored before BP-358. Without that
@@ -1066,6 +1092,17 @@ async function createNextRecurrence(
     // of the hand-over now, so an occurrence created without one is a task no machine looks at. A
     // weekly task that had run autonomously for months would simply stop, and the card would look
     // entirely normal — no error, no empty field a person would notice.
+    //
+    // Not re-judged against `oldTask.assignee` below — a decision, not an oversight (BP-369). This
+    // write has no actor, so there is nothing here to run `personalAgentAlienTo` on behalf of; an
+    // earlier write already chose the pairing and the copy means to reproduce it exactly.
+    // `CLEAR_WORKER_ASSIGNEE` above is the only other writer that could drift it without going
+    // through `updateTask`, and it can't — see the comment on `RUN_RELEASES_ASSIGNEE`. What
+    // re-judging here cannot reach is a pairing already stale before `personalAgentAlienTo`
+    // existed; that keeps reproducing because closing an occurrence is not an edit to the one being
+    // copied. `snapshotFor` still refuses to run a machine on a stale pairing at claim time, so
+    // nothing unvetted executes — this is a one-off document repair, out of band: see
+    // scripts/repair-recurring-agent-pairing.ts.
     agent: oldTask.agent ?? null,
     dueDate: nextDue,
     checklist,

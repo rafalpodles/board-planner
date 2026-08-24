@@ -103,6 +103,7 @@ final class CheckoutRemovalTests: XCTestCase {
     // it, so the ones belonging to THIS checkout are named instead.
     func testItNamesTheLinkedWorktreesToTakeWithIt() {
         let git = Git()
+        git.present = ["/checkouts/SB", "/checkouts/cp-worktrees/w1/bp-1", "/checkouts/cp-worktrees/w1/bp-2"]
         git.answers["worktree"] = (
             0,
             """
@@ -122,6 +123,61 @@ final class CheckoutRemovalTests: XCTestCase {
         XCTAssertEqual(
             verdict,
             .go(worktrees: ["/checkouts/cp-worktrees/w1/bp-1", "/checkouts/cp-worktrees/w1/bp-2"]))
+    }
+
+
+    /// A worktree somebody removed with `rm -rf` and never pruned. It is still registered, and
+    /// there is nothing on disk to lose — so it must not appear in the list the caller deletes,
+    /// or the removal fails on it every poll for ever (BP-418).
+    func testAWorktreeWhoseDirectoryIsGoneIsDroppedRatherThanRefused() {
+        let git = Git()
+        git.present = ["/checkouts/SB", "/checkouts/cp-worktrees/w1/live"]
+        git.answers["worktree"] = (
+            0,
+            """
+            worktree /checkouts/SB
+            HEAD abc
+
+            worktree /checkouts/cp-worktrees/w1/live
+            HEAD def
+
+            worktree /checkouts/cp-worktrees/w1/pruned
+            HEAD ghi
+            """
+        )
+
+        XCTAssertEqual(
+            git.removal().check(path: "/checkouts/SB", workerIsBusy: false),
+            .go(worktrees: ["/checkouts/cp-worktrees/w1/live"]))
+    }
+
+    /// The file's own rule, applied to the arm this branch added: a check that cannot be run is a
+    /// no. `--porcelain` reaches the checkout's own status first, so the worktree's needs its own
+    /// case or it can be deleted without anyone noticing.
+    func testAWorktreeWhoseStatusCannotBeReadIsARefusal() {
+        let git = Git()
+        git.present = ["/checkouts/SB", "/checkouts/cp-worktrees/w1/bp-1"]
+        git.answers["worktree"] = (
+            0,
+            """
+            worktree /checkouts/SB
+            HEAD abc
+
+            worktree /checkouts/cp-worktrees/w1/bp-1
+            HEAD def
+            """
+        )
+        // Only the worktree's status fails; the checkout's has already passed by then. The output
+        // is empty on purpose: with a message here, dropping the exit-code guard would still refuse
+        // — reading the error text as a list of changed files — and this test would pass against a
+        // guard that was not there.
+        git.answers["/checkouts/cp-worktrees/w1/bp-1"] = (128, "")
+
+        guard case .refused(let reason) = git.removal().check(path: "/checkouts/SB", workerIsBusy: false)
+        else {
+            return XCTFail("an unexaminable worktree is not a clean one")
+        }
+        XCTAssertTrue(reason.contains("/checkouts/cp-worktrees/w1/bp-1"), reason)
     }
 
     // The allowlist entry still has to go; there is simply nothing on disk to delete.

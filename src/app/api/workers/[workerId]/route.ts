@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { withAuth, withWorker } from "@/lib/middleware";
+import { stripControlCharacters } from "@/lib/identifiers";
 import { Worker } from "@/models/worker";
 import { Project } from "@/models/project";
 import { assignmentsFor, catalogueFor, offersFor, overriddenWorkerPolicy, ownerReachableProjectIds, toApiWorker, usableRepos } from "@/lib/worker-service";
@@ -119,10 +120,21 @@ export const PATCH = withAuth(async (request, { params, user }) => {
   for (const field of ADMIN_FIELDS) {
     if (!(field in body)) continue;
     if (field === "name") {
-      if (typeof body.name !== "string" || !body.name.trim()) {
+      if (typeof body.name !== "string") {
         return NextResponse.json({ error: "name must be a non-empty string" }, { status: 400 });
       }
-      update.name = body.name.trim();
+      // The one other writer of this field besides registration, and the only one an admin
+      // controls directly rather than a machine reporting itself — same characters stripped for
+      // the same reason: unlike registration this could 400 and be retyped, but stripping matches
+      // what the field gets everywhere else rather than adding a third behaviour for it (BP-413).
+      // Checked for empty AFTER stripping — a name of nothing but control characters passes a
+      // check made against the raw string (they are not whitespace, so `.trim()` alone leaves them)
+      // and would otherwise be stored as "".
+      const stripped = stripControlCharacters(body.name).trim().slice(0, 120);
+      if (!stripped) {
+        return NextResponse.json({ error: "name must be a non-empty string" }, { status: 400 });
+      }
+      update.name = stripped;
     } else {
       if (typeof body[field] !== "boolean") {
         return NextResponse.json({ error: `${field} must be a boolean` }, { status: 400 });

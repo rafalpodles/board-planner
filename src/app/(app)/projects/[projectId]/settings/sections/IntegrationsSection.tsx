@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { useApi } from "@/hooks/use-api";
+import { webhookDeliveryStatus } from "@/lib/webhook-delivery-status";
 import { useDraft } from "@/hooks/use-draft";
 import { CODA_COLUMNS, CODA_KEY_COLUMN } from "@/lib/coda";
 import { clearsStoredToken } from "@/lib/host-bound-secrets";
@@ -970,6 +971,15 @@ export function IntegrationsSection({
                             </button>
                           ))}
                         </div>
+                        {wh._id && (
+                          <p
+                            className={`mt-2 text-xs ${
+                              webhookDeliveryStatus(wh).tone === "failed" ? "text-danger" : "text-text-muted"
+                            }`}
+                          >
+                            {webhookDeliveryStatus(wh).text}
+                          </p>
+                        )}
                       </div>
                     ))}
                     {webhooks.value.webhooks.length === 0 && (

@@ -24,6 +24,10 @@ export const GET = withProjectOwner(async (_request, { params }) => {
   return NextResponse.json(masked(project));
 });
 
+// All three writers below use an atomic operator ($push/$set/$pull) rather than load, mutate
+// in memory, save() — that pattern re-sent the WHOLE webhooks array on every save, and
+// dispatchWebhooks records a delivery outcome onto one row from its own background write
+// (BP-407). A save() landing after that write clobbered it with the stale in-memory snapshot.
 export const POST = withProjectOwner(async (request, { params, user }) => {
   const { projectId } = await params;
   await connectDB();
@@ -42,19 +46,14 @@ export const POST = withProjectOwner(async (request, { params, user }) => {
     );
   }
 
-  const project = await Project.findById(projectId);
+  const project = await Project.findOneAndUpdate(
+    { _id: projectId },
+    { $push: { webhooks: { url: parsedUrl, events: parsedEvents, enabled: true } } },
+    { returnDocument: "after" }
+  );
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
-
-  const webhooks = project.webhooks || [];
-  webhooks.push({
-    url: parsedUrl,
-    events: parsedEvents,
-    enabled: true,
-  } as typeof webhooks[number]);
-  project.webhooks = webhooks;
-  await project.save();
 
   logProjectAudit(projectId, user._id, "settings_updated", `Webhook added: ${maskSecretUrl(parsedUrl)}`);
 
@@ -70,24 +69,13 @@ export const PUT = withProjectOwner(async (request, { params }) => {
     return NextResponse.json({ error: "webhookId is required" }, { status: 400 });
   }
 
-  const project = await Project.findById(projectId);
-  if (!project) {
-    return NextResponse.json({ error: "Project not found" }, { status: 404 });
-  }
-
-  const webhook = (project.webhooks || []).find(
-    (w) => w._id.toString() === webhookId
-  );
-  if (!webhook) {
-    return NextResponse.json({ error: "Webhook not found" }, { status: 404 });
-  }
-
+  const setFields: Record<string, unknown> = {};
   if (updates.url !== undefined) {
     const parsedUrl = parseWebhookUrl(updates.url);
     if (!parsedUrl) {
       return NextResponse.json({ error: "A valid URL is required" }, { status: 400 });
     }
-    webhook.url = parsedUrl;
+    setFields["webhooks.$.url"] = parsedUrl;
   }
   if (updates.events !== undefined) {
     const parsedEvents = parseWebhookEvents(updates.events);
@@ -97,11 +85,21 @@ export const PUT = withProjectOwner(async (request, { params }) => {
         { status: 400 }
       );
     }
-    webhook.events = parsedEvents;
+    setFields["webhooks.$.events"] = parsedEvents;
   }
-  if (updates.enabled !== undefined) webhook.enabled = !!updates.enabled;
+  if (updates.enabled !== undefined) setFields["webhooks.$.enabled"] = !!updates.enabled;
 
-  await project.save();
+  const project = await Project.findOneAndUpdate(
+    { _id: projectId, "webhooks._id": webhookId },
+    { $set: setFields },
+    { returnDocument: "after" }
+  );
+  if (!project) {
+    // Ambiguous on purpose the same way it always was: the project itself may be gone, or just
+    // this webhook — one extra round trip only to tell those apart is not worth it here.
+    return NextResponse.json({ error: "Webhook not found" }, { status: 404 });
+  }
+
   return NextResponse.json(masked(project));
 });
 
@@ -114,16 +112,21 @@ export const DELETE = withProjectOwner(async (request, { params, user }) => {
     return NextResponse.json({ error: "webhookId is required" }, { status: 400 });
   }
 
-  const project = await Project.findById(projectId);
+  // Read before the pull only to name it in the audit log — the removal itself is the $pull below
+  const before = await Project.findOne(
+    { _id: projectId, "webhooks._id": webhookId },
+    { "webhooks.$": 1 }
+  ).lean();
+  const removed = before?.webhooks?.[0];
+
+  const project = await Project.findOneAndUpdate(
+    { _id: projectId },
+    { $pull: { webhooks: { _id: webhookId } } },
+    { returnDocument: "after" }
+  );
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
-
-  const removed = (project.webhooks || []).find((w) => w._id.toString() === webhookId);
-  project.webhooks = (project.webhooks || []).filter(
-    (w) => w._id.toString() !== webhookId
-  );
-  await project.save();
 
   if (removed) logProjectAudit(projectId, user._id, "settings_updated", `Webhook removed: ${maskSecretUrl(removed.url)}`);
 

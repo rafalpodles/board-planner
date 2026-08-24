@@ -7,7 +7,7 @@ import { subscribeBoardRefresh } from "@/lib/board-refresh";
 import { taskPath } from "@/lib/urls";
 import { timeAgo } from "@/lib/time";
 import { useAuth } from "@/hooks/use-auth";
-import { ApiAgent, ApiProject, ApiSprint, ApiTask, ApiUser, RunConflict } from "@/types";
+import { ApiAgent, ApiProject, ApiSprint, ApiTask, ApiUserSummary, RunConflict } from "@/types";
 import { useStore } from "@/app/(app)/agents/store";
 import { effectiveColumns } from "@/lib/columns";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -24,6 +24,7 @@ import { LinkedWork } from "@/components/tasks/detail/LinkedWork";
 import { MobileCommentBar } from "@/components/tasks/detail/MobileCommentBar";
 import { MobileSummary } from "@/components/tasks/detail/MobileSummary";
 import { PropertyRail } from "@/components/tasks/detail/PropertyRail";
+import { assigneeToShow } from "@/components/tasks/detail/assignee-display";
 import { TaskTopBar } from "@/components/tasks/detail/TaskTopBar";
 import { useScrolledBehind } from "@/components/tasks/detail/atoms";
 import { useTaskEditor } from "@/components/tasks/detail/useTaskEditor";
@@ -46,7 +47,7 @@ export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailP
   const [project, setProject] = useState<ApiProject | null>(null);
   const [sprints, setSprints] = useState<ApiSprint[]>([]);
   const { allAgents: agents } = useStore();
-  const [users, setUsers] = useState<ApiUser[]>([]);
+  const [users, setUsers] = useState<ApiUserSummary[]>([]);
   const [loading, setLoading] = useState(true);
 
   const loadData = useCallback(async () => {
@@ -73,13 +74,15 @@ export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailP
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId]);
 
+  // /api/users is admin-only, so this used to leave every non-admin with an empty picker and a
+  // task that IS assigned rendering as "Unassigned" (BP-400)
   useEffect(() => {
     api
-      .get("/api/users")
+      .get(`/api/projects/${projectId}/assignable-users`)
       .then(setUsers)
       .catch(() => setUsers([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [projectId]);
 
   // The board was not the only view going stale on a PM write — this view never reloaded
   // at all, so it kept editing a task that had moved underneath it
@@ -115,7 +118,7 @@ interface TaskDetailViewProps {
   project: ApiProject;
   sprints: ApiSprint[];
   agents: ApiAgent[];
-  users: ApiUser[];
+  users: ApiUserSummary[];
   onClose: () => void;
   onReload: () => void;
   onTaskChange: (updater: (prev: ApiTask | null) => ApiTask | null) => void;
@@ -158,7 +161,10 @@ function TaskDetailView({
   const scope = { key: project.key, formerKeys: project.formerKeys };
   const triggers = useEditorTriggers(projectId, project.key);
   const taskKey = `${project.key}-${task.taskNumber}`;
-  const assignee = users.find((u) => u.username === draft.assignee);
+  // Not a plain lookup in the roster: that holds only people who reach the board, so a task
+  // assigned before somebody lost access resolved to nothing and the mobile chip printed
+  // "Unassigned" over it. Same rule the rail's picker uses, so the two cannot disagree.
+  const assignee = assigneeToShow(users, draft.assignee, task.assignee);
   const reporter =
     task.createdBy && typeof task.createdBy === "object" ? task.createdBy.fullName : null;
   const watching = !!currentUser && (task.watchers || []).includes(currentUser._id);

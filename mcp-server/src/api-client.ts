@@ -111,8 +111,11 @@ export class ApiClient {
   }
 
   // Users
-  async listUsers(): Promise<unknown[]> {
-    return this.request("GET", "/api/users/list") as Promise<unknown[]>;
+  async listAssignableUsers(projectId: string): Promise<unknown[]> {
+    return this.request(
+      "GET",
+      `/api/projects/${seg(projectId)}/assignable-users`
+    ) as Promise<unknown[]>;
   }
 
   async listAgents(): Promise<unknown[]> {

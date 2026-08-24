@@ -1,14 +1,14 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import { ApiProjectCategory, ApiUser, PRIORITY_LABELS } from "@/types";
+import { ApiProjectCategory, ApiUserSummary, PRIORITY_LABELS } from "@/types";
 import { categoryColor } from "@/lib/category-colors";
 import { Avatar, PriorityBars } from "./atoms";
 import type { TaskDraft } from "./useTaskEditor";
 
 interface MobileSummaryProps {
   draft: TaskDraft;
-  assignee: ApiUser | undefined;
+  assignee: ApiUserSummary | undefined;
   categories: ApiProjectCategory[];
   onOpenDetails: () => void;
 }
@@ -40,7 +40,7 @@ export function MobileSummary({
       >
         {draft.category}
       </span>
-      <span className={CHIP}>
+      <span className={CHIP} data-testid="mobile-assignee-chip">
         <Avatar name={assignee?.fullName} size={18} />
         {assignee ? assignee.fullName : "Unassigned"}
       </span>

@@ -74,3 +74,36 @@ describe("the username an account may be given", () => {
     expect(res.status).toBe(201);
   });
 });
+
+/**
+ * The same rule, on the other half of the field's life. This route used to check `fullName` for
+ * truthiness only, so a name of nothing but spaces reached the schema, was trimmed to "" there,
+ * and came back as a `required` ValidationError — a 400 delivered as a 500 (BP-410).
+ */
+describe("the display name an account may be given", () => {
+  it.each([
+    ["a name of nothing but spaces", "   "],
+    ["no name at all", ""],
+    ["a newline", "Some\nbody"],
+    ["a Unicode line separator", "Some\u2028body"],
+    ["an escape character", "Some\u001bbody"],
+    ["something far too long", "a".repeat(81)],
+  ])("refuses %s with a 400, and creates nothing", async (_label, fullName) => {
+    const res = await post({ username: "nowak", password: "password123", fullName });
+
+    expect(res.status).toBe(400);
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  // Without this the refusals above would pass on a route that refuses everything
+  it("accepts a name an allowlist would have refused, and stores it trimmed", async () => {
+    const res = await post({
+      username: "nowak",
+      password: "password123",
+      fullName: "  Rafał Podleś-O'Brien  ",
+    });
+
+    expect(res.status).toBe(201);
+    expect(create.mock.calls[0][0].fullName).toBe("Rafał Podleś-O'Brien");
+  });
+});

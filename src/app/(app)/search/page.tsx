@@ -57,8 +57,9 @@ function SearchContent() {
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (query.trim().length < 2) return;
+    // The effect above, watching ?q, is what actually searches — this only updates the address.
+    // Also calling performSearch here fires the same request a second time (BP-406).
     router.replace(`/search?q=${encodeURIComponent(query.trim())}`);
-    performSearch(query);
   }
 
   const grouped: GroupedResult[] = [];

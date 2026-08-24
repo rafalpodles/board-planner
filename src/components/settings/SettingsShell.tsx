@@ -35,6 +35,19 @@ interface SettingsShellProps {
   children: React.ReactNode;
 }
 
+/**
+ * The app's scroll container is `main`, not the window, so the `window.scrollTo` this replaces had
+ * never moved anything (BP-405). It lives here because the shell already encodes the same geometry
+ * in the sticky offset its pill row uses, and both settings surfaces wear the shell.
+ *
+ * Deliberately a function the caller invokes rather than an effect on `active`: the project page's
+ * section search changes `active` on every keystroke and must NOT scroll, so a shell that scrolled
+ * whenever `active` moved would break searching without failing anything.
+ */
+export function scrollSettingsToTop() {
+  document.getElementById("main-content")?.scrollTo({ top: 0, behavior: "smooth" });
+}
+
 function DirtyDot({ className = "" }: { className?: string }) {
   return (
     <span
@@ -88,6 +101,7 @@ export function SettingsShell({
       <Link
         key={item.id}
         href={item.href}
+        onClick={scrollSettingsToTop}
         aria-current={isActive ? "page" : undefined}
         className={className}
       >
@@ -119,6 +133,7 @@ export function SettingsShell({
         key={item.id}
         ref={isActive ? activePill : undefined}
         href={item.href}
+        onClick={scrollSettingsToTop}
         aria-current={isActive ? "page" : undefined}
         className={pillClass(isActive)}
       >

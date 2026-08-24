@@ -105,6 +105,13 @@ const projectSchema = new Schema<IProject>(
         url: { type: String, required: true, trim: true },
         events: { type: [{ type: String, enum: WEBHOOK_EVENTS }], default: WEBHOOK_EVENTS },
         enabled: { type: Boolean, default: true },
+        // Single-shot delivery, deliberately (BP-407) — the same fire-and-forget choice the
+        // activity log and dispatchNotifications already make, so the outcome of the one attempt
+        // has to be visible somewhere rather than retried. No default on lastStatus/lastError:
+        // absent means never attempted, which reads correctly as blank rather than as "ok".
+        lastAttemptAt: { type: Date, default: null },
+        lastStatus: { type: String, enum: ["ok", "failed"] },
+        lastError: { type: String, default: "" },
       }],
       default: [],
     },

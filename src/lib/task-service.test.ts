@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // mongoose's own query matcher, so the filters below are judged by MongoDB semantics rather than
 // by a hand-rolled reading of them
 import sift from "sift";
@@ -127,6 +127,25 @@ vi.mock("@/lib/in-app-notifications", () => ({
 }));
 vi.mock("@/lib/pm/triggers", () => ({ onTaskStatusChanged: vi.fn().mockResolvedValue(undefined) }));
 
+/**
+ * The rule itself is grants.ts's, and grants.test.ts runs it against real filters. What this file
+ * has to show is that task-service ASKS and obeys the answer, so the answer is what is controlled
+ * here — the tests below that care set it explicitly, and everything else assigns freely, the way
+ * it did before BP-400.
+ */
+const canBeAssignedMock = vi.fn(async (_userId?: string, _projectId?: string) => true);
+vi.mock("@/lib/grants", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/grants")>()),
+  canBeAssigned: (userId: string, projectId: string) => canBeAssignedMock(userId, projectId),
+}));
+
+beforeEach(() => {
+  // Cleared as well as re-answered: the assertions below that count calls are otherwise reading
+  // every earlier test's calls too, and pass or fail on the order the file happens to run in.
+  canBeAssignedMock.mockClear();
+  canBeAssignedMock.mockResolvedValue(true);
+});
+
 const {
   CLEAR_WORKER_ASSIGNEE,
   claimNextTask,
@@ -143,6 +162,7 @@ const {
   MAX_EXECUTION_ATTEMPTS,
   MAX_PHASE_LENGTH,
   EXECUTION_LEASE_MS,
+  personalAgentAlienTo,
 } = await import("./task-service");
 
 const { logActivity } = await import("@/lib/activity");
@@ -2254,6 +2274,159 @@ describe("a task records who assigned it", () => {
 });
 
 // createTask writes assignedBy too, and none of the tests above exercise that path
+/**
+ * BP-400. A task could be handed to somebody who cannot open the board. Since BP-328 delivery
+ * checks the grant, so they correctly hear nothing — which left the assignment itself silently
+ * broken: a 200, an avatar on the card, and nobody working on it.
+ *
+ * The rule lives in grants.ts and is exercised against real filters in grants.test.ts. What is
+ * under test here is that task-service asks it, and obeys the answer, on every path that writes an
+ * assignee — which is these two functions and nothing else in the repo.
+ */
+describe("assigning somebody who cannot reach the board", () => {
+  beforeEach(() => {
+    findOneAndUpdate.mockReset();
+    findOneAndUpdate.mockReturnValue({
+      populate: () => Promise.resolve({ _id: "t1", taskNumber: 1, title: "x", execution: {} }),
+    });
+    findById.mockReset();
+    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    const task = {
+      _id: "t1",
+      taskNumber: 1,
+      status: "doing",
+      title: "x",
+      assignee: { _id: "u1", username: "rpo", fullName: "Rafal" },
+      assignedBy: "u9",
+    };
+    findOne.mockReturnValue({
+      lean: () => Promise.resolve(task),
+      populate: () => ({ lean: () => Promise.resolve(task) }),
+    });
+    userFindOne.mockResolvedValue({ _id: "u2", username: "kuba" });
+    userFindById.mockReturnValue({ lean: async () => ({ username: "kuba" }) });
+  });
+
+  // Restores the module-level implementation, which answers "actor" — mockReturnValue above would
+  // otherwise stand for the rest of the file, and every later test asserting who assigned a task
+  // would read this block's fixture instead of its own.
+  afterEach(() => {
+    userFindById.mockReset();
+  });
+
+  it("refuses the move, with a 400 rather than a silent success", async () => {
+    canBeAssignedMock.mockResolvedValue(false);
+
+    const result = await updateTask("p1", "t1", { assignee: "kuba" }, "actor");
+
+    expect(result.ok).toBe(false);
+    expect(result).toMatchObject({ status: 400 });
+  });
+
+  // The message is the only thing separating "no such account" from "that account cannot reach
+  // this board", and an agent reading it has no other way to tell which repair to attempt.
+  it("names the person it refused", async () => {
+    canBeAssignedMock.mockResolvedValue(false);
+
+    const result = await updateTask("p1", "t1", { assignee: "kuba" }, "actor");
+
+    expect(result).toMatchObject({ error: expect.stringContaining("kuba") });
+    expect(result).toMatchObject({ error: expect.stringMatching(/no access to this board/i) });
+  });
+
+  it("writes nothing at all when it refuses", async () => {
+    canBeAssignedMock.mockResolvedValue(false);
+
+    await updateTask("p1", "t1", { assignee: "kuba" }, "actor");
+
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  // The control. Without it, a refusal caused by a mis-wired fixture reads exactly like the rule
+  // working — every assertion above would pass against a task-service that refused everything.
+  it("still assigns somebody the rule accepts", async () => {
+    canBeAssignedMock.mockResolvedValue(true);
+
+    const result = await updateTask("p1", "t1", { assignee: "kuba" }, "actor");
+
+    expect(result.ok).toBe(true);
+    expect(findOneAndUpdate).toHaveBeenCalled();
+  });
+
+  it("asks about the board the task is on", async () => {
+    await updateTask("p1", "t1", { assignee: "kuba" }, "actor");
+
+    expect(canBeAssignedMock).toHaveBeenCalledWith("u2", "p1");
+  });
+
+  /**
+   * Taking work away from somebody who cannot reach the board is the repair, not the mistake — and
+   * refusing it would leave such a task permanently stuck with them on it.
+   */
+  it("never refuses an unassignment", async () => {
+    canBeAssignedMock.mockResolvedValue(false);
+
+    const result = await updateTask("p1", "t1", { assignee: null }, "actor");
+
+    expect(result.ok).toBe(true);
+  });
+
+  /**
+   * Only a MOVE is judged. A REST or MCP client that GETs a task, edits one field and PUTs the
+   * whole object back sends the assignee too — so judging every incoming value would make a task
+   * assigned before that person lost access refuse every unrelated edit made to it since.
+   */
+  it("lets the stored assignee be echoed back even once they have lost access", async () => {
+    canBeAssignedMock.mockResolvedValue(false);
+    userFindOne.mockResolvedValue({ _id: "u1", username: "rpo" });
+
+    const result = await updateTask("p1", "t1", { assignee: "rpo", title: "renamed" }, "actor");
+
+    expect(result.ok).toBe(true);
+    expect(canBeAssignedMock).not.toHaveBeenCalled();
+  });
+
+  describe("and the same answer on the way in", () => {
+    beforeEach(() => {
+      taskCreate.mockClear();
+      projectFindOneAndUpdate.mockResolvedValue({
+        _id: "p1",
+        taskCounter: 1,
+        key: "BP",
+        ...customBoard,
+      });
+      taskCreate.mockResolvedValue({ _id: "new" });
+      taskFindById.mockReturnValue({ populate: () => ({ lean: async () => ({ _id: "new" }) }) });
+      userFindOne.mockReturnValue({ _id: "u2", username: "kuba" });
+    });
+
+    it("refuses to create a task already assigned to somebody without access", async () => {
+      canBeAssignedMock.mockResolvedValue(false);
+
+      const result = await createTask("p1", "actor", { title: "x", assignee: "kuba" });
+
+      expect(result.ok).toBe(false);
+      expect(result).toMatchObject({ status: 400 });
+      expect(taskCreate).not.toHaveBeenCalled();
+    });
+
+    it("creates it for somebody the rule accepts", async () => {
+      canBeAssignedMock.mockResolvedValue(true);
+
+      const result = await createTask("p1", "actor", { title: "x", assignee: "kuba" });
+
+      expect(result.ok).toBe(true);
+      expect(taskCreate.mock.calls[0][0].assignee).toBe("u2");
+    });
+
+    it("asks nothing when the new task starts unassigned", async () => {
+      await createTask("p1", "actor", { title: "x" });
+
+      expect(canBeAssignedMock).not.toHaveBeenCalled();
+    });
+  });
+});
+
 describe("createTask stamps who assigned it", () => {
   beforeEach(() => {
     taskCreate.mockClear();
@@ -2922,6 +3095,51 @@ describe("what a change of hands does to the agent already on the task", () => {
     await write({ title: "renamed" }, HOLDER);
 
     expect(vi.mocked(logActivity).mock.calls.map((c) => c[3])).not.toContain("agent");
+  });
+});
+
+// BP-369. Exported so scripts/repair-recurring-agent-pairing.ts asks the same question updateTask
+// already asks live, rather than a second copy of the rule.
+describe("personalAgentAlienTo", () => {
+  beforeEach(() => agentFindById.mockReset());
+
+  // The mock resolves by projection alone and ignores which id it was asked for, so nothing above
+  // this line would notice the two arguments swapped — `agent` looked up instead of `assigneeAfter`
+  // compared, or vice versa. Asserted here once, directly, rather than trusted to a return-value
+  // check that would pass either way.
+  it("looks up the agent argument, not the assignee", async () => {
+    agentInTheCatalog({ scope: "user", owner: "u1" });
+    await personalAgentAlienTo("the-agent-id", "u1");
+    expect(agentFindById).toHaveBeenCalledWith("the-agent-id", "scope owner");
+  });
+
+  it("is not alien when the personal agent's owner is the assignee", async () => {
+    agentInTheCatalog({ scope: "user", owner: "u1" });
+    expect(await personalAgentAlienTo("a1", "u1")).toBe(false);
+  });
+
+  it("is alien when the personal agent belongs to somebody else", async () => {
+    agentInTheCatalog({ scope: "user", owner: "u1" });
+    expect(await personalAgentAlienTo("a1", "u2")).toBe(true);
+  });
+
+  // Nobody chose it: an unassigned task cannot be the reason a personal agent is still there
+  it("is alien on an unassigned task", async () => {
+    agentInTheCatalog({ scope: "user", owner: "u1" });
+    expect(await personalAgentAlienTo("a1", null)).toBe(true);
+  });
+
+  // A project or global agent is nobody's personal choice to begin with
+  it("is never alien for a project-scoped agent", async () => {
+    agentInTheCatalog({ scope: "project", owner: null });
+    expect(await personalAgentAlienTo("a1", "somebody-else")).toBe(false);
+  });
+
+  // Covers a dangling reference and a missing agent alike — neither branches before the lookup
+  it("is not alien when the agent cannot be found — missing id or dangling reference alike", async () => {
+    agentInTheCatalog(null);
+    expect(await personalAgentAlienTo("gone", "u1")).toBe(false);
+    expect(await personalAgentAlienTo(null, "u1")).toBe(false);
   });
 });
 
