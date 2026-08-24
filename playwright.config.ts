@@ -1,5 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 import { E2E_MONGODB_URI } from "./e2e/seed";
+import { GROUPS } from "./e2e/groups";
 
 // 3987, not the usual 3456: a developer's own dev server and other agents share this machine
 const PORT = Number(process.env.E2E_PORT ?? 3987);
@@ -55,7 +56,13 @@ export default defineConfig({
     // Seven columns at their 200px floor do not fit a 1280px board without horizontal scrolling
     viewport: { width: 1600, height: 1000 },
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  // One project per group so CI can run them as separate jobs (`--project=board`). A run with no
+  // --project runs every group, which is the whole suite and what a local run wants.
+  projects: Object.entries(GROUPS).map(([name, files]) => ({
+    name,
+    use: { ...devices["Desktop Chrome"] },
+    testMatch: files.map((file) => `**/${file}`),
+  })),
   webServer: [
     {
       // Stands in for OpenRouter so a PM turn runs for free and offline; everything the app does

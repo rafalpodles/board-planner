@@ -97,8 +97,17 @@ jobs:
       - run: npm run build
 
   e2e:
-    name: End to end — Playwright
+    # One job per group in e2e/groups.ts, each with a runner, a Mongo and a dev server of its own,
+    # so the groups need no isolation from one another. `groups.test.ts` fails the unit job when
+    # this list and that file disagree, and when a spec belongs to no group at all.
+    name: End to end — ${{ matrix.group }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # e2e-groups-start
+        group: [tasks, task-fields, board, project, people, automation]
+        # e2e-groups-end
     services:
       mongo:
         image: mongo:7
@@ -135,13 +144,13 @@ jobs:
         if: steps.browser-cache.outputs.cache-hit == 'true'
 
       - name: Tests
-        run: npm run test:e2e
+        run: npx playwright test --project=${{ matrix.group }}
 
       # The trace is the only way to see what the page looked like when a run fails on a machine
       # nobody can open
       - uses: actions/upload-artifact@v7
         if: failure()
         with:
-          name: playwright-artifacts
+          name: playwright-artifacts-${{ matrix.group }}
           path: e2e/.artifacts
           retention-days: 7
