@@ -96,3 +96,84 @@ describe("update_task and the agent that runs it", () => {
     expect(agents).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * BP-400. Both tools resolved a username against the whole instance's roster before this branch;
+ * now they resolve it against listAssignableUsers, which is scoped to the board. Nothing above
+ * exercises the assignee branch at all, so this is new coverage rather than an update to existing
+ * coverage — the "typo" and "no access" cases were previously indistinguishable and untested here.
+ */
+describe("resolving an assignee through the board's own roster", () => {
+  function callCreate(args: Record<string, unknown>) {
+    return registered().get("create_task")!.handler({ project: "BP", title: "x", ...args }, extra);
+  }
+
+  function callUpdate(args: Record<string, unknown>) {
+    return registered().get("update_task")!.handler({ taskKey: "BP-1", ...args }, extra);
+  }
+
+  beforeEach(() => {
+    vi.spyOn(PlannerClient.prototype, "getProjectByKey").mockResolvedValue({
+      _id: "p1",
+      key: "BP",
+      customFields: [],
+    } as never);
+  });
+
+  it("create_task resolves the username against the board's roster, not the instance's", async () => {
+    const listUsers = vi
+      .spyOn(PlannerClient.prototype, "listAssignableUsers")
+      .mockResolvedValue([{ _id: "u1", username: "kuba" }]);
+    const create = vi.spyOn(PlannerClient.prototype, "createTask").mockResolvedValue({});
+
+    await callCreate({ assignee: "KUBA" });
+
+    expect(listUsers).toHaveBeenCalledWith("p1");
+    expect(create).toHaveBeenCalledWith("p1", expect.objectContaining({ assignee: "kuba" }));
+  });
+
+  // Whoever calls this cannot tell a typo from somebody genuinely without access, on purpose —
+  // splitting the two would mean confirming an account exists elsewhere on the instance
+  it("create_task refuses a username the board's roster does not contain", async () => {
+    vi.spyOn(PlannerClient.prototype, "listAssignableUsers").mockResolvedValue([]);
+    const create = vi.spyOn(PlannerClient.prototype, "createTask").mockResolvedValue({});
+
+    await expect(callCreate({ assignee: "outsider" })).rejects.toThrow(
+      /not someone this board can be assigned to/
+    );
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("update_task resolves the username against the board's roster too", async () => {
+    const listUsers = vi
+      .spyOn(PlannerClient.prototype, "listAssignableUsers")
+      .mockResolvedValue([{ _id: "u1", username: "kuba" }]);
+    const update = vi.spyOn(PlannerClient.prototype, "updateTask").mockResolvedValue({});
+
+    await callUpdate({ assignee: "kuba" });
+
+    expect(listUsers).toHaveBeenCalledWith("p1");
+    expect(update).toHaveBeenCalledWith("p1", "t1", expect.objectContaining({ assignee: "kuba" }));
+  });
+
+  it("update_task refuses a username the board's roster does not contain", async () => {
+    vi.spyOn(PlannerClient.prototype, "listAssignableUsers").mockResolvedValue([]);
+    const update = vi.spyOn(PlannerClient.prototype, "updateTask").mockResolvedValue({});
+
+    await expect(callUpdate({ assignee: "outsider" })).rejects.toThrow(
+      /not someone this board can be assigned to/
+    );
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  // "" unassigns, same as the agent field — it must not be resolved against the roster at all
+  it("update_task still unassigns on an empty string without consulting the roster", async () => {
+    const listUsers = vi.spyOn(PlannerClient.prototype, "listAssignableUsers");
+    const update = vi.spyOn(PlannerClient.prototype, "updateTask").mockResolvedValue({});
+
+    await callUpdate({ assignee: "" });
+
+    expect(listUsers).not.toHaveBeenCalled();
+    expect(update).toHaveBeenCalledWith("p1", "t1", expect.objectContaining({ assignee: null }));
+  });
+});
