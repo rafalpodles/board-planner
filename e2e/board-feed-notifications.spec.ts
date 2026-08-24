@@ -89,6 +89,9 @@ async function createTask(page: Page, title: string) {
   await page.getByRole("button", { name: "New task" }).click();
 
   const modal = page.getByRole("dialog", { name: "New Task" });
+  // AI Assist renders only once /ai/generate-task has answered, and it adds a block above these
+  // fields — a late answer would shift the form under the fill below
+  await expect(modal.getByPlaceholder("Describe what you need")).toBeVisible();
   await modal.getByLabel("Title").fill(title);
 
   const created = page.waitForResponse(

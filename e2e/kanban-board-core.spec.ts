@@ -238,6 +238,9 @@ test("creating a task from the header mints the next key and rejects an empty ti
   await test.step("an empty title cannot reach the server", async () => {
     await page.getByRole("button", { name: "New task" }).click();
     await expect(modal).toBeVisible();
+    // AI Assist renders only once /ai/generate-task has answered, and it adds ~110px above these
+    // fields. Awaited here so a late answer cannot shift the form under an action in flight.
+    await expect(modal.getByPlaceholder("Describe what you need")).toBeVisible();
 
     // The form leans on the browser's required-field validation, so the submit never happens
     await modal.getByRole("button", { name: "Create Task" }).click();
@@ -286,6 +289,9 @@ test("creating a task from the header mints the next key and rejects an empty ti
   await test.step("cancelling the next draft leaves nothing behind", async () => {
     await page.getByRole("button", { name: "New task" }).click();
     await expect(modal).toBeVisible();
+    // AI Assist renders only once /ai/generate-task has answered, and it adds ~110px above these
+    // fields. Awaited here so a late answer cannot shift the form under an action in flight.
+    await expect(modal.getByPlaceholder("Describe what you need")).toBeVisible();
     await modal.getByLabel("Title").fill("Never saved");
     await modal.getByRole("button", { name: "Cancel" }).click();
     await expect(modal).toHaveCount(0);
