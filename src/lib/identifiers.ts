@@ -48,7 +48,11 @@ export const FULL_NAME_RULE = `A name cannot be blank, must be at most ${FULL_NA
 
 // C0, DEL and C1, plus the two Unicode separators that break a line in a renderer without being
 // matched by \s in a JavaScript regex.
-function isControlCodePoint(code: number): boolean {
+//
+// Exported so a writer that cannot refuse a name outright — a machine's own display name has
+// nobody to hand a 400 to and ask to retype (BP-413) — can strip the same characters this refuses,
+// rather than restating the set.
+export function isControlCodePoint(code: number): boolean {
   return code < 0x20 || (code >= 0x7f && code <= 0x9f) || code === 0x2028 || code === 0x2029;
 }
 
