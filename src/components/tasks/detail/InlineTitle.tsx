@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef } from "react";
+import { TASK_TITLE_MAX_LENGTH } from "@/lib/identifiers";
 import { useAutoGrow } from "./atoms";
 
 interface InlineTitleProps {
@@ -19,6 +20,7 @@ export function InlineTitle({ value, onChange }: InlineTitleProps) {
       ref={ref}
       rows={1}
       value={value}
+      maxLength={TASK_TITLE_MAX_LENGTH}
       aria-label="Task title"
       onChange={(e) => onChange(e.target.value)}
       onKeyDown={(e) => {
