@@ -81,6 +81,13 @@ export function stripControlCharacters(value: string): string {
   return out;
 }
 
+export function hasControlCharacters(value: string): boolean {
+  for (const character of value) {
+    if (isControlCodePoint(character.codePointAt(0) ?? 0)) return true;
+  }
+  return false;
+}
+
 // The schema trims, so validate what will be stored — checking the untrimmed string is what let a
 // name of nothing but spaces past the admin form's `!fullName` check and into a 500 (BP-410).
 export function normaliseFullName(fullName: string): string {
@@ -89,8 +96,53 @@ export function normaliseFullName(fullName: string): string {
 
 export function isValidFullName(fullName: string): boolean {
   if (fullName.length === 0 || fullName.length > FULL_NAME_MAX_LENGTH) return false;
-  for (const character of fullName) {
-    if (isControlCodePoint(character.codePointAt(0) ?? 0)) return false;
+  return !hasControlCharacters(fullName);
+}
+
+/**
+ * Blank as a reader means it, which `trim()` does not: it removes whitespace, and the ways to write
+ * a string that paints nothing are wider than whitespace. A title of one zero-width space was
+ * stored and rendered as an empty heading on the board and on the task screen — the outcome BP-437
+ * exists to prevent, one paste further along (BP-440).
+ *
+ * `\p{Cf}` is most of it (U+200B, the word joiner U+2060, the BOM, the bidi controls). The two
+ * Hangul fillers are named separately because they are `Lo` — letters by category, blank by
+ * rendering, which is why this cannot be a category check alone.
+ */
+const INVISIBLE_CATEGORIES = /[\s\p{Cc}\p{Cf}\p{Zs}]/u;
+const HANGUL_FILLERS = new Set([0x3164, 0xffa0]);
+
+export function rendersBlank(value: string): boolean {
+  for (const character of value) {
+    if (HANGUL_FILLERS.has(character.codePointAt(0) ?? 0)) continue;
+    if (!INVISIBLE_CATEGORIES.test(character)) return false;
   }
   return true;
+}
+
+/**
+ * A task title and an acceptance criterion are free text like a display name, and they live here
+ * for the same reason: what constrains them is a character rule, not a pattern. The control-
+ * character half is `isControlCodePoint` shared rather than restated — U+202E does not render
+ * blank, it reverses the rendering of everything after it.
+ *
+ * The length cap is the other half. Nothing capped a title at any layer, so a megabyte of one
+ * saved and then reached `src/lib/notifications.ts`, which interpolates a title into a Slack
+ * payload. 200 keeps every stored title under the 256 the worker truncates a branch name and a PR
+ * title at (`worker/src/delivery.ts`), the tightest consumer downstream.
+ */
+export const TASK_TITLE_MAX_LENGTH = 200;
+export const CRITERION_TEXT_MAX_LENGTH = 500;
+
+export const TASK_TITLE_RULE = `A title must be at most ${TASK_TITLE_MAX_LENGTH} characters and cannot contain zero-width, bidi or other control characters`;
+export const CRITERION_TEXT_RULE = `An acceptance criterion must be at most ${CRITERION_TEXT_MAX_LENGTH} characters and cannot contain zero-width, bidi or other control characters`;
+
+export function isValidTaskTitle(title: string): boolean {
+  if (rendersBlank(title) || title.length > TASK_TITLE_MAX_LENGTH) return false;
+  return !hasControlCharacters(title);
+}
+
+export function isValidCriterionText(text: string): boolean {
+  if (rendersBlank(text) || text.length > CRITERION_TEXT_MAX_LENGTH) return false;
+  return !hasControlCharacters(text);
 }

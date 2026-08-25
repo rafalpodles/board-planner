@@ -16,6 +16,7 @@ import {
   seed,
 } from "./seed";
 import { signIn as arriveSignedIn } from "./session";
+import { TASK_TITLE_MAX_LENGTH } from "@/lib/identifiers";
 
 /**
  * BP-385: the task detail surface — comments, mentions, watching, acceptance criteria,
@@ -485,6 +486,67 @@ test("clearing the title is refused rather than crashing, and the stored one sur
 });
 
 /**
+ * BP-440. BP-437 refuses the titles `trim()` empties; a zero-width space is not one of them, so a
+ * title of a single U+200B was stored and painted an entirely blank heading here and on the board —
+ * the outcome that change exists to prevent, one paste further along. Nothing capped the length at
+ * any layer either, and the title is interpolated into a Slack payload downstream.
+ */
+test("an invisible title is refused, and one past the cap never reaches the database", async ({
+  page,
+  request,
+}) => {
+  await openTask(page, SIBLING_TASK_NUMBER);
+  const field = page.getByLabel("Task title");
+  await expect(field).toHaveValue(SIBLING_TASK_TITLE);
+
+  await test.step("a title of one zero-width space answers 400", async () => {
+    const refused = taskWrite(page, "PUT", `/tasks/${SIBLING_TASK_ID}`);
+    // Built from its code point rather than pasted: the character is as invisible in this file as
+    // it is on the board, and a diff cannot show what it does not paint.
+    await field.fill(String.fromCodePoint(0x200b));
+    expect((await refused).status()).toBe(400);
+  });
+
+  await test.step("and the blank one is reported in the server's own words", async () => {
+    await expect(saveStatus(page).getByRole("button")).toHaveText("⚠ Title is required — retry");
+  });
+
+  await test.step("the title on the server is untouched", async () => {
+    // Read from the API, not from the field: what the field holds is the text this test typed,
+    // which is true whether the write was refused or lost.
+    expect((await readTask(request, SIBLING_TASK_NUMBER)).title).toBe(SIBLING_TASK_TITLE);
+  });
+
+  /**
+   * The cap asserted on the outcome rather than on the status code, because two defences stand in
+   * front of it and either one is a pass: the field's own maxLength may cut the paste to the cap
+   * before a request exists, and the server refuses whatever survives that. What must not happen —
+   * what nothing prevented before — is a stored title longer than the cap.
+   */
+  await test.step("a title past the cap never reaches the database", async () => {
+    // The write is awaited rather than the read polled: reading before it lands would pass against
+    // a server that stores anything, which is the state this test was written from.
+    const write = taskWrite(page, "PUT", `/tasks/${SIBLING_TASK_ID}`);
+    await field.fill("a".repeat(TASK_TITLE_MAX_LENGTH + 1));
+    await write;
+
+    const stored = (await readTask(request, SIBLING_TASK_NUMBER)).title as string;
+    expect(stored.length).toBeLessThanOrEqual(TASK_TITLE_MAX_LENGTH);
+  });
+
+  // The control, at the boundary: without it a guard refusing every title would pass everything
+  // above, and a cap off by one would look identical to a cap that works. A different character
+  // from the step before, so the field's value genuinely changes and the autosave genuinely fires.
+  await test.step("a title of visible characters, exactly at the cap, still saves", async () => {
+    const atTheCap = "b".repeat(TASK_TITLE_MAX_LENGTH);
+    const saved = taskWrite(page, "PUT", `/tasks/${SIBLING_TASK_ID}`);
+    await field.fill(atTheCap);
+    expect((await saved).status()).toBe(200);
+    expect((await readTask(request, SIBLING_TASK_NUMBER)).title).toBe(atTheCap);
+  });
+});
+
+/**
  * The autosave line under the title. Filtered rather than taken by position: the top bar has a
  * live region of its own, and this one has to be found in every state it reports — including the
  * failure, which is the state that used to have no live region at all.
@@ -572,6 +634,15 @@ test("emptying an acceptance criterion is refused, and the stored one survives",
 
     const refused = taskWrite(page, "PUT", `/tasks/${FINISHED_TASK_ID}`);
     await box.fill("");
+    expect((await refused).status()).toBe(400);
+  });
+
+  // BP-440, the same field family: a criterion of one zero-width space is not empty and paints
+  // nothing, so the row would have been stored and then shown as a checkbox with no text beside it.
+  await test.step("and so does replacing it with a zero-width space", async () => {
+    const box = page.getByRole("textbox", { name: "Criterion 1" });
+    const refused = taskWrite(page, "PUT", `/tasks/${FINISHED_TASK_ID}`);
+    await box.fill(String.fromCodePoint(0x200b));
     expect((await refused).status()).toBe(400);
   });
 

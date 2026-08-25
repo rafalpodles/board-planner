@@ -25,6 +25,7 @@ import {
 } from "@/types";
 import { effectiveColumns } from "@/lib/columns";
 import { parseChecklistString } from "@/lib/checklist";
+import { TASK_TITLE_MAX_LENGTH } from "@/lib/identifiers";
 import { activeFields, sortedFields, orderedOptions } from "@/lib/custom-fields";
 import type { GeneratedTask } from "@/lib/ai";
 
@@ -284,6 +285,7 @@ export function TaskForm({
         label="Title"
         value={title}
         onChange={(e) => setTitle(e.target.value)}
+        maxLength={TASK_TITLE_MAX_LENGTH}
         required
       />
 
