@@ -1240,6 +1240,7 @@ export async function seedAssignmentOutsider() {
  * of what is stored would pass a fixture carrying only the negative case.
  */
 export const WEBHOOK_OK_ID = id("e2e00000000000000000f001");
+export const WEBHOOK_UNTRIED_ID = id("e2e00000000000000000ba03");
 export const WEBHOOK_FAILED_ID = id("e2e00000000000000000f002");
 
 export async function seedWebhookDeliveryOutcomes() {
@@ -1267,6 +1268,14 @@ export async function seedWebhookDeliveryOutcomes() {
             lastAttemptAt: new Date(Date.now() - 5 * 60_000),
             lastStatus: "failed",
             lastError: "connect ECONNREFUSED",
+          },
+          // Never delivered to. The control for the panel: without it, a panel that printed an
+          // outcome for every endpoint would satisfy every assertion about the other two.
+          {
+            _id: WEBHOOK_UNTRIED_ID,
+            url: "https://e2e-receiver.example/never-tried",
+            events: ["task_created"],
+            enabled: true,
           },
         ],
       },
