@@ -74,6 +74,7 @@ const userFindOne = vi.fn();
 const userFindById = vi.fn(() => ({ lean: async () => ({ username: "actor" }) }));
 const commentCreate = vi.fn(async () => ({ _id: "c1" }));
 const createNotificationsMock = vi.fn();
+const notifyBoardFeedMock = vi.fn();
 const collectRecipientsMock = vi.fn((_task?: unknown): string[] => []);
 const resolveMentionsMock = vi.fn(async (_body?: string): Promise<string[]> => []);
 const workerFindById = vi.fn();
@@ -125,6 +126,7 @@ vi.mock("@/lib/in-app-notifications", () => ({
   resolveMentions: (body: string) => resolveMentionsMock(body),
   assigneeIdOf: () => undefined,
 }));
+vi.mock("@/lib/board-feed", () => ({ notifyBoardFeed: (p: unknown) => notifyBoardFeedMock(p) }));
 vi.mock("@/lib/pm/triggers", () => ({ onTaskStatusChanged: vi.fn().mockResolvedValue(undefined) }));
 
 /**
@@ -740,6 +742,30 @@ describe("releaseExpiredTasks", () => {
       await releaseExpiredTasks("p1", now);
 
       expect(createNotificationsMock).not.toHaveBeenCalled();
+    });
+
+    // Nothing awaits the announcement — the poll has already been answered — so a rejection
+    // escaping it is an unhandled rejection, which ends the process rather than losing one mail.
+    //
+    // The failure is an implementation that THROWS, not mockRejectedValue: that one builds its
+    // rejected promise when the test sets it up, vitest handles it there, and the test then passes
+    // with the .catch() deleted — the one thing it exists to prove.
+    it("logs and survives an announcement that throws", async () => {
+      abandoned();
+      const reported = vi.spyOn(console, "error").mockImplementation(() => {});
+      userFindOne.mockImplementationOnce(() => {
+        throw new Error("mongo is having a bad afternoon");
+      });
+
+      await expect(releaseExpiredTasks("p1", now)).resolves.toBe(1);
+
+      await vi.waitFor(() =>
+        expect(reported).toHaveBeenCalledWith(
+          "Failed to announce an abandoned run:",
+          expect.any(Error)
+        )
+      );
+      reported.mockRestore();
     });
   });
 });
@@ -3187,6 +3213,10 @@ describe("what a task is populated with before it is answered", () => {
 
 // Handing work over by creating the task — how the MCP, the PM agent and a worker all do it —
 // used to tell the assignee nothing. Only reassigning an existing task did.
+//
+// The other two audiences a created task reaches are here for a different reason: the tests that
+// came with the mails assert how one RENDERS, which is only reachable once something sent it. That
+// left the sending itself unheld — delete either dispatch below and the whole suite stays green.
 describe("createTask handing the task to somebody", () => {
   const ASSIGNEE = "507f1f77bcf86cd799439041";
 
@@ -3221,6 +3251,42 @@ describe("createTask handing the task to somebody", () => {
     await createTask("p1", "actor", { title: "x" });
 
     expect(createNotificationsMock).not.toHaveBeenCalled();
+  });
+
+  // The personal counterpart of the shared team channel: the people who ticked "every task created
+  // on this board" hear about it here and nowhere else. board-feed.test.ts proves the fan-out;
+  // that createTask reaches it, and what mail it hands over, was pinned by nothing.
+  it("announces it to the board's own subscribers, with the mail it would send", async () => {
+    await createTask("p1", "actor", { title: "Session cookie survives a change" });
+
+    const [feed] = notifyBoardFeedMock.mock.calls.at(-1) ?? [];
+    expect(feed.projectId).toBe("p1");
+    expect(feed.title).toBe("New task BP-7 in Board Planner");
+    expect(feed.body).toBe("Session cookie survives a change");
+    // The builder is a function so an unsubscribed board never pays for the actor lookup, which
+    // means nothing runs it unless a test does
+    expect(await feed.email()).toMatchObject({
+      kicker: "New on the board",
+      taskKey: "BP-7",
+      taskPills: [
+        { label: "Ready", tone: "todo" },
+        { label: "Medium", tone: "neutral" },
+      ],
+      taskMeta: "Board Planner · created by actor",
+      projectRef: "BP",
+      taskNumber: 7,
+    });
+  });
+
+  // A different audience and a different switch from the one above: a room nobody subscribed to
+  // individually. The webhook beside it is asserted; this dispatch was not.
+  it("tells the project's shared chat channel", async () => {
+    await createTask("p1", "actor", { title: "Session cookie survives a change" });
+
+    expect(dispatchNotifications).toHaveBeenCalledWith("p1", "task_created", {
+      project: { key: "BP", name: "Board Planner" },
+      task: { taskKey: "BP-7", title: "Session cookie survives a change", status: "ready" },
+    });
   });
 });
 
