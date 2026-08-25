@@ -131,6 +131,7 @@ export function BoardSection({ projectId, project, patchProject, stats }: Sectio
             <div className="min-w-0 flex-1 sm:w-[180px] sm:flex-none sm:shrink-0">
               <Input
                 value={col.label}
+                aria-label="Column name"
                 onChange={(e) => update(i, { label: e.target.value })}
                 className="py-1.5"
               />

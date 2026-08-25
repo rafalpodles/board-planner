@@ -11,6 +11,7 @@ import {
   SIBLING_TASK_NUMBER,
   seed,
 } from "./seed";
+import { signIn as arriveSignedIn } from "./session";
 
 /**
  * BP-413. `/api/workers/enrolment/device` is unauthenticated and takes an arbitrary machine name,
@@ -51,13 +52,7 @@ async function db() {
   return handle;
 }
 
-async function signIn(page: Page) {
-  await page.goto("/login");
-  await page.getByLabel("Username").fill(ADMIN_USERNAME);
-  await page.getByLabel("Password").fill(ADMIN_PASSWORD);
-  await page.getByRole("button", { name: "Sign In" }).click();
-  await expect(page).toHaveURL(/\/projects/);
-}
+const signIn = arriveSignedIn;
 
 test.beforeEach(async () => {
   await seed();
