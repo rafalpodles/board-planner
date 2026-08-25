@@ -257,9 +257,41 @@ async function sprintBelongsToProject(projectId: string, sprint: unknown): Promi
  *  blank is a refusal rather than a write, and the trimmed string is what gets stored. */
 function titleOrRefusal(value: unknown): string | TaskServiceResult {
   if (typeof value !== "string" || value.trim() === "") {
-    return { ok: false, error: "Title cannot be empty", status: 400 };
+    return { ok: false, error: "Title is required", status: 400 };
   }
   return value.trim();
+}
+
+/** The rows a checklist is made of, as they arrive from a request body. */
+interface ChecklistInput {
+  text: string;
+  done?: boolean;
+}
+
+/**
+ * The same agreement for acceptance criteria. `checklist[].text` is `required` too, and the raw
+ * array arrives straight off the request body — so clearing a criterion on the task screen was the
+ * title bug one section lower, byte for byte: the same autosave, the same escaped ValidationError,
+ * the same 500. The `acceptanceCriteria` string path never had it, because parseChecklistString
+ * drops blank lines already.
+ *
+ * Adding a criterion is unaffected: CriteriaSection refuses to append a blank one, so no legitimate
+ * gesture sends an empty text and this can only ever catch the destructive one.
+ */
+function checklistOrRefusal(value: unknown): ChecklistInput[] | TaskServiceResult {
+  if (!Array.isArray(value)) {
+    return { ok: false, error: "Checklist must be a list of criteria", status: 400 };
+  }
+  const items: ChecklistInput[] = [];
+  for (const raw of value) {
+    const text = (raw as { text?: unknown } | null)?.text;
+    if (typeof text !== "string" || text.trim() === "") {
+      return { ok: false, error: "An acceptance criterion is required", status: 400 };
+    }
+    // Spread first so an existing row keeps its `_id` and `done`; only the text is normalised
+    items.push({ ...(raw as ChecklistInput), text: text.trim() });
+  }
+  return items;
 }
 
 export async function createTask(
@@ -272,9 +304,17 @@ export async function createTask(
   const title = titleOrRefusal(body.title);
   if (typeof title !== "string") return title;
 
-  // Checked before the counter moves, not after: the `$inc` below is what mints the task number,
-  // and a create refused past this point spends one on a task that never exists, leaving a hole in
-  // the board's numbering that nothing fills.
+  const checklist = Array.isArray(body.checklist) ? checklistOrRefusal(body.checklist) : [];
+  if (!Array.isArray(checklist)) return checklist;
+
+  // Checked before the counter moves: the `$inc` below is what mints the task number, so a create
+  // refused past it spends one on a task that never exists.
+  //
+  // Only this refusal is in front of it. Category, status and assignee are all refused *after* the
+  // `$inc` and still burn a number each, and so does anything the schema throws on — a mistyped
+  // `priority` from MCP, which declares it as a free-form string, costs a number and a 500. Moving
+  // the whole validation ahead of the counter is the real fix and is tracked separately; this is
+  // one arm of it, placed correctly rather than a claim that the hole is closed.
   const project = await Project.findOneAndUpdate(
     { _id: projectId },
     { $inc: { taskCounter: 1 } },
@@ -332,7 +372,7 @@ export async function createTask(
     assignedBy: assigneeId ? actorId : null,
     dueDate: body.dueDate || null,
     checklist: Array.isArray(body.checklist)
-      ? body.checklist
+      ? checklist
       : parseChecklistString(
           Array.isArray(body.acceptanceCriteria)
             ? body.acceptanceCriteria.join("\n")
@@ -634,15 +674,24 @@ export async function updateTask(
       updates[field] = body[field];
     }
   }
-  // `title` is `required` on the schema, so an empty one is not refused here but by Mongoose's
-  // updateValidators, and a ValidationError nobody catches leaves the route as a 500. Same shape as
-  // the two normalisations below, one field earlier — and the easiest of the three to reach, because
-  // the task screen saves on every keystroke, so clearing the field to retype it is the ordinary way
-  // in. Trimmed to match the schema, so the value compared and the value stored are one string.
+  // `title` and `checklist[].text` are both `required` on the schema, so a blank one is refused not
+  // here but by Mongoose's updateValidators — and a ValidationError nobody catches leaves the route
+  // as a 500. The task screen saves on every keystroke, so clearing either field to retype it is
+  // the ordinary way in, not an exotic one.
+  //
+  // Neighbours, not the same shape: the `sprint` and `agent` lines below *normalise* a cleared
+  // picker's "" into null, because null is a value those fields can hold. Blank is not a value
+  // these two can hold, so they refuse instead.
   if (updates.title !== undefined) {
     const title = titleOrRefusal(updates.title);
     if (typeof title !== "string") return title;
     updates.title = title;
+  }
+
+  if (updates.checklist !== undefined) {
+    const checklist = checklistOrRefusal(updates.checklist);
+    if (!Array.isArray(checklist)) return checklist;
+    updates.checklist = checklist;
   }
 
   // "" is what a cleared <select> sends, and it is not a value this field can hold: `sprint` is an

@@ -484,3 +484,36 @@ test("clearing the title is refused rather than crashing, and the stored one sur
     expect((await readTask(request, SIBLING_TASK_NUMBER)).title).toBe("Renamed after the refusal");
   });
 });
+
+/**
+ * BP-437, the same mine one section lower. `checklist[].text` is `required` too, so emptying a
+ * criterion sent `text: ""` and got the identical escaped ValidationError as a blank title.
+ *
+ * Adding one is the control that matters most here: `CriteriaSection` refuses to append a blank,
+ * so the guard must never be reachable by the constructive gesture — only by the destructive one.
+ */
+test("emptying an acceptance criterion is refused, and the stored one survives", async ({
+  page,
+  request,
+}) => {
+  await openTask(page, FINISHED_TASK_NUMBER);
+
+  await test.step("a criterion is added the ordinary way", async () => {
+    const saved = taskWrite(page, "PUT", `/tasks/${FINISHED_TASK_ID}`);
+    await page.getByLabel("Add criterion").fill("the build passes");
+    await page.getByLabel("Add criterion").press("Enter");
+    expect((await saved).status()).toBe(200);
+  });
+
+  await test.step("clearing it answers 400, not 500", async () => {
+    await page.getByRole("button", { name: "Criterion 1", exact: true }).click();
+    const refused = taskWrite(page, "PUT", `/tasks/${FINISHED_TASK_ID}`);
+    await page.getByRole("textbox", { name: "Criterion 1" }).fill("");
+    expect((await refused).status()).toBe(400);
+  });
+
+  await test.step("and the criterion on the server is untouched", async () => {
+    const stored = (await readTask(request, FINISHED_TASK_NUMBER)).checklist as ChecklistItem[];
+    expect(stored.map((i) => i.text)).toEqual(["the build passes"]);
+  });
+});
