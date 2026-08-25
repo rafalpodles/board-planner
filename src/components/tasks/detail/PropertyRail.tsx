@@ -167,8 +167,8 @@ export function PropertyRail({
   /**
    * A personal agent is a composition nobody vetted — anyone may compose one out of the admin's
    * blocks — so the server runs it only on a task its owner assigned to themselves. Offering one
-   * elsewhere would be a control that 400s on click, and this view's save failure carries no
-   * message: the reader is told "Save failed — retry", and retrying fails the same way.
+   * elsewhere would be a control that 400s on click: the reader is told what the server refused
+   * and offered a retry that fails the same way.
    *
    * Keyed on the DRAFT assignee, which is what the same save will send, so taking a task on and
    * picking your own agent in one gesture works. The agent already on the task stays listed

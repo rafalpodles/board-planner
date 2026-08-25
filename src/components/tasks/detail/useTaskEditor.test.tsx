@@ -31,7 +31,7 @@ const baseTask = {
 } as unknown as ApiTask;
 
 function Harness({ task }: { task: ApiTask }) {
-  const { draft, set, autoSaveState, retry } = useTaskEditor("p1", task);
+  const { draft, set, autoSaveState, autoSaveError, retry } = useTaskEditor("p1", task);
   return (
     <div>
       <input
@@ -40,7 +40,9 @@ function Harness({ task }: { task: ApiTask }) {
         onChange={(e) => set("title", e.target.value)}
       />
       <span data-testid="state">{autoSaveState}</span>
+      <span data-testid="error">{autoSaveError ?? ""}</span>
       <span data-testid="priority">{draft.priority}</span>
+      <button onClick={() => set("priority", "low")}>lower priority</button>
       <button onClick={retry}>retry</button>
     </div>
   );
@@ -123,6 +125,60 @@ describe("useTaskEditor", () => {
 
     await waitFor(() => expect(screen.getByTestId("state").textContent).toBe("saved"));
     expect(api.put).toHaveBeenCalledTimes(2);
+  });
+
+  /**
+   * BP-439. Clearing the title is how a rename starts, and the 400 that answers it carries the
+   * reason on the Error `use-api` throws. Discarded, the reader was told "Save failed" and left to
+   * guess — so the reason is kept and stays kept while the refused value is still in the draft,
+   * which is the state a person is actually in when they go and edit something else.
+   */
+  it("keeps the server's reason for a refusal, and keeps it across the next edit", async () => {
+    api.put.mockRejectedValue(Object.assign(new Error("Title is required"), { status: 400 }));
+    render(<Harness task={baseTask} />);
+
+    await act(async () => type(titleField(), ""));
+    await act(async () => {
+      vi.advanceTimersByTime(700);
+    });
+
+    await waitFor(() => expect(screen.getByTestId("state").textContent).toBe("error"));
+    expect(screen.getByTestId("error").textContent).toBe("Title is required");
+
+    await act(async () => screen.getByText("lower priority").click());
+    await act(async () => {
+      vi.advanceTimersByTime(700);
+    });
+
+    await waitFor(() =>
+      expect(api.put).toHaveBeenLastCalledWith("/api/projects/p1/tasks/t1", {
+        title: "",
+        priority: "low",
+      })
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("error").textContent).toBe("Title is required")
+    );
+  });
+
+  // The control: without it a reason that is never cleared reads exactly like one that is reported
+  it("drops the reason once a save goes through", async () => {
+    api.put.mockRejectedValueOnce(new Error("Title is required"));
+    render(<Harness task={baseTask} />);
+
+    await act(async () => type(titleField(), ""));
+    await act(async () => {
+      vi.advanceTimersByTime(700);
+    });
+    await waitFor(() => expect(screen.getByTestId("error").textContent).toBe("Title is required"));
+
+    await act(async () => type(titleField(), "Renamed after the refusal"));
+    await act(async () => {
+      vi.advanceTimersByTime(700);
+    });
+
+    await waitFor(() => expect(screen.getByTestId("state").textContent).toBe("saved"));
+    expect(screen.getByTestId("error").textContent).toBe("");
   });
 
   // A PM move or a second tab must not be clobbered, but it must not win over

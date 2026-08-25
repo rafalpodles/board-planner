@@ -485,6 +485,61 @@ test("clearing the title is refused rather than crashing, and the stored one sur
 });
 
 /**
+ * The autosave line under the title. Filtered rather than taken by position: the top bar has a
+ * live region of its own, and this one has to be found in every state it reports — including the
+ * failure, which is the state that used to have no live region at all.
+ */
+function saveStatus(page: Page): Locator {
+  return page
+    .locator("#main-content [aria-live='polite']")
+    .filter({ hasText: /All changes saved|Saving|retry/ });
+}
+
+/**
+ * BP-439. BP-437 turned the blank title's 500 into a 400 that says "Title is required", and the
+ * screen went on printing "Save failed" — the same nothing, in the scenario that justified the
+ * change. Driven the way a person meets it: the refused title stays in the draft, so the next edit
+ * to a DIFFERENT field goes out beside it and is refused for the same reason, which is precisely
+ * when being told the reason decides whether the screen is recoverable.
+ */
+test("a refused autosave says what the server refused, and keeps saying it", async ({ page }) => {
+  await openTask(page, SIBLING_TASK_NUMBER);
+  const field = page.getByLabel("Task title");
+  await expect(field).toHaveValue(SIBLING_TASK_TITLE);
+  await expect(saveStatus(page)).toHaveText("All changes saved");
+
+  await test.step("clearing the title is reported in the server's own words", async () => {
+    const refused = taskWrite(page, "PUT", `/tasks/${SIBLING_TASK_ID}`);
+    await field.fill("");
+    expect((await refused).status()).toBe(400);
+
+    await expect(saveStatus(page).getByRole("button")).toHaveText("⚠ Title is required — retry");
+  });
+
+  await test.step("and so is the next edit, which the refused title takes down with it", async () => {
+    const refused = taskWrite(page, "PUT", `/tasks/${SIBLING_TASK_ID}`);
+    await page.getByRole("combobox", { name: "Priority", exact: true }).click();
+    await page
+      .getByRole("listbox", { name: "Priority", exact: true })
+      .getByRole("option", { name: "High", exact: true })
+      .click();
+    expect((await refused).status()).toBe(400);
+
+    await expect(saveStatus(page).getByRole("button")).toHaveText("⚠ Title is required — retry");
+  });
+
+  // The control. Without it, a line that always reads "Title is required" would pass every
+  // assertion above while telling the reader the same one thing forever.
+  await test.step("a title the server accepts puts the line back", async () => {
+    const saved = taskWrite(page, "PUT", `/tasks/${SIBLING_TASK_ID}`);
+    await field.fill("Renamed after the refusal");
+    expect((await saved).status()).toBe(200);
+
+    await expect(saveStatus(page)).toHaveText("All changes saved");
+  });
+});
+
+/**
  * BP-437, the same mine one section lower. `checklist[].text` is `required` too, so emptying a
  * criterion sent `text: ""` and got the identical escaped ValidationError as a blank title.
  *
