@@ -6,7 +6,16 @@ import { User } from "@/models/user";
 import { Comment } from "@/models/comment";
 import { Worker } from "@/models/worker";
 import { Sprint } from "@/models/sprint";
-import { ApiTaskExecution, ICustomField, ITask, ITaskExecution, RunConflict, DEFAULT_PRIORITY } from "@/types";
+import {
+  ApiTaskExecution,
+  ICustomField,
+  ITask,
+  ITaskExecution,
+  RunConflict,
+  DEFAULT_PRIORITY,
+  PRIORITIES,
+  RECURRENCE_FREQUENCIES,
+} from "@/types";
 import { getColumnIds, defaultStatusFor, roleOf, getProjectColumns, columnIdsWithRole } from "@/lib/columns";
 import { escalationColumnId } from "@/lib/escalation";
 import { isRunnable, normaliseComposition } from "@/lib/agent-rules";
@@ -313,6 +322,70 @@ function checklistOrRefusal(value: unknown): ChecklistInput[] | TaskServiceResul
   return items;
 }
 
+/** What Mongoose's Date cast accepts: a Date, a timestamp, or a string it can parse. */
+function castsToDate(value: unknown): boolean {
+  if (value instanceof Date) return !Number.isNaN(value.getTime());
+  if (typeof value !== "string" && typeof value !== "number") return false;
+  return !Number.isNaN(new Date(value).getTime());
+}
+
+/**
+ * The fields the SCHEMA judges rather than either writer: `priority` is an enum, `dueDate` a Date
+ * cast, `recurrence` a subdocument whose interval is required. A wrong value on any of them is a
+ * ValidationError or a CastError nobody catches, so the route answers 500 where 400 belongs — the
+ * same family BP-437 closed for `title` and `checklist[].text`, one field at a time.
+ *
+ * On create it costs more than the status code: the guard runs before the `$inc` that mints the
+ * task number, so a refusal past it would spend a number on a task that never exists. Reachable
+ * rather than hypothetical — MCP's `create_task` declares `priority` as a free-form string and
+ * forwards it unchecked, so a model writing "critical" got a 500 and a permanent hole in the
+ * board's numbering (BP-438).
+ *
+ * Only the keys actually present are judged: an update writes what it names and nothing else.
+ */
+function schemaValuesOrRefusal(values: Body): TaskServiceResult | null {
+  if ("priority" in values && !PRIORITIES.includes(values.priority)) {
+    return {
+      ok: false,
+      error: `Invalid priority "${values.priority}" — must be one of: ${PRIORITIES.join(", ")}`,
+      status: 400,
+    };
+  }
+
+  // `""` is what a cleared date input sends, and Mongoose's own cast turns it into null the way it
+  // does an explicit one — refusing it here would be stricter than the schema this stands in for.
+  const dueDate = values.dueDate;
+  if ("dueDate" in values && dueDate !== null && dueDate !== "" && !castsToDate(dueDate)) {
+    return { ok: false, error: `Invalid due date "${dueDate}"`, status: 400 };
+  }
+
+  const recurrence = values.recurrence;
+  if ("recurrence" in values && recurrence !== null) {
+    if (typeof recurrence !== "object" || Array.isArray(recurrence)) {
+      return { ok: false, error: "Recurrence must be a frequency and an interval", status: 400 };
+    }
+    if (!RECURRENCE_FREQUENCIES.includes(recurrence.frequency)) {
+      return {
+        ok: false,
+        error: `Invalid recurrence frequency "${recurrence.frequency}" — must be one of: ${RECURRENCE_FREQUENCIES.join(", ")}`,
+        status: 400,
+      };
+    }
+    // Through Number(), because that is what the cast does: "2" is a 2 to Mongoose and refusing it
+    // here would make this guard stricter than the schema it stands in for.
+    const interval = Number(recurrence.interval);
+    if (!Number.isInteger(interval) || interval < 1) {
+      return {
+        ok: false,
+        error: "Recurrence interval must be a whole number of at least 1",
+        status: 400,
+      };
+    }
+  }
+
+  return null;
+}
+
 export async function createTask(
   projectId: string,
   actorId: string,
@@ -337,25 +410,17 @@ export async function createTask(
       );
   if (!Array.isArray(checklist)) return checklist;
 
-  // Checked before the counter moves: the `$inc` below is what mints the task number, so a create
-  // refused past it spends one on a task that never exists.
-  //
-  // Only this refusal is in front of it. Category, status and assignee are all refused *after* the
-  // `$inc` and still burn a number each, and so does anything the schema throws on — a mistyped
-  // `priority` from MCP, which declares it as a free-form string, costs a number and a 500. Moving
-  // the whole validation ahead of the counter is the real fix and is tracked separately; this is
-  // one arm of it, placed correctly rather than a claim that the hole is closed.
-  const project = await Project.findOneAndUpdate(
-    { _id: projectId },
-    { $inc: { taskCounter: 1 } },
-    { returnDocument: "after" }
-  );
+  // Read, not incremented: minting the task number is what the whole of the validation below has
+  // to happen in front of, so the project lookup the category and column lists need is split from
+  // the `$inc` that spends a number (BP-438). Every refusal past that point leaves a permanent hole
+  // in the board's numbering, for a task that never existed.
+  const board = await Project.findById(projectId, "categories columns customFields").lean();
 
-  if (!project) {
+  if (!board) {
     return { ok: false, error: "Project not found", status: 404 };
   }
 
-  const categoryNames = (project.categories || []).map((c) => c.name);
+  const categoryNames = (board.categories || []).map((c) => c.name);
   const category =
     body.category ??
     (categoryNames.includes("user-story") ? "user-story" : categoryNames[0] ?? "user-story");
@@ -367,8 +432,8 @@ export async function createTask(
     };
   }
 
-  const columnIds = getColumnIds(project);
-  const status = body.status ?? defaultStatusFor(project);
+  const columnIds = getColumnIds(board);
+  const status = body.status ?? defaultStatusFor(board);
   if (!columnIds.includes(status)) {
     return {
       ok: false,
@@ -390,28 +455,49 @@ export async function createTask(
     }
   }
 
+  const priority = body.priority ?? DEFAULT_PRIORITY;
+  const dueDate = body.dueDate || null;
+  const recurrence = body.recurrence || null;
+  const schemaRefusal = schemaValuesOrRefusal({ priority, dueDate, recurrence });
+  if (schemaRefusal) return schemaRefusal;
+
+  const sprint = (await sprintBelongsToProject(projectId, body.sprint)) ? body.sprint : null;
+  const customFieldValues = (() => {
+    const raw = body.customFieldValues || {};
+    if (typeof raw !== "object" || Array.isArray(raw)) return {};
+    const defs = board.customFields || [];
+    const sanitized = sanitizeCustomFieldValues(raw, defs);
+    const result = validateCustomFieldValues(sanitized, defs);
+    return result.valid ? sanitized : {};
+  })();
+
+  // Nothing above this line spent a number and nothing below it may refuse: the request is known
+  // to be answerable before the counter moves.
+  const project = await Project.findOneAndUpdate(
+    { _id: projectId },
+    { $inc: { taskCounter: 1 } },
+    { returnDocument: "after" }
+  );
+
+  if (!project) {
+    return { ok: false, error: "Project not found", status: 404 };
+  }
+
   const task = await Task.create({
     project: projectId,
     taskNumber: project.taskCounter,
     title,
     description: body.description ?? "",
-    priority: body.priority ?? DEFAULT_PRIORITY,
+    priority,
     category,
     status,
     assignee: assigneeId,
     assignedBy: assigneeId ? actorId : null,
-    dueDate: body.dueDate || null,
+    dueDate,
     checklist,
-    sprint: (await sprintBelongsToProject(projectId, body.sprint)) ? body.sprint : null,
-    customFieldValues: (() => {
-      const raw = body.customFieldValues || {};
-      if (typeof raw !== "object" || Array.isArray(raw)) return {};
-      const defs = project.customFields || [];
-      const sanitized = sanitizeCustomFieldValues(raw, defs);
-      const result = validateCustomFieldValues(sanitized, defs);
-      return result.valid ? sanitized : {};
-    })(),
-    recurrence: body.recurrence || null,
+    sprint,
+    customFieldValues,
+    recurrence,
     order: body.order ?? 0,
     createdBy: actorId,
   });
@@ -717,6 +803,12 @@ export async function updateTask(
     if (!Array.isArray(checklist)) return checklist;
     updates.checklist = checklist;
   }
+
+  // The rest of the same family, and the same reason: `priority`, `dueDate` and `recurrence` are
+  // all on the whitelist above and all judged by the schema, so a wrong one escaped as a 500 here
+  // exactly as it did on create.
+  const schemaRefusal = schemaValuesOrRefusal(updates);
+  if (schemaRefusal) return schemaRefusal;
 
   // "" is what a cleared <select> sends, and it is not a value this field can hold: `sprint` is an
   // ObjectId, so an empty string casts to a CastError and surfaces as a 500. Normalise first, then
