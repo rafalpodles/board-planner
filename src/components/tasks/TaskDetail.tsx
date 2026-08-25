@@ -153,7 +153,10 @@ function TaskDetailView({
   const [deleting, setDeleting] = useState(false);
   const [commentRefreshKey, setCommentRefreshKey] = useState(0);
 
-  const { draft, set, autoSaveState, retry, resend } = useTaskEditor(projectId, task);
+  const { draft, set, autoSaveState, autoSaveError, retry, resend } = useTaskEditor(
+    projectId,
+    task
+  );
 
   const columns = effectiveColumns(project.columns);
   // What a written task key is measured against. Former keys included, because this board renamed
@@ -335,22 +338,26 @@ function TaskDetailView({
                 <span aria-hidden className="opacity-40">
                   •
                 </span>
-                {autoSaveState === "error" ? (
-                  <button
-                    type="button"
-                    onClick={retry}
-                    className="focus-ring rounded text-danger hover:underline"
-                  >
-                    ⚠ Save failed — retry
-                  </button>
-                ) : (
-                  <span
-                    aria-live="polite"
-                    className={autoSaveState === "saved" ? "text-success" : ""}
-                  >
-                    {autoSaveState === "saving" ? "Saving…" : "All changes saved"}
-                  </span>
-                )}
+                {/* One live region across all four states: parked in the non-error branch it
+                    unmounted on failure, so the refusal was announced to nobody. */}
+                <span
+                  aria-live="polite"
+                  className={autoSaveState === "saved" ? "text-success" : ""}
+                >
+                  {autoSaveState === "error" ? (
+                    <button
+                      type="button"
+                      onClick={retry}
+                      className="focus-ring rounded text-danger hover:underline"
+                    >
+                      ⚠ {autoSaveError || "Save failed"} — retry
+                    </button>
+                  ) : autoSaveState === "saving" ? (
+                    "Saving…"
+                  ) : (
+                    "All changes saved"
+                  )}
+                </span>
               </div>
             </div>
 
