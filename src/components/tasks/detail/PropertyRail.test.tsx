@@ -407,8 +407,7 @@ describe("the Agent row", () => {
    * `agentUsableOnProject` runs a personal agent only on a task its owner assigned to themselves —
    * anyone may compose one, so its steps are a composition nobody vetted, and a `merge` step merges
    * whatever the prompt around it says. Offering one anywhere else would be a control that 400s on
-   * click, and this view's save failure prints no server message at all: "Save failed — retry",
-   * and retrying fails the same way.
+   * click: the reader is told what the server refused, and retrying fails the same way.
    *
    * `/api/agents` only ever answers with the reader's OWN user-scoped agents, so `scope: "user"`
    * in this list always means mine.
@@ -527,8 +526,8 @@ describe("the Agent row", () => {
    * decides what runs on a machine, which is the exact thing the consent model rests on.
    *
    * The name therefore travels on the task itself. The row stops being a picker: re-offering the
-   * value would be a control that 400s on click, which this view reports as "Save failed — retry"
-   * and nothing more.
+   * value would be a control that 400s on click, which this view can only report and offer to
+   * retry into the same refusal.
    */
   describe("and an agent the reader may not choose, which the task carries anyway", () => {
     // Populated, which is the shape the task routes answer with. A fixture holding the bare id
