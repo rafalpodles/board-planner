@@ -445,3 +445,83 @@ test("the history tab narrates a status change with both columns named", async (
     });
   });
 });
+
+/**
+ * BP-437. `title` is `required` on the schema, so a blank one used to be refused by Mongoose's
+ * updateValidators rather than by the route, and the ValidationError nobody catches left as a 500.
+ *
+ * Driven as the gesture that finds it: this field saves on change, so selecting the title and
+ * deleting it — what a person does on the way to typing a new one — sends the empty value. The
+ * status is the whole subject, so it is read off the response rather than inferred from the screen.
+ */
+test("clearing the title is refused rather than crashing, and the stored one survives", async ({
+  page,
+  request,
+}) => {
+  await openTask(page, SIBLING_TASK_NUMBER);
+  const field = page.getByLabel("Task title");
+  await expect(field).toHaveValue(SIBLING_TASK_TITLE);
+
+  await test.step("emptying it answers 400, not 500", async () => {
+    const refused = taskWrite(page, "PUT", `/tasks/${SIBLING_TASK_ID}`);
+    await field.fill("");
+    expect((await refused).status()).toBe(400);
+  });
+
+  await test.step("and the title on the server is untouched", async () => {
+    // Read from the API, not from the field: what the field holds is the text this test typed,
+    // which is true whether the write was refused or lost.
+    expect((await readTask(request, SIBLING_TASK_NUMBER)).title).toBe(SIBLING_TASK_TITLE);
+  });
+
+  // The control. Without it, "the write was refused" is equally consistent with a guard that
+  // refuses every title, and this screen would be broken rather than fixed.
+  await test.step("an ordinary rename still saves", async () => {
+    const saved = taskWrite(page, "PUT", `/tasks/${SIBLING_TASK_ID}`);
+    await field.fill("Renamed after the refusal");
+    expect((await saved).status()).toBe(200);
+    expect((await readTask(request, SIBLING_TASK_NUMBER)).title).toBe("Renamed after the refusal");
+  });
+});
+
+/**
+ * BP-437, the same mine one section lower. `checklist[].text` is `required` too, so emptying a
+ * criterion sent `text: ""` and got the identical escaped ValidationError as a blank title.
+ *
+ * Adding one is the control that matters most here: `CriteriaSection` refuses to append a blank,
+ * so the guard must never be reachable by the constructive gesture — only by the destructive one.
+ */
+test("emptying an acceptance criterion is refused, and the stored one survives", async ({
+  page,
+  request,
+}) => {
+  await openTask(page, FINISHED_TASK_NUMBER);
+
+  await test.step("a criterion is added the ordinary way", async () => {
+    const saved = taskWrite(page, "PUT", `/tasks/${FINISHED_TASK_ID}`);
+    await page.getByLabel("Add criterion").fill("the build passes");
+    await page.getByLabel("Add criterion").press("Enter");
+    expect((await saved).status()).toBe(200);
+  });
+
+  await test.step("clearing it answers 400, not 500", async () => {
+    await page.getByRole("button", { name: "Criterion 1", exact: true }).click();
+
+    // The edit-mode render settled, read off React's own state rather than a clock. Clicking swaps
+    // a rendered div for a textarea, and a fill landing inside that swap is dropped: the value goes
+    // into the DOM, React's state keeps the old one, no change event, no save — and the wait below
+    // then times out on a request that was never sent. This assertion is a *pre-write* read, so the
+    // value can only have come from React. Without it the test failed two runs in three.
+    const box = page.getByRole("textbox", { name: "Criterion 1" });
+    await expect(box).toHaveValue("the build passes");
+
+    const refused = taskWrite(page, "PUT", `/tasks/${FINISHED_TASK_ID}`);
+    await box.fill("");
+    expect((await refused).status()).toBe(400);
+  });
+
+  await test.step("and the criterion on the server is untouched", async () => {
+    const stored = (await readTask(request, FINISHED_TASK_NUMBER)).checklist as ChecklistItem[];
+    expect(stored.map((i) => i.text)).toEqual(["the build passes"]);
+  });
+});
