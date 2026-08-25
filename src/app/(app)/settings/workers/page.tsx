@@ -179,6 +179,11 @@ export default function AdminWorkersPage() {
           <p className="text-sm text-text-muted">
             Every worker registered on this instance. Only an instance admin can change what is on this page.
           </p>
+          {/* This page can only say what a machine is doing right now: every exit clears the run
+              identity it reads. What a finished run said is next door. */}
+          <Link href="/settings/workers/runs" className="mt-1 inline-block text-sm text-primary underline">
+            Run history
+          </Link>
         </div>
         <Button onClick={() => setEnrolling(true)}>Enrol a worker</Button>
       </div>
