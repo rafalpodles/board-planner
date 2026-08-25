@@ -55,6 +55,8 @@ export const GROUPS = {
     "claim-ownership.spec.ts",
     "in-app-notifications.spec.ts",
     "board-feed-notifications.spec.ts",
+    "pm-chat.spec.ts",
+    "pm-autonomy.spec.ts",
     "removed-member-notifications.spec.ts",
   ],
 } as const satisfies Record<string, readonly string[]>;
