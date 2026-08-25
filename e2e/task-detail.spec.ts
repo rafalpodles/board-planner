@@ -507,8 +507,17 @@ test("emptying an acceptance criterion is refused, and the stored one survives",
 
   await test.step("clearing it answers 400, not 500", async () => {
     await page.getByRole("button", { name: "Criterion 1", exact: true }).click();
+
+    // The edit-mode render settled, read off React's own state rather than a clock. Clicking swaps
+    // a rendered div for a textarea, and a fill landing inside that swap is dropped: the value goes
+    // into the DOM, React's state keeps the old one, no change event, no save — and the wait below
+    // then times out on a request that was never sent. This assertion is a *pre-write* read, so the
+    // value can only have come from React. Without it the test failed two runs in three.
+    const box = page.getByRole("textbox", { name: "Criterion 1" });
+    await expect(box).toHaveValue("the build passes");
+
     const refused = taskWrite(page, "PUT", `/tasks/${FINISHED_TASK_ID}`);
-    await page.getByRole("textbox", { name: "Criterion 1" }).fill("");
+    await box.fill("");
     expect((await refused).status()).toBe(400);
   });
 
