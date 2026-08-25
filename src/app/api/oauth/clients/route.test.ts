@@ -60,4 +60,21 @@ describe("DELETE /api/oauth/clients", () => {
     expect(tokenDeleteMany).not.toHaveBeenCalled();
     expect(clientDeleteOne).not.toHaveBeenCalled();
   });
+
+  // BP-444: `request.json()` throws on a body it cannot parse, and an uncaught throw is a 500 for
+  // what the caller should be told is a 400.
+  it("refuses a body that is not JSON instead of throwing", async () => {
+    const res = await DELETE(
+      new Request("https://app.example.com/api/oauth/clients", {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: "{not json",
+      }),
+      ctx()
+    );
+
+    expect(res.status).toBe(400);
+    expect(findById).not.toHaveBeenCalled();
+    expect(clientDeleteOne).not.toHaveBeenCalled();
+  });
 });
