@@ -215,12 +215,26 @@ test("Save is not offered when nothing has changed", async ({ page }) => {
  */
 test("a second answer for the same data does not take your typing away", async ({ page }) => {
   let pageFetches = 0;
+  let released: () => void;
+  // Resolved by the route once the second answer has actually gone out, so nothing here has to
+  // sleep for a length of time that has to be kept in step with the delay below
+  const secondAnswered = new Promise<void>((resolve) => {
+    released = resolve;
+  });
+
   await page.route("**/api/auth/me", async (route) => {
-    if (route.request().headers()["content-type"] === "application/json") {
-      pageFetches += 1;
-      // The first answers at once, so the field renders and can be typed into. The second is the
-      // one that used to arrive on top of the typing.
-      if (pageFetches > 1) await new Promise((resolve) => setTimeout(resolve, 3_000));
+    if (route.request().headers()["content-type"] !== "application/json") {
+      await route.continue();
+      return;
+    }
+    pageFetches += 1;
+    // The first answers at once, so the field renders and can be typed into. The second is the
+    // one that used to arrive on top of the typing — held just long enough to be sure it does.
+    if (pageFetches > 1) {
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      await route.continue();
+      released();
+      return;
     }
     await route.continue();
   });
@@ -233,7 +247,7 @@ test("a second answer for the same data does not take your typing away", async (
   await field.fill(NEW_NAME);
 
   // Past the held answer, which is where the typing used to be replaced or appended to
-  await page.waitForTimeout(3_500);
+  await secondAnswered;
   await expect(field).toHaveValue(NEW_NAME);
 
   // And it is the typed name that reaches the server, not the one that arrived late
