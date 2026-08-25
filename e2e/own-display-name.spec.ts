@@ -11,6 +11,7 @@ import {
   MEMBER_USERNAME,
   seed,
 } from "./seed";
+import { signIn as arriveSignedIn, signInThroughForm } from "./session";
 
 /**
  * BP-410. `/settings/profile` rendered `fullName` as plain text and `PUT /api/users/me` did not
@@ -39,13 +40,12 @@ async function storedName() {
   return admin?.fullName;
 }
 
-async function signIn(page: Page, username = ADMIN_USERNAME, password = ADMIN_PASSWORD) {
-  await page.goto("/login");
-  await page.getByLabel("Username").fill(username);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign In" }).click();
-  await expect(page).toHaveURL(/\/projects/);
-}
+const signIn = (page: Page, username: string = ADMIN_USERNAME, password = ADMIN_PASSWORD) =>
+  username === ADMIN_USERNAME
+    ? arriveSignedIn(page)
+    : username === MEMBER_USERNAME
+      ? arriveSignedIn(page, "member")
+      : signInThroughForm(page, username, password);
 
 // The field is on screen before React has hydrated it, and a fill inside that window is dropped —
 // silently, and in a way the DOM cannot show, because Playwright's own write is still sitting in
@@ -74,8 +74,25 @@ async function typeName(page: Page, value: string) {
     await expect(save).toBeDisabled({ timeout: 1_000 });
   }).toPass();
 
-  await field.fill(value);
-  if (value.trim()) await expect(save).toBeEnabled();
+  // The fill is retried until React is holding exactly what was typed. Two assertions, because
+  // they answer different questions: Save is enabled only when the value DIFFERS from the stored
+  // one, which is React confirming it saw a change; the value check is what catches the change
+  // being the wrong one.
+  //
+  // This is BP-435, and the cause is no longer a mystery. Loading the profile fires FOUR
+  // `GET /api/auth/me` responses, spread over ~84ms, and the page calls `setFullName` on each.
+  // One landing after the field was cleared puts the loaded name back — and `fill` then inserts
+  // into a box it believes it emptied, so the request carries `E2E MemberAnna Nowak`. Rare,
+  // because the window is those few milliseconds; likelier the faster the page arrives.
+  if (value.trim() && value.trim() !== SEEDED_NAME) {
+    await expect(async () => {
+      await field.fill(value);
+      await expect(save).toBeEnabled({ timeout: 1_000 });
+      await expect(field).toHaveValue(value, { timeout: 1_000 });
+    }).toPass();
+  } else {
+    await field.fill(value);
+  }
 }
 
 // The profile form is optimistic about nothing, but the toast is not evidence the write landed —
@@ -100,6 +117,13 @@ function savedName(page: Page) {
  * of what it saved, so the failure lands on the click and says which name went up.
  */
 async function saveName(page: Page, expected: string) {
+  // A late load landing between typeName's poll and this click is a smaller window than the one
+  // the poll closes, but the same window. Trimmed, because one caller types the name padded with
+  // spaces on purpose and expects the trimmed one back.
+  await expect
+    .poll(async () => (await page.getByLabel("Full Name").inputValue()).trim())
+    .toBe(expected);
+
   const [response] = await Promise.all([
     savedName(page),
     page.getByRole("button", { name: "Save" }).click(),
@@ -155,6 +179,80 @@ test("the account answers with the new name straight away", async ({ page }) => 
 
   const me = await page.request.get("/api/auth/me");
   expect((await me.json()).fullName).toBe(NEW_NAME);
+});
+
+test("Save is not offered when nothing has changed", async ({ page }) => {
+  await signIn(page);
+  await page.goto(PROFILE);
+
+  // The load has landed — the same wait typeName makes before it types
+  await expect(page.getByLabel("Full Name")).toHaveValue(SEEDED_NAME);
+  await expect(page.getByRole("button", { name: "Save" })).toBeDisabled();
+
+  // The control: it is offered the moment something does change
+  await typeName(page, "Anna Nowak");
+  await expect(page.getByRole("button", { name: "Save" })).toBeEnabled();
+});
+
+/**
+ * BP-435, held still.
+ *
+ * The flake was a response landing after the field had been typed into and putting the loaded
+ * name back — the failing run sent `E2E MemberAnna Nowak`, a concatenation, which is the one
+ * thing a dropped fill cannot produce.
+ *
+ * The window is narrow and specific. This screen issues **two** `/api/auth/me` requests of its
+ * own, and each calls `setFullName`. The field does not exist until the first answers, so nobody
+ * can type before that; the second lands about a millisecond later, and typing into that
+ * millisecond is what went wrong roughly once in thirty runs.
+ *
+ * Holding the second back turns the millisecond into three seconds. Remove the `edited` guard
+ * from the page and this goes red every time — checked both ways, which is the only reason it is
+ * worth having.
+ *
+ * The page's own requests are told from the auth provider's by Content-Type: `useApi` sends one,
+ * the provider's bare `fetch` does not, and only the page's call touches this field.
+ */
+test("a second answer for the same data does not take your typing away", async ({ page }) => {
+  let pageFetches = 0;
+  let released: () => void;
+  // Resolved by the route once the second answer has actually gone out, so nothing here has to
+  // sleep for a length of time that has to be kept in step with the delay below
+  const secondAnswered = new Promise<void>((resolve) => {
+    released = resolve;
+  });
+
+  await page.route("**/api/auth/me", async (route) => {
+    if (route.request().headers()["content-type"] !== "application/json") {
+      await route.continue();
+      return;
+    }
+    pageFetches += 1;
+    // The first answers at once, so the field renders and can be typed into. The second is the
+    // one that used to arrive on top of the typing — held just long enough to be sure it does.
+    if (pageFetches > 1) {
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      await route.continue();
+      released();
+      return;
+    }
+    await route.continue();
+  });
+
+  await signIn(page);
+  await page.goto(PROFILE);
+
+  const field = page.getByLabel("Full Name");
+  await expect(field).toHaveValue(SEEDED_NAME);
+  await field.fill(NEW_NAME);
+
+  // Past the held answer, which is where the typing used to be replaced or appended to
+  await secondAnswered;
+  await expect(field).toHaveValue(NEW_NAME);
+
+  // And it is the typed name that reaches the server, not the one that arrived late
+  await saveName(page, NEW_NAME);
+  await expect.poll(storedName).toBe(NEW_NAME);
 });
 
 test("a blank name is refused, and the stored one is left alone", async ({ page }) => {
