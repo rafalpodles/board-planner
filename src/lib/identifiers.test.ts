@@ -1,8 +1,12 @@
 import { describe, it, expect } from "vitest";
 import {
+  CRITERION_TEXT_MAX_LENGTH,
   FULL_NAME_MAX_LENGTH,
+  TASK_TITLE_MAX_LENGTH,
+  isValidCriterionText,
   isValidFullName,
   isValidProjectKey,
+  isValidTaskTitle,
   isValidUsername,
   normaliseFullName,
 } from "@/lib/identifiers";
@@ -149,5 +153,87 @@ describe("a display name", () => {
     expect(isValidFullName(normaliseFullName(" " + "a".repeat(FULL_NAME_MAX_LENGTH) + " "))).toBe(
       true
     );
+  });
+});
+
+/**
+ * BP-440. Written as code points rather than pasted characters, for the reason the subject itself
+ * is about: a string that paints nothing paints nothing in this file too, so a literal here would
+ * be a test whose input no reader can see.
+ */
+const codePoints = (...codes: number[]) => codes.map((c) => String.fromCodePoint(c)).join("");
+
+/** The ones that render as nothing at all — every entry of BP-440's table that `trim()` keeps. */
+const INVISIBLE: [string, number][] = [
+  ["zero-width space", 0x200b],
+  ["zero-width non-joiner", 0x200c],
+  ["left-to-right mark", 0x200e],
+  ["word joiner", 0x2060],
+  ["Mongolian vowel separator", 0x180e],
+  ["Hangul filler", 0x3164],
+  ["halfwidth Hangul filler", 0xffa0],
+  ["BOM", 0xfeff],
+  ["non-breaking space", 0x00a0],
+];
+
+/**
+ * BP-437 refuses a title `trim()` empties. These are the titles it does not: a zero-width space
+ * survives `trim()` as a one-character string, so the guard passed it through and the board painted
+ * a card with no title on it — the outcome that change exists to prevent, one paste further along.
+ */
+describe("a task title", () => {
+  it("accepts the titles a board actually has, in any script", () => {
+    for (const title of [
+      "Fix the board's drag handle",
+      "Poprawić eksport CSV",
+      "看板の並び替え",
+      "A title with an em dash — and a colon: fine",
+      "x",
+    ]) {
+      expect(isValidTaskTitle(title), title).toBe(true);
+    }
+  });
+
+  it.each(INVISIBLE)("refuses a title of nothing but %s", (_label, code) => {
+    expect(isValidTaskTitle(codePoints(code))).toBe(false);
+  });
+
+  it("refuses a title of invisible characters mixed with spaces, which is the pasted case", () => {
+    expect(isValidTaskTitle(codePoints(0x200b, 0x20, 0x2060, 0x20, 0xfeff))).toBe(false);
+  });
+
+  // Distinct from the above: U+202E paints nothing blank — it reverses the rendering of everything
+  // after it, so the title reads as one thing and is another (CVE-2021-42574's class).
+  it("refuses a bidi override even where the rest of the title is ordinary text", () => {
+    expect(isValidTaskTitle("Approve" + codePoints(0x202e) + "the payout")).toBe(false);
+    expect(isValidTaskTitle("Approve" + codePoints(0x2066) + "the payout")).toBe(false);
+    expect(isValidTaskTitle("Ship it" + codePoints(0x0a) + "and also this")).toBe(false);
+  });
+
+  it("caps the length, at the boundary", () => {
+    expect(isValidTaskTitle("a".repeat(TASK_TITLE_MAX_LENGTH))).toBe(true);
+    expect(isValidTaskTitle("a".repeat(TASK_TITLE_MAX_LENGTH + 1))).toBe(false);
+  });
+});
+
+describe("an acceptance criterion", () => {
+  it("accepts the sentence a criterion actually is", () => {
+    expect(isValidCriterionText("The digest goes out at 07:00 in the project's own timezone")).toBe(
+      true
+    );
+  });
+
+  it("refuses the invisible ones the same way a title does", () => {
+    for (const [label, code] of INVISIBLE) {
+      expect(isValidCriterionText(codePoints(code)), label).toBe(false);
+    }
+    expect(isValidCriterionText("Approve" + codePoints(0x202e) + "the payout")).toBe(false);
+  });
+
+  // Longer than a title on purpose — a criterion is a sentence, and a cap that refused one would
+  // refuse the ordinary gesture rather than the pathological one
+  it("caps the length, at the boundary", () => {
+    expect(isValidCriterionText("a".repeat(CRITERION_TEXT_MAX_LENGTH))).toBe(true);
+    expect(isValidCriterionText("a".repeat(CRITERION_TEXT_MAX_LENGTH + 1))).toBe(false);
   });
 });

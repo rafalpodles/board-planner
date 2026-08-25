@@ -23,6 +23,13 @@ import { notifyBoardFeed } from "@/lib/board-feed";
 import { pillToneForRole } from "@/lib/email-template";
 import { parseChecklistString } from "@/lib/checklist";
 import {
+  CRITERION_TEXT_RULE,
+  TASK_TITLE_RULE,
+  isValidCriterionText,
+  isValidTaskTitle,
+  rendersBlank,
+} from "@/lib/identifiers";
+import {
   validateCustomFieldValues,
   sanitizeCustomFieldValues,
   customFieldActivityChanges,
@@ -254,12 +261,21 @@ async function sprintBelongsToProject(projectId: string, sprint: unknown): Promi
 }
 
 /** A title both writers must agree on: the schema marks it `required` and trims it, so anything
- *  blank is a refusal rather than a write, and the trimmed string is what gets stored. */
+ *  blank is a refusal rather than a write, and the trimmed string is what gets stored.
+ *
+ *  `trim()` is not the whole of blank, which is the second refusal: a zero-width space survives it
+ *  and renders as no title at all, and nothing capped the length at any layer (BP-440). */
 function titleOrRefusal(value: unknown): string | TaskServiceResult {
-  if (typeof value !== "string" || value.trim() === "") {
+  // `rendersBlank`, not `trim() === ""`: a title of one zero-width space is blank to everybody who
+  // looks at it and empty to nobody who measures it, and it kept the older message either way.
+  if (typeof value !== "string" || rendersBlank(value)) {
     return { ok: false, error: "Title is required", status: 400 };
   }
-  return value.trim();
+  const title = value.trim();
+  if (!isValidTaskTitle(title)) {
+    return { ok: false, error: TASK_TITLE_RULE, status: 400 };
+  }
+  return title;
 }
 
 /** The rows a checklist is made of, as they arrive from a request body. */
@@ -272,8 +288,8 @@ interface ChecklistInput {
  * The same agreement for acceptance criteria. `checklist[].text` is `required` too, and the raw
  * array arrives straight off the request body — so clearing a criterion on the task screen was the
  * title bug one section lower, byte for byte: the same autosave, the same escaped ValidationError,
- * the same 500. The `acceptanceCriteria` string path never had it, because parseChecklistString
- * drops blank lines already.
+ * the same 500. The `acceptanceCriteria` string path never had *that*, because parseChecklistString
+ * drops blank lines already — it does have BP-440's, so it goes through here too now.
  *
  * Adding a criterion is unaffected: CriteriaSection refuses to append a blank one, so no legitimate
  * gesture sends an empty text and this can only ever catch the destructive one.
@@ -285,8 +301,11 @@ function checklistOrRefusal(value: unknown): ChecklistInput[] | TaskServiceResul
   const items: ChecklistInput[] = [];
   for (const raw of value) {
     const text = (raw as { text?: unknown } | null)?.text;
-    if (typeof text !== "string" || text.trim() === "") {
+    if (typeof text !== "string" || rendersBlank(text)) {
       return { ok: false, error: "An acceptance criterion is required", status: 400 };
+    }
+    if (!isValidCriterionText(text.trim())) {
+      return { ok: false, error: CRITERION_TEXT_RULE, status: 400 };
     }
     // Spread first so an existing row keeps its `_id` and `done`; only the text is normalised
     items.push({ ...(raw as ChecklistInput), text: text.trim() });
@@ -304,7 +323,18 @@ export async function createTask(
   const title = titleOrRefusal(body.title);
   if (typeof title !== "string") return title;
 
-  const checklist = Array.isArray(body.checklist) ? checklistOrRefusal(body.checklist) : [];
+  // The string form goes through the same guard, and here rather than at the write below: it drops
+  // blank lines already, but a criterion of zero-width spaces is not a blank line (BP-440), and a
+  // refusal past the `$inc` costs a task number.
+  const checklist = Array.isArray(body.checklist)
+    ? checklistOrRefusal(body.checklist)
+    : checklistOrRefusal(
+        parseChecklistString(
+          Array.isArray(body.acceptanceCriteria)
+            ? body.acceptanceCriteria.join("\n")
+            : (body.acceptanceCriteria ?? "")
+        )
+      );
   if (!Array.isArray(checklist)) return checklist;
 
   // Checked before the counter moves: the `$inc` below is what mints the task number, so a create
@@ -371,13 +401,7 @@ export async function createTask(
     assignee: assigneeId,
     assignedBy: assigneeId ? actorId : null,
     dueDate: body.dueDate || null,
-    checklist: Array.isArray(body.checklist)
-      ? checklist
-      : parseChecklistString(
-          Array.isArray(body.acceptanceCriteria)
-            ? body.acceptanceCriteria.join("\n")
-            : (body.acceptanceCriteria ?? "")
-        ),
+    checklist,
     sprint: (await sprintBelongsToProject(projectId, body.sprint)) ? body.sprint : null,
     customFieldValues: (() => {
       const raw = body.customFieldValues || {};
@@ -738,7 +762,9 @@ export async function updateTask(
     const acText = Array.isArray(body.acceptanceCriteria)
       ? body.acceptanceCriteria.join("\n")
       : body.acceptanceCriteria;
-    updates.checklist = parseChecklistString(acText);
+    const parsed = checklistOrRefusal(parseChecklistString(acText));
+    if (!Array.isArray(parsed)) return parsed;
+    updates.checklist = parsed;
   }
 
   // Kept in scope past validation: the same definitions name the fields in the history entries

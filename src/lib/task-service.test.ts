@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // by a hand-rolled reading of them
 import sift from "sift";
 import { Types } from "mongoose";
+import { CRITERION_TEXT_MAX_LENGTH, TASK_TITLE_MAX_LENGTH } from "@/lib/identifiers";
 
 // MongoDB's $cond treats only false, null, 0 and missing as false. An **empty string is true** —
 // the opposite of JavaScript. `execution.workerId` defaults to "", so an expression that leaned on
@@ -3481,6 +3482,11 @@ describe("what a status change tells a watcher", () => {
   });
 });
 
+/** BP-440's inputs, built rather than pasted: a character that paints nothing paints nothing here. */
+function codePoints(...codes: number[]): string {
+  return codes.map((code) => String.fromCodePoint(code)).join("");
+}
+
 /**
  * BP-437. `title` is `required` on the schema, so a blank one was refused by Mongoose's
  * updateValidators rather than by either writer — and a ValidationError nobody catches leaves the
@@ -3490,13 +3496,17 @@ describe("what a status change tells a watcher", () => {
  * Both writers are covered because both reached the schema, and `createTask` had the sharper
  * consequence: it spends a task number with `$inc` before it writes, so a refusal past that point
  * leaves a permanent hole in the board's numbering.
+ *
+ * BP-440 widened the same block rather than starting another: a title of zero-width spaces and a
+ * title of a megabyte are refused by the same guard, in the same two writers, for the same reason.
  */
+
 describe("a title neither writer will store", () => {
   const WHO = "u-actor";
 
   // Every mock this block reads is given an implementation here, including the ones only the
   // control needs. Borrowing them from an earlier describe is what an unqualified `mockClear` gets
-  // you: the ten refusals return before any mock is touched and pass either way, while the control
+  // you: the refusals return before any mock is touched and pass either way, while the control
   // — the one assertion telling "refuses blanks" apart from "refuses everything" — passed only
   // because a block two thousand lines above happened to run first. Alone, or under `-t`, or after
   // a reorder, it died on `Cannot read properties of undefined (reading 'populate')`, and under a
@@ -3524,6 +3534,15 @@ describe("a title neither writer will store", () => {
     ["a newline and nothing else", "\n"],
     ["a number", 7],
     ["null", null],
+    // BP-440: the titles `trim()` does not empty. Written as code points because a pasted one
+    // would be invisible here too — which is the whole complaint.
+    ["a zero-width space", codePoints(0x200b)],
+    ["a word joiner", codePoints(0x2060)],
+    ["a Hangul filler", codePoints(0x3164)],
+    ["invisible characters padded with spaces", ` ${codePoints(0x200b, 0xfeff)} `],
+    // Not blank: this one renders, and renders as a lie about the order of what follows it
+    ["a bidi override beside ordinary text", `Approve${codePoints(0x202e)}the payout`],
+    ["one character past the length cap", "a".repeat(TASK_TITLE_MAX_LENGTH + 1)],
   ])("%s", (_label, title) => {
     it("is refused by updateTask with a 400, and nothing is written", async () => {
       const result = await updateTask("p1", "t1", { title } as never, WHO);
@@ -3554,6 +3573,16 @@ describe("a title neither writer will store", () => {
     expect(created.ok).toBe(true);
     expect(taskCreate.mock.calls[0][0]).toMatchObject({ title: "Brand new" });
   });
+
+  // The cap's own control, at the boundary: a guard off by one refuses a title that fits, and
+  // looks from the refusals above exactly like a guard that works.
+  it("stores a title of exactly the length cap", async () => {
+    const atTheCap = "a".repeat(TASK_TITLE_MAX_LENGTH);
+    const updated = await updateTask("p1", "t1", { title: atTheCap }, WHO);
+
+    expect(updated.ok).toBe(true);
+    expect(setStage(findOneAndUpdate.mock.calls[0][1])).toMatchObject({ title: atTheCap });
+  });
 });
 
 /**
@@ -3561,8 +3590,10 @@ describe("a title neither writer will store", () => {
  * raw array comes straight off the request body — so clearing an acceptance criterion sent
  * `text: ""` and got the identical escaped ValidationError.
  *
- * The `acceptanceCriteria` string path is deliberately not covered here: parseChecklistString drops
- * blank lines before anything reaches the schema, so it never had the bug.
+ * The `acceptanceCriteria` string path was deliberately not covered: parseChecklistString drops
+ * blank lines before anything reaches the schema, so it never had *that* bug. BP-440 is one it does
+ * have — a line of zero-width spaces is not a blank line — so it now shares the same guard, and the
+ * two tests at the foot of this block are what says so in both directions.
  */
 describe("an acceptance criterion neither writer will store", () => {
   const WHO = "u-actor";
@@ -3587,6 +3618,10 @@ describe("an acceptance criterion neither writer will store", () => {
     ["one of whitespace", [{ _id: "c1", text: "   ", done: false }]],
     ["a criterion with no text at all", [{ _id: "c1", done: false }]],
     ["a good one beside a blank one", [GOOD, { text: "", done: false }]],
+    // BP-440, the same field family: blank to a reader without being empty to `trim()`
+    ["one of zero-width spaces", [{ _id: "c1", text: codePoints(0x200b, 0x200b), done: false }]],
+    ["one carrying a bidi override", [{ text: `Approve${codePoints(0x202e)}the payout`, done: false }]],
+    ["one past the length cap", [{ text: "a".repeat(CRITERION_TEXT_MAX_LENGTH + 1), done: false }]],
   ])("%s", (_label, checklist) => {
     it("is refused by updateTask, and nothing is written", async () => {
       const result = await updateTask("p1", "t1", { checklist } as never, WHO);
@@ -3620,8 +3655,34 @@ describe("an acceptance criterion neither writer will store", () => {
     ]);
   });
 
-  // The string form never had the defect, and must not acquire a refusal it does not need
-  it("leaves the acceptanceCriteria string path alone", async () => {
+  // BP-440. The string form is where MCP and the AI generator arrive, and parseChecklistString
+  // keeps a line of zero-width spaces because it is not a blank line.
+  it("refuses an invisible criterion arriving as an acceptanceCriteria string", async () => {
+    const result = await updateTask(
+      "p1",
+      "t1",
+      { acceptanceCriteria: `- [ ] ${codePoints(0x200b)}` },
+      WHO
+    );
+
+    expect(result).toMatchObject({ ok: false, status: 400 });
+    expect(findOneAndUpdate, "the update reached the model anyway").not.toHaveBeenCalled();
+  });
+
+  it("refuses it on create too, before the task number is spent", async () => {
+    const result = await createTask("p1", WHO, {
+      title: "New",
+      acceptanceCriteria: `- [ ] ${codePoints(0x3164)}`,
+    });
+
+    expect(result).toMatchObject({ ok: false, status: 400 });
+    expect(taskCreate).not.toHaveBeenCalled();
+    expect(projectFindOneAndUpdate, "a refused create still spent a task number").not.toHaveBeenCalled();
+  });
+
+  // The control for the two above, and for the guard the string path did not need: ordinary
+  // criteria still parse, and blank lines are still dropped rather than refused.
+  it("still stores an ordinary acceptanceCriteria string", async () => {
     const result = await updateTask(
       "p1",
       "t1",
