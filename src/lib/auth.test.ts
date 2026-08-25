@@ -148,6 +148,8 @@ describe("getAuthUser — an OAuth row that cannot be shown to be live", () => {
   it.each([
     ["missing", undefined],
     ["null", null],
+    // NaN is not less than Date.now(), so this row was read as a LIVE credential
+    ["an unparseable date", new Date("not a date")],
   ])("refuses a row whose accessExpiresAt is %s without throwing", async (_label, value) => {
     oauthTokenFindOne.mockResolvedValue({
       user: "u1",
