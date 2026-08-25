@@ -30,6 +30,8 @@ const agentRunSchema = new Schema<IAgentRun>(
 
 agentRunSchema.index({ project: 1, finishedAt: -1 });
 agentRunSchema.index({ task: 1 });
+// The fleet console reads across projects, which the compound index above cannot serve
+agentRunSchema.index({ finishedAt: -1 });
 
 export const AgentRun: Model<IAgentRun> =
   mongoose.models.AgentRun || mongoose.model<IAgentRun>("AgentRun", agentRunSchema);

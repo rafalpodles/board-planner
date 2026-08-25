@@ -13,6 +13,7 @@ import {
   seedCustomFields,
   storedActivity,
 } from "./seed";
+import { signIn as arriveSignedIn } from "./session";
 
 /**
  * CP-250: a task's history ignored every field the project defines, which since CP-213 is most of
@@ -33,13 +34,7 @@ test.beforeEach(async () => {
   await seed();
 });
 
-async function signIn(page: Page) {
-  await page.goto("/login");
-  await page.getByLabel("Username").fill(ADMIN_USERNAME);
-  await page.getByLabel("Password").fill(ADMIN_PASSWORD);
-  await page.getByRole("button", { name: "Sign In" }).click();
-  await expect(page).toHaveURL(/\/projects/);
-}
+const signIn = arriveSignedIn;
 
 /** Only the entries this suite is about: the fixture's own edits, never the seed's own noise. */
 async function fieldEntries(name?: string): Promise<Entry[]> {
@@ -130,11 +125,20 @@ async function typeValue(page: Page, field: string, value: string) {
 async function openHistory(page: Page): Promise<Locator> {
   await page.goto(TASK_URL);
   await page.getByRole("tab", { name: /^History/ }).click();
+  // "Show all" exists only above five entries, so whether it is there has to be read AFTER the
+  // entries arrive. isVisible() does not wait, and answers false on a panel that is still
+  // fetching — leaving the history truncated and the assertion below hunting for a row that was
+  // never expanded into view. The empty-state line is also the loading state, so its going is
+  // what says the entries are in.
+  const panel = page.locator("#task-panel-history");
+  await expect(panel).toBeVisible();
+  await expect(panel.getByText("No history yet")).toBeHidden();
+
   const showAll = page.getByRole("button", { name: /Show all \d+ entries/ });
-  if (await showAll.isVisible().catch(() => false)) await showAll.click();
+  if (await showAll.isVisible()) await showAll.click();
   // Scoped on purpose: the rail alongside shows each field's *current* name and value, so a
   // page-wide assertion about a renamed field would be answered by the rail, not by the history.
-  return page.locator("#task-panel-history");
+  return panel;
 }
 
 /** A PUT through the app's own API — the path MCP, the PM agent and the board all end up on. */

@@ -9,6 +9,7 @@ import {
   MEMBER_USERNAME,
   seed,
 } from "./seed";
+import { signIn as arriveSignedIn } from "./session";
 
 /**
  * BP-281, slice 2. A password reset by email needs an address to send to, and an account had no
@@ -27,13 +28,7 @@ async function db() {
   return handle;
 }
 
-async function signInAsAdmin(page: Page) {
-  await page.goto("/login");
-  await page.getByLabel("Username").fill(ADMIN_USERNAME);
-  await page.getByLabel("Password").fill(ADMIN_PASSWORD);
-  await page.getByRole("button", { name: "Sign In" }).click();
-  await expect(page).toHaveURL(/\/projects/);
-}
+const signInAsAdmin = arriveSignedIn;
 
 async function createUser(page: Page, username: string, email: string) {
   await page.getByRole("button", { name: "New User" }).click();

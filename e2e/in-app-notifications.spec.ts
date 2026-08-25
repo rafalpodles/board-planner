@@ -28,6 +28,7 @@ import {
   seedDemotableAdmin,
   seedSecondProject,
 } from "./seed";
+import { signIn as arriveSignedIn, signInThroughForm } from "./session";
 
 /**
  * BP-387. The bell and the feed behind it — `/api/notifications`, `/api/notifications/read` and
@@ -108,13 +109,12 @@ const KEPT_ASSIGNED = `${KEPT_TASK_KEY} assigned to you`;
 
 test.beforeEach(seed);
 
-async function signIn(page: Page, username: string, password: string) {
-  await page.goto("/login");
-  await page.getByLabel("Username").fill(username);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign In" }).click();
-  await expect(page).toHaveURL(/\/projects/);
-}
+const signIn = (page: Page, username: string, password: string) =>
+  username === ADMIN_USERNAME
+    ? arriveSignedIn(page)
+    : username === MEMBER_USERNAME
+      ? arriveSignedIn(page, "member")
+      : signInThroughForm(page, username, password);
 
 /**
  * Both API routes compiled and answered once, before anything is timed against them.
