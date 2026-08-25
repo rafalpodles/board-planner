@@ -74,8 +74,25 @@ async function typeName(page: Page, value: string) {
     await expect(save).toBeDisabled({ timeout: 1_000 });
   }).toPass();
 
-  await field.fill(value);
-  if (value.trim()) await expect(save).toBeEnabled();
+  // The fill is retried until React is holding exactly what was typed. Two assertions, because
+  // they answer different questions: Save is enabled only when the value DIFFERS from the stored
+  // one, which is React confirming it saw a change; the value check is what catches the change
+  // being the wrong one.
+  //
+  // This is BP-435, and the cause is no longer a mystery. Loading the profile fires FOUR
+  // `GET /api/auth/me` responses, spread over ~84ms, and the page calls `setFullName` on each.
+  // One landing after the field was cleared puts the loaded name back — and `fill` then inserts
+  // into a box it believes it emptied, so the request carries `E2E MemberAnna Nowak`. Rare,
+  // because the window is those few milliseconds; likelier the faster the page arrives.
+  if (value.trim() && value.trim() !== SEEDED_NAME) {
+    await expect(async () => {
+      await field.fill(value);
+      await expect(save).toBeEnabled({ timeout: 1_000 });
+      await expect(field).toHaveValue(value, { timeout: 1_000 });
+    }).toPass();
+  } else {
+    await field.fill(value);
+  }
 }
 
 // The profile form is optimistic about nothing, but the toast is not evidence the write landed —
@@ -100,6 +117,13 @@ function savedName(page: Page) {
  * of what it saved, so the failure lands on the click and says which name went up.
  */
 async function saveName(page: Page, expected: string) {
+  // A late load landing between typeName's poll and this click is a smaller window than the one
+  // the poll closes, but the same window. Trimmed, because one caller types the name padded with
+  // spaces on purpose and expects the trimmed one back.
+  await expect
+    .poll(async () => (await page.getByLabel("Full Name").inputValue()).trim())
+    .toBe(expected);
+
   const [response] = await Promise.all([
     savedName(page),
     page.getByRole("button", { name: "Save" }).click(),
@@ -155,6 +179,19 @@ test("the account answers with the new name straight away", async ({ page }) => 
 
   const me = await page.request.get("/api/auth/me");
   expect((await me.json()).fullName).toBe(NEW_NAME);
+});
+
+test("Save is not offered when nothing has changed", async ({ page }) => {
+  await signIn(page);
+  await page.goto(PROFILE);
+
+  // The load has landed — the same wait typeName makes before it types
+  await expect(page.getByLabel("Full Name")).toHaveValue(SEEDED_NAME);
+  await expect(page.getByRole("button", { name: "Save" })).toBeDisabled();
+
+  // The control: it is offered the moment something does change
+  await typeName(page, "Anna Nowak");
+  await expect(page.getByRole("button", { name: "Save" })).toBeEnabled();
 });
 
 test("a blank name is refused, and the stored one is left alone", async ({ page }) => {

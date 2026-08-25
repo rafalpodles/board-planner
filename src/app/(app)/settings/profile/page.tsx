@@ -149,6 +149,9 @@ export default function ProfilePage() {
             saving ||
             loadFailed ||
             !fullName.trim() ||
+            // Nothing to save is not something to offer: the route writes only what differs, so
+            // this used to answer 200 having written nothing
+            (!nameChanged && !emailChanged) ||
             (emailChanged && !currentPassword.trim())
           }
         >
