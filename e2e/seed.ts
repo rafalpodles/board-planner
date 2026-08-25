@@ -475,7 +475,9 @@ export const LIFECYCLE_PAST_ONE_DELIVERED = 8;
 export const LIFECYCLE_PAST_ONE_ABANDONED = 4;
 
 const LIFECYCLE_PAST_TWO_ID = id("e2e00000000000000000c402");
-export const LIFECYCLE_PAST_TWO_NAME = "Sprint 6";
+// Numbered above every other sprint and *not* the latest-ending one, so the form's suggestion
+// tells "the latest sprint plus one" apart from "the highest number plus one"
+export const LIFECYCLE_PAST_TWO_NAME = "Sprint 12";
 export const LIFECYCLE_PAST_TWO_DELIVERED = 2;
 
 export const LIFECYCLE_CURRENT_ID = id("e2e00000000000000000c403");
@@ -490,6 +492,12 @@ export const LIFECYCLE_FINISHED_TASK_NUMBER = 120;
 
 const LIFECYCLE_UNFINISHED_TASK_ID = id("e2e00000000000000000d402");
 export const LIFECYCLE_UNFINISHED_TASK_NUMBER = 121;
+
+// In the backlog and in the done column at once. Whether the planning view offers it is decided in
+// the browser (PlanningView's columnIdsWithRole), and /tasks?sprint=backlog returns it either way —
+// so it is the one thing on this board no server response can answer for.
+export const LIFECYCLE_BACKLOG_DONE_TASK_NUMBER = 125;
+export const LIFECYCLE_BACKLOG_DONE_TASK_TITLE = "Finished long before this sprint";
 
 export async function seedSprintLifecycle() {
   const db = (await connect()).db!;
@@ -586,6 +594,13 @@ export async function seedSprintLifecycle() {
       order: 0,
     }),
     task({
+      taskNumber: LIFECYCLE_BACKLOG_DONE_TASK_NUMBER,
+      title: LIFECYCLE_BACKLOG_DONE_TASK_TITLE,
+      status: "done",
+      sprint: null,
+      order: 0,
+    }),
+    task({
       taskNumber: 124,
       title: "Committed to Sprint 5 and never finished",
       status: "in_progress",
@@ -602,7 +617,7 @@ export async function seedSprintLifecycle() {
       order: 0,
     }),
   ]);
-  await db.collection("projects").updateOne({ _id: PROJECT_ID }, { $max: { taskCounter: 124 } });
+  await db.collection("projects").updateOne({ _id: PROJECT_ID }, { $max: { taskCounter: 125 } });
 
   await mongoose.disconnect();
 }
