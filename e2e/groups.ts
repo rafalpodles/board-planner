@@ -35,6 +35,7 @@ export const GROUPS = {
     "instance-settings.spec.ts",
     "settings-mobile-nav.spec.ts",
     "instance-audit.spec.ts",
+    "agents-catalog.spec.ts",
     "external-integrations.spec.ts",
     "mcp-oauth.spec.ts",
   ],
