@@ -8,7 +8,7 @@ export const BASE_URL = `http://localhost:${PORT}`;
 
 // The PM agent's model, replaced by a local script. Its own port so the dev server's is free.
 const PM_STUB_PORT = Number(process.env.PM_STUB_PORT ?? PORT + 1);
-const PM_STUB_URL = `http://localhost:${PM_STUB_PORT}`;
+export const PM_STUB_URL = `http://localhost:${PM_STUB_PORT}`;
 
 // The model behind AI task generation, replaced the same way.
 //
@@ -120,6 +120,11 @@ export default defineConfig({
         // Presence alone is what isPmAvailable checks; the stub never looks at it
         OPENROUTER_API_KEY: "e2e-stub-key",
         OPENROUTER_BASE_URL: `${PM_STUB_URL}/v1`,
+        // Effectively never. The scheduler starts with the app (src/instrumentation.ts), and a
+        // spec that switches a project's daily review on leaves it on until the next seed() — so
+        // at the 5-minute default a tick can land mid-run and spend a real turn against the cap
+        // the turn-cap specs are counting.
+        PM_SCHEDULER_TICK_MS: String(24 * 60 * 60 * 1000),
         // isAIEnabled() checks the key's presence and the form hides AI Assist without it; the
         // base URL is what keeps the SDK off api.openai.com
         OPENAI_API_KEY: "e2e-stub-key",
