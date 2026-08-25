@@ -61,7 +61,7 @@ export default defineConfig({
   projects: Object.entries(GROUPS).map(([name, files]) => ({
     name,
     use: { ...devices["Desktop Chrome"] },
-    testMatch: files.map((file) => `**/${file}`),
+    testMatch: files.map((file) => `${__dirname}/e2e/${file}`),
   })),
   webServer: [
     {

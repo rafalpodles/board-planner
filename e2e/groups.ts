@@ -2,9 +2,10 @@
  * The suite, divided into groups that run as separate CI jobs.
  *
  * It is one Playwright project per group rather than `--shard`, because Playwright shards by
- * **test count**: `claim-ownership` has 43 tests in 35 seconds and `field-history` 26 in 154, so
- * an even split of tests is a very uneven split of minutes. The groups below are balanced on
- * measured duration and named for what they cover, so a new spec has an obvious home.
+ * **test count**, and on this suite that is a very uneven split of minutes: on CI run 32768854540,
+ * `claim-ownership` took 35s over 43 tests while `field-history` took 154s over 26. The groups
+ * below are balanced on those CI durations and named for what they cover, so a new spec has an
+ * obvious home.
  *
  * A spec in no group runs nowhere. `groups.test.ts` fails when one is missing, in the cheap unit
  * job rather than three minutes into an end-to-end run.
