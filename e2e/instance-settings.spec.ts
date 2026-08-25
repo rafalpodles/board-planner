@@ -401,8 +401,15 @@ test("the theme follows the choice, and the choice survives a reload", async ({ 
   // Choosing does not close the menu, so a second choice must not toggle it shut on the way in
   async function chooseTheme(name: "Light" | "Dark") {
     const group = page.getByRole("group", { name: "Theme" });
-    if (!(await group.isVisible().catch(() => false))) {
-      await page.getByRole("button", { name: /E2E Admin/ }).click();
+    const accountMenu = page.getByRole("button", { name: /E2E Admin/ });
+    // Whether the menu is already open cannot be read before one of the two is on screen: an
+    // isVisible() during a re-render answers false, clicks the account button, and closes the
+    // menu the choice was about to be made in — which is the very thing the comment above warns
+    // against.
+    await expect(group.or(accountMenu).first()).toBeVisible();
+    if (!(await group.isVisible())) {
+      await accountMenu.click();
+      await expect(group).toBeVisible();
     }
     await group.getByRole("button", { name, exact: true }).click();
   }
