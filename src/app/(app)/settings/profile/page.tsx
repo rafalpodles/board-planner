@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { FULL_NAME_MAX_LENGTH } from "@/lib/identifiers";
@@ -30,16 +30,24 @@ export default function ProfilePage() {
   // the shell over
   const nameChanged = loadFailed ? false : fullName.trim() !== savedFullName;
 
+  // A response can arrive after somebody has started typing — a slow connection, or simply a
+  // second request in flight — and applying it then throws their edit away mid-sentence. The
+  // baseline still moves, because it is what "changed" is measured against; only the field they
+  // are holding is left alone.
+  const edited = useRef(false);
+
   useEffect(() => {
     if (!user) return;
     // Fetch fresh user data
     api
       .get("/api/auth/me")
       .then((data: { email?: string; fullName?: string }) => {
-        setEmail(data.email || "");
         setSavedEmail(data.email || "");
-        setFullName(data.fullName || "");
         setSavedFullName(data.fullName || "");
+        if (!edited.current) {
+          setEmail(data.email || "");
+          setFullName(data.fullName || "");
+        }
         setLoaded(true);
       })
       .catch(() => {
@@ -64,6 +72,7 @@ export default function ProfilePage() {
       setSavedFullName(fullName.trim());
       setFullName(fullName.trim());
       setCurrentPassword("");
+      edited.current = false;
       // The shell renders the name from the cached user, so without this it keeps showing the old
       // one until a full reload — on the one screen where somebody is watching for it to change
       if (nameChanged) await refreshUser();
@@ -106,7 +115,10 @@ export default function ProfilePage() {
         <Input
           label="Full Name"
           value={fullName}
-          onChange={(e) => setFullName(e.target.value)}
+          onChange={(e) => {
+            edited.current = true;
+            setFullName(e.target.value);
+          }}
           maxLength={FULL_NAME_MAX_LENGTH}
           placeholder="How you appear on tasks and comments"
         />
@@ -115,7 +127,10 @@ export default function ProfilePage() {
           label="Email"
           type="email"
           value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          onChange={(e) => {
+            edited.current = true;
+            setEmail(e.target.value);
+          }}
           placeholder="your@email.com"
         />
 
