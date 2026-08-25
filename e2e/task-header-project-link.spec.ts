@@ -8,6 +8,7 @@ import {
   SIBLING_TASK_NUMBER,
   seed,
 } from "./seed";
+import { signIn as arriveSignedIn } from "./session";
 
 // BP-417. The project name in the task header used to be a plain <span> — these specs would fail
 // against that version because there is no link with this name to find at all.
@@ -16,13 +17,7 @@ const TASK_URL = `${BASE_URL}/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBE
 const BOARD_URL = `${BASE_URL}/projects/${PROJECT_KEY}`;
 const TASK_KEY = `${PROJECT_KEY}-${SIBLING_TASK_NUMBER}`;
 
-async function signIn(page: Page) {
-  await page.goto("/login");
-  await page.getByLabel("Username").fill(ADMIN_USERNAME);
-  await page.getByLabel("Password").fill(ADMIN_PASSWORD);
-  await page.getByRole("button", { name: "Sign In" }).click();
-  await expect(page).toHaveURL(/\/projects/);
-}
+const signIn = arriveSignedIn;
 
 const bar = (page: Page) => page.getByTestId("task-top-bar");
 const projectLink = (page: Page) => bar(page).getByRole("link", { name: PROJECT_NAME });

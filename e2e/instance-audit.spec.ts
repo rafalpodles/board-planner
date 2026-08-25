@@ -2,6 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 import mongoose from "mongoose";
 import { ADMIN_AUTH, SAME_ORIGIN, signInApi } from "./api";
 import { ADMIN_PASSWORD, ADMIN_USERNAME, E2E_MONGODB_URI, PROJECT_ID, PROJECT_KEY, seed } from "./seed";
+import { signIn as arriveSignedIn } from "./session";
 
 /**
  * BP-233. BP-232 removed stored worker assignments, and the audit call that hung off them went with
@@ -27,13 +28,7 @@ async function auditRows() {
   return handle.collection("instanceauditlogs").find({}).sort({ createdAt: -1 }).toArray();
 }
 
-async function signIn(page: Page) {
-  await page.goto("/login");
-  await page.getByLabel("Username").fill(ADMIN_USERNAME);
-  await page.getByLabel("Password").fill(ADMIN_PASSWORD);
-  await page.getByRole("button", { name: "Sign In" }).click();
-  await expect(page).toHaveURL(/\/projects/);
-}
+const signIn = arriveSignedIn;
 
 test.beforeEach(async () => {
   await seed();

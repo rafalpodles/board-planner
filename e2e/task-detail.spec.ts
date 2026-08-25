@@ -15,6 +15,7 @@ import {
   storedActivity,
   seed,
 } from "./seed";
+import { signIn as arriveSignedIn } from "./session";
 
 /**
  * BP-385: the task detail surface — comments, mentions, watching, acceptance criteria,
@@ -44,10 +45,8 @@ const TINY_PNG = Buffer.from(
 );
 
 async function signIn(page: Page) {
+  await arriveSignedIn(page);
   await page.goto(boardUrl);
-  await page.getByLabel("Username").fill(ADMIN_USERNAME);
-  await page.getByLabel("Password").fill(ADMIN_PASSWORD);
-  await page.getByRole("button", { name: "Sign In" }).click();
   await expect(page.getByRole("heading", { name: PROJECT_NAME })).toBeVisible();
 }
 

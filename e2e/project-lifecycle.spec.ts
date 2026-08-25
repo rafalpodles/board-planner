@@ -12,6 +12,7 @@ import {
   seed,
   seedAssignmentOutsider,
 } from "./seed";
+import { signIn as arriveSignedIn, signInThroughForm } from "./session";
 
 /**
  * BP-388, the identity-and-access half: creating a board, renaming it, deleting it, and handing
@@ -34,13 +35,12 @@ const NEW_NAME = "Zeppelin Works";
 const NEW_KEY = "ZW";
 const SECOND_KEY = "ZX";
 
-async function signIn(page: Page, username: string, password: string) {
-  await page.goto("/login");
-  await page.getByLabel("Username").fill(username);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign In" }).click();
-  await expect(page).toHaveURL(/\/projects/);
-}
+const signIn = (page: Page, username: string, password: string) =>
+  username === ADMIN_USERNAME
+    ? arriveSignedIn(page)
+    : username === MEMBER_USERNAME
+      ? arriveSignedIn(page, "member")
+      : signInThroughForm(page, username, password);
 
 const sidebarLink = (page: Page, name: string) =>
   page.getByRole("complementary").getByRole("link", { name: new RegExp(name) });

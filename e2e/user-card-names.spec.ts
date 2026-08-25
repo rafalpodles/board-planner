@@ -1,5 +1,6 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
 import { ADMIN_PASSWORD, ADMIN_USERNAME, seed } from "./seed";
+import { signIn as arriveSignedIn } from "./session";
 
 /**
  * BP-351. The cards truncated every ordinary name — "E2E Me…" for "E2E Member" — because three
@@ -7,13 +8,7 @@ import { ADMIN_PASSWORD, ADMIN_USERNAME, seed } from "./seed";
  * column sat beside them.
  */
 
-async function signIn(page: Page) {
-  await page.goto("/login");
-  await page.getByLabel("Username").fill(ADMIN_USERNAME);
-  await page.getByLabel("Password").fill(ADMIN_PASSWORD);
-  await page.getByRole("button", { name: "Sign In" }).click();
-  await expect(page).toHaveURL(/\/projects/);
-}
+const signIn = arriveSignedIn;
 
 // Whether the browser is hiding characters, which is what "truncated" means here. `toBeVisible`
 // cannot see it: an ellipsised name is fully visible and still unreadable.

@@ -12,6 +12,7 @@ import {
   TARGET_COLUMN,
   seed,
 } from "./seed";
+import { signIn as arriveSignedIn } from "./session";
 
 /**
  * BP-398. Every claim here is about where the browser puts the header while the task moves, and
@@ -39,13 +40,7 @@ const TALL_BODY = Array.from(
 in front of while the task scrolls.`
 ).join("\n\n");
 
-async function signIn(page: Page) {
-  await page.goto("/login");
-  await page.getByLabel("Username").fill(ADMIN_USERNAME);
-  await page.getByLabel("Password").fill(ADMIN_PASSWORD);
-  await page.getByRole("button", { name: "Sign In" }).click();
-  await expect(page).toHaveURL(/\/projects/);
-}
+const signIn = arriveSignedIn;
 
 /** A task tall enough to scroll and titled long enough to overflow the header */
 async function makeTaskTall(page: Page) {
