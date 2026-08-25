@@ -31,6 +31,7 @@ export const GROUPS = {
   project: [
     "project-lifecycle.spec.ts",
     "project-settings.spec.ts",
+    "project-dashboard.spec.ts",
     "instance-settings.spec.ts",
     "settings-mobile-nav.spec.ts",
     "instance-audit.spec.ts",
