@@ -31,6 +31,7 @@ function statusBadge(status: SprintStatus) {
   const accent = accents[status];
   return (
     <span
+      data-testid="sprint-status"
       className={`text-xs px-2 py-0.5 rounded-full font-medium ${
         accent ? "chip" : "bg-bg-input text-text-muted"
       }`}
@@ -92,7 +93,7 @@ export function SprintHeader({
         <div className="min-w-0 basis-full sm:basis-auto">
           <div className="flex items-center gap-2">
             <div className="relative inline-flex min-w-0 items-center gap-1">
-              <h2 className="truncate text-lg font-semibold">{sprint.name}</h2>
+              <h2 data-testid="sprint-name" className="truncate text-lg font-semibold">{sprint.name}</h2>
               {canPickSprint && (
                 <svg
                   aria-hidden="true"
