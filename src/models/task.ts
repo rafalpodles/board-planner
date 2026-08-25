@@ -1,5 +1,5 @@
 import mongoose, { Schema, Model } from "mongoose";
-import { ITask, PRIORITIES, DEFAULT_PRIORITY } from "@/types";
+import { ITask, PRIORITIES, DEFAULT_PRIORITY, RECURRENCE_FREQUENCIES } from "@/types";
 
 const taskSchema = new Schema<ITask>(
   {
@@ -104,7 +104,7 @@ const taskSchema = new Schema<ITask>(
     },
     recurrence: {
       type: {
-        frequency: { type: String, enum: ["daily", "weekly", "monthly"], required: true },
+        frequency: { type: String, enum: RECURRENCE_FREQUENCIES, required: true },
         interval: { type: Number, required: true, min: 1 },
       },
       default: null,
