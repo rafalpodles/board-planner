@@ -10,21 +10,9 @@ import { SettingsCard } from "@/components/settings/SettingsCard";
 import { useDirtyGroup } from "@/components/settings/settings-context";
 import { PROJECT_POLICY_DEFAULTS } from "@/lib/worker-policy";
 import { projectRemotes, sameRepo } from "@/lib/repo-match";
-import { ApiProject, ApiWorker } from "@/types";
+import { ApiAgentRun, ApiProject, ApiWorker } from "@/types";
 import { SectionProps } from "./types";
-import { AgentRunOutcome, ApiAgentRun } from "@/types";
-
-const OUTCOME_LABELS: Record<AgentRunOutcome, string> = {
-  delivered: "Pull request open",
-  merged: "Merged",
-  refused: "Refused",
-  blocked: "Went to a human",
-  failed: "Failed",
-  requeued: "Back in the queue",
-  released: "Released",
-};
-
-const FAILED_OUTCOMES = new Set<AgentRunOutcome>(["refused", "blocked", "failed"]);
+import { endedBadly, endState } from "@/lib/run-outcome";
 import Link from "next/link";
 import { useStore } from "@/app/(app)/agents/store";
 
@@ -345,11 +333,19 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
                       <td className="px-3 py-2">{run.taskKey}</td>
                       <td className="px-3 py-2 text-text-muted">{run.agentName || "—"}</td>
                       <td
-                        className={`px-3 py-2 ${
-                          FAILED_OUTCOMES.has(run.outcome) ? "text-danger" : "text-success"
-                        }`}
+                        className={`px-3 py-2 ${endedBadly(run) ? "text-danger" : "text-success"}`}
                       >
-                        {run.refusedBy ? `Refused: ${run.refusedBy}` : OUTCOME_LABELS[run.outcome]}
+                        {endState(run)}
+                        {/* What the run said on the way out. It was written to the database and
+                            rendered nowhere, so the only way to read it was a Mongo shell. */}
+                        {run.detail && (
+                          <span
+                            data-testid="run-detail"
+                            className="mt-0.5 block max-h-24 overflow-auto whitespace-pre-wrap break-words text-xs font-normal text-text-muted"
+                          >
+                            {run.detail}
+                          </span>
+                        )}
                       </td>
                       <td className="px-3 py-2 text-right text-text-muted">{run.minutes} min</td>
                       <td className="px-3 py-2 text-right text-text-muted">
