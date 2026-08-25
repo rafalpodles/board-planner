@@ -3,6 +3,7 @@ import { AgentBlock } from "@/models/agentBlock";
 import {
   ApiAgent,
   ApiAgentRun,
+  ApiFleetRun,
   IAgentRun,
   ApiAgentBlock,
   IAgent,
@@ -82,6 +83,23 @@ export function toApiRun(run: IAgentRun): ApiAgentRun {
     minutes: Math.max(0, Math.round(ms / 60000)),
     costUsd: run.costUsd,
     finishedAt: run.finishedAt.toISOString(),
+  };
+}
+
+// An unpopulated ref is an ObjectId, which has neither field — so it reads as absent rather than
+// serialising an id into a column that exists to name something.
+function named(ref: unknown, field: string): string {
+  return ref && typeof ref === "object" && field in ref
+    ? String((ref as Record<string, unknown>)[field] ?? "")
+    : "";
+}
+
+export function toFleetRun(run: IAgentRun): ApiFleetRun {
+  return {
+    ...toApiRun(run),
+    projectKey: named(run.project, "key"),
+    projectName: named(run.project, "name"),
+    workerName: named(run.worker, "name"),
   };
 }
 
