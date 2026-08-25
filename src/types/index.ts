@@ -1531,3 +1531,10 @@ export interface ApiAgentRun {
   costUsd: number;
   finishedAt: string;
 }
+
+/** A run read from the fleet console, where the project and the machine are not implied. */
+export interface ApiFleetRun extends ApiAgentRun {
+  projectKey: string;
+  projectName: string;
+  workerName: string;
+}

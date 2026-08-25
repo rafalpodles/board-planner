@@ -13,6 +13,7 @@ import {
   seed,
   seedBoardFeedBystander,
 } from "./seed";
+import { signIn as arriveSignedIn, signInThroughForm } from "./session";
 
 /**
  * BP-402. The fifth row of the notification grid is the only one whose recipients are not derived
@@ -34,13 +35,12 @@ const CREATED_TITLE = "Bounded fan-out for the board feed";
 const PROJECT_ROW = "Anybody creates a task on this board";
 const GLOBAL_ROW = "Anybody creates a task on a board";
 
-async function signIn(page: Page, username: string, password: string) {
-  await page.goto("/login");
-  await page.getByLabel("Username").fill(username);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign In" }).click();
-  await expect(page).toHaveURL(/\/projects/);
-}
+const signIn = (page: Page, username: string, password: string) =>
+  username === ADMIN_USERNAME
+    ? arriveSignedIn(page)
+    : username === MEMBER_USERNAME
+      ? arriveSignedIn(page, "member")
+      : signInThroughForm(page, username, password);
 
 async function db() {
   if (mongoose.connection.readyState === 0) await mongoose.connect(E2E_MONGODB_URI);

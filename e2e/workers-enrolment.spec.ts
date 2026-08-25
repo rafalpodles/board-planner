@@ -18,6 +18,7 @@ import {
   WORKER_NAME,
   seed,
 } from "./seed";
+import { signIn as arriveSignedIn, signInThroughForm } from "./session";
 
 /**
  * BP-392. What a machine costs a person: connecting one, stopping one, and reading what it did.
@@ -66,13 +67,12 @@ async function workerRow(name: string) {
   return (await db()).collection("workers").findOne({ name });
 }
 
-async function signIn(page: Page, username: string, password: string) {
-  await page.goto("/login");
-  await page.getByLabel("Username").fill(username);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign In" }).click();
-  await expect(page).toHaveURL(/\/projects/);
-}
+const signIn = (page: Page, username: string, password: string) =>
+  username === ADMIN_USERNAME
+    ? arriveSignedIn(page)
+    : username === MEMBER_USERNAME
+      ? arriveSignedIn(page, "member")
+      : signInThroughForm(page, username, password);
 
 /** The machine's half: it has nothing to authenticate with yet, which is the point of this route. */
 async function machineAsksToEnrol(request: APIRequestContext, machine = MACHINE) {
@@ -162,6 +162,30 @@ function decidedByTheServer(view: {
 
 function fleetRow(page: Page, name: string) {
   return page.getByRole("row").filter({ hasText: name }).first();
+}
+
+/** A finished run, filed by the machine that ran it — the only writer of this record in production. */
+async function machineRecordsRun(
+  request: APIRequestContext,
+  machine: Machine,
+  run: { outcome: string; refusedBy?: string; detail?: string }
+) {
+  const response = await request.post(`/api/projects/${PROJECT_KEY}/runs`, {
+    headers: { ...SAME_ORIGIN, ...asMachine(machine) },
+    data: {
+      taskId: String(HELD_TASK_ID),
+      taskKey: HELD_TASK_KEY,
+      workerId: machine.workerId,
+      agentName: "Default",
+      refusedBy: "",
+      detail: "",
+      startedAt: new Date(Date.now() - 4 * 60_000).toISOString(),
+      finishedAt: new Date().toISOString(),
+      costUsd: 0.42,
+      ...run,
+    },
+  });
+  expect(response.status(), await response.text()).toBe(201);
 }
 
 /** The policy chips are a row of their own beneath the machine's, so they are found by what they say. */
@@ -511,4 +535,39 @@ test("a run refused for too large a diff is reported by the machine and read by 
   await expect(run.getByText("Refused: diff-size")).toBeVisible();
   await expect(run.getByText("4 min")).toBeVisible();
   await expect(run.getByText("$0.42")).toBeVisible();
+});
+
+/**
+ * BP-432. The detail a run leaves behind was written on every exit and rendered nowhere: the fleet
+ * page reports a run in flight, and every exit clears the run identity it reads from. The account
+ * of a finished run — why it ended the way it did — was reachable only through a Mongo shell.
+ */
+test("what a finished run said is read from the fleet page, not out of the database", async ({
+  page,
+  request,
+}) => {
+  await signIn(page, MEMBER_USERNAME, MEMBER_PASSWORD);
+  const machine = await enrolAMachine(page, request);
+  await machineReportsCheckouts(request, machine, [{ remote: REPOSITORY, path: CHECKOUT }]);
+
+  const REASON = "the build failed: 2 tests red in src/lib/gates.test.ts";
+  await machineRecordsRun(request, machine, { outcome: "failed", detail: REASON });
+  // The control: a refusal files its reason as the gate's name and leaves the detail empty, so a
+  // blank there is expected rather than a detail that failed to render
+  await machineRecordsRun(request, machine, { outcome: "refused", refusedBy: "diff-size" });
+
+  await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);
+  await page.goto("/settings/workers");
+  await page.getByRole("link", { name: "Run history" }).click();
+
+  await expect(page.getByRole("heading", { name: "Run history" })).toBeVisible();
+  await expect(page.getByTestId("run-detail")).toHaveText(REASON);
+  // The machine is the first question a bad run raises, and it is stored on the run rather than
+  // implied by the screen
+  await expect(page.getByRole("row").filter({ hasText: "Failed" }).first()).toContainText(
+    MACHINE.name
+  );
+
+  await expect(page.getByText("Refused: diff-size")).toBeVisible();
+  await expect(page.getByTestId("run-detail-empty")).toContainText("diff-size");
 });

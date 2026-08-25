@@ -3480,3 +3480,159 @@ describe("what a status change tells a watcher", () => {
     expect(notification.email.projectRef).toBe("TP");
   });
 });
+
+/**
+ * BP-437. `title` is `required` on the schema, so a blank one was refused by Mongoose's
+ * updateValidators rather than by either writer — and a ValidationError nobody catches leaves the
+ * route as a 500. Found by clearing the title on the task screen, which is what a person does on
+ * the way to typing a new one: the screen saves on every keystroke, so the empty value is sent.
+ *
+ * Both writers are covered because both reached the schema, and `createTask` had the sharper
+ * consequence: it spends a task number with `$inc` before it writes, so a refusal past that point
+ * leaves a permanent hole in the board's numbering.
+ */
+describe("a title neither writer will store", () => {
+  const WHO = "u-actor";
+
+  // Every mock this block reads is given an implementation here, including the ones only the
+  // control needs. Borrowing them from an earlier describe is what an unqualified `mockClear` gets
+  // you: the ten refusals return before any mock is touched and pass either way, while the control
+  // — the one assertion telling "refuses blanks" apart from "refuses everything" — passed only
+  // because a block two thousand lines above happened to run first. Alone, or under `-t`, or after
+  // a reorder, it died on `Cannot read properties of undefined (reading 'populate')`, and under a
+  // mutation it died of that rather than of the mutation.
+  beforeEach(() => {
+    vi.clearAllMocks();
+    const stored = { _id: "t1", taskNumber: 9, status: "doing", title: "Before the edit" };
+    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    findOne.mockReturnValue({
+      lean: () => Promise.resolve(stored),
+      populate: () => ({ lean: () => Promise.resolve(stored) }),
+    });
+    findOneAndUpdate.mockReturnValue({
+      populate: () => Promise.resolve({ ...stored, title: "Renamed by hand" }),
+    });
+    // Task.findById, not Project.findById — createTask re-reads what it wrote
+    taskFindById.mockReturnValue({ populate: () => Promise.resolve({ _id: "new", title: "Brand new" }) });
+    projectFindOneAndUpdate.mockResolvedValue({ _id: "p1", key: "TP", taskCounter: 8, ...customBoard });
+    taskCreate.mockImplementation(async (doc: Record<string, unknown>) => ({ ...doc, _id: "new" }));
+  });
+
+  describe.each([
+    ["an empty string", ""],
+    ["only whitespace", "   "],
+    ["a newline and nothing else", "\n"],
+    ["a number", 7],
+    ["null", null],
+  ])("%s", (_label, title) => {
+    it("is refused by updateTask with a 400, and nothing is written", async () => {
+      const result = await updateTask("p1", "t1", { title } as never, WHO);
+
+      expect(result).toMatchObject({ ok: false, status: 400 });
+      expect(findOneAndUpdate, "the update reached the model anyway").not.toHaveBeenCalled();
+    });
+
+    it("is refused by createTask before the task number is spent", async () => {
+      const result = await createTask("p1", WHO, { title } as never);
+
+      expect(result).toMatchObject({ ok: false, status: 400 });
+      expect(taskCreate).not.toHaveBeenCalled();
+      // The counter is minted by this call, so a refusal after it burns a number on nothing
+      expect(projectFindOneAndUpdate, "a refused create still spent a task number").not.toHaveBeenCalled();
+    });
+  });
+
+  // The control both halves rest on. Without it, "nothing was written" is equally true of a guard
+  // that refuses every title, and the surrounding padding proves the value is normalised rather
+  // than merely accepted — the schema trims, so an untrimmed write would disagree with it.
+  it("stores an ordinary title, trimmed the way the schema would", async () => {
+    const updated = await updateTask("p1", "t1", { title: "  Renamed by hand  " }, WHO);
+    expect(updated.ok).toBe(true);
+    expect(setStage(findOneAndUpdate.mock.calls[0][1])).toMatchObject({ title: "Renamed by hand" });
+
+    const created = await createTask("p1", WHO, { title: "  Brand new  " });
+    expect(created.ok).toBe(true);
+    expect(taskCreate.mock.calls[0][0]).toMatchObject({ title: "Brand new" });
+  });
+});
+
+/**
+ * The same mine one section lower on the same screen. `checklist[].text` is `required` too, and the
+ * raw array comes straight off the request body — so clearing an acceptance criterion sent
+ * `text: ""` and got the identical escaped ValidationError.
+ *
+ * The `acceptanceCriteria` string path is deliberately not covered here: parseChecklistString drops
+ * blank lines before anything reaches the schema, so it never had the bug.
+ */
+describe("an acceptance criterion neither writer will store", () => {
+  const WHO = "u-actor";
+  const GOOD = { text: "Ships with a test", done: false };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    const stored = { _id: "t1", taskNumber: 9, status: "doing", title: "Before the edit" };
+    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    findOne.mockReturnValue({
+      lean: () => Promise.resolve(stored),
+      populate: () => ({ lean: () => Promise.resolve(stored) }),
+    });
+    findOneAndUpdate.mockReturnValue({ populate: () => Promise.resolve(stored) });
+    taskFindById.mockReturnValue({ populate: () => Promise.resolve({ _id: "new" }) });
+    projectFindOneAndUpdate.mockResolvedValue({ _id: "p1", key: "TP", taskCounter: 8, ...customBoard });
+    taskCreate.mockImplementation(async (doc: Record<string, unknown>) => ({ ...doc, _id: "new" }));
+  });
+
+  describe.each([
+    ["an emptied criterion", [{ _id: "c1", text: "", done: false }]],
+    ["one of whitespace", [{ _id: "c1", text: "   ", done: false }]],
+    ["a criterion with no text at all", [{ _id: "c1", done: false }]],
+    ["a good one beside a blank one", [GOOD, { text: "", done: false }]],
+  ])("%s", (_label, checklist) => {
+    it("is refused by updateTask, and nothing is written", async () => {
+      const result = await updateTask("p1", "t1", { checklist } as never, WHO);
+
+      expect(result).toMatchObject({ ok: false, status: 400 });
+      expect(findOneAndUpdate, "the update reached the model anyway").not.toHaveBeenCalled();
+    });
+
+    it("is refused by createTask before the task number is spent", async () => {
+      const result = await createTask("p1", WHO, { title: "New", checklist } as never);
+
+      expect(result).toMatchObject({ ok: false, status: 400 });
+      expect(taskCreate).not.toHaveBeenCalled();
+      expect(projectFindOneAndUpdate, "a refused create still spent a task number").not.toHaveBeenCalled();
+    });
+  });
+
+  // The control. Adding a criterion is the gesture this must never break, and the padding proves
+  // the text is normalised rather than merely waved through.
+  it("stores ordinary criteria, trimmed, keeping the row's own id and done flag", async () => {
+    const result = await updateTask(
+      "p1",
+      "t1",
+      { checklist: [{ _id: "c1", text: "  Ships with a test  ", done: true }] } as never,
+      WHO
+    );
+
+    expect(result.ok).toBe(true);
+    expect(setStage(findOneAndUpdate.mock.calls[0][1]).checklist).toEqual([
+      { _id: "c1", text: "Ships with a test", done: true },
+    ]);
+  });
+
+  // The string form never had the defect, and must not acquire a refusal it does not need
+  it("leaves the acceptanceCriteria string path alone", async () => {
+    const result = await updateTask(
+      "p1",
+      "t1",
+      { acceptanceCriteria: "- [ ] one\n\n- [x] two\n   \n" },
+      WHO
+    );
+
+    expect(result.ok).toBe(true);
+    expect(setStage(findOneAndUpdate.mock.calls[0][1]).checklist).toEqual([
+      { text: "one", done: false },
+      { text: "two", done: true },
+    ]);
+  });
+});

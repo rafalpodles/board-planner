@@ -13,6 +13,7 @@ import {
   SIBLING_TASK_TITLE,
   seed,
 } from "./seed";
+import { signIn as arriveSignedIn } from "./session";
 
 /**
  * BP-254, the rendering half. A task key written in prose becomes a link to that task, and nothing
@@ -44,13 +45,7 @@ async function addComment(body: string) {
   });
 }
 
-async function signIn(page: Page) {
-  await page.goto("/login");
-  await page.getByLabel("Username").fill(ADMIN_USERNAME);
-  await page.getByLabel("Password").fill(ADMIN_PASSWORD);
-  await page.getByRole("button", { name: "Sign In" }).click();
-  await expect(page).toHaveURL(/\/projects/);
-}
+const signIn = arriveSignedIn;
 
 // toBeVisible() retries; boundingBox() does not. If React replaces the node in the gap between
 // the two calls, boundingBox() returns null, and a bare `!` turns that into a width/height
