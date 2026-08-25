@@ -320,8 +320,11 @@ describe("the fan-outs nobody awaits", () => {
       type: "comment_added",
       title: NOTIFICATION.title,
       email: NOTIFICATION.email,
-      users: [expect.objectContaining({ _id: WATCHER })],
     });
+    // The recipient query casts to ObjectId, so these ids are not the strings above. vitest prints
+    // an ObjectId as its quoted hex, which makes a mismatch here read as an exact match in the diff
+    const { users } = chat as { users: Array<{ _id: unknown }> };
+    expect(users.map((user) => String(user._id))).toEqual([WATCHER]);
     // Mail was off in that grid, so the two channels are decided separately rather than together
     expect(sendEmail).not.toHaveBeenCalled();
   });
