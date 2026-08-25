@@ -253,7 +253,9 @@ test("changing your own password: the new one signs in and the old one stops", a
     await fresh.getByRole("button", { name: "Sign In" }).click();
     await expect(fresh).toHaveURL(/\/login/);
 
-    await signIn(fresh, MEMBER_USERNAME, NEW_PASSWORD);
+    // The form, deliberately: this step exists to prove the new password works, and a seeded
+    // session would sign in without ever presenting it
+    await signInThroughForm(fresh, MEMBER_USERNAME, NEW_PASSWORD);
     await other.close();
   });
 

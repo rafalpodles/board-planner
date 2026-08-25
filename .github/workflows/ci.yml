@@ -24,7 +24,10 @@ jobs:
       - name: Types
         run: npx tsc --noEmit
 
+      # Runs even when the type check failed: the group guard lives here, and a spec that belongs
+      # to no CI job is exactly the thing you want to hear about while you are still editing
       - name: Unit tests
+        if: ${{ !cancelled() }}
         run: npm test
 
       # Proven not to touch the database: the build succeeds against an unreachable URI, so this

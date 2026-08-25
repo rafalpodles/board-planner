@@ -1,4 +1,4 @@
-import { expect, type Browser, type BrowserContext, type Page } from "@playwright/test";
+import { expect, type BrowserContext, type Page } from "@playwright/test";
 import {
   ADMIN_PASSWORD,
   ADMIN_SESSION_TOKEN,
@@ -46,13 +46,16 @@ export async function signInContext(context: BrowserContext, who: Who = "admin")
       sameSite: "Lax",
     },
   ]);
-}
 
-/** A second browser, signed in as the same person — for the specs that need two devices. */
-export async function signedInPage(browser: Browser, who: Who = "admin"): Promise<Page> {
-  const context = await browser.newContext();
-  await signInContext(context, who);
-  return context.newPage();
+  // The form helper this replaced ended on `toHaveURL(/\/projects/)`, and that was the suite's
+  // only proof that anybody was signed in. Setting a cookie proves nothing on its own: against a
+  // signed-out page the suite's many `toBeHidden`/`toHaveCount(0)` assertions pass vacuously. So
+  // the session is resolved once here — `context.request` shares the cookie jar — for one GET
+  // rather than the page load, two fills and a redirect it stands in for.
+  const me = await context.request.get("/api/auth/me");
+  expect(me.status(), `the seeded ${who} session did not authenticate — did this spec seed()?`).toBe(
+    200
+  );
 }
 
 /** The real form. Only for specs whose subject is signing in. */

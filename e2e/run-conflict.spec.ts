@@ -37,7 +37,7 @@ import {
   seedSecondHeldTask,
   storedExecution,
 } from "./seed";
-import { signIn as arriveSignedIn } from "./session";
+import { signIn as arriveSignedIn, signInThroughForm } from "./session";
 
 // Per test, not once per run: the flow ends with the run released, so a retry or a second
 // iteration would otherwise start from a task no worker is holding
@@ -110,8 +110,13 @@ function expectToast(page: Page, message: string) {
     .toContain(message);
 }
 
-async function signIn(page: Page, username = ADMIN_USERNAME) {
-  await arriveSignedIn(page, username === MEMBER_USERNAME ? "member" : "admin");
+async function signIn(page: Page, username = ADMIN_USERNAME, password = ADMIN_PASSWORD) {
+  // Anything that is not one of the two seeded sessions goes through the form. On this board a
+  // caller silently running as the instance admin would pass every refusal assertion for the
+  // wrong reason.
+  if (username === ADMIN_USERNAME) await arriveSignedIn(page);
+  else if (username === MEMBER_USERNAME) await arriveSignedIn(page, "member");
+  else await signInThroughForm(page, username, password);
   await page.goto(`/projects/${PROJECT_KEY}`);
 
   await expect(page.getByRole("heading", { name: PROJECT_NAME })).toBeVisible();
