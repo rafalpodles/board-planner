@@ -215,9 +215,16 @@ test.describe("repository sync", () => {
       await page.goto(SETTINGS);
       await page.getByRole("button", { name: "Integrations", exact: true }).first().click();
       const picker = page.getByRole("button", { name: /Add integration/ });
-      if (await picker.isVisible().catch(() => false)) await picker.click();
-      if (!(await cardBody.isVisible().catch(() => false))) {
-        await page.getByRole("button", { name: /GitHub/ }).first().click();
+      // Three shapes, not two: the picker on a board with nothing connected, the GitHub row
+      // beside the connected ones, and the opened card's own body. Which one this is cannot be
+      // read until one of them is on screen — an isVisible() before that answers false
+      // immediately and takes the wrong branch, which is what retried this test on CI run
+      // 32816339185.
+      const githubRow = page.getByRole("button", { name: /GitHub/ });
+      await expect(picker.or(githubRow).or(cardBody).first()).toBeVisible();
+      if (await picker.isVisible()) await picker.click();
+      if (!(await cardBody.isVisible())) {
+        await githubRow.first().click();
       }
       // The card's own body, not the repository field beside it: that field renders whether or not
       // this card was ever opened, so an absent button below would otherwise be a reading of the
