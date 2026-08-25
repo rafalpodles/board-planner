@@ -1623,7 +1623,7 @@ describe("a status change announces the same things whichever path made it", () 
     taskCreate.mockImplementation(async (doc: Record<string, unknown>) => ({ ...doc, _id: "new", taskNumber: 8 }));
     taskFindById.mockReturnValue({ populate: () => ({ lean: async () => ({ _id: "new" }) }) });
 
-    await createTask("p1", "actor", { title: "Announced to the room", status: "todo" });
+    await createTask("p1", "actor", { title: "Announced to the room", status: "doing" });
 
     expect(webhookPayloads()).toHaveLength(1);
     const [event, payload] = webhookPayloads()[0];
@@ -1632,7 +1632,7 @@ describe("a status change announces the same things whichever path made it", () 
     // nothing else to go on
     expect(payload).toMatchObject({
       project: { key: "TP", name: "A board" },
-      task: { taskKey: "TP-8", title: "Announced to the room", status: "todo" },
+      task: { taskKey: "TP-8", title: "Announced to the room", status: "doing" },
     });
   });
 
@@ -1797,6 +1797,8 @@ describe("createTask and a foreign sprint", () => {
   beforeEach(() => {
     sprintExists.mockClear();
     sprintExists.mockResolvedValue(null);
+    // The board createTask validates against, read before the counter moves (BP-438)
+    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
     projectFindOneAndUpdate.mockResolvedValue({
       _id: "p1",
       taskCounter: 1,
@@ -2416,6 +2418,7 @@ describe("assigning somebody who cannot reach the board", () => {
   describe("and the same answer on the way in", () => {
     beforeEach(() => {
       taskCreate.mockClear();
+      findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
       projectFindOneAndUpdate.mockResolvedValue({
         _id: "p1",
         taskCounter: 1,
@@ -2457,6 +2460,7 @@ describe("assigning somebody who cannot reach the board", () => {
 describe("createTask stamps who assigned it", () => {
   beforeEach(() => {
     taskCreate.mockClear();
+    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
     projectFindOneAndUpdate.mockResolvedValue({
       _id: "p1",
       taskCounter: 1,
@@ -3224,6 +3228,7 @@ describe("createTask handing the task to somebody", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     sprintExists.mockResolvedValue(null);
+    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
     projectFindOneAndUpdate.mockResolvedValue({
       _id: "p1",
       taskCounter: 7,
@@ -3695,5 +3700,174 @@ describe("an acceptance criterion neither writer will store", () => {
       { text: "one", done: false },
       { text: "two", done: true },
     ]);
+  });
+});
+
+/**
+ * BP-438. BP-437 moved ONE refusal in front of the `$inc` that mints the task number; the other
+ * four stayed behind it, so an unknown category, an unknown status, an assignee without access and
+ * anything the schema throws on each spent a number on a task that never existed — a permanent
+ * hole in the board's numbering.
+ *
+ * The `priority` arm is the sharpest and the reachable one: MCP's `create_task` declares it as a
+ * free-form string and forwards it unchecked, so a model writing "critical" got a 500 *and* burnt
+ * a number.
+ *
+ * `projectFindOneAndUpdate` is the assertion in every case, because it IS the counter: it is the
+ * only call that increments it, and a create that reaches it and then refuses cannot give the
+ * number back.
+ */
+describe("nothing a create is refused for costs a task number", () => {
+  const board = {
+    categories: [{ name: "bug" }, { name: "user-story" }],
+    ...customBoard,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    findById.mockReturnValue({ lean: () => Promise.resolve(board) });
+    projectFindOneAndUpdate.mockResolvedValue({
+      _id: "p1",
+      taskCounter: 12,
+      key: "BP",
+      name: "Board Planner",
+      ...board,
+    });
+    taskCreate.mockImplementation(async (doc: Record<string, unknown>) => ({ ...doc, _id: "new" }));
+    taskFindById.mockReturnValue({ populate: () => ({ lean: async () => ({ _id: "new" }) }) });
+    userFindOne.mockResolvedValue({ _id: "u2", username: "kuba" });
+    sprintExists.mockResolvedValue(null);
+  });
+
+  const REFUSED: [string, Record<string, unknown>][] = [
+    ["a category the project does not have", { category: "chore" }],
+    ["a column the board does not have", { status: "in_progress" }],
+    // The one MCP hands over unchecked
+    ["a priority the schema will not store", { priority: "critical" }],
+    ["a priority cleared to an empty string", { priority: "" }],
+    ["a due date that is not a date", { dueDate: "next thursday" }],
+    ["a due date that is not even a string", { dueDate: { when: "soon" } }],
+    ["a recurrence with no frequency", { recurrence: { interval: 2 } }],
+    ["a recurrence the schema does not know", { recurrence: { frequency: "hourly", interval: 1 } }],
+    ["a recurrence interval below the minimum", { recurrence: { frequency: "weekly", interval: 0 } }],
+    ["a recurrence interval that is not a number", { recurrence: { frequency: "weekly", interval: "often" } }],
+  ];
+
+  describe.each(REFUSED)("%s", (_label, over) => {
+    it("is refused with a 400, before the counter moves", async () => {
+      const result = await createTask("p1", "actor", { title: "Ordinary title", ...over });
+
+      expect(result).toMatchObject({ ok: false, status: 400 });
+      expect(taskCreate).not.toHaveBeenCalled();
+      expect(projectFindOneAndUpdate, "a refused create still spent a task number").not.toHaveBeenCalled();
+    });
+  });
+
+  // Not table-driven with the rest: this one is refused by an answer rather than by the body, so
+  // it needs the grant rule turned against it.
+  it("refuses an assignee with no access to the board before the counter moves", async () => {
+    canBeAssignedMock.mockResolvedValue(false);
+
+    const result = await createTask("p1", "actor", { title: "Ordinary title", assignee: "kuba" });
+
+    expect(result).toMatchObject({ ok: false, status: 400 });
+    expect(taskCreate).not.toHaveBeenCalled();
+    expect(projectFindOneAndUpdate, "a refused create still spent a task number").not.toHaveBeenCalled();
+  });
+
+  // The control the whole block rests on: "the counter did not move" is equally true of a create
+  // that refuses everything, and a task number nobody mints is a bug of its own.
+  it("mints the number and writes the task when the body is answerable", async () => {
+    const result = await createTask("p1", "actor", {
+      title: "Ordinary title",
+      category: "bug",
+      status: "doing",
+      priority: "urgent",
+      dueDate: "2026-08-25",
+      recurrence: { frequency: "weekly", interval: 2 },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(projectFindOneAndUpdate).toHaveBeenCalledTimes(1);
+    expect(taskCreate.mock.calls[0][0]).toMatchObject({
+      taskNumber: 12,
+      category: "bug",
+      status: "doing",
+      priority: "urgent",
+      recurrence: { frequency: "weekly", interval: 2 },
+    });
+  });
+
+  // The default arms of the same values: a body naming none of them still writes, so the guard
+  // cannot be refusing absence.
+  it("still creates a task that names none of them", async () => {
+    const result = await createTask("p1", "actor", { title: "Ordinary title" });
+
+    expect(result.ok).toBe(true);
+    expect(taskCreate.mock.calls[0][0]).toMatchObject({
+      priority: "medium",
+      dueDate: null,
+      recurrence: null,
+    });
+  });
+});
+
+/**
+ * The same three values on the update path, where they escaped as 500s too — `priority` is an
+ * enum, `dueDate` a Date cast and `recurrence.interval` required, and all three are on updateTask's
+ * whitelist. The family BP-437 closed for `title` and `checklist[].text`, closed for the rest.
+ */
+describe("a value the schema will not store is refused by updateTask too", () => {
+  const WHO = "u-actor";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    const stored = { _id: "t1", taskNumber: 9, status: "doing", title: "Before the edit" };
+    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    findOne.mockReturnValue({
+      lean: () => Promise.resolve(stored),
+      populate: () => ({ lean: () => Promise.resolve(stored) }),
+    });
+    findOneAndUpdate.mockReturnValue({ populate: () => Promise.resolve(stored) });
+  });
+
+  const REFUSED: [string, Record<string, unknown>][] = [
+    ["a priority the schema will not store", { priority: "critical" }],
+    ["a priority cleared to an empty string", { priority: "" }],
+    ["a priority cleared to null", { priority: null }],
+    ["a due date that is not a date", { dueDate: "next thursday" }],
+    ["a recurrence with no frequency", { recurrence: { interval: 2 } }],
+    ["a recurrence interval below the minimum", { recurrence: { frequency: "daily", interval: 0 } }],
+    ["a recurrence that is not an object at all", { recurrence: "weekly" }],
+  ];
+
+  describe.each(REFUSED)("%s", (_label, body) => {
+    it("is refused with a 400, and nothing is written", async () => {
+      const result = await updateTask("p1", "t1", body, WHO);
+
+      expect(result).toMatchObject({ ok: false, status: 400 });
+      expect(findOneAndUpdate, "the update reached the model anyway").not.toHaveBeenCalled();
+    });
+  });
+
+  // The control, and the two clearing gestures the schema DOES accept: a date input emptied to ""
+  // and an explicit null both mean "no due date", and Mongoose's own cast stores null for each.
+  it("stores the values the schema accepts, clearings included", async () => {
+    const result = await updateTask(
+      "p1",
+      "t1",
+      { priority: "high", dueDate: "2026-08-25", recurrence: { frequency: "monthly", interval: 3 } },
+      WHO
+    );
+
+    expect(result.ok).toBe(true);
+    expect(setStage(findOneAndUpdate.mock.calls[0][1])).toMatchObject({
+      priority: "high",
+      dueDate: "2026-08-25",
+      recurrence: { frequency: "monthly", interval: 3 },
+    });
+
+    expect((await updateTask("p1", "t1", { dueDate: "" }, WHO)).ok).toBe(true);
+    expect((await updateTask("p1", "t1", { dueDate: null, recurrence: null }, WHO)).ok).toBe(true);
   });
 });

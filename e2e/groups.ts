@@ -21,6 +21,7 @@ export const GROUPS = {
   "task-fields": ["field-history.spec.ts", "ai-task-generation.spec.ts", "search.spec.ts"],
   board: [
     "kanban-board-core.spec.ts",
+    "task-number-not-burnt.spec.ts",
     "column-roles.spec.ts",
     "sprint-planning.spec.ts",
     "sprint-estimates.spec.ts",
