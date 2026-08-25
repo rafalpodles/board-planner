@@ -35,7 +35,8 @@ export const GET = withAuth(async (_request, { user }) => {
 export const DELETE = withAuth(async (request, { user }) => {
   await connectDB();
 
-  const { id } = await request.json();
+  const body = await request.json().catch(() => null);
+  const id = (body as { id?: unknown } | null)?.id;
   // Typed, not merely truthy: a JSON body can carry an operator object, and {"$ne": null} would
   // delete an arbitrary row of the caller's own instead of the one named
   if (typeof id !== "string" || !isValidObjectId(id)) {

@@ -97,7 +97,12 @@ async function verifyOAuthAccessToken(token: string): Promise<IUser | null> {
 
   const record = await OAuthToken.findOne({ accessTokenHash: sha256(token) });
   if (!record) return null;
-  if (record.accessExpiresAt.getTime() < Date.now()) return null;
+  // Optional chaining, not a bare .getTime(): a row missing its expiry is a credential that cannot
+  // be shown to be live, and reading it as one threw a TypeError out of an ordinary refusal. The
+  // caller answered 401 either way — mcp-handler catches it — but the refusal travelled as an
+  // unexpected error, and logged a stack trace on the routine path (BP-444).
+  const expiresAt = record.accessExpiresAt?.getTime();
+  if (expiresAt === undefined || expiresAt < Date.now()) return null;
 
   const user = await User.findById(record.user);
   if (!user) return null;

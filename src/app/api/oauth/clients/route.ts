@@ -36,7 +36,8 @@ export const GET = withAdmin(async () => {
 export const DELETE = withAdmin(async (request) => {
   await connectDB();
 
-  const { id } = await request.json();
+  const body = await request.json().catch(() => null);
+  const id = (body as { id?: unknown } | null)?.id;
   if (typeof id !== "string" || !isValidObjectId(id)) {
     return NextResponse.json({ error: "Client id is required" }, { status: 400 });
   }

@@ -35,6 +35,7 @@ export const GROUPS = {
     "instance-audit.spec.ts",
     "external-integrations.spec.ts",
     "mcp-oauth.spec.ts",
+    "bp444-probe.spec.ts",
   ],
   people: [
     "sessions-and-auth.spec.ts",
