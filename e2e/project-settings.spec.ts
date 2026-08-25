@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
 import { ADMIN_AUTH } from "./api";
 import {
   HELD_TASK_KEY,
@@ -16,9 +16,12 @@ import { signIn } from "./session";
  * the save bar all three share.
  *
  * What every test here is really asking is whether the editor mirrors what the server will
- * accept. So the control is the state **after a reload** — a draft that looks right on screen and
- * never reached the server is the failure this spec exists to catch, and it is invisible to any
- * assertion made before the page is thrown away.
+ * accept. So the control is the state the server holds — read back over the API, or after a
+ * reload, or both. A draft that looks right on screen and never reached the server is the failure
+ * this spec exists to catch, and it is invisible to any assertion made before the page is thrown
+ * away. Three kinds of test here do not reload, deliberately: the warnings, which are about a
+ * live draft; the steps settled by an API read instead, which is stronger; and the save-bar tests,
+ * whose subject is in-memory state a reload would destroy.
  *
  * Categories are here despite living on a different screen (`TaskFieldsSection`, beside custom
  * fields): to a person they are board structure, and they answer to the same save bar.
@@ -52,13 +55,21 @@ async function openSection(page: Page, name: "Board" | "Task fields") {
   await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
 }
 
+interface StoredColumn {
+  id: string;
+  label: string;
+  role: string;
+  order: number;
+  triggersPmReview: boolean;
+}
+
 /** The columns as the server holds them, which is the only reader that settles a save. */
-async function storedColumns(request: Parameters<typeof test>[0] extends never ? never : any) {
+async function storedColumns(request: APIRequestContext): Promise<StoredColumn[]> {
   const response = await request.get(`/api/projects/${PROJECT_ID}/columns`, {
     headers: ADMIN_AUTH,
   });
   expect(response.status(), await response.text()).toBe(200);
-  return (await response.json()) as { id: string; label: string; role: string }[];
+  return (await response.json()) as StoredColumn[];
 }
 
 /**
@@ -150,10 +161,23 @@ test.describe("Board · Columns", () => {
 
     // The second row's own up arrow: the label is shared by every row, so position is what names it
     await page.getByRole("button", { name: "Move column up" }).nth(1).click();
+    expect(
+      (await labelsInOrder(page, 7)).slice(0, 3),
+      "the arrow did not move the row on screen"
+    ).toEqual(["To Do", "Planned", "In Progress"]);
+
     await save(page, "Columns saved");
 
+    // `order` is the field, and neither reader here would notice it being destroyed: GET returns
+    // the array unsorted, so its sequence is incidental, and `effectiveColumns` sorts stably, so a
+    // column of zeroes keeps insertion order and the reload agrees with itself
     const stored = await storedColumns(request);
-    expect(stored.slice(0, 3).map((c) => c.label)).toEqual(["To Do", "Planned", "In Progress"]);
+    expect([...stored].sort((a, b) => a.order - b.order).map((c) => c.id).slice(0, 3)).toEqual([
+      "todo",
+      "planned",
+      "in_progress",
+    ]);
+    expect(stored.map((c) => c.order)).toEqual([0, 1, 2, 3, 4, 5, 6]);
 
     await page.reload();
     expect((await labelsInOrder(page, 7)).slice(0, 3)).toEqual([
@@ -180,14 +204,19 @@ test.describe("Board · Columns", () => {
       await page.getByRole("button", { name: "Remove In Progress" }).click();
       await saveButton(page).click();
 
-      await expect(page.getByText(new RegExp(`still has tasks.*${HELD_TASK_KEY}`))).toBeVisible();
-      await expect(page.getByText(new RegExp(SIBLING_TASK_KEY))).toBeVisible();
+      // One regex over the whole sentence: two separate matches never say the keys are in the
+      // same refusal, and a bare /TP-3/ is also satisfied by TP-30
+      await expect(
+        page.getByText(
+          new RegExp(`still has tasks: ${HELD_TASK_KEY}, ${SIBLING_TASK_KEY}(?![0-9])`)
+        )
+      ).toBeVisible();
       // A refused save keeps the work on screen rather than pretending it landed
       await expect(saveButton(page)).toBeVisible();
 
       expect((await storedColumns(request)).map((c) => c.label)).toContain("In Progress");
       await page.reload();
-      await expect(columnNames(page).filter({ has: page.locator("xpath=.") })).toHaveCount(6);
+      await expect(columnNames(page)).toHaveCount(6);
       await expect(roleOf(page, "In Progress")).toBeVisible();
     });
   });
@@ -221,7 +250,10 @@ test.describe("Board · Columns", () => {
 });
 
 test.describe("Board · Hand-off to the PM agent", () => {
-  test("the escalation column is the one chosen here, after a reload", async ({ page }) => {
+  test("the escalation column is the one chosen here, after a reload", async ({
+    page,
+    request,
+  }) => {
     await signIn(page);
     await openSection(page, "Board");
 
@@ -229,7 +261,11 @@ test.describe("Board · Hand-off to the PM agent", () => {
     await expect(escalation).toHaveValue("needs_human_review");
 
     await escalation.selectOption("ready_to_test");
+    await expect(escalation, "the choice did not take on screen").toHaveValue("ready_to_test");
     await save(page, "Columns saved");
+
+    const stored = await storedColumns(request);
+    expect(stored.filter((c) => c.triggersPmReview).map((c) => c.id)).toEqual(["ready_to_test"]);
 
     await page.reload();
     await expect(page.getByLabel("Escalation column")).toHaveValue("ready_to_test");
@@ -237,19 +273,25 @@ test.describe("Board · Hand-off to the PM agent", () => {
 
   test("a board that hands off from two columns warns, and saving leaves one", async ({
     page,
+    request,
   }) => {
     await seedSecondEscalationColumn();
     await signIn(page);
     await openSection(page, "Board");
 
     const warning = page.getByText(/hands off from more than one column/);
-    await expect(warning).toBeVisible();
-    await expect(warning).toContainText("In Review");
-    await expect(warning).toContainText("Needs Human Review");
+    // The whole sentence, not the two names in it: which column survives and which is stopped is
+    // the entire content of this warning, and both names appear either way round
+    await expect(warning).toContainText("Saving keeps In Review and stops Needs Human Review");
+    await expect(warning.locator("strong")).toHaveText("In Review");
 
-    // Saving the section as it stands is what resolves it — the draft already carries one flag
+    // The draft loads carrying BOTH flags, so nothing is dirty until the choice is made; picking
+    // one is what runs `withEscalationColumn` and clears the stray
     await page.getByLabel("Escalation column").selectOption("in_review");
     await save(page, "Columns saved");
+
+    const stored = await storedColumns(request);
+    expect(stored.filter((c) => c.triggersPmReview).map((c) => c.id)).toEqual(["in_review"]);
 
     await page.reload();
     await expect(page.getByLabel("Escalation column")).toHaveValue("in_review");
@@ -269,7 +311,12 @@ test.describe("Task fields · Categories", () => {
     await save(page, "Categories saved");
 
     await page.reload();
-    await expect(categoryNames(page).last()).toHaveValue("spike");
+    // The count is what says it was ADDED. Reading only the last row cannot tell an addition
+    // from an overwrite of the row that used to be last
+    await expect(categoryNames(page)).toHaveCount(5);
+    expect(
+      await categoryNames(page).evaluateAll((els) => els.map((el) => (el as HTMLInputElement).value))
+    ).toEqual(["bug", "doc", "user-story", "idea", "spike"]);
   });
 
   test("renaming a category carries the tasks that were using it", async ({ page, request }) => {
@@ -312,6 +359,9 @@ test.describe("Task fields · Categories", () => {
       await page.getByRole("button", { name: "Remove doc" }).click();
       await save(page, "Categories saved");
       await page.reload();
+      // Anchored, because the settings page renders a spinner until the project arrives: an
+      // unanchored absence resolves during the fetch and says nothing about what was saved
+      await expect(categoryNames(page)).toHaveCount(3);
       await expect(page.getByRole("button", { name: "Remove doc" })).toBeHidden();
     });
 
@@ -375,15 +425,25 @@ test.describe("Integrations · the save bar", () => {
 
     await saveButton(page).click();
 
+    // "1 endpoint" renders from `project`, which only moves once the server has answered — so it
+    // is what says the save is over. Asserting the bar first passes while the request is still in
+    // flight, because the button relabels itself to "Saving..." and goes hidden under that name.
+    await expect(page.getByText("1 endpoint")).toBeVisible();
+
     // The whole defect in one assertion: the save worked and the page still asked to be saved
     await expect(saveButton(page)).toBeHidden();
-    await expect(page.getByText("1 endpoint")).toBeVisible();
   });
 
   test("pressing Save again after a successful save sends nothing", async ({ page }) => {
     await signIn(page);
-    await addWebhook(page, "https://example.com/e2e-hook");
+    // The input is held rather than re-opened: `openWebhooks` navigates, and a navigation between
+    // the two saves rebuilds the draft's baseline from the server — repairing by hand the exact
+    // staleness this test exists to catch, and leaving it green against the bug.
+    const input = await openWebhooks(page);
+    await input.fill("https://example.com/e2e-hook");
+    await page.getByRole("button", { name: "Add", exact: true }).click();
     await saveButton(page).click();
+    await expect(page.getByText("1 endpoint")).toBeVisible();
     await expect(saveButton(page)).toBeHidden();
 
     const sent: string[] = [];
@@ -393,7 +453,6 @@ test.describe("Integrations · the save bar", () => {
 
     // Add a second one and save again. If the baseline had not moved, this save would re-issue the
     // first webhook's POST alongside the second — two requests where one is correct.
-    const input = await openWebhooks(page);
     await input.fill("https://example.com/second");
     await page.getByRole("button", { name: "Add", exact: true }).click();
     await expect(saveButton(page)).toBeVisible();
@@ -433,5 +492,9 @@ test.describe("Integrations · the save bar", () => {
     await expect(page.getByText(/Last delivered/)).toBeVisible();
     await expect(page.getByText(/Last delivery failed/)).toBeVisible();
     await expect(page.getByText("connect ECONNREFUSED")).toBeVisible();
+
+    // The control: the third seeded endpoint has never been delivered to, and a panel that
+    // printed an outcome for everything would satisfy all three assertions above
+    await expect(page.getByText(/Last deliver/)).toHaveCount(2);
   });
 });
