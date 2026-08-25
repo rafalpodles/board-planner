@@ -17,6 +17,7 @@ export const GROUPS = {
     "copy-task-link.spec.ts",
     "task-header-project-link.spec.ts",
     "sticky-task-header.spec.ts",
+    "task-recurrence.spec.ts",
   ],
   "task-fields": ["field-history.spec.ts", "ai-task-generation.spec.ts", "search.spec.ts"],
   board: [
