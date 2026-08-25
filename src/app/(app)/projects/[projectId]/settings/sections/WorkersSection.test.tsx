@@ -98,3 +98,49 @@ describe("WorkersSection", () => {
     ).not.toBeNull();
   });
 });
+
+function run(over: Record<string, unknown> = {}) {
+  return {
+    _id: "r1",
+    taskKey: "TP-7",
+    agentName: "Default",
+    outcome: "failed",
+    refusedBy: "",
+    detail: "the build failed: 2 tests red",
+    minutes: 4,
+    costUsd: 0.42,
+    finishedAt: new Date().toISOString(),
+    ...over,
+  };
+}
+
+function answerWithRuns(...runs: Record<string, unknown>[]) {
+  api.get.mockImplementation((url: string) =>
+    Promise.resolve(url.includes("/runs") ? runs : [])
+  );
+}
+
+// BP-432: the detail was written by the worker on every exit and read by nobody. It was already in
+// this response — only the rendering was missing.
+describe("what a finished run said on the way out", () => {
+  it("renders the detail on the run's row", async () => {
+    answerWithRuns(run());
+
+    renderSection(true);
+
+    expect((await screen.findByTestId("run-detail")).textContent).toBe(
+      "the build failed: 2 tests red"
+    );
+  });
+
+  // The control: a refusal files the gate's key and leaves the detail empty, so a blank here is the
+  // record being what it is rather than the rendering failing
+  it("names the gate on a refusal, which records no detail", async () => {
+    answerWithRuns(run({ outcome: "refused", refusedBy: "diff-size", detail: "" }));
+
+    renderSection(true);
+
+    expect(await screen.findByText("Refused: diff-size")).not.toBeNull();
+    expect(screen.queryByTestId("run-detail")).toBeNull();
+  });
+});
