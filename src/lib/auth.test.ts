@@ -141,6 +141,52 @@ describe("getAuthUser — machine credentials", () => {
   });
 });
 
+describe("getAuthUser — an OAuth row that cannot be shown to be live", () => {
+  // BP-444: every stale shape here answers 401, and one of them arrived there by throwing. A row
+  // whose expiry is missing read `.getTime()` off undefined, so an ordinary refusal left the
+  // module as a TypeError — 401 downstream only because mcp-handler catches everything.
+  it.each([
+    ["missing", undefined],
+    ["null", null],
+    // NaN is not less than Date.now(), so this row was read as a LIVE credential
+    ["an unparseable date", new Date("not a date")],
+  ])("refuses a row whose accessExpiresAt is %s without throwing", async (_label, value) => {
+    oauthTokenFindOne.mockResolvedValue({
+      user: "u1",
+      accessExpiresAt: value,
+      allowedProjects: [],
+    });
+
+    await expect(
+      getAuthUser(request({ authorization: `Bearer ${MACHINE_TOKEN}` }))
+    ).resolves.toBeNull();
+    // The refusal is the token's, not the user's: reaching the user lookup would mean the row was
+    // read as live
+    expect(userFindById).not.toHaveBeenCalled();
+  });
+
+  it("still refuses a plainly expired row, and still admits a live one", async () => {
+    oauthTokenFindOne.mockResolvedValue({
+      user: "u1",
+      accessExpiresAt: new Date(Date.now() - 1000),
+      allowedProjects: [],
+    });
+    await expect(
+      getAuthUser(request({ authorization: `Bearer ${MACHINE_TOKEN}` }))
+    ).resolves.toBeNull();
+
+    oauthTokenFindOne.mockResolvedValue({
+      user: "u1",
+      accessExpiresAt: new Date(Date.now() + DAY_MS),
+      allowedProjects: [],
+    });
+    userFindById.mockResolvedValue(user());
+    await expect(
+      getAuthUser(request({ authorization: `Bearer ${MACHINE_TOKEN}` }))
+    ).resolves.toMatchObject({ username: "rpo" });
+  });
+});
+
 describe("getAuthUser — Basic auth is gone", () => {
   it("rejects a Basic header instead of verifying the password it carries", async () => {
     const basic = Buffer.from("rpo:correct-horse").toString("base64");

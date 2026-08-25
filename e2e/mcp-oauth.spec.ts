@@ -14,6 +14,7 @@ import {
   SECOND_PROJECT_NAME,
   expireAccessToken,
   seed,
+  stripAccessExpiry,
   seedSecondProject,
 } from "./seed";
 
@@ -564,6 +565,68 @@ test.describe("MCP OAuth handshake", () => {
     const expired = new McpSession(request, accessToken);
     const { status } = await expired.call("tools/list");
     expect(status).toBe(401);
+  });
+
+  /**
+   * BP-444 reported every MCP call answering 500 while a credential was stale, and the refusal
+   * paths measure 401 throughout — including this one, but only because mcp-handler catches
+   * everything `verifyToken` throws. `error_description` is what tells the two apart: a refusal
+   * this instance decided says "No authorization provided", a throw the library rescued says
+   * "Invalid token". Asserting it is the difference between a test that watches the fix and one
+   * that only watches the status code, which is identical either way.
+   */
+  test("a token row with no expiry is refused as a credential, not rescued from a throw", async ({
+    page,
+    request,
+  }) => {
+    const { accessToken } = await authorize(page, request);
+
+    const working = new McpSession(request, accessToken);
+    await working.open();
+
+    expect(await stripAccessExpiry(accessToken), "the row was reaped, so the 401 proves nothing").toBe(
+      true
+    );
+
+    const response = await request.post("/api/mcp", {
+      headers: { ...MCP_HEADERS, Authorization: `Bearer ${accessToken}` },
+      data: { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} },
+    });
+
+    expect(response.status()).toBe(401);
+    const challenge = response.headers()["www-authenticate"] ?? "";
+    expect(challenge, challenge).toContain('error_description="No authorization provided"');
+    // The pointer a client follows to re-authorise has to survive the refusal
+    expect(challenge).toContain("resource_metadata=");
+  });
+
+  /**
+   * The endpoint a client reaches by itself the moment its access token lapses. `formData()` throws
+   * on anything that is not a form, and the throw was uncaught: an empty 500 where RFC 6749 §5.2
+   * has a 400 naming `invalid_request`. A client acts on the second and not on the first, which is
+   * what turned a lapsed credential into a person's problem (BP-444).
+   */
+  test("the token endpoint refuses a body it cannot parse with 400, not 500", async ({
+    page,
+    request,
+  }) => {
+    const { refreshToken, clientId } = await authorize(page, request);
+
+    for (const [label, headers, body] of [
+      ["json", { "content-type": "application/json" }, JSON.stringify({ grant_type: "refresh_token" })],
+      ["text", { "content-type": "text/plain" }, "grant_type=refresh_token"],
+    ] as const) {
+      const refused = await request.post("/oauth/token", { headers, data: body });
+      expect(refused.status(), `${label}: ${await refused.text()}`).toBe(400);
+      expect(await refused.json()).toMatchObject({ error: "invalid_request" });
+    }
+
+    // The control: the refusal is about the encoding, and a real refresh still rotates
+    const refreshed = await request.post("/oauth/token", {
+      form: { grant_type: "refresh_token", refresh_token: refreshToken, client_id: clientId },
+    });
+    expect(refreshed.status(), await refreshed.text()).toBe(200);
+    expect((await refreshed.json()).access_token).toMatch(/^cpat_/);
   });
 
   test("a credential that was never issued is refused", async ({ request }) => {
