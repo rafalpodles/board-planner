@@ -1487,6 +1487,22 @@ export async function seedExtraCategory() {
  * so the row is not made a candidate for the reaper — and the caller asserts it survived anyway,
  * because a refusal caused by a missing row is not the refusal the test is about.
  */
+/**
+ * The row is there and readable, but carries no expiry — the shape BP-444 found reading
+ * `.getTime()` off undefined, so an ordinary refusal left `verifyOAuthAccessToken` as a TypeError.
+ * Returns whether the row survived, so a test cannot mistake a reaped row for the refusal.
+ */
+export async function stripAccessExpiry(accessToken: string): Promise<boolean> {
+  const db = (await connect()).db!;
+  const accessTokenHash = crypto.createHash("sha256").update(accessToken).digest("hex");
+  await db
+    .collection("oauthtokens")
+    .updateOne({ accessTokenHash }, { $unset: { accessExpiresAt: "" } });
+  const still = await db.collection("oauthtokens").findOne({ accessTokenHash });
+  await mongoose.disconnect();
+  return !!still;
+}
+
 export async function expireAccessToken(accessToken: string): Promise<boolean> {
   const db = (await connect()).db!;
   const accessTokenHash = crypto.createHash("sha256").update(accessToken).digest("hex");
