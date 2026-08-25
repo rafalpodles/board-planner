@@ -9,6 +9,7 @@ import {
   PROJECT_NAME,
   seed,
 } from "./seed";
+import { signIn as arriveSignedIn, signInThroughForm } from "./session";
 
 /**
  * BP-394. The settings a person changes about the instance and about themselves: the model the
@@ -44,13 +45,12 @@ import {
 
 test.beforeEach(seed);
 
-async function signIn(page: Page, username: string, password: string) {
-  await page.goto("/login");
-  await page.getByLabel("Username").fill(username);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign In" }).click();
-  await expect(page).toHaveURL(/\/projects/);
-}
+const signIn = (page: Page, username: string, password: string) =>
+  username === ADMIN_USERNAME
+    ? arriveSignedIn(page)
+    : username === MEMBER_USERNAME
+      ? arriveSignedIn(page, "member")
+      : signInThroughForm(page, username, password);
 
 /**
  * Next's development overlay mounts a portal over the bottom-left corner, which is where the
@@ -253,7 +253,9 @@ test("changing your own password: the new one signs in and the old one stops", a
     await fresh.getByRole("button", { name: "Sign In" }).click();
     await expect(fresh).toHaveURL(/\/login/);
 
-    await signIn(fresh, MEMBER_USERNAME, NEW_PASSWORD);
+    // The form, deliberately: this step exists to prove the new password works, and a seeded
+    // session would sign in without ever presenting it
+    await signInThroughForm(fresh, MEMBER_USERNAME, NEW_PASSWORD);
     await other.close();
   });
 
@@ -391,13 +393,23 @@ const paintedBackground = (page: Page) =>
 
 test("the theme follows the choice, and the choice survives a reload", async ({ page }) => {
   await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);
+  // The only test here that reads the shell rather than a settings screen, so it is the only one
+  // that has to say where it is: signIn sets a cookie and navigates nowhere.
+  await page.goto("/projects");
   await hideDevOverlay(page);
 
   // Choosing does not close the menu, so a second choice must not toggle it shut on the way in
   async function chooseTheme(name: "Light" | "Dark") {
     const group = page.getByRole("group", { name: "Theme" });
-    if (!(await group.isVisible().catch(() => false))) {
-      await page.getByRole("button", { name: /E2E Admin/ }).click();
+    const accountMenu = page.getByRole("button", { name: /E2E Admin/ });
+    // Whether the menu is already open cannot be read before one of the two is on screen: an
+    // isVisible() during a re-render answers false, clicks the account button, and closes the
+    // menu the choice was about to be made in — which is the very thing the comment above warns
+    // against.
+    await expect(group.or(accountMenu).first()).toBeVisible();
+    if (!(await group.isVisible())) {
+      await accountMenu.click();
+      await expect(group).toBeVisible();
     }
     await group.getByRole("button", { name, exact: true }).click();
   }

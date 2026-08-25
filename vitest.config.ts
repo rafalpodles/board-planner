@@ -6,7 +6,8 @@ export default defineConfig({
     environment: "node",
     // Component specs opt into a DOM with `// @vitest-environment happy-dom`,
     // so pure-logic specs keep running in the faster node environment
-    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
+    // e2e/*.test.ts is the group guard, not a Playwright spec — those end in .spec.ts
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx", "e2e/*.test.ts"],
     setupFiles: ["./vitest.setup.ts"],
   },
   resolve: {
