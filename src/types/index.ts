@@ -837,6 +837,8 @@ export interface ApiSprint {
 
 export type RecurrenceFrequency = "daily" | "weekly" | "monthly";
 
+export const RECURRENCE_FREQUENCIES: RecurrenceFrequency[] = ["daily", "weekly", "monthly"];
+
 export interface IRecurrence {
   frequency: RecurrenceFrequency;
   interval: number;
