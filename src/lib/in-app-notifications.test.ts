@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const sendEmail = vi.fn().mockResolvedValue(true);
+const sendPersonalChat = vi.fn(async (_params: unknown): Promise<void> => {});
 const selfOrigin = vi.fn<() => string | null>(() => "https://app.example.com");
 const insertMany = vi.fn().mockResolvedValue([]);
 const userFind = vi.fn();
@@ -100,6 +101,7 @@ vi.mock("@/lib/email", () => ({
   isEmailConfigured: () => true,
 }));
 vi.mock("@/lib/session", () => ({ selfOrigin: () => selfOrigin() }));
+vi.mock("@/lib/personal-chat", () => ({ sendPersonalChat: (p: unknown) => sendPersonalChat(p) }));
 
 const { createNotifications, collectRecipients, assigneeIdOf } = await import(
   "@/lib/in-app-notifications"
@@ -133,6 +135,7 @@ async function sentMails() {
 
 beforeEach(() => {
   sendEmail.mockClear();
+  sendPersonalChat.mockClear();
   insertMany.mockClear();
   prefs = {};
   userFind.mockClear();
@@ -279,6 +282,95 @@ describe("notification emails", () => {
 
     expect(insertMany).toHaveBeenCalledWith([expect.objectContaining({ title: NOTIFICATION.title })]);
     expect(insertMany.mock.calls[0][0]).toHaveLength(1);
+  });
+});
+
+/**
+ * Both fan-outs are started and walked away from: notify() has already answered the request that
+ * caused them. A rejection escaping either one is an unhandled rejection, which ends the process
+ * rather than losing a single notification — so each has a .catch(), and each .catch() was held up
+ * by nothing.
+ *
+ * Every failure below is an implementation that THROWS rather than mockRejectedValue. That one
+ * builds its rejected promise when the test sets it up; vitest attaches a handler there and the
+ * test then passes with the .catch() deleted, which is the only thing it exists to prove.
+ *
+ * Recorded gap: the per-recipient `sendEmail(...).catch(() => {})` inside the mail fan-out cannot
+ * be pinned this way. It swallows silently — no log line, no effect on the loop, which is not
+ * awaited either — so nothing distinguishes the guarded version from the unguarded one except an
+ * unhandled rejection arriving at the runtime. Pinning it needs a process-level
+ * "unhandledRejection" listener, which is a different kind of test from these.
+ */
+describe("the fan-outs nobody awaits", () => {
+  const CHAT_CONNECTED = {
+    notifications: {
+      defaults: { comment_added: { inApp: true, email: false, chat: true } },
+      projects: [],
+      chat: { kind: "slack", webhookUrl: "https://hooks.example.com/T/B/x" },
+    },
+  };
+
+  it("hands the personal chat fan-out the recipients who asked for it, and the mail payload", async () => {
+    prefs[WATCHER] = CHAT_CONNECTED;
+
+    await createNotifications({ ...NOTIFICATION, recipientIds: [WATCHER] });
+
+    const [chat] = sendPersonalChat.mock.calls.at(-1) ?? [];
+    expect(chat).toMatchObject({
+      type: "comment_added",
+      title: NOTIFICATION.title,
+      email: NOTIFICATION.email,
+    });
+    // The recipient query casts to ObjectId, so these ids are not the strings above. vitest prints
+    // an ObjectId as its quoted hex, which makes a mismatch here read as an exact match in the diff
+    const { users } = chat as { users: Array<{ _id: unknown }> };
+    expect(users.map((user) => String(user._id))).toEqual([WATCHER]);
+    // Mail was off in that grid, so the two channels are decided separately rather than together
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("leaves chat alone for somebody who connected nothing", async () => {
+    await createNotifications({ ...NOTIFICATION, recipientIds: [WATCHER] });
+    await sentMails();
+
+    expect(sendPersonalChat).not.toHaveBeenCalled();
+  });
+
+  it("logs and survives a mail fan-out that throws", async () => {
+    const reported = vi.spyOn(console, "error").mockImplementation(() => {});
+    selfOrigin.mockImplementation(() => {
+      throw new Error("origin is misconfigured");
+    });
+
+    await expect(createNotifications(NOTIFICATION)).resolves.toBeUndefined();
+
+    await vi.waitFor(() =>
+      expect(reported).toHaveBeenCalledWith(
+        "Failed to send email notifications:",
+        expect.any(Error)
+      )
+    );
+    reported.mockRestore();
+  });
+
+  it("logs and survives a chat fan-out that throws", async () => {
+    const reported = vi.spyOn(console, "error").mockImplementation(() => {});
+    prefs[WATCHER] = CHAT_CONNECTED;
+    sendPersonalChat.mockImplementationOnce(async () => {
+      throw new Error("slack answered 404");
+    });
+
+    await expect(
+      createNotifications({ ...NOTIFICATION, recipientIds: [WATCHER] })
+    ).resolves.toBeUndefined();
+
+    await vi.waitFor(() =>
+      expect(reported).toHaveBeenCalledWith(
+        "Failed to send chat notifications:",
+        expect.any(Error)
+      )
+    );
+    reported.mockRestore();
   });
 });
 
