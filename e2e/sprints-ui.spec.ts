@@ -3,6 +3,8 @@ import { ADMIN_AUTH } from "./api";
 import {
   ADMIN_PASSWORD,
   ADMIN_USERNAME,
+  LIFECYCLE_BACKLOG_DONE_TASK_NUMBER,
+  LIFECYCLE_BACKLOG_DONE_TASK_TITLE,
   LIFECYCLE_CURRENT_GOAL,
   LIFECYCLE_CURRENT_ID,
   LIFECYCLE_CURRENT_NAME,
@@ -32,6 +34,11 @@ import {
  * column is called something else. Nothing here repeats that. What does belong here is the case
  * the two tickets meet on: a board with no done-role column at all, closed from the screen — every
  * task counts as unfinished then, the one sitting in the column still labelled Done included.
+ *
+ * That case leans on the planning backlog rather than on the header's counts, and deliberately: the
+ * counts agree with `GET /sprints` whatever the browser thinks, so a page that stopped reasoning
+ * about roles and echoed the server would satisfy them. Which backlog tasks are *offered* is the one
+ * thing on that board only the browser decides (BP-441).
  *
  * Give this run its own database and port block; the fixture empties whatever it is pointed at:
  *   E2E_PORT=4060 PM_STUB_PORT=4061 AI_STUB_PORT=4062 WEBHOOK_RECEIVER_PORT=4063 \
@@ -74,6 +81,17 @@ function progress(page: Page): Locator {
   return page.getByTestId("sprint-progress");
 }
 
+function planningBacklog(page: Page): Locator {
+  return page.getByTestId("planning-pane-backlog");
+}
+
+/** The planning view, which a completed sprint does not offer — hence always on a live one. */
+async function openPlanning(page: Page, sprintId: string) {
+  await page.goto(`${sprintsUrl}?sprint=${sprintId}&view=planning`);
+  await expect(planningBacklog(page)).toBeVisible();
+  await expect(planningBacklog(page).getByText("Loading…")).toHaveCount(0);
+}
+
 /** The board's own GET /sprints poll is constant, so a write is matched by method. */
 function sprintWrite(page: Page, method: "POST" | "PUT" | "DELETE"): Promise<Response> {
   return page.waitForResponse(
@@ -104,9 +122,9 @@ test.describe("creating and editing a sprint from the form", () => {
     await page.getByRole("button", { name: "New Sprint" }).click();
     const form = page.getByRole("dialog", { name: "New Sprint" });
 
-    // Computed in the browser from the sprints it just fetched — "Sprint 8" is the latest-ending
-    // sprint, so the suggestion is the next number. A fill() landing before hydration would be
-    // dropped silently, and this value is what proves React is running before anything is typed.
+    // Computed in the browser from the sprints it just fetched: "Sprint 8" is the latest-ending
+    // one, and "Sprint 12" is the highest-numbered. Reading 13 here would mean the suggestion
+    // follows whichever number is biggest rather than whichever sprint runs last.
     await expect(form.getByLabel("Name")).toHaveValue("Sprint 9");
 
     const startInput = form.locator('input[type="date"]').first();
@@ -217,6 +235,9 @@ test.describe("creating and editing a sprint from the form", () => {
         .getByRole("group", { name: "Completed" })
         .getByRole("button", { name: new RegExp(`^${LIFECYCLE_CURRENT_NAME}\\b`) })
     ).toBeVisible();
+    // Three closed sprints is OLDER_COMPLETED_THRESHOLD exactly; a fourth would hide one of them
+    // behind this disclosure and the assertion above would read as a product bug
+    await expect(sprintList(page).getByRole("button", { name: /^Show \d+ older/ })).toHaveCount(0);
 
     expect((await storedSprint(LIFECYCLE_PLANNED_ID))?.status).toBe("active");
     expect((await storedSprint(LIFECYCLE_CURRENT_ID))?.status).toBe("completed");
@@ -317,15 +338,39 @@ test.describe("closing a sprint from the header", () => {
     expect((await storedSprint(LIFECYCLE_CURRENT_ID))?.status).toBe("completed");
   });
 
+  test("a task in a done column is kept out of the planning backlog", async ({ page }) => {
+    await signIn(page);
+    await openPlanning(page, String(LIFECYCLE_CURRENT_ID));
+
+    // The control for the board below. The server hands the browser every task with no sprint,
+    // this one included; leaving it out is PlanningView's own reading of the column's role.
+    await expect(planningBacklog(page)).not.toContainText(LIFECYCLE_BACKLOG_DONE_TASK_TITLE);
+    await expect(
+      planningBacklog(page).locator(
+        `a[href="/projects/${PROJECT_KEY}/tasks/${LIFECYCLE_BACKLOG_DONE_TASK_NUMBER}"]`
+      )
+    ).toHaveCount(0);
+    // Not an empty pane mistaken for a filtered one
+    await expect(planningBacklog(page).locator("a[href*='/tasks/']").first()).toBeVisible();
+  });
+
   test("on a board with no done column, nothing counts as finished and everything is swept out", async ({
     page,
   }) => {
     await demoteDoneColumn();
     await signIn(page);
-    await openSprints(page);
 
-    // The task in the column still labelled Done is no longer in a done-*role* column, so the
-    // board cannot say anything is finished
+    await test.step("the planning backlog offers the task in the column labelled Done", async () => {
+      await openPlanning(page, String(LIFECYCLE_CURRENT_ID));
+      await expect(
+        planningBacklog(page).locator(
+          `a[href="/projects/${PROJECT_KEY}/tasks/${LIFECYCLE_BACKLOG_DONE_TASK_NUMBER}"]`
+        )
+      ).toBeVisible();
+    });
+
+    await openSprints(page);
+    // The counts follow, though they prove less: the server's own aggregation says 0/2 too
     await expect(progress(page)).toHaveText("0/2");
 
     await page.getByRole("button", { name: "Complete", exact: true }).click();
@@ -338,6 +383,7 @@ test.describe("closing a sprint from the header", () => {
 
     expect(await storedTaskSprint(LIFECYCLE_UNFINISHED_TASK_NUMBER)).toBeNull();
     expect(await storedTaskSprint(LIFECYCLE_FINISHED_TASK_NUMBER)).toBeNull();
+    expect((await storedSprint(LIFECYCLE_CURRENT_ID))?.status).toBe("completed");
   });
 });
 
@@ -453,9 +499,11 @@ test.describe("which sprint the page opens on", () => {
     expect(deleted).not.toBe(String(LIFECYCLE_PAST_ONE_ID));
 
     await signIn(page);
-    await openSprints(page, `?sprint=${deleted}`);
+    // Not through openSprints: a page that accepted the id renders a spinner for ever, and the
+    // helper would time out on a locator instead of naming the fallback that failed
+    await page.goto(`${sprintsUrl}?sprint=${deleted}`);
 
-    await expect(selectedSprintName(page)).toHaveText(LIFECYCLE_CURRENT_NAME);
     await expect(page).toHaveURL(new RegExp(`sprint=${LIFECYCLE_CURRENT_ID}`));
+    await expect(selectedSprintName(page)).toHaveText(LIFECYCLE_CURRENT_NAME);
   });
 });
