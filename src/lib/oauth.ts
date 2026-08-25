@@ -54,3 +54,17 @@ export function isValidRedirectUri(value: unknown): value is string {
 export function newClientId(): string {
   return `cpc_${crypto.randomBytes(16).toString("hex")}`;
 }
+
+/**
+ * RFC 6749 §4.1.3 has the token request form-encoded, and `Request.formData()` throws a TypeError
+ * on anything else — an uncaught 500 with an empty body on the one endpoint a client reaches by
+ * itself when its access token lapses. §5.2 calls that `invalid_request`, and the difference
+ * matters to a machine: a 400 naming the error is something a client acts on, a 500 is not (BP-444).
+ */
+export async function readFormBody(req: Request): Promise<FormData | null> {
+  try {
+    return await req.formData();
+  } catch {
+    return null;
+  }
+}

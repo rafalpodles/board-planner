@@ -5,6 +5,7 @@ import { OAuthCode } from "@/models/oauthCode";
 import { OAuthToken } from "@/models/oauthToken";
 import {
   randomToken,
+  readFormBody,
   sha256,
   verifyPkceS256,
   ACCESS_TOKEN_TTL_SECONDS,
@@ -59,7 +60,13 @@ async function issueTokens(
 
 export async function POST(req: Request) {
   await connectDB();
-  const form = await req.formData();
+  const form = await readFormBody(req);
+  if (!form) {
+    return tokenError(
+      "invalid_request",
+      "the request body must be application/x-www-form-urlencoded"
+    );
+  }
   const grantType = String(form.get("grant_type") || "");
 
   if (grantType === "authorization_code") {

@@ -89,3 +89,49 @@ describe("POST /oauth/token — refresh rotation", () => {
     expect(findOneAndDelete.mock.calls[0][0].clientId).toBe("c9");
   });
 });
+
+/**
+ * BP-444. This endpoint is the one a client reaches by itself the moment its access token lapses,
+ * and `Request.formData()` throws a TypeError on any body that is not a form — which left an empty
+ * 500 where RFC 6749 §5.2 has a 400 naming `invalid_request`. A client acts on the second and not
+ * on the first, so the lapse became a person's problem rather than the client's.
+ */
+describe("POST /oauth/token — a body it cannot parse", () => {
+  const unparseable: [string, RequestInit][] = [
+    [
+      "a JSON body",
+      {
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ grant_type: "refresh_token", refresh_token: REFRESH }),
+      },
+    ],
+    ["a text/plain body", { headers: { "content-type": "text/plain" }, body: "grant_type=x" }],
+    ["no content-type at all", { body: "grant_type=refresh_token" }],
+  ];
+
+  it.each(unparseable)("answers 400 invalid_request for %s", async (_label, init) => {
+    const res = await POST(
+      new Request("https://app.example.com/oauth/token", { method: "POST", ...init })
+    );
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "invalid_request" });
+    // Refused before anything was consumed: a body nobody could read must not spend a grant
+    expect(findOneAndDelete).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("still issues a pair for a form body — the refusal is about the encoding, not the grant", async () => {
+    findOneAndDelete.mockResolvedValue({
+      clientId: "c1",
+      user: "u1",
+      scope: "mcp",
+      allowedProjects: [],
+    });
+
+    const res = await POST(refreshRequest());
+
+    expect(res.status).toBe(200);
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+});

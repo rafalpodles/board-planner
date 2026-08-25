@@ -22,7 +22,13 @@ import { OAuthClient } from "@/models/oauthClient";
 import { OAuthCode } from "@/models/oauthCode";
 import { OAuthConsent } from "@/models/oauthConsent";
 import { Project } from "@/models/project";
-import { randomToken, sha256, isValidRedirectUri, AUTH_CODE_TTL_SECONDS } from "@/lib/oauth";
+import {
+  randomToken,
+  readFormBody,
+  sha256,
+  isValidRedirectUri,
+  AUTH_CODE_TTL_SECONDS,
+} from "@/lib/oauth";
 import { IOAuthClient, IOAuthConsent, IUser } from "@/types";
 import { APP_NAME } from "@/lib/brand";
 
@@ -449,7 +455,8 @@ export async function POST(req: Request) {
   }
 
   await connectDB();
-  const form = await req.formData();
+  const form = await readFormBody(req);
+  if (!form) return errorPage("This form was submitted with a body that is not a form.");
   const phase = String(form.get("phase") || "login");
 
   if (phase === "consent") {

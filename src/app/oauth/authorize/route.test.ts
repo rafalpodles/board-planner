@@ -192,6 +192,23 @@ describe("POST /oauth/authorize login phase", () => {
       });
     }
 
+    // BP-444: same-origin, so it is past the gate above, and `formData()` throws on a body that is
+    // not a form — a 500 for what is a plain refusal.
+    it("refuses a same-origin post whose body is not a form", async () => {
+      verifyCredentials.mockResolvedValue(USER);
+
+      const response = await POST(
+        new Request("http://localhost/oauth/authorize", {
+          method: "POST",
+          headers: { "content-type": "application/json", "sec-fetch-site": "same-origin" },
+          body: JSON.stringify({ username: "rafal", password: "guess" }),
+        })
+      );
+
+      expect(response.status).toBe(400);
+      expect(verifyCredentials).not.toHaveBeenCalled();
+    });
+
     it("refuses a cross-site post before verifying anything", async () => {
       verifyCredentials.mockResolvedValue(USER);
 
