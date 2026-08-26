@@ -606,12 +606,13 @@ test.describe("emptying one that is still in use", () => {
     await page.getByRole("button", { name: "Remove Size" }).click();
     await saving(page, id, 200);
 
-    await expect(page.getByText(/Not saved/)).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Saved" })).toBeVisible();
     expect((await storedAgent("Nobody's"))?.composition).toMatchObject({ verification: [] });
   });
 
-  test("counts a project's default as well as a task", async ({ page }) => {
-    // The reference lookup has two arms and the refusal above exercises only the task one.
+  test("is refused for a project's default too, not only for a task", async ({ page }) => {
+    // The reference lookup has two arms and the refusal above exercises only the task one. This
+    // sets the project arm alone, so it fails if that arm is dropped and the other is not.
     await signIn(page);
     const id = await agentHolding(page, "The board's default", ["diff-size"]);
     await withDb(async (db) => {
