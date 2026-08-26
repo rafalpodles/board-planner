@@ -15,6 +15,11 @@ import { taskPath } from "@/lib/urls";
 import { Modal } from "@/components/ui/Modal";
 
 const MAX_ATTACHMENTS = 4;
+// A stream that ended without done/error is polled for at most this long. Past it the turn is
+// unrecoverable from here — see recoveryPoll.
+const RECOVERY_INTERVAL_MS = 3000;
+const RECOVERY_ATTEMPTS = 20;
+
 const MAX_INPUT_HEIGHT = 200;
 
 interface PendingAttachment {
@@ -63,6 +68,8 @@ export function PmChat({
   const [stopping, setStopping] = useState(false);
   const [errorState, setErrorState] = useState("");
   const [lastFailedInput, setLastFailedInput] = useState("");
+  const optimisticSeq = useRef(0);
+  const recoveryAttempts = useRef(0);
   const [loading, setLoading] = useState(true);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
@@ -115,8 +122,13 @@ export function PmChat({
     bottomRef.current?.scrollIntoView({ block: "end" });
   }, [messages, liveActions, working]);
 
-  // Stream lost mid-turn: poll history until the assistant message is finalized
+  // Stream lost mid-turn: poll history until the assistant message is finalized.
+  //
+  // Bounded, because there are turns it can never see finish: the agent writes the assistant
+  // message up front with empty content and only fills it when the turn finalizes, so a server
+  // that dies mid-turn leaves a stub this will read forever (BP-452).
   const recoveryPoll = useCallback(async () => {
+    recoveryAttempts.current += 1;
     try {
       const msgs = await loadMessages();
       const last = msgs[msgs.length - 1];
@@ -128,21 +140,43 @@ export function PmChat({
         setLiveActions([]);
         refreshTaskMap();
         emitBoardRefresh(projectId);
+        return;
       }
     } catch {
-      // keep polling
+      // a failed load still counts against the ceiling
+    }
+    if (recoveryAttempts.current >= RECOVERY_ATTEMPTS) {
+      setRecovering(false);
+      setWorking(false);
+      setStopping(false);
+      setWorkingStatus("");
+      setErrorState(
+        "Lost the connection and could not recover the answer. Reload to see whether the turn finished."
+      );
     }
   }, [loadMessages, refreshTaskMap]);
-  usePollWhileVisible(recoveryPoll, 3000, recovering);
+  useEffect(() => {
+    if (recovering) recoveryAttempts.current = 0;
+  }, [recovering]);
+  usePollWhileVisible(recoveryPoll, RECOVERY_INTERVAL_MS, recovering);
 
   async function interrupt() {
     setStopping(true);
     setWorkingStatus("Stopping…");
     try {
       await api.post(`/api/projects/${projectId}/pm/interrupt`, {});
-    } catch {
-      // 404 = the turn finished on its own between click and request; the stream
-      // is about to deliver the real answer, so there is nothing to report
+    } catch (error) {
+      // 404 = the turn finished on its own between click and request; the stream is about to
+      // deliver the real answer, so there is nothing to report. Anything else is a refusal, and
+      // leaving the button on "Stopping…" is what wedged the composer (BP-452).
+      const status = (error as { status?: number }).status;
+      if (status !== 404) {
+        setStopping(false);
+        setWorkingStatus("");
+        setErrorState(
+          (error as Error).message || "Could not stop the turn."
+        );
+      }
     }
   }
 
@@ -205,11 +239,11 @@ export function PmChat({
     const sentAttachments = pending.map(({ previewUrl: _preview, ...rest }) => rest);
     setPending([]);
 
-    // Optimistic user message
+    const optimisticId = `local-${optimisticSeq.current++}`;
     setMessages((prev) => [
       ...prev,
       {
-        _id: `local-${prev.length}`,
+        _id: optimisticId,
         project: projectId,
         role: "user",
         content: message,
@@ -221,6 +255,16 @@ export function PmChat({
       },
     ]);
 
+    // Nothing was sent, so the optimistic message is a lie on screen — and Retry would add a
+    // second copy of it beside the first.
+    function unsend(reason: string) {
+      setWorking(false);
+      setWorkingStatus("");
+      setMessages((prev) => prev.filter((m) => m._id !== optimisticId));
+      setErrorState(reason);
+      setLastFailedInput(message);
+    }
+
     let response: Response;
     try {
       response = await api.stream(`/api/projects/${projectId}/pm/chat`, {
@@ -228,9 +272,7 @@ export function PmChat({
         ...(sentAttachments.length ? { attachments: sentAttachments } : {}),
       });
     } catch {
-      setWorking(false);
-      setErrorState("Could not reach the server.");
-      setLastFailedInput(message);
+      unsend("Could not reach the server.");
       return;
     }
 
@@ -238,10 +280,9 @@ export function PmChat({
       const err = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
       setWorking(false);
       if (response.status === 409) {
-        setWorkingStatus("");
-        setErrorState("A PM turn is already running for this project — hold on.");
-        setRecovering(true);
-        setWorking(true);
+        // Not a turn to recover. It belongs to somebody else, threads are private, so nothing
+        // will ever land in this one and the poll would run forever (BP-452).
+        unsend(err.error || "Someone else is talking to the PM agent on this project.");
       } else if (response.status === 429) {
         setErrorState(err.error || "Daily turn limit reached.");
       } else if (response.status === 503) {
