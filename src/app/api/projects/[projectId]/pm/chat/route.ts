@@ -9,11 +9,7 @@ import { isPmAvailable } from "@/lib/pm/config";
 import { acquireTurnLock, releaseTurnLock } from "@/lib/pm/turn-lock";
 import { isOverDailyTurnCap } from "@/lib/pm/turn-cap";
 import { isPmRunnable, pmDisabledReason, resolvePmModel } from "@/lib/pm/availability";
-import {
-  IMAGE_MIME_TYPES,
-  MAX_ATTACHMENTS_PER_MESSAGE,
-  modelAcceptsImages,
-} from "@/lib/pm/attachments";
+import { IMAGE_MIME_TYPES, MAX_ATTACHMENTS_PER_MESSAGE, anyAttachmentReadable, modelAcceptsImages } from "@/lib/pm/attachments";
 import { databaseUnavailable, resolveProjectId } from "@/lib/middleware";
 import { check } from "@/lib/grants";
 import { PmAttachment } from "@/types";
@@ -130,6 +126,16 @@ export async function POST(
         { status: 400 }
       );
     }
+  }
+
+  // An image-only turn stands or falls on the image. Everything above checks the *shape* of an
+  // attachment, so a well-formed fileId naming no file — or one on another board — would start a
+  // turn whose user content is the empty string (BP-451 review).
+  if (!message.trim() && !(await anyAttachmentReadable(parsedAttachments, projectId))) {
+    return NextResponse.json(
+      { error: "That image could not be read. Attach it again, or type a message." },
+      { status: 400 }
+    );
   }
 
   const { over, cap } = await isOverDailyTurnCap(projectId, project.pm);
