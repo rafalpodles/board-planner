@@ -18,7 +18,7 @@ const MAX_ATTACHMENTS = 4;
 // A stream that ended without done/error is polled for at most this long. Past it the turn is
 // unrecoverable from here — see recoveryPoll.
 const RECOVERY_INTERVAL_MS = 3000;
-const RECOVERY_ATTEMPTS = 20;
+const RECOVERY_ATTEMPTS = 10;
 
 const MAX_INPUT_HEIGHT = 200;
 
