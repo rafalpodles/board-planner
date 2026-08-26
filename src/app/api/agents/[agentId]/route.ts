@@ -4,22 +4,13 @@ import { connectDB } from "@/lib/db";
 import { withAuth } from "@/lib/middleware";
 import { check } from "@/lib/grants";
 import { Agent } from "@/models/agent";
-import { allBlocks, toApiAgent, toApiBlock } from "@/lib/agent-service";
-import { brokenProblems, isRunnable, normaliseComposition } from "@/lib/agent-rules";
+import { compositionRefusal, toApiAgent } from "@/lib/agent-service";
+import { isRunnable, normaliseComposition } from "@/lib/agent-rules";
 import { AgentComposition, IUser } from "@/types";
-/**
- * The editor shows these before you save, but the editor is not the only way in. A composition that
- * cannot run must not be stored: the failure would surface on a machine, mid-task, instead of here.
- */
+// The editor shows these before you save, but the editor is not the only way in.
 async function refusalFor(composition: AgentComposition) {
-  const blocks = await allBlocks();
-  const lookup = (key: string) => blocks.map(toApiBlock).find((b) => b.key === key);
-  const broken = brokenProblems(composition, lookup);
-  if (broken.length === 0) return null;
-  return NextResponse.json(
-    { error: broken[0].message, problems: broken.map((p) => p.message) },
-    { status: 400 }
-  );
+  const refusal = await compositionRefusal(composition);
+  return refusal ? NextResponse.json(refusal, { status: 400 }) : null;
 }
 
 /**
@@ -58,6 +49,11 @@ export const PUT = withAuth(async (request, { params, user }) => {
 
   const agent = await Agent.findById(agentId);
   if (!agent) return NextResponse.json({ error: "No such agent" }, { status: 404 });
+  // DELETE refuses one; nothing restores a built-in that has been edited, since seedAgents only
+  // ever inserts.
+  if (agent.builtIn) {
+    return NextResponse.json({ error: "A built-in agent cannot be changed" }, { status: 400 });
+  }
 
   if (!(await mayEdit(user, agent))) {
     return NextResponse.json({ error: "Not yours to change" }, { status: 403 });
@@ -70,10 +66,7 @@ export const PUT = withAuth(async (request, { params, user }) => {
     const composition = normaliseComposition(body.composition);
     const refusal = await refusalFor(composition);
     if (refusal) return refusal;
-    // Emptying an agent something points at is the same act as deleting it, and DELETE refuses.
-    // Left through, the tasks keep an agent no claim can resolve: each is handed straight back and
-    // sorts first on the next poll, so the rest of the board queues behind it (BP-457). An agent
-    // nothing points at stays a draft, which is what makes this a check about references.
+    // Same act as deleting it, which DELETE refuses. An agent nothing points at stays a draft.
     if (!isRunnable(composition)) {
       const uses = await referencesTo(agent._id);
       if (uses.length > 0) return stillInUse(uses);
