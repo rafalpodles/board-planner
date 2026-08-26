@@ -437,6 +437,70 @@ test.describe("attaching a screenshot", () => {
     await expect(agentSpoke(page)).toHaveCount(0);
   });
 
+  test("an image on its own is a message, with nothing typed", async ({ page }) => {
+    // BP-451, reachable on a first attempt: paste a screenshot, press Send, and the image was gone
+    // — the button offered it and the server refused with a validation sentence written for an API
+    // client. No directive is typed here, so the stub answers with its fallback; that is the point.
+    await pmSettings({ model: "e2e/vision-model" });
+    await signIn(page);
+    await openChat(page);
+
+    await attach(page);
+    await expect(page.getByAltText("Attachment preview")).toBeVisible();
+    await expect(chatBox(page)).toHaveValue("");
+
+    const [response] = await Promise.all([
+      page.waitForResponse(
+        (r) => r.request().method() === "POST" && r.url().includes("/pm/chat")
+      ),
+      sendButton(page).click(),
+    ]);
+    expect(response.status(), await response.text()).toBe(200);
+
+    await expect(reply(page)).toContainText("Noted.");
+    await expect(page.getByAltText("Attached screenshot").first()).toBeVisible();
+  });
+
+  test("a refused send hands the picture back instead of destroying it", async ({ page }) => {
+    // The other half of BP-451, and it survives whichever end of the argument wins: the thumbnails
+    // were cleared on the way out rather than on success, so a refusal left the upload sitting in
+    // GridFS with nothing on screen able to reach it.
+    await pmSettings({ model: "e2e/text-only-model" });
+    await signIn(page);
+    await openChat(page);
+
+    await attach(page);
+    await expect(page.getByAltText("Attachment preview")).toBeVisible();
+    await sendButton(page).click();
+
+    await expect(
+      page.getByText(/does not accept images/)
+    ).toBeVisible();
+    // Still there, and offered again — Retry used to be keyed on the typed text, which is empty
+    // for an image-only send
+    await expect(page.getByAltText("Attachment preview")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
+    // ...and the message that never went is not left in the thread
+    await expect(agentSpoke(page)).toHaveCount(0);
+  });
+
+  test("more images than the cap says how many it took", async ({ page }) => {
+    await signIn(page);
+    await openChat(page);
+
+    await page.setInputFiles(
+      'input[type="file"]',
+      Array.from({ length: 6 }, (_, i) => ({
+        name: `shot-${i}.png`,
+        mimeType: "image/png",
+        buffer: PNG,
+      }))
+    );
+
+    await expect(page.getByText("Only 4 of 6 images attached — at most 4 per message.")).toBeVisible();
+    await expect(page.getByAltText("Attachment preview")).toHaveCount(4);
+  });
+
   test("a model that can read images takes it, and the sent message keeps the picture", async ({
     page,
   }) => {
