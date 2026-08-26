@@ -66,7 +66,12 @@ export async function loadAttachmentDataUri(
   const mime = (found[0].metadata?.contentType as string) || a.mimeType;
   if (!IMAGE_MIME_TYPES.has(mime)) return null;
 
-  return `data:${mime};base64,${Buffer.concat(chunks).toString("base64")}`;
+  // A file whose chunks are gone streams nothing and throws nothing, so without this the turn
+  // carries `data:image/png;base64,` — an image of no bytes — instead of refusing.
+  const bytes = Buffer.concat(chunks);
+  if (bytes.length === 0) return null;
+
+  return `data:${mime};base64,${bytes.toString("base64")}`;
 }
 
 /**
@@ -85,21 +90,21 @@ export async function anyAttachmentReadable(
   const db = mongoose.connection.db;
   if (!db) return false;
 
-  const ids: mongoose.Types.ObjectId[] = [];
+  // Keyed by the canonical id, not by what the client typed: ObjectId accepts hex in any case and
+  // stringifies it lowercase, so a raw-string key misses for every non-canonical spelling.
+  const claimed = new Map<string, string>();
   for (const a of attachments) {
     try {
-      ids.push(new mongoose.Types.ObjectId(a.fileId));
+      claimed.set(new mongoose.Types.ObjectId(a.fileId).toString(), a.mimeType);
     } catch {
       // a fileId that is not an id names no file
     }
   }
+  const ids = [...claimed.keys()].map((id) => new mongoose.Types.ObjectId(id));
   if (ids.length === 0) return false;
 
   const bucket = new mongoose.mongo.GridFSBucket(db, { bucketName: UPLOAD_BUCKET });
   const found = await bucket.find({ _id: { $in: ids } }).toArray();
-  // The same fallback the loader uses: a file written before contentType was stamped is still
-  // readable, and refusing it here would say "could not be read" about one that reads fine.
-  const claimed = new Map(attachments.map((a) => [String(a.fileId), a.mimeType]));
   return found.some(
     (file) =>
       projectForUpload(file) === String(projectId) &&

@@ -90,9 +90,9 @@ test.beforeEach(async ({ request }) => {
 async function lastRequest(request: APIRequestContext): Promise<{
   userBlocks: string[];
   images: number;
-  systemLines: number;
+  systems: string[];
   roles: string[];
-}> {
+} | null> {
   const res = await request.get(`${PM_STUB_URL}/last`);
   return res.json();
 }
@@ -337,7 +337,10 @@ test.describe("a turn, from the box to the bubble", () => {
 
     const working = page.getByRole("button", { name: "Stop the PM turn" });
     await expect(working).toBeVisible();
-    await expect(page.getByText(new RegExp(SIBLING_TASK_KEY))).toBeVisible();
+    // `.first()`, because the live working-status line and the action chip both name the task once
+    // the action arrives — a bare getByText is a strict-mode violation whenever the chip wins the
+    // race, and that failure aborts the turn and leaks its lock into the next test (BP-483).
+    await expect(page.getByText(new RegExp(SIBLING_TASK_KEY)).first()).toBeVisible();
     // Still working: the chip is streamed, not the finished message being read back
     await expect(working).toBeVisible();
 
@@ -466,7 +469,9 @@ test.describe("attaching a screenshot", () => {
       ),
       sendButton(page).click(),
     ]);
-    expect(response.status(), await response.text()).toBe(200);
+    // Not `await response.text()` as the message: this is an SSE stream, and reading its body
+    // after the fact fails with "Response body is not available" often enough to flake.
+    expect(response.status(), "the image-only send was refused").toBe(200);
 
     await expect(reply(page)).toContainText("Noted.");
     await expect(page.getByAltText("Attached screenshot").first()).toBeVisible();
@@ -475,9 +480,16 @@ test.describe("attaching a screenshot", () => {
     // certifies that a turn ran, not that the picture was in it — a buildUserContent that returned
     // the text unconditionally left every test in this file green (BP-451 review).
     const sent = await lastRequest(request);
-    expect(sent.userBlocks, "the image never reached the model").toContain("image_url");
-    expect(sent.userBlocks, "an empty text block went with it").not.toContain("empty-text");
-    expect(sent.images).toBe(1);
+    expect(sent, "no completion request reached the model at all").not.toBeNull();
+    expect(sent!.userBlocks, "the image never reached the model").toContain("image_url");
+    expect(sent!.userBlocks, "an empty text block went with it").not.toContain("empty-text");
+    expect(sent!.images).toBe(1);
+    // The guard rail for an unexplained screenshot. Nothing asserted it, and deleting it left the
+    // whole suite green.
+    expect(
+      sent!.systems.join("\n"),
+      "the image-only turn was sent without its do-not-write instruction"
+    ).toContain("carries an image and no text");
   });
 
   test("the picture is still there on the next turn, when the question arrives", async ({
@@ -498,9 +510,12 @@ test.describe("attaching a screenshot", () => {
     await expect(reply(page)).toContainText("The pixel is white.");
 
     const sent = await lastRequest(request);
-    expect(sent.userBlocks, "the follow-up itself carries no image").toEqual(["text"]);
-    expect(sent.images, "the screenshot was dropped from history").toBe(1);
-    expect(sent.roles.filter((r) => r === "user")).toHaveLength(2);
+    expect(sent).not.toBeNull();
+    expect(sent!.userBlocks, "the follow-up itself carries no image").toEqual(["text"]);
+    expect(sent!.images, "the screenshot was dropped from history").toBe(1);
+    expect(sent!.roles.filter((r) => r === "user")).toHaveLength(2);
+    // The control for the nudge above: a turn that says something gets no such instruction
+    expect(sent!.systems.join("\n")).not.toContain("carries an image and no text");
   });
 
   test("a refused send hands the picture back instead of destroying it", async ({ page }) => {
@@ -521,23 +536,83 @@ test.describe("attaching a screenshot", () => {
     await expect(
       page.getByText(/does not accept images/)
     ).toBeVisible();
-    // Still there, and offered again — Retry used to be keyed on the typed text, which is empty
-    // for an image-only send
+    // Still there. The thumbnails used to be cleared on the way out, so a refusal destroyed them
+    // while the upload sat in GridFS with nothing on screen able to reach it.
     await expect(page.getByAltText("Attachment preview")).toBeVisible();
-    await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
     // ...and the message that never went is not left in the thread
     await expect(agentSpoke(page)).toHaveCount(0);
 
-    // A thumbnail is not the picture. Clicking Retry is what proves the restored attachment is the
+    // No Retry: a 400 is decided by the bytes in the request, so the same button would reproduce
+    // the same refusal for ever. What comes back instead is the composer — the picture and, when
+    // there was one, the typed message — so the person can change what needs changing.
+    await expect(page.getByRole("button", { name: "Retry" })).toHaveCount(0);
+    await expect(sendButton(page)).toBeEnabled();
+
+    // A thumbnail is not the picture. Sending again is what proves the restored attachment is the
     // same upload and still usable — a restore that handed back previews with rewritten fileIds
     // read identically to this one (BP-451 review).
     const [second] = await Promise.all([
       page.waitForRequest((r) => r.method() === "POST" && r.url().includes("/pm/chat")),
-      page.getByRole("button", { name: "Retry" }).click(),
+      sendButton(page).click(),
     ]);
     expect(JSON.parse(second.postData() ?? "{}").attachments).toEqual(
       JSON.parse(first.postData() ?? "{}").attachments
     );
+  });
+
+  test("what was typed comes back with the picture", async ({ page }) => {
+    await pmSettings({ model: "e2e/text-only-model" });
+    await signIn(page);
+    await openChat(page);
+
+    await attach(page);
+    await chatBox(page).fill("Look at this one.");
+    await sendButton(page).click();
+
+    await expect(page.getByText(/does not accept images/)).toBeVisible();
+    await expect(chatBox(page)).toHaveValue("Look at this one.");
+    await expect(page.getByAltText("Attachment preview")).toBeVisible();
+  });
+
+  test("attaching after a failure takes the stale Retry away with the banner", async ({ page }) => {
+    // The banner is shared, and `retryable` used to survive a write to it — so an informational
+    // "Attached 4 of 6" rendered with a Retry beside it that resent an older, unrelated message.
+    await signIn(page);
+    await openChat(page);
+
+    await say(page, "This one will not go through.", { status: 500 });
+    await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
+
+    await page.setInputFiles(
+      'input[type="file"]',
+      Array.from({ length: 6 }, (_, i) => ({
+        name: `after-${i}.png`,
+        mimeType: "image/png",
+        buffer: PNG,
+      }))
+    );
+
+    await expect(page.getByText("Attached 4 of 6 — 4 images per message.")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Retry" })).toHaveCount(0);
+  });
+
+  test("a Retry with nothing left to send is not offered", async ({ page }) => {
+    // An image-only refusal has no typed text, so Retry stands or falls on the thumbnails. It used
+    // to survive them: clicking it called send("") and did nothing at all.
+    await spendTurns(3);
+    await pmSettings({ dailyTurnCap: 3, model: "e2e/vision-model" });
+    await signIn(page);
+    await openChat(page);
+
+    await attach(page);
+    await sendButton(page).click();
+
+    const retry = page.getByRole("button", { name: "Retry" });
+    await expect(retry).toBeVisible();
+
+    await page.getByRole("button", { name: "Remove attachment" }).click();
+    await expect(page.getByAltText("Attachment preview")).toHaveCount(0);
+    await expect(retry).toHaveCount(0);
   });
 
   test("a turn that fails mid-stream offers no Retry when it carried a picture", async ({
@@ -582,6 +657,30 @@ test.describe("attaching a screenshot", () => {
     expect(
       await withDb(async (db) => db.collection("pmmessages").countDocuments({ project: PROJECT_ID }))
     ).toBe(0);
+  });
+
+  test("an image whose bytes vanish between the check and the turn is not sent as nothing",
+    async ({ page, request }) => {
+    // The route checks the files document; the bytes are read later, inside the turn. Deleting the
+    // chunks in between is the case no pre-flight check can cover, and it used to reach the
+    // provider as an empty user message with the turn already counted against the cap.
+    await pmSettings({ model: "e2e/vision-model" });
+    await signIn(page);
+    await openChat(page);
+
+    await attach(page);
+    await expect(page.getByAltText("Attachment preview")).toBeVisible();
+
+    // Straight out of GridFS, after the upload and before Send
+    await withDb(async (db) => {
+      await db.collection("uploads.chunks").deleteMany({});
+    });
+
+    await sendButton(page).click();
+
+    await expect(reply(page)).toContainText("That image could not be read");
+    const sent = await lastRequest(request);
+    expect(sent, "an empty turn was sent to the model anyway").toBeNull();
   });
 
   test("more images than the cap says how many it took", async ({ page }) => {
