@@ -526,43 +526,59 @@ test.describe("deleting one that is still in use", () => {
 
 test.describe("emptying one that is still in use", () => {
   /**
-   * Leaves the agent holding one gate, which is a runnable composition: `implement` is the only
-   * block with capability "edit", and the push rule only fires for an agent that writes. So this
-   * saves — which is what lets each test below then take the block away again.
+   * The composition is written rather than dragged in. What is under test is the save, and at the
+   * 1280x720 the suite actually runs at (BP-449) the Gates half of the palette sits below the fold,
+   * so a drag there fails for a reason that has nothing to do with this ticket. Composing by drag
+   * is covered by its own tests above.
+   *
+   * Two gates, because only `implement` carries capability "edit" and the push rule fires for an
+   * agent that writes — a gate-only composition is runnable, so it saves and can then be taken away.
    */
-  async function composedAgent(page: Page, name: string) {
+  async function agentHolding(page: Page, name: string, keys: string[]) {
     await openCatalog(page);
     await page.getByRole("button", { name: "New agent" }).click();
     await page.getByLabel("Name").fill(name);
     await page.getByRole("button", { name: "Create" }).click();
-    await page.getByRole("link", { name: new RegExp(name) }).click();
-    await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
-
-    const palette = page.locator("#main-content aside");
-    await dragOnto(page, palette.getByRole("button", { name: /^Size/ }), bucketOf(page, "Verification"));
-    await expect(bucketOf(page, "Verification").getByText("Size", { exact: true })).toBeVisible();
 
     const id = await agentIdByName(name);
-    await savedBy(page, id, () => page.getByRole("button", { name: "Save" }).click(), 200);
+    expect(
+      await withDb(async (db) => {
+        const result = await db
+          .collection("agents")
+          .updateOne(
+            { _id: new mongoose.Types.ObjectId(id) },
+            { $set: { "composition.verification": keys.map((key) => ({ key })) } }
+          );
+        return result.modifiedCount;
+      }),
+      "the fixture did not compose the agent"
+    ).toBe(1);
+
+    await page.goto(`/agents/${id}`);
+    await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
     return id;
   }
 
-  /** The status is the assertion. "Saved" relabels itself back after two seconds, and a refusal
-   *  renders in a different place entirely, so reading the page cannot tell 409 from 200 reliably. */
-  async function savedBy(page: Page, id: string, act: () => Promise<void>, expected: number) {
+  /**
+   * The status is the assertion. "Saved" relabels itself back after two seconds and a refusal
+   * renders somewhere else entirely, so reading the page cannot tell 409 from 200 reliably.
+   */
+  async function saving(page: Page, id: string, expected: number) {
     const [response] = await Promise.all([
-      page.waitForResponse((r) => r.request().method() === "PUT" && r.url().includes(`/api/agents/${id}`)),
-      act(),
+      page.waitForResponse(
+        (r) => r.request().method() === "PUT" && r.url().includes(`/api/agents/${id}`)
+      ),
+      page.getByRole("button", { name: "Save" }).click(),
     ]);
     expect(response.status(), `the save answered ${response.status()}`).toBe(expected);
   }
 
   test("is refused with the sentence deleting it uses", async ({ page }) => {
     await signIn(page);
-    const id = await composedAgent(page, "Spoken for");
+    const id = await agentHolding(page, "Spoken for", ["diff-size"]);
 
-    // A task now points at it. Emptying it is the strictly equivalent act to deleting it, which
-    // the describe above proves is refused — the two answers used to disagree (BP-457).
+    // A task now points at it. Emptying it is the strictly equivalent act to deleting it, which the
+    // describe above proves is refused — the two answers used to disagree (BP-457).
     await withDb(async (db) => {
       await db
         .collection("tasks")
@@ -571,24 +587,24 @@ test.describe("emptying one that is still in use", () => {
 
     await page.reload();
     await page.getByRole("button", { name: "Remove Size" }).click();
-    await savedBy(page, id, () => page.getByRole("button", { name: "Save" }).click(), 409);
+    await saving(page, id, 409);
 
     await expect(
       page.getByText("Not saved. Still in use by 1 task. Point those elsewhere first.")
     ).toBeVisible();
-    // What the guard is actually for: the task is still carrying something a claim can resolve
+    // What the guard is for: the task is still carrying something a claim can resolve
     expect((await storedAgent("Spoken for"))?.composition).toMatchObject({
       verification: [{ key: "diff-size" }],
     });
   });
 
   test("goes through when nothing points at it, because that is a draft again", async ({ page }) => {
-    // The control. Without it a guard that refused every save would read exactly like this one.
+    // The control. Without it a guard that refused every emptying would read exactly like this one.
     await signIn(page);
-    const id = await composedAgent(page, "Nobody's");
+    const id = await agentHolding(page, "Nobody's", ["diff-size"]);
 
     await page.getByRole("button", { name: "Remove Size" }).click();
-    await savedBy(page, id, () => page.getByRole("button", { name: "Save" }).click(), 200);
+    await saving(page, id, 200);
 
     await expect(page.getByText(/Not saved/)).toHaveCount(0);
     expect((await storedAgent("Nobody's"))?.composition).toMatchObject({ verification: [] });
@@ -597,16 +613,19 @@ test.describe("emptying one that is still in use", () => {
   test("counts a project's default as well as a task", async ({ page }) => {
     // The reference lookup has two arms and the refusal above exercises only the task one.
     await signIn(page);
-    const id = await composedAgent(page, "The board's default");
+    const id = await agentHolding(page, "The board's default", ["diff-size"]);
     await withDb(async (db) => {
       await db
         .collection("projects")
-        .updateOne({ _id: PROJECT_ID }, { $set: { "worker.agent": new mongoose.Types.ObjectId(id) } });
+        .updateOne(
+          { _id: PROJECT_ID },
+          { $set: { "worker.agent": new mongoose.Types.ObjectId(id) } }
+        );
     });
 
     await page.reload();
     await page.getByRole("button", { name: "Remove Size" }).click();
-    await savedBy(page, id, () => page.getByRole("button", { name: "Save" }).click(), 409);
+    await saving(page, id, 409);
 
     await expect(page.getByText(new RegExp(`Still in use by ${PROJECT_NAME}`))).toBeVisible();
     expect((await storedAgent("The board's default"))?.composition).toMatchObject({
@@ -615,10 +634,10 @@ test.describe("emptying one that is still in use", () => {
   });
 
   test("an in-use agent can still be edited, as long as it stays runnable", async ({ page }) => {
-    // The guard is about references AND emptiness together. Refusing every edit to an in-use agent
-    // would satisfy the two refusal tests above and be a worse product.
+    // The guard is about references AND emptiness together. One that refused every edit to an
+    // in-use agent would satisfy both refusals above and be a worse product.
     await signIn(page);
-    const id = await composedAgent(page, "Busy but editable");
+    const id = await agentHolding(page, "Busy but editable", ["diff-size", "protected-paths"]);
     await withDb(async (db) => {
       await db
         .collection("tasks")
@@ -626,16 +645,11 @@ test.describe("emptying one that is still in use", () => {
     });
 
     await page.reload();
-    const palette = page.locator("#main-content aside");
-    await dragOnto(
-      page,
-      palette.getByRole("button", { name: /^Protected files/ }),
-      bucketOf(page, "Verification")
-    );
-    await savedBy(page, id, () => page.getByRole("button", { name: "Save" }).click(), 200);
+    await page.getByRole("button", { name: "Remove Size" }).click();
+    await saving(page, id, 200);
 
     expect((await storedAgent("Busy but editable"))?.composition).toMatchObject({
-      verification: [{ key: "diff-size" }, { key: "protected-paths" }],
+      verification: [{ key: "protected-paths" }],
     });
   });
 });

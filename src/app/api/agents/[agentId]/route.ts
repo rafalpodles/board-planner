@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { isValidObjectId } from "mongoose";
+import { isValidObjectId, Types } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { withAuth } from "@/lib/middleware";
 import { check } from "@/lib/grants";
@@ -26,7 +26,7 @@ async function refusalFor(composition: AgentComposition) {
  * What still points at this agent, named the way a person would recognise it. Shared by DELETE and
  * PUT so the two answers cannot drift: emptying an in-use agent is the same act as deleting it.
  */
-async function referencesTo(agentId: unknown): Promise<string[]> {
+async function referencesTo(agentId: Types.ObjectId): Promise<string[]> {
   const { Project } = await import("@/models/project");
   const { Task } = await import("@/models/task");
   const projects = await Project.find({ "worker.agent": agentId }, "name").lean();
