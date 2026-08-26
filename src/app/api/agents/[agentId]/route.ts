@@ -1,24 +1,37 @@
 import { NextResponse } from "next/server";
-import { isValidObjectId } from "mongoose";
+import { isValidObjectId, Types } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { withAuth } from "@/lib/middleware";
 import { check } from "@/lib/grants";
 import { Agent } from "@/models/agent";
-import { allBlocks, toApiAgent, toApiBlock } from "@/lib/agent-service";
-import { brokenProblems, normaliseComposition } from "@/lib/agent-rules";
+import { compositionRefusal, toApiAgent } from "@/lib/agent-service";
+import { isRunnable, normaliseComposition } from "@/lib/agent-rules";
 import { AgentComposition, IUser } from "@/types";
-/**
- * The editor shows these before you save, but the editor is not the only way in. A composition that
- * cannot run must not be stored: the failure would surface on a machine, mid-task, instead of here.
- */
+// The editor shows these before you save, but the editor is not the only way in.
 async function refusalFor(composition: AgentComposition) {
-  const blocks = await allBlocks();
-  const lookup = (key: string) => blocks.map(toApiBlock).find((b) => b.key === key);
-  const broken = brokenProblems(composition, lookup);
-  if (broken.length === 0) return null;
+  const refusal = await compositionRefusal(composition);
+  return refusal ? NextResponse.json(refusal, { status: 400 }) : null;
+}
+
+/**
+ * What still points at this agent, named the way a person would recognise it. Shared by DELETE and
+ * PUT so the two answers cannot drift: emptying an in-use agent is the same act as deleting it.
+ */
+async function referencesTo(agentId: Types.ObjectId): Promise<string[]> {
+  const { Project } = await import("@/models/project");
+  const { Task } = await import("@/models/task");
+  const projects = await Project.find({ "worker.agent": agentId }, "name").lean();
+  const tasks = await Task.countDocuments({ agent: agentId });
+  return [
+    ...projects.map((p) => p.name),
+    ...(tasks > 0 ? [`${tasks} task${tasks === 1 ? "" : "s"}`] : []),
+  ];
+}
+
+function stillInUse(uses: string[]) {
   return NextResponse.json(
-    { error: broken[0].message, problems: broken.map((p) => p.message) },
-    { status: 400 }
+    { error: `Still in use by ${uses.join(", ")}. Point those elsewhere first.` },
+    { status: 409 }
   );
 }
 
@@ -36,7 +49,6 @@ export const PUT = withAuth(async (request, { params, user }) => {
 
   const agent = await Agent.findById(agentId);
   if (!agent) return NextResponse.json({ error: "No such agent" }, { status: 404 });
-
   if (!(await mayEdit(user, agent))) {
     return NextResponse.json({ error: "Not yours to change" }, { status: 403 });
   }
@@ -48,6 +60,11 @@ export const PUT = withAuth(async (request, { params, user }) => {
     const composition = normaliseComposition(body.composition);
     const refusal = await refusalFor(composition);
     if (refusal) return refusal;
+    // Same act as deleting it, which DELETE refuses. An agent nothing points at stays a draft.
+    if (!isRunnable(composition)) {
+      const uses = await referencesTo(agent._id);
+      if (uses.length > 0) return stillInUse(uses);
+    }
     agent.composition = composition;
   }
 
@@ -75,21 +92,8 @@ export const DELETE = withAuth(async (_request, { params, user }) => {
   // A task pointing at a deleted agent is claimed and then handed straight back, three times,
   // before it escalates; a project pointing at one offers a first choice that does not exist.
   // Both are better refused here.
-  const { Project } = await import("@/models/project");
-  const { Task } = await import("@/models/task");
-  const projects = await Project.find({ "worker.agent": agent._id }, "name").lean();
-  const tasks = await Task.countDocuments({ agent: agent._id });
-
-  if (projects.length > 0 || tasks > 0) {
-    const uses = [
-      ...projects.map((p) => p.name),
-      ...(tasks > 0 ? [`${tasks} task${tasks === 1 ? "" : "s"}`] : []),
-    ];
-    return NextResponse.json(
-      { error: `Still in use by ${uses.join(", ")}. Point those elsewhere first.` },
-      { status: 409 }
-    );
-  }
+  const uses = await referencesTo(agent._id);
+  if (uses.length > 0) return stillInUse(uses);
 
   await agent.deleteOne();
   return NextResponse.json({ ok: true });

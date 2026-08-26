@@ -1,6 +1,7 @@
 import { Agent } from "@/models/agent";
 import { AgentBlock } from "@/models/agentBlock";
 import {
+  AgentComposition,
   ApiAgent,
   ApiAgentRun,
   ApiFleetRun,
@@ -11,7 +12,35 @@ import {
   IProject,
   IUser,
 } from "@/types";
-import { normaliseComposition } from "./agent-rules";
+import { brokenProblems, keysOf, normaliseComposition } from "./agent-rules";
+
+/**
+ * Why a composition must not be stored, or null. Shared because the create and edit routes had a
+ * copy each, and BP-457 was two routes on the same file disagreeing about the same question.
+ *
+ * The unknown-key arm is not covered by the rules: they no-op on a key that resolves to nothing,
+ * while `snapshotFor` returns null for one — so a composition of nonsense strands the tasks
+ * pointing at it exactly the way an empty one does.
+ */
+export async function compositionRefusal(
+  composition: AgentComposition
+): Promise<{ error: string; problems: string[] } | null> {
+  const blocks = (await allBlocks()).map(toApiBlock);
+  const lookup = (key: string) => blocks.find((b) => b.key === key);
+
+  const unresolved = [...new Set(keysOf(composition).filter((key) => !key?.trim() || !lookup(key)))];
+  if (unresolved.length > 0) {
+    const named = unresolved.filter((key) => key?.trim()).join(", ");
+    const message = named
+      ? `No block called ${named}. The worker refuses a key it cannot resolve, so this would fail on a machine mid-task.`
+      : "An entry names no block at all.";
+    return { error: message, problems: [message] };
+  }
+
+  const broken = brokenProblems(composition, lookup);
+  if (broken.length === 0) return null;
+  return { error: broken[0].message, problems: broken.map((p) => p.message) };
+}
 
 interface AgentDoc extends Omit<IAgent, "project"> {
   project: (IProject & { _id: unknown }) | null;
