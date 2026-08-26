@@ -715,16 +715,43 @@ test.describe("what else points at what", () => {
     expect(await storedAgent("The board's default")).not.toBeNull();
   });
 
+  test("a block nothing is built from is deleted, and is gone", async ({ page }) => {
+    // The control for the refusal below, and the case BP-460 actually broke: the in-use query
+    // threw while being *built*, so every delete answered 500 whether anything used the block or
+    // not. Written after the fix because the refusal test could not have caught this — it was
+    // marked `test.fail()`, and a test.fail() body counts any failure as success.
+    await signIn(page);
+    await openCatalog(page);
+    await page.getByRole("tab", { name: "Gates" }).click();
+    await page.getByRole("button", { name: "New gate" }).click();
+    await page.getByLabel("Name").fill("Nobody uses me");
+    await page.getByRole("button", { name: "Create" }).click();
+    await expect(page.getByRole("button", { name: "Nobody uses me", exact: true })).toBeVisible();
+
+    // The status is what separates this from the bug: a 500 also removes nothing, so asserting
+    // only that the row is gone would read the same against a server that had thrown.
+    const [response] = await Promise.all([
+      page.waitForResponse(
+        (r) => r.request().method() === "DELETE" && /\/api\/agent-blocks\//.test(r.url())
+      ),
+      page.getByRole("button", { name: "Delete Nobody uses me" }).click(),
+    ]);
+    expect(response.status(), "the delete answered something other than 200").toBe(200);
+
+    await expect(page.getByRole("button", { name: "Nobody uses me", exact: true })).toHaveCount(0);
+    await expect
+      .poll(async () =>
+        withDb(async (db) => db.collection("agentblocks").countDocuments({ name: "Nobody uses me" }))
+      )
+      .toBe(0);
+  });
+
   test("a block an agent is built from cannot be deleted out from under it", async ({ page }) => {
-    // EXPECTED TO FAIL — BP-460. `DELETE /api/agent-blocks/:id` answers 500 for *every* block:
-    // the in-use query's legacy arm compares a string against a path typed as an array of
-    // subdocuments, so Mongoose throws while building the query and `block.deleteOne()` is never
-    // reached. The 409 this test is about has therefore never fired in production.
-    //
-    // `test.fail()` rather than a skip: the real path still runs, nothing here pretends the bug is
-    // correct behaviour, and the day BP-460 lands this test fails for passing and gets its marker
-    // removed. A skip would go quiet instead.
-    test.fail();
+    // BP-460 kept this unreachable: the in-use query's legacy arm compared a string against a path
+    // typed as an array of subdocuments, so Mongoose threw while building the query and the 409
+    // below had never once fired in production. The legacy arm now goes through $elemMatch, and it
+    // is still load-bearing — an agent stored before entries became objects holds bare keys, and
+    // normaliseComposition rewrites those on save, not in the database.
 
     // It has to be a block somebody authored: the ones that ship carry `builtIn` and the list
     // offers them no delete control at all, so the server's 409 is unreachable through them.
