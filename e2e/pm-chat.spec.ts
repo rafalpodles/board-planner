@@ -86,6 +86,19 @@ test.beforeEach(async ({ request }) => {
   await request.post(`${PM_STUB_URL}/reset`);
 });
 
+/**
+ * Several tests here deliberately leave a turn running — that is the state they are about. The turn
+ * outlives the browser context on purpose (the answer still lands in pmmessages), and it holds the
+ * project's lock until it finishes, so the next test's send is refused with a 409 that has nothing
+ * to do with what it is testing.
+ *
+ * A test that ends normally waits its turn out. One that *fails* mid-turn does not, which is how a
+ * single strict-mode violation used to take the following test with it (BP-483).
+ */
+test.afterEach(async ({ request }) => {
+  await request.post(`/api/projects/${PROJECT_KEY}/pm/interrupt`, { headers: ADMIN_AUTH });
+});
+
 /** What the model was handed on the last turn — see the stub's /last. */
 async function lastRequest(request: APIRequestContext): Promise<{
   userBlocks: string[];
