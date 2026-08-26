@@ -24,7 +24,7 @@ const compositionSchema = new Schema(
   { _id: false }
 );
 
-const agentSchema = new Schema<IAgent>(
+export const agentSchema = new Schema<IAgent>(
   {
     name: { type: String, required: true, trim: true },
     description: { type: String, default: "" },
