@@ -77,7 +77,7 @@ export async function POST(
   const carriesAttachment = Array.isArray(attachments) && attachments.length > 0;
   if (typeof message !== "string" || message.length > 10_000) {
     return NextResponse.json(
-      { error: "message must be a string of at most 10000 chars" },
+      { error: "That message is too long — 10,000 characters at most." },
       { status: 400 }
     );
   }

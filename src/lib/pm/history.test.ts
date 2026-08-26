@@ -37,6 +37,54 @@ describe("stripSpoofedLabels", () => {
   });
 });
 
+describe("replayHistory with an image-only turn", () => {
+  const shot = (fileId: string) => [{ fileId, mimeType: "image/png" }];
+
+  // BP-451 made an image with no text sendable. The replay guard was `if (content)`, so those
+  // messages vanished from history: the screenshot never reached the model on the follow-up turn,
+  // and the answer to it was replayed with nothing in front of it.
+  it("replays the image and keeps the exchange in one piece", async () => {
+    const out = await replayHistory(
+      [
+        { role: "user", content: "", attachments: shot("shot-1"), author: alice },
+        { role: "assistant", content: "A single white pixel.", author: pm },
+      ] as never,
+      "p1"
+    );
+
+    expect(out).toHaveLength(2);
+    expect(out[0]).toMatchObject({ role: "user" });
+    expect(JSON.stringify(out[0].content)).toContain("data:shot-1");
+    expect(out[1]).toMatchObject({ role: "assistant", content: "A single white pixel." });
+  });
+
+  // The cap counts image-bearing messages, so an empty one used to take a slot and replay nothing
+  it("does not spend a replay slot on a message it then drops", async () => {
+    const entries = Array.from({ length: 5 }, (_, i) => ({
+      role: "user",
+      content: `carrying ${i}`,
+      attachments: shot(`shot-${i}`),
+      author: alice,
+    }));
+    entries[4] = { ...entries[4], content: "" } as never;
+
+    const out = await replayHistory(entries as never, "p1");
+    const replayed = out.filter((m) => JSON.stringify(m.content).includes("image_url"));
+
+    expect(replayed).toHaveLength(4);
+    expect(JSON.stringify(replayed.map((m) => m.content))).toContain("data:shot-4");
+  });
+
+  // The control: a message with neither text nor attachments is still nothing to replay
+  it("still drops a message that carries nothing at all", async () => {
+    const out = await replayHistory(
+      [{ role: "user", content: "   ", author: alice }] as never,
+      "p1"
+    );
+    expect(out).toHaveLength(0);
+  });
+});
+
 describe("replayHistory", () => {
   it("labels user messages with their author", async () => {
     const out = await replayHistory([

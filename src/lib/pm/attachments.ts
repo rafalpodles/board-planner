@@ -97,10 +97,15 @@ export async function anyAttachmentReadable(
 
   const bucket = new mongoose.mongo.GridFSBucket(db, { bucketName: UPLOAD_BUCKET });
   const found = await bucket.find({ _id: { $in: ids } }).toArray();
+  // The same fallback the loader uses: a file written before contentType was stamped is still
+  // readable, and refusing it here would say "could not be read" about one that reads fine.
+  const claimed = new Map(attachments.map((a) => [String(a.fileId), a.mimeType]));
   return found.some(
     (file) =>
       projectForUpload(file) === String(projectId) &&
-      IMAGE_MIME_TYPES.has((file.metadata?.contentType as string) || "")
+      IMAGE_MIME_TYPES.has(
+        (file.metadata?.contentType as string) || claimed.get(String(file._id)) || ""
+      )
   );
 }
 
