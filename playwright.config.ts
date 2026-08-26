@@ -53,8 +53,18 @@ export default defineConfig({
     // Turbopack compiles /login and the board on first navigation
     navigationTimeout: 90_000,
     actionTimeout: 30_000,
-    // Seven columns at their 200px floor do not fit a 1280px board without horizontal scrolling
-    viewport: { width: 1600, height: 1000 },
+    // No viewport here. Every project below spreads `devices["Desktop Chrome"]`, whose own
+    // viewport wins over anything set at this level — so a width written here is dead, and the
+    // 1600x1000 that used to sit in this spot was never what ran (BP-449).
+    //
+    // The suite runs at Desktop Chrome's 1280x720. Measured at that width, the board's seven
+    // columns come to 1496px against a 988px scrollport, so the column strip scrolls
+    // horizontally. Nothing is red because Playwright scrolls to whatever it clicks — but a spec
+    // that measures geometry is measuring a scrolled board, and should say so.
+    //
+    // Raising it would not change that: at 1600 the strip is still 1496 against 1308. Seven
+    // columns first fit at about 1920, where they also grow past their 200px floor to 217. Any
+    // future move to a wider board is a behavioural change to every spec, not a config tidy.
   },
   // One project per group so CI can run them as separate jobs (`--project=board`). A run with no
   // --project runs every group, which is the whole suite and what a local run wants.
