@@ -78,12 +78,13 @@ export async function buildUserContent(
 ): Promise<string | Record<string, unknown>[]> {
   if (!attachments?.length) return text;
 
-  const blocks: Record<string, unknown>[] = [{ type: "text", text }];
+  // An image on its own carries no text, and an empty text block is something providers reject
+  const blocks: Record<string, unknown>[] = text.trim() ? [{ type: "text", text }] : [];
   for (const a of attachments) {
     const url = await loadAttachmentDataUri(a, projectId);
     if (url) blocks.push({ type: "image_url", image_url: { url } });
   }
-  return blocks.length > 1 ? blocks : text;
+  return blocks.some((b) => b.type === "image_url") ? blocks : text;
 }
 
 interface ModelCapability {

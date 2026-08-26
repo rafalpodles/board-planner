@@ -75,9 +75,19 @@ export async function POST(
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
-  if (typeof message !== "string" || !message.trim() || message.length > 10_000) {
+  // Empty is allowed when something is attached: an image on its own is a turn, and the Send button
+  // has always offered it (BP-451). The attachments themselves are validated below, so an empty
+  // message with an empty array is still refused.
+  const carriesAttachment = Array.isArray(attachments) && attachments.length > 0;
+  if (typeof message !== "string" || message.length > 10_000) {
     return NextResponse.json(
-      { error: "message must be a non-empty string up to 10000 chars" },
+      { error: "message must be a string of at most 10000 chars" },
+      { status: 400 }
+    );
+  }
+  if (!message.trim() && !carriesAttachment) {
+    return NextResponse.json(
+      { error: "Type something, or attach an image." },
       { status: 400 }
     );
   }

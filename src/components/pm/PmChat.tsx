@@ -70,6 +70,9 @@ export function PmChat({
   const [stopping, setStopping] = useState(false);
   const [errorState, setErrorState] = useState("");
   const [lastFailedInput, setLastFailedInput] = useState("");
+  // Separate from the text: a refused image-only send has nothing typed, and `lastFailedInput`
+  // alone is falsy there, which is why no Retry appeared (BP-451).
+  const [retryable, setRetryable] = useState(false);
   const optimisticSeq = useRef(0);
   const recoveryStartedAt = useRef(0);
   // The answer this send is waiting for is whichever assistant message is NOT this one. Without it
@@ -205,10 +208,15 @@ export function PmChat({
       return;
     }
 
+    const taking = images.slice(0, room);
     setUploading(true);
-    setErrorState("");
+    setErrorState(
+      taking.length < images.length
+        ? `Only ${taking.length} of ${images.length} images attached — at most ${MAX_ATTACHMENTS} per message.`
+        : ""
+    );
     try {
-      for (const original of images.slice(0, room)) {
+      for (const original of taking) {
         const resized = await downscaleImage(original);
         const form = new FormData();
         form.append("file", resized.file);
@@ -248,6 +256,7 @@ export function PmChat({
     // Written on every failure and never cleared, so a later, unrelated banner offered Retry for
     // whatever had failed last — including the give-up above, which must not spend a second turn.
     setLastFailedInput("");
+    setRetryable(false);
     answerBefore.current =
       [...messages].reverse().find((m) => m.role === "assistant")?._id ?? "";
     setInput("");
@@ -256,6 +265,7 @@ export function PmChat({
     setWorkingStatus("PM is thinking…");
     setLiveActions([]);
 
+    const sentPending = pending;
     const sentAttachments = pending.map(({ previewUrl: _preview, ...rest }) => rest);
     setPending([]);
 
@@ -275,12 +285,16 @@ export function PmChat({
       },
     ]);
 
+    // The thumbnails come back rather than being cleared on the way out: the upload survives in
+    // GridFS but nothing on screen could reach it (BP-451).
     function unsend(reason: string) {
       setWorking(false);
       setWorkingStatus("");
       setMessages((prev) => prev.filter((m) => m._id !== optimisticId));
+      setPending(sentPending);
       setErrorState(reason);
       setLastFailedInput(message);
+      setRetryable(true);
     }
 
     let response: Response;
@@ -336,6 +350,7 @@ export function PmChat({
             if (eventLine === "error" && data.error) {
               setErrorState(data.error);
               setLastFailedInput(message);
+              setRetryable(true);
             }
           }
         }
@@ -513,8 +528,8 @@ export function PmChat({
       {errorState && (
         <div className="mb-2 text-sm text-danger flex items-center gap-3">
           <span>{errorState}</span>
-          {lastFailedInput && (
-            <Button size="sm" variant="secondary" onClick={() => { setErrorState(""); send(lastFailedInput); }}>
+          {retryable && (
+            <Button size="sm" variant="secondary" onClick={() => { setErrorState(""); setRetryable(false); send(lastFailedInput); }}>
               Retry
             </Button>
           )}
