@@ -531,8 +531,8 @@ test.describe("emptying one that is still in use", () => {
    * so a drag there fails for a reason that has nothing to do with this ticket. Composing by drag
    * is covered by its own tests above.
    *
-   * Two gates, because only `implement` carries capability "edit" and the push rule fires for an
-   * agent that writes — a gate-only composition is runnable, so it saves and can then be taken away.
+   * Gates rather than steps: only `implement` carries capability "edit", and the push rule fires
+   * for an agent that writes — so a gate-only composition is runnable and therefore saveable.
    */
   async function agentHolding(page: Page, name: string, keys: string[]) {
     await openCatalog(page);
@@ -629,6 +629,32 @@ test.describe("emptying one that is still in use", () => {
 
     await expect(page.getByText(new RegExp(`Still in use by ${PROJECT_NAME}`))).toBeVisible();
     expect((await storedAgent("The board's default"))?.composition).toMatchObject({
+      verification: [{ key: "diff-size" }],
+    });
+  });
+
+  test("a composition naming a block that does not exist is refused too", async ({ page, request }) => {
+    // `isRunnable` only counts entries, but `snapshotFor` also answers null when a key resolves to
+    // no block (src/lib/agent-snapshot.ts:93) — so a non-empty composition of nonsense strands the
+    // task exactly the way an empty one does. Driven over the API deliberately: the editor can only
+    // offer blocks that exist, and refusalFor's own comment is that the editor is not the only way
+    // in. Found by review of this branch, not by the ticket.
+    await signIn(page);
+    const id = await agentHolding(page, "Names a ghost", ["diff-size"]);
+    await withDb(async (db) => {
+      await db
+        .collection("tasks")
+        .updateOne({ _id: SIBLING_TASK_ID }, { $set: { agent: new mongoose.Types.ObjectId(id) } });
+    });
+
+    const response = await request.put(`/api/agents/${id}`, {
+      headers: ADMIN_AUTH,
+      data: { composition: { implementation: [{ key: "no-such-block" }] } },
+    });
+    expect(response.status(), await response.text()).toBe(400);
+
+    // Unchanged, so the task still resolves a snapshot
+    expect((await storedAgent("Names a ghost"))?.composition).toMatchObject({
       verification: [{ key: "diff-size" }],
     });
   });
