@@ -716,10 +716,8 @@ test.describe("what else points at what", () => {
   });
 
   test("a block nothing is built from is deleted, and is gone", async ({ page }) => {
-    // The control for the refusal below, and the case BP-460 actually broke: the in-use query
-    // threw while being *built*, so every delete answered 500 whether anything used the block or
-    // not. Written after the fix because the refusal test could not have caught this — it was
-    // marked `test.fail()`, and a test.fail() body counts any failure as success.
+    // The control for the refusal below, and the case BP-460 actually broke: every delete answered
+    // 500, whether anything used the block or not.
     await signIn(page);
     await openCatalog(page);
     await page.getByRole("tab", { name: "Gates" }).click();
@@ -747,12 +745,6 @@ test.describe("what else points at what", () => {
   });
 
   test("a block an agent is built from cannot be deleted out from under it", async ({ page }) => {
-    // BP-460 kept this unreachable: the in-use query's legacy arm compared a string against a path
-    // typed as an array of subdocuments, so Mongoose threw while building the query and the 409
-    // below had never once fired in production. The legacy arm now goes through $elemMatch, and it
-    // is still load-bearing — an agent stored before entries became objects holds bare keys, and
-    // normaliseComposition rewrites those on save, not in the database.
-
     // It has to be a block somebody authored: the ones that ship carry `builtIn` and the list
     // offers them no delete control at all, so the server's 409 is unreachable through them.
     await signIn(page);
@@ -801,6 +793,59 @@ test.describe("what else points at what", () => {
     await expect
       .poll(async () =>
         withDb(async (db) => db.collection("agentblocks").countDocuments({ name: "House style" }))
+      )
+      .toBe(1);
+  });
+
+  test("the refusal finds a block named in the pre-object shape too", async ({ page }) => {
+    // The arm above it is dotted and matches `{ key }` entries; this one is the other arm. Nothing
+    // migrates the pre-object shape — normaliseComposition coerces it on read and only the
+    // composition editor writes it back — so agents holding bare keys are live, and without this
+    // the legacy arm could be deleted with every other test in the file still green.
+    await signIn(page);
+    await openCatalog(page);
+    await page.getByRole("tab", { name: "Gates" }).click();
+    await page.getByRole("button", { name: "New gate" }).click();
+    await page.getByLabel("Name").fill("Old school");
+    await page.getByRole("button", { name: "Create" }).click();
+    await expect(page.getByRole("button", { name: "Old school", exact: true })).toBeVisible();
+
+    let key = "";
+    await expect
+      .poll(async () => {
+        key = await withDb(async (db) => {
+          const block = await db.collection("agentblocks").findOne({ name: "Old school" });
+          return block ? String(block.key) : "";
+        });
+        return key;
+      })
+      .not.toBe("");
+
+    // Bare strings, written through the driver so nothing casts them into the modern shape on the
+    // way in — which is exactly how these documents came to exist.
+    expect(
+      await withDb(async (db) => {
+        const result = await db
+          .collection("agents")
+          .updateOne(
+            { name: DEFAULT_AGENT },
+            { $set: { "composition.verification": ["protected-paths", key] } }
+          );
+        return result.modifiedCount;
+      }),
+      "the fixture did not put the gate inside an agent"
+    ).toBe(1);
+
+    await page.reload();
+    await page.getByRole("tab", { name: "Gates" }).click();
+    await page.getByRole("button", { name: "Delete Old school" }).click();
+
+    await expect(
+      page.getByText(`Still used by ${DEFAULT_AGENT}. Take it out of those agents first.`)
+    ).toBeVisible();
+    await expect
+      .poll(async () =>
+        withDb(async (db) => db.collection("agentblocks").countDocuments({ name: "Old school" }))
       )
       .toBe(1);
   });
