@@ -10,7 +10,7 @@ import {
   SIBLING_TASK_NUMBER,
   seed,
 } from "./seed";
-import { signIn } from "./session";
+import { signIn, signInContext } from "./session";
 import { PM_STUB_URL } from "../playwright.config";
 
 /**
@@ -115,6 +115,103 @@ async function say(page: Page, prompt: string, directive: Record<string, unknown
   await chatBox(page).fill(`${prompt} <<${JSON.stringify(directive)}>>`);
   await sendButton(page).click();
 }
+
+test.describe("a turn somebody else is running", () => {
+  test("is refused without wedging the second reader's composer shut", async ({ page, browser }) => {
+    // BP-452. The 409 used to put this reader into the recovery state, which only ever exits when
+    // an assistant message lands in *their own* thread — and threads are private, so the turn that
+    // caused the refusal can never end it. Box disabled, Send replaced by a Stop that is refused
+    // in silence, and what was typed gone. Only a reload got you out.
+    await signIn(page, "admin");
+    await openChat(page);
+    await say(page, "Hold the line.", { delayMs: 30_000, say: "Eventually." });
+    await expect(page.getByText("PM is thinking…")).toBeVisible();
+
+    const other = await browser.newContext();
+    await signInContext(other, "member");
+    const second = await other.newPage();
+    try {
+      await second.goto(PM_URL);
+      await expect(chatBox(second)).toBeVisible();
+
+      const [refusal] = await Promise.all([
+        second.waitForResponse(
+          (r) => r.request().method() === "POST" && r.url().includes("/pm/chat")
+        ),
+        (async () => {
+          await chatBox(second).fill("Mine now, please.");
+          await sendButton(second).click();
+        })(),
+      ]);
+      expect(refusal.status(), "the second sender did not get the refusal this test is about").toBe(
+        409
+      );
+
+      // The refusal is on screen, and it is the server's sentence rather than a recovery notice
+      await expect(second.getByText(/Someone is already talking to the PM agent/)).toBeVisible();
+      await expect(second.getByText("Connection lost — recovering the answer…")).toHaveCount(0);
+
+      // ...and the composer is still a composer
+      await expect(chatBox(second)).toBeEnabled();
+      await expect(sendButton(second)).toBeVisible();
+      await expect(second.getByRole("button", { name: "Stop the PM turn" })).toHaveCount(0);
+
+      // What was typed is recoverable, and the message that was never sent is not left on screen
+      await expect(second.getByRole("button", { name: "Retry" })).toBeVisible();
+      await expect(bubbles(second).filter({ hasText: "Mine now, please." })).toHaveCount(0);
+    } finally {
+      await other.close();
+      // The held turn is real and the lock is in-process, so leaving it running would 409 the next
+      // test in this file for the rest of its delay. Stopping it is also the control for the
+      // refusal above: this reader owns the turn, so their Stop is allowed.
+      await page.getByRole("button", { name: "Stop the PM turn" }).click();
+      await expect(page.getByText("⏹ Stopped by user.")).toBeVisible();
+      await expect(sendButton(page)).toBeVisible();
+    }
+  });
+});
+
+test.describe("a stream that dies mid-turn", () => {
+  test("is polled for, then given up on, rather than leaving the box disabled forever", async ({
+    page,
+  }) => {
+    // BP-452's second door. The route is truncated rather than the server killed: what the client
+    // sees is the same — a stream that ends with no `done` and no `error` frame.
+    //
+    // The poll it falls into could never have ended on its own here. agent.ts writes the assistant
+    // message up front with empty content and fills it only when the turn finalizes, so a turn
+    // whose server died leaves a stub the poll reads forever. It now has a ceiling.
+    await signIn(page);
+    await openChat(page);
+
+    await page.route("**/pm/chat", async (route) => {
+      await route.fulfill({
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+        body: 'event: action\ndata: {"summary":"Reading the board"}\n\n',
+      });
+    });
+
+    await chatBox(page).fill("Say something.");
+    await sendButton(page).click();
+
+    await expect(page.getByText("Connection lost — recovering the answer…")).toBeVisible();
+    // The control for the assertion below: while it is still polling the box stays shut, which is
+    // correct — the complaint was that it never stopped.
+    await expect(chatBox(page)).toBeDisabled();
+
+    await expect(
+      page.getByText(/Lost the connection and could not recover the answer/)
+    ).toBeVisible({ timeout: 60_000 });
+    await expect(chatBox(page)).toBeEnabled();
+    await expect(sendButton(page)).toBeVisible();
+
+    // Deliberately no Retry, unlike the 409 above: there the turn never started, here it may well
+    // have finished on the server, and re-sending would spend a second turn against the cap for an
+    // answer that is already stored. The message says to reload for that reason.
+    await expect(page.getByRole("button", { name: "Retry" })).toHaveCount(0);
+  });
+});
 
 test.describe("a turn, from the box to the bubble", () => {
   test("an empty thread says what the agent is for", async ({ page }) => {
