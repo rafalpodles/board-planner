@@ -69,6 +69,41 @@ export async function loadAttachmentDataUri(
   return `data:${mime};base64,${Buffer.concat(chunks).toString("base64")}`;
 }
 
+/**
+ * Whether any of these attachments is a readable image on this project — without draining bytes.
+ *
+ * Only the image-only case needs it. A turn with no text whose every attachment fails to load
+ * would reach the provider with an empty user content, spending a turn against the cap on nothing
+ * (BP-451 review): the shape checks in the route pass for a well-formed `fileId` that names no
+ * file, or one belonging to another board.
+ */
+export async function anyAttachmentReadable(
+  attachments: PmAttachment[],
+  projectId: string
+): Promise<boolean> {
+  await connectDB();
+  const db = mongoose.connection.db;
+  if (!db) return false;
+
+  const ids: mongoose.Types.ObjectId[] = [];
+  for (const a of attachments) {
+    try {
+      ids.push(new mongoose.Types.ObjectId(a.fileId));
+    } catch {
+      // a fileId that is not an id names no file
+    }
+  }
+  if (ids.length === 0) return false;
+
+  const bucket = new mongoose.mongo.GridFSBucket(db, { bucketName: UPLOAD_BUCKET });
+  const found = await bucket.find({ _id: { $in: ids } }).toArray();
+  return found.some(
+    (file) =>
+      projectForUpload(file) === String(projectId) &&
+      IMAGE_MIME_TYPES.has((file.metadata?.contentType as string) || "")
+  );
+}
+
 // A message the model receives: plain string when there is nothing attached, so text-only
 // turns keep exactly the shape they had before
 export async function buildUserContent(

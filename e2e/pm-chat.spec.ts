@@ -484,6 +484,32 @@ test.describe("attaching a screenshot", () => {
     await expect(agentSpoke(page)).toHaveCount(0);
   });
 
+  test("an image-only send whose image cannot be read is refused, not turned into an empty turn",
+    async ({ page, request }) => {
+    // Found reviewing this branch's own change. Everything the route checks above is the *shape* of
+    // an attachment, so a well-formed fileId naming no file passed — and with no text either, the
+    // turn reached the provider with an empty user content, spending one against the daily cap.
+    // Driven over the API because the composer can only offer files it has just uploaded.
+    await pmSettings({ model: "e2e/vision-model" });
+    await signIn(page);
+
+    const response = await request.post(`/api/projects/${PROJECT_KEY}/pm/chat`, {
+      headers: ADMIN_AUTH,
+      data: {
+        message: "",
+        attachments: [{ fileId: "0123456789abcdef01234567", mimeType: "image/png" }],
+      },
+    });
+    expect(response.status(), await response.text()).toBe(400);
+    expect(await response.text()).toContain("That image could not be read");
+
+    // The control: the same shape with a real upload behind it is a turn, not a refusal — covered
+    // by "an image on its own is a message" above, which goes through the composer.
+    expect(
+      await withDb(async (db) => db.collection("pmmessages").countDocuments({ project: PROJECT_ID }))
+    ).toBe(0);
+  });
+
   test("more images than the cap says how many it took", async ({ page }) => {
     await signIn(page);
     await openChat(page);
