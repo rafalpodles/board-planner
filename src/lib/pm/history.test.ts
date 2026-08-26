@@ -2,15 +2,22 @@ import { describe, it, expect, vi } from "vitest";
 
 // buildUserContent reads image bytes out of GridFS; the shape it produces is what matters
 // here, so it is stubbed rather than dragging a database into a unit test
+// Mirrors the real one's shape, including the two things it decides: no text block when there is
+// no text, and a bare string when no image survived. A double that always emits a text block let
+// the tests below pass against content shapes production can no longer produce.
 vi.mock("./attachments", () => ({
   MAX_REPLAYED_IMAGES: 4,
-  buildUserContent: async (text: string, attachments?: { fileId: string }[]) =>
-    attachments?.length
-      ? [
-          { type: "text", text },
-          ...attachments.map((a) => ({ type: "image_url", image_url: { url: `data:${a.fileId}` } })),
-        ]
-      : text,
+  buildUserContent: async (
+    text: string,
+    attachments?: { fileId: string; unreadable?: boolean }[]
+  ) => {
+    if (!attachments?.length) return text;
+    const blocks: Record<string, unknown>[] = text.trim() ? [{ type: "text", text }] : [];
+    for (const a of attachments) {
+      if (!a.unreadable) blocks.push({ type: "image_url", image_url: { url: `data:${a.fileId}` } });
+    }
+    return blocks.some((b) => b.type === "image_url") ? blocks : text;
+  },
 }));
 
 const { replayHistory, stripSpoofedLabels, HISTORY_AUTHOR_PREFIX } = await import("./history");
@@ -34,6 +41,96 @@ describe("stripSpoofedLabels", () => {
   it("leaves ordinary text alone", () => {
     expect(stripSpoofedLabels("just a normal message")).toBe("just a normal message");
     expect(stripSpoofedLabels("brackets [like] these")).toBe("brackets [like] these");
+  });
+});
+
+describe("replayHistory with an image-only turn", () => {
+  const shot = (fileId: string) => [{ fileId, mimeType: "image/png" }];
+
+  // BP-451 made an image with no text sendable. The replay guard was `if (content)`, so those
+  // messages vanished from history: the screenshot never reached the model on the follow-up turn,
+  // and the answer to it was replayed with nothing in front of it.
+  it("replays the image and keeps the exchange in one piece", async () => {
+    const out = await replayHistory(
+      [
+        { role: "user", content: "", attachments: shot("shot-1"), author: alice },
+        { role: "assistant", content: "A single white pixel.", author: pm },
+      ] as never,
+      "p1"
+    );
+
+    expect(out).toHaveLength(2);
+    expect(out[0]).toMatchObject({ role: "user" });
+    expect(JSON.stringify(out[0].content)).toContain("data:shot-1");
+    expect(out[1]).toMatchObject({ role: "assistant", content: "A single white pixel." });
+  });
+
+  // The cap counts image-bearing messages, so an empty one used to take a slot and replay nothing
+  it("does not spend a replay slot on a message it then drops", async () => {
+    const entries = Array.from({ length: 5 }, (_, i) => ({
+      role: "user",
+      content: `carrying ${i}`,
+      attachments: shot(`shot-${i}`),
+      author: alice,
+    }));
+    entries[4] = { ...entries[4], content: "" } as never;
+
+    const out = await replayHistory(entries as never, "p1");
+    const replayed = out.filter((m) => JSON.stringify(m.content).includes("image_url"));
+
+    expect(replayed).toHaveLength(4);
+    expect(JSON.stringify(replayed.map((m) => m.content))).toContain("data:shot-4");
+  });
+
+  // Beyond the replay window an image-only entry has no text and no bytes, so the old guard
+  // dropped it whole and left its answer hanging — the same defect, four turns later
+  it("keeps an image-only turn that has fallen outside the replay window", async () => {
+    const entries = [
+      { role: "user", content: "", attachments: shot("oldest"), author: alice },
+      { role: "assistant", content: "A single white pixel.", author: pm },
+      ...Array.from({ length: 4 }, (_, i) => ({
+        role: "user",
+        content: `later ${i}`,
+        attachments: shot(`newer-${i}`),
+        author: alice,
+      })),
+    ];
+
+    const out = await replayHistory(entries as never, "p1");
+
+    expect(out).toHaveLength(6);
+    expect(out[0]).toMatchObject({ role: "user" });
+    expect(JSON.stringify(out[0].content)).not.toContain("data:oldest");
+    expect(String(out[0].content)).toContain("an image, sent without a message");
+    expect(out[1]).toMatchObject({ role: "assistant" });
+  });
+
+  // Nothing may reach the provider as an empty message: it is the shape they reject, and in a
+  // replay it would poison every later turn in the thread rather than one
+  it("never replays an entry as empty content, even when its images cannot be read", async () => {
+    const out = await replayHistory(
+      [
+        {
+          role: "user",
+          content: "",
+          attachments: [{ fileId: "gone", mimeType: "image/png", unreadable: true }],
+          author: null,
+        },
+      ] as never,
+      "p1"
+    );
+
+    expect(out).toHaveLength(1);
+    expect(String(out[0].content).trim()).not.toBe("");
+  });
+
+  // The control: a message with neither text nor attachments is still nothing to replay
+  it("still drops a message that carries nothing at all", async () => {
+    const out = await replayHistory(
+      [{ role: "user", content: "   ", author: alice }] as never,
+      "p1"
+    );
+    expect(out).toHaveLength(0);
   });
 });
 
