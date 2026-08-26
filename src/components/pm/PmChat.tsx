@@ -201,6 +201,15 @@ export function PmChat({
   async function addFiles(files: File[]) {
     const images = files.filter((f) => f.type.startsWith("image/"));
     if (images.length === 0) return;
+    // This writes the shared banner, and a Retry left over from an earlier failure would render
+    // beside a sentence about attachments and resend that older message.
+    setRetryable(false);
+    // `pending` is read from this closure while the uploads below append to it one at a time, so a
+    // second call landing mid-batch would compute its room against a count still growing.
+    if (uploading) {
+      setErrorState("Still attaching — try that again in a moment.");
+      return;
+    }
 
     const room = MAX_ATTACHMENTS - pending.length;
     if (room <= 0) {
@@ -291,19 +300,22 @@ export function PmChat({
 
     // The thumbnails come back rather than being cleared on the way out: the upload survives in
     // GridFS but nothing on screen could reach it (BP-451).
-    function unsend(reason: string) {
+    /**
+     * `worthRetrying` is about the refusal, not the message: a 400 is decided by the bytes in the
+     * request, so the same Retry produces the same 400 for ever.
+     */
+    function unsend(reason: string, worthRetrying: boolean) {
       setWorking(false);
       setWorkingStatus("");
       setMessages((prev) => prev.filter((m) => m._id !== optimisticId));
-      // Merged, not overwritten: onDrop is not gated on `working`, so anything added while the turn
-      // was in flight would be discarded here with its upload orphaned in GridFS.
-      setPending((now) => [
-        ...sentPending,
-        ...now.filter((p) => !sentPending.some((was) => was.fileId === p.fileId)),
-      ]);
+      setInput(message);
+      // Merged rather than overwritten, because onDrop is not gated on `working` and anything added
+      // mid-flight would otherwise be discarded with its upload orphaned. Clamped, because nothing
+      // else clamps this one: `addFiles` is no longer the only writer.
+      setPending((now) => [...sentPending, ...now].slice(0, MAX_ATTACHMENTS));
       setErrorState(reason);
       setLastFailedInput(message);
-      setRetryable(true);
+      setRetryable(worthRetrying);
     }
 
     let response: Response;
@@ -313,7 +325,7 @@ export function PmChat({
         ...(sentAttachments.length ? { attachments: sentAttachments } : {}),
       });
     } catch {
-      unsend("Could not reach the server.");
+      unsend("Could not reach the server.", true);
       return;
     }
 
@@ -323,9 +335,10 @@ export function PmChat({
     if (!response.ok) {
       const err = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
       if (response.status === 503) {
-        unsend("PM is not configured on the server (OPENROUTER_API_KEY missing).");
+        unsend("PM is not configured on the server (OPENROUTER_API_KEY missing).", false);
       } else {
-        unsend(err.error || "Request failed.");
+        // A 400 is deterministic in the request; a 409 or 429 is about the moment
+        unsend(err.error || "Request failed.", response.status !== 400);
       }
       return;
     }
@@ -541,7 +554,7 @@ export function PmChat({
       {errorState && (
         <div className="mb-2 text-sm text-danger flex items-center gap-3">
           <span>{errorState}</span>
-          {retryable && (
+          {retryable && (lastFailedInput || pending.length > 0) && (
             <Button size="sm" variant="secondary" onClick={() => { setErrorState(""); setRetryable(false); send(lastFailedInput); }}>
               Retry
             </Button>

@@ -223,6 +223,19 @@ export async function runPmTurn(opts: {
   // screenshot is as likely to mint tasks as to ask what it is for (BP-451).
   const imageOnly = !opts.userMessage.trim() && Array.isArray(userContent);
 
+  const finalize = async (content: string): Promise<PmTurnResult> => {
+    assistantMessage.content = content;
+    await assistantMessage.save();
+    return { ok: true, message: assistantMessage.toObject() as IPmMessage };
+  };
+
+  // The route checks the *files* document before the turn starts; the bytes are read here, and a
+  // file whose chunks are gone fails only at this point. Without this the provider is handed an
+  // empty user message, and the turn is already counted against the cap (BP-451 review).
+  if (!opts.userMessage.trim() && !Array.isArray(userContent)) {
+    return finalize("⚠️ That image could not be read, so there was nothing to send.");
+  }
+
   const messages: OrChatMessage[] = [
     { role: "system", content: buildSystemPrompt(project, mcp, disallowedTools, actor) },
     ...(await replayHistory(history, opts.projectId)),
@@ -238,11 +251,6 @@ export async function runPmTurn(opts: {
     { role: "user", content: userContent },
   ];
 
-  const finalize = async (content: string): Promise<PmTurnResult> => {
-    assistantMessage.content = content;
-    await assistantMessage.save();
-    return { ok: true, message: assistantMessage.toObject() as IPmMessage };
-  };
 
   const interrupted = async (): Promise<PmTurnResult> => {
     const done = assistantMessage.actions.map((a) => a.summary);

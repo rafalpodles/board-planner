@@ -75,7 +75,13 @@ export async function POST(
   // has always offered it (BP-451). The attachments themselves are validated below, so an empty
   // message with an empty array is still refused.
   const carriesAttachment = Array.isArray(attachments) && attachments.length > 0;
-  if (typeof message !== "string" || message.length > 10_000) {
+  if (typeof message !== "string") {
+    return NextResponse.json(
+      { error: "This request carried no message. Send text, an image, or both." },
+      { status: 400 }
+    );
+  }
+  if (message.length > 10_000) {
     return NextResponse.json(
       { error: "That message is too long — 10,000 characters at most." },
       { status: 400 }
@@ -128,16 +134,6 @@ export async function POST(
     }
   }
 
-  // An image-only turn stands or falls on the image. Everything above checks the *shape* of an
-  // attachment, so a well-formed fileId naming no file — or one on another board — would start a
-  // turn whose user content is the empty string (BP-451 review).
-  if (!message.trim() && !(await anyAttachmentReadable(parsedAttachments, projectId))) {
-    return NextResponse.json(
-      { error: "That image could not be read. Attach it again, or type a message." },
-      { status: 400 }
-    );
-  }
-
   const { over, cap } = await isOverDailyTurnCap(projectId, project.pm);
   if (over) {
     return NextResponse.json(
@@ -150,6 +146,17 @@ export async function POST(
 
   // One turn per project even though conversations are private — the agent writes to a
   // board everyone shares
+  // After the cap, because that refusal is a count this request already had to make and this one is
+  // a GridFS round trip. An image-only turn stands or falls on the image: everything above checks
+  // the *shape* of an attachment, so a well-formed fileId naming no file would otherwise start a
+  // turn whose user content is the empty string (BP-451 review).
+  if (!message.trim() && !(await anyAttachmentReadable(parsedAttachments, projectId))) {
+    return NextResponse.json(
+      { error: "That image could not be read. Attach it again, or type a message." },
+      { status: 400 }
+    );
+  }
+
   const abort = acquireTurnLock(projectId, triggeredByUserId);
   if (!abort) {
     return NextResponse.json(

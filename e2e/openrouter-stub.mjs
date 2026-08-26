@@ -99,12 +99,16 @@ const server = createServer((req, res) => {
       // A malformed request is the app's problem to report, not something to paper over
     }
 
+    // An empty text *part* has to be as visible as an empty string content: reporting it as plain
+    // "text" made the assertion written to catch the empty-block regression unfailable.
+    const kindOfPart = (part) =>
+      part?.type === "text" && !String(part.text ?? "").trim() ? "empty-text" : part?.type ?? "unknown";
     const kindsOf = (m) =>
       typeof m?.content === "string"
         ? m.content.trim()
           ? ["text"]
           : ["empty-text"]
-        : (m?.content ?? []).map((part) => part?.type ?? "unknown");
+        : (m?.content ?? []).map(kindOfPart);
     const users = messages.filter((m) => m?.role === "user");
     received = {
       userBlocks: kindsOf(users[users.length - 1]),
@@ -113,7 +117,11 @@ const server = createServer((req, res) => {
         (n, m) => n + kindsOf(m).filter((k) => k === "image_url").length,
         0
       ),
-      systemLines: messages.filter((m) => m?.role === "system").length,
+      // The contents, not a count: replayHistory also emits system rows for past board actions, so
+      // a count cannot say whether a particular instruction was sent.
+      systems: messages
+        .filter((m) => m?.role === "system")
+        .map((m) => String(m?.content ?? "").slice(0, 200)),
       roles: messages.map((m) => m?.role),
     };
 
