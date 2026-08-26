@@ -92,10 +92,71 @@ describe("changing a block", () => {
   });
 });
 
+/**
+ * Mongoose casts a query value against the schema path it names. `composition.<bucket>` is an
+ * array of subdocuments, so a bare string there is a CastError thrown while the query is being
+ * built — before it reads anything.
+ *
+ * A mock that accepts any object cannot see that, which is why six passing tests sat on top of a
+ * route that answered 500 for every delete (BP-460). This reproduces the one casting rule that
+ * bit us, so reintroducing the bare string turns these tests red instead of green.
+ */
+function castLikeMongoose(query: Record<string, unknown>): void {
+  const arms = (query.$or ?? []) as Record<string, unknown>[];
+  for (const arm of arms) {
+    for (const [path, value] of Object.entries(arm)) {
+      const isBucketItself = /^composition\.[a-z]+$/.test(path);
+      if (isBucketItself && typeof value === "string") {
+        throw new Error(
+          `Cast to embedded failed for value "${value}" (type string) at path "${path}"`
+        );
+      }
+    }
+  }
+}
+
 describe("deleting a block", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    agentFind.mockReturnValue({ lean: () => Promise.resolve([]) });
+    agentFind.mockImplementation((query: Record<string, unknown>) => {
+      castLikeMongoose(query);
+      return { lean: () => Promise.resolve([]) };
+    });
+  });
+
+  // Named for the bug rather than for the query: what matters is that no delete can 500 on the way
+  // to its in-use check, whatever shape that check ends up being written in.
+  it("builds an in-use query a real Mongoose would not throw on", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+    blockFindById.mockResolvedValue(block());
+
+    await del();
+
+    expect(agentFind).toHaveBeenCalledOnce();
+    expect(() =>
+      castLikeMongoose(agentFind.mock.calls[0][0] as Record<string, unknown>)
+    ).not.toThrow();
+  });
+
+  // The legacy arm is not decoration: normaliseComposition coerces the pre-object shape on read and
+  // rewrites it on save, so an agent nobody has saved since still holds bare keys in the database.
+  // Dropping the arm would leave those agents unprotected, and every other test here would stay green.
+  it("still searches the pre-object shape, through an operator rather than a bare string", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+    blockFindById.mockResolvedValue(block());
+
+    await del();
+
+    const arms = (agentFind.mock.calls[0][0] as { $or: Record<string, unknown>[] }).$or;
+    const legacy = arms.filter((arm) =>
+      Object.keys(arm).some((path) => /^composition\.[a-z]+$/.test(path))
+    );
+    expect(legacy.length, "the legacy arm is gone — pre-object compositions are unprotected").toBe(
+      4
+    );
+    for (const arm of legacy) {
+      expect(Object.values(arm)[0]).toEqual({ $elemMatch: { $eq: "a-key" } });
+    }
   });
 
   function del() {
