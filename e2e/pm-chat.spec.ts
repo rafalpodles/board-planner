@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
 import mongoose from "mongoose";
 import { ADMIN_AUTH } from "./api";
 import {
@@ -85,6 +85,17 @@ test.beforeEach(async ({ request }) => {
   // has nothing to do with the product.
   await request.post(`${PM_STUB_URL}/reset`);
 });
+
+/** What the model was handed on the last turn — see the stub's /last. */
+async function lastRequest(request: APIRequestContext): Promise<{
+  userBlocks: string[];
+  images: number;
+  systemLines: number;
+  roles: string[];
+}> {
+  const res = await request.get(`${PM_STUB_URL}/last`);
+  return res.json();
+}
 
 const chatBox = (page: Page) => page.getByPlaceholder(/Message the PM/);
 const sendButton = (page: Page) => page.getByRole("button", { name: "Send", exact: true });
@@ -437,7 +448,7 @@ test.describe("attaching a screenshot", () => {
     await expect(agentSpoke(page)).toHaveCount(0);
   });
 
-  test("an image on its own is a message, with nothing typed", async ({ page }) => {
+  test("an image on its own is a message, with nothing typed", async ({ page, request }) => {
     // BP-451, reachable on a first attempt: paste a screenshot, press Send, and the image was gone
     // — the button offered it and the server refused with a validation sentence written for an API
     // client. No directive is typed here, so the stub answers with its fallback; that is the point.
@@ -459,6 +470,37 @@ test.describe("attaching a screenshot", () => {
 
     await expect(reply(page)).toContainText("Noted.");
     await expect(page.getByAltText("Attached screenshot").first()).toBeVisible();
+
+    // The assertion the reply cannot make. "Noted." is what any turn answers, so on its own it
+    // certifies that a turn ran, not that the picture was in it — a buildUserContent that returned
+    // the text unconditionally left every test in this file green (BP-451 review).
+    const sent = await lastRequest(request);
+    expect(sent.userBlocks, "the image never reached the model").toContain("image_url");
+    expect(sent.userBlocks, "an empty text block went with it").not.toContain("empty-text");
+    expect(sent.images).toBe(1);
+  });
+
+  test("the picture is still there on the next turn, when the question arrives", async ({
+    page,
+    request,
+  }) => {
+    // The follow-up is the point of sending a screenshot at all, and it is where the replay guard
+    // dropped it: history was replayed only `if (content)`, and an image-only turn has none.
+    await pmSettings({ model: "e2e/vision-model" });
+    await signIn(page);
+    await openChat(page);
+
+    await attach(page);
+    await sendButton(page).click();
+    await expect(reply(page)).toContainText("Noted.");
+
+    await say(page, "What is wrong with it?", { say: "The pixel is white." });
+    await expect(reply(page)).toContainText("The pixel is white.");
+
+    const sent = await lastRequest(request);
+    expect(sent.userBlocks, "the follow-up itself carries no image").toEqual(["text"]);
+    expect(sent.images, "the screenshot was dropped from history").toBe(1);
+    expect(sent.roles.filter((r) => r === "user")).toHaveLength(2);
   });
 
   test("a refused send hands the picture back instead of destroying it", async ({ page }) => {
@@ -471,7 +513,10 @@ test.describe("attaching a screenshot", () => {
 
     await attach(page);
     await expect(page.getByAltText("Attachment preview")).toBeVisible();
-    await sendButton(page).click();
+    const [first] = await Promise.all([
+      page.waitForRequest((r) => r.method() === "POST" && r.url().includes("/pm/chat")),
+      sendButton(page).click(),
+    ]);
 
     await expect(
       page.getByText(/does not accept images/)
@@ -482,6 +527,35 @@ test.describe("attaching a screenshot", () => {
     await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
     // ...and the message that never went is not left in the thread
     await expect(agentSpoke(page)).toHaveCount(0);
+
+    // A thumbnail is not the picture. Clicking Retry is what proves the restored attachment is the
+    // same upload and still usable — a restore that handed back previews with rewritten fileIds
+    // read identically to this one (BP-451 review).
+    const [second] = await Promise.all([
+      page.waitForRequest((r) => r.method() === "POST" && r.url().includes("/pm/chat")),
+      page.getByRole("button", { name: "Retry" }).click(),
+    ]);
+    expect(JSON.parse(second.postData() ?? "{}").attachments).toEqual(
+      JSON.parse(first.postData() ?? "{}").attachments
+    );
+  });
+
+  test("a turn that fails mid-stream offers no Retry when it carried a picture", async ({
+    page,
+  }) => {
+    // Unlike a refusal, this turn ran: its images are on the persisted message, so resending would
+    // upload them again, and resending the text without them is not a retry. Before the review this
+    // branch offered a Retry here that called send("") and did nothing at all.
+    await pmSettings({ model: "e2e/vision-model" });
+    await signIn(page);
+    await openChat(page);
+
+    await attach(page);
+    await say(page, "Look at this.", { status: 500 });
+
+    await expect(reply(page)).toContainText(/⚠️ OpenRouter HTTP 500/);
+    await expect(page.getByRole("button", { name: "Retry" })).toHaveCount(0);
+    await expect(chatBox(page)).toBeEnabled();
   });
 
   test("an image-only send whose image cannot be read is refused, not turned into an empty turn",

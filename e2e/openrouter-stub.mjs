@@ -52,12 +52,24 @@ function reply(res, body) {
   res.end(payload);
 }
 
+// The shape of the last completion request, for /last
+let received = null;
+
 const server = createServer((req, res) => {
   // `failTimes` counts attempts per directive, and this process outlives every test in the run —
   // including a Playwright retry, which would otherwise start at attempt 2 and never fail.
   if (req.url === "/reset") {
     seen.clear();
+    received = null;
     res.writeHead(200, { "Content-Type": "text/plain" }).end("ok");
+    return;
+  }
+
+  // What the model was actually handed on the last turn. A turn carrying only an image has no text
+  // to put a directive in, so this is the only way a test can assert the image was in the request
+  // rather than merely that a turn ran (BP-451 review).
+  if (req.url === "/last") {
+    res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(received));
     return;
   }
 
@@ -86,6 +98,24 @@ const server = createServer((req, res) => {
     } catch {
       // A malformed request is the app's problem to report, not something to paper over
     }
+
+    const kindsOf = (m) =>
+      typeof m?.content === "string"
+        ? m.content.trim()
+          ? ["text"]
+          : ["empty-text"]
+        : (m?.content ?? []).map((part) => part?.type ?? "unknown");
+    const users = messages.filter((m) => m?.role === "user");
+    received = {
+      userBlocks: kindsOf(users[users.length - 1]),
+      // Across the whole request, so a follow-up turn shows whether history replayed the picture
+      images: messages.reduce(
+        (n, m) => n + kindsOf(m).filter((k) => k === "image_url").length,
+        0
+      ),
+      systemLines: messages.filter((m) => m?.role === "system").length,
+      roles: messages.map((m) => m?.role),
+    };
 
     const toolHasRun = messages.some((m) => m?.role === "tool");
 
