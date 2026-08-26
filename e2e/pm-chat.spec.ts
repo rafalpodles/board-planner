@@ -523,7 +523,66 @@ test.describe("attaching a screenshot", () => {
       }))
     );
 
-    await expect(page.getByText("Only 4 of 6 images attached — at most 4 per message.")).toBeVisible();
+    await expect(page.getByText("Attached 4 of 6 — 4 images per message.")).toBeVisible();
+    await expect(page.getByAltText("Attachment preview")).toHaveCount(4);
+  });
+
+  test("the cap counts what is already attached, and says so", async ({ page }) => {
+    // The case above has 4 taken and a cap of 4, so the two numbers are the same and swapping them
+    // would be invisible. Here they differ, and the sentence has to explain why only one landed.
+    await signIn(page);
+    await openChat(page);
+
+    await page.setInputFiles(
+      'input[type="file"]',
+      Array.from({ length: 3 }, (_, i) => ({
+        name: `first-${i}.png`,
+        mimeType: "image/png",
+        buffer: PNG,
+      }))
+    );
+    await expect(page.getByAltText("Attachment preview")).toHaveCount(3);
+
+    await page.setInputFiles(
+      'input[type="file"]',
+      Array.from({ length: 2 }, (_, i) => ({
+        name: `more-${i}.png`,
+        mimeType: "image/png",
+        buffer: PNG,
+      }))
+    );
+
+    await expect(
+      page.getByText("Attached 1 of 2 — 4 images per message, and 3 already attached.")
+    ).toBeVisible();
+    await expect(page.getByAltText("Attachment preview")).toHaveCount(4);
+  });
+
+  test("a composer already at the cap says how many are there, not just the limit", async ({
+    page,
+  }) => {
+    await signIn(page);
+    await openChat(page);
+
+    await page.setInputFiles(
+      'input[type="file"]',
+      Array.from({ length: 4 }, (_, i) => ({
+        name: `full-${i}.png`,
+        mimeType: "image/png",
+        buffer: PNG,
+      }))
+    );
+    await expect(page.getByAltText("Attachment preview")).toHaveCount(4);
+
+    await page.setInputFiles('input[type="file"]', {
+      name: "one-too-many.png",
+      mimeType: "image/png",
+      buffer: PNG,
+    });
+
+    await expect(
+      page.getByText("Attached 0 of 1 — 4 images per message, and 4 already attached.")
+    ).toBeVisible();
     await expect(page.getByAltText("Attachment preview")).toHaveCount(4);
   });
 

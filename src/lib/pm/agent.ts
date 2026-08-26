@@ -213,13 +213,29 @@ export async function runPmTurn(opts: {
     ...[...mcp.tools.values()].map((t) => t.definition),
   ].filter((t) => !blocked.has(t.name));
 
+  const userContent = await buildUserContent(
+    stripSpoofedLabels(opts.userMessage),
+    opts.attachments,
+    opts.projectId
+  );
+  // An image with nothing typed is a question, not an instruction. The standing rules are about
+  // writing to the board, and nothing in them mentions images, so without this an unexplained
+  // screenshot is as likely to mint tasks as to ask what it is for (BP-451).
+  const imageOnly = !opts.userMessage.trim() && Array.isArray(userContent);
+
   const messages: OrChatMessage[] = [
     { role: "system", content: buildSystemPrompt(project, mcp, disallowedTools, actor) },
     ...(await replayHistory(history, opts.projectId)),
-    {
-      role: "user",
-      content: await buildUserContent(stripSpoofedLabels(opts.userMessage), opts.attachments, opts.projectId),
-    },
+    ...(imageOnly
+      ? [
+          {
+            role: "system" as const,
+            content:
+              "This turn carries an image and no text. Describe what you see and ask what is wanted with it. Do not create, change or assign anything on the board until you are told to.",
+          },
+        ]
+      : []),
+    { role: "user", content: userContent },
   ];
 
   const finalize = async (content: string): Promise<PmTurnResult> => {

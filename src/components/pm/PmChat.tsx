@@ -204,7 +204,9 @@ export function PmChat({
 
     const room = MAX_ATTACHMENTS - pending.length;
     if (room <= 0) {
-      setErrorState(`At most ${MAX_ATTACHMENTS} images per message.`);
+      setErrorState(
+        `Attached 0 of ${images.length} — ${MAX_ATTACHMENTS} images per message, and ${pending.length} already attached.`
+      );
       return;
     }
 
@@ -212,7 +214,9 @@ export function PmChat({
     setUploading(true);
     setErrorState(
       taking.length < images.length
-        ? `Only ${taking.length} of ${images.length} images attached — at most ${MAX_ATTACHMENTS} per message.`
+        ? `Attached ${taking.length} of ${images.length} — ${MAX_ATTACHMENTS} images per message${
+            pending.length ? `, and ${pending.length} already attached` : ""
+          }.`
         : ""
     );
     try {
@@ -291,7 +295,12 @@ export function PmChat({
       setWorking(false);
       setWorkingStatus("");
       setMessages((prev) => prev.filter((m) => m._id !== optimisticId));
-      setPending(sentPending);
+      // Merged, not overwritten: onDrop is not gated on `working`, so anything added while the turn
+      // was in flight would be discarded here with its upload orphaned in GridFS.
+      setPending((now) => [
+        ...sentPending,
+        ...now.filter((p) => !sentPending.some((was) => was.fileId === p.fileId)),
+      ]);
       setErrorState(reason);
       setLastFailedInput(message);
       setRetryable(true);
@@ -350,7 +359,11 @@ export function PmChat({
             if (eventLine === "error" && data.error) {
               setErrorState(data.error);
               setLastFailedInput(message);
-              setRetryable(true);
+              // Not `unsend`: this turn ran, so its attachments are on the persisted message and
+              // resending them would upload the same image twice. Which leaves nothing honest to
+              // offer when the send carried one — a Retry there resends the text without the
+              // picture, and with nothing typed it calls send("") and does nothing at all.
+              setRetryable(message.length > 0 && sentAttachments.length === 0);
             }
           }
         }
@@ -503,7 +516,7 @@ export function PmChat({
                 </div>
               )}
               <div className="text-sm prose-sm break-words">
-                <MarkdownContent>{m.content || "…"}</MarkdownContent>
+                <MarkdownContent>{m.content || (m.attachments?.length ? "" : "…")}</MarkdownContent>
               </div>
               <ActionChips actions={m.actions} />
               <p className="text-[10px] text-text-muted mt-1">{timeAgo(m.createdAt)}</p>

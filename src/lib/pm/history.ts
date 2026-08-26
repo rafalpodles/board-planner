@@ -45,7 +45,10 @@ export async function replayHistory(
 
   for (const entry of history) {
     const content = stripSpoofedLabels((entry.content || "").trim());
-    if (content) {
+    // An image-only turn has no text and is still a turn: dropping it took the screenshot out of
+    // the model's history, left the answer dangling with nothing before it, and still spent one of
+    // the replay slots — so an older image was evicted for a message that replayed nothing (BP-451).
+    if (content || replayable.has(entry)) {
       // The thread is shared, so an unlabelled message is one the model may read as the
       // current user's own earlier instruction and act on
       const username = entry.role === "user" ? authorOf(entry) : null;
