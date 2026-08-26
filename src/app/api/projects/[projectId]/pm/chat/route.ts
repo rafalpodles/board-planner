@@ -9,11 +9,7 @@ import { isPmAvailable } from "@/lib/pm/config";
 import { acquireTurnLock, releaseTurnLock } from "@/lib/pm/turn-lock";
 import { isOverDailyTurnCap } from "@/lib/pm/turn-cap";
 import { isPmRunnable, pmDisabledReason, resolvePmModel } from "@/lib/pm/availability";
-import {
-  IMAGE_MIME_TYPES,
-  MAX_ATTACHMENTS_PER_MESSAGE,
-  modelAcceptsImages,
-} from "@/lib/pm/attachments";
+import { IMAGE_MIME_TYPES, MAX_ATTACHMENTS_PER_MESSAGE, anyAttachmentReadable, modelAcceptsImages } from "@/lib/pm/attachments";
 import { databaseUnavailable, resolveProjectId } from "@/lib/middleware";
 import { check } from "@/lib/grants";
 import { PmAttachment } from "@/types";
@@ -75,9 +71,25 @@ export async function POST(
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
-  if (typeof message !== "string" || !message.trim() || message.length > 10_000) {
+  // Empty is allowed when something is attached: an image on its own is a turn, and the Send button
+  // has always offered it (BP-451). The attachments themselves are validated below, so an empty
+  // message with an empty array is still refused.
+  const carriesAttachment = Array.isArray(attachments) && attachments.length > 0;
+  if (typeof message !== "string") {
     return NextResponse.json(
-      { error: "message must be a non-empty string up to 10000 chars" },
+      { error: "This request carried no message. Send text, an image, or both." },
+      { status: 400 }
+    );
+  }
+  if (message.length > 10_000) {
+    return NextResponse.json(
+      { error: "That message is too long — 10,000 characters at most." },
+      { status: 400 }
+    );
+  }
+  if (!message.trim() && !carriesAttachment) {
+    return NextResponse.json(
+      { error: "Type something, or attach an image." },
       { status: 400 }
     );
   }
@@ -134,6 +146,17 @@ export async function POST(
 
   // One turn per project even though conversations are private — the agent writes to a
   // board everyone shares
+  // After the cap, because that refusal is a count this request already had to make and this one is
+  // a GridFS round trip. An image-only turn stands or falls on the image: everything above checks
+  // the *shape* of an attachment, so a well-formed fileId naming no file would otherwise start a
+  // turn whose user content is the empty string (BP-451 review).
+  if (!message.trim() && !(await anyAttachmentReadable(parsedAttachments, projectId))) {
+    return NextResponse.json(
+      { error: "That image could not be read. Attach it again, or type a message." },
+      { status: 400 }
+    );
+  }
+
   const abort = acquireTurnLock(projectId, triggeredByUserId);
   if (!abort) {
     return NextResponse.json(
