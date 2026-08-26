@@ -49,12 +49,6 @@ export const PUT = withAuth(async (request, { params, user }) => {
 
   const agent = await Agent.findById(agentId);
   if (!agent) return NextResponse.json({ error: "No such agent" }, { status: 404 });
-  // DELETE refuses one; nothing restores a built-in that has been edited, since seedAgents only
-  // ever inserts.
-  if (agent.builtIn) {
-    return NextResponse.json({ error: "A built-in agent cannot be changed" }, { status: 400 });
-  }
-
   if (!(await mayEdit(user, agent))) {
     return NextResponse.json({ error: "Not yours to change" }, { status: 403 });
   }
