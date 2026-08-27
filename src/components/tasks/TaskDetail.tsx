@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
 import { subscribeBoardRefresh } from "@/lib/board-refresh";
 import { taskPath } from "@/lib/urls";
+import { duplicatePayload } from "@/lib/task-duplicate";
 import { timeAgo } from "@/lib/time";
 import { useAuth } from "@/hooks/use-auth";
 import { ApiAgent, ApiProject, ApiSprint, ApiTask, ApiUserSummary, RunConflict } from "@/types";
@@ -251,17 +252,9 @@ function TaskDetailView({
 
   async function handleDuplicate() {
     try {
-      // No status: columns are per project since CP-128, so a literal "planned" is a 400
-      // in any project that renamed or rebuilt its board. Omitting it lets the server pick
-      // the project's own backlog column.
-      const created = await api.post(`/api/projects/${projectId}/tasks`, {
-        title: `Copy of ${task.title}`,
-        description: task.description,
-        category: task.category,
-        checklist: task.checklist,
-        dueDate: task.dueDate,
-        customFieldValues: task.customFieldValues,
-      });
+      // What a copy carries, and what it deliberately leaves behind, is decided in one place —
+      // the board's context menu duplicates through the same payload
+      const created = await api.post(`/api/projects/${projectId}/tasks`, duplicatePayload(task));
       toast("Task duplicated", "success");
       router.push(taskPath(projectId, created.taskNumber));
     } catch {
