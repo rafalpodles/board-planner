@@ -35,3 +35,31 @@ describe("Task schema", () => {
     expect(Task.schema.path("assignedBy").options.ref).toBe("User");
   });
 });
+
+// BP-463 review. The interval's 365 bound belongs to `normaliseRecurrence`, which every client
+// path goes through, and NOT to the schema — because `createNextRecurrence` copies the closed
+// task's recurrence verbatim into `Task.create`, which runs full-document validation. Tasks stored
+// back when a pasted 400 was accepted end to end still exist; with a schema `max` their first
+// close throws into a fire-and-forget `.catch`, so the successor is never minted and the series
+// dies with nothing on screen and nothing in the log. That is the failure BP-463 exists to remove.
+describe("a recurrence stored before the interval had a bound", () => {
+  const legacy = (interval: number) =>
+    new Task({
+      project: "6a69903ec4c79d7d07a5eda8",
+      taskNumber: 1,
+      title: "Pay the annual thing",
+      createdBy: "69a52cb3399b27d3cbb2c59b",
+      recurrence: { frequency: "daily", interval },
+    }).validateSync();
+
+  it("still validates, so its series can go on being minted", () => {
+    expect(legacy(400)).toBeUndefined();
+    expect(legacy(100_000)).toBeUndefined();
+  });
+
+  // The control, and the reason the above is about the maximum rather than about validation being
+  // switched off: the floor is still the schema's, because nothing legitimate ever wrote a zero.
+  it("still refuses an interval below one", () => {
+    expect(legacy(0)?.errors["recurrence.interval"]).toBeTruthy();
+  });
+});

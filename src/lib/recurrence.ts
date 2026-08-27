@@ -1,10 +1,8 @@
-import { RecurrenceFrequency } from "@/types";
+import { RecurrenceFrequency, RECURRENCE_FREQUENCIES } from "@/types";
 
 // Both editors have advertised this bound as an HTML `max` since recurrence shipped, and nothing
 // behind them held to it: a pasted 400 — or 100000 — was stored end to end.
 export const MAX_RECURRENCE_INTERVAL = 365;
-
-const FREQUENCIES: RecurrenceFrequency[] = ["daily", "weekly", "monthly"];
 
 export interface NormalisedRecurrence {
   frequency: RecurrenceFrequency;
@@ -33,14 +31,18 @@ export function normaliseRecurrence(raw: unknown): RecurrenceResult {
 
   const { frequency, interval, endDate } = raw as Record<string, unknown>;
 
-  if (!FREQUENCIES.includes(frequency as RecurrenceFrequency)) {
+  if (!RECURRENCE_FREQUENCIES.includes(frequency as RecurrenceFrequency)) {
     return {
       ok: false,
-      error: `Invalid recurrence frequency "${String(frequency)}" — one of: ${FREQUENCIES.join(", ")}`,
+      error: `Invalid recurrence frequency "${String(frequency)}" — one of: ${RECURRENCE_FREQUENCIES.join(", ")}`,
     };
   }
 
-  const every = typeof interval === "number" ? interval : Number(interval);
+  // Not a bare `Number()`: `Number(true)` is 1 and `Number([5])` is 5, so a boolean was accepted as
+  // "every 1 day" and a one-element array as its contents — the second of those looser than the
+  // Mongoose cast this stands in for, which refuses an array outright.
+  const every =
+    typeof interval === "number" || typeof interval === "string" ? Number(interval) : NaN;
   if (!Number.isInteger(every) || every < 1 || every > MAX_RECURRENCE_INTERVAL) {
     return {
       ok: false,
@@ -145,7 +147,22 @@ export function nextOccurrence(
   const next = dueDate
     ? nextRecurrenceDue(new Date(dueDate), recurrence.frequency, recurrence.interval)
     : null;
-  const end = recurrence.endDate ? new Date(recurrence.endDate) : null;
-  // An undated series carries no clock of its own, so its end is judged against the day it reaches
+  // The end is a *day*, and everything it is compared against is an instant. Judged against its
+  // midnight, the same field meant two different things: a dated series ending on a day it lands on
+  // kept that occurrence (both are midnight), while an undated one closed at any hour of the end day
+  // was already past it — so "until 31 December" handed out its last occurrence on the 30th. A due
+  // date carrying a time of day, which the REST API accepts even though the date input cannot make
+  // one, lost its final occurrence the same way.
+  const end = recurrence.endDate ? endOfDay(new Date(recurrence.endDate)) : null;
   return { ended: !!end && (next ?? now) > end, dueDate: next };
+}
+
+/**
+ * The last instant of a day, read in UTC because that is where a date-only value is stored: an
+ * `<input type="date">` sends "2026-12-31" and Mongoose casts it to that day's UTC midnight.
+ */
+function endOfDay(day: Date): Date {
+  const last = new Date(day);
+  last.setUTCHours(23, 59, 59, 999);
+  return last;
 }

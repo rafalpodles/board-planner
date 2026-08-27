@@ -14,8 +14,6 @@ import {
   RunConflict,
   DEFAULT_PRIORITY,
   PRIORITIES,
-  RECURRENCE_FREQUENCIES,
-  RecurrenceFrequency,
 } from "@/types";
 import { getColumnIds, defaultStatusFor, roleOf, getProjectColumns, columnIdsWithRole } from "@/lib/columns";
 import { escalationColumnId } from "@/lib/escalation";
@@ -359,30 +357,6 @@ function schemaValuesOrRefusal(values: Body): TaskServiceResult | null {
   const dueDate = values.dueDate;
   if ("dueDate" in values && dueDate !== null && dueDate !== "" && !castsToDate(dueDate)) {
     return { ok: false, error: `Invalid due date "${dueDate}"`, status: 400 };
-  }
-
-  const recurrence = values.recurrence;
-  if ("recurrence" in values && recurrence !== null) {
-    if (typeof recurrence !== "object" || Array.isArray(recurrence)) {
-      return { ok: false, error: "Recurrence must be a frequency and an interval", status: 400 };
-    }
-    if (!RECURRENCE_FREQUENCIES.includes(recurrence.frequency)) {
-      return {
-        ok: false,
-        error: `Invalid recurrence frequency "${recurrence.frequency}" — must be one of: ${RECURRENCE_FREQUENCIES.join(", ")}`,
-        status: 400,
-      };
-    }
-    // Through Number(), because that is what the cast does: "2" is a 2 to Mongoose and refusing it
-    // here would make this guard stricter than the schema it stands in for.
-    const interval = Number(recurrence.interval);
-    if (!Number.isInteger(interval) || interval < 1) {
-      return {
-        ok: false,
-        error: "Recurrence interval must be a whole number of at least 1",
-        status: 400,
-      };
-    }
   }
 
   return null;
