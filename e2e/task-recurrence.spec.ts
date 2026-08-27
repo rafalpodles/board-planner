@@ -462,7 +462,7 @@ test.describe("what happens when the task is closed", () => {
 
   // `max` on the number input stops neither typing nor pasting, and for a year it was the only
   // thing standing between a pasted 400 and the database.
-  test("an interval above the advertised maximum never reaches the database", async ({ page }) => {
+  test("an interval above the advertised maximum never reaches the database", async ({ page, request }) => {
     await signIn(page);
     await openRepeats(page);
 
@@ -478,6 +478,31 @@ test.describe("what happens when the task is closed", () => {
         })
       )
       .toBe(365);
+
+    // The other half, and it needs a different instrument: the clamp above means no sequence of
+    // clicks can put 400 on the wire, so the browser alone cannot say whether anything behind it
+    // would have refused. Who reaches this is MCP, the PM agent and anything else holding a token.
+    //
+    // Measured, both mutations, and the UI test above stays green through both: with the service
+    // bound removed the schema's own `max` throws a ValidationError nobody catches and the route
+    // answers **500**; with the schema's removed as well it answers **200** and stores 400. This
+    // line is the only thing in the suite that tells those three apart.
+    const refused = await request.put(`/api/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_ID}`, {
+      headers: ADMIN_AUTH,
+      data: { recurrence: { frequency: "daily", interval: 400 } },
+    });
+
+    expect(refused.status()).toBe(400);
+    expect(await refused.text()).toContain("365");
+
+    // The control: one inside the bound is accepted, so the refusal above is about the value
+    // rather than about the field being rejected wholesale
+    const accepted = await request.put(`/api/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_ID}`, {
+      headers: ADMIN_AUTH,
+      data: { recurrence: { frequency: "daily", interval: 365 } },
+    });
+
+    expect(accepted.status(), await accepted.text()).toBe(200);
   });
 
   test("a task with no rhythm leaves nothing behind", async ({ page, request }) => {
