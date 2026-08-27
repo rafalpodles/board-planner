@@ -16,9 +16,18 @@ function sprint(over: Partial<ApiSprint> & { _id: string }): ApiSprint {
 }
 
 describe("nextSprintDates", () => {
+  // Local, not `new Date("…T00:00:00Z")`. `today` stands for the day the person is having, and the
+  // only caller is a client component passing `new Date()` in the browser; `toDateInput` reads it
+  // with local getters, which is right — somebody in Los Angeles creating a sprint on the 10th
+  // should be offered the 10th. A UTC instant as the fixture is a different day for everybody west
+  // of UTC, so these two cases failed there and nowhere else (BP-487). Noon so no zone's midnight
+  // shift can move it.
+  const localNoonOn = (year: number, month: number, day: number) =>
+    new Date(year, month - 1, day, 12, 0, 0);
+
   it("chains onto the previous sprint's end date", () => {
     const sprints = [sprint({ _id: "s1", startDate: "2026-08-01T00:00:00Z", endDate: "2026-08-15T00:00:00Z" })];
-    const today = new Date("2026-08-05T00:00:00Z");
+    const today = localNoonOn(2026, 8, 5);
     expect(nextSprintDates(sprints, today)).toEqual({
       startDate: "2026-08-15",
       endDate: "2026-08-29",
@@ -27,7 +36,7 @@ describe("nextSprintDates", () => {
 
   it("falls back to today when the latest sprint has a null startDate", () => {
     const sprints = [sprint({ _id: "broken", startDate: null as unknown as string })];
-    const today = new Date("2026-08-11T00:00:00Z");
+    const today = localNoonOn(2026, 8, 11);
     expect(nextSprintDates(sprints, today)).toEqual({
       startDate: "2026-08-11",
       endDate: "2026-08-25",
@@ -36,7 +45,7 @@ describe("nextSprintDates", () => {
 
   it("falls back to today when the latest sprint has a null endDate", () => {
     const sprints = [sprint({ _id: "broken", endDate: null as unknown as string })];
-    const today = new Date("2026-08-11T00:00:00Z");
+    const today = localNoonOn(2026, 8, 11);
     expect(nextSprintDates(sprints, today)).toEqual({
       startDate: "2026-08-11",
       endDate: "2026-08-25",
