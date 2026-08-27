@@ -166,6 +166,7 @@ const {
   MAX_PHASE_LENGTH,
   EXECUTION_LEASE_MS,
   personalAgentAlienTo,
+  nextRecurrenceDue,
 } = await import("./task-service");
 
 const { logActivity } = await import("@/lib/activity");
@@ -3869,5 +3870,129 @@ describe("a value the schema will not store is refused by updateTask too", () =>
 
     expect((await updateTask("p1", "t1", { dueDate: "" }, WHO)).ok).toBe(true);
     expect((await updateTask("p1", "t1", { dueDate: null, recurrence: null }, WHO)).ok).toBe(true);
+  });
+});
+
+
+// BP-461. `setMonth` does not clamp: 31 January + 1 month is 3 March, so a monthly series skipped
+// February and then kept drifting, because the occurrence after that was computed from the 3rd.
+describe("advancing a recurring series' due date", () => {
+  const ymd = (d: Date) => [d.getFullYear(), d.getMonth() + 1, d.getDate()];
+
+  // The short months, both directions across a year boundary, and both leap-year answers for
+  // 29 February, plus one whose day the target month can hold. All but the last are dates where
+  // a bare `setMonth` and the clamp disagree, so they cannot go green against the code this
+  // replaces; the last one guards the other half of `Math.min`.
+  it.each([
+    { from: [2026, 0, 31], interval: 1, to: [2026, 2, 28], why: "31 Jan lands on the last of February" },
+    { from: [2026, 0, 29], interval: 1, to: [2026, 2, 28], why: "so does the 29th" },
+    { from: [2026, 0, 30], interval: 1, to: [2026, 2, 28], why: "and the 30th" },
+    { from: [2026, 2, 31], interval: 1, to: [2026, 4, 30], why: "31 March lands on 30 April" },
+    { from: [2028, 0, 31], interval: 1, to: [2028, 2, 29], why: "a leap year gets its 29th" },
+    { from: [2026, 11, 31], interval: 2, to: [2027, 2, 28], why: "the clamp survives a year boundary" },
+    { from: [2026, 0, 31], interval: 3, to: [2026, 4, 30], why: "and an interval above one" },
+    // The other half of `Math.min`. Every row above lands on the target month's last day, so a
+    // version that discarded `day` and always used the month end would satisfy all of them —
+    // measured. This one is shorter than February, let alone the month it lands in.
+    { from: [2026, 4, 15], interval: 2, to: [2026, 7, 15], why: "a day the target month can hold is kept" },
+  ])("monthly: $why", ({ from, interval, to }) => {
+    const next = nextRecurrenceDue(new Date(from[0], from[1], from[2], 12, 0, 0), "monthly", interval);
+    expect(ymd(next)).toEqual(to);
+  });
+
+  // Measured, and deliberately not what BP-461's own description predicted: each occurrence is
+  // computed from the one just closed, so once February has clamped 31 to 28 the series settles on
+  // the 28th rather than climbing back to the 31st.
+  //
+  // That is the price of basing the next occurrence on the previous one, and the previous one is
+  // what makes retargeting work — a person who edits a mid-series due date to the 5th gets the 5th
+  // from then on. Climbing back would need the originally chosen day stored beside the recurrence
+  // and invalidated on every explicit due-date edit; see the note on BP-461.
+  //
+  // What matters is that it is stationary. The bug was a series walking forward forever — 31 Jan,
+  // 3 Mar, 3 Apr, 3 May — through months nobody chose.
+  it("settles on a day and stays there, instead of walking forward month after month", () => {
+    let due = new Date(2026, 0, 31, 12, 0, 0);
+    const series: number[][] = [];
+    for (let i = 0; i < 4; i++) {
+      due = nextRecurrenceDue(due, "monthly", 1);
+      series.push(ymd(due));
+    }
+
+    expect(series).toEqual([
+      [2026, 2, 28],
+      [2026, 3, 28],
+      [2026, 4, 28],
+      [2026, 5, 28],
+    ]);
+  });
+
+  // The control. `setDate` overflowing into the next month is exactly what "seven days later"
+  // means, so these two must be left alone by the fix above — and the interval has to be carried,
+  // or `7 * interval` mutated to a bare `7` goes unnoticed.
+  it.each([
+    { frequency: "daily" as const, interval: 3, to: [2026, 3, 3] },
+    { frequency: "weekly" as const, interval: 2, to: [2026, 3, 14] },
+  ])("$frequency every $interval still counts days across the month boundary", ({ frequency, interval, to }) => {
+    const next = nextRecurrenceDue(new Date(2026, 1, 28, 12, 0, 0), frequency, interval);
+    expect(ymd(next)).toEqual(to);
+  });
+
+  it("keeps the time of day, so a series does not walk around the clock", () => {
+    const next = nextRecurrenceDue(new Date(2026, 0, 31, 9, 30, 0), "monthly", 1);
+    expect([next.getHours(), next.getMinutes()]).toEqual([9, 30]);
+  });
+
+  // Also from the review: `base.getMonth() + interval + 1` concatenates rather than adds if
+  // `interval` arrives as a string — `0 + "2" + 1` is "021", which is September 2027, whose last
+  // day is the 30th, so 31 January + 2 months came back as **30** March instead of the 31st.
+  //
+  // Unreachable through the app — `schemaValuesOrRefusal` requires an integer ≥ 1 and the schema
+  // types the path as a Number — but this function is exported, and its one caller reads the
+  // interval off a task typed `any`, so the parameter's type is documentation rather than a guard.
+  it("adds a string interval rather than concatenating it", () => {
+    const next = nextRecurrenceDue(
+      new Date(2026, 0, 31, 12, 0, 0),
+      "monthly",
+      "2" as unknown as number
+    );
+    expect(ymd(next)).toEqual([2026, 3, 31]);
+  });
+
+  // Raised by an independent review of this fix. Clamping by stepping through the 1st of the
+  // target month — `setDate(1)` then `setMonth` then `setDate(day)` — imports a DST gap that the
+  // chosen day does not have. In a zone whose clocks go forward on the 1st of October, a series
+  // due at 02:30 on the 15th passes through an hour that does not exist on 1 October, is
+  // normalised forward, and every occurrence from then on is an hour late: 02:30, 03:30, 03:30…
+  //
+  // Nothing to do with the clamp — 15 October holds a 15th perfectly well, and the whole zone
+  // family (Sydney, Melbourne, Hobart, Adelaide, Lord Howe, Norfolk) is affected for any base
+  // whose time-of-day falls in the gap. Europe and the Americas are clean only because their
+  // transition Sundays land later in the month.
+  it("does not pick up an hour from a DST gap the chosen day never touches", () => {
+    const wasTz = process.env.TZ;
+    process.env.TZ = "Australia/Sydney";
+    try {
+      const base = new Date(2028, 8, 15, 2, 30, 0);
+      // On the offset rather than on the hour: 15 September 02:30 reads as hour 2 in Warsaw and in
+      // UTC as well, so an hour of 2 would say nothing about whether the switch above took effect.
+      // AEST is UTC+10, which no default this suite runs under shares.
+      expect(base.getTimezoneOffset(), "the timezone did not actually change").toBe(-600);
+
+      let due = base;
+      const clock: string[] = [];
+      for (let i = 0; i < 3; i++) {
+        due = nextRecurrenceDue(due, "monthly", 1);
+        clock.push(`${due.getDate()}/${due.getMonth() + 1} ${due.getHours()}:${due.getMinutes()}`);
+      }
+
+      expect(clock).toEqual(["15/10 2:30", "15/11 2:30", "15/12 2:30"]);
+    } finally {
+      // Not `process.env.TZ = wasTz`: assigning undefined to a process.env property stores the
+      // *string* "undefined", which is not a zone, and Node silently falls back to UTC — leaving
+      // every test that ran afterwards in a timezone nobody chose.
+      if (wasTz === undefined) delete process.env.TZ;
+      else process.env.TZ = wasTz;
+    }
   });
 });
