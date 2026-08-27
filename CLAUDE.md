@@ -148,6 +148,13 @@ gh api user -q .login            # must print rafalpodles
 gh auth switch --user rafalpodles
 ```
 
+**The `gh` account and the commit author are different identities, and only the first one matters
+here.** `git config user.name` is `podlesrafal` globally, so every commit in this repo is authored by
+it — that is what the whole history looks like and it is correct. Seeing `podlesrafal` on a commit is
+not the failure. The failure is `gh` being `podlesrafal` at the moment a pull request is created,
+merged or deleted, which is a different setting, changed by a different command, and invisible in the
+commit log.
+
 `gh auth switch` is global machine state shared with every other session, so **the active account can
 flip mid-session** — "it worked ten minutes ago" is not evidence it is still right. Check it
 immediately before each of create / merge / delete, not once at the start.
