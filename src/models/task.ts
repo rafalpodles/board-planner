@@ -155,6 +155,9 @@ taskSchema.index({ project: 1, taskNumber: 1 }, { unique: true });
 taskSchema.index({ project: 1, status: 1 });
 taskSchema.index({ assignee: 1 });
 taskSchema.index({ sprint: 1 });
+// Same shape as the two above, and the only thing the agent refusal has to ask: without it both
+// the count and the candidate read are collection scans (BP-482 review).
+taskSchema.index({ agent: 1 });
 // The fleet console polls the worker join every 5s; unindexed, each poll scans the collection
 taskSchema.index({ "execution.workerId": 1 });
 // Closing a recurring task asks whether it already has a successor; unindexed that is a scan of

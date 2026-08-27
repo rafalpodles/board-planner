@@ -18,6 +18,7 @@ import {
 import { getColumnIds, defaultStatusFor, roleOf, getProjectColumns, columnIdsWithRole } from "@/lib/columns";
 import { escalationColumnId } from "@/lib/escalation";
 import { isRunnable, normaliseComposition } from "@/lib/agent-rules";
+import { taskKeyOf } from "@/lib/task-key";
 import { logActivity } from "@/lib/activity";
 import { dispatchWebhooks } from "@/lib/webhooks";
 import { dispatchNotifications } from "@/lib/notifications";
@@ -30,6 +31,7 @@ import {
 import { notifyBoardFeed } from "@/lib/board-feed";
 import { pillToneForRole } from "@/lib/email-template";
 import { parseChecklistString } from "@/lib/checklist";
+import { undoneChecklist } from "@/lib/task-duplicate";
 import {
   CRITERION_TEXT_RULE,
   TASK_TITLE_RULE,
@@ -487,7 +489,7 @@ export async function createTask(
   const eventPayload = {
     project: { key: project.key, name: project.name },
     task: {
-      taskKey: `${project.key}-${task.taskNumber}`,
+      taskKey: taskKeyOf(project.key, task.taskNumber),
       title: task.title,
       status: task.status,
     },
@@ -495,7 +497,7 @@ export async function createTask(
   dispatchWebhooks(projectId, "task_created", eventPayload);
   dispatchNotifications(projectId, "task_created", eventPayload);
 
-  const createdKey = `${project.key}-${task.taskNumber}`;
+  const createdKey = taskKeyOf(project.key, task.taskNumber);
   // The personal counterpart of the shared team channel two lines up. Same event, different
   // audience: that one announces the board to a room nobody subscribed to individually, this one
   // reaches the people who ticked the row for themselves.
@@ -525,7 +527,7 @@ export async function createTask(
   // Assigning an existing task told the assignee; creating one already assigned to them said
   // nothing, which is how the MCP, the PM agent and a worker all hand work over.
   if (assigneeId) {
-    const taskKey = `${project.key}-${task.taskNumber}`;
+    const taskKey = taskKeyOf(project.key, task.taskNumber);
     const column = getProjectColumns(project).find((c) => c.id === status);
     createNotifications({
       type: "task_assigned",
@@ -615,7 +617,7 @@ export async function changeStatus(
     // force — is still refused (BP-335).
     const byItsHolder = !!conflict && !!callerWorkerId && conflict.workerId === callerWorkerId;
     if (conflict && !byItsHolder) {
-      const key = projectColumns?.key ? `${projectColumns.key}-${oldTask.taskNumber}` : `#${oldTask.taskNumber}`;
+      const key = taskKeyOf(projectColumns?.key, oldTask.taskNumber);
       return refuseHeldRun(conflict, key);
     }
   }
@@ -696,7 +698,7 @@ async function announceStatusChange(a: StatusChangeAnnouncement): Promise<void> 
     Project.findById(a.projectId, "key name").lean(),
     usernameOf(a.actorId),
   ]);
-  const taskKey = project ? `${project.key}-${a.task.taskNumber}` : `#${a.task.taskNumber}`;
+  const taskKey = taskKeyOf(project?.key, a.task.taskNumber);
   // The column's own label, not its id: since CP-128 a project names its columns, and
   // "BP-142 → in_review" is the seeded id showing through on a board that may call it anything.
   const columns = getProjectColumns(a.project);
@@ -934,7 +936,7 @@ export async function updateTask(
     const conflict = runHolding(oldTask);
     if (conflict) {
       const keyed = await Project.findById(projectId, "key").lean();
-      const key = keyed?.key ? `${keyed.key}-${oldTask.taskNumber}` : `#${oldTask.taskNumber}`;
+      const key = taskKeyOf(keyed?.key, oldTask.taskNumber);
       return refuseHeldRun(conflict, key);
     }
   }
@@ -1083,7 +1085,7 @@ export async function updateTask(
       Project.findById(projectId, "key name columns").lean(),
       usernameOf(actorId),
     ]);
-    const taskKey = project ? `${project.key}-${task.taskNumber}` : `#${task.taskNumber}`;
+    const taskKey = taskKeyOf(project?.key, task.taskNumber);
     const column = getProjectColumns(project).find((c) => c.id === String(task.status));
     createNotifications({
       type: "task_assigned",
@@ -1164,7 +1166,7 @@ export async function addComment(
     Project.findById(projectId, "key name columns").lean(),
     resolveMentions(bodyText),
   ]);
-  const taskKey = project ? `${project.key}-${task.taskNumber}` : `#${task.taskNumber}`;
+  const taskKey = taskKeyOf(project?.key, task.taskNumber);
   const column = getProjectColumns(project).find((c) => c.id === String(task.status));
   const excerpt = bodyText.trim().substring(0, 120);
   const sharedEmail = {
@@ -1243,10 +1245,7 @@ async function createNextRecurrence(
   );
   if (!project) return;
 
-  // Reset checklist items to undone
-  const checklist = (oldTask.checklist || []).map(
-    (item: { text: string }) => ({ text: item.text, done: false })
-  );
+  const checklist = undoneChecklist(oldTask.checklist);
 
   await Task.create({
     project: projectId,
@@ -1361,7 +1360,7 @@ async function announceAbandonedRuns(
 ): Promise<void> {
   const column = columns.find((c) => c.id === exhausted);
   for (const task of tasks) {
-    const taskKey = project?.key ? `${project.key}-${task.taskNumber}` : `#${task.taskNumber}`;
+    const taskKey = taskKeyOf(project?.key, task.taskNumber);
     const recipients = collectRecipients(task);
     if (recipients.length === 0) continue;
     // The machine that stopped answering is the actor, because that is what happened — and the

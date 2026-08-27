@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import mongoose from "mongoose";
+import { AGENT_BUCKETS } from "@/types";
 
 const getAuthUser = vi.fn();
 const blockFindById = vi.fn();
@@ -92,10 +94,53 @@ describe("changing a block", () => {
   });
 });
 
+// Mongoose's own caster, over the real schema. It needs no connection, and it is the only thing
+// that answers "would this query have 500ed" without guessing which shapes are illegal (BP-460).
+const { agentSchema } = await vi.importActual<typeof import("@/models/agent")>("@/models/agent");
+const CastProbe = mongoose.model("AgentCastProbe", agentSchema);
+
+function castThroughMongoose(query: Record<string, unknown>): void {
+  CastProbe.find(query).cast(CastProbe);
+}
+
 describe("deleting a block", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    agentFind.mockReturnValue({ lean: () => Promise.resolve([]) });
+    agentFind.mockImplementation((query: Record<string, unknown>) => {
+      castThroughMongoose(query);
+      return { lean: () => Promise.resolve([]) };
+    });
+  });
+
+  it("builds an in-use query Mongoose can cast", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+    blockFindById.mockResolvedValue(block());
+
+    await del();
+
+    expect(agentFind).toHaveBeenCalledOnce();
+    expect(() =>
+      castThroughMongoose(agentFind.mock.calls[0][0] as Record<string, unknown>)
+    ).not.toThrow();
+  });
+
+  // Not decoration: nothing migrates the pre-object shape, so agents stored that way are live.
+  it("searches every bucket for the pre-object shape as well", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+    blockFindById.mockResolvedValue(block());
+
+    await del();
+
+    const arms = (agentFind.mock.calls[0][0] as { $or: Record<string, unknown>[] }).$or;
+    const buckets = new Set(
+      arms
+        .flatMap((arm) => Object.keys(arm))
+        .filter((path) => /^composition\.[a-z]+$/.test(path))
+    );
+    expect(
+      [...buckets].sort(),
+      "a bucket lost its pre-object arm, so agents stored that way are unprotected there"
+    ).toEqual([...AGENT_BUCKETS].sort().map((b) => `composition.${b}`));
   });
 
   function del() {

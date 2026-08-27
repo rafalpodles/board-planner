@@ -151,7 +151,12 @@ export async function storedExecution(
   return task?.execution as Record<string, unknown> | undefined;
 }
 
-const taskFactory = (now: Date) => (over: Record<string, unknown>) => ({
+/**
+ * A task the product would accept, for specs that need many of them. Exported because a hand-rolled
+ * insert drifts from the schema — one without `createdBy` reads as a product bug the day a test
+ * loads the board (BP-482 review).
+ */
+export const taskFactory = (now: Date) => (over: Record<string, unknown>) => ({
   project: PROJECT_ID,
   description: "",
   priority: "medium",

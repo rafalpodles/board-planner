@@ -213,20 +213,44 @@ export async function runPmTurn(opts: {
     ...[...mcp.tools.values()].map((t) => t.definition),
   ].filter((t) => !blocked.has(t.name));
 
-  const messages: OrChatMessage[] = [
-    { role: "system", content: buildSystemPrompt(project, mcp, disallowedTools, actor) },
-    ...(await replayHistory(history, opts.projectId)),
-    {
-      role: "user",
-      content: await buildUserContent(stripSpoofedLabels(opts.userMessage), opts.attachments, opts.projectId),
-    },
-  ];
+  const userContent = await buildUserContent(
+    stripSpoofedLabels(opts.userMessage),
+    opts.attachments,
+    opts.projectId
+  );
+  // An image with nothing typed is a question, not an instruction. The standing rules are about
+  // writing to the board, and nothing in them mentions images, so without this an unexplained
+  // screenshot is as likely to mint tasks as to ask what it is for (BP-451).
+  const imageOnly = !opts.userMessage.trim() && Array.isArray(userContent);
 
   const finalize = async (content: string): Promise<PmTurnResult> => {
     assistantMessage.content = content;
     await assistantMessage.save();
     return { ok: true, message: assistantMessage.toObject() as IPmMessage };
   };
+
+  // The route checks the *files* document before the turn starts; the bytes are read here, and a
+  // file whose chunks are gone fails only at this point. Without this the provider is handed an
+  // empty user message, and the turn is already counted against the cap (BP-451 review).
+  if (!opts.userMessage.trim() && !Array.isArray(userContent)) {
+    return finalize("⚠️ That image could not be read, so there was nothing to send.");
+  }
+
+  const messages: OrChatMessage[] = [
+    { role: "system", content: buildSystemPrompt(project, mcp, disallowedTools, actor) },
+    ...(await replayHistory(history, opts.projectId)),
+    ...(imageOnly
+      ? [
+          {
+            role: "system" as const,
+            content:
+              "This turn carries an image and no text. Describe what you see and ask what is wanted with it. Do not create, change or assign anything on the board until you are told to.",
+          },
+        ]
+      : []),
+    { role: "user", content: userContent },
+  ];
+
 
   const interrupted = async (): Promise<PmTurnResult> => {
     const done = assistantMessage.actions.map((a) => a.summary);
