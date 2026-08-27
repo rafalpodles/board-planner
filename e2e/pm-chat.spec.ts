@@ -245,6 +245,88 @@ test.describe("a stream that dies mid-turn", () => {
   });
 });
 
+test.describe("a turn whose server went away", () => {
+  const NOTICE = "⚠️ The connection dropped before this answer finished.";
+
+  /**
+   * What a dead server leaves behind: `runPmTurn` persists the assistant message empty and fills it
+   * when the turn ends, so a process killed mid-stream leaves a stored `content: ""` bubble and no
+   * turn lock. Written straight into the collection because that resting state is the subject — a
+   * test cannot kill the dev server the whole suite is running against, and truncating the route
+   * (the BP-452 test above) never starts a turn, so it leaves no stub at all.
+   */
+  async function abandonedTurn(question: string) {
+    await withDb(async (db) => {
+      const at = new Date();
+      await db.collection("pmmessages").insertMany([
+        {
+          project: PROJECT_ID,
+          role: "user",
+          content: question,
+          actions: [],
+          attachments: [],
+          trigger: { type: "chat", taskKey: "" },
+          triggeredBy: ADMIN_ID,
+          createdAt: at,
+        },
+        {
+          project: PROJECT_ID,
+          role: "assistant",
+          content: "",
+          actions: [],
+          attachments: [],
+          trigger: { type: "chat", taskKey: "" },
+          triggeredBy: ADMIN_ID,
+          createdAt: at,
+        },
+      ]);
+    });
+  }
+
+  test("says what happened instead of sitting there typing for ever", async ({ page }) => {
+    // BP-484. The bubble rendered "…", which reads as still typing, under a red line saying the
+    // connection was lost — and it stayed that way across every reload, because it is a real
+    // stored document.
+    await abandonedTurn("Did this one ever finish?");
+    await signIn(page);
+    await openChat(page);
+
+    await expect(reply(page)).toContainText(NOTICE);
+    await expect(reply(page)).not.toContainText("…");
+
+    // The thread has to still say it tomorrow, so the reload is the assertion and not a formality
+    await page.reload();
+    await expect(reply(page)).toContainText(NOTICE);
+    await expect(page.getByText("Did this one ever finish?")).toBeVisible();
+  });
+
+  test("but a turn that is still running keeps its ellipsis", async ({ page }) => {
+    // The control, and the one that decides *when* a stub is dead rather than merely unfinished.
+    // Reloading mid-turn is exactly the shape of the bug — an empty assistant message read back
+    // from the database — with the difference that this one is still being written.
+    await signIn(page);
+    await openChat(page);
+
+    await say(page, "Take your time.", { delayMs: 20_000, say: "Finished in the end." });
+    await expect(page.getByText("PM is thinking…")).toBeVisible();
+
+    // Reloaded in a loop rather than once: "PM is thinking…" is the composer's own optimism, set
+    // before the request leaves the browser, so a single reload can beat the stub into existence.
+    await expect(async () => {
+      await page.reload();
+      await expect(reply(page)).toContainText("…", { timeout: 2000 });
+    }).toPass({ timeout: 15_000 });
+    await expect(page.getByText(NOTICE)).toHaveCount(0);
+
+    // And the answer it was still writing lands in that same bubble
+    await expect(async () => {
+      await page.reload();
+      await expect(reply(page)).toContainText("Finished in the end.", { timeout: 3000 });
+    }).toPass({ timeout: 45_000 });
+    await expect(page.getByText(NOTICE)).toHaveCount(0);
+  });
+});
+
 test.describe("a turn, from the box to the bubble", () => {
   test("an empty thread says what the agent is for", async ({ page }) => {
     await signIn(page);
