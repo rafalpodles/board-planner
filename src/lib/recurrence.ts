@@ -24,7 +24,10 @@ export type RecurrenceResult =
  */
 export function normaliseRecurrence(raw: unknown): RecurrenceResult {
   if (raw === null || raw === undefined || raw === "") return { ok: true, value: null };
-  if (typeof raw !== "object" || Array.isArray(raw)) {
+  // `raw === null` again, and not redundantly: `typeof null` is "object", so this test does not
+  // exclude null on its own — it only looks like it does. The early return above happens to have
+  // caught it, which makes the safety depend on line order rather than on this line.
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
     return { ok: false, error: "Invalid recurrence — expected frequency and interval" };
   }
 
@@ -70,19 +73,52 @@ export function clampInterval(raw: string | number): number {
   return Math.min(MAX_RECURRENCE_INTERVAL, Math.max(1, Math.trunc(value)));
 }
 
-export function advance(from: Date, frequency: RecurrenceFrequency, interval: number): Date {
-  const next = new Date(from);
+export function nextRecurrenceDue(
+  base: Date,
+  frequency: RecurrenceFrequency,
+  interval: number
+): Date {
+  // Every getter and setter below is a UTC one, and that is the whole point (BP-485). A due date
+  // comes from `<input type="date">` as "2026-01-31", which Mongoose casts to UTC midnight. Read
+  // back with local getters, the day being advanced was whatever day it happened to be where the
+  // server runs: on a host west of UTC, 31 January read as the 30th and a monthly series landed in
+  // March rather than on 28 February. UTC is the only reading of a date-with-no-time that does not
+  // depend on that.
+  //
+  // The cost, deliberately accepted: UTC has no daylight saving, so a series carrying a real time
+  // of day keeps its *UTC* time and its local wall clock moves by an hour across a transition. For
+  // a date-only value — which is all the app can produce — midnight UTC stays midnight UTC.
+  const next = new Date(base);
+
   switch (frequency) {
     case "daily":
-      next.setDate(next.getDate() + interval);
+      next.setUTCDate(next.getUTCDate() + interval);
       break;
     case "weekly":
-      next.setDate(next.getDate() + 7 * interval);
+      next.setUTCDate(next.getUTCDate() + 7 * interval);
       break;
-    case "monthly":
-      next.setMonth(next.getMonth() + interval);
+    case "monthly": {
+      // `setUTCMonth` does not clamp — 31 January + 1 month is 3 March, not 28 February (BP-461).
+      // `setUTCFullYear` takes year, month and day together, so there is no intermediate date to
+      // overflow. Day 0 of the month after the target is that target's last day.
+      //
+      // `interval` is coerced because `+` on a string concatenates: `0 + "2" + 1` is "021", and the
+      // only caller reads it off a task typed `any`.
+      const months = Number(interval);
+      const day = base.getUTCDate();
+
+      const endOfTargetMonth = new Date(base);
+      endOfTargetMonth.setUTCFullYear(base.getUTCFullYear(), base.getUTCMonth() + months + 1, 0);
+
+      next.setUTCFullYear(
+        base.getUTCFullYear(),
+        base.getUTCMonth() + months,
+        Math.min(day, endOfTargetMonth.getUTCDate())
+      );
       break;
+    }
   }
+
   return next;
 }
 
@@ -106,7 +142,9 @@ export function nextOccurrence(
   dueDate: Date | string | null | undefined,
   now = new Date()
 ): NextOccurrence {
-  const next = dueDate ? advance(new Date(dueDate), recurrence.frequency, recurrence.interval) : null;
+  const next = dueDate
+    ? nextRecurrenceDue(new Date(dueDate), recurrence.frequency, recurrence.interval)
+    : null;
   const end = recurrence.endDate ? new Date(recurrence.endDate) : null;
   // An undated series carries no clock of its own, so its end is judged against the day it reaches
   return { ended: !!end && (next ?? now) > end, dueDate: next };

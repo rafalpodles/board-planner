@@ -171,16 +171,25 @@ describe("PropertyRail", () => {
     expect(screen.getByText(/Every week until/)).toBeTruthy();
   });
 
-  it("gives a repeating task an end, and clears it back to a series with no end", async () => {
+  // Two renders rather than two events on one: the input is controlled by the draft, which does not
+  // move when `set` is a spy, so a second `fireEvent.change` back to "" is a no-op — the DOM value
+  // React re-rendered is already "". Written as one test it passed on the first assertion and
+  // never reached the second.
+  it("gives a repeating task an end", async () => {
     const recurrence = { frequency: "weekly" as const, interval: 1, endDate: null };
     const set = renderRail({ draft: { ...draft, recurrence } });
     await openRow("Repeats");
 
-    const until = screen.getByLabelText("Repeats until");
-    fireEvent.change(until, { target: { value: "2026-12-31" } });
+    fireEvent.change(screen.getByLabelText("Repeats until"), { target: { value: "2026-12-31" } });
     expect(set).toHaveBeenCalledWith("recurrence", { ...recurrence, endDate: "2026-12-31" });
+  });
 
-    fireEvent.change(until, { target: { value: "" } });
+  it("clears an end back to a series with no end", async () => {
+    const recurrence = { frequency: "weekly" as const, interval: 1, endDate: "2026-12-31" };
+    const set = renderRail({ draft: { ...draft, recurrence } });
+    await openRow("Repeats");
+
+    fireEvent.change(screen.getByLabelText("Repeats until"), { target: { value: "" } });
     expect(set).toHaveBeenCalledWith("recurrence", { ...recurrence, endDate: null });
   });
 
