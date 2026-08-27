@@ -524,6 +524,107 @@ test.describe("deleting one that is still in use", () => {
   });
 });
 
+test.describe("an agent stored in the shape that predates entries", () => {
+  /**
+   * Entries used to be bare key strings. Those rows are still in the database — nothing migrates
+   * them — and everything reads them fine except a hydrated document, which is what `PUT` uses.
+   *
+   * Driven over the API rather than the composer because there is no rename control in the UI:
+   * `store.ts` carries a `renameAgent`, and nothing calls it. So this is the one shape of change
+   * only an API or MCP client can make, and it answered 500 (BP-481).
+   */
+  async function legacyAgent(name: string, keys: string[]): Promise<string> {
+    return withDb(async (db) => {
+      const result = await db.collection("agents").insertOne({
+        name,
+        description: "",
+        scope: "global",
+        owner: null,
+        project: null,
+        builtIn: false,
+        // Bare strings, written through the driver so nothing casts them on the way in
+        composition: { analysis: keys, implementation: [], verification: [], delivery: [] },
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      return String(result.insertedId);
+    });
+  }
+
+  test("can be renamed, and keeps what it was composed of", async ({ request }) => {
+    const id = await legacyAgent("Written long ago", ["implement", "push"]);
+
+    const response = await request.put(`/api/agents/${id}`, {
+      headers: ADMIN_AUTH,
+      data: { name: "Written long ago, renamed" },
+    });
+    expect(response.status(), await response.text()).toBe(200);
+
+    const stored = await withDb(async (db) =>
+      db.collection("agents").findOne({ _id: new mongoose.Types.ObjectId(id) })
+    );
+    expect(stored?.name).toBe("Written long ago, renamed");
+    // The hydrate used to empty the bucket on the way through, so a save could have written the
+    // emptiness back over what the agent was actually composed of
+    expect(stored?.composition?.analysis, "the composition was lost in the round trip").toHaveLength(
+      2
+    );
+  });
+
+  test("survives a save that changes nothing", async ({ request }) => {
+    const id = await legacyAgent("Untouched by anyone", ["implement"]);
+
+    const response = await request.put(`/api/agents/${id}`, { headers: ADMIN_AUTH, data: {} });
+    expect(response.status(), await response.text()).toBe(200);
+  });
+
+  // The control: the same two requests against the shape everything writes today
+  test("and so does one stored the way they are written now", async ({ request, page }) => {
+    await signIn(page);
+    await openCatalog(page);
+    await page.getByRole("button", { name: "New agent" }).click();
+    await page.getByLabel("Name").fill("Written today");
+    await page.getByRole("button", { name: "Create" }).click();
+    const id = await agentIdByName("Written today");
+
+    expect(
+      (await request.put(`/api/agents/${id}`, { headers: ADMIN_AUTH, data: { name: "Renamed today" } }))
+        .status()
+    ).toBe(200);
+    expect((await request.put(`/api/agents/${id}`, { headers: ADMIN_AUTH, data: {} })).status()).toBe(
+      200
+    );
+  });
+
+  // What the emptied bucket would have cost, on the one board where it is expensive: an agent a
+  // task names, renamed by somebody who never opened the composer.
+  test("keeps working for the task that names it", async ({ request }) => {
+    const id = await legacyAgent("Named by a task", ["implement"]);
+    await withDb(async (db) => {
+      await db
+        .collection("tasks")
+        .updateOne({ _id: SIBLING_TASK_ID }, { $set: { agent: new mongoose.Types.ObjectId(id) } });
+    });
+
+    const response = await request.put(`/api/agents/${id}`, {
+      headers: ADMIN_AUTH,
+      data: { name: "Renamed while a task pointed at it" },
+    });
+    expect(response.status(), await response.text()).toBe(200);
+
+    // Read back the way a claim reads it — the list route is `.lean()` plus normaliseComposition,
+    // which is what a machine resolves the task's agent through
+    const listed = await request.get("/api/agents", { headers: ADMIN_AUTH });
+    const agents = (await listed.json()) as { _id: string; name: string; composition: Record<string, { key: string }[]> }[];
+    const mine = agents.find((a) => a._id === id);
+    expect(mine?.name).toBe("Renamed while a task pointed at it");
+    expect(
+      mine?.composition?.analysis?.map((e) => e.key),
+      "the task is left pointing at an agent with nothing in it"
+    ).toEqual(["implement"]);
+  });
+});
+
 test.describe("emptying one that is still in use", () => {
   /**
    * The composition is written rather than dragged in. What is under test is the save, and at the
