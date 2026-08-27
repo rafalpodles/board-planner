@@ -392,6 +392,94 @@ test.describe("what happens when the task is closed", () => {
     expect([next.getUTCFullYear(), next.getUTCMonth(), next.getUTCDate()]).toEqual([2026, 1, 28]);
   });
 
+  // BP-463. A series had no way to stop: `endDate` was neither stored nor refused, so a client
+  // that set one got a 200 and a task that repeated forever. Both arms here, because a silence
+  // caused by a mis-wired fixture reads exactly like a silence caused by the end being honoured.
+  test("a series past its end stops, and one still inside it does not", async ({ page }) => {
+    const due = new Date("2026-05-12");
+    await giveDueDate(due);
+
+    // The end is BEFORE the occurrence this close would mint (19 May), so the series is over
+    await withDb(async (db) => {
+      await db.collection("tasks").updateOne(
+        { _id: SIBLING_TASK_ID },
+        { $set: { recurrence: { frequency: "weekly", interval: 1, endDate: new Date("2026-05-15") } } }
+      );
+    });
+
+    await signIn(page);
+    const before = await taskNumbers();
+    await closeOnTheBoard(page);
+
+    // The same budget the positive cases get, so this is a real absence rather than an early look
+    await page.waitForTimeout(6_000);
+    expect(await taskNumbers(), "the series ran past its end").toEqual(before);
+
+    // The control, and the reason this test can be trusted: move the end past 19 May and the very
+    // same close mints the occurrence. Only the end date differs between the two halves.
+    await withDb(async (db) => {
+      await db.collection("tasks").updateMany(
+        { _id: SIBLING_TASK_ID },
+        {
+          $set: {
+            status: "todo",
+            dueDate: due,
+            recurrence: { frequency: "weekly", interval: 1, endDate: new Date("2026-12-31") },
+          },
+          $unset: { recurringParentId: "" },
+        }
+      );
+    });
+
+    await closeOnTheBoard(page);
+    const created = await newOccurrence(before);
+    expect(new Date(created.dueDate as Date).toISOString()).toBe("2026-05-19T00:00:00.000Z");
+  });
+
+  // The other half of BP-463's end: `endDate` reaches the server from the task screen, and a value
+  // it cannot read is refused rather than dropped. Driven through the UI because the silent
+  // discard was invisible exactly there — the row saved, said nothing, and forgot the date.
+  test("an end set on the task screen is stored, and comes back on the way in", async ({ page }) => {
+    await signIn(page);
+    await openRepeats(page);
+
+    await page.getByRole("option", { name: "weekly" }).click();
+    await page.getByLabel("Repeats until").fill("2026-12-31");
+
+    await expect
+      .poll(async () =>
+        withDb(async (db) => {
+          const task = await db.collection("tasks").findOne({ _id: SIBLING_TASK_ID });
+          const end = task?.recurrence?.endDate;
+          return end ? new Date(end).toISOString().slice(0, 10) : null;
+        })
+      )
+      .toBe("2026-12-31");
+
+    await openRepeats(page);
+    await expect(page.getByLabel("Repeats until")).toHaveValue("2026-12-31");
+  });
+
+  // `max` on the number input stops neither typing nor pasting, and for a year it was the only
+  // thing standing between a pasted 400 and the database.
+  test("an interval above the advertised maximum never reaches the database", async ({ page }) => {
+    await signIn(page);
+    await openRepeats(page);
+
+    await page.getByRole("option", { name: "daily" }).click();
+    await intervalBox(page).fill("400");
+
+    await expect(intervalBox(page)).toHaveValue("365");
+    await expect
+      .poll(async () =>
+        withDb(async (db) => {
+          const task = await db.collection("tasks").findOne({ _id: SIBLING_TASK_ID });
+          return task?.recurrence?.interval ?? null;
+        })
+      )
+      .toBe(365);
+  });
+
   test("a task with no rhythm leaves nothing behind", async ({ page, request }) => {
     // The control for all of the above, driven the same way — through the board rather than
     // through the API, which is the path `field-history` already covers.
