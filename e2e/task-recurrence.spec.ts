@@ -708,7 +708,14 @@ test.describe("duplicating one of these", () => {
     await card.click({ button: "right" });
 
     const copy = await copyCreatedBy(page, () =>
-      page.getByTestId("task-context-menu").getByRole("button", { name: "Duplicate" }).click()
+      // `exact`, because Playwright matches an accessible name by substring: this fixture's sprint
+      // is called "Sprint Duplicate" and the menu offers it under "Move to sprint", so the loose
+      // form resolves to two buttons and the click refuses. The task-screen case above already
+      // says `exact` for the same reason; this one was missed, and it is red on `main`.
+      page
+        .getByTestId("task-context-menu")
+        .getByRole("button", { name: "Duplicate", exact: true })
+        .click()
     );
 
     expectTheWorkAndNotTheHandover(copy);
