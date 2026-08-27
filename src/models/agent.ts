@@ -1,5 +1,5 @@
 import mongoose, { Schema, Model } from "mongoose";
-import { AGENT_SCOPES, IAgent } from "@/types";
+import { AGENT_BUCKETS, AGENT_SCOPES, IAgent } from "@/types";
 
 // One position in the sequence. The key says which block; params override that block's own, for
 // this position only — which is what lets one agent carry two Size gates with different limits
@@ -38,6 +38,26 @@ export const agentSchema = new Schema<IAgent>(
   },
   { timestamps: true }
 );
+
+/**
+ * Entries used to be bare key strings. `normaliseComposition` reads either shape, but only on the
+ * `.lean()` paths — a hydrated document is cast against `entrySchema` first, and a string cannot
+ * become a subdocument. Mongoose empties the bucket, stamps an init ValidationError on the
+ * document, and every later `save()` throws it: renaming a legacy agent answered 500 (BP-481).
+ *
+ * `pre("init")` is the one place that sees the raw row before the cast. It does not rewrite the
+ * stored row — nothing marks the path modified — so the database keeps the old shape until
+ * something saves a composition, which is the lazy story `normaliseComposition` already tells.
+ */
+agentSchema.pre("init", function (raw: Record<string, unknown>) {
+  const composition = raw?.composition as Record<string, unknown> | undefined;
+  if (!composition) return;
+  for (const bucket of AGENT_BUCKETS) {
+    const entries = composition[bucket];
+    if (!Array.isArray(entries)) continue;
+    composition[bucket] = entries.map((entry) => (typeof entry === "string" ? { key: entry } : entry));
+  }
+});
 
 agentSchema.index({ scope: 1, owner: 1 });
 agentSchema.index({ scope: 1, project: 1 });
