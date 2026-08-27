@@ -236,6 +236,44 @@ describe("TaskDetail", () => {
     expect(body.title).toBe("Copy of Recurring one");
   });
 
+  // BP-462. The copy of a weekly task did not repeat, the copy of an urgent one was medium, and
+  // the checklist came over still ticked — three fields decided by which six the POST happened
+  // to name.
+  it("duplicates the rhythm and the priority, and unticks the criteria", async () => {
+    api.post.mockResolvedValue({ taskNumber: 7 });
+    api.get.mockImplementation((url: string) => {
+      if (url === "/api/projects/TP/assignable-users") return Promise.resolve([]);
+      if (url.startsWith("/api/agent")) return Promise.resolve([]);
+      if (url.includes("/tasks/"))
+        return Promise.resolve({
+          ...task,
+          recurrence: { frequency: "weekly", interval: 2 },
+          assignee: { _id: "u1", username: "rpo", fullName: "Rafal Podles" },
+          sprint: "s1",
+          agent: { _id: "a1", name: "Default" },
+        });
+      if (url.includes("/sprints")) return Promise.resolve([]);
+      return Promise.resolve(project);
+    });
+
+    renderDetail();
+    await loaded();
+
+    await act(async () => screen.getByRole("button", { name: /^Duplicate$/ }).click());
+
+    const body = api.post.mock.calls.at(-1)![1];
+    expect(body.recurrence).toEqual({ frequency: "weekly", interval: 2 });
+    expect(body.priority).toBe("high");
+    expect(body.checklist).toEqual([
+      { text: "First criterion", done: false },
+      { text: "Second criterion", done: false },
+    ]);
+    // The hand-over is not copied: the task screen navigates to the copy and a person decides
+    for (const field of ["assignee", "sprint", "agent"]) {
+      expect(body).not.toHaveProperty(field);
+    }
+  });
+
   it("closes rather than navigating when the top bar is dismissed", async () => {
     const onClose = vi.fn();
     renderDetail({ onClose });

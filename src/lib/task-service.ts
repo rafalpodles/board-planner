@@ -32,6 +32,7 @@ import {
 import { notifyBoardFeed } from "@/lib/board-feed";
 import { pillToneForRole } from "@/lib/email-template";
 import { parseChecklistString } from "@/lib/checklist";
+import { undoneChecklist } from "@/lib/task-duplicate";
 import {
   CRITERION_TEXT_RULE,
   TASK_TITLE_RULE,
@@ -1264,10 +1265,7 @@ async function createNextRecurrence(
       break;
   }
 
-  // Reset checklist items to undone
-  const checklist = (oldTask.checklist || []).map(
-    (item: { text: string }) => ({ text: item.text, done: false })
-  );
+  const checklist = undoneChecklist(oldTask.checklist);
 
   await Task.create({
     project: projectId,
