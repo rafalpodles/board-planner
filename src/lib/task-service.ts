@@ -1248,55 +1248,6 @@ export async function assignTask(
   return updateTask(projectId, taskId, { assignee: username }, actorId);
 }
 
-export function nextRecurrenceDue(
-  base: Date,
-  frequency: RecurrenceFrequency,
-  interval: number
-): Date {
-  // Every getter and setter below is a UTC one, and that is the whole point (BP-485). A due date
-  // comes from `<input type="date">` as "2026-01-31", which Mongoose casts to UTC midnight. Read
-  // back with local getters, the day being advanced was whatever day it happened to be where the
-  // server runs: on a host west of UTC, 31 January read as the 30th and a monthly series landed in
-  // March rather than on 28 February. UTC is the only reading of a date-with-no-time that does not
-  // depend on that.
-  //
-  // The cost, deliberately accepted: UTC has no daylight saving, so a series carrying a real time
-  // of day keeps its *UTC* time and its local wall clock moves by an hour across a transition. For
-  // a date-only value — which is all the app can produce — midnight UTC stays midnight UTC.
-  const next = new Date(base);
-
-  switch (frequency) {
-    case "daily":
-      next.setUTCDate(next.getUTCDate() + interval);
-      break;
-    case "weekly":
-      next.setUTCDate(next.getUTCDate() + 7 * interval);
-      break;
-    case "monthly": {
-      // `setUTCMonth` does not clamp — 31 January + 1 month is 3 March, not 28 February (BP-461).
-      // `setUTCFullYear` takes year, month and day together, so there is no intermediate date to
-      // overflow. Day 0 of the month after the target is that target's last day.
-      //
-      // `interval` is coerced because `+` on a string concatenates: `0 + "2" + 1` is "021", and the
-      // only caller reads it off a task typed `any`.
-      const months = Number(interval);
-      const day = base.getUTCDate();
-
-      const endOfTargetMonth = new Date(base);
-      endOfTargetMonth.setUTCFullYear(base.getUTCFullYear(), base.getUTCMonth() + months + 1, 0);
-
-      next.setUTCFullYear(
-        base.getUTCFullYear(),
-        base.getUTCMonth() + months,
-        Math.min(day, endOfTargetMonth.getUTCDate())
-      );
-      break;
-    }
-  }
-
-  return next;
-}
-
 async function createNextRecurrence(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   oldTask: any,
