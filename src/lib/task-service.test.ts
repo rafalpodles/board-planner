@@ -3974,7 +3974,10 @@ describe("advancing a recurring series' due date", () => {
     process.env.TZ = "Australia/Sydney";
     try {
       const base = new Date(2028, 8, 15, 2, 30, 0);
-      expect(base.getHours(), "the base itself is before the transition").toBe(2);
+      // On the offset rather than on the hour: 15 September 02:30 reads as hour 2 in Warsaw and in
+      // UTC as well, so an hour of 2 would say nothing about whether the switch above took effect.
+      // AEST is UTC+10, which no default this suite runs under shares.
+      expect(base.getTimezoneOffset(), "the timezone did not actually change").toBe(-600);
 
       let due = base;
       const clock: string[] = [];
@@ -3985,7 +3988,11 @@ describe("advancing a recurring series' due date", () => {
 
       expect(clock).toEqual(["15/10 2:30", "15/11 2:30", "15/12 2:30"]);
     } finally {
-      process.env.TZ = wasTz;
+      // Not `process.env.TZ = wasTz`: assigning undefined to a process.env property stores the
+      // *string* "undefined", which is not a zone, and Node silently falls back to UTC — leaving
+      // every test that ran afterwards in a timezone nobody chose.
+      if (wasTz === undefined) delete process.env.TZ;
+      else process.env.TZ = wasTz;
     }
   });
 });
