@@ -18,58 +18,93 @@ async function refusalFor(composition: AgentComposition) {
  * What still points at this agent, named the way a person would recognise it. Shared by DELETE and
  * PUT so the two answers cannot drift: emptying an in-use agent is the same act as deleting it.
  */
-// Enough to act on without a sentence nobody reads. Past it the count says how many are left, and
-// the next refusal names the next few — retiring an agent walks down the list.
-const TASKS_NAMED = 5;
+// The cap the two sibling refusals already use — see the columns and categories routes, which
+// name task keys for the same "still in use" act. Only the candidates are read: a count answers
+// how many are left, so an agent on five thousand tasks costs a count and fifty documents.
+const TASKS_NAMED = 10;
+const TASK_CANDIDATES = 50;
 
-async function referencesTo(agentId: Types.ObjectId, user: IUser): Promise<string[]> {
+interface AgentUses {
+  /** Everything pointing at the agent, named or not — what decides whether to refuse at all. */
+  total: number;
+  projects: string[];
+  named: string[];
+  beyond: number;
+  /** True only when every remaining task was seen and none of them may be named. */
+  restIsHidden: boolean;
+}
+
+/**
+ * What still points at this agent. Shared by DELETE and PUT so the two answers cannot drift:
+ * emptying an in-use agent is the same act as deleting it.
+ */
+async function referencesTo(agentId: Types.ObjectId, user: IUser): Promise<AgentUses> {
   const { Project } = await import("@/models/project");
   const { Task } = await import("@/models/task");
-  const projects = await Project.find({ "worker.agent": agentId }, "name").lean();
-  // Keys, not a count: "12 tasks" told somebody to point twelve things elsewhere and gave them no
-  // way to find one of them (BP-482).
-  const tasks = await Task.find({ agent: agentId }, "taskNumber project")
-    .sort({ taskNumber: 1 })
+  const projects = await Project.find({ "worker.agent": agentId }, "name key").lean();
+  const total = await Task.countDocuments({ agent: agentId });
+  // By project first: sorting on the number alone lets one board's low numbers starve another's
+  // out of the cap for ever, and leaves ties to whatever order the collection happens to be in.
+  const candidates = await Task.find({ agent: agentId }, "taskNumber project")
+    .sort({ project: 1, taskNumber: 1 })
+    .limit(TASK_CANDIDATES)
     .populate("project", "key")
     .lean();
 
-  // Naming a key says more than counting one — it says a board exists and what is on it. A
+  // Naming a key says more than counting one: it says a board exists and what is on it. A
   // user-scoped agent reaches this with no project check at all (`mayEdit`), and its owner may
-  // have lost the board since the agent was written onto the task. Those fold into the count.
+  // have lost the board since the agent was written onto the task.
   const readable = new Map<string, boolean>();
+  const mayRead = async (projectId: string) => {
+    if (!projectId) return false;
+    if (!readable.has(projectId)) readable.set(projectId, await check(user, projectId, "access"));
+    return readable.get(projectId)!;
+  };
+
   const named: string[] = [];
-  let beyond = 0;
-  for (const task of tasks) {
+  let hidden = 0;
+  for (const task of candidates) {
     const project = task.project as { _id?: unknown; key?: string } | null;
-    const projectId = String(project?._id ?? "");
-    if (!readable.has(projectId)) {
-      readable.set(projectId, projectId ? await check(user, projectId, "access") : false);
-    }
-    if (readable.get(projectId) && named.length < TASKS_NAMED) {
-      named.push(taskKeyOf(project?.key, task.taskNumber));
+    if (await mayRead(String(project?._id ?? ""))) {
+      if (named.length < TASKS_NAMED) named.push(taskKeyOf(project?.key, task.taskNumber));
     } else {
-      beyond += 1;
+      hidden += 1;
     }
   }
 
-  return [
-    // A board with no name still has to be nameable in a sentence
-    ...projects.map((p) => p.name?.trim() || "a project with no name"),
-    ...namedTasks(named, beyond),
-  ];
-}
-
-/** The task half of the sentence: what can be named, then how many are left. */
-function namedTasks(named: string[], beyond: number): string[] {
-  if (named.length === 0) {
-    return beyond > 0 ? [`${beyond} task${beyond === 1 ? "" : "s"}`] : [];
+  const visibleProjects: string[] = [];
+  for (const project of projects) {
+    // The same reasoning as the tasks: a board's name discloses at least as much as a key
+    if (await mayRead(String(project._id))) {
+      visibleProjects.push(project.name?.trim() || "a project with no name");
+    }
   }
-  return [beyond > 0 ? `${named.join(", ")} and ${beyond} more` : named.join(", ")];
+
+  return {
+    // Every reference, visible or not. What may be *named* is scoped to the caller; what blocks
+    // the delete is not — otherwise losing sight of a board would be a way to delete its default.
+    total: total + projects.length,
+    projects: visibleProjects,
+    named,
+    beyond: total - named.length,
+    // Saying "and 3 more" about tasks nobody can reach sends somebody round a loop that cannot
+    // end. Only claimed when the whole set was seen and every one of the rest is out of reach.
+    restIsHidden: total <= candidates.length && named.length === 0 && hidden > 0,
+  };
 }
 
-function stillInUse(uses: string[]) {
+function stillInUse({ projects, named, beyond, restIsHidden }: AgentUses) {
+  const parts = [...projects];
+  if (named.length > 0) {
+    parts.push(`${named.length === 1 && beyond === 0 ? "task" : "tasks"} ${named.join(", ")}${beyond > 0 ? ` and ${beyond} more` : ""}`);
+  } else if (beyond > 0) {
+    const tasks = `${beyond} task${beyond === 1 ? "" : "s"}`;
+    parts.push(restIsHidden ? `${tasks} on boards you cannot open` : tasks);
+  }
+  // Nothing at all could be described to this caller, and the reference is still real
+  if (parts.length === 0) parts.push("something on a board you cannot open");
   return NextResponse.json(
-    { error: `Still in use by ${uses.join(", ")}. Point those elsewhere first.` },
+    { error: `Still in use by ${parts.join(", ")}. Point those elsewhere first.` },
     { status: 409 }
   );
 }
@@ -102,7 +137,7 @@ export const PUT = withAuth(async (request, { params, user }) => {
     // Same act as deleting it, which DELETE refuses. An agent nothing points at stays a draft.
     if (!isRunnable(composition)) {
       const uses = await referencesTo(agent._id, user);
-      if (uses.length > 0) return stillInUse(uses);
+      if (uses.total > 0) return stillInUse(uses);
     }
     agent.composition = composition;
   }
@@ -132,7 +167,7 @@ export const DELETE = withAuth(async (_request, { params, user }) => {
   // before it escalates; a project pointing at one offers a first choice that does not exist.
   // Both are better refused here.
   const uses = await referencesTo(agent._id, user);
-  if (uses.length > 0) return stillInUse(uses);
+  if (uses.total > 0) return stillInUse(uses);
 
   await agent.deleteOne();
   return NextResponse.json({ ok: true });

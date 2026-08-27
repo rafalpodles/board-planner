@@ -506,7 +506,7 @@ test.describe("deleting one that is still in use", () => {
     await page.getByRole("button", { name: "Delete Spoken for" }).click();
 
     await expect(
-      page.getByText(`Still in use by ${SIBLING_TASK_KEY}. Point those elsewhere first.`)
+      page.getByText(`Still in use by task ${SIBLING_TASK_KEY}. Point those elsewhere first.`)
     ).toBeVisible();
     expect(await storedAgent("Spoken for")).not.toBeNull();
   });
@@ -577,38 +577,38 @@ test.describe("what the refusal names", () => {
     const keys = await tasksNaming(id, 3);
 
     expect(await refusalFor(request, id)).toBe(
-      `Still in use by ${keys.join(", ")}. Point those elsewhere first.`
+      `Still in use by tasks ${keys.join(", ")}. Point those elsewhere first.`
     );
   });
 
-  // Exactly at the cap: naming all five and saying "and 0 more" would be a sentence nobody writes
-  test("all five at the cap, with nothing trailing", async ({ page, request }) => {
+  // Exactly at the cap: naming all ten and saying "and 0 more" would be a sentence nobody writes
+  test("all ten at the cap, with nothing trailing", async ({ page, request }) => {
     await signIn(page);
-    const id = await newAgent(page, "Named by five");
-    const keys = await tasksNaming(id, 5);
+    const id = await newAgent(page, "Named by ten");
+    const keys = await tasksNaming(id, 10);
 
     const error = await refusalFor(request, id);
-    expect(error).toBe(`Still in use by ${keys.join(", ")}. Point those elsewhere first.`);
+    expect(error).toBe(`Still in use by tasks ${keys.join(", ")}. Point those elsewhere first.`);
     expect(error).not.toContain("more");
   });
 
-  test("five and a count, one past the cap", async ({ page, request }) => {
+  test("ten and a count, one past the cap", async ({ page, request }) => {
     await signIn(page);
-    const id = await newAgent(page, "Named by six");
-    const keys = await tasksNaming(id, 6);
+    const id = await newAgent(page, "Named by eleven");
+    const keys = await tasksNaming(id, 11);
 
     expect(await refusalFor(request, id)).toBe(
-      `Still in use by ${keys.slice(0, 5).join(", ")} and 1 more. Point those elsewhere first.`
+      `Still in use by tasks ${keys.slice(0, 10).join(", ")} and 1 more. Point those elsewhere first.`
     );
   });
 
   // The count is the whole point of the cap: twelve tasks used to be twelve unfindable tasks
   test("the count past the cap is the number left, not the total", async ({ page, request }) => {
     await signIn(page);
-    const id = await newAgent(page, "Named by twelve");
-    await tasksNaming(id, 12);
+    const id = await newAgent(page, "Named by eighteen");
+    await tasksNaming(id, 18);
 
-    expect(await refusalFor(request, id)).toContain("and 7 more");
+    expect(await refusalFor(request, id)).toContain("and 8 more");
   });
 
   // A user-scoped agent reaches this refusal with no project check at all, so the keys it names
@@ -646,7 +646,42 @@ test.describe("what the refusal names", () => {
     expect(error, "the refusal named a task on a board this caller cannot see").not.toContain(
       SIBLING_TASK_KEY
     );
-    expect(error).toBe("Still in use by 1 task. Point those elsewhere first.");
+    expect(error).toBe("Still in use by 1 task on boards you cannot open. Point those elsewhere first.");
+  });
+
+  // The board half of the same sentence. A board's name discloses at least as much as a task key,
+  // and it was the half this change left ungated — caught by review, and unreachable through the
+  // product only because the project-agent route refuses a user-scoped agent as a default.
+  test("does not name a board the caller cannot open either", async ({ request }) => {
+    const id = await withDb(async (db) => {
+      const result = await db.collection("agents").insertOne({
+        name: "A member's own, made a default",
+        description: "",
+        scope: "user",
+        owner: MEMBER_ID,
+        project: null,
+        builtIn: false,
+        composition: { analysis: [], implementation: [], verification: [], delivery: [] },
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      return String(result.insertedId);
+    });
+    await withDb(async (db) => {
+      await db
+        .collection("projects")
+        .updateOne({ _id: PROJECT_ID }, { $set: { "worker.agent": new mongoose.Types.ObjectId(id) } });
+      const removed = await db.collection("grants").deleteMany({ subject: MEMBER_ID });
+      expect(removed.deletedCount, "the fixture removed no grant, so nothing was revoked").toBeGreaterThan(0);
+    });
+
+    const response = await request.delete(`/api/agents/${id}`, { headers: MEMBER_AUTH });
+    expect(response.status()).toBe(409);
+    const { error } = (await response.json()) as { error: string };
+
+    expect(error, "the refusal named a board this caller cannot see").not.toContain(PROJECT_NAME);
+    // Still refused — the reference is real, it just cannot be described to this caller
+    expect(error).toContain("Still in use by");
   });
 
   test("a board with no name is still nameable", async ({ page, request }) => {
@@ -832,7 +867,7 @@ test.describe("emptying one that is still in use", () => {
     await saving(page, id, 409);
 
     await expect(
-      page.getByText(`Not saved. Still in use by ${SIBLING_TASK_KEY}. Point those elsewhere first.`)
+      page.getByText(`Not saved. Still in use by task ${SIBLING_TASK_KEY}. Point those elsewhere first.`)
     ).toBeVisible();
     // What the guard is for: the task is still carrying something a claim can resolve
     expect((await storedAgent("Spoken for"))?.composition).toMatchObject({
