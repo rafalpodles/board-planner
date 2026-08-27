@@ -166,6 +166,56 @@ test.describe("choosing a rhythm on the create form", () => {
       .toMatchObject({ frequency: "weekly", interval: 2 });
   });
 
+  // Both of these were entirely uncovered, and each is the shape of defect BP-463 exists to fix.
+  // Measured before adding them: replacing the create form's `endDate: recurrenceEnd || null` with
+  // a hard `null` — a field that collects a date and throws it away — left the whole spec green,
+  // and so did reverting its interval clamp. The only test that drove 400 was on the task detail
+  // screen, which is a different component.
+  test("an end set on the create form is what the task is created with", async ({ page }) => {
+    await openNewTask(page);
+
+    await page.getByLabel("Title").fill("Renew the certificate");
+    await repeatsSelect(page).selectOption("monthly");
+    await page.getByLabel("Repeats until").fill("2027-03-01");
+    await page.getByRole("button", { name: "Create Task" }).click();
+
+    await expect(page.getByRole("dialog", { name: "New Task" })).toHaveCount(0);
+    await expect
+      .poll(async () =>
+        withDb(async (db) => {
+          const task = await db.collection("tasks").findOne({ title: "Renew the certificate" });
+          const end = task?.recurrence?.endDate;
+          // The whole value, not just its presence: a date that arrives as the wrong day is its own
+          // bug, and `toMatchObject` on frequency and interval is exactly what missed this before
+          return end === undefined ? "absent" : end === null ? null : new Date(end).toISOString();
+        })
+      )
+      .toBe("2027-03-01T00:00:00.000Z");
+  });
+
+  test("an interval pasted past the maximum is clamped before it is submitted", async ({ page }) => {
+    await openNewTask(page);
+    await repeatsSelect(page).selectOption("daily");
+
+    await intervalBox(page).fill("400");
+    await expect(intervalBox(page)).toHaveValue("365");
+
+    await page.getByLabel("Title").fill("Not every four hundred days");
+    await page.getByRole("button", { name: "Create Task" }).click();
+
+    await expect(page.getByRole("dialog", { name: "New Task" })).toHaveCount(0);
+    await expect
+      .poll(async () =>
+        withDb(async (db) => {
+          const task = await db
+            .collection("tasks")
+            .findOne({ title: "Not every four hundred days" });
+          return task?.recurrence?.interval ?? null;
+        })
+      )
+      .toBe(365);
+  });
+
   test("an interval below one is not a rhythm, and the form says one instead", async ({ page }) => {
     await openNewTask(page);
     await repeatsSelect(page).selectOption("daily");
