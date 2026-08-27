@@ -1234,6 +1234,35 @@ export async function assignTask(
   return updateTask(projectId, taskId, { assignee: username }, actorId);
 }
 
+export function nextRecurrenceDue(
+  base: Date,
+  frequency: "daily" | "weekly" | "monthly",
+  interval: number
+): Date {
+  const next = new Date(base);
+
+  switch (frequency) {
+    case "daily":
+      next.setDate(next.getDate() + interval);
+      break;
+    case "weekly":
+      next.setDate(next.getDate() + 7 * interval);
+      break;
+    case "monthly": {
+      const day = next.getDate();
+      // The 1st first, or the month change itself overflows before the clamp below can run:
+      // 31 January + 1 month is 3 March, not 28 February.
+      next.setDate(1);
+      next.setMonth(next.getMonth() + interval);
+      const lastDayOfTargetMonth = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
+      next.setDate(Math.min(day, lastDayOfTargetMonth));
+      break;
+    }
+  }
+
+  return next;
+}
+
 async function createNextRecurrence(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   oldTask: any,
@@ -1249,19 +1278,7 @@ async function createNextRecurrence(
 
   const { frequency, interval } = oldTask.recurrence;
   const baseDate = oldTask.dueDate ? new Date(oldTask.dueDate) : new Date();
-  const nextDue = new Date(baseDate);
-
-  switch (frequency) {
-    case "daily":
-      nextDue.setDate(nextDue.getDate() + interval);
-      break;
-    case "weekly":
-      nextDue.setDate(nextDue.getDate() + 7 * interval);
-      break;
-    case "monthly":
-      nextDue.setMonth(nextDue.getMonth() + interval);
-      break;
-  }
+  const nextDue = nextRecurrenceDue(baseDate, frequency, interval);
 
   // Reset checklist items to undone
   const checklist = (oldTask.checklist || []).map(
