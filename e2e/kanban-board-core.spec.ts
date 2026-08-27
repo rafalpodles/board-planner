@@ -566,3 +566,114 @@ test("the board works on a phone: every column is there and the rail scrolls", a
 
   await expect(page.getByText(HELD_TASK_TITLE)).toBeVisible();
 });
+
+/**
+ * BP-488. On a phone each column fills the screen and a flick moves to the next one, in the
+ * order the project configured. Driven with real touch events: React reads `changedTouches`,
+ * and a mouse drag carries none — so a spec written with `page.mouse` would pass against a
+ * board with no gesture wired up at all.
+ */
+test.describe("swiping between the columns on a phone", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+
+  async function flick(page: Page, dx: number, dy = 0) {
+    await page.evaluate(
+      ({ dx, dy }) => {
+        const rail = document
+          .querySelector("[data-testid='column-planned']")!
+          .closest(".overflow-x-auto") as HTMLElement;
+        const box = rail.getBoundingClientRect();
+        const x = box.left + box.width / 2;
+        const y = box.top + box.height / 2;
+        const at = (px: number, py: number) => [
+          new Touch({ identifier: 1, target: rail, clientX: px, clientY: py }),
+        ];
+        const send = (type: string, touches: Touch[], changedTouches: Touch[]) =>
+          rail.dispatchEvent(
+            new TouchEvent(type, { bubbles: true, cancelable: true, touches, changedTouches })
+          );
+        send("touchstart", at(x, y), at(x, y));
+        send("touchmove", at(x + dx, y + dy), at(x + dx, y + dy));
+        send("touchend", [], at(x + dx, y + dy));
+      },
+      { dx, dy }
+    );
+  }
+
+  const activeDot = (page: Page) => page.locator("[data-testid^='column-dot-'][aria-current]");
+
+  /** Whether the column is the one the reader is looking at, rather than a page away. */
+  function onScreen(page: Page, columnId: string) {
+    return boardColumn(page, columnId).evaluate((el) => {
+      const rail = el.closest(".overflow-x-auto") as HTMLElement;
+      const column = el.getBoundingClientRect();
+      const view = rail.getBoundingClientRect();
+      return column.left >= view.left - 1 && column.right <= view.right + 1;
+    });
+  }
+
+  async function expectShowing(page: Page, columnId: string, label: string) {
+    await expect(activeDot(page)).toHaveAttribute("aria-label", `Show ${label}`);
+    await expect.poll(() => onScreen(page, columnId)).toBe(true);
+  }
+
+  test("a flick left moves on a column, a flick right moves back, and the first column is the end of the road", async ({
+    page,
+  }) => {
+    await signIn(page);
+
+    // The control: the board opens on its first column and the second one is off screen
+    await expectShowing(page, "planned", "Planned");
+    expect(await onScreen(page, "todo")).toBe(false);
+
+    await flick(page, -150);
+    await expectShowing(page, "todo", "To Do");
+    expect(await onScreen(page, "planned")).toBe(false);
+
+    await flick(page, 150);
+    await expectShowing(page, "planned", "Planned");
+
+    // No loop: the board stays where it is rather than jumping to Done
+    await flick(page, 150);
+    await expectShowing(page, "planned", "Planned");
+  });
+
+  test("flicking past the last column stops there", async ({ page }) => {
+    await signIn(page);
+
+    const rest = [
+      ["todo", "To Do"],
+      ["in_progress", "In Progress"],
+      ["in_review", "In Review"],
+      ["needs_human_review", "Needs Human Review"],
+      ["ready_to_test", "Ready to Test"],
+      ["done", "Done"],
+    ];
+    for (const [columnId, label] of rest) {
+      await flick(page, -150);
+      await expectShowing(page, columnId, label);
+    }
+
+    await flick(page, -150);
+    await expectShowing(page, "done", "Done");
+  });
+
+  // The same finger scrolls a column's cards. Paging on that gesture would make the board
+  // unreadable, so a drag that is mostly vertical has to leave it alone.
+  test("a mostly vertical drag does not page the board", async ({ page }) => {
+    await signIn(page);
+    await expectShowing(page, "planned", "Planned");
+
+    await flick(page, -150, 400);
+    await expectShowing(page, "planned", "Planned");
+  });
+
+  // Swiping is additive: the indicator is still a way to pick a column outright
+  test("tapping a dot jumps to that column", async ({ page }) => {
+    await signIn(page);
+
+    await page.getByTestId("column-dot-done").click();
+    await expectShowing(page, "done", "Done");
+    expect(await onScreen(page, "planned")).toBe(false);
+  });
+});
