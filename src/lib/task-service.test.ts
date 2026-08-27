@@ -3924,9 +3924,14 @@ describe("advancing a recurring series' due date", () => {
   // Same claim for the two frequencies the clamp does not touch, so a half-UTC module cannot pass:
   // reverting only the monthly branch leaves this one green, and reverting only these leaves the
   // one above green.
+  //
+  // Both spans deliberately cross the US transition on 8 March 2026, and that is load-bearing:
+  // adding days locally and adding them in UTC give the same instant *except* across a DST
+  // boundary. A February span proved nothing — measured, reverting the daily branch to local
+  // getters passed every zone.
   it.each([
-    { frequency: "daily" as const, interval: 3, from: "2026-02-27", to: "2026-03-02" },
-    { frequency: "weekly" as const, interval: 2, from: "2026-02-27", to: "2026-03-13" },
+    { frequency: "daily" as const, interval: 3, from: "2026-03-06", to: "2026-03-09" },
+    { frequency: "weekly" as const, interval: 2, from: "2026-03-01", to: "2026-03-15" },
   ])("$frequency is the same in every timezone too", ({ frequency, interval, from, to }) => {
     const answers = ["UTC", "America/Los_Angeles", "Australia/Sydney"].map((zone) =>
       inZone(zone, () => nextRecurrenceDue(stored(from), frequency, interval).toISOString())
