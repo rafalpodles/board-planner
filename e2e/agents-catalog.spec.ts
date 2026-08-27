@@ -1,6 +1,6 @@
-import { test, expect, type Locator, type Page } from "@playwright/test";
+import { test, expect, type APIRequestContext, type Locator, type Page } from "@playwright/test";
 import mongoose from "mongoose";
-import { ADMIN_AUTH } from "./api";
+import { ADMIN_AUTH, MEMBER_AUTH } from "./api";
 import {
   ADMIN_ID,
   E2E_MONGODB_URI,
@@ -9,6 +9,7 @@ import {
   PROJECT_KEY,
   PROJECT_NAME,
   SIBLING_TASK_ID,
+  SIBLING_TASK_KEY,
   SIBLING_TASK_NUMBER,
   seed,
 } from "./seed";
@@ -504,7 +505,9 @@ test.describe("deleting one that is still in use", () => {
     await page.reload();
     await page.getByRole("button", { name: "Delete Spoken for" }).click();
 
-    await expect(page.getByText(/Still in use by 1 task\. Point those elsewhere first\./)).toBeVisible();
+    await expect(
+      page.getByText(`Still in use by ${SIBLING_TASK_KEY}. Point those elsewhere first.`)
+    ).toBeVisible();
     expect(await storedAgent("Spoken for")).not.toBeNull();
   });
 
@@ -521,6 +524,144 @@ test.describe("deleting one that is still in use", () => {
     await expect(page.getByText(/Still in use/)).toHaveCount(0);
     await expect(page.getByText("You have not created an agent yet.")).toBeVisible();
     expect(await storedAgent("Spoken for")).toBeNull();
+  });
+});
+
+test.describe("what the refusal names", () => {
+  /** `count` tasks on this board, all pointing at `agentId`, numbered from 900 upward. */
+  async function tasksNaming(agentId: string, count: number): Promise<string[]> {
+    return withDb(async (db) => {
+      const keys: string[] = [];
+      for (let i = 0; i < count; i++) {
+        const taskNumber = 900 + i;
+        await db.collection("tasks").insertOne({
+          project: PROJECT_ID,
+          taskNumber,
+          title: `Points at the agent ${i}`,
+          status: "todo",
+          priority: "medium",
+          agent: new mongoose.Types.ObjectId(agentId),
+          checklist: [],
+          blockedBy: [],
+          watchers: [],
+          relations: [],
+          linkedPRs: [],
+          customFieldValues: {},
+          order: i,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
+        keys.push(`${PROJECT_KEY}-${taskNumber}`);
+      }
+      return keys;
+    });
+  }
+
+  async function refusalFor(request: APIRequestContext, agentId: string): Promise<string> {
+    const response = await request.delete(`/api/agents/${agentId}`, { headers: ADMIN_AUTH });
+    expect(response.status()).toBe(409);
+    return ((await response.json()) as { error: string }).error;
+  }
+
+  async function newAgent(page: Page, name: string): Promise<string> {
+    await openCatalog(page);
+    await page.getByRole("button", { name: "New agent" }).click();
+    await page.getByLabel("Name").fill(name);
+    await page.getByRole("button", { name: "Create" }).click();
+    return agentIdByName(name);
+  }
+
+  test("every task, when there are few enough to name", async ({ page, request }) => {
+    await signIn(page);
+    const id = await newAgent(page, "Named by three");
+    const keys = await tasksNaming(id, 3);
+
+    expect(await refusalFor(request, id)).toBe(
+      `Still in use by ${keys.join(", ")}. Point those elsewhere first.`
+    );
+  });
+
+  // Exactly at the cap: naming all five and saying "and 0 more" would be a sentence nobody writes
+  test("all five at the cap, with nothing trailing", async ({ page, request }) => {
+    await signIn(page);
+    const id = await newAgent(page, "Named by five");
+    const keys = await tasksNaming(id, 5);
+
+    const error = await refusalFor(request, id);
+    expect(error).toBe(`Still in use by ${keys.join(", ")}. Point those elsewhere first.`);
+    expect(error).not.toContain("more");
+  });
+
+  test("five and a count, one past the cap", async ({ page, request }) => {
+    await signIn(page);
+    const id = await newAgent(page, "Named by six");
+    const keys = await tasksNaming(id, 6);
+
+    expect(await refusalFor(request, id)).toBe(
+      `Still in use by ${keys.slice(0, 5).join(", ")} and 1 more. Point those elsewhere first.`
+    );
+  });
+
+  // The count is the whole point of the cap: twelve tasks used to be twelve unfindable tasks
+  test("the count past the cap is the number left, not the total", async ({ page, request }) => {
+    await signIn(page);
+    const id = await newAgent(page, "Named by twelve");
+    await tasksNaming(id, 12);
+
+    expect(await refusalFor(request, id)).toContain("and 7 more");
+  });
+
+  // A user-scoped agent reaches this refusal with no project check at all, so the keys it names
+  // must not describe a board the caller cannot open. Found reviewing this change, not in the
+  // ticket: counting leaked nothing, naming does.
+  test("counts, rather than names, a task on a board the caller cannot open", async ({ request }) => {
+    const id = await withDb(async (db) => {
+      const result = await db.collection("agents").insertOne({
+        name: "A member's own",
+        description: "",
+        scope: "user",
+        owner: MEMBER_ID,
+        project: null,
+        builtIn: false,
+        composition: { analysis: [], implementation: [], verification: [], delivery: [] },
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      return String(result.insertedId);
+    });
+    // Their agent is on a task of this board, and their grant on it is then taken away — which is
+    // exactly how an agent outlives somebody's access to the board it is working on.
+    await withDb(async (db) => {
+      await db
+        .collection("tasks")
+        .updateOne({ _id: SIBLING_TASK_ID }, { $set: { agent: new mongoose.Types.ObjectId(id) } });
+      const removed = await db.collection("grants").deleteMany({ subject: MEMBER_ID });
+      expect(removed.deletedCount, "the fixture removed no grant, so nothing was revoked").toBeGreaterThan(0);
+    });
+
+    const response = await request.delete(`/api/agents/${id}`, { headers: MEMBER_AUTH });
+    expect(response.status()).toBe(409);
+    const { error } = (await response.json()) as { error: string };
+
+    expect(error, "the refusal named a task on a board this caller cannot see").not.toContain(
+      SIBLING_TASK_KEY
+    );
+    expect(error).toBe("Still in use by 1 task. Point those elsewhere first.");
+  });
+
+  test("a board with no name is still nameable", async ({ page, request }) => {
+    await signIn(page);
+    const id = await newAgent(page, "The nameless board's default");
+    await withDb(async (db) => {
+      await db.collection("projects").updateOne(
+        { _id: PROJECT_ID },
+        { $set: { name: "  ", "worker.agent": new mongoose.Types.ObjectId(id) } }
+      );
+    });
+
+    expect(await refusalFor(request, id)).toBe(
+      "Still in use by a project with no name. Point those elsewhere first."
+    );
   });
 });
 
@@ -691,7 +832,7 @@ test.describe("emptying one that is still in use", () => {
     await saving(page, id, 409);
 
     await expect(
-      page.getByText("Not saved. Still in use by 1 task. Point those elsewhere first.")
+      page.getByText(`Not saved. Still in use by ${SIBLING_TASK_KEY}. Point those elsewhere first.`)
     ).toBeVisible();
     // What the guard is for: the task is still carrying something a claim can resolve
     expect((await storedAgent("Spoken for"))?.composition).toMatchObject({
