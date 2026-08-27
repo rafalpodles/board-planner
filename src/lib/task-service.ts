@@ -947,7 +947,7 @@ export async function updateTask(
     const conflict = runHolding(oldTask);
     if (conflict) {
       const keyed = await Project.findById(projectId, "key").lean();
-      const key = keyed?.key ? `${keyed.key}-${oldTask.taskNumber}` : `#${oldTask.taskNumber}`;
+      const key = taskKeyOf(keyed?.key, oldTask.taskNumber);
       return refuseHeldRun(conflict, key);
     }
   }
@@ -1096,7 +1096,7 @@ export async function updateTask(
       Project.findById(projectId, "key name columns").lean(),
       usernameOf(actorId),
     ]);
-    const taskKey = project ? `${project.key}-${task.taskNumber}` : `#${task.taskNumber}`;
+    const taskKey = taskKeyOf(project?.key, task.taskNumber);
     const column = getProjectColumns(project).find((c) => c.id === String(task.status));
     createNotifications({
       type: "task_assigned",
@@ -1177,7 +1177,7 @@ export async function addComment(
     Project.findById(projectId, "key name columns").lean(),
     resolveMentions(bodyText),
   ]);
-  const taskKey = project ? `${project.key}-${task.taskNumber}` : `#${task.taskNumber}`;
+  const taskKey = taskKeyOf(project?.key, task.taskNumber);
   const column = getProjectColumns(project).find((c) => c.id === String(task.status));
   const excerpt = bodyText.trim().substring(0, 120);
   const sharedEmail = {
@@ -1382,7 +1382,7 @@ async function announceAbandonedRuns(
 ): Promise<void> {
   const column = columns.find((c) => c.id === exhausted);
   for (const task of tasks) {
-    const taskKey = project?.key ? `${project.key}-${task.taskNumber}` : `#${task.taskNumber}`;
+    const taskKey = taskKeyOf(project?.key, task.taskNumber);
     const recipients = collectRecipients(task);
     if (recipients.length === 0) continue;
     // The machine that stopped answering is the actor, because that is what happened — and the

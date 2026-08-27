@@ -4,6 +4,7 @@ import { ADMIN_AUTH, MEMBER_AUTH } from "./api";
 import {
   ADMIN_ID,
   E2E_MONGODB_URI,
+  FINISHED_TASK_NUMBER,
   MEMBER_ID,
   PROJECT_ID,
   PROJECT_KEY,
@@ -12,6 +13,7 @@ import {
   SIBLING_TASK_KEY,
   SIBLING_TASK_NUMBER,
   seed,
+  taskFactory,
 } from "./seed";
 import { signIn } from "./session";
 
@@ -528,33 +530,36 @@ test.describe("deleting one that is still in use", () => {
 });
 
 test.describe("what the refusal names", () => {
-  /** `count` tasks on this board, all pointing at `agentId`, numbered from 900 upward. */
+  /**
+   * `count` tasks on this board pointing at `agentId`, numbered from 900 — **inserted out of
+   * order**, so the route's sort is doing work. Written ascending, the collection's natural order
+   * already equals the sorted one and deleting the sort leaves every test green (BP-482 review).
+   *
+   * Built through the seed's own factory rather than by hand: a task without `createdBy` is one
+   * the product would refuse, and `taskCounter` has to move or the board cannot mint its next.
+   */
   async function tasksNaming(agentId: string, count: number): Promise<string[]> {
-    return withDb(async (db) => {
-      const keys: string[] = [];
-      for (let i = 0; i < count; i++) {
-        const taskNumber = 900 + i;
-        await db.collection("tasks").insertOne({
-          project: PROJECT_ID,
-          taskNumber,
-          title: `Points at the agent ${i}`,
-          status: "todo",
-          priority: "medium",
-          agent: new mongoose.Types.ObjectId(agentId),
-          checklist: [],
-          blockedBy: [],
-          watchers: [],
-          relations: [],
-          linkedPRs: [],
-          customFieldValues: {},
-          order: i,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        });
-        keys.push(`${PROJECT_KEY}-${taskNumber}`);
-      }
-      return keys;
+    const numbers = Array.from({ length: count }, (_, i) => 900 + i);
+    const scrambled = [...numbers].reverse();
+    await withDb(async (db) => {
+      const build = taskFactory(new Date());
+      await db.collection("tasks").insertMany(
+        scrambled.map((taskNumber, i) =>
+          build({
+            taskNumber,
+            title: `Points at the agent ${taskNumber}`,
+            status: "todo",
+            agent: new mongoose.Types.ObjectId(agentId),
+            order: i,
+          })
+        )
+      );
+      await db
+        .collection("projects")
+        .updateOne({ _id: PROJECT_ID }, { $max: { taskCounter: numbers[numbers.length - 1] } });
     });
+    // Ascending, which is what the refusal must name however the rows happen to sit
+    return numbers.map((n) => `${PROJECT_KEY}-${n}`);
   }
 
   async function refusalFor(request: APIRequestContext, agentId: string): Promise<string> {
@@ -606,9 +611,11 @@ test.describe("what the refusal names", () => {
   test("the count past the cap is the number left, not the total", async ({ page, request }) => {
     await signIn(page);
     const id = await newAgent(page, "Named by eighteen");
-    await tasksNaming(id, 18);
+    const keys = await tasksNaming(id, 18);
 
-    expect(await refusalFor(request, id)).toContain("and 8 more");
+    expect(await refusalFor(request, id)).toBe(
+      `Still in use by tasks ${keys.slice(0, 10).join(", ")} and 8 more. Point those elsewhere first.`
+    );
   });
 
   // A user-scoped agent reaches this refusal with no project check at all, so the keys it names
@@ -629,13 +636,17 @@ test.describe("what the refusal names", () => {
       });
       return String(result.insertedId);
     });
-    // Their agent is on a task of this board, and their grant on it is then taken away — which is
-    // exactly how an agent outlives somebody's access to the board it is working on.
+    // Their agent is on two tasks of this board — two, so the plural of the count-only sentence is
+    // exercised by something — and their grant on it is then taken away, which is exactly how an
+    // agent outlives somebody's access to the board it is working on.
     await withDb(async (db) => {
       await db
         .collection("tasks")
-        .updateOne({ _id: SIBLING_TASK_ID }, { $set: { agent: new mongoose.Types.ObjectId(id) } });
-      const removed = await db.collection("grants").deleteMany({ subject: MEMBER_ID });
+        .updateMany(
+          { project: PROJECT_ID, taskNumber: { $in: [SIBLING_TASK_NUMBER, FINISHED_TASK_NUMBER] } },
+          { $set: { agent: new mongoose.Types.ObjectId(id) } }
+        );
+      const removed = await db.collection("grants").deleteMany({ subject: MEMBER_ID, object: PROJECT_ID });
       expect(removed.deletedCount, "the fixture removed no grant, so nothing was revoked").toBeGreaterThan(0);
     });
 
@@ -646,7 +657,40 @@ test.describe("what the refusal names", () => {
     expect(error, "the refusal named a task on a board this caller cannot see").not.toContain(
       SIBLING_TASK_KEY
     );
-    expect(error).toBe("Still in use by 1 task on boards you cannot open. Point those elsewhere first.");
+    expect(error).toBe("Still in use by 2 tasks on boards you cannot open. Point those elsewhere first.");
+  });
+
+  // The control the leak test cannot supply on its own: with the grant left in place the same
+  // member sees the key. Without this, narrowing the check to `user.role === "admin"` would leave
+  // the whole group green, because the admin is the only caller that ever reaches the true branch.
+  test("names it for a member who does hold the board", async ({ request }) => {
+    const id = await withDb(async (db) => {
+      const result = await db.collection("agents").insertOne({
+        name: "A member's own, still granted",
+        description: "",
+        scope: "user",
+        owner: MEMBER_ID,
+        project: null,
+        builtIn: false,
+        composition: { analysis: [], implementation: [], verification: [], delivery: [] },
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      return String(result.insertedId);
+    });
+    await withDb(async (db) => {
+      await db
+        .collection("tasks")
+        .updateOne({ _id: SIBLING_TASK_ID }, { $set: { agent: new mongoose.Types.ObjectId(id) } });
+      const grant = await db.collection("grants").countDocuments({ subject: MEMBER_ID, object: PROJECT_ID });
+      expect(grant, "the member has no grant, so this proves nothing").toBeGreaterThan(0);
+    });
+
+    const response = await request.delete(`/api/agents/${id}`, { headers: MEMBER_AUTH });
+    expect(response.status()).toBe(409);
+    const { error } = (await response.json()) as { error: string };
+
+    expect(error).toBe(`Still in use by task ${SIBLING_TASK_KEY}. Point those elsewhere first.`);
   });
 
   // The board half of the same sentence. A board's name discloses at least as much as a task key,
@@ -671,7 +715,7 @@ test.describe("what the refusal names", () => {
       await db
         .collection("projects")
         .updateOne({ _id: PROJECT_ID }, { $set: { "worker.agent": new mongoose.Types.ObjectId(id) } });
-      const removed = await db.collection("grants").deleteMany({ subject: MEMBER_ID });
+      const removed = await db.collection("grants").deleteMany({ subject: MEMBER_ID, object: PROJECT_ID });
       expect(removed.deletedCount, "the fixture removed no grant, so nothing was revoked").toBeGreaterThan(0);
     });
 
