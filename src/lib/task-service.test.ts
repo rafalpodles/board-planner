@@ -166,6 +166,7 @@ const {
   MAX_PHASE_LENGTH,
   EXECUTION_LEASE_MS,
   personalAgentAlienTo,
+  nextRecurrenceDue,
 } = await import("./task-service");
 
 const { logActivity } = await import("@/lib/activity");
@@ -3869,5 +3870,96 @@ describe("a value the schema will not store is refused by updateTask too", () =>
 
     expect((await updateTask("p1", "t1", { dueDate: "" }, WHO)).ok).toBe(true);
     expect((await updateTask("p1", "t1", { dueDate: null, recurrence: null }, WHO)).ok).toBe(true);
+  });
+});
+
+
+// BP-461. `setMonth` does not clamp: 31 January + 1 month is 3 March, so a monthly series skipped
+// February and then kept drifting, because the occurrence after that was computed from the 3rd.
+describe("advancing a recurring series' due date", () => {
+  const ymd = (d: Date) => [d.getFullYear(), d.getMonth() + 1, d.getDate()];
+
+  // The short months, both directions across a year boundary, and both leap-year answers for
+  // 29 February. Each is a date where the naive `setMonth` and the clamp disagree, so none of them
+  // can go green against the code this replaces.
+  it.each([
+    { from: [2026, 0, 31], interval: 1, to: [2026, 2, 28], why: "31 Jan lands on the last of February" },
+    { from: [2026, 0, 29], interval: 1, to: [2026, 2, 28], why: "so does the 29th" },
+    { from: [2026, 0, 30], interval: 1, to: [2026, 2, 28], why: "and the 30th" },
+    { from: [2026, 2, 31], interval: 1, to: [2026, 4, 30], why: "31 March lands on 30 April" },
+    { from: [2028, 0, 31], interval: 1, to: [2028, 2, 29], why: "a leap year gets its 29th" },
+    { from: [2026, 11, 31], interval: 2, to: [2027, 2, 28], why: "the clamp survives a year boundary" },
+    { from: [2026, 0, 31], interval: 3, to: [2026, 4, 30], why: "and an interval above one" },
+  ])("monthly: $why", ({ from, interval, to }) => {
+    const next = nextRecurrenceDue(new Date(from[0], from[1], from[2], 12, 0, 0), "monthly", interval);
+    expect(ymd(next)).toEqual(to);
+  });
+
+  // Measured, and deliberately not what BP-461's own description predicted: each occurrence is
+  // computed from the one just closed, so once February has clamped 31 to 28 the series settles on
+  // the 28th rather than climbing back to the 31st.
+  //
+  // That is the price of basing the next occurrence on the previous one, and the previous one is
+  // what makes retargeting work — a person who edits a mid-series due date to the 5th gets the 5th
+  // from then on. Climbing back would need the originally chosen day stored beside the recurrence
+  // and invalidated on every explicit due-date edit; see the note on BP-461.
+  //
+  // What matters is that it is stationary. The bug was a series walking forward forever — 31 Jan,
+  // 3 Mar, 3 Apr, 3 May — through months nobody chose.
+  it("settles on a day and stays there, instead of walking forward month after month", () => {
+    let due = new Date(2026, 0, 31, 12, 0, 0);
+    const series: number[][] = [];
+    for (let i = 0; i < 4; i++) {
+      due = nextRecurrenceDue(due, "monthly", 1);
+      series.push(ymd(due));
+    }
+
+    expect(series).toEqual([
+      [2026, 2, 28],
+      [2026, 3, 28],
+      [2026, 4, 28],
+      [2026, 5, 28],
+    ]);
+    // Said as the property rather than as four dates: every occurrence is one month after the last
+    expect(series.map(([, month]) => month)).toEqual([2, 3, 4, 5]);
+  });
+
+  // The same series under the code this replaces, so the assertion above is anchored to something
+  // that can be seen to differ. `setMonth` alone skips February and then keeps the 3rd forever.
+  it("is the fix that stops it: the naive setMonth walks into months nobody chose", () => {
+    const naive = (base: Date) => {
+      const n = new Date(base);
+      n.setMonth(n.getMonth() + 1);
+      return n;
+    };
+    let due = new Date(2026, 0, 31, 12, 0, 0);
+    const series: number[][] = [];
+    for (let i = 0; i < 4; i++) {
+      due = naive(due);
+      series.push(ymd(due));
+    }
+
+    expect(series).toEqual([
+      [2026, 3, 3],
+      [2026, 4, 3],
+      [2026, 5, 3],
+      [2026, 6, 3],
+    ]);
+  });
+
+  // The control. `setDate` overflowing into the next month is exactly what "seven days later"
+  // means, so these two must be left alone by the fix above — and the interval has to be carried,
+  // or `7 * interval` mutated to a bare `7` goes unnoticed.
+  it.each([
+    { frequency: "daily" as const, interval: 3, to: [2026, 3, 3] },
+    { frequency: "weekly" as const, interval: 2, to: [2026, 3, 14] },
+  ])("$frequency every $interval still counts days across the month boundary", ({ frequency, interval, to }) => {
+    const next = nextRecurrenceDue(new Date(2026, 1, 28, 12, 0, 0), frequency, interval);
+    expect(ymd(next)).toEqual(to);
+  });
+
+  it("keeps the time of day, so a series does not walk around the clock", () => {
+    const next = nextRecurrenceDue(new Date(2026, 0, 31, 9, 30, 0), "monthly", 1);
+    expect([next.getHours(), next.getMinutes()]).toEqual([9, 30]);
   });
 });

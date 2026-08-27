@@ -334,10 +334,10 @@ test.describe("what happens when the task is closed", () => {
   }
 
   test("a monthly task on a day every month has comes back in the right month", async ({ page }) => {
-    // The monthly arithmetic needs a case that can go red *today*. The 31st one below is under
-    // test.fail(), so on its own it leaves `case "monthly"` deletable without a single test
-    // noticing. A mid-month date is unaffected by the overflow BP-461 is about, so this one pins
-    // the branch while that one documents the defect.
+    // The plain case, which the overflow BP-461 was about never touched: a mid-month date is the
+    // same under `setMonth` and under the clamp that replaced it. It is here to pin the branch —
+    // without it, deleting `case "monthly"` outright leaves only the 31st test below, and that one
+    // is about the day of the month rather than about the month advancing at all.
     const due = new Date(2026, 4, 15, 12, 0, 0);
     await giveDueDate(due);
     await withDb(async (db) => {
@@ -359,19 +359,13 @@ test.describe("what happens when the task is closed", () => {
   test("a monthly task due on the 31st comes back on the last day of the next month", async ({
     page,
   }) => {
-    // EXPECTED TO FAIL — BP-461. `setMonth` does not clamp, so 31 January becomes 3 March: the
-    // series skips February entirely and then drifts, because the occurrence after that is
-    // computed from the 3rd. Measured: Jan 31 -> Mar 3, Jan 29 -> Mar 1, Mar 31 -> May 1.
+    // BP-461. `setMonth` does not clamp, so 31 January used to become 3 March: the series skipped
+    // February entirely and then drifted, because the occurrence after that was computed from the
+    // 3rd. Measured before the fix: Jan 31 -> Mar 3, Jan 29 -> Mar 1, Mar 31 -> May 1.
     //
-    // `test.fail()` rather than a skip, and rather than asserting 3 March as though it were
-    // intended: the real path runs, and the day BP-461 lands this fails for passing.
-    //
-    // It is called at the END, not the top, and that matters. Under `test.fail()` *any* failure
-    // counts as success, so a version that declared it up front would also go green on a broken
-    // selector, a timeout, or the monthly branch being deleted outright — measured: with
-    // `case "monthly"` removed the date is 31 January, which fails this assertion just as happily.
-    // Declaring it after the occurrence is in hand narrows the expected failure to the one line
-    // that is actually about BP-461.
+    // Driven through the board rather than through `nextRecurrenceDue` directly, which its own
+    // unit tests cover: what this adds is that the date a person actually receives on the new card
+    // is the clamped one — the value survives the write, the schema's cast and the read back.
     const due = new Date(2026, 0, 31, 12, 0, 0);
     await giveDueDate(due);
     await withDb(async (db) => {
@@ -385,10 +379,8 @@ test.describe("what happens when the task is closed", () => {
     await closeOnTheBoard(page);
 
     const created = await newOccurrence(before);
-
-    test.fail();
     const next = new Date(created.dueDate as Date);
-    expect([next.getMonth(), next.getDate()]).toEqual([1, 28]);
+    expect([next.getFullYear(), next.getMonth(), next.getDate()]).toEqual([2026, 1, 28]);
   });
 
   test("a task with no rhythm leaves nothing behind", async ({ page, request }) => {
