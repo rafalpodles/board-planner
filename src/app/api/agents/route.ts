@@ -4,23 +4,14 @@ import { withAuth } from "@/lib/middleware";
 import { accessibleProjectIds, check } from "@/lib/grants";
 import { Agent } from "@/models/agent";
 import { Project } from "@/models/project";
-import { allBlocks, toApiAgent, toApiBlock, visibleAgents } from "@/lib/agent-service";
-import { brokenProblems, normaliseComposition } from "@/lib/agent-rules";
+import { compositionRefusal, toApiAgent, visibleAgents } from "@/lib/agent-service";
+import { normaliseComposition } from "@/lib/agent-rules";
 import { AgentComposition } from "@/types";
 
-/**
- * The editor shows these before you save, but the editor is not the only way in. A composition that
- * cannot run must not be stored: the failure would surface on a machine, mid-task, instead of here.
- */
+// The editor shows these before you save, but the editor is not the only way in.
 async function refusalFor(composition: AgentComposition) {
-  const blocks = await allBlocks();
-  const lookup = (key: string) => blocks.map(toApiBlock).find((b) => b.key === key);
-  const broken = brokenProblems(composition, lookup);
-  if (broken.length === 0) return null;
-  return NextResponse.json(
-    { error: broken[0].message, problems: broken.map((p) => p.message) },
-    { status: 400 }
-  );
+  const refusal = await compositionRefusal(composition);
+  return refusal ? NextResponse.json(refusal, { status: 400 }) : null;
 }
 
 export const GET = withAuth(async (_request, { user }) => {

@@ -17,6 +17,13 @@ import { Modal } from "@/components/ui/Modal";
 const MAX_ATTACHMENTS = 4;
 const MAX_INPUT_HEIGHT = 200;
 
+const RECOVERY_INTERVAL_MS = 3000;
+// Two phases, because the turn may well still be running: the route is allowed maxDuration = 300
+// and the agent loop runs up to MAX_STEPS completions with no per-call timeout. Blocking the
+// composer for that long is the wedge again, and giving up at 30s abandons answers that land.
+const RECOVERY_BLOCK_MS = 30_000;
+const RECOVERY_WINDOW_MS = 300_000;
+
 interface PendingAttachment {
   fileId: string;
   mimeType: string;
@@ -63,6 +70,15 @@ export function PmChat({
   const [stopping, setStopping] = useState(false);
   const [errorState, setErrorState] = useState("");
   const [lastFailedInput, setLastFailedInput] = useState("");
+  // Separate from the text: a refused image-only send has nothing typed, and `lastFailedInput`
+  // alone is falsy there, which is why no Retry appeared (BP-451).
+  const [retryable, setRetryable] = useState(false);
+  const optimisticSeq = useRef(0);
+  const recoveryStartedAt = useRef(0);
+  // The answer this send is waiting for is whichever assistant message is NOT this one. Without it
+  // the poll accepts any trailing assistant message with content — including the previous turn's,
+  // which ends recovery instantly while the real turn is still running.
+  const answerBefore = useRef("");
   const [loading, setLoading] = useState(true);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
@@ -115,12 +131,15 @@ export function PmChat({
     bottomRef.current?.scrollIntoView({ block: "end" });
   }, [messages, liveActions, working]);
 
-  // Stream lost mid-turn: poll history until the assistant message is finalized
+  // Stream lost mid-turn: poll history until the assistant message is finalized (BP-452).
   const recoveryPoll = useCallback(async () => {
+    // A deadline rather than a count. usePollWhileVisible fires once on mount and again on every
+    // return to the tab, so an attempt counter is spent by alt-tabbing rather than by time.
+    const elapsed = Date.now() - recoveryStartedAt.current;
     try {
       const msgs = await loadMessages();
       const last = msgs[msgs.length - 1];
-      if (last && last.role === "assistant" && last.content) {
+      if (last && last.role === "assistant" && last.content && last._id !== answerBefore.current) {
         setRecovering(false);
         setWorking(false);
         setStopping(false);
@@ -128,38 +147,89 @@ export function PmChat({
         setLiveActions([]);
         refreshTaskMap();
         emitBoardRefresh(projectId);
+        return;
       }
     } catch {
-      // keep polling
+      // a failed load still counts against the deadline
+    }
+    if (elapsed >= RECOVERY_WINDOW_MS) {
+      setRecovering(false);
+      setWorking(false);
+      setStopping(false);
+      setWorkingStatus("");
+      setErrorState("Lost the connection and could not recover the answer.");
+      return;
+    }
+    if (elapsed >= RECOVERY_BLOCK_MS) {
+      // Stop blocking, keep watching. The turn may still be running, and the answer lands here on
+      // its own when it does.
+      setWorking(false);
+      setStopping(false);
+      setWorkingStatus("");
+      setErrorState(
+        "The connection dropped. The turn may still be running — the answer will appear here if it lands."
+      );
     }
   }, [loadMessages, refreshTaskMap]);
-  usePollWhileVisible(recoveryPoll, 3000, recovering);
+  useEffect(() => {
+    if (recovering) recoveryStartedAt.current = Date.now();
+  }, [recovering]);
+  usePollWhileVisible(recoveryPoll, RECOVERY_INTERVAL_MS, recovering);
 
   async function interrupt() {
     setStopping(true);
     setWorkingStatus("Stopping…");
     try {
       await api.post(`/api/projects/${projectId}/pm/interrupt`, {});
-    } catch {
-      // 404 = the turn finished on its own between click and request; the stream
-      // is about to deliver the real answer, so there is nothing to report
+    } catch (error) {
+      // Keyed on what the route said, not on the status: withProjectAccess answers 404 for a
+      // project it cannot resolve, and reading that as "the turn finished" leaves Stop dead.
+      const { status, body } = error as { status?: number; body?: { error?: string } };
+      const finishedOnItsOwn =
+        status === 404 && body?.error === "No PM turn is running for this project";
+      if (finishedOnItsOwn) return;
+      setStopping(false);
+      setWorkingStatus("");
+      setErrorState(
+        status === undefined
+          ? "Could not reach the server to stop the turn."
+          : (error as Error).message || "Could not stop the turn."
+      );
     }
   }
 
   async function addFiles(files: File[]) {
     const images = files.filter((f) => f.type.startsWith("image/"));
     if (images.length === 0) return;
-
-    const room = MAX_ATTACHMENTS - pending.length;
-    if (room <= 0) {
-      setErrorState(`At most ${MAX_ATTACHMENTS} images per message.`);
+    // This writes the shared banner, and a Retry left over from an earlier failure would render
+    // beside a sentence about attachments and resend that older message.
+    setRetryable(false);
+    // `pending` is read from this closure while the uploads below append to it one at a time, so a
+    // second call landing mid-batch would compute its room against a count still growing.
+    if (uploading) {
+      setErrorState("Still attaching — try that again in a moment.");
       return;
     }
 
+    const room = MAX_ATTACHMENTS - pending.length;
+    if (room <= 0) {
+      setErrorState(
+        `Attached 0 of ${images.length} — ${MAX_ATTACHMENTS} images per message, and ${pending.length} already attached.`
+      );
+      return;
+    }
+
+    const taking = images.slice(0, room);
     setUploading(true);
-    setErrorState("");
+    setErrorState(
+      taking.length < images.length
+        ? `Attached ${taking.length} of ${images.length} — ${MAX_ATTACHMENTS} images per message${
+            pending.length ? `, and ${pending.length} already attached` : ""
+          }.`
+        : ""
+    );
     try {
-      for (const original of images.slice(0, room)) {
+      for (const original of taking) {
         const resized = await downscaleImage(original);
         const form = new FormData();
         form.append("file", resized.file);
@@ -196,20 +266,27 @@ export function PmChat({
     const message = text.trim();
     if ((!message && pending.length === 0) || working || uploading) return;
     setErrorState("");
+    // Written on every failure and never cleared, so a later, unrelated banner offered Retry for
+    // whatever had failed last — including the give-up above, which must not spend a second turn.
+    setLastFailedInput("");
+    setRetryable(false);
+    answerBefore.current =
+      [...messages].reverse().find((m) => m.role === "assistant")?._id ?? "";
     setInput("");
     setStopping(false);
     setWorking(true);
     setWorkingStatus("PM is thinking…");
     setLiveActions([]);
 
+    const sentPending = pending;
     const sentAttachments = pending.map(({ previewUrl: _preview, ...rest }) => rest);
     setPending([]);
 
-    // Optimistic user message
+    const optimisticId = `local-${optimisticSeq.current++}`;
     setMessages((prev) => [
       ...prev,
       {
-        _id: `local-${prev.length}`,
+        _id: optimisticId,
         project: projectId,
         role: "user",
         content: message,
@@ -221,6 +298,26 @@ export function PmChat({
       },
     ]);
 
+    // The thumbnails come back rather than being cleared on the way out: the upload survives in
+    // GridFS but nothing on screen could reach it (BP-451).
+    /**
+     * `worthRetrying` is about the refusal, not the message: a 400 is decided by the bytes in the
+     * request, so the same Retry produces the same 400 for ever.
+     */
+    function unsend(reason: string, worthRetrying: boolean) {
+      setWorking(false);
+      setWorkingStatus("");
+      setMessages((prev) => prev.filter((m) => m._id !== optimisticId));
+      setInput(message);
+      // Merged rather than overwritten, because onDrop is not gated on `working` and anything added
+      // mid-flight would otherwise be discarded with its upload orphaned. Clamped, because nothing
+      // else clamps this one: `addFiles` is no longer the only writer.
+      setPending((now) => [...sentPending, ...now].slice(0, MAX_ATTACHMENTS));
+      setErrorState(reason);
+      setLastFailedInput(message);
+      setRetryable(worthRetrying);
+    }
+
     let response: Response;
     try {
       response = await api.stream(`/api/projects/${projectId}/pm/chat`, {
@@ -228,27 +325,20 @@ export function PmChat({
         ...(sentAttachments.length ? { attachments: sentAttachments } : {}),
       });
     } catch {
-      setWorking(false);
-      setErrorState("Could not reach the server.");
-      setLastFailedInput(message);
+      unsend("Could not reach the server.", true);
       return;
     }
 
+    // Nothing is persisted before the stream opens, so a refusal on any status is a turn that did
+    // not run. A 409 in particular is not one to recover: the lock is per project and owner-blind,
+    // so it may even be this reader's own turn from another tab (BP-452).
     if (!response.ok) {
       const err = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
-      setWorking(false);
-      if (response.status === 409) {
-        setWorkingStatus("");
-        setErrorState("A PM turn is already running for this project — hold on.");
-        setRecovering(true);
-        setWorking(true);
-      } else if (response.status === 429) {
-        setErrorState(err.error || "Daily turn limit reached.");
-      } else if (response.status === 503) {
-        setErrorState("PM is not configured on the server (OPENROUTER_API_KEY missing).");
+      if (response.status === 503) {
+        unsend("PM is not configured on the server (OPENROUTER_API_KEY missing).", false);
       } else {
-        setErrorState(err.error || "Request failed.");
-        setLastFailedInput(message);
+        // A 400 is deterministic in the request; a 409 or 429 is about the moment
+        unsend(err.error || "Request failed.", response.status !== 400);
       }
       return;
     }
@@ -282,6 +372,11 @@ export function PmChat({
             if (eventLine === "error" && data.error) {
               setErrorState(data.error);
               setLastFailedInput(message);
+              // Not `unsend`: this turn ran, so its attachments are on the persisted message and
+              // resending them would upload the same image twice. Which leaves nothing honest to
+              // offer when the send carried one — a Retry there resends the text without the
+              // picture, and with nothing typed it calls send("") and does nothing at all.
+              setRetryable(message.length > 0 && sentAttachments.length === 0);
             }
           }
         }
@@ -434,7 +529,7 @@ export function PmChat({
                 </div>
               )}
               <div className="text-sm prose-sm break-words">
-                <MarkdownContent>{m.content || "…"}</MarkdownContent>
+                <MarkdownContent>{m.content || (m.attachments?.length ? "" : "…")}</MarkdownContent>
               </div>
               <ActionChips actions={m.actions} />
               <p className="text-[10px] text-text-muted mt-1">{timeAgo(m.createdAt)}</p>
@@ -459,8 +554,8 @@ export function PmChat({
       {errorState && (
         <div className="mb-2 text-sm text-danger flex items-center gap-3">
           <span>{errorState}</span>
-          {lastFailedInput && (
-            <Button size="sm" variant="secondary" onClick={() => { setErrorState(""); send(lastFailedInput); }}>
+          {retryable && (lastFailedInput || pending.length > 0) && (
+            <Button size="sm" variant="secondary" onClick={() => { setErrorState(""); setRetryable(false); send(lastFailedInput); }}>
               Retry
             </Button>
           )}

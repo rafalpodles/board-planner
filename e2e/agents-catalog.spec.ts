@@ -1,16 +1,19 @@
-import { test, expect, type Locator, type Page } from "@playwright/test";
+import { test, expect, type APIRequestContext, type Locator, type Page } from "@playwright/test";
 import mongoose from "mongoose";
-import { ADMIN_AUTH } from "./api";
+import { ADMIN_AUTH, MEMBER_AUTH } from "./api";
 import {
   ADMIN_ID,
   E2E_MONGODB_URI,
+  FINISHED_TASK_NUMBER,
   MEMBER_ID,
   PROJECT_ID,
   PROJECT_KEY,
   PROJECT_NAME,
   SIBLING_TASK_ID,
+  SIBLING_TASK_KEY,
   SIBLING_TASK_NUMBER,
   seed,
+  taskFactory,
 } from "./seed";
 import { signIn } from "./session";
 
@@ -504,7 +507,9 @@ test.describe("deleting one that is still in use", () => {
     await page.reload();
     await page.getByRole("button", { name: "Delete Spoken for" }).click();
 
-    await expect(page.getByText(/Still in use by 1 task\. Point those elsewhere first\./)).toBeVisible();
+    await expect(
+      page.getByText(`Still in use by task ${SIBLING_TASK_KEY}. Point those elsewhere first.`)
+    ).toBeVisible();
     expect(await storedAgent("Spoken for")).not.toBeNull();
   });
 
@@ -521,6 +526,479 @@ test.describe("deleting one that is still in use", () => {
     await expect(page.getByText(/Still in use/)).toHaveCount(0);
     await expect(page.getByText("You have not created an agent yet.")).toBeVisible();
     expect(await storedAgent("Spoken for")).toBeNull();
+  });
+});
+
+test.describe("what the refusal names", () => {
+  /**
+   * `count` tasks on this board pointing at `agentId`, numbered from 900 — **inserted out of
+   * order**, so the route's sort is doing work. Written ascending, the collection's natural order
+   * already equals the sorted one and deleting the sort leaves every test green (BP-482 review).
+   *
+   * Built through the seed's own factory rather than by hand: a task without `createdBy` is one
+   * the product would refuse, and `taskCounter` has to move or the board cannot mint its next.
+   */
+  async function tasksNaming(agentId: string, count: number): Promise<string[]> {
+    const numbers = Array.from({ length: count }, (_, i) => 900 + i);
+    const scrambled = [...numbers].reverse();
+    await withDb(async (db) => {
+      const build = taskFactory(new Date());
+      await db.collection("tasks").insertMany(
+        scrambled.map((taskNumber, i) =>
+          build({
+            taskNumber,
+            title: `Points at the agent ${taskNumber}`,
+            status: "todo",
+            agent: new mongoose.Types.ObjectId(agentId),
+            order: i,
+          })
+        )
+      );
+      await db
+        .collection("projects")
+        .updateOne({ _id: PROJECT_ID }, { $max: { taskCounter: numbers[numbers.length - 1] } });
+    });
+    // Ascending, which is what the refusal must name however the rows happen to sit
+    return numbers.map((n) => `${PROJECT_KEY}-${n}`);
+  }
+
+  async function refusalFor(request: APIRequestContext, agentId: string): Promise<string> {
+    const response = await request.delete(`/api/agents/${agentId}`, { headers: ADMIN_AUTH });
+    expect(response.status()).toBe(409);
+    return ((await response.json()) as { error: string }).error;
+  }
+
+  async function newAgent(page: Page, name: string): Promise<string> {
+    await openCatalog(page);
+    await page.getByRole("button", { name: "New agent" }).click();
+    await page.getByLabel("Name").fill(name);
+    await page.getByRole("button", { name: "Create" }).click();
+    return agentIdByName(name);
+  }
+
+  test("every task, when there are few enough to name", async ({ page, request }) => {
+    await signIn(page);
+    const id = await newAgent(page, "Named by three");
+    const keys = await tasksNaming(id, 3);
+
+    expect(await refusalFor(request, id)).toBe(
+      `Still in use by tasks ${keys.join(", ")}. Point those elsewhere first.`
+    );
+  });
+
+  // Exactly at the cap: naming all ten and saying "and 0 more" would be a sentence nobody writes
+  test("all ten at the cap, with nothing trailing", async ({ page, request }) => {
+    await signIn(page);
+    const id = await newAgent(page, "Named by ten");
+    const keys = await tasksNaming(id, 10);
+
+    const error = await refusalFor(request, id);
+    expect(error).toBe(`Still in use by tasks ${keys.join(", ")}. Point those elsewhere first.`);
+    expect(error).not.toContain("more");
+  });
+
+  test("ten and a count, one past the cap", async ({ page, request }) => {
+    await signIn(page);
+    const id = await newAgent(page, "Named by eleven");
+    const keys = await tasksNaming(id, 11);
+
+    expect(await refusalFor(request, id)).toBe(
+      `Still in use by tasks ${keys.slice(0, 10).join(", ")} and 1 more. Point those elsewhere first.`
+    );
+  });
+
+  // The count is the whole point of the cap: twelve tasks used to be twelve unfindable tasks
+  test("the count past the cap is the number left, not the total", async ({ page, request }) => {
+    await signIn(page);
+    const id = await newAgent(page, "Named by eighteen");
+    const keys = await tasksNaming(id, 18);
+
+    expect(await refusalFor(request, id)).toBe(
+      `Still in use by tasks ${keys.slice(0, 10).join(", ")} and 8 more. Point those elsewhere first.`
+    );
+  });
+
+  // A user-scoped agent reaches this refusal with no project check at all, so the keys it names
+  // must not describe a board the caller cannot open. Found reviewing this change, not in the
+  // ticket: counting leaked nothing, naming does.
+  test("counts, rather than names, a task on a board the caller cannot open", async ({ request }) => {
+    const id = await withDb(async (db) => {
+      const result = await db.collection("agents").insertOne({
+        name: "A member's own",
+        description: "",
+        scope: "user",
+        owner: MEMBER_ID,
+        project: null,
+        builtIn: false,
+        composition: { analysis: [], implementation: [], verification: [], delivery: [] },
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      return String(result.insertedId);
+    });
+    // Their agent is on two tasks of this board — two, so the plural of the count-only sentence is
+    // exercised by something — and their grant on it is then taken away, which is exactly how an
+    // agent outlives somebody's access to the board it is working on.
+    await withDb(async (db) => {
+      await db
+        .collection("tasks")
+        .updateMany(
+          { project: PROJECT_ID, taskNumber: { $in: [SIBLING_TASK_NUMBER, FINISHED_TASK_NUMBER] } },
+          { $set: { agent: new mongoose.Types.ObjectId(id) } }
+        );
+      const removed = await db.collection("grants").deleteMany({ subject: MEMBER_ID, object: PROJECT_ID });
+      expect(removed.deletedCount, "the fixture removed no grant, so nothing was revoked").toBeGreaterThan(0);
+    });
+
+    const response = await request.delete(`/api/agents/${id}`, { headers: MEMBER_AUTH });
+    expect(response.status()).toBe(409);
+    const { error } = (await response.json()) as { error: string };
+
+    expect(error, "the refusal named a task on a board this caller cannot see").not.toContain(
+      SIBLING_TASK_KEY
+    );
+    expect(error).toBe("Still in use by 2 tasks on boards you cannot open. Point those elsewhere first.");
+  });
+
+  // The control the leak test cannot supply on its own: with the grant left in place the same
+  // member sees the key. Without this, narrowing the check to `user.role === "admin"` would leave
+  // the whole group green, because the admin is the only caller that ever reaches the true branch.
+  test("names it for a member who does hold the board", async ({ request }) => {
+    const id = await withDb(async (db) => {
+      const result = await db.collection("agents").insertOne({
+        name: "A member's own, still granted",
+        description: "",
+        scope: "user",
+        owner: MEMBER_ID,
+        project: null,
+        builtIn: false,
+        composition: { analysis: [], implementation: [], verification: [], delivery: [] },
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      return String(result.insertedId);
+    });
+    await withDb(async (db) => {
+      await db
+        .collection("tasks")
+        .updateOne({ _id: SIBLING_TASK_ID }, { $set: { agent: new mongoose.Types.ObjectId(id) } });
+      const grant = await db.collection("grants").countDocuments({ subject: MEMBER_ID, object: PROJECT_ID });
+      expect(grant, "the member has no grant, so this proves nothing").toBeGreaterThan(0);
+    });
+
+    const response = await request.delete(`/api/agents/${id}`, { headers: MEMBER_AUTH });
+    expect(response.status()).toBe(409);
+    const { error } = (await response.json()) as { error: string };
+
+    expect(error).toBe(`Still in use by task ${SIBLING_TASK_KEY}. Point those elsewhere first.`);
+  });
+
+  // The board half of the same sentence. A board's name discloses at least as much as a task key,
+  // and it was the half this change left ungated — caught by review, and unreachable through the
+  // product only because the project-agent route refuses a user-scoped agent as a default.
+  test("does not name a board the caller cannot open either", async ({ request }) => {
+    const id = await withDb(async (db) => {
+      const result = await db.collection("agents").insertOne({
+        name: "A member's own, made a default",
+        description: "",
+        scope: "user",
+        owner: MEMBER_ID,
+        project: null,
+        builtIn: false,
+        composition: { analysis: [], implementation: [], verification: [], delivery: [] },
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      return String(result.insertedId);
+    });
+    await withDb(async (db) => {
+      await db
+        .collection("projects")
+        .updateOne({ _id: PROJECT_ID }, { $set: { "worker.agent": new mongoose.Types.ObjectId(id) } });
+      const removed = await db.collection("grants").deleteMany({ subject: MEMBER_ID, object: PROJECT_ID });
+      expect(removed.deletedCount, "the fixture removed no grant, so nothing was revoked").toBeGreaterThan(0);
+    });
+
+    const response = await request.delete(`/api/agents/${id}`, { headers: MEMBER_AUTH });
+    expect(response.status()).toBe(409);
+    const { error } = (await response.json()) as { error: string };
+
+    expect(error, "the refusal named a board this caller cannot see").not.toContain(PROJECT_NAME);
+    // Still refused — the reference is real, it just cannot be described to this caller
+    expect(error).toContain("Still in use by");
+  });
+
+  test("a board with no name is still nameable", async ({ page, request }) => {
+    await signIn(page);
+    const id = await newAgent(page, "The nameless board's default");
+    await withDb(async (db) => {
+      await db.collection("projects").updateOne(
+        { _id: PROJECT_ID },
+        { $set: { name: "  ", "worker.agent": new mongoose.Types.ObjectId(id) } }
+      );
+    });
+
+    expect(await refusalFor(request, id)).toBe(
+      "Still in use by a project with no name. Point those elsewhere first."
+    );
+  });
+});
+
+test.describe("an agent stored in the shape that predates entries", () => {
+  /**
+   * Entries used to be bare key strings. Those rows are still in the database — nothing migrates
+   * them — and everything reads them fine except a hydrated document, which is what `PUT` uses.
+   *
+   * Driven over the API rather than the composer because there is no rename control in the UI:
+   * `store.ts` carries a `renameAgent`, and nothing calls it. So this is the one shape of change
+   * only an API or MCP client can make, and it answered 500 (BP-481).
+   */
+  async function legacyAgent(name: string, keys: string[]): Promise<string> {
+    return withDb(async (db) => {
+      const result = await db.collection("agents").insertOne({
+        name,
+        description: "",
+        scope: "global",
+        owner: null,
+        project: null,
+        builtIn: false,
+        // Bare strings, written through the driver so nothing casts them on the way in
+        composition: { analysis: keys, implementation: [], verification: [], delivery: [] },
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      return String(result.insertedId);
+    });
+  }
+
+  test("can be renamed, and keeps what it was composed of", async ({ request }) => {
+    const id = await legacyAgent("Written long ago", ["implement", "push"]);
+
+    const response = await request.put(`/api/agents/${id}`, {
+      headers: ADMIN_AUTH,
+      data: { name: "Written long ago, renamed" },
+    });
+    expect(response.status(), await response.text()).toBe(200);
+
+    const stored = await withDb(async (db) =>
+      db.collection("agents").findOne({ _id: new mongoose.Types.ObjectId(id) })
+    );
+    expect(stored?.name).toBe("Written long ago, renamed");
+    // The hydrate used to empty the bucket on the way through, so a save could have written the
+    // emptiness back over what the agent was actually composed of
+    expect(stored?.composition?.analysis, "the composition was lost in the round trip").toHaveLength(
+      2
+    );
+  });
+
+  test("survives a save that changes nothing", async ({ request }) => {
+    const id = await legacyAgent("Untouched by anyone", ["implement"]);
+
+    const response = await request.put(`/api/agents/${id}`, { headers: ADMIN_AUTH, data: {} });
+    expect(response.status(), await response.text()).toBe(200);
+  });
+
+  // The control: the same two requests against the shape everything writes today
+  test("and so does one stored the way they are written now", async ({ request, page }) => {
+    await signIn(page);
+    await openCatalog(page);
+    await page.getByRole("button", { name: "New agent" }).click();
+    await page.getByLabel("Name").fill("Written today");
+    await page.getByRole("button", { name: "Create" }).click();
+    const id = await agentIdByName("Written today");
+
+    expect(
+      (await request.put(`/api/agents/${id}`, { headers: ADMIN_AUTH, data: { name: "Renamed today" } }))
+        .status()
+    ).toBe(200);
+    expect((await request.put(`/api/agents/${id}`, { headers: ADMIN_AUTH, data: {} })).status()).toBe(
+      200
+    );
+  });
+
+  // What the emptied bucket would have cost, on the one board where it is expensive: an agent a
+  // task names, renamed by somebody who never opened the composer.
+  test("keeps working for the task that names it", async ({ request }) => {
+    const id = await legacyAgent("Named by a task", ["implement"]);
+    await withDb(async (db) => {
+      await db
+        .collection("tasks")
+        .updateOne({ _id: SIBLING_TASK_ID }, { $set: { agent: new mongoose.Types.ObjectId(id) } });
+    });
+
+    const response = await request.put(`/api/agents/${id}`, {
+      headers: ADMIN_AUTH,
+      data: { name: "Renamed while a task pointed at it" },
+    });
+    expect(response.status(), await response.text()).toBe(200);
+
+    // Read back the way a claim reads it — the list route is `.lean()` plus normaliseComposition,
+    // which is what a machine resolves the task's agent through
+    const listed = await request.get("/api/agents", { headers: ADMIN_AUTH });
+    const agents = (await listed.json()) as { _id: string; name: string; composition: Record<string, { key: string }[]> }[];
+    const mine = agents.find((a) => a._id === id);
+    expect(mine?.name).toBe("Renamed while a task pointed at it");
+    expect(
+      mine?.composition?.analysis?.map((e) => e.key),
+      "the task is left pointing at an agent with nothing in it"
+    ).toEqual(["implement"]);
+  });
+});
+
+test.describe("emptying one that is still in use", () => {
+  /**
+   * The composition is written rather than dragged in. What is under test is the save, and at the
+   * 1280x720 the suite actually runs at (BP-449) the Gates half of the palette sits below the fold,
+   * so a drag there fails for a reason that has nothing to do with this ticket. Composing by drag
+   * is covered by its own tests above.
+   *
+   * Gates rather than steps: only `implement` carries capability "edit", and the push rule fires
+   * for an agent that writes — so a gate-only composition is runnable and therefore saveable.
+   */
+  async function agentHolding(page: Page, name: string, keys: string[]) {
+    await openCatalog(page);
+    await page.getByRole("button", { name: "New agent" }).click();
+    await page.getByLabel("Name").fill(name);
+    await page.getByRole("button", { name: "Create" }).click();
+
+    const id = await agentIdByName(name);
+    expect(
+      await withDb(async (db) => {
+        const result = await db
+          .collection("agents")
+          .updateOne(
+            { _id: new mongoose.Types.ObjectId(id) },
+            { $set: { "composition.verification": keys.map((key) => ({ key })) } }
+          );
+        return result.modifiedCount;
+      }),
+      "the fixture did not compose the agent"
+    ).toBe(1);
+
+    await page.goto(`/agents/${id}`);
+    await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
+    return id;
+  }
+
+  /**
+   * The status is the assertion. "Saved" relabels itself back after two seconds and a refusal
+   * renders somewhere else entirely, so reading the page cannot tell 409 from 200 reliably.
+   */
+  async function saving(page: Page, id: string, expected: number) {
+    const [response] = await Promise.all([
+      page.waitForResponse(
+        (r) => r.request().method() === "PUT" && r.url().includes(`/api/agents/${id}`)
+      ),
+      page.getByRole("button", { name: "Save" }).click(),
+    ]);
+    expect(response.status(), `the save answered ${response.status()}`).toBe(expected);
+  }
+
+  test("is refused with the sentence deleting it uses", async ({ page }) => {
+    await signIn(page);
+    const id = await agentHolding(page, "Spoken for", ["diff-size"]);
+
+    // A task now points at it. Emptying it is the strictly equivalent act to deleting it, which the
+    // describe above proves is refused — the two answers used to disagree (BP-457).
+    await withDb(async (db) => {
+      await db
+        .collection("tasks")
+        .updateOne({ _id: SIBLING_TASK_ID }, { $set: { agent: new mongoose.Types.ObjectId(id) } });
+    });
+
+    await page.reload();
+    await page.getByRole("button", { name: "Remove Size" }).click();
+    await saving(page, id, 409);
+
+    await expect(
+      page.getByText(`Not saved. Still in use by task ${SIBLING_TASK_KEY}. Point those elsewhere first.`)
+    ).toBeVisible();
+    // What the guard is for: the task is still carrying something a claim can resolve
+    expect((await storedAgent("Spoken for"))?.composition).toMatchObject({
+      verification: [{ key: "diff-size" }],
+    });
+  });
+
+  test("goes through when nothing points at it, because that is a draft again", async ({ page }) => {
+    // The control. Without it a guard that refused every emptying would read exactly like this one.
+    await signIn(page);
+    const id = await agentHolding(page, "Nobody's", ["diff-size"]);
+
+    await page.getByRole("button", { name: "Remove Size" }).click();
+    await saving(page, id, 200);
+
+    await expect(page.getByRole("button", { name: "Saved" })).toBeVisible();
+    expect((await storedAgent("Nobody's"))?.composition).toMatchObject({ verification: [] });
+  });
+
+  test("is refused for a project's default too, not only for a task", async ({ page }) => {
+    // The reference lookup has two arms and the refusal above exercises only the task one. This
+    // sets the project arm alone, so it fails if that arm is dropped and the other is not.
+    await signIn(page);
+    const id = await agentHolding(page, "The board's default", ["diff-size"]);
+    await withDb(async (db) => {
+      await db
+        .collection("projects")
+        .updateOne(
+          { _id: PROJECT_ID },
+          { $set: { "worker.agent": new mongoose.Types.ObjectId(id) } }
+        );
+    });
+
+    await page.reload();
+    await page.getByRole("button", { name: "Remove Size" }).click();
+    await saving(page, id, 409);
+
+    await expect(page.getByText(new RegExp(`Still in use by ${PROJECT_NAME}`))).toBeVisible();
+    expect((await storedAgent("The board's default"))?.composition).toMatchObject({
+      verification: [{ key: "diff-size" }],
+    });
+  });
+
+  test("a composition naming a block that does not exist is refused too", async ({ page, request }) => {
+    // `isRunnable` only counts entries, but `snapshotFor` also answers null when a key resolves to
+    // no block (src/lib/agent-snapshot.ts:93) — so a non-empty composition of nonsense strands the
+    // task exactly the way an empty one does. Driven over the API deliberately: the editor can only
+    // offer blocks that exist, and refusalFor's own comment is that the editor is not the only way
+    // in. Found by review of this branch, not by the ticket.
+    await signIn(page);
+    const id = await agentHolding(page, "Names a ghost", ["diff-size"]);
+    await withDb(async (db) => {
+      await db
+        .collection("tasks")
+        .updateOne({ _id: SIBLING_TASK_ID }, { $set: { agent: new mongoose.Types.ObjectId(id) } });
+    });
+
+    const response = await request.put(`/api/agents/${id}`, {
+      headers: ADMIN_AUTH,
+      data: { composition: { implementation: [{ key: "no-such-block" }] } },
+    });
+    expect(response.status(), await response.text()).toBe(400);
+
+    // Unchanged, so the task still resolves a snapshot
+    expect((await storedAgent("Names a ghost"))?.composition).toMatchObject({
+      verification: [{ key: "diff-size" }],
+    });
+  });
+
+  test("an in-use agent can still be edited, as long as it stays runnable", async ({ page }) => {
+    // The guard is about references AND emptiness together. One that refused every edit to an
+    // in-use agent would satisfy both refusals above and be a worse product.
+    await signIn(page);
+    const id = await agentHolding(page, "Busy but editable", ["diff-size", "protected-paths"]);
+    await withDb(async (db) => {
+      await db
+        .collection("tasks")
+        .updateOne({ _id: SIBLING_TASK_ID }, { $set: { agent: new mongoose.Types.ObjectId(id) } });
+    });
+
+    await page.reload();
+    await page.getByRole("button", { name: "Remove Size" }).click();
+    await saving(page, id, 200);
+
+    expect((await storedAgent("Busy but editable"))?.composition).toMatchObject({
+      verification: [{ key: "protected-paths" }],
+    });
   });
 });
 
@@ -715,17 +1193,36 @@ test.describe("what else points at what", () => {
     expect(await storedAgent("The board's default")).not.toBeNull();
   });
 
-  test("a block an agent is built from cannot be deleted out from under it", async ({ page }) => {
-    // EXPECTED TO FAIL — BP-460. `DELETE /api/agent-blocks/:id` answers 500 for *every* block:
-    // the in-use query's legacy arm compares a string against a path typed as an array of
-    // subdocuments, so Mongoose throws while building the query and `block.deleteOne()` is never
-    // reached. The 409 this test is about has therefore never fired in production.
-    //
-    // `test.fail()` rather than a skip: the real path still runs, nothing here pretends the bug is
-    // correct behaviour, and the day BP-460 lands this test fails for passing and gets its marker
-    // removed. A skip would go quiet instead.
-    test.fail();
+  test("a block nothing is built from is deleted, and is gone", async ({ page }) => {
+    // The control for the refusal below, and the case BP-460 actually broke: every delete answered
+    // 500, whether anything used the block or not.
+    await signIn(page);
+    await openCatalog(page);
+    await page.getByRole("tab", { name: "Gates" }).click();
+    await page.getByRole("button", { name: "New gate" }).click();
+    await page.getByLabel("Name").fill("Nobody uses me");
+    await page.getByRole("button", { name: "Create" }).click();
+    await expect(page.getByRole("button", { name: "Nobody uses me", exact: true })).toBeVisible();
 
+    // The status is what separates this from the bug: a 500 also removes nothing, so asserting
+    // only that the row is gone would read the same against a server that had thrown.
+    const [response] = await Promise.all([
+      page.waitForResponse(
+        (r) => r.request().method() === "DELETE" && /\/api\/agent-blocks\//.test(r.url())
+      ),
+      page.getByRole("button", { name: "Delete Nobody uses me" }).click(),
+    ]);
+    expect(response.status(), "the delete answered something other than 200").toBe(200);
+
+    await expect(page.getByRole("button", { name: "Nobody uses me", exact: true })).toHaveCount(0);
+    await expect
+      .poll(async () =>
+        withDb(async (db) => db.collection("agentblocks").countDocuments({ name: "Nobody uses me" }))
+      )
+      .toBe(0);
+  });
+
+  test("a block an agent is built from cannot be deleted out from under it", async ({ page }) => {
     // It has to be a block somebody authored: the ones that ship carry `builtIn` and the list
     // offers them no delete control at all, so the server's 409 is unreachable through them.
     await signIn(page);
@@ -774,6 +1271,59 @@ test.describe("what else points at what", () => {
     await expect
       .poll(async () =>
         withDb(async (db) => db.collection("agentblocks").countDocuments({ name: "House style" }))
+      )
+      .toBe(1);
+  });
+
+  test("the refusal finds a block named in the pre-object shape too", async ({ page }) => {
+    // The arm above it is dotted and matches `{ key }` entries; this one is the other arm. Nothing
+    // migrates the pre-object shape — normaliseComposition coerces it on read and only the
+    // composition editor writes it back — so agents holding bare keys are live, and without this
+    // the legacy arm could be deleted with every other test in the file still green.
+    await signIn(page);
+    await openCatalog(page);
+    await page.getByRole("tab", { name: "Gates" }).click();
+    await page.getByRole("button", { name: "New gate" }).click();
+    await page.getByLabel("Name").fill("Old school");
+    await page.getByRole("button", { name: "Create" }).click();
+    await expect(page.getByRole("button", { name: "Old school", exact: true })).toBeVisible();
+
+    let key = "";
+    await expect
+      .poll(async () => {
+        key = await withDb(async (db) => {
+          const block = await db.collection("agentblocks").findOne({ name: "Old school" });
+          return block ? String(block.key) : "";
+        });
+        return key;
+      })
+      .not.toBe("");
+
+    // Bare strings, written through the driver so nothing casts them into the modern shape on the
+    // way in — which is exactly how these documents came to exist.
+    expect(
+      await withDb(async (db) => {
+        const result = await db
+          .collection("agents")
+          .updateOne(
+            { name: DEFAULT_AGENT },
+            { $set: { "composition.verification": ["protected-paths", key] } }
+          );
+        return result.modifiedCount;
+      }),
+      "the fixture did not put the gate inside an agent"
+    ).toBe(1);
+
+    await page.reload();
+    await page.getByRole("tab", { name: "Gates" }).click();
+    await page.getByRole("button", { name: "Delete Old school" }).click();
+
+    await expect(
+      page.getByText(`Still used by ${DEFAULT_AGENT}. Take it out of those agents first.`)
+    ).toBeVisible();
+    await expect
+      .poll(async () =>
+        withDb(async (db) => db.collection("agentblocks").countDocuments({ name: "Old school" }))
       )
       .toBe(1);
   });

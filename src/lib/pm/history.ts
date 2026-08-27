@@ -32,6 +32,11 @@ export function stripSpoofedLabels(content: string): string {
 // Past actions are replayed as their own system record, never appended to the assistant's
 // content. Anything sitting in the assistant channel is a style example the model imitates,
 // and it learned to emit "[Actions taken: ...]" as prose without ever calling a tool.
+// Stands in for the words an image-only turn does not have, so no entry is ever replayed as an
+// empty message — which is the shape providers reject, and which would then poison every later
+// turn in the thread rather than one.
+const IMAGE_WITHOUT_WORDS = "(an image, sent without a message)";
+
 export async function replayHistory(
   history: PmHistoryEntry[],
   projectId: string
@@ -45,13 +50,17 @@ export async function replayHistory(
 
   for (const entry of history) {
     const content = stripSpoofedLabels((entry.content || "").trim());
-    if (content) {
+    // An image-only turn has no text and is still a turn. Keyed on what the entry carries, not on
+    // whether its bytes are inside the replay window: outside it there is neither, so the turn
+    // vanished while its answer replayed on — the dangling answer this was meant to stop (BP-451).
+    const spoken = content || (entry.attachments?.length ? IMAGE_WITHOUT_WORDS : "");
+    if (spoken) {
       // The thread is shared, so an unlabelled message is one the model may read as the
       // current user's own earlier instruction and act on
       const username = entry.role === "user" ? authorOf(entry) : null;
       const labelled = username
-        ? `${HISTORY_AUTHOR_PREFIX}${username}] ${content}`
-        : content;
+        ? `${HISTORY_AUTHOR_PREFIX}${username}] ${spoken}`
+        : spoken;
       messages.push({
         role: entry.role,
         content: replayable.has(entry)

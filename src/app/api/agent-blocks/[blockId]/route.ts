@@ -79,10 +79,10 @@ export const DELETE = withAuth(async (_request, { params, user }) => {
   const users = await Agent.find(
     {
       $or: AGENT_BUCKETS.flatMap((bucket) => [
-        // Entries are objects now; a composition written before that holds the bare key, and both
-        // shapes are still readable, so both have to be searchable.
+        // Both shapes are stored. $elemMatch, not a bare string: the path is a subdocument array,
+        // and a bare string there is a CastError that took the whole request down (BP-460).
         { [`composition.${bucket}.key`]: block.key },
-        { [`composition.${bucket}`]: block.key },
+        { [`composition.${bucket}`]: { $elemMatch: { $eq: block.key } } },
       ]),
     },
     "name"

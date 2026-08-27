@@ -9,6 +9,7 @@ import {
   PROJECT_NAME,
   SIBLING_TASK_ID,
   SIBLING_TASK_NUMBER,
+  SIBLING_TASK_TITLE,
   seed,
 } from "./seed";
 import { signIn } from "./session";
@@ -576,5 +577,140 @@ test.describe("what happens when the task is closed", () => {
       headers: ADMIN_AUTH,
     });
     expect((await still.json()).status).toBe("done");
+  });
+});
+
+/**
+ * BP-462. The product's other "make me another one of these" path, and it disagreed with the one
+ * above on three fields: the copy did not repeat, its priority reset to medium, and the checklist
+ * came over with its ticks — a task claiming half its work was already done.
+ *
+ * Both writers are driven, because they disagreed with each other too: the task screen omitted the
+ * priority the board's context menu sent.
+ */
+test.describe("duplicating one of these", () => {
+  const SPRINT_ID = new mongoose.Types.ObjectId("e2e00000000000000000c701");
+  const COPY_TITLE = `Copy of ${SIBLING_TASK_TITLE}`;
+
+  /** The catalog the product ships, so the task can be paired with an agent that exists. */
+  async function catalogAgentId(): Promise<mongoose.Types.ObjectId> {
+    await mongoose.connect(E2E_MONGODB_URI);
+    const { seedAgents } = await import("@/lib/agent-seed");
+    await seedAgents();
+    await mongoose.disconnect();
+
+    const agent = await withDb(async (db) => db.collection("agents").findOne({}));
+    if (!agent) throw new Error("the shipped catalog seeded no agent to pair the task with");
+    return agent._id as mongoose.Types.ObjectId;
+  }
+
+  /**
+   * The seeded task made worth copying: a rhythm, a priority that is not the default, half its
+   * criteria ticked, and all three hand-over fields set.
+   *
+   * Every value here has to differ from what a copy would have anyway. `medium` is
+   * DEFAULT_PRIORITY, and a task with no sprint or no agent would satisfy the drops below without
+   * anything having been dropped.
+   */
+  async function makeWorthCopying() {
+    const agentId = await catalogAgentId();
+    await giveDueDate(BASE_DUE());
+    await withDb(async (db) => {
+      // Planned rather than active: an active sprint becomes the board's scope, and the board test
+      // below reaches this card through the unscoped board
+      await db.collection("sprints").insertOne({
+        _id: SPRINT_ID,
+        project: PROJECT_ID,
+        name: "Sprint Duplicate",
+        startDate: BASE_DUE(),
+        endDate: new Date(BASE_DUE().getTime() + 14 * DAY_MS),
+        goal: "",
+        status: "planned",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      await db.collection("tasks").updateOne(
+        { _id: SIBLING_TASK_ID },
+        {
+          $set: {
+            recurrence: { frequency: "weekly", interval: 2 },
+            priority: "urgent",
+            sprint: SPRINT_ID,
+            agent: agentId,
+          },
+        }
+      );
+    });
+  }
+
+  /** The task the POST created, read back from the database rather than from the response. */
+  async function copyCreatedBy(page: Page, act: () => Promise<void>) {
+    const posted = page.waitForResponse(
+      (r) =>
+        r.request().method() === "POST" &&
+        new URL(r.url()).pathname === `/api/projects/${PROJECT_KEY}/tasks`
+    );
+    await act();
+    const response = await posted;
+    expect(response.status(), await response.text()).toBe(201);
+    const created = await storedTask((await response.json()).taskNumber);
+    if (!created) throw new Error("the duplicate was answered 201 and is not in the database");
+    return created;
+  }
+
+  function expectTheWorkAndNotTheHandover(copy: Record<string, unknown>) {
+    expect(copy.title).toBe(COPY_TITLE);
+    // The two omissions, and the reason for the ticket
+    expect(copy.recurrence).toMatchObject({ frequency: "weekly", interval: 2 });
+    expect(copy.priority).toBe("urgent");
+    // Work to do, the way the next occurrence arrives
+    expect(copy.checklist).toMatchObject([
+      { text: "first", done: false },
+      { text: "second", done: false },
+    ]);
+    // Dropped on purpose — see src/lib/task-duplicate.ts. The server is what enforces `agent`:
+    // POST /tasks does not accept one at all, because choosing one is its own hand-over gesture.
+    expect(copy.assignee ?? null).toBeNull();
+    expect(copy.sprint ?? null).toBeNull();
+    expect(copy.agent ?? null).toBeNull();
+    // The board's own backlog column, never a literal "planned" the payload dictated (CP-128)
+    expect(copy.status).toBe("planned");
+  }
+
+  test("the task screen copies the work, not the ticks and not the hand-over", async ({ page }) => {
+    await makeWorthCopying();
+    await signIn(page);
+    await page.goto(`/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`);
+    await expect(page.getByRole("textbox", { name: "Title" })).toBeVisible();
+
+    const copy = await copyCreatedBy(page, () =>
+      page.getByRole("button", { name: "Duplicate", exact: true }).click()
+    );
+
+    expectTheWorkAndNotTheHandover(copy);
+    expect(new Date(copy.dueDate as Date).getTime()).toBe(BASE_DUE().getTime());
+
+    // The original is not a draft to be consumed: its ticks stay where the person left them
+    expect((await storedTask(SIBLING_TASK_NUMBER))?.checklist).toMatchObject([
+      { text: "first", done: true },
+      { text: "second", done: false },
+    ]);
+  });
+
+  test("and so does the board's context menu", async ({ page }) => {
+    await makeWorthCopying();
+    await signIn(page);
+    await page.goto(BOARD);
+    await expect(page.getByRole("heading", { name: PROJECT_NAME })).toBeVisible();
+
+    const card = page.locator(`a[href="/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}"]`);
+    await expect(card).toBeVisible();
+    await card.click({ button: "right" });
+
+    const copy = await copyCreatedBy(page, () =>
+      page.getByTestId("task-context-menu").getByRole("button", { name: "Duplicate" }).click()
+    );
+
+    expectTheWorkAndNotTheHandover(copy);
   });
 });

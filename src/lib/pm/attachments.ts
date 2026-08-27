@@ -66,7 +66,52 @@ export async function loadAttachmentDataUri(
   const mime = (found[0].metadata?.contentType as string) || a.mimeType;
   if (!IMAGE_MIME_TYPES.has(mime)) return null;
 
-  return `data:${mime};base64,${Buffer.concat(chunks).toString("base64")}`;
+  // A file whose chunks are gone streams nothing and throws nothing, so without this the turn
+  // carries `data:image/png;base64,` — an image of no bytes — instead of refusing.
+  const bytes = Buffer.concat(chunks);
+  if (bytes.length === 0) return null;
+
+  return `data:${mime};base64,${bytes.toString("base64")}`;
+}
+
+/**
+ * Whether any of these attachments is a readable image on this project — without draining bytes.
+ *
+ * Only the image-only case needs it. A turn with no text whose every attachment fails to load
+ * would reach the provider with an empty user content, spending a turn against the cap on nothing
+ * (BP-451 review): the shape checks in the route pass for a well-formed `fileId` that names no
+ * file, or one belonging to another board.
+ */
+export async function anyAttachmentReadable(
+  attachments: PmAttachment[],
+  projectId: string
+): Promise<boolean> {
+  await connectDB();
+  const db = mongoose.connection.db;
+  if (!db) return false;
+
+  // Keyed by the canonical id, not by what the client typed: ObjectId accepts hex in any case and
+  // stringifies it lowercase, so a raw-string key misses for every non-canonical spelling.
+  const claimed = new Map<string, string>();
+  for (const a of attachments) {
+    try {
+      claimed.set(new mongoose.Types.ObjectId(a.fileId).toString(), a.mimeType);
+    } catch {
+      // a fileId that is not an id names no file
+    }
+  }
+  const ids = [...claimed.keys()].map((id) => new mongoose.Types.ObjectId(id));
+  if (ids.length === 0) return false;
+
+  const bucket = new mongoose.mongo.GridFSBucket(db, { bucketName: UPLOAD_BUCKET });
+  const found = await bucket.find({ _id: { $in: ids } }).toArray();
+  return found.some(
+    (file) =>
+      projectForUpload(file) === String(projectId) &&
+      IMAGE_MIME_TYPES.has(
+        (file.metadata?.contentType as string) || claimed.get(String(file._id)) || ""
+      )
+  );
 }
 
 // A message the model receives: plain string when there is nothing attached, so text-only
@@ -78,12 +123,13 @@ export async function buildUserContent(
 ): Promise<string | Record<string, unknown>[]> {
   if (!attachments?.length) return text;
 
-  const blocks: Record<string, unknown>[] = [{ type: "text", text }];
+  // An image on its own carries no text, and an empty text block is something providers reject
+  const blocks: Record<string, unknown>[] = text.trim() ? [{ type: "text", text }] : [];
   for (const a of attachments) {
     const url = await loadAttachmentDataUri(a, projectId);
     if (url) blocks.push({ type: "image_url", image_url: { url } });
   }
-  return blocks.length > 1 ? blocks : text;
+  return blocks.some((b) => b.type === "image_url") ? blocks : text;
 }
 
 interface ModelCapability {
