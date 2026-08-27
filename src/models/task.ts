@@ -105,7 +105,14 @@ const taskSchema = new Schema<ITask>(
     recurrence: {
       type: {
         frequency: { type: String, enum: RECURRENCE_FREQUENCIES, required: true },
+        // No `max` here, deliberately. The bound is enforced by `normaliseRecurrence`, which is the
+        // only way a client reaches this field. Putting it on the schema as well breaks the tasks
+        // stored back when a pasted 400 was accepted end to end: `createNextRecurrence` copies the
+        // parent's recurrence verbatim into `Task.create`, full-document validation refuses it, and
+        // the whole call is fire-and-forget — so the series would end with nothing on screen and
+        // nothing in the log. That is the exact failure BP-463 exists to remove.
         interval: { type: Number, required: true, min: 1 },
+        endDate: { type: Date, default: null },
       },
       default: null,
     },
@@ -153,6 +160,9 @@ taskSchema.index({ sprint: 1 });
 taskSchema.index({ agent: 1 });
 // The fleet console polls the worker join every 5s; unindexed, each poll scans the collection
 taskSchema.index({ "execution.workerId": 1 });
+// Closing a recurring task asks whether it already has a successor; unindexed that is a scan of
+// every task in every project, and the usual answer — no — is the one that scans to the end
+taskSchema.index({ recurringParentId: 1 });
 
 export const Task: Model<ITask> =
   mongoose.models.Task || mongoose.model<ITask>("Task", taskSchema);

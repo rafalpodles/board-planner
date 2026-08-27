@@ -37,7 +37,7 @@ export interface TaskDraft {
   checklist: ChecklistDraftItem[];
   sprint: string | null;
   agent: string | null;
-  recurrence: { frequency: RecurrenceFrequency; interval: number } | null;
+  recurrence: { frequency: RecurrenceFrequency; interval: number; endDate: string | null } | null;
   customFieldValues: Record<string, unknown>;
 }
 
@@ -57,7 +57,11 @@ export function draftFromTask(task: ApiTask): TaskDraft {
     agent: refIdOf(task.agent),
     sprint: task.sprint || null,
     recurrence: task.recurrence
-      ? { frequency: task.recurrence.frequency, interval: task.recurrence.interval }
+      ? {
+          frequency: task.recurrence.frequency,
+          interval: task.recurrence.interval,
+          endDate: task.recurrence.endDate ? task.recurrence.endDate.substring(0, 10) : null,
+        }
       : null,
     customFieldValues: task.customFieldValues || {},
   };

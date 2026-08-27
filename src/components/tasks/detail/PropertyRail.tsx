@@ -30,6 +30,7 @@ import type { ApiAgent, ApiTask } from "@/types";
 import { handoverOf, refIdOf, type Handover } from "@/lib/handover";
 import { assigneeToShow } from "./assignee-display";
 import type { AnyColumn } from "@/lib/columns";
+import { MAX_RECURRENCE_INTERVAL, clampInterval } from "@/lib/recurrence";
 
 const RECURRENCE_UNITS: Record<RecurrenceFrequency, string> = {
   daily: "day",
@@ -40,9 +41,9 @@ const RECURRENCE_UNITS: Record<RecurrenceFrequency, string> = {
 function recurrenceLabel(recurrence: TaskDraft["recurrence"]): string | null {
   if (!recurrence) return null;
   const unit = RECURRENCE_UNITS[recurrence.frequency];
-  return recurrence.interval === 1
-    ? `Every ${unit}`
-    : `Every ${recurrence.interval} ${unit}s`;
+  const every =
+    recurrence.interval === 1 ? `Every ${unit}` : `Every ${recurrence.interval} ${unit}s`;
+  return recurrence.endDate ? `${every} until ${formatDate(recurrence.endDate)}` : every;
 }
 
 function formatDate(value: string): string {
@@ -384,6 +385,7 @@ export function PropertyRail({
                       set("recurrence", {
                         frequency,
                         interval: draft.recurrence?.interval || 1,
+                        endDate: draft.recurrence?.endDate ?? null,
                       })
                     }
                   >
@@ -392,23 +394,40 @@ export function PropertyRail({
                 ))}
               </OptionList>
               {draft.recurrence && (
-                <label className="flex items-center gap-2 px-2.5 py-2 text-sm text-text-muted">
-                  Every
-                  <input
-                    type="number"
-                    min={1}
-                    max={365}
-                    value={draft.recurrence.interval}
-                    onChange={(e) =>
-                      set("recurrence", {
-                        frequency: draft.recurrence!.frequency,
-                        interval: Math.max(1, parseInt(e.target.value) || 1),
-                      })
-                    }
-                    className="focus-ring w-16 rounded-lg border border-border bg-bg-input px-2 py-1 text-sm"
-                  />
-                  {RECURRENCE_UNITS[draft.recurrence.frequency]}s
-                </label>
+                <>
+                  <label className="flex items-center gap-2 px-2.5 py-2 text-sm text-text-muted">
+                    Every
+                    <input
+                      type="number"
+                      min={1}
+                      max={MAX_RECURRENCE_INTERVAL}
+                      value={draft.recurrence.interval}
+                      onChange={(e) =>
+                        set("recurrence", {
+                          ...draft.recurrence!,
+                          interval: clampInterval(e.target.value),
+                        })
+                      }
+                      className="focus-ring w-16 rounded-lg border border-border bg-bg-input px-2 py-1 text-sm"
+                    />
+                    {RECURRENCE_UNITS[draft.recurrence.frequency]}s
+                  </label>
+                  <label className="flex items-center gap-2 px-2.5 py-2 text-sm text-text-muted">
+                    Until
+                    <input
+                      type="date"
+                      aria-label="Repeats until"
+                      value={draft.recurrence.endDate ?? ""}
+                      onChange={(e) =>
+                        set("recurrence", {
+                          ...draft.recurrence!,
+                          endDate: e.target.value || null,
+                        })
+                      }
+                      className="focus-ring rounded-lg border border-border bg-bg-input px-2 py-1 text-sm"
+                    />
+                  </label>
+                </>
               )}
             </div>
           )}
