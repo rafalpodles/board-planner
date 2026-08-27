@@ -31,7 +31,10 @@ const DAY_MS = 86400000;
  * date near a clock change would make `+7 days` off by an hour in some zones and not others. Any
  * date moved here should stay clear of late March and late October.
  */
-const BASE_DUE = () => new Date(2026, 4, 12, 12, 0, 0);
+// UTC midnight, which is what a due date actually is: `<input type="date">` sends "2026-05-12"
+// and Mongoose casts a date-only ISO string to this. The local-noon `Date` this used to build was
+// a shape no user can produce, and it is why nothing here could see BP-485.
+const BASE_DUE = () => new Date("2026-05-12");
 
 async function withDb<T>(fn: (db: mongoose.mongo.Db) => Promise<T>): Promise<T> {
   const dbName = new URL(E2E_MONGODB_URI.replace(/^mongodb/, "http")).pathname.slice(1);
@@ -338,7 +341,7 @@ test.describe("what happens when the task is closed", () => {
     // same under `setMonth` and under the clamp that replaced it. It is here to pin the branch —
     // without it, deleting `case "monthly"` outright leaves only the 31st test below, and that one
     // is about the day of the month rather than about the month advancing at all.
-    const due = new Date(2026, 4, 15, 12, 0, 0);
+    const due = new Date("2026-05-15");
     await giveDueDate(due);
     await withDb(async (db) => {
       await db
@@ -353,7 +356,7 @@ test.describe("what happens when the task is closed", () => {
     const created = await newOccurrence(before);
     const next = new Date(created.dueDate as Date);
     // 15 May + 2 months, and the day of the month is kept
-    expect([next.getFullYear(), next.getMonth(), next.getDate()]).toEqual([2026, 6, 15]);
+    expect([next.getUTCFullYear(), next.getUTCMonth(), next.getUTCDate()]).toEqual([2026, 6, 15]);
   });
 
   test("a monthly task due on the 31st comes back on the last day of the next month", async ({
@@ -367,12 +370,12 @@ test.describe("what happens when the task is closed", () => {
     // unit tests cover: what this adds is that closing a task really does reach the clamp, and the
     // clamped date really is what comes back on the new card.
     //
-    // Its reach stops short of one thing, deliberately. `giveDueDate` writes a `Date` at local
-    // noon, whereas a person's `<input type="date">` sends "2026-01-31", which Mongoose casts to
-    // UTC midnight — and the arithmetic reads it back with local getters. On a server west of UTC
-    // that reads as the 30th and the occurrence lands in March after all. Pre-existing, and true
-    // of the code this replaces too; see BP-461's follow-up. Nothing here would notice it.
-    const due = new Date(2026, 0, 31, 12, 0, 0);
+    // Seeded as UTC midnight, the value a person's date input really produces, and asserted in UTC.
+    // That pairing is BP-485: the arithmetic used to read the stored value with local getters, so
+    // on a server west of UTC 31 January read as the 30th and this landed in March. The unit tests
+    // pin the timezone-independence itself by running the same input under seven zones; what this
+    // adds is that the shape reaching the database, and coming back on the new card, is that one.
+    const due = new Date("2026-01-31");
     await giveDueDate(due);
     await withDb(async (db) => {
       await db
@@ -386,7 +389,7 @@ test.describe("what happens when the task is closed", () => {
 
     const created = await newOccurrence(before);
     const next = new Date(created.dueDate as Date);
-    expect([next.getFullYear(), next.getMonth(), next.getDate()]).toEqual([2026, 1, 28]);
+    expect([next.getUTCFullYear(), next.getUTCMonth(), next.getUTCDate()]).toEqual([2026, 1, 28]);
   });
 
   test("a task with no rhythm leaves nothing behind", async ({ page, request }) => {
