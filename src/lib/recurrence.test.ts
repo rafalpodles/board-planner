@@ -104,6 +104,20 @@ describe("when the next occurrence falls", () => {
     expect(nextOccurrence({ ...weekly, endDate: "2026-06-08" }, at.dueDate).ended).toBe(true);
   });
 
+  // The operator itself. Once the comparison moved to the end of the day, `>` and `>=` disagree
+  // only on the day's very last millisecond — but they do disagree, and the end day is inclusive,
+  // so an occurrence due at 23:59:59.999 on it belongs to the series. Without this the mutation
+  // `>` -> `>=` passes the whole file.
+  it("keeps an occurrence due on the end day's final millisecond", () => {
+    const at = nextOccurrence(
+      { frequency: "daily", interval: 1, endDate: "2026-06-08" },
+      new Date("2026-06-07T23:59:59.999Z")
+    );
+
+    expect(at.ended).toBe(false);
+    expect(at.dueDate?.toISOString()).toBe("2026-06-08T23:59:59.999Z");
+  });
+
   // The end is a day, and every value it is compared against is an instant. Judged against its
   // midnight the field meant two different things: a due date carrying a time of day — which the
   // REST API accepts even though the date input cannot make one — lost its final occurrence.
