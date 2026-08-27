@@ -24,6 +24,10 @@ export function releaseTurnLock(projectId: string): void {
   inFlight.delete(projectId);
 }
 
+export function isTurnRunning(projectId: string): boolean {
+  return inFlight.has(projectId);
+}
+
 export type InterruptOutcome = "interrupted" | "not-running" | "forbidden";
 
 export function interruptTurn(

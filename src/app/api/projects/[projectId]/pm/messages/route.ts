@@ -4,6 +4,7 @@ import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
 import { PmMessage } from "@/models/pmMessage";
 import { pmThreadFilter } from "@/lib/pm/thread";
+import { finalizeAbandonedTurns } from "@/lib/pm/abandoned";
 
 export const GET = withProjectAccess(async (request, { params, user }) => {
   const { projectId } = await params;
@@ -25,6 +26,8 @@ export const GET = withProjectAccess(async (request, { params, user }) => {
     }
     threadUserId = requestedUserId;
   }
+
+  await finalizeAbandonedTurns(projectId, threadUserId);
 
   const filter: Record<string, unknown> = pmThreadFilter(projectId, threadUserId);
   if (before) {
