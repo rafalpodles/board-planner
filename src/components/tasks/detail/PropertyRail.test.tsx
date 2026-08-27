@@ -157,8 +157,43 @@ describe("PropertyRail", () => {
 
   // Recurrence is not a custom field; it belongs with the rest of the details
   it("puts Repeats in the details and reads it back in words", () => {
-    renderRail({ draft: { ...draft, recurrence: { frequency: "weekly", interval: 2 } } });
+    renderRail({
+      draft: { ...draft, recurrence: { frequency: "weekly", interval: 2, endDate: null } },
+    });
     expect(screen.getByText("Every 2 weeks")).toBeTruthy();
+  });
+
+  // BP-463: a series had no way to end, so it repeated until somebody remembered to turn it off
+  it("reads back the day a series stops", () => {
+    renderRail({
+      draft: { ...draft, recurrence: { frequency: "weekly", interval: 1, endDate: "2026-12-31" } },
+    });
+    expect(screen.getByText(/Every week until/)).toBeTruthy();
+  });
+
+  it("gives a repeating task an end, and clears it back to a series with no end", async () => {
+    const recurrence = { frequency: "weekly" as const, interval: 1, endDate: null };
+    const set = renderRail({ draft: { ...draft, recurrence } });
+    await openRow("Repeats");
+
+    const until = screen.getByLabelText("Repeats until");
+    fireEvent.change(until, { target: { value: "2026-12-31" } });
+    expect(set).toHaveBeenCalledWith("recurrence", { ...recurrence, endDate: "2026-12-31" });
+
+    fireEvent.change(until, { target: { value: "" } });
+    expect(set).toHaveBeenCalledWith("recurrence", { ...recurrence, endDate: null });
+  });
+
+  // `max` on the input stops neither typing nor pasting, and the server refuses anything above it
+  it("clamps a pasted interval to the maximum it advertises", async () => {
+    const recurrence = { frequency: "weekly" as const, interval: 1, endDate: null };
+    const set = renderRail({ draft: { ...draft, recurrence } });
+    await openRow("Repeats");
+
+    const every = screen.getByRole("spinbutton");
+    fireEvent.change(every, { target: { value: "400" } });
+
+    expect(set).toHaveBeenCalledWith("recurrence", { ...recurrence, interval: 365 });
   });
 
   it("says Never when a task does not repeat", () => {

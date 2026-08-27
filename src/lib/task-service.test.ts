@@ -80,11 +80,14 @@ const collectRecipientsMock = vi.fn((_task?: unknown): string[] => []);
 const resolveMentionsMock = vi.fn(async (_body?: string): Promise<string[]> => []);
 const workerFindById = vi.fn();
 const taskFindById = vi.fn();
+// Whether this occurrence has already minted its successor. Null is "not yet", which is what
+// every closing task that is not being asked about recurrence twice answers.
+const taskExists = vi.fn(async (_filter?: unknown): Promise<unknown> => null);
 
 vi.mock("./db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/worker", () => ({ Worker: { findById: workerFindById } }));
 vi.mock("@/models/task", () => ({
-  Task: { findOneAndUpdate, updateMany, updateOne, findOne, find, findByIdAndUpdate, findById: taskFindById, create: taskCreate },
+  Task: { findOneAndUpdate, updateMany, updateOne, findOne, find, findByIdAndUpdate, findById: taskFindById, create: taskCreate, exists: taskExists },
 }));
 vi.mock("@/models/project", () => ({ Project: { findById, findOneAndUpdate: projectFindOneAndUpdate } }));
 vi.mock("@/models/user", () => ({ User: { findOne: userFindOne, findById: userFindById } }));
@@ -1614,6 +1617,10 @@ describe("a status change announces the same things whichever path made it", () 
   const webhookPayloads = () =>
     (dispatchWebhooks as ReturnType<typeof vi.fn>).mock.calls.map((c) => [c[1], c[2]]);
 
+  // Minting the next occurrence is deliberately fire-and-forget, so an assertion about it has to
+  // let the chain settle rather than lean on how many awaits happen to be in front of it
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+
   // BP-396. `status_changed` had this assertion and `task_created` did not, so deleting the
   // dispatch from createTask left every test in the repository green — the e2e specs written for
   // webhooks included, because their subject is a delivery being *refused*. Silence reads the same
@@ -1665,6 +1672,7 @@ describe("a status change announces the same things whichever path made it", () 
   it("creates the next occurrence when the edit form closes a recurring task", async () => {
     setup({ recurrence: { frequency: "weekly", interval: 1 } });
     await updateTask("p1", "t1", { status: "shipped" }, "actor");
+    await flush();
 
     expect(taskCreate, "no next occurrence was created").toHaveBeenCalled();
   });
@@ -1675,6 +1683,7 @@ describe("a status change announces the same things whichever path made it", () 
   it("carries the original assigner into the next occurrence, not whoever closed this one", async () => {
     setup({ recurrence: { frequency: "weekly", interval: 1 }, assignee: "u9", assignedBy: "u9" });
     await updateTask("p1", "t1", { status: "shipped" }, "actor");
+    await flush();
 
     expect(taskCreate.mock.calls[0]?.[0].assignedBy).toBe("u9");
   });
@@ -1690,6 +1699,7 @@ describe("a status change announces the same things whichever path made it", () 
       agent: "a1",
     });
     await updateTask("p1", "t1", { status: "shipped" }, "actor");
+    await flush();
 
     expect(taskCreate.mock.calls[0]?.[0].agent).toBe("a1");
   });
@@ -1700,6 +1710,7 @@ describe("a status change announces the same things whichever path made it", () 
   it("leaves the next occurrence of a hand-written task with no agent", async () => {
     setup({ recurrence: { frequency: "weekly", interval: 1 }, assignee: "u9", assignedBy: "u9" });
     await updateTask("p1", "t1", { status: "shipped" }, "actor");
+    await flush();
 
     expect(taskCreate.mock.calls[0]?.[0].agent).toBeNull();
   });
@@ -1711,7 +1722,7 @@ describe("a status change announces the same things whichever path made it", () 
   it("creates none, and burns no task number, when the task does not recur", async () => {
     setup();
     await updateTask("p1", "t1", { status: "shipped" }, "actor");
-    await new Promise((r) => setTimeout(r, 0));
+    await flush();
 
     expect(taskCreate).not.toHaveBeenCalled();
     expect(projectFindOneAndUpdate, "the recurrence counter was incremented anyway").not.toHaveBeenCalled();
@@ -1723,6 +1734,295 @@ describe("a status change announces the same things whichever path made it", () 
     await updateTask("p1", "t1", { title: "renamed" }, "actor");
     expect(dispatchWebhooks).not.toHaveBeenCalled();
     expect(taskCreate).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * BP-463: what the next occurrence should be, and when there should not be one.
+ *
+ * The board is deliberately unlike the seeded one in two ways. Its backlog column is not
+ * `columns[0]` — on the seeded board `planned` is both, so an occurrence born in "whatever column
+ * comes first" is indistinguishable from one born in the backlog. And it has two done-role
+ * columns, which is what used to mint an occurrence per hop between them.
+ */
+describe("what the next occurrence of a recurring task is", () => {
+  const board = {
+    key: "TP",
+    columns: [
+      { id: "shipped", label: "Shipped", role: "done", order: 1 },
+      { id: "later", label: "Later", role: "backlog", order: 2 },
+      { id: "doing", label: "Doing", role: "active", order: 3 },
+      { id: "released", label: "Released", role: "done", order: 4 },
+    ],
+  };
+
+  // The mint is deliberately fire-and-forget, so the assertions have to let it run
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+
+  function setup(
+    over: Record<string, unknown> = {},
+    columns: Record<string, unknown>[] = board.columns
+  ) {
+    vi.clearAllMocks();
+    const before = {
+      _id: "t1",
+      taskNumber: 7,
+      status: "doing",
+      title: "weekly sweep",
+      recurrence: { frequency: "weekly", interval: 1 },
+      ...over,
+    };
+    const project = { ...board, columns };
+    findById.mockReturnValue({ lean: () => Promise.resolve(project) });
+    findOne.mockReturnValue({
+      lean: () => Promise.resolve(before),
+      populate: () => ({ lean: () => Promise.resolve(before) }),
+    });
+    // Answers with the column the move actually named, so the two done-role columns below are
+    // told apart rather than collapsing into whichever one the fixture hardcoded
+    findOneAndUpdate.mockImplementation((_filter: unknown, update: unknown) => ({
+      populate: () =>
+        Promise.resolve({ ...before, status: setStage(update).status ?? before.status }),
+    }));
+    updateMany.mockResolvedValue({ modifiedCount: 0 });
+    projectFindOneAndUpdate.mockResolvedValue({ _id: "p1", ...project, taskCounter: 8 });
+    taskCreate.mockResolvedValue({ _id: "t2", taskNumber: 8 });
+  }
+
+  const minted = () => taskCreate.mock.calls[0]?.[0];
+
+  it("is born in the backlog column even when that is not the first one", async () => {
+    setup();
+    await changeStatus("p1", "t1", "shipped", "actor");
+    await flush();
+
+    expect(minted()?.status).toBe("later");
+  });
+
+  // Born in a done column the series ends silently: creation does not run the status-change side
+  // effects, so nothing ever mints the occurrence after it
+  it("is born somewhere it can be worked on when the board has no backlog column", async () => {
+    setup({}, [
+      { id: "shipped", label: "Shipped", role: "done", order: 1 },
+      { id: "doing", label: "Doing", role: "active", order: 2 },
+    ]);
+    await changeStatus("p1", "t1", "shipped", "actor");
+    await flush();
+
+    expect(minted()?.status).toBe("doing");
+  });
+
+  // Midsummer and midday on purpose: a date near a DST boundary would make this assertion depend
+  // on the machine's timezone
+  it("counts from the occurrence's own due date", async () => {
+    setup({ dueDate: "2026-06-03T12:00:00.000Z" });
+    await changeStatus("p1", "t1", "shipped", "actor");
+    await flush();
+
+    expect(minted()?.dueDate?.toISOString()).toBe("2026-06-10T12:00:00.000Z");
+  });
+
+  // A task somebody deliberately left undated used to come back dated `now + interval`, and every
+  // occurrence after that re-anchored to its own close time — so a weekly series closed on a
+  // Tuesday and then a Friday landed eleven days later, and kept sliding
+  it("stays undated when the occurrence it follows was undated", async () => {
+    setup();
+    await changeStatus("p1", "t1", "shipped", "actor");
+    await flush();
+
+    expect(minted()?.dueDate).toBeNull();
+  });
+
+  it("mints nothing once the series' end is behind the occurrence that would come next", async () => {
+    setup({
+      dueDate: "2026-06-03T12:00:00.000Z",
+      recurrence: { frequency: "weekly", interval: 1, endDate: "2026-06-08T00:00:00.000Z" },
+    });
+    await changeStatus("p1", "t1", "shipped", "actor");
+    await flush();
+
+    expect(taskCreate).not.toHaveBeenCalled();
+    expect(projectFindOneAndUpdate, "a task number was burned on a series that is over").not.toHaveBeenCalled();
+  });
+
+  it("goes on minting while the series' end is still ahead", async () => {
+    setup({
+      dueDate: "2026-06-03T12:00:00.000Z",
+      recurrence: { frequency: "weekly", interval: 1, endDate: "2026-12-31T00:00:00.000Z" },
+    });
+    await changeStatus("p1", "t1", "shipped", "actor");
+    await flush();
+
+    expect(taskCreate).toHaveBeenCalled();
+  });
+
+  // An undated series has no due date to judge the end against, so it is judged against the day
+  // it reaches — otherwise an end date on an undated series would mean nothing at all
+  it("ends an undated series once its end date has passed", async () => {
+    setup({ recurrence: { frequency: "weekly", interval: 1, endDate: "2020-01-01T00:00:00.000Z" } });
+    await changeStatus("p1", "t1", "shipped", "actor");
+    await flush();
+
+    expect(taskCreate).not.toHaveBeenCalled();
+  });
+
+  it("mints nothing on a hop between two done columns", async () => {
+    setup({ status: "shipped" });
+    await changeStatus("p1", "t1", "released", "actor");
+    await flush();
+
+    expect(taskCreate).not.toHaveBeenCalled();
+    expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  // Dragged out of Done and back: the closing move is a genuine one each time, so only the
+  // successor already on record can stop the second mint
+  it("mints nothing for an occurrence that already has a successor", async () => {
+    setup();
+    taskExists.mockResolvedValueOnce({ _id: "t2" });
+    await changeStatus("p1", "t1", "shipped", "actor");
+    await flush();
+
+    expect(taskExists).toHaveBeenCalledWith({ recurringParentId: "t1" });
+    expect(taskCreate).not.toHaveBeenCalled();
+    expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("carries the series' end into the occurrence it mints", async () => {
+    const recurrence = { frequency: "weekly", interval: 1, endDate: "2026-12-31T00:00:00.000Z" };
+    setup({ recurrence });
+    await changeStatus("p1", "t1", "shipped", "actor");
+    await flush();
+
+    expect(minted()?.recurrence).toEqual(recurrence);
+  });
+});
+
+/**
+ * BP-463: `endDate` was neither stored nor rejected — a client setting one got a 200 and a series
+ * that ran forever — and the interval's stated maximum of 365 was an HTML attribute and nothing
+ * else, so a pasted 400 was accepted and stored end to end.
+ */
+describe("what a client may say about a repeating task", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    sprintExists.mockResolvedValue(null);
+    projectFindOneAndUpdate.mockResolvedValue({
+      _id: "p1",
+      taskCounter: 1,
+      key: "BP",
+      ...customBoard,
+    });
+    taskCreate.mockImplementation(async (doc: Record<string, unknown>) => ({ ...doc, _id: "new" }));
+    taskFindById.mockReturnValue({ populate: () => ({ lean: async () => ({ _id: "new" }) }) });
+    const stored = { _id: "t1", taskNumber: 7, status: "ready", title: "x" };
+    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    findOne.mockReturnValue({
+      lean: () => Promise.resolve(stored),
+      populate: () => ({ lean: () => Promise.resolve(stored) }),
+    });
+    findOneAndUpdate.mockReturnValue({ populate: () => Promise.resolve(stored) });
+  });
+
+  const created = () => taskCreate.mock.calls.at(-1)?.[0];
+  const written = () =>
+    (findOneAndUpdate.mock.calls.at(-1)?.[1] as { $set?: Record<string, unknown> })?.$set;
+
+  it("refuses an interval above the stated maximum rather than storing it", async () => {
+    const result = await createTask("p1", "actor", {
+      title: "x",
+      recurrence: { frequency: "weekly", interval: 400 },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe(400);
+    expect(result.error).toContain("365");
+    expect(taskCreate).not.toHaveBeenCalled();
+  });
+
+  it("refuses an interval below one", async () => {
+    const result = await createTask("p1", "actor", {
+      title: "x",
+      recurrence: { frequency: "weekly", interval: 0 },
+    });
+
+    expect(result.status).toBe(400);
+  });
+
+  it("refuses a frequency the schema does not have", async () => {
+    const result = await createTask("p1", "actor", {
+      title: "x",
+      recurrence: { frequency: "fortnightly", interval: 1 },
+    });
+
+    expect(result.status).toBe(400);
+  });
+
+  // The worst of the three possible answers was the one it gave: 200 and a silent discard
+  it("refuses an end date it cannot read rather than dropping it", async () => {
+    const result = await createTask("p1", "actor", {
+      title: "x",
+      recurrence: { frequency: "weekly", interval: 1, endDate: "whenever" },
+    });
+
+    expect(result.status).toBe(400);
+    expect(result.error).toContain("endDate");
+  });
+
+  it("stores the end a client does give", async () => {
+    const result = await createTask("p1", "actor", {
+      title: "x",
+      recurrence: { frequency: "weekly", interval: 1, endDate: "2026-12-31" },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(created()?.recurrence.endDate).toEqual(new Date("2026-12-31"));
+  });
+
+  // No end is still the ordinary case, and saying so explicitly is what the editors send
+  it("takes a null end as a series with no end", async () => {
+    const result = await createTask("p1", "actor", {
+      title: "x",
+      recurrence: { frequency: "weekly", interval: 1, endDate: null },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(created()?.recurrence.endDate).toBeNull();
+  });
+
+  it("refuses the same interval on an edit", async () => {
+    const result = await updateTask(
+      "p1",
+      "t1",
+      { recurrence: { frequency: "daily", interval: 100000 } },
+      "actor"
+    );
+
+    expect(result.status).toBe(400);
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("stores an end set on an edit", async () => {
+    const result = await updateTask(
+      "p1",
+      "t1",
+      { recurrence: { frequency: "daily", interval: 2, endDate: "2026-12-31" } },
+      "actor"
+    );
+
+    expect(result.ok).toBe(true);
+    expect(written()?.recurrence).toEqual({
+      frequency: "daily",
+      interval: 2,
+      endDate: new Date("2026-12-31"),
+    });
+  });
+
+  it("still clears the recurrence when an edit sends none", async () => {
+    const result = await updateTask("p1", "t1", { recurrence: null }, "actor");
+
+    expect(result.ok).toBe(true);
+    expect(written()?.recurrence).toBeNull();
   });
 });
 

@@ -842,6 +842,8 @@ export const RECURRENCE_FREQUENCIES: RecurrenceFrequency[] = ["daily", "weekly",
 export interface IRecurrence {
   frequency: RecurrenceFrequency;
   interval: number;
+  /** The day the series stops after. Null — and absent, on a task stored before BP-463 — is a series with no end. */
+  endDate?: Date | null;
 }
 
 export interface ITask {
@@ -1065,6 +1067,7 @@ export interface ApiTaskLink {
 export interface ApiRecurrence {
   frequency: RecurrenceFrequency;
   interval: number;
+  endDate?: string | null;
 }
 
 export interface ApiTask {

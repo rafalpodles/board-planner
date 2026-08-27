@@ -26,6 +26,7 @@ import {
 import { effectiveColumns } from "@/lib/columns";
 import { parseChecklistString } from "@/lib/checklist";
 import { TASK_TITLE_MAX_LENGTH } from "@/lib/identifiers";
+import { MAX_RECURRENCE_INTERVAL, clampInterval } from "@/lib/recurrence";
 import { activeFields, sortedFields, orderedOptions } from "@/lib/custom-fields";
 import type { GeneratedTask } from "@/lib/ai";
 
@@ -80,6 +81,7 @@ export function TaskForm({
   const [customFieldValues, setCustomFieldValues] = useState<Record<string, unknown>>({});
   const [recurrenceFreq, setRecurrenceFreq] = useState<RecurrenceFrequency | "">("");
   const [recurrenceInterval, setRecurrenceInterval] = useState(1);
+  const [recurrenceEnd, setRecurrenceEnd] = useState("");
   const [users, setUsers] = useState<ApiUserSummary[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -148,7 +150,11 @@ export function TaskForm({
     checklist,
     sprint: sprint || null,
     recurrence: recurrenceFreq
-      ? { frequency: recurrenceFreq, interval: recurrenceInterval }
+      ? {
+          frequency: recurrenceFreq,
+          interval: recurrenceInterval,
+          endDate: recurrenceEnd || null,
+        }
       : null,
     customFieldValues,
   };
@@ -351,22 +357,35 @@ export function TaskForm({
           placeholder="No recurrence"
         />
         {recurrenceFreq && (
-          <div>
-            <label className="block text-sm font-medium mb-1">Every</label>
-            <div className="flex items-center gap-2">
-              <input
-                type="number"
-                min={1}
-                max={365}
-                value={recurrenceInterval}
-                onChange={(e) => setRecurrenceInterval(Math.max(1, parseInt(e.target.value) || 1))}
-                className="focus-ring w-16 sm:w-20 bg-bg-input border border-border rounded px-3 py-1.5 text-sm min-h-[44px]"
-              />
-              <span className="text-sm text-text-muted">
-                {recurrenceFreq === "daily" ? "day(s)" : recurrenceFreq === "weekly" ? "week(s)" : "month(s)"}
-              </span>
+          <>
+            <div>
+              <label className="block text-sm font-medium mb-1">Every</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min={1}
+                  max={MAX_RECURRENCE_INTERVAL}
+                  value={recurrenceInterval}
+                  onChange={(e) => setRecurrenceInterval(clampInterval(e.target.value))}
+                  className="focus-ring w-16 sm:w-20 bg-bg-input border border-border rounded px-3 py-1.5 text-sm min-h-[44px]"
+                />
+                <span className="text-sm text-text-muted">
+                  {recurrenceFreq === "daily" ? "day(s)" : recurrenceFreq === "weekly" ? "week(s)" : "month(s)"}
+                </span>
+              </div>
             </div>
-          </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Repeats until</label>
+              <input
+                type="date"
+                aria-label="Repeats until"
+                value={recurrenceEnd}
+                onChange={(e) => setRecurrenceEnd(e.target.value)}
+                className="focus-ring w-full bg-bg-input border border-border rounded px-3 py-1.5 text-sm min-h-[44px]"
+              />
+              <p className="mt-1 text-xs text-text-muted">Leave empty for a series with no end</p>
+            </div>
+          </>
         )}
       </div>
 
