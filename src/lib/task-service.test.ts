@@ -3943,6 +3943,22 @@ describe("advancing a recurring series' due date", () => {
     expect([next.getHours(), next.getMinutes()]).toEqual([9, 30]);
   });
 
+  // Also from the review: `base.getMonth() + interval + 1` concatenates rather than adds if
+  // `interval` arrives as a string — `0 + "2" + 1` is "021", which is September 2027, whose last
+  // day is the 30th, so 31 January + 2 months came back as **30** March instead of the 31st.
+  //
+  // Unreachable through the app — `schemaValuesOrRefusal` requires an integer ≥ 1 and the schema
+  // types the path as a Number — but this function is exported, and its one caller reads the
+  // interval off a task typed `any`, so the parameter's type is documentation rather than a guard.
+  it("adds a string interval rather than concatenating it", () => {
+    const next = nextRecurrenceDue(
+      new Date(2026, 0, 31, 12, 0, 0),
+      "monthly",
+      "2" as unknown as number
+    );
+    expect(ymd(next)).toEqual([2026, 3, 31]);
+  });
+
   // Raised by an independent review of this fix. Clamping by stepping through the 1st of the
   // target month — `setDate(1)` then `setMonth` then `setDate(day)` — imports a DST gap that the
   // chosen day does not have. In a zone whose clocks go forward on the 1st of October, a series

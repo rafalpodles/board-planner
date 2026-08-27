@@ -1250,29 +1250,29 @@ export function nextRecurrenceDue(
       next.setDate(next.getDate() + 7 * interval);
       break;
     case "monthly": {
-      // Built in one construction rather than mutated through `setMonth`, which does not clamp:
-      // 31 January + 1 month is 3 March, not 28 February. Day 0 of the month after the target is
-      // that target's last day, so `Math.min` lands on the chosen day or on the month's end.
+      // `setMonth` does not clamp — 31 January + 1 month is 3 March, not 28 February — and neither
+      // does stepping through the 1st of the target month, which instead imports a DST gap the
+      // chosen day does not have: in a zone whose clocks go forward on the 1st, 15 September 02:30
+      // comes back as 15 October 03:30 and the series keeps the shifted hour from then on.
       //
-      // Constructed rather than stepped through an intermediate 1st, which would import a DST gap
-      // the target day does not have: in a zone whose clocks go forward on the 1st of a month,
-      // 15 September 02:30 stepped via 1 October comes back as 15 October 03:30, and the series
-      // keeps the shifted hour from then on. Carrying the wall clock explicitly avoids it.
+      // `setFullYear` takes year, month and day together, so there is no intermediate date to
+      // overflow or to land in a gap. Day 0 of the month after the target is that target's last
+      // day, which is what `Math.min` clamps to.
+      //
+      // `interval` is coerced because `+` on a string concatenates: `0 + "2" + 1` is "021", and the
+      // only caller reads it off a task typed `any`.
+      const months = Number(interval);
       const day = base.getDate();
-      const lastDayOfTargetMonth = new Date(
+
+      const endOfTargetMonth = new Date(base);
+      endOfTargetMonth.setFullYear(base.getFullYear(), base.getMonth() + months + 1, 0);
+
+      next.setFullYear(
         base.getFullYear(),
-        base.getMonth() + interval + 1,
-        0
-      ).getDate();
-      return new Date(
-        base.getFullYear(),
-        base.getMonth() + interval,
-        Math.min(day, lastDayOfTargetMonth),
-        base.getHours(),
-        base.getMinutes(),
-        base.getSeconds(),
-        base.getMilliseconds()
+        base.getMonth() + months,
+        Math.min(day, endOfTargetMonth.getDate())
       );
+      break;
     }
   }
 
