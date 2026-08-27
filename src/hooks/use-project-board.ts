@@ -5,6 +5,7 @@ import { useApi } from "@/hooks/use-api";
 import { usePollWhileVisible } from "@/hooks/use-poll-while-visible";
 import { ApiProject, ApiSprint, ApiTask, ApiUserSummary, RunConflict } from "@/types";
 import { subscribeBoardRefresh } from "@/lib/board-refresh";
+import { duplicatePayload } from "@/lib/task-duplicate";
 import { useToast } from "@/components/ui/Toast";
 
 export interface ProjectBoard {
@@ -430,17 +431,9 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
     const task = tasks.find((t) => t._id === taskId);
     if (!task) return;
     try {
-      // No status: columns are per project since CP-128, so a literal "planned" is a 400
-      // in any project that renamed or rebuilt its board
-      await api.post(`/api/projects/${projectId}/tasks`, {
-        title: `Copy of ${task.title}`,
-        description: task.description,
-        priority: task.priority,
-        category: task.category,
-        checklist: task.checklist,
-        dueDate: task.dueDate,
-        customFieldValues: task.customFieldValues,
-      });
+      // Same payload as the task screen's Duplicate, so the two cannot disagree about what a
+      // copy is — see src/lib/task-duplicate.ts
+      await api.post(`/api/projects/${projectId}/tasks`, duplicatePayload(task));
       toast("Task duplicated", "success");
       loadData();
     } catch {
