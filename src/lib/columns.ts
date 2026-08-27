@@ -36,9 +36,17 @@ export function roleOf(
   return getProjectColumns(project).find((c) => c.id === statusId)?.role;
 }
 
+// A board need not have a backlog column, and columns[0] on such a board can be a done one — where
+// a task is born already finished. A recurring occurrence landing there ends the series silently,
+// because creation never runs the status-change side effects that would mint the one after it.
 export function defaultStatusFor(project: HasColumns | null | undefined): string {
   const columns = getProjectColumns(project);
-  return columns.find((c) => c.role === "backlog")?.id ?? columns[0].id;
+  const landing =
+    columns.find((c) => c.role === "backlog") ??
+    columns.find((c) => c.role === "approved") ??
+    columns.find((c) => c.role !== "done") ??
+    columns[0];
+  return landing.id;
 }
 
 // Which column ids carry a role, for the queries that used to compare against a literal id.

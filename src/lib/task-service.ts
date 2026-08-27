@@ -44,6 +44,7 @@ import {
   sanitizeCustomFieldValues,
   customFieldActivityChanges,
 } from "@/lib/custom-fields";
+import { normaliseRecurrence, nextOccurrence } from "@/lib/recurrence";
 import { onTaskStatusChanged } from "@/lib/pm/triggers";
 import { canBeAssigned } from "@/lib/grants";
 import { workerUsername } from "@/lib/worker-user";
@@ -458,7 +459,9 @@ export async function createTask(
 
   const priority = body.priority ?? DEFAULT_PRIORITY;
   const dueDate = body.dueDate || null;
-  const recurrence = body.recurrence || null;
+  const normalised = normaliseRecurrence(body.recurrence);
+  if (!normalised.ok) return { ok: false, error: normalised.error, status: 400 };
+  const recurrence = normalised.value;
   const schemaRefusal = schemaValuesOrRefusal({ priority, dueDate, recurrence });
   if (schemaRefusal) return schemaRefusal;
 
@@ -750,7 +753,11 @@ async function announceStatusChange(a: StatusChangeAnnouncement): Promise<void> 
     },
   });
 
-  if (roleOf(a.project, status) === "done" && a.oldTask.recurrence) {
+  // The move that CLOSES the task, not any move that lands in a done column: a board may define
+  // two of them, and a hop between the two closes nothing — it used to mint an occurrence each way
+  const closes =
+    roleOf(a.project, status) === "done" && roleOf(a.project, a.oldTask.status) !== "done";
+  if (closes && a.oldTask.recurrence) {
     createNextRecurrence(a.oldTask, a.projectId, a.actorId).catch((err) =>
       console.error("Failed to create recurring task:", err)
     );
@@ -808,6 +815,12 @@ export async function updateTask(
   // The rest of the same family, and the same reason: `priority`, `dueDate` and `recurrence` are
   // all on the whitelist above and all judged by the schema, so a wrong one escaped as a 500 here
   // exactly as it did on create.
+  if (updates.recurrence !== undefined) {
+    const recurrence = normaliseRecurrence(updates.recurrence);
+    if (!recurrence.ok) return { ok: false, error: recurrence.error, status: 400 };
+    updates.recurrence = recurrence.value;
+  }
+
   const schemaRefusal = schemaValuesOrRefusal(updates);
   if (schemaRefusal) return schemaRefusal;
 
@@ -1290,16 +1303,20 @@ async function createNextRecurrence(
   projectId: string,
   userId: string
 ): Promise<void> {
+  const { ended, dueDate: nextDue } = nextOccurrence(oldTask.recurrence, oldTask.dueDate);
+  if (ended) return;
+
+  // One successor per closed occurrence, whichever way the task got back into a done column —
+  // dragged out of Done and back, or moved between two done-role columns. Before the counter is
+  // incremented, so a refused mint burns no task number.
+  if (await Task.exists({ recurringParentId: oldTask._id })) return;
+
   const project = await Project.findOneAndUpdate(
     { _id: projectId },
     { $inc: { taskCounter: 1 } },
     { returnDocument: "after" }
   );
   if (!project) return;
-
-  const { frequency, interval } = oldTask.recurrence;
-  const baseDate = oldTask.dueDate ? new Date(oldTask.dueDate) : new Date();
-  const nextDue = nextRecurrenceDue(baseDate, frequency, interval);
 
   // Reset checklist items to undone
   const checklist = (oldTask.checklist || []).map(
