@@ -15,6 +15,7 @@ import {
   DEFAULT_PRIORITY,
   PRIORITIES,
   RECURRENCE_FREQUENCIES,
+  RecurrenceFrequency,
 } from "@/types";
 import { getColumnIds, defaultStatusFor, roleOf, getProjectColumns, columnIdsWithRole } from "@/lib/columns";
 import { escalationColumnId } from "@/lib/escalation";
@@ -1236,7 +1237,7 @@ export async function assignTask(
 
 export function nextRecurrenceDue(
   base: Date,
-  frequency: "daily" | "weekly" | "monthly",
+  frequency: RecurrenceFrequency,
   interval: number
 ): Date {
   const next = new Date(base);
