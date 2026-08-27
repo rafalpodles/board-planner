@@ -1250,14 +1250,29 @@ export function nextRecurrenceDue(
       next.setDate(next.getDate() + 7 * interval);
       break;
     case "monthly": {
-      const day = next.getDate();
-      // The 1st first, or the month change itself overflows before the clamp below can run:
-      // 31 January + 1 month is 3 March, not 28 February.
-      next.setDate(1);
-      next.setMonth(next.getMonth() + interval);
-      const lastDayOfTargetMonth = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
-      next.setDate(Math.min(day, lastDayOfTargetMonth));
-      break;
+      // Built in one construction rather than mutated through `setMonth`, which does not clamp:
+      // 31 January + 1 month is 3 March, not 28 February. Day 0 of the month after the target is
+      // that target's last day, so `Math.min` lands on the chosen day or on the month's end.
+      //
+      // Constructed rather than stepped through an intermediate 1st, which would import a DST gap
+      // the target day does not have: in a zone whose clocks go forward on the 1st of a month,
+      // 15 September 02:30 stepped via 1 October comes back as 15 October 03:30, and the series
+      // keeps the shifted hour from then on. Carrying the wall clock explicitly avoids it.
+      const day = base.getDate();
+      const lastDayOfTargetMonth = new Date(
+        base.getFullYear(),
+        base.getMonth() + interval + 1,
+        0
+      ).getDate();
+      return new Date(
+        base.getFullYear(),
+        base.getMonth() + interval,
+        Math.min(day, lastDayOfTargetMonth),
+        base.getHours(),
+        base.getMinutes(),
+        base.getSeconds(),
+        base.getMilliseconds()
+      );
     }
   }
 

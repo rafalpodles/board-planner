@@ -364,8 +364,14 @@ test.describe("what happens when the task is closed", () => {
     // 3rd. Measured before the fix: Jan 31 -> Mar 3, Jan 29 -> Mar 1, Mar 31 -> May 1.
     //
     // Driven through the board rather than through `nextRecurrenceDue` directly, which its own
-    // unit tests cover: what this adds is that the date a person actually receives on the new card
-    // is the clamped one — the value survives the write, the schema's cast and the read back.
+    // unit tests cover: what this adds is that closing a task really does reach the clamp, and the
+    // clamped date really is what comes back on the new card.
+    //
+    // Its reach stops short of one thing, deliberately. `giveDueDate` writes a `Date` at local
+    // noon, whereas a person's `<input type="date">` sends "2026-01-31", which Mongoose casts to
+    // UTC midnight — and the arithmetic reads it back with local getters. On a server west of UTC
+    // that reads as the 30th and the occurrence lands in March after all. Pre-existing, and true
+    // of the code this replaces too; see BP-461's follow-up. Nothing here would notice it.
     const due = new Date(2026, 0, 31, 12, 0, 0);
     await giveDueDate(due);
     await withDb(async (db) => {

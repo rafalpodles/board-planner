@@ -3880,8 +3880,9 @@ describe("advancing a recurring series' due date", () => {
   const ymd = (d: Date) => [d.getFullYear(), d.getMonth() + 1, d.getDate()];
 
   // The short months, both directions across a year boundary, and both leap-year answers for
-  // 29 February. Each is a date where the naive `setMonth` and the clamp disagree, so none of them
-  // can go green against the code this replaces.
+  // 29 February, plus one whose day the target month can hold. All but the last are dates where
+  // a bare `setMonth` and the clamp disagree, so they cannot go green against the code this
+  // replaces; the last one guards the other half of `Math.min`.
   it.each([
     { from: [2026, 0, 31], interval: 1, to: [2026, 2, 28], why: "31 Jan lands on the last of February" },
     { from: [2026, 0, 29], interval: 1, to: [2026, 2, 28], why: "so does the 29th" },
@@ -3890,6 +3891,10 @@ describe("advancing a recurring series' due date", () => {
     { from: [2028, 0, 31], interval: 1, to: [2028, 2, 29], why: "a leap year gets its 29th" },
     { from: [2026, 11, 31], interval: 2, to: [2027, 2, 28], why: "the clamp survives a year boundary" },
     { from: [2026, 0, 31], interval: 3, to: [2026, 4, 30], why: "and an interval above one" },
+    // The other half of `Math.min`. Every row above lands on the target month's last day, so a
+    // version that discarded `day` and always used the month end would satisfy all of them —
+    // measured. This one is shorter than February, let alone the month it lands in.
+    { from: [2026, 4, 15], interval: 2, to: [2026, 7, 15], why: "a day the target month can hold is kept" },
   ])("monthly: $why", ({ from, interval, to }) => {
     const next = nextRecurrenceDue(new Date(from[0], from[1], from[2], 12, 0, 0), "monthly", interval);
     expect(ymd(next)).toEqual(to);
@@ -3920,31 +3925,6 @@ describe("advancing a recurring series' due date", () => {
       [2026, 4, 28],
       [2026, 5, 28],
     ]);
-    // Said as the property rather than as four dates: every occurrence is one month after the last
-    expect(series.map(([, month]) => month)).toEqual([2, 3, 4, 5]);
-  });
-
-  // The same series under the code this replaces, so the assertion above is anchored to something
-  // that can be seen to differ. `setMonth` alone skips February and then keeps the 3rd forever.
-  it("is the fix that stops it: the naive setMonth walks into months nobody chose", () => {
-    const naive = (base: Date) => {
-      const n = new Date(base);
-      n.setMonth(n.getMonth() + 1);
-      return n;
-    };
-    let due = new Date(2026, 0, 31, 12, 0, 0);
-    const series: number[][] = [];
-    for (let i = 0; i < 4; i++) {
-      due = naive(due);
-      series.push(ymd(due));
-    }
-
-    expect(series).toEqual([
-      [2026, 3, 3],
-      [2026, 4, 3],
-      [2026, 5, 3],
-      [2026, 6, 3],
-    ]);
   });
 
   // The control. `setDate` overflowing into the next month is exactly what "seven days later"
@@ -3961,5 +3941,35 @@ describe("advancing a recurring series' due date", () => {
   it("keeps the time of day, so a series does not walk around the clock", () => {
     const next = nextRecurrenceDue(new Date(2026, 0, 31, 9, 30, 0), "monthly", 1);
     expect([next.getHours(), next.getMinutes()]).toEqual([9, 30]);
+  });
+
+  // Raised by an independent review of this fix. Clamping by stepping through the 1st of the
+  // target month — `setDate(1)` then `setMonth` then `setDate(day)` — imports a DST gap that the
+  // chosen day does not have. In a zone whose clocks go forward on the 1st of October, a series
+  // due at 02:30 on the 15th passes through an hour that does not exist on 1 October, is
+  // normalised forward, and every occurrence from then on is an hour late: 02:30, 03:30, 03:30…
+  //
+  // Nothing to do with the clamp — 15 October holds a 15th perfectly well, and the whole zone
+  // family (Sydney, Melbourne, Hobart, Adelaide, Lord Howe, Norfolk) is affected for any base
+  // whose time-of-day falls in the gap. Europe and the Americas are clean only because their
+  // transition Sundays land later in the month.
+  it("does not pick up an hour from a DST gap the chosen day never touches", () => {
+    const wasTz = process.env.TZ;
+    process.env.TZ = "Australia/Sydney";
+    try {
+      const base = new Date(2028, 8, 15, 2, 30, 0);
+      expect(base.getHours(), "the base itself is before the transition").toBe(2);
+
+      let due = base;
+      const clock: string[] = [];
+      for (let i = 0; i < 3; i++) {
+        due = nextRecurrenceDue(due, "monthly", 1);
+        clock.push(`${due.getDate()}/${due.getMonth() + 1} ${due.getHours()}:${due.getMinutes()}`);
+      }
+
+      expect(clock).toEqual(["15/10 2:30", "15/11 2:30", "15/12 2:30"]);
+    } finally {
+      process.env.TZ = wasTz;
+    }
   });
 });
