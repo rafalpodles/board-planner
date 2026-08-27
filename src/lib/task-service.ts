@@ -14,8 +14,6 @@ import {
   RunConflict,
   DEFAULT_PRIORITY,
   PRIORITIES,
-  RECURRENCE_FREQUENCIES,
-  RecurrenceFrequency,
 } from "@/types";
 import { getColumnIds, defaultStatusFor, roleOf, getProjectColumns, columnIdsWithRole } from "@/lib/columns";
 import { escalationColumnId } from "@/lib/escalation";
@@ -46,6 +44,7 @@ import {
   sanitizeCustomFieldValues,
   customFieldActivityChanges,
 } from "@/lib/custom-fields";
+import { normaliseRecurrence, nextOccurrence } from "@/lib/recurrence";
 import { onTaskStatusChanged } from "@/lib/pm/triggers";
 import { canBeAssigned } from "@/lib/grants";
 import { workerUsername } from "@/lib/worker-user";
@@ -362,30 +361,6 @@ function schemaValuesOrRefusal(values: Body): TaskServiceResult | null {
     return { ok: false, error: `Invalid due date "${dueDate}"`, status: 400 };
   }
 
-  const recurrence = values.recurrence;
-  if ("recurrence" in values && recurrence !== null) {
-    if (typeof recurrence !== "object" || Array.isArray(recurrence)) {
-      return { ok: false, error: "Recurrence must be a frequency and an interval", status: 400 };
-    }
-    if (!RECURRENCE_FREQUENCIES.includes(recurrence.frequency)) {
-      return {
-        ok: false,
-        error: `Invalid recurrence frequency "${recurrence.frequency}" — must be one of: ${RECURRENCE_FREQUENCIES.join(", ")}`,
-        status: 400,
-      };
-    }
-    // Through Number(), because that is what the cast does: "2" is a 2 to Mongoose and refusing it
-    // here would make this guard stricter than the schema it stands in for.
-    const interval = Number(recurrence.interval);
-    if (!Number.isInteger(interval) || interval < 1) {
-      return {
-        ok: false,
-        error: "Recurrence interval must be a whole number of at least 1",
-        status: 400,
-      };
-    }
-  }
-
   return null;
 }
 
@@ -460,7 +435,9 @@ export async function createTask(
 
   const priority = body.priority ?? DEFAULT_PRIORITY;
   const dueDate = body.dueDate || null;
-  const recurrence = body.recurrence || null;
+  const normalised = normaliseRecurrence(body.recurrence);
+  if (!normalised.ok) return { ok: false, error: normalised.error, status: 400 };
+  const recurrence = normalised.value;
   const schemaRefusal = schemaValuesOrRefusal({ priority, dueDate, recurrence });
   if (schemaRefusal) return schemaRefusal;
 
@@ -752,7 +729,11 @@ async function announceStatusChange(a: StatusChangeAnnouncement): Promise<void> 
     },
   });
 
-  if (roleOf(a.project, status) === "done" && a.oldTask.recurrence) {
+  // The move that CLOSES the task, not any move that lands in a done column: a board may define
+  // two of them, and a hop between the two closes nothing — it used to mint an occurrence each way
+  const closes =
+    roleOf(a.project, status) === "done" && roleOf(a.project, a.oldTask.status) !== "done";
+  if (closes && a.oldTask.recurrence) {
     createNextRecurrence(a.oldTask, a.projectId, a.actorId).catch((err) =>
       console.error("Failed to create recurring task:", err)
     );
@@ -810,6 +791,12 @@ export async function updateTask(
   // The rest of the same family, and the same reason: `priority`, `dueDate` and `recurrence` are
   // all on the whitelist above and all judged by the schema, so a wrong one escaped as a 500 here
   // exactly as it did on create.
+  if (updates.recurrence !== undefined) {
+    const recurrence = normaliseRecurrence(updates.recurrence);
+    if (!recurrence.ok) return { ok: false, error: recurrence.error, status: 400 };
+    updates.recurrence = recurrence.value;
+  }
+
   const schemaRefusal = schemaValuesOrRefusal(updates);
   if (schemaRefusal) return schemaRefusal;
 
@@ -1237,66 +1224,26 @@ export async function assignTask(
   return updateTask(projectId, taskId, { assignee: username }, actorId);
 }
 
-export function nextRecurrenceDue(
-  base: Date,
-  frequency: RecurrenceFrequency,
-  interval: number
-): Date {
-  const next = new Date(base);
-
-  switch (frequency) {
-    case "daily":
-      next.setDate(next.getDate() + interval);
-      break;
-    case "weekly":
-      next.setDate(next.getDate() + 7 * interval);
-      break;
-    case "monthly": {
-      // `setMonth` does not clamp — 31 January + 1 month is 3 March, not 28 February — and neither
-      // does stepping through the 1st of the target month, which instead imports a DST gap the
-      // chosen day does not have: in a zone whose clocks go forward on the 1st, 15 September 02:30
-      // comes back as 15 October 03:30 and the series keeps the shifted hour from then on.
-      //
-      // `setFullYear` takes year, month and day together, so there is no intermediate date to
-      // overflow or to land in a gap. Day 0 of the month after the target is that target's last
-      // day, which is what `Math.min` clamps to.
-      //
-      // `interval` is coerced because `+` on a string concatenates: `0 + "2" + 1` is "021", and the
-      // only caller reads it off a task typed `any`.
-      const months = Number(interval);
-      const day = base.getDate();
-
-      const endOfTargetMonth = new Date(base);
-      endOfTargetMonth.setFullYear(base.getFullYear(), base.getMonth() + months + 1, 0);
-
-      next.setFullYear(
-        base.getFullYear(),
-        base.getMonth() + months,
-        Math.min(day, endOfTargetMonth.getDate())
-      );
-      break;
-    }
-  }
-
-  return next;
-}
-
 async function createNextRecurrence(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   oldTask: any,
   projectId: string,
   userId: string
 ): Promise<void> {
+  const { ended, dueDate: nextDue } = nextOccurrence(oldTask.recurrence, oldTask.dueDate);
+  if (ended) return;
+
+  // One successor per closed occurrence, whichever way the task got back into a done column —
+  // dragged out of Done and back, or moved between two done-role columns. Before the counter is
+  // incremented, so a refused mint burns no task number.
+  if (await Task.exists({ recurringParentId: oldTask._id })) return;
+
   const project = await Project.findOneAndUpdate(
     { _id: projectId },
     { $inc: { taskCounter: 1 } },
     { returnDocument: "after" }
   );
   if (!project) return;
-
-  const { frequency, interval } = oldTask.recurrence;
-  const baseDate = oldTask.dueDate ? new Date(oldTask.dueDate) : new Date();
-  const nextDue = nextRecurrenceDue(baseDate, frequency, interval);
 
   const checklist = undoneChecklist(oldTask.checklist);
 

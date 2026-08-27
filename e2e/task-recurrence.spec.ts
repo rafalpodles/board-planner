@@ -32,7 +32,10 @@ const DAY_MS = 86400000;
  * date near a clock change would make `+7 days` off by an hour in some zones and not others. Any
  * date moved here should stay clear of late March and late October.
  */
-const BASE_DUE = () => new Date(2026, 4, 12, 12, 0, 0);
+// UTC midnight, which is what a due date actually is: `<input type="date">` sends "2026-05-12"
+// and Mongoose casts a date-only ISO string to this. The local-noon `Date` this used to build was
+// a shape no user can produce, and it is why nothing here could see BP-485.
+const BASE_DUE = () => new Date("2026-05-12");
 
 async function withDb<T>(fn: (db: mongoose.mongo.Db) => Promise<T>): Promise<T> {
   const dbName = new URL(E2E_MONGODB_URI.replace(/^mongodb/, "http")).pathname.slice(1);
@@ -162,6 +165,56 @@ test.describe("choosing a rhythm on the create form", () => {
         })
       )
       .toMatchObject({ frequency: "weekly", interval: 2 });
+  });
+
+  // Both of these were entirely uncovered, and each is the shape of defect BP-463 exists to fix.
+  // Measured before adding them: replacing the create form's `endDate: recurrenceEnd || null` with
+  // a hard `null` — a field that collects a date and throws it away — left the whole spec green,
+  // and so did reverting its interval clamp. The only test that drove 400 was on the task detail
+  // screen, which is a different component.
+  test("an end set on the create form is what the task is created with", async ({ page }) => {
+    await openNewTask(page);
+
+    await page.getByLabel("Title").fill("Renew the certificate");
+    await repeatsSelect(page).selectOption("monthly");
+    await page.getByLabel("Repeats until").fill("2027-03-01");
+    await page.getByRole("button", { name: "Create Task" }).click();
+
+    await expect(page.getByRole("dialog", { name: "New Task" })).toHaveCount(0);
+    await expect
+      .poll(async () =>
+        withDb(async (db) => {
+          const task = await db.collection("tasks").findOne({ title: "Renew the certificate" });
+          const end = task?.recurrence?.endDate;
+          // The whole value, not just its presence: a date that arrives as the wrong day is its own
+          // bug, and `toMatchObject` on frequency and interval is exactly what missed this before
+          return end === undefined ? "absent" : end === null ? null : new Date(end).toISOString();
+        })
+      )
+      .toBe("2027-03-01T00:00:00.000Z");
+  });
+
+  test("an interval pasted past the maximum is clamped before it is submitted", async ({ page }) => {
+    await openNewTask(page);
+    await repeatsSelect(page).selectOption("daily");
+
+    await intervalBox(page).fill("400");
+    await expect(intervalBox(page)).toHaveValue("365");
+
+    await page.getByLabel("Title").fill("Not every four hundred days");
+    await page.getByRole("button", { name: "Create Task" }).click();
+
+    await expect(page.getByRole("dialog", { name: "New Task" })).toHaveCount(0);
+    await expect
+      .poll(async () =>
+        withDb(async (db) => {
+          const task = await db
+            .collection("tasks")
+            .findOne({ title: "Not every four hundred days" });
+          return task?.recurrence?.interval ?? null;
+        })
+      )
+      .toBe(365);
   });
 
   test("an interval below one is not a rhythm, and the form says one instead", async ({ page }) => {
@@ -339,7 +392,7 @@ test.describe("what happens when the task is closed", () => {
     // same under `setMonth` and under the clamp that replaced it. It is here to pin the branch —
     // without it, deleting `case "monthly"` outright leaves only the 31st test below, and that one
     // is about the day of the month rather than about the month advancing at all.
-    const due = new Date(2026, 4, 15, 12, 0, 0);
+    const due = new Date("2026-05-15");
     await giveDueDate(due);
     await withDb(async (db) => {
       await db
@@ -354,7 +407,7 @@ test.describe("what happens when the task is closed", () => {
     const created = await newOccurrence(before);
     const next = new Date(created.dueDate as Date);
     // 15 May + 2 months, and the day of the month is kept
-    expect([next.getFullYear(), next.getMonth(), next.getDate()]).toEqual([2026, 6, 15]);
+    expect([next.getUTCFullYear(), next.getUTCMonth(), next.getUTCDate()]).toEqual([2026, 6, 15]);
   });
 
   test("a monthly task due on the 31st comes back on the last day of the next month", async ({
@@ -368,12 +421,12 @@ test.describe("what happens when the task is closed", () => {
     // unit tests cover: what this adds is that closing a task really does reach the clamp, and the
     // clamped date really is what comes back on the new card.
     //
-    // Its reach stops short of one thing, deliberately. `giveDueDate` writes a `Date` at local
-    // noon, whereas a person's `<input type="date">` sends "2026-01-31", which Mongoose casts to
-    // UTC midnight — and the arithmetic reads it back with local getters. On a server west of UTC
-    // that reads as the 30th and the occurrence lands in March after all. Pre-existing, and true
-    // of the code this replaces too; see BP-461's follow-up. Nothing here would notice it.
-    const due = new Date(2026, 0, 31, 12, 0, 0);
+    // Seeded as UTC midnight, the value a person's date input really produces, and asserted in UTC.
+    // That pairing is BP-485: the arithmetic used to read the stored value with local getters, so
+    // on a server west of UTC 31 January read as the 30th and this landed in March. The unit tests
+    // pin the timezone-independence itself by running the same input under seven zones; what this
+    // adds is that the shape reaching the database, and coming back on the new card, is that one.
+    const due = new Date("2026-01-31");
     await giveDueDate(due);
     await withDb(async (db) => {
       await db
@@ -387,7 +440,120 @@ test.describe("what happens when the task is closed", () => {
 
     const created = await newOccurrence(before);
     const next = new Date(created.dueDate as Date);
-    expect([next.getFullYear(), next.getMonth(), next.getDate()]).toEqual([2026, 1, 28]);
+    expect([next.getUTCFullYear(), next.getUTCMonth(), next.getUTCDate()]).toEqual([2026, 1, 28]);
+  });
+
+  // BP-463. A series had no way to stop: `endDate` was neither stored nor refused, so a client
+  // that set one got a 200 and a task that repeated forever. Both arms here, because a silence
+  // caused by a mis-wired fixture reads exactly like a silence caused by the end being honoured.
+  test("a series past its end stops, and one still inside it does not", async ({ page }) => {
+    const due = new Date("2026-05-12");
+    await giveDueDate(due);
+
+    // The end is BEFORE the occurrence this close would mint (19 May), so the series is over
+    await withDb(async (db) => {
+      await db.collection("tasks").updateOne(
+        { _id: SIBLING_TASK_ID },
+        { $set: { recurrence: { frequency: "weekly", interval: 1, endDate: new Date("2026-05-15") } } }
+      );
+    });
+
+    await signIn(page);
+    const before = await taskNumbers();
+    await closeOnTheBoard(page);
+
+    // The same budget the positive cases get, so this is a real absence rather than an early look
+    await page.waitForTimeout(6_000);
+    expect(await taskNumbers(), "the series ran past its end").toEqual(before);
+
+    // The control, and the reason this test can be trusted: move the end past 19 May and the very
+    // same close mints the occurrence. Only the end date differs between the two halves.
+    await withDb(async (db) => {
+      await db.collection("tasks").updateMany(
+        { _id: SIBLING_TASK_ID },
+        {
+          $set: {
+            status: "todo",
+            dueDate: due,
+            recurrence: { frequency: "weekly", interval: 1, endDate: new Date("2026-12-31") },
+          },
+          $unset: { recurringParentId: "" },
+        }
+      );
+    });
+
+    await closeOnTheBoard(page);
+    const created = await newOccurrence(before);
+    expect(new Date(created.dueDate as Date).toISOString()).toBe("2026-05-19T00:00:00.000Z");
+  });
+
+  // The other half of BP-463's end: `endDate` reaches the server from the task screen, and a value
+  // it cannot read is refused rather than dropped. Driven through the UI because the silent
+  // discard was invisible exactly there — the row saved, said nothing, and forgot the date.
+  test("an end set on the task screen is stored, and comes back on the way in", async ({ page }) => {
+    await signIn(page);
+    await openRepeats(page);
+
+    await page.getByRole("option", { name: "weekly" }).click();
+    await page.getByLabel("Repeats until").fill("2026-12-31");
+
+    await expect
+      .poll(async () =>
+        withDb(async (db) => {
+          const task = await db.collection("tasks").findOne({ _id: SIBLING_TASK_ID });
+          const end = task?.recurrence?.endDate;
+          return end ? new Date(end).toISOString().slice(0, 10) : null;
+        })
+      )
+      .toBe("2026-12-31");
+
+    await openRepeats(page);
+    await expect(page.getByLabel("Repeats until")).toHaveValue("2026-12-31");
+  });
+
+  // `max` on the number input stops neither typing nor pasting, and for a year it was the only
+  // thing standing between a pasted 400 and the database.
+  test("an interval above the advertised maximum never reaches the database", async ({ page, request }) => {
+    await signIn(page);
+    await openRepeats(page);
+
+    await page.getByRole("option", { name: "daily" }).click();
+    await intervalBox(page).fill("400");
+
+    await expect(intervalBox(page)).toHaveValue("365");
+    await expect
+      .poll(async () =>
+        withDb(async (db) => {
+          const task = await db.collection("tasks").findOne({ _id: SIBLING_TASK_ID });
+          return task?.recurrence?.interval ?? null;
+        })
+      )
+      .toBe(365);
+
+    // The other half, and it needs a different instrument: the clamp above means no sequence of
+    // clicks can put 400 on the wire, so the browser alone cannot say whether anything behind it
+    // would have refused. Who reaches this is MCP, the PM agent and anything else holding a token.
+    //
+    // Measured, both mutations, and the UI test above stays green through both: with the service
+    // bound removed the schema's own `max` throws a ValidationError nobody catches and the route
+    // answers **500**; with the schema's removed as well it answers **200** and stores 400. This
+    // line is the only thing in the suite that tells those three apart.
+    const refused = await request.put(`/api/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_ID}`, {
+      headers: ADMIN_AUTH,
+      data: { recurrence: { frequency: "daily", interval: 400 } },
+    });
+
+    expect(refused.status()).toBe(400);
+    expect(await refused.text()).toContain("365");
+
+    // The control: one inside the bound is accepted, so the refusal above is about the value
+    // rather than about the field being rejected wholesale
+    const accepted = await request.put(`/api/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_ID}`, {
+      headers: ADMIN_AUTH,
+      data: { recurrence: { frequency: "daily", interval: 365 } },
+    });
+
+    expect(accepted.status(), await accepted.text()).toBe(200);
   });
 
   test("a task with no rhythm leaves nothing behind", async ({ page, request }) => {
@@ -542,7 +708,14 @@ test.describe("duplicating one of these", () => {
     await card.click({ button: "right" });
 
     const copy = await copyCreatedBy(page, () =>
-      page.getByTestId("task-context-menu").getByRole("button", { name: "Duplicate" }).click()
+      // `exact`, because Playwright matches an accessible name by substring: this fixture's sprint
+      // is called "Sprint Duplicate" and the menu offers it under "Move to sprint", so the loose
+      // form resolves to two buttons and the click refuses. The task-screen case above already
+      // says `exact` for the same reason; this one was missed, and it is red on `main`.
+      page
+        .getByTestId("task-context-menu")
+        .getByRole("button", { name: "Duplicate", exact: true })
+        .click()
     );
 
     expectTheWorkAndNotTheHandover(copy);
