@@ -38,6 +38,13 @@ describe("what a client may say about a repeating task", () => {
     expect(normaliseRecurrence({ frequency: "daily", interval: 100000 }).ok).toBe(false);
   });
 
+  // `Number(true)` is 1 and `Number([5])` is 5, so a boolean was accepted as "every 1 day" and a
+  // one-element array as its contents — the second looser than the Mongoose cast this stands in
+  // for, which refuses an array outright.
+  it.each([true, false, [5], [], {}, () => 5])("refuses an interval of %o", (interval) => {
+    expect(normaliseRecurrence({ frequency: "daily", interval }).ok).toBe(false);
+  });
+
   it("refuses an interval that is not a whole number of periods", () => {
     expect(normaliseRecurrence({ frequency: "daily", interval: 0 }).ok).toBe(false);
     expect(normaliseRecurrence({ frequency: "daily", interval: -1 }).ok).toBe(false);
@@ -79,6 +86,48 @@ describe("clamping what an editor's number input hands over", () => {
 
 describe("when the next occurrence falls", () => {
   const weekly = { frequency: "weekly", interval: 1 } as const;
+
+  // The boundary itself, which nothing pinned: `>` versus `>=` passed the whole suite either way,
+  // because no fixture put an occurrence exactly ON the end date. It is the case a person is most
+  // likely to reach — pick 8 June on a weekly series that lands there — and `endDate` is documented
+  // as the day the series stops *after*, so the occurrence is produced.
+  it("produces the occurrence that lands exactly on the end date", () => {
+    const at = nextOccurrence(
+      { ...weekly, endDate: "2026-06-08" },
+      new Date("2026-06-01T00:00:00.000Z")
+    );
+
+    expect(at.ended).toBe(false);
+    expect(at.dueDate?.toISOString()).toBe("2026-06-08T00:00:00.000Z");
+
+    // The control, one week further on: the same series with the same end is over by then
+    expect(nextOccurrence({ ...weekly, endDate: "2026-06-08" }, at.dueDate).ended).toBe(true);
+  });
+
+  // The end is a day, and every value it is compared against is an instant. Judged against its
+  // midnight the field meant two different things: a due date carrying a time of day — which the
+  // REST API accepts even though the date input cannot make one — lost its final occurrence.
+  it("keeps an occurrence due later in the day the series ends", () => {
+    const at = nextOccurrence(
+      { frequency: "daily", interval: 1, endDate: "2026-06-08" },
+      new Date("2026-06-07T09:00:00.000Z")
+    );
+
+    expect(at.ended).toBe(false);
+    expect(at.dueDate?.toISOString()).toBe("2026-06-08T09:00:00.000Z");
+  });
+
+  // The undated arm of the same disagreement: `now` is a full timestamp, so any close after
+  // midnight UTC on the end day was already past it and "until 31 December" handed out its last
+  // occurrence on the 30th.
+  it("does not end an undated series partway through the day it ends", () => {
+    const config = { ...weekly, endDate: "2026-12-31" };
+
+    expect(nextOccurrence(config, null, new Date("2026-12-31T10:00:00.000Z")).ended).toBe(false);
+    expect(nextOccurrence(config, null, new Date("2026-12-31T23:59:59.000Z")).ended).toBe(false);
+    // and the control on the far side of it
+    expect(nextOccurrence(config, null, new Date("2027-01-01T00:00:01.000Z")).ended).toBe(true);
+  });
 
   // Through `nextOccurrence`, not through the arithmetic directly — that has its own block below.
   // What this pins is the wiring: the next occurrence counts from the closed one's own due date.
