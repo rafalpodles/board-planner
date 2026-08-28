@@ -569,35 +569,38 @@ test("the board works on a phone: every column is there and the rail scrolls", a
 
 /**
  * BP-488. On a phone each column fills the screen and a flick moves to the next one, in the
- * order the project configured. Driven with real touch events: React reads `changedTouches`,
- * and a mouse drag carries none — so a spec written with `page.mouse` would pass against a
- * board with no gesture wired up at all.
+ * order the project configured.
+ *
+ * Driven through the browser's own input pipeline (`Input.dispatchTouchEvent` over CDP), not by
+ * constructing `TouchEvent`s in the page. The difference is the whole point: a script-dispatched
+ * event is untrusted and bypasses the compositor, so it cannot exercise `touch-action`, native
+ * panning, or the browser's gesture arbitration — which is where this feature actually lives on
+ * a finger. Measured on the first version of this spec: with `hasTouch` turned off it still
+ * passed all four tests, which is the tell that nothing browser-side was being reached.
  */
 test.describe("swiping between the columns on a phone", () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
 
   async function flick(page: Page, dx: number, dy = 0) {
-    await page.evaluate(
-      ({ dx, dy }) => {
-        const rail = document
-          .querySelector("[data-testid='column-planned']")!
-          .closest(".overflow-x-auto") as HTMLElement;
-        const box = rail.getBoundingClientRect();
-        const x = box.left + box.width / 2;
-        const y = box.top + box.height / 2;
-        const at = (px: number, py: number) => [
-          new Touch({ identifier: 1, target: rail, clientX: px, clientY: py }),
-        ];
-        const send = (type: string, touches: Touch[], changedTouches: Touch[]) =>
-          rail.dispatchEvent(
-            new TouchEvent(type, { bubbles: true, cancelable: true, touches, changedTouches })
-          );
-        send("touchstart", at(x, y), at(x, y));
-        send("touchmove", at(x + dx, y + dy), at(x + dx, y + dy));
-        send("touchend", [], at(x + dx, y + dy));
-      },
-      { dx, dy }
-    );
+    const box = await page
+      .locator("[data-testid='column-planned']")
+      .evaluate((el) => (el.closest(".overflow-x-auto") as HTMLElement).getBoundingClientRect().toJSON());
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+
+    const cdp = await page.context().newCDPSession(page);
+    const point = (px: number, py: number) => [{ x: px, y: py }];
+    // Several moves rather than one: a single jump is a teleport no finger makes, and the
+    // component now reads the furthest point the finger reached, not only where it ended
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: point(x, y) });
+    for (const t of [0.34, 0.67, 1]) {
+      await cdp.send("Input.dispatchTouchEvent", {
+        type: "touchMove",
+        touchPoints: point(x + dx * t, y + dy * t),
+      });
+    }
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await cdp.detach();
   }
 
   const activeDot = (page: Page) => page.locator("[data-testid^='column-dot-'][aria-current]");
