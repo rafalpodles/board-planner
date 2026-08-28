@@ -60,7 +60,7 @@ export function BoardHeader({
 
   return (
     // z-30 keeps the scope menu over the board: @container makes the header a stacking context
-    <header className="@container relative z-30 flex h-14 shrink-0 items-center gap-3 border-b border-border bg-bg px-6">
+    <header className="@container relative z-30 flex h-14 shrink-0 items-center gap-2 @md:gap-3 border-b border-border bg-bg px-3 @md:px-6">
       <div className="min-w-0">
         {/* Own row: centred on the title+scope block the icon hangs below the title */}
         <div className="flex items-center gap-2">
@@ -142,7 +142,9 @@ export function BoardHeader({
             type="button"
             onClick={() => onViewModeChange(mode)}
             aria-current={viewMode === mode ? "true" : undefined}
-            className={`focus-ring rounded-md px-2 py-1.5 text-[13px] transition-colors @md:px-3 ${
+            // Small on a narrow header on purpose: this toggle and the project's name compete for
+            // the same row, and the name is the one a reader needs. It grows back at @md.
+            className={`focus-ring rounded-md px-1.5 py-1 text-[11px] transition-colors @md:px-3 @md:py-1.5 @md:text-[13px] ${
               viewMode === mode
                 ? "bg-bg-input font-medium text-text"
                 : "text-text-muted hover:text-text"
