@@ -79,10 +79,15 @@ export function Board({
 
   const scrollerRef = useRef<HTMLDivElement>(null);
   const [activeColumn, setActiveColumn] = useState(0);
-  const touchStart = useRef<{ x: number; y: number } | null>(null);
+  const touchStart = useRef<{ x: number; y: number; furthestDx: number } | null>(null);
   // A smooth scroll reports every position on the way, and reading the column off those would
-  // answer a second flick with the column the first one started from
-  const scrollingTo = useRef<number | null>(null);
+  // answer a second flick with the column the first one started from.
+  //
+  // `lastLeft` is what makes it recoverable. Waiting only for the target to arrive leaves the
+  // guard wedged forever if the animation is interrupted — a field scrolled into view on focus,
+  // a URL-bar clamp — and from then on the dots name one column while another is on screen, and
+  // the next flick steps from the stale index and skips one.
+  const scrollingTo = useRef<{ target: number; lastLeft: number } | null>(null);
 
   useEffect(() => {
     setActiveColumn((current) => stepColumn(current, 0, boardColumns.length));
@@ -97,8 +102,11 @@ export function Board({
       // A flick at the end of the board asks for the column already on screen, which scrolls
       // nowhere and so would leave a scroll that never arrives to wait for
       const settled =
+        scroller.clientWidth <= 0 ||
         pagedColumnAt(scroller.scrollLeft, scroller.clientWidth, boardColumns.length) === target;
-      scrollingTo.current = settled ? null : target;
+      // `clientWidth <= 0` counts as settled: an unlaid-out row can never report arriving, so a
+      // guard set here would never clear again for the life of the component.
+      scrollingTo.current = settled ? null : { target, lastLeft: scroller.scrollLeft };
       scroller.scrollTo({
         left: pagedColumnOffset(target, scroller.clientWidth),
         behavior: "smooth",
@@ -111,8 +119,20 @@ export function Board({
     // A second finger is a pinch, and its travel says nothing about which column is wanted
     touchStart.current =
       e.touches.length === 1
-        ? { x: e.touches[0].clientX, y: e.touches[0].clientY }
+        ? { x: e.touches[0].clientX, y: e.touches[0].clientY, furthestDx: 0 }
         : null;
+  }
+
+  function handleTouchMove(e: React.TouchEvent) {
+    const start = touchStart.current;
+    if (!start) return;
+    // A second finger mid-gesture is a pinch; its travel says nothing about which column is wanted
+    if (e.touches.length !== 1) {
+      touchStart.current = null;
+      return;
+    }
+    const dx = e.touches[0].clientX - start.x;
+    if (Math.abs(dx) > Math.abs(start.furthestDx)) start.furthestDx = dx;
   }
 
   function handleTouchEnd(e: React.TouchEvent) {
@@ -120,20 +140,31 @@ export function Board({
     touchStart.current = null;
     const end = e.changedTouches?.[0];
     if (!start || !end) return;
-    const step = swipeStep(end.clientX - start.x, end.clientY - start.y);
+    const step = swipeStep(end.clientX - start.x, end.clientY - start.y, start.furthestDx || undefined);
     if (step) goToColumn(activeColumn + step);
   }
 
   function handleScroll(e: React.UIEvent<HTMLDivElement>) {
-    const at = pagedColumnAt(
-      e.currentTarget.scrollLeft,
-      e.currentTarget.clientWidth,
-      boardColumns.length
-    );
-    if (scrollingTo.current !== null) {
-      if (at === scrollingTo.current) scrollingTo.current = null;
-      return;
+    const scroller = e.currentTarget;
+    const at = pagedColumnAt(scroller.scrollLeft, scroller.clientWidth, boardColumns.length);
+    const pending = scrollingTo.current;
+
+    if (pending) {
+      if (at === pending.target) {
+        scrollingTo.current = null;
+        return;
+      }
+      const goal = pagedColumnOffset(pending.target, scroller.clientWidth);
+      if (Math.abs(scroller.scrollLeft - goal) < Math.abs(pending.lastLeft - goal)) {
+        // Still closing on it: an ordinary frame of the animation
+        pending.lastLeft = scroller.scrollLeft;
+        return;
+      }
+      // Stalled or moving away — something other than this animation owns the row now. Let it
+      // win rather than holding an indicator that has stopped describing the screen.
+      scrollingTo.current = null;
     }
+
     setActiveColumn(at);
   }
 
@@ -153,11 +184,21 @@ export function Board({
               aria-label={`Show ${column.label}`}
               aria-current={i === activeColumn ? "true" : undefined}
               data-testid={`column-dot-${column.id}`}
-              className={`focus-ring h-2 rounded-full transition-all ${
-                i === activeColumn ? "w-6" : "w-2 bg-border"
-              }`}
-              style={i === activeColumn ? { backgroundColor: column.color } : undefined}
-            />
+              // The dot is 8px because that is what reads well; the button around it is 44px
+              // because that is what a thumb needs, and it is the pattern the app layout and the
+              // settings screens already use. These are the only pointer controls on the mobile
+              // board, and at 8px with 8px between them they were the smallest in the app —
+              // small enough that WCAG 2.2's spacing exemption does not apply either.
+              className="focus-ring grid min-h-11 min-w-11 place-items-center rounded-full"
+            >
+              <span
+                aria-hidden="true"
+                className={`block h-2 rounded-full transition-all ${
+                  i === activeColumn ? "w-6" : "w-2 bg-border"
+                }`}
+                style={i === activeColumn ? { backgroundColor: column.color } : undefined}
+              />
+            </button>
           ))}
         </div>
       )}
@@ -174,7 +215,9 @@ export function Board({
           ...(paged ? { touchAction: "pan-y pinch-zoom" } : {}),
         }}
         onTouchStart={paged ? handleTouchStart : undefined}
+        onTouchMove={paged ? handleTouchMove : undefined}
         onTouchEnd={paged ? handleTouchEnd : undefined}
+        onTouchCancel={paged ? () => { touchStart.current = null; } : undefined}
         onScroll={paged ? handleScroll : undefined}
       >
         <div

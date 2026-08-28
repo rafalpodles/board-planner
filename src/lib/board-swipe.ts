@@ -1,16 +1,27 @@
 import { BOARD_GAP_PX } from "./board-grid";
 
-// Below this the gesture is a tap or a hesitation, not a flick
-export const SWIPE_MIN_DISTANCE_PX = 48;
+// Below this the gesture is a tap or a hesitation, not a flick. Raised from 48px on review: at
+// 48 a 57px drag 32 degrees off horizontal paged the board, which is an ordinary thumb
+// reposition while reading — and nothing moves under the finger to warn that it counted.
+export const SWIPE_MIN_DISTANCE_PX = 64;
 // A gesture taller than this share of its width belongs to whatever is being scrolled
-// vertically — a column's card list, or the page itself
-const SWIPE_MAX_SLOPE = 0.7;
+// vertically — a column's card list, or the page itself. Tightened from 0.7 (35 degrees) for
+// the same reason: a deliberate flick between columns is not held at 30 degrees.
+const SWIPE_MAX_SLOPE = 0.5;
 
 export type SwipeStep = -1 | 0 | 1;
 
-export function swipeStep(dx: number, dy: number): SwipeStep {
+/**
+ * `furthestDx` is the extreme the finger reached, not where it ended. Without it only net
+ * displacement is measured, so a finger that drags 300px left to peek at the next column,
+ * thinks better of it and returns — overshooting the origin by 50px on the way back — pages
+ * *backward*: the opposite of both things the person did. Comparing the two says the gesture
+ * turned around, and a gesture that turned around is a cancellation.
+ */
+export function swipeStep(dx: number, dy: number, furthestDx: number = dx): SwipeStep {
   if (Math.abs(dx) < SWIPE_MIN_DISTANCE_PX) return 0;
   if (Math.abs(dy) > Math.abs(dx) * SWIPE_MAX_SLOPE) return 0;
+  if (Math.sign(dx) !== Math.sign(furthestDx)) return 0;
   // Dragging leftwards pulls the next column in, the way a carousel moves
   return dx < 0 ? 1 : -1;
 }
