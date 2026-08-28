@@ -2001,6 +2001,71 @@ describe("what a client may say about a repeating task", () => {
     expect(findOneAndUpdate).not.toHaveBeenCalled();
   });
 
+  // BP-486's invalidation rule, and the fragile half of it: the anchor is a stored fact, so what
+  // keeps it honest is deciding correctly *when* it stops being true. Driven through `updateTask`
+  // rather than through the helper, because the rule is about which fields the edit touched.
+  describe("which day a monthly series stays anchored to", () => {
+    const storedWith = (over: Record<string, unknown>) => {
+      const stored = { _id: "t1", taskNumber: 7, status: "ready", title: "x", ...over };
+      findOne.mockReturnValue({
+        lean: () => Promise.resolve(stored),
+        populate: () => ({ lean: () => Promise.resolve(stored) }),
+      });
+    };
+    const anchored = { frequency: "monthly", interval: 1, endDate: null, anchorDay: 31 };
+
+    // Both editors send the whole recurrence back with no anchor in it, so without carrying the
+    // stored one across, changing the interval would quietly cost a person the 31st they chose.
+    it("keeps it when only the rhythm changes", async () => {
+      storedWith({ recurrence: anchored });
+      await updateTask("p1", "t1", { recurrence: { frequency: "monthly", interval: 2 } }, "actor");
+
+      expect((written()?.recurrence as { anchorDay?: number })?.anchorDay).toBe(31);
+    });
+
+    // A different rhythm is not the same series' day: the next mint takes it from the due date.
+    it("drops it when the frequency changes", async () => {
+      storedWith({ recurrence: anchored });
+      await updateTask("p1", "t1", { recurrence: { frequency: "weekly", interval: 1 } }, "actor");
+
+      expect((written()?.recurrence as { anchorDay?: number | null })?.anchorDay).toBeNull();
+    });
+
+    // Writing a due date IS choosing a day, and this is what lets somebody retarget a series by
+    // editing it — the reason the anchor cannot just live at the series' root.
+    it("clears it when the due date is chosen again", async () => {
+      storedWith({ recurrence: anchored });
+      await updateTask("p1", "t1", { dueDate: "2026-03-05" }, "actor");
+
+      expect(written()).toMatchObject({ "recurrence.anchorDay": null });
+    });
+
+    // The dotted path would otherwise build a partial subdocument on a task that has no rhythm,
+    // and `frequency` is required — so the write would fail validation as a 500.
+    it("writes nothing about it when the task does not repeat", async () => {
+      storedWith({ recurrence: null });
+      await updateTask("p1", "t1", { dueDate: "2026-03-05" }, "actor");
+
+      expect(Object.keys(written() ?? {})).not.toContain("recurrence.anchorDay");
+    });
+
+    // Both at once is the create-form-style edit: the recurrence is fresh, so the due date decides
+    // and there is no dotted path to conflict with the subdocument being replaced.
+    it("lets the new due date decide when both are written together", async () => {
+      storedWith({ recurrence: anchored });
+      await updateTask(
+        "p1",
+        "t1",
+        { dueDate: "2026-03-05", recurrence: { frequency: "monthly", interval: 1 } },
+        "actor"
+      );
+
+      const set = written() ?? {};
+      expect((set.recurrence as { anchorDay?: number | null })?.anchorDay).toBeNull();
+      expect(Object.keys(set)).not.toContain("recurrence.anchorDay");
+    });
+  });
+
   it("stores an end set on an edit", async () => {
     const result = await updateTask(
       "p1",
