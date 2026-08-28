@@ -336,10 +336,12 @@ export function BoardFilters({
     "focus-ring h-8 w-full rounded-lg border border-border bg-bg-input px-2 text-[12px] text-text";
 
   return (
-    <div className="flex flex-wrap items-center gap-2.5 border-b border-border px-6 py-2.5">
+    <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-3 py-1.5 sm:gap-2.5 sm:px-6 sm:py-2.5">
       {/* Basis below the target width so the row fits before anything wraps;
-          it grows back up to 200px whenever there is room */}
-      <div className="relative min-w-0 max-w-[200px] flex-[1_1_120px]">
+          it grows back up to 200px whenever there is room.
+          Hidden on a phone: the header's magnifier opens the same search, and this is the widest
+          thing in the row — keeping both spends a third of the screen on one job twice. */}
+      <div className="relative hidden min-w-0 max-w-[200px] flex-[1_1_120px] sm:block">
         <svg
           className="pointer-events-none absolute left-2.5 top-1/2 h-[15px] w-[15px] -translate-y-1/2 text-text-muted"
           fill="none"
@@ -362,7 +364,7 @@ export function BoardFilters({
         />
       </div>
 
-      <div className="h-[22px] w-px shrink-0 bg-border" />
+      <div className="hidden h-[22px] w-px shrink-0 bg-border sm:block" />
 
       <div className="relative shrink-0" ref={popoverRef}>
         <button
@@ -568,7 +570,7 @@ export function BoardFilters({
         </button>
       )}
 
-      <div className="ml-auto flex h-[34px] shrink-0 items-center overflow-hidden rounded-lg border border-border bg-bg-card">
+      <div className="flex h-[34px] shrink-0 items-center overflow-hidden rounded-lg border border-border bg-bg-card sm:ml-auto">
         <select
           value={sortField}
           aria-label="Sort tasks by"
