@@ -130,7 +130,6 @@ export function BoardHeader({
     <>
       {compact}
       {/* z-30 keeps the scope menu over the board: @container makes the header a stacking context */}
-      stacking context
       <header className="@container relative z-30 flex h-14 shrink-0 items-center gap-2 @md:gap-3 border-b border-border bg-bg px-3 @md:px-6">
         <div className="min-w-0">
           {/* Own row: centred on the title+scope block the icon hangs below the title */}
