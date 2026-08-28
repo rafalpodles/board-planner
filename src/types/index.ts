@@ -844,6 +844,8 @@ export interface IRecurrence {
   interval: number;
   /** The day the series stops after. Null — and absent, on a task stored before BP-463 — is a series with no end. */
   endDate?: Date | null;
+  /** The day of the month a monthly series was set to, so a short month's clamp is not permanent (BP-486). Server-side; no client sends it. */
+  anchorDay?: number | null;
 }
 
 export interface ITask {
@@ -1068,6 +1070,7 @@ export interface ApiRecurrence {
   frequency: RecurrenceFrequency;
   interval: number;
   endDate?: string | null;
+  anchorDay?: number | null;
 }
 
 export interface ApiTask {

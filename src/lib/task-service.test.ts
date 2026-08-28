@@ -1893,7 +1893,7 @@ describe("what the next occurrence of a recurring task is", () => {
     await changeStatus("p1", "t1", "shipped", "actor");
     await flush();
 
-    expect(minted()?.recurrence).toEqual(recurrence);
+    expect(minted()?.recurrence).toEqual({ ...recurrence, anchorDay: null });
   });
 });
 
@@ -2011,6 +2011,7 @@ describe("what a client may say about a repeating task", () => {
 
     expect(result.ok).toBe(true);
     expect(written()?.recurrence).toEqual({
+      anchorDay: null,
       frequency: "daily",
       interval: 2,
       endDate: new Date("2026-12-31"),

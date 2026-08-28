@@ -44,7 +44,8 @@ import {
   sanitizeCustomFieldValues,
   customFieldActivityChanges,
 } from "@/lib/custom-fields";
-import { normaliseRecurrence, nextOccurrence } from "@/lib/recurrence";
+import { normaliseRecurrence, nextOccurrence, keptAnchor } from "@/lib/recurrence";
+import type { NormalisedRecurrence } from "@/lib/recurrence";
 import { onTaskStatusChanged } from "@/lib/pm/triggers";
 import { canBeAssigned } from "@/lib/grants";
 import { workerUsername } from "@/lib/worker-user";
@@ -874,6 +875,25 @@ export async function updateTask(
     return { ok: false, error: "Task not found", status: 404 };
   }
 
+  // Which day a monthly series falls on, once a short month has clamped it (BP-486). Two rules, and
+  // they are about intent rather than about fields:
+  //
+  //  - Writing `dueDate` IS the person choosing a day, so the anchor is cleared and the next mint
+  //    takes it from the date they picked. That is what lets somebody retarget a series by editing
+  //    its due date, which is why the anchor cannot simply live at the series' root.
+  //  - Writing the rhythm alone is not. Both editors send the whole recurrence back with no anchor
+  //    in it, so without carrying the stored one across, changing "every month" to "every 2 months"
+  //    would quietly cost a person the 31st they had chosen.
+  if (updates.recurrence !== undefined && updates.dueDate === undefined) {
+    const incoming = updates.recurrence as NormalisedRecurrence | null;
+    const kept = keptAnchor(oldTask.recurrence, incoming);
+    if (incoming && kept !== null) incoming.anchorDay = kept;
+  } else if (updates.dueDate !== undefined && updates.recurrence === undefined && oldTask.recurrence) {
+    // The dotted path, not a whole subdocument: `recurrence` is required-fielded, so replacing it
+    // wholesale here would need frequency and interval restated to survive validation.
+    updates["recurrence.anchorDay"] = null;
+  }
+
   // Resolve assignee username to ObjectId if provided as string
   if (updates.assignee && typeof updates.assignee === "string") {
     const assigneeUser = await User.findOne({
@@ -1230,7 +1250,7 @@ async function createNextRecurrence(
   projectId: string,
   userId: string
 ): Promise<void> {
-  const { ended, dueDate: nextDue } = nextOccurrence(oldTask.recurrence, oldTask.dueDate);
+  const { ended, dueDate: nextDue, anchorDay } = nextOccurrence(oldTask.recurrence, oldTask.dueDate);
   if (ended) return;
 
   // One successor per closed occurrence, whichever way the task got back into a done column —
@@ -1278,7 +1298,15 @@ async function createNextRecurrence(
     agent: oldTask.agent ?? null,
     dueDate: nextDue,
     checklist,
-    recurrence: oldTask.recurrence,
+    // Rebuilt rather than copied, so the anchor the arithmetic just resolved travels with the
+    // series: without it every occurrence re-derives the day from the one before, and a single
+    // February leaves a series on the 28th for good.
+    recurrence: {
+      frequency: oldTask.recurrence.frequency,
+      interval: oldTask.recurrence.interval,
+      endDate: oldTask.recurrence.endDate ?? null,
+      anchorDay,
+    },
     recurringParentId: oldTask._id,
     order: 0,
     createdBy: userId,
