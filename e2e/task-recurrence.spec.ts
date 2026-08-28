@@ -298,10 +298,10 @@ test.describe("changing it on the task itself", () => {
 
 test.describe("what happens when the task is closed", () => {
   /** Closes the seeded task through the board's own context menu. */
-  async function closeOnTheBoard(page: Page) {
+  async function closeOnTheBoard(page: Page, taskNumber: number = SIBLING_TASK_NUMBER) {
     await page.goto(BOARD);
     await expect(page.getByRole("heading", { name: PROJECT_NAME })).toBeVisible();
-    const card = page.locator(`a[href="/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}"]`);
+    const card = page.locator(`a[href="/projects/${PROJECT_KEY}/tasks/${taskNumber}"]`);
     await expect(card).toBeVisible();
     await card.click({ button: "right" });
     await page
@@ -309,7 +309,7 @@ test.describe("what happens when the task is closed", () => {
       .getByRole("button", { name: "Done", exact: true })
       .click();
     await expect(
-      page.getByTestId("column-done").locator(`a[href*="/tasks/${SIBLING_TASK_NUMBER}"]`)
+      page.getByTestId("column-done").locator(`a[href*="/tasks/${taskNumber}"]`)
     ).toBeVisible();
   }
 
@@ -554,6 +554,35 @@ test.describe("what happens when the task is closed", () => {
     });
 
     expect(accepted.status(), await accepted.text()).toBe(200);
+  });
+
+  // BP-486. The clamp BP-461 added stopped the series walking into months nobody chose, but it left
+  // the day demoted for good: 31 January became 28 February and every occurrence after that was
+  // computed from the 28th. Driven through the board twice, because one hop cannot show it — the
+  // first close is where the clamp happens and the second is where the day has to come back.
+  test("a monthly series clamped by February gets its day back in March", async ({ page }) => {
+    await giveDueDate(new Date("2026-01-31"));
+    await withDb(async (db) => {
+      await db
+        .collection("tasks")
+        .updateOne({ _id: SIBLING_TASK_ID }, { $set: { recurrence: { frequency: "monthly", interval: 1 } } });
+    });
+
+    await signIn(page);
+    const before = await taskNumbers();
+    await closeOnTheBoard(page);
+
+    const february = await newOccurrence(before);
+    expect(new Date(february.dueDate as Date).toISOString()).toBe("2026-02-28T00:00:00.000Z");
+
+    // The February occurrence itself is what gets closed, not the seeded card reset to look like
+    // it. Reusing the parent would be refused, and rightly: it already has a successor, which is
+    // the one-successor guard doing its job. Measured — the second close minted nothing.
+    const beforeMarch = await taskNumbers();
+    await closeOnTheBoard(page, Number(february.taskNumber));
+
+    const march = await newOccurrence(beforeMarch);
+    expect(new Date(march.dueDate as Date).toISOString()).toBe("2026-03-31T00:00:00.000Z");
   });
 
   test("a task with no rhythm leaves nothing behind", async ({ page, request }) => {
