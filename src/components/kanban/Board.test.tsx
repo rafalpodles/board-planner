@@ -263,7 +263,7 @@ describe("Board paged on a phone", () => {
   // A plain Event carrying the fields React copies onto its synthetic touch event: happy-dom's
   // TouchEvent is not what is under test, and constructing one adds a dependency on it
   function touchEvent(
-    type: "touchstart" | "touchend",
+    type: "touchstart" | "touchmove" | "touchend" | "touchcancel",
     key: "touches" | "changedTouches",
     points: { clientX: number; clientY: number }[]
   ) {
@@ -274,14 +274,23 @@ describe("Board paged on a phone", () => {
 
   const START = { clientX: 300, clientY: 400 };
 
-  function swipe(el: HTMLElement, dx: number, dy = 0) {
+  function swipe(el: HTMLElement, dx: number, dy = 0, via?: number) {
     fireEvent(el, touchEvent("touchstart", "touches", [START]));
+    if (via !== undefined) {
+      fireEvent(el, touchEvent("touchmove", "touches", [{ clientX: START.clientX + via, clientY: START.clientY }]));
+    }
     fireEvent(
       el,
       touchEvent("touchend", "changedTouches", [
         { clientX: START.clientX + dx, clientY: START.clientY + dy },
       ])
     );
+  }
+
+  /** Moves the row the way anything other than `goToColumn` would, and reports it. */
+  function scrollRowTo(scroller: HTMLElement, left: number) {
+    Object.defineProperty(scroller, "scrollLeft", { configurable: true, value: left });
+    fireEvent.scroll(scroller);
   }
 
   function renderPhoneBoard() {
@@ -392,6 +401,105 @@ describe("Board paged on a phone", () => {
     fireEvent.scroll(scroller);
     expect(active()).toBe("Show In Progress");
   });
+
+  // The defect this guard was hiding: waiting only for the target to arrive left it wedged when
+  // the animation was interrupted, and from then on the dots named a column that was not on
+  // screen. Reproduced by moving the row somewhere else while a flick's scroll is in flight.
+  it("follows the row when something interrupts the scroll it asked for", () => {
+    const { scroller } = renderPhoneBoard();
+
+    swipe(scroller, -100);
+    expect(active()).toBe("Show In Progress");
+
+    // Not the column it asked for, and then stuck there — a field scrolled into view, a URL bar
+    scrollRowTo(scroller, pagedColumnOffset(0, PAGE_WIDTH));
+    scrollRowTo(scroller, pagedColumnOffset(0, PAGE_WIDTH));
+
+    expect(active(), "the dots kept naming a column that is not on screen").toBe("Show To Do");
+  });
+
+  // The consequence of the wedge, and the one a person actually sees: the next flick steps from
+  // the stale index and jumps two columns.
+  it("does not skip a column on the flick after an interrupted one", () => {
+    const { scroller, scrollTo } = renderPhoneBoard();
+
+    swipe(scroller, -100);
+    scrollRowTo(scroller, pagedColumnOffset(0, PAGE_WIDTH));
+    scrollRowTo(scroller, pagedColumnOffset(0, PAGE_WIDTH));
+    scrollTo.mockClear();
+
+    swipe(scroller, -100);
+
+    expect(scrollTo).toHaveBeenCalledWith(scrolledTo(1));
+    expect(active()).toBe("Show In Progress");
+  });
+
+  // The control for the two above: while the scroll really is closing on its target, the frames
+  // on the way must NOT move the indicator, which is what the guard exists for
+  it("ignores the positions a smooth scroll reports on its way", () => {
+    const { scroller } = renderPhoneBoard();
+
+    swipe(scroller, -100);
+    scrollRowTo(scroller, 40);
+    scrollRowTo(scroller, 200);
+
+    expect(active()).toBe("Show In Progress");
+  });
+
+  // Peek at the next column and come back, overshooting the start: net displacement alone reads
+  // that as a swipe the other way
+  it("stays put when the finger turns around and overshoots", () => {
+    const { scroller, scrollTo } = renderPhoneBoard();
+
+    swipe(scroller, 70, 0, -300);
+
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect(active()).toBe("Show To Do");
+  });
+
+  it("abandons the gesture when the touch is cancelled", () => {
+    const { scroller, scrollTo } = renderPhoneBoard();
+
+    fireEvent(scroller, touchEvent("touchstart", "touches", [START]));
+    fireEvent(scroller, touchEvent("touchcancel", "changedTouches", [START]));
+    fireEvent(
+      scroller,
+      touchEvent("touchend", "changedTouches", [{ clientX: START.clientX - 200, clientY: START.clientY }])
+    );
+
+    expect(scrollTo).not.toHaveBeenCalled();
+  });
+
+  // A second finger arriving mid-drag is a pinch, and its travel says nothing about columns
+  it("abandons the gesture when a second finger arrives", () => {
+    const { scroller, scrollTo } = renderPhoneBoard();
+
+    fireEvent(scroller, touchEvent("touchstart", "touches", [START]));
+    fireEvent(scroller, touchEvent("touchmove", "touches", [START, { clientX: 100, clientY: 400 }]));
+    fireEvent(
+      scroller,
+      touchEvent("touchend", "changedTouches", [{ clientX: START.clientX - 200, clientY: START.clientY }])
+    );
+
+    expect(scrollTo).not.toHaveBeenCalled();
+  });
+
+  // The declaration the whole feature rests on with a real finger: without it the browser pans
+  // the row itself, against the paging. Deletable with the entire suite green before this.
+  it("tells the browser not to pan the row itself", () => {
+    const { scroller } = renderPhoneBoard();
+    expect(scroller.style.touchAction).toBe("pan-y pinch-zoom");
+  });
+
+  // These are the only pointer controls on the mobile board, and the app sizes such targets at
+  // 44px everywhere else
+  it("gives each dot a thumb-sized hit area", () => {
+    renderPhoneBoard();
+    const dot = screen.getByLabelText("Show To Do");
+    expect(dot.className).toContain("min-h-11");
+    expect(dot.className).toContain("min-w-11");
+  });
+
 });
 
 describe("Board on a wide screen", () => {
@@ -400,8 +508,10 @@ describe("Board on a wide screen", () => {
     { _id: "c2", id: "in_progress", label: "In Progress", color: "#f59e0b", role: "active", order: 1, triggersPmReview: false },
   ];
 
-  // The control for the paged tests: without it a mis-wired media query would look like a
-  // working phone board and quietly page the desktop one too
+  // The control for the paged tests: it catches a mis-wired *use* of the flag — paging that
+  // ignores it and runs everywhere. It cannot catch a mis-wired query string, because the hook
+  // is mocked in this file and the string is never evaluated: inverting `max-width` to
+  // `min-width` leaves every test here green. Only the e2e, which sets a real viewport, sees it.
   it("has no column dots and keeps the side-by-side columns", () => {
     const { container } = render(
       <Board

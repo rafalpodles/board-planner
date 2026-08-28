@@ -32,6 +32,41 @@ describe("swipeStep", () => {
   it("still counts a long sideways drag that drifts a little", () => {
     expect(swipeStep(-200, 40)).toBe(1);
   });
+
+  // The two false positives review found, both written as the gesture rather than as the
+  // constants — a case built from SWIPE_MIN_DISTANCE_PX moves with it and cannot pin a value.
+  // Measured before the fix: this exact drag paged the board.
+  it("ignores an incidental drag: 57px at 32 degrees is a thumb being repositioned", () => {
+    expect(swipeStep(48, 30)).toBe(0);
+    expect(swipeStep(-48, -30)).toBe(0);
+  });
+
+  // The distance itself, in literals. Both existing arms derive from the constant, so raising it
+  // to 120 — two and a half times harder to trigger — passed the whole suite.
+  it("wants a real flick: 63px is not one, 65px is", () => {
+    expect(swipeStep(-63, 0)).toBe(0);
+    expect(swipeStep(-65, 0)).toBe(1);
+  });
+
+  // And the angle, likewise pinned rather than derived
+  it("wants it roughly sideways: 100px across and 60 down is not a swipe, 40 down is", () => {
+    expect(swipeStep(-100, 60)).toBe(0);
+    expect(swipeStep(-100, 40)).toBe(1);
+  });
+
+  // Peek at the next column, think better of it, come back — and overshoot the origin on the way.
+  // Net displacement alone reads that as a swipe in the direction opposite to both halves of it.
+  it("refuses a gesture that turned around, whichever way it went first", () => {
+    expect(swipeStep(50, 0, -300)).toBe(0);
+    expect(swipeStep(-50, 0, 300)).toBe(0);
+  });
+
+  // The control beside it: a flick that wobbles but never reverses is still a flick, and the
+  // furthest point being further than the end is the ordinary case for one
+  it("still counts a flick that eased back a little without turning", () => {
+    expect(swipeStep(-80, 0, -120)).toBe(1);
+    expect(swipeStep(80, 0, 120)).toBe(-1);
+  });
 });
 
 describe("stepColumn", () => {
