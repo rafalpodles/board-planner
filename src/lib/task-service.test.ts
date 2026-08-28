@@ -1790,6 +1790,35 @@ describe("what the next occurrence of a recurring task is", () => {
 
   const minted = () => taskCreate.mock.calls[0]?.[0];
 
+  // BP-486's wiring, which is separate from its arithmetic: the resolved anchor has to reach the
+  // successor's own document, or every occurrence re-derives the day from the one before it and the
+  // climb back never happens. Measured — with the mint writing a null anchor instead, the pure
+  // function's own tests stay green, because they thread the anchor by hand.
+  it("hands the anchor to the occurrence it mints, or the climb back dies here", async () => {
+    setup({
+      dueDate: new Date("2026-01-31"),
+      recurrence: { frequency: "monthly", interval: 1 },
+    });
+    await changeStatus("p1", "t1", "shipped", "actor");
+    await flush();
+
+    // Clamped this time round, and the 31st recorded so the next one is not
+    expect(minted()?.dueDate?.toISOString()).toBe("2026-02-28T00:00:00.000Z");
+    expect(minted()?.recurrence).toMatchObject({ frequency: "monthly", anchorDay: 31 });
+  });
+
+  // The second hop, driven the same way: closing the clamped occurrence gets the chosen day back.
+  it("gets the chosen day back on the occurrence after the short month", async () => {
+    setup({
+      dueDate: new Date("2026-02-28"),
+      recurrence: { frequency: "monthly", interval: 1, anchorDay: 31 },
+    });
+    await changeStatus("p1", "t1", "shipped", "actor");
+    await flush();
+
+    expect(minted()?.dueDate?.toISOString()).toBe("2026-03-31T00:00:00.000Z");
+  });
+
   it("is born in the backlog column even when that is not the first one", async () => {
     setup();
     await changeStatus("p1", "t1", "shipped", "actor");
