@@ -7,6 +7,13 @@ export const MAX_RECURRENCE_INTERVAL = 365;
 export interface NormalisedRecurrence {
   frequency: RecurrenceFrequency;
   interval: number;
+  /**
+   * The day of the month the series was set to, for a monthly rhythm that a short month has since
+   * clamped. Without it the clamp is permanent: 31 January becomes 28 February and every occurrence
+   * after that is computed from the 28th, so a series demoted by one February never sees the 31st
+   * again. Server-side only — no client sends it, and `updateTask` decides when it is cleared.
+   */
+  anchorDay: number | null;
   /** null: the series has no end, which is now a decision the writer made rather than the only option */
   endDate: Date | null;
 }
@@ -65,7 +72,12 @@ export function normaliseRecurrence(raw: unknown): RecurrenceResult {
     ends = parsed;
   }
 
-  return { ok: true, value: { frequency: frequency as RecurrenceFrequency, interval: every, endDate: ends } };
+  return {
+    ok: true,
+    // Always null out of the normaliser: the anchor is not part of what a client may say, and
+    // `updateTask` is the one place that decides whether the stored one survives the edit.
+    value: { frequency: frequency as RecurrenceFrequency, interval: every, endDate: ends, anchorDay: null },
+  };
 }
 
 /** What an editor's number input may hand over. `max` alone stops neither typing nor pasting. */
@@ -78,7 +90,8 @@ export function clampInterval(raw: string | number): number {
 export function nextRecurrenceDue(
   base: Date,
   frequency: RecurrenceFrequency,
-  interval: number
+  interval: number,
+  anchorDay?: number | null
 ): Date {
   // Every getter and setter below is a UTC one, and that is the whole point (BP-485). A due date
   // comes from `<input type="date">` as "2026-01-31", which Mongoose casts to UTC midnight. Read
@@ -107,7 +120,9 @@ export function nextRecurrenceDue(
       // `interval` is coerced because `+` on a string concatenates: `0 + "2" + 1` is "021", and the
       // only caller reads it off a task typed `any`.
       const months = Number(interval);
-      const day = base.getUTCDate();
+      // The day the series was set to, not the day it currently sits on: those differ exactly when
+      // a short month has clamped it, and using the clamped one is what made the demotion permanent.
+      const day = anchorDay ?? base.getUTCDate();
 
       const endOfTargetMonth = new Date(base);
       endOfTargetMonth.setUTCFullYear(base.getUTCFullYear(), base.getUTCMonth() + months + 1, 0);
@@ -128,9 +143,29 @@ export interface RecurrenceLike {
   frequency: RecurrenceFrequency;
   interval: number;
   endDate?: Date | string | null;
+  anchorDay?: number | null;
+}
+
+/**
+ * Which anchor an edit to the rhythm leaves behind. Changing the interval or the end date is not a
+ * decision about *which day* the series falls on, so the stored anchor survives it — the editors
+ * send the whole recurrence back with no anchor in it, and without this a person who changed
+ * "every month" to "every 2 months" would silently lose the 31st they had chosen.
+ *
+ * Changing the frequency is a different rhythm, so its anchor comes from the due date instead.
+ */
+export function keptAnchor(
+  stored: RecurrenceLike | null | undefined,
+  incoming: NormalisedRecurrence | null
+): number | null {
+  if (!stored || !incoming) return null;
+  if (stored.frequency !== incoming.frequency) return null;
+  return stored.anchorDay ?? null;
 }
 
 export interface NextOccurrence {
+  /** What the successor should carry, so a series clamped by a short month climbs back afterwards */
+  anchorDay: number | null;
   /** The series is over: nothing should be created */
   ended: boolean;
   /** null keeps an undated task undated — it used to come back dated `now + interval`, and every
@@ -144,8 +179,15 @@ export function nextOccurrence(
   dueDate: Date | string | null | undefined,
   now = new Date()
 ): NextOccurrence {
+  // Fixed at the first occurrence that has a due date, and carried from there on. Only monthly can
+  // be clamped, so nothing else stores one.
+  const anchorDay =
+    recurrence.frequency === "monthly"
+      ? (recurrence.anchorDay ?? (dueDate ? new Date(dueDate).getUTCDate() : null))
+      : null;
+
   const next = dueDate
-    ? nextRecurrenceDue(new Date(dueDate), recurrence.frequency, recurrence.interval)
+    ? nextRecurrenceDue(new Date(dueDate), recurrence.frequency, recurrence.interval, anchorDay)
     : null;
   // The end is a *day*, and everything it is compared against is an instant. Judged against its
   // midnight, the same field meant two different things: a dated series ending on a day it lands on
@@ -154,7 +196,7 @@ export function nextOccurrence(
   // date carrying a time of day, which the REST API accepts even though the date input cannot make
   // one, lost its final occurrence the same way.
   const end = recurrence.endDate ? endOfDay(new Date(recurrence.endDate)) : null;
-  return { ended: !!end && (next ?? now) > end, dueDate: next };
+  return { ended: !!end && (next ?? now) > end, dueDate: next, anchorDay };
 }
 
 /**

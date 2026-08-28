@@ -25,6 +25,8 @@ describe("what a client may say about a repeating task", () => {
       frequency: "monthly",
       interval: 3,
       endDate: null,
+      // Always null out of the normaliser: no client says which day a series is anchored to
+      anchorDay: null,
     });
   });
 
@@ -264,6 +266,52 @@ describe("advancing a recurring series' due date", () => {
     { from: "2026-05-15", interval: 2, to: [2026, 7, 15], why: "a day the target month can hold is kept" },
   ])("monthly: $why", ({ from, interval, to }) => {
     expect(ymd(nextRecurrenceDue(stored(from), "monthly", interval))).toEqual(to);
+  });
+
+  // BP-486, and the point of the whole anchor. Before it, February's clamp was permanent: every
+  // occurrence was computed from the one before, so 31 January became 28 February and the series
+  // stayed on the 28th for good. The anchor is the day the person chose, carried forward, so the
+  // 31st comes back the moment a month is long enough to hold it.
+  it("climbs back to the chosen day once a month is long enough", () => {
+    let due: Date | null = new Date("2026-01-31");
+    let anchor: number | null = null;
+    const series: string[] = [];
+
+    for (let i = 0; i < 5; i++) {
+      const at = nextOccurrence({ frequency: "monthly", interval: 1, anchorDay: anchor }, due);
+      due = at.dueDate;
+      anchor = at.anchorDay;
+      series.push(due!.toISOString().slice(0, 10));
+    }
+
+    expect(series).toEqual([
+      "2026-02-28",
+      "2026-03-31",
+      "2026-04-30",
+      "2026-05-31",
+      "2026-06-30",
+    ]);
+    // Said as the property too: the anchor is the day chosen, not the day last landed on
+    expect(anchor).toBe(31);
+  });
+
+  // The control, and the reason the anchor is not simply the series' first due date: a person who
+  // retargets the series by editing a due date must get the day they moved it to. `updateTask`
+  // clears the anchor on that write, which is what this reproduces.
+  it("takes the new day when somebody retargets the series", () => {
+    const retargeted = nextOccurrence(
+      { frequency: "monthly", interval: 1, anchorDay: null },
+      new Date("2026-03-05")
+    );
+
+    expect(retargeted.dueDate?.toISOString().slice(0, 10)).toBe("2026-04-05");
+    expect(retargeted.anchorDay).toBe(5);
+  });
+
+  // Only monthly can be clamped, so nothing else carries one — a stored anchor on a weekly series
+  // would be a value nothing reads and everything has to keep consistent.
+  it.each(["daily", "weekly"] as const)("stores no anchor for a %s series", (frequency) => {
+    expect(nextOccurrence({ frequency, interval: 1 }, new Date("2026-01-31")).anchorDay).toBeNull();
   });
 
   // Measured, and deliberately not what BP-461's description predicted: each occurrence is computed
