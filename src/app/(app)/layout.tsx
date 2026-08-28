@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import { useCallback, useRef, useState } from "react";
 import { AuthGuard } from "@/components/AuthGuard";
 import { SearchLayer } from "@/components/search/SearchLayer";
@@ -8,7 +7,6 @@ import { SearchIconButton } from "@/components/search/SearchTrigger";
 import { PmChatWidget } from "@/components/pm/PmChatWidget";
 import { ProjectsProvider } from "@/components/shell/ProjectsProvider";
 import { Sidebar } from "@/components/shell/Sidebar";
-import { APP_NAME } from "@/lib/brand";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [navOpen, setNavOpen] = useState(false);
@@ -64,11 +62,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                   <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
                 </svg>
               </button>
-              <Image src="/logo.svg" alt="" width={20} height={20} />
-              <span className="text-sm font-bold">{APP_NAME}</span>
-              <div className="ml-auto">
-                <SearchIconButton onOpen={openSearch} />
-              </div>
+              {/* The page's own header lands here rather than in a second bar below: two stacked
+                  bars cost 141px on a phone before any content appears. The wordmark goes with
+                  them — the drawer names the app, and you know which one you opened. */}
+              <div id="mobile-header-slot" className="flex min-w-0 flex-1 items-center gap-2" />
+              <SearchIconButton onOpen={openSearch} />
             </div>
 
             {/* tabIndex makes the target focusable, or the skip link moves the
