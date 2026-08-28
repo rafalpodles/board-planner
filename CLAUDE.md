@@ -139,9 +139,10 @@ Practicalities that cost real time to rediscover:
 
 ### GitHub — always the `rafalpodles` account
 
-This repo belongs to `rafalpodles`. The machine has a second `gh` account, `other-account`, which is
-**not** a collaborator here, so anything it does fails with `must be a collaborator` — a message that
-reads like a repository permission problem and is really the wrong identity.
+This repo belongs to `rafalpodles`, and that is the account every `gh` command here must run as.
+Any other account on this machine is **not** a collaborator, so anything it does fails with
+`must be a collaborator` — a message that reads like a repository permission problem and is really
+the wrong identity.
 
 ```bash
 gh api user -q .login            # must print rafalpodles
