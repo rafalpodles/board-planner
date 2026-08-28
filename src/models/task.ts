@@ -113,6 +113,9 @@ const taskSchema = new Schema<ITask>(
         // nothing in the log. That is the exact failure BP-463 exists to remove.
         interval: { type: Number, required: true, min: 1 },
         endDate: { type: Date, default: null },
+        // Server-side only: which day of the month the series was set to, so a monthly rhythm a
+        // short month has clamped climbs back to it. See BP-486.
+        anchorDay: { type: Number, min: 1, max: 31, default: null },
       },
       default: null,
     },

@@ -25,6 +25,8 @@ describe("what a client may say about a repeating task", () => {
       frequency: "monthly",
       interval: 3,
       endDate: null,
+      // Always null out of the normaliser: no client says which day a series is anchored to
+      anchorDay: null,
     });
   });
 
