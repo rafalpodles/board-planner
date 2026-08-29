@@ -176,11 +176,12 @@ export function SettingsShell({
           {sidebarFooter}
         </nav>
 
-        {/* The scroll container is the app's `main`, which is padded `py-6`, and a sticky offset
-            is measured from its padding edge — so `top-0` alone parks the row 24px down and
-            leaves a band above it that page content scrolls through, sliced. Pulling the row up
-            by that padding and paying it back as padding puts the pills flush against the top. */}
-        <SectionPillsNav className="sticky -top-6 z-30 -mx-4 -mt-6 mb-3 border-b border-border bg-bg px-4 py-3 md:hidden">
+        {/* A sticky offset is measured from the scrollport's content box, so these four numbers
+            have to equal the padding on the app's `main` — `p-2` everywhere this row is on
+            screen, since both it and main's larger desktop padding turn over at `md`. Get them
+            wrong and the row parks off the top edge; `e2e/settings-mobile-nav.spec.ts` is what
+            catches it. */}
+        <SectionPillsNav className="sticky -top-2 z-30 -mx-2 -mt-2 mb-3 border-b border-border bg-bg px-2 py-3 md:hidden">
           {pills.map(pill)}
         </SectionPillsNav>
 

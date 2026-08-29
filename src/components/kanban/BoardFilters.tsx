@@ -336,10 +336,12 @@ export function BoardFilters({
     "focus-ring h-8 w-full rounded-lg border border-border bg-bg-input px-2 text-[12px] text-text";
 
   return (
-    <div className="flex flex-wrap items-center gap-2.5 border-b border-border px-6 py-2.5">
+    <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-3 py-1.5 md:gap-2.5 md:px-6 md:py-2.5">
       {/* Basis below the target width so the row fits before anything wraps;
-          it grows back up to 200px whenever there is room */}
-      <div className="relative min-w-0 max-w-[200px] flex-[1_1_120px]">
+          it grows back up to 200px whenever there is room.
+          Hidden on a phone: the header's magnifier opens the same search, and this is the widest
+          thing in the row — keeping both spends a third of the screen on one job twice. */}
+      <div className="relative hidden min-w-0 max-w-[200px] flex-[1_1_120px] md:block">
         <svg
           className="pointer-events-none absolute left-2.5 top-1/2 h-[15px] w-[15px] -translate-y-1/2 text-text-muted"
           fill="none"
@@ -358,17 +360,17 @@ export function BoardFilters({
           placeholder={`Search tasks, or ${projectKey ?? "CP"}-128…`}
           value={filters.search}
           onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))}
-          className="focus-ring h-[34px] w-full rounded-lg border border-border bg-bg-card pl-8 pr-2.5 text-[13px] text-text placeholder:text-text-muted"
+          className="focus-ring h-11 w-full rounded-lg border border-border bg-bg-card pl-8 pr-2.5 text-[13px] text-text placeholder:text-text-muted"
         />
       </div>
 
-      <div className="h-[22px] w-px shrink-0 bg-border" />
+      <div className="hidden h-[22px] w-px shrink-0 bg-border md:block" />
 
       <div className="relative shrink-0" ref={popoverRef}>
         <button
           onClick={() => setShowFilters((v) => !v)}
           aria-expanded={showFilters}
-          className={`focus-ring flex h-[34px] items-center gap-1.5 rounded-lg border px-2.5 text-[13px] font-medium transition-colors ${
+          className={`focus-ring flex h-11 items-center gap-1.5 rounded-lg border px-2.5 text-[13px] font-medium transition-colors ${
             hasActiveFilters
               ? "border-primary bg-primary/10 text-primary"
               : "border-border text-text-muted hover:text-text"
@@ -568,7 +570,7 @@ export function BoardFilters({
         </button>
       )}
 
-      <div className="ml-auto flex h-[34px] shrink-0 items-center overflow-hidden rounded-lg border border-border bg-bg-card">
+      <div className="flex h-11 shrink-0 items-center overflow-hidden rounded-lg border border-border bg-bg-card md:ml-auto">
         <select
           value={sortField}
           aria-label="Sort tasks by"

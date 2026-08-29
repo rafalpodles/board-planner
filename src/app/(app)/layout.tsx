@@ -4,7 +4,7 @@ import Image from "next/image";
 import { useCallback, useRef, useState } from "react";
 import { AuthGuard } from "@/components/AuthGuard";
 import { SearchLayer } from "@/components/search/SearchLayer";
-import { SearchIconButton } from "@/components/search/SearchTrigger";
+import { SearchPageLink } from "@/components/search/SearchTrigger";
 import { PmChatWidget } from "@/components/pm/PmChatWidget";
 import { ProjectsProvider } from "@/components/shell/ProjectsProvider";
 import { Sidebar } from "@/components/shell/Sidebar";
@@ -67,7 +67,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               <Image src="/logo.svg" alt="" width={20} height={20} />
               <span className="text-sm font-bold">{APP_NAME}</span>
               <div className="ml-auto">
-                <SearchIconButton onOpen={openSearch} />
+                <SearchPageLink />
               </div>
             </div>
 
@@ -76,7 +76,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <main
               id="main-content"
               tabIndex={-1}
-              className="relative flex flex-1 flex-col overflow-y-auto px-4 py-6"
+              // Barely any padding on a phone: this sat 24px above every page's own header, which
+              // on the board is 24px of nothing between the app bar and the project's name. The
+              // desktop value comes back at sm.
+              className="relative flex flex-1 flex-col overflow-y-auto px-2 py-2 md:px-4 md:py-6"
             >
               {children}
             </main>

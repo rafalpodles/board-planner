@@ -35,7 +35,14 @@ const nextConfig: NextConfig = {
             key: "Content-Security-Policy",
             value: [
               "default-src 'self'",
-              "script-src 'self' 'unsafe-inline'",
+              // `unsafe-eval` in development only, and never in a production build: React's dev
+              // build uses eval() to reconstruct call stacks that came from another environment,
+              // so without it every page logs a console error and the debugging features it names
+              // are simply off. The production bundle never calls eval, so nothing is loosened
+              // where it would matter.
+              process.env.NODE_ENV === "development"
+                ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
+                : "script-src 'self' 'unsafe-inline'",
               "style-src 'self' 'unsafe-inline'",
               "img-src * data: blob:",
               "font-src 'self' data:",

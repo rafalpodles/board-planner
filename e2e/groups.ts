@@ -28,6 +28,8 @@ export const GROUPS = {
     "sprint-estimates.spec.ts",
     "sprints-ui.spec.ts",
     "focus-ring.spec.ts",
+    "board-toolbar-geometry.spec.ts",
+    "board-move-without-drag.spec.ts",
   ],
   project: [
     "project-lifecycle.spec.ts",
