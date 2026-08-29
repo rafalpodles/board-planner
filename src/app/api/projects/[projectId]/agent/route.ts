@@ -20,7 +20,13 @@ export const PUT = withProjectAccess(async (request, { params, user }) => {
 
   const body = await request.json();
   const agentId = typeof body.agentId === "string" ? body.agentId : "";
-  if (!agentId) return NextResponse.json({ error: "agentId is required" }, { status: 400 });
+
+  // The empty string clears it. A default that could be set and never unset left a project stuck
+  // with a suggestion it had outgrown, and the picker with no way back (BP-458).
+  if (!agentId) {
+    await Project.updateOne({ _id: projectId }, { $set: { "worker.agent": null } });
+    return NextResponse.json({ ok: true });
+  }
 
   const agent = await Agent.findById(agentId, "scope project composition").lean();
   if (!agent) return NextResponse.json({ error: "No such agent" }, { status: 404 });
