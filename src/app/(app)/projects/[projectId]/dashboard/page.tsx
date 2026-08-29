@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
-import { STATUS_LABELS, TaskStatus } from "@/types";
+import { ApiProject, STATUS_LABELS, TaskStatus } from "@/types";
+import { columnIdsWithRole, effectiveColumns } from "@/lib/columns";
 import { useToast } from "@/components/ui/Toast";
 import { PageHeader } from "@/components/shell/PageHeader";
 
@@ -46,10 +47,12 @@ function EmptyChart({ message }: { message: string }) {
 function DonutChart({
   data,
   colors,
+  labels,
   emptyMessage,
 }: {
   data: Record<string, number>;
   colors: Record<string, string>;
+  labels?: Record<string, string>;
   emptyMessage: string;
 }) {
   const entries = Object.entries(data).filter(([, v]) => v > 0);
@@ -67,7 +70,15 @@ function DonutChart({
     const dashArray = `${pct * circumference} ${circumference}`;
     const rotation = offset * 360;
     offset += pct;
-    return { key, value, pct, dashArray, rotation, color: colors[key] || "#6b7280" };
+    return {
+      key,
+      label: labels?.[key] ?? STATUS_LABELS[key as TaskStatus] ?? key,
+      value,
+      pct,
+      dashArray,
+      rotation,
+      color: colors[key] || "#6b7280",
+    };
   });
 
   return (
@@ -95,7 +106,7 @@ function DonutChart({
         {segments.map((seg) => (
           <div key={seg.key} className="flex items-center gap-2 text-xs">
             <span className="w-3 h-3 rounded-sm flex-shrink-0" style={{ backgroundColor: seg.color }} />
-            <span className="text-text-muted">{STATUS_LABELS[seg.key as TaskStatus] || seg.key}</span>
+            <span className="text-text-muted">{seg.label}</span>
             <span className="font-medium">{seg.value}</span>
           </div>
         ))}
@@ -235,7 +246,8 @@ export default function DashboardPage() {
   const { toast } = useToast();
 
   const [stats, setStats] = useState<Stats | null>(null);
-  const [projectName, setProjectName] = useState("");
+  const [project, setProject] = useState<ApiProject | null>(null);
+  const projectName = project?.name ?? "";
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -245,7 +257,7 @@ export default function DashboardPage() {
     ])
       .then(([s, p]) => {
         setStats(s);
-        setProjectName(p.name);
+        setProject(p);
       })
       .catch(() => toast("Failed to load dashboard", "error"))
       .finally(() => setLoading(false));
@@ -261,6 +273,25 @@ export default function DashboardPage() {
   }
 
   const completionPct = stats.total > 0 ? Math.round((stats.done / stats.total) * 100) : 0;
+
+  // The board's own columns decide what every chart is called and painted, so the dashboard and
+  // the board cannot disagree about the same column. The seeded maps above stay as the fallback
+  // for a project whose document predates column seeding.
+  const columns = effectiveColumns(project?.columns);
+  const columnLabels = Object.fromEntries(columns.map((c) => [c.id, c.label]));
+  const columnColors = {
+    ...STATUS_COLORS,
+    ...Object.fromEntries(columns.map((c) => [c.id, c.color])),
+  };
+  const categoryColors = {
+    ...CATEGORY_COLORS,
+    ...Object.fromEntries((project?.categories ?? []).map((c) => [c.name, c.color])),
+  };
+  // Plural: a board may carry more than one column in flight, and task-service already sums them
+  const inFlight = columnIdsWithRole(project, "active").reduce(
+    (n, id) => n + (stats.statusBreakdown[id] || 0),
+    0
+  );
 
   return (
     <div className="max-w-7xl mx-auto w-full">
@@ -278,7 +309,7 @@ export default function DashboardPage() {
         </div>
         <div className="bg-bg-card border border-border rounded-lg p-4">
           <p className="text-sm text-text-muted">In Progress</p>
-          <p className="text-2xl font-bold text-status-in-progress">{stats.statusBreakdown.in_progress || 0}</p>
+          <p className="text-2xl font-bold text-status-in-progress">{inFlight}</p>
         </div>
         <div className="bg-bg-card border border-border rounded-lg p-4">
           <p className="text-sm text-text-muted">Completion</p>
@@ -292,7 +323,8 @@ export default function DashboardPage() {
           <h2 className="font-semibold mb-4">Status Breakdown</h2>
           <DonutChart
             data={stats.statusBreakdown}
-            colors={STATUS_COLORS}
+            colors={columnColors}
+            labels={columnLabels}
             emptyMessage="No tasks on the board yet — every task counts towards its column here."
           />
         </div>
@@ -310,7 +342,7 @@ export default function DashboardPage() {
           <h2 className="font-semibold mb-4">By Category</h2>
           <HorizontalBars
             data={stats.categoryBreakdown}
-            colors={CATEGORY_COLORS}
+            colors={categoryColors}
             emptyMessage="No tasks yet — categories appear as soon as the board has tasks."
           />
         </div>
