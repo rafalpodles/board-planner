@@ -2,21 +2,11 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "mobile-toolbar",
+      "name": "boardplanner-dev",
       "runtimeExecutable": "npm",
-      "runtimeArgs": [
-        "run",
-        "dev"
-      ],
-      "port": 3501,
-      "autoPort": false,
-      "env": {
-        "MONGODB_URI": "mongodb://localhost:27018/docsshot_e2e",
-        "PORT": "3501",
-        "APP_ORIGIN": "http://localhost:3501",
-        "PUBLIC_ORIGIN": "http://localhost:3501",
-        "ENCRYPTION_KEY": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-      }
+      "runtimeArgs": ["run", "dev"],
+      "port": 3456,
+      "autoPort": true
     }
   ]
 }
