@@ -233,9 +233,14 @@ mcp-server/           # Standalone MCP server (stdio transport)
   than stored. A worker reports the checkouts it has — resolved from `repos.json` on its own
   machine — and the server matches those remotes against the project's `githubRepo`/`gitlabRepo`.
   **The server never sends a path**: an assignment names a remote and the worker resolves its own
-  checkout, so where anything runs stays a local decision. Work policy (`autoMerge`, `baseBranch`, diff limits, models) lives on the
-  project; only `pollIntervalMs` and the kill switch live on the worker. `autoMerge` defaults off,
-  so an unconfigured project gets a pull request and nothing merged. See `worker/README.md`.
+  checkout, so where anything runs stays a local decision. What a run *does* is the **agent** the
+  task names — an ordered list of steps and gates, composed in Agents. Merging is a **Merge step**
+  in that sequence, not a setting: `autoMerge` and `reviewGate` left the project's settings along
+  with the diff limits and the models, which now belong to the blocks that use them. A project
+  keeps only `baseBranch` and the two timeouts, and the worker keeps `pollIntervalMs` and the kill
+  switch. A task naming **no** agent is never claimed at all — there is no falling back to the
+  project's default, which only pre-selects the picker. See `worker/README.md` and
+  https://board-planner.com/docs/ai/agents/.
 - **A held task refuses to move**: while a run holds a task (`execution.runId` set), a status change
   that would leave the column is refused with **409**, naming the worker and its phase — through
   every writer: the board, the edit form, MCP `update_task`, and the PM agent. `force: true` on the
