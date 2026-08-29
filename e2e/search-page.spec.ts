@@ -1,7 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import {
   DECOY_TASK_TITLE,
-  HELD_TASK_TITLE,
+  SIBLING_TASK_TITLE,
   PROJECT_KEY,
   PROJECT_NAME,
   seed,
@@ -79,27 +79,32 @@ test("a project is a result too, as it is in the palette", async ({ page }) => {
 test("a late answer for an earlier query cannot overwrite a newer one", async ({ page }) => {
   await signIn(page);
 
+  // The two queries must match *different* tasks, or a stale answer would put the same row
+  // back on screen and the assertion could not tell the two apart.
+  const STALE = "already";
+  const CURRENT = "free to";
+
   await page.route("**/api/search?q=*", async (route) => {
     const q = new URL(route.request().url()).searchParams.get("q") ?? "";
-    if (q === "he") await new Promise((r) => setTimeout(r, 2500));
+    if (q === STALE) await new Promise((r) => setTimeout(r, 3000));
     await route.continue();
   });
 
   await page.goto("/search");
   const box = searchBox(page);
 
-  // "he" fires and is left in flight; the debounce is 250ms, so the pause matters
-  await box.pressSequentially("he", { delay: 40 });
-  await page.waitForTimeout(600);
-  await box.pressSequentially("ld by", { delay: 40 });
+  // Long enough past the 250ms debounce for the request to be in flight, and stalled
+  await box.fill(STALE);
+  await page.waitForTimeout(700);
 
-  await expect(page.getByText(HELD_TASK_TITLE)).toBeVisible();
-  await expect(box).toHaveValue("held by");
+  await box.fill(CURRENT);
+  await expect(page.getByText(SIBLING_TASK_TITLE)).toBeVisible();
+  await expect(page.getByText(DECOY_TASK_TITLE)).toHaveCount(0);
 
-  // Long enough for the stalled "he" answer to arrive and, if unguarded, replace what is shown
-  await page.waitForTimeout(2500);
-  await expect(page.getByText(HELD_TASK_TITLE)).toBeVisible();
-  await expect(box).toHaveValue("held by");
+  // The stalled answer lands here. Unguarded, it replaces what is on screen with its own.
+  await page.waitForTimeout(3500);
+  await expect(page.getByText(SIBLING_TASK_TITLE)).toBeVisible();
+  await expect(page.getByText(DECOY_TASK_TITLE)).toHaveCount(0);
 });
 
 test("on a phone the drawer's Search is the same page the magnifier opens", async ({ page }) => {
@@ -112,6 +117,10 @@ test("on a phone the drawer's Search is the same page the magnifier opens", asyn
   const drawer = page.getByRole("dialog", { name: "Navigation" });
   const searchRow = drawer.getByRole("link", { name: "Search" });
   await expect(searchRow).toHaveAttribute("href", "/search");
+
+  // The drawer slides in on a transform. Clicking mid-slide lands on the scrim behind it and
+  // quietly does nothing — which cost a run to diagnose, on a loaded machine.
+  await expect.poll(async () => (await drawer.boundingBox())?.x).toBe(0);
 
   await searchRow.click();
   await expect(page).toHaveURL(/\/search$/);
