@@ -407,6 +407,7 @@ function TaskDetailView({
               users={users}
               sprints={sprints}
               agents={agents}
+              projectId={String(project._id)}
               projectDefaultAgent={projectDefaultAgent}
               stored={task}
               columns={columns}
@@ -440,6 +441,7 @@ function TaskDetailView({
           users={users}
           sprints={sprints}
           agents={agents}
+          projectId={String(project._id)}
           projectDefaultAgent={projectDefaultAgent}
           stored={task}
           columns={columns}
