@@ -19,6 +19,7 @@ export interface SearchHit {
   meta: string;
   icon?: string;
   status?: TaskStatus;
+  priority?: ApiTask["priority"];
   projectName?: string;
   projectKey?: string;
   projectId?: string;
@@ -59,6 +60,7 @@ export function toHits(projects: ApiProject[], tasks: ApiTask[]): SearchHit[] {
         label: t.title,
         meta: project?.key ? `${project.key}-${t.taskNumber}` : `#${t.taskNumber}`,
         status: t.status,
+        priority: t.priority,
         projectName: project?.name,
         projectKey: project?.key,
         projectId: project?._id,
@@ -96,10 +98,14 @@ export function sortByGroup(hits: SearchHit[], currentProjectRef?: string): Sear
   ];
 }
 
-export function useSearch(projects: ApiProject[], currentProjectRef?: string) {
+export function useSearch(
+  projects: ApiProject[],
+  currentProjectRef?: string,
+  initialQuery = ""
+) {
   const api = useApi();
   const router = useRouter();
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialQuery);
   const [tasks, setTasks] = useState<ApiTask[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);

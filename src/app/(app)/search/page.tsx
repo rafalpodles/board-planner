@@ -1,99 +1,86 @@
 "use client";
 
-import { Suspense, useState, useEffect, useRef } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
+import { Suspense, useEffect, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { useApi } from "@/hooks/use-api";
-import { ApiTask, STATUS_LABELS, PRIORITY_LABELS } from "@/types";
+import { STATUS_LABELS, PRIORITY_LABELS } from "@/types";
 import { Badge } from "@/components/ui/Badge";
-import { taskPath } from "@/lib/urls";
 import { PageHeader } from "@/components/shell/PageHeader";
+import { useProjects } from "@/hooks/use-projects";
+import { MIN_QUERY, SearchHit, columnOf, useSearch } from "@/components/search/use-search";
 
-interface GroupedResult {
-  projectId: string;
-  projectName: string;
-  projectKey: string;
-  tasks: ApiTask[];
+interface Group {
+  key: string;
+  label: string;
+  hits: SearchHit[];
+}
+
+/** Task hits gathered under the project they belong to, in the order the API returned them */
+function byProject(hits: SearchHit[]): Group[] {
+  const groups: Group[] = [];
+  const seen = new Map<string, Group>();
+  for (const hit of hits) {
+    if (hit.kind !== "task") continue;
+    const key = hit.projectId ?? hit.projectKey ?? "";
+    let group = seen.get(key);
+    if (!group) {
+      group = {
+        key,
+        label: hit.projectKey ? `${hit.projectName ?? ""} (${hit.projectKey})` : (hit.projectName ?? ""),
+        hits: [],
+      };
+      seen.set(key, group);
+      groups.push(group);
+    }
+    group.hits.push(hit);
+  }
+  return groups;
 }
 
 function SearchContent() {
-  const searchParams = useSearchParams();
-  const router = useRouter();
-  const api = useApi();
+  const { projects } = useProjects();
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const initialQuery = searchParams.get("q") || "";
-  const [query, setQuery] = useState(initialQuery);
-  const [results, setResults] = useState<ApiTask[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [searched, setSearched] = useState(false);
+  // Read once: after this the box owns the query and writes the address, not the other way round
+  const initialQuery = useSearchParams().get("q") ?? "";
+  const { query, setQuery, trimmed, active, loading, hits } = useSearch(
+    projects,
+    undefined,
+    initialQuery
+  );
 
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
 
+  // The address follows the box so the page stays linkable. `history.replaceState`, not
+  // `router.replace`: a router navigation queued here lands *after* a result the reader has
+  // just clicked and takes them back to the search page. Nothing on this page reads the
+  // address after the first render, so the bare history entry is enough.
+  const inTheAddress = useRef(initialQuery);
   useEffect(() => {
-    if (!initialQuery) return;
-    performSearch(initialQuery);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialQuery]);
+    if (inTheAddress.current === trimmed) return;
+    const timer = setTimeout(() => {
+      inTheAddress.current = trimmed;
+      const next = trimmed ? `/search?q=${encodeURIComponent(trimmed)}` : "/search";
+      window.history.replaceState(window.history.state, "", next);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [trimmed]);
 
-  async function performSearch(q: string) {
-    if (q.trim().length < 2) return;
-    setLoading(true);
-    setSearched(true);
-    try {
-      const data = await api.get(
-        `/api/search?q=${encodeURIComponent(q.trim())}`,
-      );
-      setResults(data);
-    } catch {
-      setResults([]);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (query.trim().length < 2) return;
-    // The effect above, watching ?q, is what actually searches — this only updates the address.
-    // Also calling performSearch here fires the same request a second time (BP-406).
-    router.replace(`/search?q=${encodeURIComponent(query.trim())}`);
-  }
-
-  const grouped: GroupedResult[] = [];
-  const projectMap = new Map<string, GroupedResult>();
-
-  for (const task of results) {
-    const proj = task.project as unknown as {
-      _id: string;
-      name: string;
-      key: string;
-    };
-    if (!proj || typeof proj !== "object") continue;
-    let group = projectMap.get(proj._id);
-    if (!group) {
-      group = {
-        projectId: proj._id,
-        projectName: proj.name,
-        projectKey: proj.key,
-        tasks: [],
-      };
-      projectMap.set(proj._id, group);
-      grouped.push(group);
-    }
-    group.tasks.push(task);
-  }
+  const projectHits = hits.filter((hit) => hit.kind === "project");
+  const taskGroups = byProject(hits);
 
   return (
-    <div className="w-full max-w-3xl mx-auto">
+    <div className="mx-auto w-full max-w-3xl">
       <PageHeader title="Search" />
 
-      <form onSubmit={handleSubmit} className="mb-6">
+      {/* No submit handler: the hook searches as the box changes, and Enter would only fire
+          the same request a second time — the defect BP-406 fixed here once already. */}
+      <form onSubmit={(e) => e.preventDefault()} className="mb-6">
         <div className="relative">
           <svg
-            className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted pointer-events-none"
+            className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-text-muted"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -110,54 +97,91 @@ function SearchContent() {
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search tasks by title, description, or key (e.g. CP-12)..."
-            className="focus-ring w-full bg-bg-input border border-border rounded-lg pl-10 pr-4 py-2.5
+            aria-label="Search tasks and projects"
+            placeholder="Search tasks by title, description, or key (e.g. CP-12)…"
+            className="focus-ring w-full rounded-lg border border-border bg-bg-input py-2.5 pl-10 pr-4
               text-text placeholder:text-text-muted"
           />
         </div>
       </form>
 
       {loading && (
-        <div className="flex justify-center py-8">
-          <div className="animate-spin rounded-full h-6 w-6 border-2 border-primary border-t-transparent" />
+        <div className="flex justify-center py-8" role="status" aria-label="Searching">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
         </div>
       )}
 
-      {!loading && searched && results.length === 0 && (
-        <p className="text-center text-text-muted py-8">No tasks found</p>
+      {!loading && active && hits.length === 0 && (
+        <p className="py-8 text-center text-text-muted">No tasks found</p>
+      )}
+
+      {!loading && !active && trimmed.length > 0 && (
+        <p className="py-8 text-center text-text-muted">
+          Keep typing — {MIN_QUERY} characters at least
+        </p>
+      )}
+
+      {!loading && projectHits.length > 0 && (
+        <div className="mb-6">
+          <h2 className="mb-2 text-sm font-semibold text-text-muted">Projects</h2>
+          <div className="overflow-hidden rounded-lg border border-border">
+            {projectHits.map((hit, i) => (
+              <Link
+                key={hit.id}
+                href={hit.href}
+                className={`flex items-center gap-2.5 px-4 py-3 transition-colors hover:bg-bg-input/50
+                  ${i > 0 ? "border-t border-border" : ""}`}
+              >
+                {hit.icon && (
+                  <span aria-hidden className="text-[15px] leading-none">
+                    {hit.icon}
+                  </span>
+                )}
+                <span className="truncate text-sm font-medium">{hit.label}</span>
+                <span className="ml-auto shrink-0 font-mono text-xs text-text-muted">
+                  {hit.meta}
+                </span>
+              </Link>
+            ))}
+          </div>
+        </div>
       )}
 
       {!loading &&
-        grouped.map((group) => (
-          <div key={group.projectId} className="mb-6">
-            <h2 className="text-sm font-semibold text-text-muted mb-2">
-              {group.projectName}{" "}
-              <span className="font-mono text-xs">({group.projectKey})</span>
-            </h2>
-            <div className="border border-border rounded-lg overflow-hidden">
-              {group.tasks.map((task, i) => (
-                <Link
-                  key={task._id}
-                  href={taskPath(group.projectKey, task.taskNumber)}
-                  className={`flex flex-col items-start gap-1.5 px-4 py-3 transition-colors hover:bg-bg-input/50 md:flex-row md:items-center md:gap-3
-                  ${i > 0 ? "border-t border-border" : ""}`}
-                >
-                  <span className="flex min-w-0 max-w-full items-center gap-2 md:flex-1">
-                    <span className="text-xs font-mono text-text-muted whitespace-nowrap">
-                      {group.projectKey}-{task.taskNumber}
+        taskGroups.map((group) => (
+          <div key={group.key} className="mb-6">
+            <h2 className="mb-2 text-sm font-semibold text-text-muted">{group.label}</h2>
+            <div className="overflow-hidden rounded-lg border border-border">
+              {group.hits.map((hit, i) => {
+                const column = columnOf(hit, projects);
+                return (
+                  <Link
+                    key={hit.id}
+                    href={hit.href}
+                    className={`flex flex-col items-start gap-1.5 px-4 py-3 transition-colors hover:bg-bg-input/50 md:flex-row md:items-center md:gap-3
+                    ${i > 0 ? "border-t border-border" : ""}`}
+                  >
+                    <span className="flex min-w-0 max-w-full items-center gap-2 md:flex-1">
+                      <span className="whitespace-nowrap font-mono text-xs text-text-muted">
+                        {hit.meta}
+                      </span>
+                      <span className="truncate text-sm font-medium">{hit.label}</span>
                     </span>
-                    <span className="truncate text-sm font-medium">{task.title}</span>
-                  </span>
-                  <span className="flex shrink-0 items-center gap-2">
-                    <Badge variant="status" value={task.status}>
-                      {STATUS_LABELS[task.status]}
-                    </Badge>
-                    <Badge variant="priority" value={task.priority}>
-                      {PRIORITY_LABELS[task.priority] ?? task.priority}
-                    </Badge>
-                  </span>
-                </Link>
-              ))}
+                    <span className="flex shrink-0 items-center gap-2">
+                      {hit.status && (
+                        <Badge variant="status" value={hit.status} color={column?.color}>
+                          {column?.label ?? STATUS_LABELS[hit.status] ?? hit.status}
+                        </Badge>
+                      )}
+                      {hit.priority && (
+                        <Badge variant="priority" value={hit.priority}>
+                          {PRIORITY_LABELS[hit.priority] ?? hit.priority}
+                        </Badge>
+                      )}
+                    </span>
+                  </Link>
+                );
+              })}
             </div>
           </div>
         ))}
@@ -170,7 +194,7 @@ export default function SearchPage() {
     <Suspense
       fallback={
         <div className="flex justify-center py-12">
-          <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary border-t-transparent" />
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
         </div>
       }
     >

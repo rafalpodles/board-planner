@@ -282,6 +282,22 @@ describe("Sidebar search row", () => {
     expect(row.querySelector("kbd")).toBeNull();
   });
 
+  // BP-494: the phone's magnifier opens /search, so a drawer row that opened the palette
+  // instead put two different searches on one screen.
+  it("is a link to the search page in the drawer, and a palette trigger otherwise", async () => {
+    setViewport(true);
+    renderSidebar({ mobileOpen: true });
+    const inDrawer = await screen.findByRole("link", { name: "Search" });
+    expect(inDrawer.getAttribute("href")).toBe("/search");
+    expect(screen.queryByRole("button", { name: "Search" })).toBeNull();
+
+    cleanup();
+    setViewport(false);
+    renderSidebar({ mobileOpen: false });
+    expect(await screen.findByRole("button", { name: "Search" })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Search" })).toBeNull();
+  });
+
   it("still announces the shortcut that reaches it", async () => {
     renderSidebar();
     const row = await screen.findByRole("button", { name: "Search" });

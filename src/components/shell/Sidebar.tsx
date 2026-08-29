@@ -250,13 +250,26 @@ export function Sidebar({
 
       <nav className="flex flex-1 flex-col gap-4 overflow-y-auto px-2.5 pb-2.5">
         <div>
-          <NavItem
-            icon={ICONS.search}
-            label="Search"
-            collapsed={compact}
-            onClick={onOpenSearch}
-            keyshortcuts="Meta+K Control+K"
-          />
+          {/* In the drawer this is a page like the two rows under it, because the phone's
+              magnifier goes to the same page and one screen must not offer two searches.
+              With a keyboard the palette is the better tool, so it stays. */}
+          {isDrawer ? (
+            <NavItem
+              href="/search"
+              icon={ICONS.search}
+              label="Search"
+              active={isActive("/search")}
+              collapsed={compact}
+            />
+          ) : (
+            <NavItem
+              icon={ICONS.search}
+              label="Search"
+              collapsed={compact}
+              onClick={onOpenSearch}
+              keyshortcuts="Meta+K Control+K"
+            />
+          )}
           <NavItem
             href="/my-tasks"
             icon={ICONS.myTasks}
