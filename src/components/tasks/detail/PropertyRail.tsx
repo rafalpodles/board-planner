@@ -192,8 +192,8 @@ export function PropertyRail({
   const offeredAgents = agents.filter((a) => mayRunForThisPerson(a) && mayRunOnThisBoard(a));
   /**
    * Set, and not among the agents this reader may choose — which after the filter above means
-   * `/api/agents` never sent it at all, and the only way that happens is somebody else's personal
-   * agent. Withholding it as an OPTION is right; hiding the current VALUE is not, and the picker
+   * `/api/agents` never sent it at all — somebody else's personal agent, or a project
+   * agent on a board this reader cannot reach. Withholding it as an OPTION is right; hiding the current VALUE is not, and the picker
    * does exactly that, rendering "No agent" over the very field the consent model rests on. So the
    * row stops being a picker and becomes what it can honestly be: the name, and why it is not
    * yours to choose. Re-offering it instead would be a control that 400s on click.
