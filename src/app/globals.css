@@ -281,3 +281,23 @@ body {
 .prose th {
   background-color: var(--color-bg-input);
 }
+
+/* iOS Safari zooms the whole page when a text-entry control whose computed size is under 16px
+   takes focus, and does not zoom back when the keyboard closes — so one tap on the board's sort
+   control leaves the app permanently magnified until the reader pinches out (BP-495).
+
+   Gated on the pointer rather than on width, like the hover rule above: this is a property of
+   touch, and an iPad in portrait is 768px wide and does it too. Unlayered, so it outranks the
+   `text-[13px]` utilities it has to beat — a bare element selector loses to a class on
+   specificity, and only being outside `@layer` wins it back.
+
+   Buttons never trigger the zoom, and the input types listed here would have their boxes
+   resized rather than their text, so all of them are left alone. Nothing in the app sets a
+   control above 16px, so this only ever raises. */
+@media (hover: none) and (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not([type="button"]):not([type="submit"]),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
