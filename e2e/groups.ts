@@ -19,7 +19,12 @@ export const GROUPS = {
     "sticky-task-header.spec.ts",
     "task-recurrence.spec.ts",
   ],
-  "task-fields": ["field-history.spec.ts", "ai-task-generation.spec.ts", "search.spec.ts"],
+  "task-fields": [
+    "field-history.spec.ts",
+    "ai-task-generation.spec.ts",
+    "search.spec.ts",
+    "search-page.spec.ts",
+  ],
   board: [
     "kanban-board-core.spec.ts",
     "task-number-not-burnt.spec.ts",
