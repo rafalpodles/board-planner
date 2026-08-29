@@ -4,7 +4,7 @@ import Image from "next/image";
 import { useCallback, useRef, useState } from "react";
 import { AuthGuard } from "@/components/AuthGuard";
 import { SearchLayer } from "@/components/search/SearchLayer";
-import { SearchIconButton } from "@/components/search/SearchTrigger";
+import { SearchPageLink } from "@/components/search/SearchTrigger";
 import { PmChatWidget } from "@/components/pm/PmChatWidget";
 import { ProjectsProvider } from "@/components/shell/ProjectsProvider";
 import { Sidebar } from "@/components/shell/Sidebar";
@@ -67,7 +67,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               <Image src="/logo.svg" alt="" width={20} height={20} />
               <span className="text-sm font-bold">{APP_NAME}</span>
               <div className="ml-auto">
-                <SearchIconButton onOpen={openSearch} />
+                <SearchPageLink />
               </div>
             </div>
 

@@ -139,21 +139,23 @@ function SearchContent() {
                 <Link
                   key={task._id}
                   href={taskPath(group.projectKey, task.taskNumber)}
-                  className={`flex items-center gap-3 px-4 py-3 hover:bg-bg-input/50 transition-colors block
+                  className={`flex flex-col items-start gap-1.5 px-4 py-3 transition-colors hover:bg-bg-input/50 md:flex-row md:items-center md:gap-3
                   ${i > 0 ? "border-t border-border" : ""}`}
                 >
-                  <span className="text-xs font-mono text-text-muted whitespace-nowrap">
-                    {group.projectKey}-{task.taskNumber}
+                  <span className="flex min-w-0 max-w-full items-center gap-2 md:flex-1">
+                    <span className="text-xs font-mono text-text-muted whitespace-nowrap">
+                      {group.projectKey}-{task.taskNumber}
+                    </span>
+                    <span className="truncate text-sm font-medium">{task.title}</span>
                   </span>
-                  <span className="text-sm font-medium truncate flex-1">
-                    {task.title}
+                  <span className="flex shrink-0 items-center gap-2">
+                    <Badge variant="status" value={task.status}>
+                      {STATUS_LABELS[task.status]}
+                    </Badge>
+                    <Badge variant="priority" value={task.priority}>
+                      {PRIORITY_LABELS[task.priority] ?? task.priority}
+                    </Badge>
                   </span>
-                  <Badge variant="status" value={task.status}>
-                    {STATUS_LABELS[task.status]}
-                  </Badge>
-                  <Badge variant="priority" value={task.priority}>
-                    {PRIORITY_LABELS[task.priority] ?? task.priority}
-                  </Badge>
                 </Link>
               ))}
             </div>
