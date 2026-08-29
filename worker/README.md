@@ -22,19 +22,21 @@ claim → worktree → claude -p → clean-tree check → gates → push → PR 
 
 Every step reports to the board, so the task's comments are the run log.
 
-The gates run in cost order, cheapest first, and the first rejection stops the run:
+The gates and their order are the **agent's** — the shipped Default agent runs them roughly
+cheapest first, and a `protected-paths` gate always stands before anything that executes the
+repository's own scripts. The first rejection stops the run:
 
 | Gate | Rejects when |
 |---|---|
-| `diff-size` | the diff is larger than the worker's `maxDiffLines` or `maxDiffFiles` policy |
+| `diff-size` | the diff is larger than the limit on the Size gate that rejected it, or the worker's `maxDiffLines`/`maxDiffFiles` where that gate names none |
 | `protected-paths` | the change touches files a later step executes or loads as instructions |
 | `test-presence` | the change touches code without touching a test |
 | `build` | `npm run build` fails |
 | `test-run` | the test suite fails |
-| `review` | a second Claude, with a clean context, rejects the diff |
+| `review` | a second Claude, with a clean context, rejects the diff — present because the agent carries a Reviewed gate |
 
-A rejection pushes the branch — unless the run committed nothing, or the provenance check refuses
-the history — comments which gate said no, and routes the task to the review column. A usage limit returns the task to the queue with its attempt refunded — it is not the
+A rejection pushes the branch — unless the run committed nothing, the provenance check refuses the
+history, or `protected-paths` is what refused, which withholds the push deliberately — comments which gate said no, and routes the task to the review column. A usage limit returns the task to the queue with its attempt refunded — it is not the
 task's failure. A crash or timeout also returns it to the queue, but spends the attempt, so a
 repeating failure runs out of retries and lands in front of a human instead of cycling forever.
 
@@ -373,16 +375,24 @@ so; the fix is to enrol the machine again from the machine.
 
 ## Where settings live
 
-**On the project** (Settings → Workers, instance admin): whether workers may run it at all, and how
-— `autoMerge`, `baseBranch`, `taskTimeoutMs`, `maxDiffLines`, `maxDiffFiles`, `model`,
-`fallbackModel`, `reviewModel`. These describe the repository and the work, so every machine serving
-that project runs under the same values.
+**On the agent** (Agents): what the run actually does — the steps, the gates, their limits and the
+models each block calls. `autoMerge` and `reviewGate` used to be project settings and are retired:
+an agent merges because its sequence ends with a **Merge** step, and a change is reviewed because a
+**Reviewed** gate stands after the last step that writes. The diff limits and the models moved onto
+the blocks that use them.
+
+**On the project** (Settings → Workers, instance admin): whether workers may run it at all,
+`baseBranch`, `taskTimeoutMs` and `runCeilingMs`. These describe the repository, so every machine
+serving that project runs under the same values.
 
 **On the worker** (Settings → Workers, the fleet console): what this machine is called, whether it
 may run, the instance kill switch, and `pollIntervalMs`. These describe the laptop.
 
 Only fields an operator actually set travel to the worker; everything else resolves against the
-defaults compiled into it, so raising a default reaches every machine that never pinned it.
+defaults compiled into it, so raising a default reaches every machine that never pinned it. The
+worker still carries `maxDiffLines` and `maxDiffFiles`: they are the fallback a Size gate uses when
+its own block names no limit.
 
-**`autoMerge` is off unless you turn it on.** A project nobody has configured gets a branch pushed
-and a pull request opened, and the task moves to review — nothing lands on the base branch.
+**Nothing merges unless the agent says so.** A project running the shipped **Default** agent gets a
+branch pushed and a pull request opened, and the task moves to review — nothing lands on the base
+branch. Give it an agent whose sequence ends with **Merge** and it merges its own work.
