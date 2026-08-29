@@ -484,13 +484,13 @@ test.describe("the /search page", () => {
     await expect(page.getByText(BODY_HIT_TITLE).first()).toBeVisible();
   });
 
-  test("typing a query and submitting it puts the query in the address", async ({ page }) => {
+  test("typing a query puts the query in the address", async ({ page }) => {
     await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);
     await openSearchPage(page);
 
+    // BP-494: the box searches as it changes, so there is no Enter in this test on purpose
     const answered = page.waitForResponse(searchFor(BODY_HIT_KEY));
     await pageInput(page).fill(BODY_HIT_KEY);
-    await pageInput(page).press("Enter");
     await answered;
 
     await expect(page).toHaveURL(new RegExp(`/search\\?q=${PROJECT_KEY}-${BODY_HIT_NUMBER}$`));
@@ -504,7 +504,7 @@ test.describe("the /search page", () => {
    * first's identical answer. waitForResponse elsewhere in this file takes the first match, so
    * it would not have caught a duplicate; only a count does.
    */
-  test("submitting the form fires exactly one request", async ({ page }) => {
+  test("a settled query fires exactly one request", async ({ page }) => {
     await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);
     await openSearchPage(page);
 
@@ -515,7 +515,6 @@ test.describe("the /search page", () => {
 
     const answered = page.waitForResponse(searchFor(SEARCH_WORD));
     await pageInput(page).fill(SEARCH_WORD);
-    await pageInput(page).press("Enter");
     await answered;
     // A duplicate fired by the effect re-running would land within one tick of the first
     await page.waitForTimeout(500);
@@ -523,7 +522,7 @@ test.describe("the /search page", () => {
     expect(count).toBe(1);
   });
 
-  test("a one-character query is not submitted at all", async ({ page }) => {
+  test("a one-character query is not searched at all", async ({ page }) => {
     await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);
     await openSearchPage(page);
 
@@ -531,7 +530,6 @@ test.describe("the /search page", () => {
     // that never woke up
     const answered = page.waitForResponse(searchFor(SEARCH_WORD));
     await pageInput(page).fill(SEARCH_WORD);
-    await pageInput(page).press("Enter");
     await answered;
     await expect(page).toHaveURL(new RegExp(`/search\\?q=${SEARCH_WORD}$`));
     await expect(results(page).filter({ hasText: TITLE_HIT_TITLE })).toHaveCount(1);
@@ -542,14 +540,12 @@ test.describe("the /search page", () => {
     });
 
     await pageInput(page).fill("z");
-    await pageInput(page).press("Enter");
     await page.waitForTimeout(1_000);
 
-    // A second valid submit, awaited, so the silence about "z" is an ordering fact and not a
+    // A second valid query, awaited, so the silence about "z" is an ordering fact and not a
     // guess about how long a shared machine takes
     const witnessed = page.waitForResponse(searchFor(LEGACY_HIT_WORD));
     await pageInput(page).fill(LEGACY_HIT_WORD);
-    await pageInput(page).press("Enter");
     await witnessed;
 
     expect(requested).toBe(false);

@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useRef } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { STATUS_LABELS, PRIORITY_LABELS } from "@/types";
 import { Badge } from "@/components/ui/Badge";
@@ -38,7 +38,6 @@ function byProject(hits: SearchHit[]): Group[] {
 }
 
 function SearchContent() {
-  const router = useRouter();
   const { projects } = useProjects();
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -54,14 +53,20 @@ function SearchContent() {
     inputRef.current?.focus();
   }, []);
 
-  // Keeps the page linkable and Back honest. `replace`, so typing does not build history.
+  // The address follows the box so the page stays linkable. `history.replaceState`, not
+  // `router.replace`: a router navigation queued here lands *after* a result the reader has
+  // just clicked and takes them back to the search page. Nothing on this page reads the
+  // address after the first render, so the bare history entry is enough.
+  const inTheAddress = useRef(initialQuery);
   useEffect(() => {
+    if (inTheAddress.current === trimmed) return;
     const timer = setTimeout(() => {
+      inTheAddress.current = trimmed;
       const next = trimmed ? `/search?q=${encodeURIComponent(trimmed)}` : "/search";
-      router.replace(next, { scroll: false });
+      window.history.replaceState(window.history.state, "", next);
     }, 300);
     return () => clearTimeout(timer);
-  }, [trimmed, router]);
+  }, [trimmed]);
 
   const projectHits = hits.filter((hit) => hit.kind === "project");
   const taskGroups = byProject(hits);
@@ -93,7 +98,7 @@ function SearchContent() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             aria-label="Search tasks and projects"
-            placeholder="Search tasks and projects, or CP-12…"
+            placeholder="Search tasks by title, description, or key (e.g. CP-12)…"
             className="focus-ring w-full rounded-lg border border-border bg-bg-input py-2.5 pl-10 pr-4
               text-text placeholder:text-text-muted"
           />
@@ -107,7 +112,7 @@ function SearchContent() {
       )}
 
       {!loading && active && hits.length === 0 && (
-        <p className="py-8 text-center text-text-muted">Nothing matches “{trimmed}”</p>
+        <p className="py-8 text-center text-text-muted">No tasks found</p>
       )}
 
       {!loading && !active && trimmed.length > 0 && (
