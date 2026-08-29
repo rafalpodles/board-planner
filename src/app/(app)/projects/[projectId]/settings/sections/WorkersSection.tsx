@@ -78,8 +78,12 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
     setDefaultAgent(agentId);
     try {
       await agentApi.put(`/api/projects/${projectId}/agent`, { agentId });
-    } catch {
+    } catch (error) {
       setDefaultAgent(previous);
+      // The control snapping back on its own said nothing at all, and the server's refusals are
+      // specific — which board the agent belongs to, or that it has nothing in it yet. `save()`
+      // in this same component already toasts, so this is the pattern beside it.
+      toast(error instanceof Error ? error.message : "Could not set the default agent", "error");
     }
   };
   const api = useApi();
@@ -295,11 +299,16 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
             onChange={(e) => saveDefaultAgent(e.target.value)}
             className="w-full rounded-lg border border-border bg-bg-input min-h-11 px-2 py-1.5 text-sm sm:min-h-0"
           >
+            <option value="">No default — the task picker starts empty</option>
             {store.allAgents
-              .filter((a) => a.scope !== "user")
+              .filter(
+                (a) =>
+                  a.scope !== "user" &&
+                  (a.scope !== "project" || a.projectId === String(project._id))
+              )
               .map((a) => (
                 <option key={a._id} value={a._id}>
-                  {a.name}
+                  {a.projectName ? `${a.name} — ${a.projectName}` : a.name}
                 </option>
               ))}
           </select>
