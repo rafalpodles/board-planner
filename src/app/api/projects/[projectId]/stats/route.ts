@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
 import { Task } from "@/models/task";
+import { columnIdsWithRole } from "@/lib/columns";
+import { normalizeOptions } from "@/lib/custom-fields";
 import { Project } from "@/models/project";
 import { User } from "@/models/user";
 import { TASK_STATUSES } from "@/types";
@@ -23,9 +25,25 @@ export const GET = withProjectAccess(async (_request, { params }) => {
 
   // Difficulty is an ordinary project field since CP-213. Reading the old column
   // here would report values frozen at the moment CP-214 removed the dual-write.
-  const project = await Project.findById(projectId, "customFields").lean();
+  const project = await Project.findById(projectId, "customFields columns").lean();
   const difficultyField = (project?.customFields || []).find(
     (f) => f.name.toLowerCase() === "difficulty"
+  );
+  // Columns are project-defined since BP-128, so "finished" is a role and not the id `done`.
+  // A board that renamed or replaced its last column read 0 completed, 0% and an empty
+  // velocity chart — three headline numbers, all of them silently wrong (BP-446).
+  const doneIds = columnIdsWithRole(project, "done");
+  // An option's stored value is its id, which survives a rename while `value` moves; and an
+  // option minted by the editor since CP-211 carries `slug-xxxxxx`. Either reaches the chart
+  // as a label nobody recognises unless it is resolved here (BP-447).
+  // Through `normalizeOptions`, which every other reader of these options goes through: the field
+  // is `Mixed` so that pre-CP-211 shapes survive, and a bare `{id}` or a plain string reaches here
+  // intact. Mapping them by hand labelled those tasks the literal "undefined" — and merged two
+  // such options into one bar with their counts added together.
+  const difficultyLabels = new Map(
+    normalizeOptions(difficultyField?.options as Parameters<typeof normalizeOptions>[0]).map(
+      (o) => [o.id, o.value] as const
+    )
   );
   const difficultyPath = difficultyField ? `$customFieldValues.${difficultyField._id}` : null;
 
@@ -36,7 +54,7 @@ export const GET = withProjectAccess(async (_request, { params }) => {
         $group: {
           _id: null,
           total: { $sum: 1 },
-          done: { $sum: { $cond: [{ $eq: ["$status", "done"] }, 1, 0] } },
+          done: { $sum: { $cond: [{ $in: ["$status", doneIds] }, 1, 0] } },
           statusPairs: { $push: "$status" },
           categoryPairs: { $push: "$category" },
           ...(difficultyPath ? { difficultyPairs: { $push: difficultyPath } } : {}),
@@ -49,7 +67,7 @@ export const GET = withProjectAccess(async (_request, { params }) => {
         project: projectOid,
         $or: [
           { createdAt: { $gte: since } },
-          { status: "done", updatedAt: { $gte: since } },
+          { status: { $in: doneIds }, updatedAt: { $gte: since } },
         ],
       },
       "createdAt updatedAt status"
@@ -85,7 +103,10 @@ export const GET = withProjectAccess(async (_request, { params }) => {
   const difficultyBreakdown: Record<string, number> = {};
   for (const d of data.difficultyPairs || []) {
     if (d === null || d === undefined || d === "") continue;
-    difficultyBreakdown[String(d)] = (difficultyBreakdown[String(d)] || 0) + 1;
+    // Falls back to the stored id: an option deleted from the field still labels its tasks
+    // with something a reader can act on rather than dropping them off the chart
+    const label = difficultyLabels.get(String(d)) ?? String(d);
+    difficultyBreakdown[label] = (difficultyBreakdown[label] || 0) + 1;
   }
 
   // assigneePairs is already in hand, so names are the only thing still missing
@@ -122,7 +143,7 @@ export const GET = withProjectAccess(async (_request, { params }) => {
   for (const task of recentTasks) {
     const createdIndex = weekIndexOf(task.createdAt);
     if (createdIndex >= 0) createdPerWeek[createdIndex]++;
-    if (task.status === "done") {
+    if (doneIds.includes(task.status)) {
       const completedIndex = weekIndexOf(task.updatedAt);
       if (completedIndex >= 0) completedPerWeek[completedIndex]++;
     }

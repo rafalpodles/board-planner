@@ -274,10 +274,10 @@ test.describe("a board with tasks on it", () => {
     await expect(card.getByText("in_progress", { exact: true })).toHaveCount(0);
     await expect(card.locator("svg text")).toHaveText(String(TOTAL));
 
-    // Deliberately NOT named "the way the board does". The legend reads the static STATUS_LABELS
-    // map rather than the project's own columns, and on the seeded board those two sources hold
-    // the same strings — so no assertion here can tell them apart. The board that can is a board
-    // sharing no id with the seeded seven, which is BP-446 and belongs with the fix.
+    // Deliberately NOT named "the way the board does". On the seeded board the project's own
+    // labels and the static STATUS_LABELS map hold the same strings, so no assertion here can
+    // tell which one the legend read. BP-446 fixed the legend to read the project, and proves
+    // it on a board sharing no id with the seeded seven — `dashboard-reads-the-board.spec.ts`.
   });
 
   test("assignee bars are sorted by the browser, tallest first, with an Unassigned bucket", async ({
