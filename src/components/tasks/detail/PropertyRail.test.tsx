@@ -498,10 +498,29 @@ describe("the Agent row", () => {
 
     it("does not blame the missing row on the reader's own agents", async () => {
       renderRail({ agents: BOTH });
+      await openRow("Agent");
 
       // The notice says "your own agents are not offered here". A list shortened by another
       // board's agent is a different fact, and there are no personal agents in this list at all.
       expect(screen.queryByTestId("personal-agents-withheld")).toBeNull();
+    });
+
+    it("still says it when a personal agent is withheld beside the other board's", async () => {
+      // The positive control for the test above: absent-because-nothing-rendered and
+      // absent-because-the-rule-says-so look identical, so the sentence has to be shown to
+      // appear in the case it is actually about — with both kinds withheld at once.
+      const ALSO_SOMEBODY_ELSES = [
+        ...(BOTH as unknown as Record<string, unknown>[]),
+        { _id: "a6", name: "Their own agent", scope: "user", description: "" },
+      ] as never;
+      renderRail({ agents: ALSO_SOMEBODY_ELSES, currentUsername: "rpo" });
+      await openRow("Agent");
+
+      expect(screen.queryByTestId("personal-agents-withheld")).not.toBeNull();
+      const options = screen.getAllByRole("option").map((o) => o.textContent || "").join("|");
+      expect(options).toContain("Our board's agent");
+      expect(options).not.toContain("Their own agent");
+      expect(options).not.toContain("Other board's agent");
     });
   });
 
