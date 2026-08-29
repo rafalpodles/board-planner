@@ -57,6 +57,9 @@ function field(over: Partial<ApiCustomField>): ApiCustomField {
   } as ApiCustomField;
 }
 
+/** This board. A project agent belonging to any other must not be offered here. */
+const PROJECT_ID = "p-this-board";
+
 function renderRail(over: Partial<React.ComponentProps<typeof PropertyRail>> = {}) {
   const set = vi.fn();
   render(
@@ -66,6 +69,7 @@ function renderRail(over: Partial<React.ComponentProps<typeof PropertyRail>> = {
       users={users}
       sprints={sprints}
       agents={[]}
+      projectId={PROJECT_ID}
       categories={[
         { _id: "c1", name: "user-story", color: "#3b82f6" },
         { _id: "c2", name: "bug", color: "#ef4444" },
@@ -456,6 +460,70 @@ describe("the Agent row", () => {
    * `/api/agents` only ever answers with the reader's OWN user-scoped agents, so `scope: "user"`
    * in this list always means mine.
    */
+  /**
+   * BP-456. `/api/agents` answers with the project agents of every project the reader can reach —
+   * every one of them, for an instance admin — and the server refuses any whose project is not
+   * this task's. Offered here they were a control that 400s on click.
+   */
+  describe("and a project agent, which belongs to one board", () => {
+    const OURS = { _id: "a4", name: "Our board's agent", scope: "project", projectId: PROJECT_ID };
+    const THEIRS = { _id: "a5", name: "Other board's agent", scope: "project", projectId: "p-elsewhere" };
+    const BOTH = [
+      ...(AGENTS as unknown as Record<string, unknown>[]),
+      OURS,
+      THEIRS,
+    ] as never;
+
+    async function agentOptions() {
+      await openRow("Agent");
+      return screen.getAllByRole("option").map((o) => o.textContent || "");
+    }
+
+    it("offers this board's own, and withholds the other board's", async () => {
+      renderRail({ agents: BOTH });
+
+      const options = (await agentOptions()).join("|");
+      // The control: withholding everything would satisfy the line below just as well
+      expect(options).toContain("Our board's agent");
+      expect(options).not.toContain("Other board's agent");
+    });
+
+    it("still names the other board's agent when the task is already carrying it", async () => {
+      renderRail({ agents: BOTH, draft: { ...draft, agent: "a5" } });
+
+      // Hiding the current value would render "No agent" over a task that is carrying one —
+      // the same lie the personal-agent rule above is careful to avoid
+      expect((await agentOptions()).join("|")).toContain("Other board's agent");
+    });
+
+    it("does not blame the missing row on the reader's own agents", async () => {
+      renderRail({ agents: BOTH });
+      await openRow("Agent");
+
+      // The notice says "your own agents are not offered here". A list shortened by another
+      // board's agent is a different fact, and there are no personal agents in this list at all.
+      expect(screen.queryByTestId("personal-agents-withheld")).toBeNull();
+    });
+
+    it("still says it when a personal agent is withheld beside the other board's", async () => {
+      // The positive control for the test above: absent-because-nothing-rendered and
+      // absent-because-the-rule-says-so look identical, so the sentence has to be shown to
+      // appear in the case it is actually about — with both kinds withheld at once.
+      const ALSO_SOMEBODY_ELSES = [
+        ...(BOTH as unknown as Record<string, unknown>[]),
+        { _id: "a6", name: "Their own agent", scope: "user", description: "" },
+      ] as never;
+      renderRail({ agents: ALSO_SOMEBODY_ELSES, currentUsername: "rpo" });
+      await openRow("Agent");
+
+      expect(screen.queryByTestId("personal-agents-withheld")).not.toBeNull();
+      const options = screen.getAllByRole("option").map((o) => o.textContent || "").join("|");
+      expect(options).toContain("Our board's agent");
+      expect(options).not.toContain("Their own agent");
+      expect(options).not.toContain("Other board's agent");
+    });
+  });
+
   describe("and a personal agent, which the server runs only on its owner's own task", () => {
     const MINE = [
       ...(AGENTS as unknown as { _id: string; name: string; scope: string }[]),
