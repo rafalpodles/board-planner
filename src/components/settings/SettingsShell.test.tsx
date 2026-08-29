@@ -103,10 +103,17 @@ describe("SettingsShell", () => {
     render(<SettingsShell groups={ROUTED} active="profile">body</SettingsShell>);
     const cls = pills().className;
     expect(cls).toContain("sticky");
-    // main is `px-4 py-6`, and a sticky offset is measured from the scrollport's content box
-    expect(cls).toContain("-top-6");
     expect(cls).toContain("bg-bg");
     expect(cls).toContain("border-b");
+
+    // The offset, the pull-out and the pay-back all cancel main's padding, so they are one
+    // number in four places — changing one and missing the others is the way this breaks.
+    // What the number has to *be* is main's own padding, which only the browser can measure:
+    // `e2e/settings-mobile-nav.spec.ts`.
+    const step = (pattern: RegExp) => cls.match(pattern)?.[1];
+    const sizes = [step(/-top-(\d+)/), step(/-mx-(\d+)/), step(/-mt-(\d+)/), step(/ px-(\d+)/)];
+    expect(sizes, cls).not.toContain(undefined);
+    expect(new Set(sizes), cls).toHaveProperty("size", 1);
   });
 });
 
