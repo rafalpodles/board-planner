@@ -90,6 +90,8 @@ interface PropertyRailProps {
   users: ApiUserSummary[];
   sprints: ApiSprint[];
   agents: ApiAgent[];
+  /** This task's board. A project agent runs on its own board's tasks and nowhere else. */
+  projectId: string;
   /** Offered first in the picker once a machine is being chosen; never a fallback */
   projectDefaultAgent?: string;
   /**
@@ -126,6 +128,7 @@ export function PropertyRail({
   users,
   sprints,
   agents,
+  projectId,
   projectDefaultAgent,
   stored,
   columns,
@@ -176,9 +179,17 @@ export function PropertyRail({
    * whatever it is, or the row would name "No agent" for a task that is carrying one.
    */
   const ownTask = !!currentUsername && draft.assignee === currentUsername;
-  const offeredAgents = agents.filter(
-    (a) => a.scope !== "user" || ownTask || a._id === draft.agent
-  );
+  const onThisTask = (a: ApiAgent) => a._id === draft.agent;
+  const mayRunForThisPerson = (a: ApiAgent) => a.scope !== "user" || ownTask || onThisTask(a);
+  /**
+   * The same reasoning one scope across. `/api/agents` sends the project agents of every project
+   * the reader can reach — every one of them, for an instance admin — and the server refuses any
+   * whose project is not this task's (`agentUsableOnProject`). Offered here, they were a control
+   * that 400s on click, with a retry whose only possible outcome is the same refusal.
+   */
+  const mayRunOnThisBoard = (a: ApiAgent) =>
+    a.scope !== "project" || a.projectId === projectId || onThisTask(a);
+  const offeredAgents = agents.filter((a) => mayRunForThisPerson(a) && mayRunOnThisBoard(a));
   /**
    * Set, and not among the agents this reader may choose — which after the filter above means
    * `/api/agents` never sent it at all, and the only way that happens is somebody else's personal
@@ -192,7 +203,9 @@ export function PropertyRail({
     stored.agent && typeof stored.agent === "object" ? stored.agent.name : null;
   // Not while the row is a read-only name: a note explaining a shortened list, printed where there
   // is no list, is the same kind of lie one row up.
-  const personalAgentsWithheld = !notOffered && offeredAgents.length < agents.length;
+  // Counted on the personal rule alone. Comparing the two lengths would print "your own agents are
+  // not offered here" over a list shortened by another board's agent, which is a different fact.
+  const personalAgentsWithheld = !notOffered && agents.some((a) => !mayRunForThisPerson(a));
 
   return (
     <div className="flex h-full flex-col gap-6">
