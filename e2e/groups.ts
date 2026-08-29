@@ -33,6 +33,7 @@ export const GROUPS = {
     "sprint-estimates.spec.ts",
     "sprints-ui.spec.ts",
     "focus-ring.spec.ts",
+    "ios-focus-zoom.spec.ts",
     "board-toolbar-geometry.spec.ts",
     "board-move-without-drag.spec.ts",
   ],
