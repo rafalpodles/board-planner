@@ -174,7 +174,7 @@ export function Board({
         <div
           role="group"
           aria-label="Board columns"
-          className="flex items-center justify-center gap-1 pt-1 sm:gap-2 sm:pt-3"
+          className="flex items-center justify-center gap-1 pt-1 md:gap-2 md:pt-3"
         >
           {boardColumns.map((column, i) => (
             <button
@@ -206,7 +206,7 @@ export function Board({
         ref={scrollerRef}
         // pt-4 matches pb-4: without it the columns' coloured top border lands on
         // the exact pixel row as the filter bar's divider, reading as one thick line
-        className="overflow-x-auto py-2 overscroll-x-contain sm:py-4 lg:h-full"
+        className="overflow-x-auto py-2 overscroll-x-contain md:py-4 lg:h-full"
         style={{
           WebkitOverflowScrolling: "touch",
           // Paging owns the horizontal gesture, so the browser must not also pan the row —

@@ -53,7 +53,7 @@ export function ColumnPicker({ hidden, onChange, customFields = [] }: ColumnPick
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-label="Choose columns"
-        className={`focus-ring flex h-[34px] items-center gap-1.5 rounded-lg border px-2.5 text-[13px] font-medium transition-colors ${
+        className={`focus-ring flex h-11 items-center gap-1.5 rounded-lg border px-2.5 text-[13px] font-medium transition-colors ${
           isDefault
             ? "border-border text-text-muted hover:text-text"
             : "border-primary bg-primary/10 text-primary"
