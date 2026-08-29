@@ -296,7 +296,29 @@ export function TaskCard({
         the button carries `relative` for its own touch target, and Tailwind's
         position utilities are ordered so `relative` would win over an `absolute`
         passed in here */}
-    <span className={`absolute top-2 ${checkboxShown ? "right-9" : "right-2"}`}>
+    <span className={`absolute top-2 flex items-center gap-1 ${checkboxShown ? "right-9" : "right-2"}`}>
+      {/* The board's drag is native HTML5, which a touch browser never starts, so a phone
+          had no way to move a card at all. Opens the same menu right-click does. */}
+      {onContextMenu && !readOnly && (
+        <button
+          type="button"
+          aria-label={`Actions for ${projectKey}-${task.taskNumber}`}
+          aria-haspopup="menu"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const r = e.currentTarget.getBoundingClientRect();
+            onContextMenu(task._id, r.left, r.bottom);
+          }}
+          className="focus-ring flex h-5 w-5 items-center justify-center rounded text-text-muted transition-colors hover:bg-bg-hover hover:text-text md:hidden"
+        >
+          <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20" aria-hidden>
+            <circle cx="10" cy="4" r="1.6" />
+            <circle cx="10" cy="10" r="1.6" />
+            <circle cx="10" cy="16" r="1.6" />
+          </svg>
+        </button>
+      )}
       <CopyTaskLink
         projectRef={projectKey}
         taskNumber={task.taskNumber}
