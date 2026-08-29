@@ -3,6 +3,7 @@ import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
 import { Task } from "@/models/task";
 import { columnIdsWithRole } from "@/lib/columns";
+import { normalizeOptions } from "@/lib/custom-fields";
 import { Project } from "@/models/project";
 import { User } from "@/models/user";
 import { TASK_STATUSES } from "@/types";
@@ -35,8 +36,14 @@ export const GET = withProjectAccess(async (_request, { params }) => {
   // An option's stored value is its id, which survives a rename while `value` moves; and an
   // option minted by the editor since CP-211 carries `slug-xxxxxx`. Either reaches the chart
   // as a label nobody recognises unless it is resolved here (BP-447).
+  // Through `normalizeOptions`, which every other reader of these options goes through: the field
+  // is `Mixed` so that pre-CP-211 shapes survive, and a bare `{id}` or a plain string reaches here
+  // intact. Mapping them by hand labelled those tasks the literal "undefined" — and merged two
+  // such options into one bar with their counts added together.
   const difficultyLabels = new Map(
-    (difficultyField?.options ?? []).map((o) => [String(o.id), String(o.value)])
+    normalizeOptions(difficultyField?.options as Parameters<typeof normalizeOptions>[0]).map(
+      (o) => [o.id, o.value] as const
+    )
   );
   const difficultyPath = difficultyField ? `$customFieldValues.${difficultyField._id}` : null;
 
