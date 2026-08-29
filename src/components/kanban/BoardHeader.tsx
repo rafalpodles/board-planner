@@ -135,7 +135,7 @@ export function BoardHeader({
         </div>
       </div>
 
-      <div className="ml-auto flex shrink-0 items-center rounded-lg border border-border bg-bg-card p-0.5">
+      <div className="ml-auto flex h-11 shrink-0 items-center rounded-lg border border-border bg-bg-card p-0.5">
         {(["board", "list"] as const).map((mode) => (
           <button
             key={mode}
@@ -160,7 +160,7 @@ export function BoardHeader({
         onClick={onRefresh}
         title="Refresh board (R)"
         aria-label="Refresh board"
-        className="focus-ring block shrink-0 rounded-lg p-2 text-text-muted transition-colors hover:bg-bg-card hover:text-text"
+        className="focus-ring flex h-11 shrink-0 items-center justify-center rounded-lg px-2 text-text-muted transition-colors hover:bg-bg-card hover:text-text"
       >
         <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path
@@ -177,7 +177,8 @@ export function BoardHeader({
         onClick={onNewTask}
         title="New task (N)"
         aria-label="New task"
-        className="shrink-0 whitespace-nowrap"
+        // Button's own sm size is responsive (min-h-11 sm:min-h-[36px]); this row must not resize
+        className="h-11 shrink-0 whitespace-nowrap"
       >
         <svg
           aria-hidden
