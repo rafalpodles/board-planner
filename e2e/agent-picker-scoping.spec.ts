@@ -73,14 +73,19 @@ async function openAgentPicker(page: Page) {
   return page.getByRole("option");
 }
 
-test("the picker offers this board's agent and withholds another board's", async ({ page }) => {
+/**
+ * This guards the risk the fix itself introduces — over-filtering — and nothing else.
+ *
+ * It deliberately does **not** assert that the other board's agent is absent. Measured: with this
+ * fixture `/api/agents` never sends it to the reader at all, so that assertion passes whether the
+ * client filter is there or not. Removing the filter leaves this whole spec green, which is why
+ * the withholding is proved in `PropertyRail.test.tsx`, where all three scopes can be handed to
+ * the component directly. Why an instance admin does not receive it here is unresolved —
+ * `agents/route.ts:21` widens `projectIds` to every project for an admin, so it should arrive.
+ */
+test("the picker still offers this board's own agent", async ({ page }) => {
   const options = await openAgentPicker(page);
-  const names = (await options.allTextContents()).join("|");
-
-  // The control: withholding everything would satisfy the second line just as well, and an
-  // instance admin sees both agents in `/api/agents` — that is what makes this worth filtering.
-  expect(names).toContain(OURS);
-  expect(names).not.toContain(THEIRS);
+  expect((await options.allTextContents()).join("|")).toContain(OURS);
 });
 
 test("a task already carrying another board's agent never reads \"No agent\"", async ({ page }) => {
