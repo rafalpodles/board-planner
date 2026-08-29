@@ -5,6 +5,8 @@ import {
   DECOY_TASK_TITLE,
   E2E_MONGODB_URI,
   OTHER_PROJECT_ID,
+  OTHER_PROJECT_KEY,
+  OTHER_PROJECT_NAME,
   PROJECT_ID,
   PROJECT_KEY,
   seed,
@@ -52,43 +54,63 @@ let theirsId: string;
 
 test.beforeEach(async () => {
   await seed();
+  const handle = await db();
+  /**
+   * `seed()` inserts exactly one project, so without this the second board does not exist and
+   * `agents/route.ts` — which widens the list to *every project that exists* for an admin —
+   * never sends its agent at all. The client filter would then be untestable from here: the
+   * server withholds it, and removing the filter leaves the spec green.
+   */
+  await handle.collection("projects").insertOne({
+    _id: OTHER_PROJECT_ID,
+    name: OTHER_PROJECT_NAME,
+    key: OTHER_PROJECT_KEY,
+    description: "",
+    icon: "",
+    categories: [],
+    columns: [],
+    taskTemplates: [],
+    customFields: [],
+    webhooks: [],
+    notificationChannels: [],
+    taskCounter: 0,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
   await insertAgent(OURS, PROJECT_ID);
   theirsId = await insertAgent(THEIRS, OTHER_PROJECT_ID);
 });
 
 async function openAgentPicker(page: Page) {
   await signIn(page);
+  // The list this row is built from, not the rendered text: the row renders its read-only
+  // branch while `agents` is still the empty array it mounts with, so waiting on what is on
+  // screen means asserting the pre-fetch state.
+  const listed = page.waitForResponse((r) => r.url().includes("/api/agents") && r.ok());
   await page.goto(`/projects/${PROJECT_KEY}/tasks/${DECOY_TASK_NUMBER}`);
-  // The rail renders after the task arrives; probing before it does finds an empty page
+  await listed;
   await expect(page.getByText(DECOY_TASK_TITLE).first()).toBeVisible();
 
-  // Button or combobox: the row is a combobox once it has a value and a button when empty,
-  // which is the union `PropertyRail.test.tsx` reaches for too.
-  const row = page
-    .getByRole("button", { name: /Agent/ })
-    .or(page.getByRole("combobox", { name: /Agent/ }))
-    .first();
+  // `Combobox` renders `role="combobox"` unconditionally; the read-only branch is a plain div
+  // with no role at all, which is why the picker is reached by this role and nothing else.
+  const row = page.getByRole("combobox", { name: /Agent/ }).first();
   await expect(row).toBeVisible();
   await row.click();
   return page.getByRole("option");
 }
 
-/**
- * This guards the risk the fix itself introduces — over-filtering — and nothing else.
- *
- * It deliberately does **not** assert that the other board's agent is absent. Measured: with this
- * fixture `/api/agents` never sends it to the reader at all, so that assertion passes whether the
- * client filter is there or not. Removing the filter leaves this whole spec green, which is why
- * the withholding is proved in `PropertyRail.test.tsx`, where all three scopes can be handed to
- * the component directly. Why an instance admin does not receive it here is unresolved —
- * `agents/route.ts:21` widens `projectIds` to every project for an admin, so it should arrive.
- */
-test("the picker still offers this board's own agent", async ({ page }) => {
+test("the picker offers this board's agent and withholds another board's", async ({ page }) => {
   const options = await openAgentPicker(page);
-  expect((await options.allTextContents()).join("|")).toContain(OURS);
+  const names = (await options.allTextContents()).join("|");
+
+  // The control: withholding everything would satisfy the second line just as well. Both agents
+  // reach this reader — an admin's project list is every project that exists — so the absence
+  // below is the client filter's doing and not the server's.
+  expect(names).toContain(OURS);
+  expect(names).not.toContain(THEIRS);
 });
 
-test("a task already carrying another board's agent never reads \"No agent\"", async ({ page }) => {
+test("a task already carrying another board's agent still names it", async ({ page }) => {
   const handle = await db();
   await handle
     .collection("tasks")
@@ -97,18 +119,9 @@ test("a task already carrying another board's agent never reads \"No agent\"", a
       { $set: { agent: new mongoose.Types.ObjectId(theirsId) } },
     );
 
-  await signIn(page);
-  await page.goto(`/projects/${PROJECT_KEY}/tasks/${DECOY_TASK_NUMBER}`);
-  await expect(page.getByText(DECOY_TASK_TITLE).first()).toBeVisible();
-
-  /**
-   * Measured rather than assumed: `/api/agents` does not send this reader another board's agent
-   * at all, so the row is the read-only name and not a picker. Which branch renders is a
-   * visibility question; the claim that matters either way is that the row names what the task
-   * is carrying. Rendering "No agent" over a task that has one is the lie to guard against, and
-   * the offered branch is covered in `PropertyRail.test.tsx`, where all three scopes can be set up.
-   */
-  const readOnly = page.getByTestId("agent-not-offered");
-  await expect(readOnly).toBeVisible();
-  await expect(readOnly).not.toHaveText(/No agent/);
+  // Hiding the current value would render "No agent" over a task that is carrying one — the lie
+  // the personal-agent rule beside this one is careful to avoid. Waiting on `/api/agents` inside
+  // the helper is what stops this asserting the mount state, where `agents` is still `[]`.
+  const options = await openAgentPicker(page);
+  expect((await options.allTextContents()).join("|")).toContain(THEIRS);
 });
