@@ -44,6 +44,16 @@ const DIFFICULTY_OPTIONS = [
   { id: "ancient", order: 2 },
 ];
 
+/**
+ * `bug`, `doc` and `user-story` carry the SAME hex in the dashboard's retired table and in the
+ * project defaults, so a chart still reading that table paints them identically and no assertion
+ * can tell. Only a colour neither table has can.
+ */
+const CATEGORIES = [
+  { name: "bug", color: "#7c3aed" },
+  { name: "doc", color: "#0d9488" },
+];
+
 const signIn = arriveSignedIn;
 
 async function db() {
@@ -65,6 +75,7 @@ test.beforeEach(async () => {
     {
       $set: {
         columns: COLUMNS,
+        categories: CATEGORIES,
         customFields: [
           {
             _id: difficultyFieldId,
@@ -264,15 +275,8 @@ test("the category chart is painted from the project's own categories", async ({
   const bars = await chart.locator("div.h-full.rounded").evaluateAll((els) =>
     els.map((el) => getComputedStyle(el).backgroundColor),
   );
-  expect(bars.length).toBeGreaterThan(0);
-  // The seeded project's own `doc` colour. The dashboard's retired table painted doc #3b82f6,
-  // so a chart still reading that table cannot produce this pixel.
-  const docColour = await page.evaluate(async (key) => {
-    const res = await fetch(`/api/projects/${key}`, { credentials: "include" });
-    const project = await res.json();
-    return (project.categories ?? []).find((c: { name: string }) => c.name === "doc")?.color;
-  }, PROJECT_KEY);
-  expect(docColour, "the seeded project defines its own categories").toBeTruthy();
-  const [r, g, b] = [1, 3, 5].map((i) => parseInt(String(docColour).slice(i, i + 2), 16));
-  expect(bars).toContain(`rgb(${r}, ${g}, ${b})`);
+  // #7c3aed bug and #0d9488 doc — this board's own. The retired table paints them #ef4444 and
+  // #3b82f6, so a chart still reading it cannot produce either pixel.
+  expect(bars).toContain("rgb(124, 58, 237)");
+  expect(bars).toContain("rgb(13, 148, 136)");
 });
