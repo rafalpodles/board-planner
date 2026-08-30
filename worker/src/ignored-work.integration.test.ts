@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { hiddenByTheRunsOwnRules } from "./ignored-work.js";
-import { createRunner } from "./exec.js";
+import { createRunner, Runner } from "./exec.js";
 
 /**
  * BP-508. Real git, because every claim here is about what `git status` hides and what
@@ -81,14 +81,29 @@ describe("work hidden by an ignore rule the run itself added", () => {
     expect(await ask()).toEqual([]);
   });
 
-  // And the cheaper control: a run that never touches an ignore file asks git nothing beyond the
-  // one diff, whatever is ignored
-  it("says nothing when the run did not touch an ignore file at all", async () => {
+  /**
+   * The cost, asserted rather than described. Removing the "did the run touch an ignore file"
+   * gate changes no verdict — a rule that predates the run is not the run's whichever way you
+   * reach it — so the only thing that mutation moves is how much git the ordinary run pays for.
+   * One diff, and nothing else.
+   */
+  it("asks git one question when the run did not touch an ignore file", async () => {
     writeFileSync(join(work, "a.ts"), "export const a = 2;\n");
     git(work, "add", "-A");
     git(work, "commit", "--quiet", "-m", "ordinary work");
 
-    expect(await ask()).toEqual([]);
+    const real = createRunner();
+    const calls: string[][] = [];
+    const counting: Runner = {
+      run: (command, args, opts) => {
+        calls.push(args);
+        return real.run(command, args, opts);
+      },
+    };
+
+    expect(await hiddenByTheRunsOwnRules(counting, work, baseSha)).toEqual([]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain("--name-only");
   });
 
   it("names the work, the rule hiding it, and the file the rule came from", async () => {
