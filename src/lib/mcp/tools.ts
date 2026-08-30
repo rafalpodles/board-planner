@@ -9,6 +9,7 @@ import {
   NOTHING_TO_CHANGE,
   CREATE_TASK_HINTS,
   UPDATE_TASK_HINTS,
+  CHANGE_STATUS_HINTS,
 } from "./strict-input";
 
 type ToolExtra = { authInfo?: AuthInfo };
@@ -132,7 +133,7 @@ export function registerPlannerTools(server: McpServer): void {
             "Project-defined fields keyed by field name, e.g. { \"Owoce\": \"Apples\" }. " +
               "get_project lists this project's fields and the options each one accepts."
           ),
-      }, CREATE_TASK_HINTS),
+      }, { hints: CREATE_TASK_HINTS, writes: true }),
     },
     async ({ project, title, description, priority, category, assignee, status, acceptanceCriteria, fields }, extra) => {
       const client = clientFrom(extra);
@@ -198,9 +199,15 @@ export function registerPlannerTools(server: McpServer): void {
             "Project-defined fields keyed by field name. Only the named fields change; " +
               "the task's other field values are left alone. get_project lists them."
           ),
-      }, UPDATE_TASK_HINTS),
+      }, { hints: UPDATE_TASK_HINTS, writes: true }),
     },
     async ({ taskKey, title, description, priority, category, assignee, agent, acceptanceCriteria, fields }, extra) => {
+      // Before the lookup, so a call that changes nothing costs nothing and the refusal is the
+      // first thing that happens rather than the last
+      if (![title, description, priority, category, assignee, agent, acceptanceCriteria, fields].some((v) => v !== undefined)) {
+        throw new Error(`update_task ${NOTHING_TO_CHANGE}`);
+      }
+
       const client = clientFrom(extra);
       const { projectId, taskId } = await client.resolveTaskKey(taskKey);
       const data: Record<string, unknown> = {};
@@ -269,7 +276,7 @@ export function registerPlannerTools(server: McpServer): void {
       inputSchema: strictInput({
         taskKey: z.string().describe("Task key (e.g. 'CP-1')"),
         status: z.string().describe("New status"),
-      }),
+      }, { hints: CHANGE_STATUS_HINTS, writes: true }),
     },
     async ({ taskKey, status }, extra) => {
       const client = clientFrom(extra);
@@ -303,7 +310,7 @@ export function registerPlannerTools(server: McpServer): void {
         startDate: z.string().describe("Start date (YYYY-MM-DD)"),
         endDate: z.string().describe("End date (YYYY-MM-DD)"),
         goal: z.string().optional().describe("Sprint goal"),
-      }),
+      }, { writes: true }),
     },
     async ({ project, name, startDate, endDate, goal }, extra) => {
       const client = clientFrom(extra);
@@ -324,9 +331,13 @@ export function registerPlannerTools(server: McpServer): void {
         endDate: z.string().optional(),
         goal: z.string().optional(),
         status: z.string().optional().describe("planned, active, or completed"),
-      }),
+      }, { writes: true }),
     },
     async ({ project, sprintId, name, startDate, endDate, goal, status }, extra) => {
+      if (![name, startDate, endDate, goal, status].some((v) => v !== undefined)) {
+        throw new Error(`update_sprint ${NOTHING_TO_CHANGE}`);
+      }
+
       const client = clientFrom(extra);
       const proj = await client.getProjectByKey(project);
       const updates: Record<string, unknown> = {};
@@ -350,7 +361,7 @@ export function registerPlannerTools(server: McpServer): void {
       inputSchema: strictInput({
         taskKey: z.string().describe("Task key (e.g. 'CP-1')"),
         body: z.string().describe("Comment text"),
-      }),
+      }, { writes: true }),
     },
     async ({ taskKey, body }, extra) => {
       const client = clientFrom(extra);
