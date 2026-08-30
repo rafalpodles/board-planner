@@ -1660,9 +1660,10 @@ export async function claimNextTask(
   // that has never run one, and an instance without it simply has no PM assignments to honour.
   const pm = await pmUserId();
 
-  // The other five `updatePipeline: true` writes here interpolate only column ids resolved from
-  // the project's own board, slugified to `[a-z0-9_]` where they are created — safe by a validator
-  // elsewhere, so if that rule ever loosens they want `$literal` too (BP-329).
+  // The runId is the only caller-controlled string any `updatePipeline: true` write in this file
+  // interpolates. The rest — including this one's own `activeStatus` — are column ids resolved from
+  // the project's own board, and the one route that writes those slugifies to `[a-z0-9_]`: safe by
+  // a validator elsewhere, so if that rule ever loosens they want `$literal` too (BP-329).
   return Task.findOneAndUpdate(
     {
       project: projectId,
@@ -1725,9 +1726,11 @@ export async function claimNextTask(
           "execution.assignedByRun": false,
           "execution.workerId": { $literal: workerId },
           // `$literal`, because an aggregation `$set` reads a leading `$` as a FIELD PATH and
-          // Mongoose casts nothing in a pipeline update. Measured: both `"$$REMOVE"` and
-          // `"$execution.workerId"` stored no runId at all, leaving the task active and held by a
-          // run nothing could address until the lease expired (BP-329).
+          // Mongoose casts nothing in a pipeline update. Measured: `"$$REMOVE"` stored no runId at
+          // all; `"$execution.workerId"` stored nothing on a first claim and the PREVIOUS run's
+          // workerId on a later one, because a field path resolves against the document as it was
+          // before the `$set` and a release deliberately leaves `workerId` behind. Either way the
+          // task went active held by a run nothing could address until the lease expired (BP-329).
           "execution.runId": { $literal: runId },
           "execution.startedAt": new Date(),
           "execution.lastError": "",

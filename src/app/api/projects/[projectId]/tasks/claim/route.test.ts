@@ -285,9 +285,9 @@ describe("POST /tasks/claim", () => {
   });
 
   // BP-329. The runId lands in an aggregation `$set`, where a leading `$` is a field path rather
-  // than text — so `$$REMOVE` claimed a task and stored no run identity at all, and
-  // `$execution.workerId` stored a copy of the machine's id. The write wraps it in `$literal` too;
-  // this is the half that refuses to carry it at all.
+  // than text — so a claim carrying one stored an identity that was not the text sent: nothing at
+  // all, or, on a task claimed once before, the previous run's workerId. The write wraps it in
+  // `$literal` too; this is the half that refuses to carry it at all.
   it("returns 400 for a runId shaped like an aggregation expression, without claiming", async () => {
     for (const runId of ["$$REMOVE", "$execution.workerId", "$$ROOT", "run.1", "a".repeat(65)]) {
       const response = await POST(request(authed, { runId }), {

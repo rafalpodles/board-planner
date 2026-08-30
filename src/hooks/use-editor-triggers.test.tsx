@@ -15,9 +15,10 @@ function taskTrigger(projectKey: string) {
 }
 
 /**
- * BP-329. The key is interpolated into a RegExp, and `Project.key` carries no pattern on either the
- * model or the routes that write it — so a key of `(((` is storable, and unescaped it threw inside
- * a useMemo, taking down the editor for everyone who opened a task on that board.
+ * BP-329. The key is interpolated into a RegExp. BP-401 constrained what a key may be at every
+ * route that writes one, but checked only values that change and migrated nothing — so a key stored
+ * before it is still there, and unescaped one that does not compile threw inside a useMemo, taking
+ * down the editor for everyone who opened a task on that board.
  */
 describe("the task trigger built from a project key", () => {
   // The control: the ordinary case has to keep working, or the escaping below proves nothing

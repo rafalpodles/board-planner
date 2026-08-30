@@ -10,7 +10,8 @@ interface GitHubPR {
   updated_at: string;
 }
 
-// Project keys are not format-validated, so a key like "C(" must not blow up the matcher
+// A key stored before BP-401 constrained the format may still be one like "C(", which must not
+// blow up the matcher
 export { escapeRegex };
 
 export interface ParsedPR {

@@ -8,6 +8,7 @@ import {
   HELD_TASK_ID,
   PROJECT_ID,
   PROJECT_KEY,
+  HELD_TASK_NUMBER,
   HELD_TASK_TITLE,
   SIBLING_TASK_NUMBER,
   SIBLING_TASK_TITLE,
@@ -420,9 +421,9 @@ test.describe("on a phone", () => {
 
 /**
  * BP-329. The board's own key is interpolated into a RegExp so that typing it offers the board's
- * tasks — and `Project.key` carries no pattern on the model or on either route that writes one, so
- * a key made of regex punctuation is storable today. Unescaped it threw inside a useMemo, which is
- * a render, which is the whole task page.
+ * tasks. BP-401 constrained what a key may be, but only on the way in and with no migration, so a
+ * key made of regex punctuation stored before it is still there. Unescaped it threw inside a
+ * useMemo, which is a render, which is the whole task page.
  *
  * By id, deliberately: `resolveProjectId` refuses a key that fails PROJECT_KEY_PATTERN, so such a
  * board answers 404 to its own key and is reachable only by its ObjectId — which every route
@@ -430,9 +431,11 @@ test.describe("on a phone", () => {
  */
 test.describe("a board whose key is regex punctuation", () => {
   // A key that fails to COMPILE, not merely one that over-matches: `A.C` unescaped is a valid
-  // regex and the page survives it, so it could not tell the fix from its absence. `POST
-  // /api/projects` stores `key.trim().toUpperCase()` and checks no pattern, so this is storable
-  // through the ordinary route today (BP-312).
+  // regex and the page survives it, so it could not tell the fix from its absence.
+  //
+  // Written straight into the collection, which is the point rather than a shortcut: BP-401 refuses
+  // this key at every route that writes one, and explicitly migrated nothing — so a board keyed
+  // this way is one that predates that check, and the driver is what such a row looks like.
   const AWKWARD = "C(";
 
   test.beforeEach(async () => {
@@ -442,7 +445,7 @@ test.describe("a board whose key is regex punctuation", () => {
 
   test("opens its tasks, and still offers them by key", async ({ page }) => {
     await signIn(page);
-    await page.goto(`/projects/${PROJECT_ID}/tasks/1`);
+    await page.goto(`/projects/${PROJECT_ID}/tasks/${HELD_TASK_NUMBER}`);
 
     // The page rendering at all is the fix: unescaped, this threw before anything was drawn
     await expect(page.getByText(HELD_TASK_TITLE).first()).toBeVisible();
@@ -452,6 +455,9 @@ test.describe("a board whose key is regex punctuation", () => {
     await box.click();
     await box.pressSequentially(`Blocked by ${AWKWARD}-`);
 
-    await expect(page.getByRole("listbox")).toBeVisible();
+    // This board's own tasks, not merely a listbox: escaped, not stripped
+    await expect(
+      page.getByRole("option", { name: SIBLING_TASK_TITLE, exact: false })
+    ).toBeVisible();
   });
 });
