@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { z } from "zod";
 import { registerPlannerTools } from "./tools";
 import { PlannerClient } from "./planner-client";
 
@@ -21,6 +22,16 @@ const authInfo = {
   scopes: [],
   extra: { baseUrl: "https://board.example.com" },
 };
+
+function registeredSchemas(): Map<string, z.ZodObject<z.ZodRawShape>> {
+  const schemas = new Map<string, z.ZodObject<z.ZodRawShape>>();
+  const server = {
+    registerTool: (name: string, config: { inputSchema: z.ZodObject<z.ZodRawShape> }) =>
+      schemas.set(name, config.inputSchema),
+  } as unknown as McpServer;
+  registerPlannerTools(server);
+  return schemas;
+}
 
 async function connectedClient(): Promise<Client> {
   const server = new McpServer({ name: "boardplanner", version: "1.0.0" });
@@ -103,15 +114,21 @@ describe("a parameter the tool does not declare is refused, not dropped", () => 
     expect(update).toHaveBeenCalledWith("p1", "t1", { title: "renamed" });
   });
 
-  it("advertises the refusal in every tool's schema, so a client can see it first", async () => {
-    const client = await connectedClient();
-    const { tools } = await client.listTools();
+  // Not asserted through tools/list: zod-to-json-schema emits additionalProperties: false for a
+  // stripping object too, so the advertised schema reads identically either way and cannot carry
+  // this. The schemas themselves can, and there are twelve of them to keep honest.
+  it("holds for every tool, not just the two that were reported", () => {
+    const schemas = registeredSchemas();
 
-    // guards the guard: an empty list would satisfy the assertion below without proving anything
-    expect(tools).toHaveLength(12);
-    expect(
-      tools.filter((t) => (t.inputSchema as { additionalProperties?: unknown }).additionalProperties !== false)
-    ).toEqual([]);
+    // guards the guard: an empty map would satisfy the loop below without proving anything
+    expect(schemas.size).toBe(12);
+
+    const permissive = [...schemas.entries()].filter(([, schema]) => {
+      const result = schema.safeParse({ __stray__: 1 });
+      return result.success || !result.error.issues.some((i) => i.code === "unrecognized_keys");
+    });
+
+    expect(permissive.map(([name]) => name)).toEqual([]);
   });
 });
 
