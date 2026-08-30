@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { readJsonBody } from "@/lib/request-body";
 import { connectDB } from "@/lib/db";
 import { pollDeviceEnrolment } from "@/lib/device-enrolment";
 import { WORKER_HEARTBEAT_MS } from "@/lib/worker-service";
@@ -9,7 +10,9 @@ import { WORKER_HEARTBEAT_MS } from "@/lib/worker-service";
 export async function POST(request: Request) {
   await connectDB();
 
-  const body = await request.json().catch(() => ({}));
+  const read = await readJsonBody(request);
+  if (!read.ok) return read.response;
+  const body = read.value;
   const result = await pollDeviceEnrolment(String(body.deviceCode ?? ""));
 
   if (result.state === "approved") {

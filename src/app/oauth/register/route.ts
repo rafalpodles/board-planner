@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { readJsonBody } from "@/lib/request-body";
 import { connectDB } from "@/lib/db";
 import { OAuthClient } from "@/models/oauthClient";
 import { isValidRedirectUri, newClientId } from "@/lib/oauth";
@@ -45,7 +46,9 @@ export async function POST(req: Request) {
   }
   await recordFailedAttempt(throttleKey);
 
-  const body = await req.json().catch(() => null);
+  const read = await readJsonBody<Record<string, unknown> | null>(req);
+  if (!read.ok) return read.response;
+  const body = read.value;
   const redirectUris = body?.redirect_uris;
 
   if (

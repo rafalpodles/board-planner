@@ -7,10 +7,13 @@ const findOneAndUpdate = vi.fn();
 const updateOne = vi.fn();
 const projectLean = vi.fn();
 const countDocuments = vi.fn();
+const deleteMany = vi.fn();
+const sort = vi.fn();
+const select = vi.fn();
 
 vi.mock("./db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/deviceEnrolment", () => ({
-  DeviceEnrolment: { create, findOne, find, findOneAndUpdate, updateOne, countDocuments },
+  DeviceEnrolment: { create, findOne, find, findOneAndUpdate, updateOne, countDocuments, deleteMany },
 }));
 // The poll now also reads the approved project, so the app knows what to clone
 vi.mock("@/models/project", () => ({
@@ -18,6 +21,7 @@ vi.mock("@/models/project", () => ({
 }));
 
 const {
+  MAX_PENDING_ENROLMENTS,
   startDeviceEnrolment,
   pollDeviceEnrolment,
   denyDeviceEnrolment,
@@ -29,6 +33,23 @@ const bcrypt = (await import("bcryptjs")).default;
 
 function candidates(rows: unknown[]) {
   find.mockReturnValue({ limit: () => Promise.resolve(rows) });
+}
+
+// The eviction query: find(live).sort(...).limit(n).select("_id").lean()
+//
+// limit() honours its argument. A mock that ignored it returned every row it was given whatever the
+// source asked for, so the deleteMany assertion below was reading the fixture rather than the
+// arithmetic — .limit(1) left the collection permanently over its ceiling and the test stayed green.
+function oldestPending(rows: unknown[]) {
+  select.mockImplementation(() => ({ lean: () => Promise.resolve(taken) }));
+  let taken: unknown[] = [];
+  sort.mockReturnValue({
+    limit: (n: number) => {
+      taken = rows.slice(0, n);
+      return { select };
+    },
+  });
+  find.mockReturnValue({ sort });
 }
 
 beforeEach(() => {
@@ -106,15 +127,54 @@ describe("the cost of a poll", () => {
     expect(create.mock.calls[0][0].deviceCodePrefix).toBe(started.deviceCode.slice(0, 12));
   });
 
-  // The old candidate window was sort({createdAt:-1}).limit(200), so sustained flooding pushed an
-  // approved enrolment out of it and its poll answered "expired" forever
-  it("caps how many enrolments one flood can leave waiting for approval", async () => {
-    countDocuments.mockResolvedValue(20);
+  // BP-322: the ceiling counted everybody's rows and refused the caller who hit it, so twenty
+  // anonymous posts closed enrolment for every genuine operator until they reaped.
+  it("does not refuse an operator because the window is full", async () => {
+    countDocuments.mockResolvedValue(MAX_PENDING_ENROLMENTS);
+    oldestPending([{ _id: "oldest" }]);
 
-    await expect(
-      startDeviceEnrolment({ machineName: "MacBook", machineHost: "" })
-    ).rejects.toThrow(/waiting for approval/);
-    expect(create).not.toHaveBeenCalled();
+    const started = await startDeviceEnrolment({ machineName: "MacBook", machineHost: "" });
+
+    expect(started.userCode).toBeTruthy();
+    expect(create).toHaveBeenCalled();
+    // At exactly the ceiling one row has to go, or the collection sits one over it from here on
+    expect(deleteMany.mock.calls[0][0]).toMatchObject({ _id: { $in: ["oldest"] } });
+  });
+
+  it("makes room by dropping the oldest pending row", async () => {
+    countDocuments.mockResolvedValue(MAX_PENDING_ENROLMENTS + 2);
+    oldestPending([{ _id: "a" }, { _id: "b" }, { _id: "c" }]);
+
+    await startDeviceEnrolment({ machineName: "MacBook", machineHost: "" });
+
+    // Ascending, so it is the oldest that goes. Descending would evict the row the operator is
+    // holding at that moment and leave the flood's own rows in place.
+    expect(sort).toHaveBeenCalledWith({ createdAt: 1 });
+    // Expired rows reap on Mongo's own schedule, so counting them would let the ceiling be held
+    // down by rows that are already dead
+    expect(find.mock.calls[0][0]).toEqual({
+      status: "pending",
+      expiresAt: { $gt: expect.any(Date) },
+    });
+    expect(select).toHaveBeenCalledWith("_id");
+    // The delete carries the same filter as the find. On ids alone, a row approved in between is
+    // removed with its credential and the machine polls for something nobody can hand it.
+    // Three ids, because it is two over the ceiling and one more is about to be created. Asking
+    // for fewer leaves the collection over its ceiling for good.
+    expect(deleteMany.mock.calls[0][0]).toEqual({
+      status: "pending",
+      expiresAt: { $gt: expect.any(Date) },
+      _id: { $in: ["a", "b", "c"] },
+    });
+  });
+
+  it("touches nothing while the window has room — the control", async () => {
+    countDocuments.mockResolvedValue(3);
+
+    await startDeviceEnrolment({ machineName: "MacBook", machineHost: "" });
+
+    expect(deleteMany).not.toHaveBeenCalled();
+    expect(create).toHaveBeenCalled();
   });
 });
 

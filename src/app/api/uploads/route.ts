@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { readFormBody } from "@/lib/request-body";
 import mongoose from "mongoose";
 import { Readable } from "stream";
 import { connectDB } from "@/lib/db";
@@ -6,6 +7,12 @@ import { withAuth, resolveProjectId } from "@/lib/middleware";
 import { check } from "@/lib/grants";
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+// The whole multipart envelope, not the file: part headers, the boundary and the projectId field
+// come to a few hundred bytes, so the slack is generous rather than tuned. Its job is to bound
+// what the process allocates, which the file-size check below cannot do — that one runs after
+// formData() has already materialised every part.
+const MAX_UPLOAD_REQUEST_BYTES = MAX_FILE_SIZE + 64 * 1024;
+const TOO_LARGE = "File too large. Maximum size is 5MB.";
 
 const ALLOWED_MIME_TYPES = new Set([
   "image/jpeg",
@@ -27,7 +34,20 @@ const ALLOWED_MIME_TYPES = new Set([
 export const POST = withAuth(async (request, { user }) => {
   await connectDB();
 
-  const formData = await request.formData();
+  // Counted through, not just declared. The file.size check further down cannot be the bound:
+  // it runs twenty-nine lines and several round trips after the body has been materialised, so
+  // the 5 MB limit governs what reaches GridFS rather than what the process allocates — and a
+  // request that simply omits Content-Length walked past a header check on its own.
+  const read = await readFormBody(request, MAX_UPLOAD_REQUEST_BYTES);
+  if (!read.ok) {
+    // Translated, not passed through: this refusal is read by somebody who has just dragged a file
+    // in, and a byte count with no unit tells them nothing. The reader bounds the allocation; the
+    // sentence is this route's job, because only this route knows what the request was.
+    return read.reason === "too-large"
+      ? NextResponse.json({ error: TOO_LARGE }, { status: 413 })
+      : read.response;
+  }
+  const formData = read.value;
   const file = formData.get("file") as File | null;
   const projectId = String(formData.get("projectId") || "");
 
@@ -58,7 +78,7 @@ export const POST = withAuth(async (request, { user }) => {
 
   if (file.size > MAX_FILE_SIZE) {
     return NextResponse.json(
-      { error: "File too large. Maximum size is 5MB." },
+      { error: TOO_LARGE },
       { status: 413 }
     );
   }

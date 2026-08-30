@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { readJsonBody } from "@/lib/request-body";
 import { connectDB } from "@/lib/db";
 import { protocolOf } from "@/lib/middleware";
 import { stripControlCharacters } from "@/lib/identifiers";
@@ -35,7 +36,9 @@ export async function POST(request: Request) {
   // Shape is checked before the token is spent: an operator gets one enrolment token, and burning
   // it on a missing field would mean minting another. Nothing here discloses anything a caller
   // without a token could not already read in the error text.
-  const body = await request.json().catch(() => ({}));
+  const read = await readJsonBody(request);
+  if (!read.ok) return read.response;
+  const body = read.value;
   // Capped and stripped like the device flow does: whoever holds a valid enrolment token chooses
   // these, and they now land in an audit list an operator reads when something is already wrong —
   // and become the machine's own fullName, so a control or bidi character has nowhere left to
