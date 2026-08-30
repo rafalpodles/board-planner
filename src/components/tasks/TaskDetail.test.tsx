@@ -202,7 +202,7 @@ describe("TaskDetail", () => {
 
     await act(async () => screen.getByRole("button", { name: "Delete" }).click());
 
-    expect(api.del).toHaveBeenCalledWith("/api/projects/TP/tasks/t1");
+    expect(api.del).toHaveBeenCalledWith("/api/projects/TP/tasks/t1", undefined);
     await waitFor(() => expect(onClose).toHaveBeenCalled());
   });
 

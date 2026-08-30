@@ -176,6 +176,22 @@ export function runHolding(task: {
   };
 }
 
+/**
+ * The refusal a run-held task gets, for a caller that is not going through `changeStatus` or
+ * `updateTask`. Exported so the delete route answers in the wording and the shape the other three
+ * writers already answer in, rather than growing a fourth (BP-337).
+ *
+ * `null` when no run holds the task, which is the ordinary case and reads as "carry on".
+ */
+export async function heldRunRefusal(
+  task: { execution?: ITaskExecution; taskNumber: number },
+  projectKey: string | null | undefined
+): Promise<TaskServiceResult | null> {
+  const conflict = runHolding(task);
+  if (!conflict) return null;
+  return refuseHeldRun(conflict, taskKeyOf(projectKey, task.taskNumber));
+}
+
 async function refuseHeldRun(conflict: RunConflict, taskKey: string): Promise<TaskServiceResult> {
   const worker = conflict.workerId
     ? await Worker.findById(conflict.workerId, "name").lean()
