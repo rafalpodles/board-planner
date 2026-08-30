@@ -59,6 +59,24 @@ public struct CloneStep: Sendable {
         }
 
         if exists((target as NSString).appendingPathComponent(".git")) {
+            // A linked worktree has a `.git` too — a file rather than a directory, which `exists`
+            // cannot tell apart — and it answers `remote get-url`, `fetch` and `push --dry-run`
+            // exactly as its repository does. So every check below passes on one, and the app
+            // adopts a directory it did not create, inside a repository it does not own, which
+            // unticking the project would then delete along with that repository (BP-422).
+            let gitDir = run("git", ["-C", target, "rev-parse", "--git-dir"], nil)
+            let commonDir = run("git", ["-C", target, "rev-parse", "--git-common-dir"], nil)
+            switch LinkedWorktreeCheck.kind(gitDir: gitDir, commonDir: commonDir, relativeTo: target) {
+            case .linkedWorktree:
+                return .failed(
+                    reason: "\(target) is a linked worktree of another checkout, not a repository of its own. Point this project at a folder of its own.")
+            case nil:
+                return .failed(
+                    reason: "\(target) already exists, and git could not say whether it is a repository or one of another repository's worktrees.")
+            case .repository:
+                break
+            }
+
             // Re-entering this step must not fail on its own earlier success
             let remote = run("git", ["-C", target, "remote", "get-url", "origin"], nil)
             guard remote.code == 0 else {

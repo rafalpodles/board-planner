@@ -15,6 +15,10 @@ final class CheckoutRemovalTests: XCTestCase {
                     for (needle, answer) in self.answers where args.contains(needle) { return answer }
                     // A clean checkout with no worktrees, unless a test says otherwise
                     if args.contains("--show-toplevel") { return (0, "/checkouts/SB\n") }
+                    // A repository rather than one of its worktrees: the two answers agree
+                    if args.contains("--git-dir") || args.contains("--git-common-dir") {
+                        return (0, ".git")
+                    }
                     if args.contains("--porcelain") && args.contains("worktree") {
                         return (0, "worktree /checkouts/SB\nHEAD abc\n")
                     }
@@ -125,6 +129,48 @@ final class CheckoutRemovalTests: XCTestCase {
             .go(worktrees: ["/checkouts/cp-worktrees/w1/bp-1", "/checkouts/cp-worktrees/w1/bp-2"]))
     }
 
+
+    /// Unexamined is not clean — the rule this whole file is built on, applied to the one question
+    /// that decides whether the path is a repository at all. Without it the answer git could not
+    /// give would be read as "an ordinary checkout" and the repository would be deleted.
+    func testADirectoryGitWillNotDescribeIsARefusal() {
+        let git = Git()
+        git.answers["--git-common-dir"] = (128, "fatal: not a git repository")
+
+        let verdict = git.removal().check(path: "/checkouts/SB", workerIsBusy: false)
+
+        guard case .refused(let reason) = verdict else {
+            return XCTFail("expected a refusal, got \(verdict)")
+        }
+        XCTAssertTrue(reason.contains("could not tell"), reason)
+    }
+
+    /// BP-422's second line, and the only place it can be exercised: `check` now refuses a linked
+    /// worktree before the list is built, so nothing reaching real git can produce this shape. What
+    /// the invariant says is that the FIRST entry is never returned — `git worktree list` names the
+    /// repository's main checkout there, whichever worktree it was run from, and filtering on
+    /// `root` alone left it in the list exactly when `root` was not it.
+    func testTheFirstWorktreeListedIsNeverOfferedForDeletion() {
+        let git = Git()
+        git.present = ["/checkouts/SB", "/checkouts/elsewhere", "/checkouts/cp-worktrees/w1/bp-1"]
+        git.answers["worktree"] = (
+            0,
+            """
+            worktree /checkouts/elsewhere
+            HEAD abc
+
+            worktree /checkouts/SB
+            HEAD def
+
+            worktree /checkouts/cp-worktrees/w1/bp-1
+            HEAD ghi
+            """
+        )
+
+        let verdict = git.removal().check(path: "/checkouts/SB", workerIsBusy: false)
+
+        XCTAssertEqual(verdict, .go(worktrees: ["/checkouts/cp-worktrees/w1/bp-1"]))
+    }
 
     /// A worktree somebody removed with `rm -rf` and never pruned. It is still registered, and
     /// there is nothing on disk to lose — so it must not appear in the list the caller deletes,

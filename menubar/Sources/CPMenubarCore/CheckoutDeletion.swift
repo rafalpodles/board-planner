@@ -43,7 +43,9 @@ public struct CheckoutDeletion: Sendable {
         }
     }
 
-    public func perform(project: String, path: String, worktrees: [String]) -> SyncStep {
+    // Not public: the comment above argues for one entry point, and `internal` is what makes
+    // that true rather than merely asserted. The tests reach it through @testable.
+    func perform(project: String, path: String, worktrees: [String]) -> SyncStep {
         do {
             // The worktrees first: they live beside the checkout, under a root shared with every
             // other project in that folder, so they are removed by name rather than by deleting
