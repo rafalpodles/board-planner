@@ -261,8 +261,8 @@ export function registerPlannerTools(server: McpServer): void {
         }
       }
 
-      // An empty update still bumps updatedAt, which is the one field that reads as proof
-      // something was written (BP-497)
+      // Backstop for a call that named `fields` but no field in it. The refusal above catches
+      // everything else, before the lookup
       if (Object.keys(data).length === 0) throw new Error(`update_task ${NOTHING_TO_CHANGE}`);
 
       return json(await client.updateTask(projectId, taskId, data));

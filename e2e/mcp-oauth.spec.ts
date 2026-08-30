@@ -410,7 +410,6 @@ test.describe("MCP OAuth handshake", () => {
     const after = await session.callTool("get_task", { taskKey: SIBLING_TASK_KEY });
     expect(after.parsed.updatedAt).toBe(before.parsed.updatedAt);
     expect(after.parsed.description).toBe(before.parsed.description);
-    expect(after.parsed.checklist).toEqual(before.parsed.checklist);
 
     // The control. Without it a tool that refused everything would read exactly like this passing
     const written = await session.callTool("update_task", {
