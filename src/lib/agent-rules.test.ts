@@ -43,6 +43,10 @@ const BLOCKS: ApiAgentBlock[] = [
   block({ key: "polish", kind: "step", capability: "edit" }),
   block({ key: "build", gateKind: "build" }),
   block({ key: "test-run", gateKind: "test-run" }),
+  // The only block here whose display name differs from its key. `block()` defaults `name` to the
+  // key, so every other one is a fixture in which "speaks in keys" and "speaks in names" produce
+  // the same string — and an assertion over them could not tell the two apart.
+  block({ key: "tests-pass", gateKind: "test-run", name: "Tests pass" }),
 ];
 
 const lookup = (key: string) => BLOCKS.find((b) => b.key === key);
@@ -281,6 +285,23 @@ describe("rules the shape of the old pipeline used to guarantee", () => {
       lookup
     );
     expect(problems.some((p) => p.severity === "broken" && /not last/i.test(p.message))).toBe(true);
+  });
+
+  // BP-459: it listed the raw keys, so the banner read "…: protected-paths, test-run runs after…"
+  // beside blocks the rest of the product calls Protected files and Tests pass.
+  it("names the blocks after Merge the way the rest of the product does", () => {
+    const problems = agentProblems(
+      composition({
+        implementation: ["implement"],
+        verification: ["protected-paths"],
+        delivery: ["push", "pull-request", "merge", "tests-pass"],
+      }),
+      lookup
+    );
+    const notLast = problems.find((p) => /not last/i.test(p.message))!;
+    expect(notLast).toBeTruthy();
+    expect(notLast.message).toContain("Tests pass");
+    expect(notLast.message).not.toContain("tests-pass");
   });
 
   it("accepts the same agent with Merge at the end", () => {
