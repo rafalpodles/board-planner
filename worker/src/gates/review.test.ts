@@ -209,6 +209,74 @@ describe("reviewGate", () => {
     expect(run).not.toHaveBeenCalled();
   });
 
+  /**
+   * BP-404 review. The clean checkout does not close the instruction channel on its own: measured
+   * on CLI 2.1.248, a CLAUDE.md planted in the checkout's PARENT was obeyed, and the agent is
+   * handed TMPDIR and writes unsandboxed. --safe-mode is what closes it — CLAUDE.md from the cwd
+   * and every directory above it, ~/.claude/CLAUDE.md, settings hooks, skills, plugins.
+   */
+  it("starts the reviewer with every discovered instruction channel disabled", async () => {
+    const { runner, run } = claudeReturning({ approved: true, reason: "" });
+
+    await reviewGate(runner, TIMEOUT_MS).run(context());
+
+    expect(claudeCall(run)[1]).toContain("--safe-mode");
+  });
+
+  /**
+   * A tripwire, not a requirement. The reviewer inherits HOME because the CLI authenticates from
+   * the logged-in session there, and the agent can write under it — so ~/.claude is a channel
+   * --safe-mode closes by flag rather than by reach. This asserts the *inheritance* so that the
+   * day BP-349 changes it, whoever changes it reads this comment. Do not "fix" this by deleting
+   * the assertion: it is recording a known limit, not asking for one.
+   */
+  it("still inherits HOME, so BP-349's surface is closed by --safe-mode and not by isolation", async () => {
+    const { runner, run } = claudeReturning({ approved: true, reason: "" });
+
+    await reviewGate(runner, TIMEOUT_MS).run(context());
+
+    expect(claudeCall(run)[2].env?.HOME).toBe(process.env.HOME);
+  });
+
+  // Without this the gate reviews an EMPTY directory and can return approved: the checkout failed,
+  // nothing was written to it, and the reviewer reads a tree with no change in it (BP-404 review)
+  it("refuses when the checkout could not be made, rather than reviewing nothing", async () => {
+    const run = vi.fn<Runner["run"]>(async (command, args) =>
+      command === "git" && args.includes("worktree") && args.includes("add")
+        ? { code: 128, stdout: "", stderr: "fatal: invalid reference", timedOut: false }
+        : { code: 0, stdout: "", stderr: "", timedOut: false }
+    );
+
+    const result = await reviewGate({ run }, TIMEOUT_MS).run(context());
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/could not be checked out/i);
+    expect(run.mock.calls.find(([command]) => command === "claude")).toBeUndefined();
+  });
+
+  // `git worktree add` fires .git/hooks/post-checkout — measured — and core.hooksPath=/dev/null is
+  // the only thing that stops it. gitArgs is where that flag comes from, so the checkout call has
+  // to go through it like every other git call here
+  it("hardens the checkout call itself, not only the calls that read", async () => {
+    const { runner, run } = claudeReturning({ approved: true, reason: "" });
+
+    await reviewGate(runner, TIMEOUT_MS).run(context());
+
+    const [, addArgs] = gitCall(run, "worktree");
+    expect(addArgs).toEqual(expect.arrayContaining(["-c", "core.hooksPath=/dev/null"]));
+    expect(gitCall(run, "worktree")[2].env?.GIT_CONFIG_NOSYSTEM).toBe("1");
+  });
+
+  // A stop has to reach the checkout too: it is a git process of unbounded duration on a large repo
+  it("passes the signal to the checkout, not only to the reviewer", async () => {
+    const controller = new AbortController();
+    const { runner, run } = claudeReturning({ approved: true, reason: "" });
+
+    await reviewGate(runner, TIMEOUT_MS).run({ ...context(), signal: controller.signal });
+
+    expect(gitCall(run, "worktree")[2].signal).toBe(controller.signal);
+  });
+
   it("reviews under the given budget", async () => {
     const { runner, run } = claudeReturning({ approved: true, reason: "" });
 

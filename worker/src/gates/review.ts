@@ -128,8 +128,12 @@ const CHECKOUT_TIMEOUT_MS = 60_000;
  * through a file no gate can see: absent from `diff --numstat`, absent from `status --porcelain`,
  * present on disk (BP-404).
  *
- * Under `os.tmpdir()` rather than beside the worktree, because the CLI also reads instruction files
- * from ancestor directories, and the run's checkouts share ancestors with each other.
+ * Under `os.tmpdir()` rather than beside the worktree so the reviewer is not standing in the run's
+ * own tree. That is all it buys: `os.tmpdir()` is itself agent-writable — `TMPDIR` is on
+ * `childEnv`'s allowlist and the agent writes unsandboxed — so a plant in the checkout's *parent*
+ * reaches the reviewer just as well. What closes the instruction channel is `--safe-mode` on the
+ * CLI, above; what this closes is the reviewer reading, as data, files no gate ever saw, and it is
+ * what makes the reviewer's tree the artefact the pipeline verified rather than a neighbouring one.
  */
 async function reviewCheckout(
   runner: Runner,
@@ -143,6 +147,12 @@ async function reviewCheckout(
   // Nothing under .git is ever tracked, so protected-paths cannot see it, and there is no key to
   // override because the filter's name is the agent's to choose. Same scan BP-403 put before
   // staging, for the same reason, before the checkout rather than after it.
+  // What it finds, not everything plantable: `git config --local --list` reads one scope. It does
+  // not expand `include.path`, does not read the per-worktree scope behind `extensions.worktreeConfig`,
+  // and does not read `~/.gitconfig` — the three BP-346 names, and the first of which was measured
+  // firing a smudge filter through this gate's own flags. This call is the third to rest on that
+  // scan, after delivery.push and commitAll, and it is the one that runs before an action the
+  // pipeline takes on its own behalf rather than one the agent asked for.
   const planted = await plantedConfig(runner, worktreePath);
   if (planted) {
     return {
@@ -267,6 +277,17 @@ export function reviewGate(
             "--tools",
             "Read Grep Glob",
             "--strict-mcp-config",
+            // Every instruction channel the CLI would otherwise discover: CLAUDE.md from the cwd
+            // AND from every directory above it, ~/.claude/CLAUDE.md, settings hooks, skills,
+            // plugins, custom agents. The clean checkout below cannot close those on its own —
+            // measured on 2.1.248, a CLAUDE.md planted in the checkout's PARENT was obeyed, and
+            // the agent is handed TMPDIR and writes with no filesystem sandbox, so choosing a
+            // directory was never going to be enough (BP-404 review).
+            //
+            // --safe-mode rather than --bare: --bare closes the same channels and also makes auth
+            // "strictly ANTHROPIC_API_KEY or apiKeyHelper", which this gate deliberately withholds.
+            // --safe-mode says auth works normally, and measured, it does.
+            "--safe-mode",
             "--model",
             model,
           ],

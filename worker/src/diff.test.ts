@@ -204,6 +204,21 @@ describe("collectDiff", () => {
     await expect(collectDiff({ run }, "/wt", BASE_SHA)).resolves.toBeDefined();
   });
 
+  // The head is validated the way the base is, and for the same reason: it is spent as a positional
+  // in two git calls and, since BP-404, checked out by the review gate. An answer that is not an
+  // object id means some earlier assumption stopped holding, and this refuses rather than passing
+  // it on. Nothing asserted this until the BP-404 review mutated it away and saw nothing go red.
+  it("refuses a head that git did not answer with an object id", async () => {
+    for (const answer of ["HEAD\n", "refs/heads/main\n", "", "not a sha\n"]) {
+      const run = vi.fn().mockResolvedValue({ code: 0, stdout: "", stderr: "", timedOut: false });
+      run.mockResolvedValueOnce({ code: 0, stdout: answer, stderr: "", timedOut: false });
+
+      await expect(collectDiff({ run }, "/wt", BASE_SHA)).rejects.toThrow(/object id/i);
+      // and it refuses before spending it: the two diffs never run
+      expect(run.mock.calls).toHaveLength(1);
+    }
+  });
+
   // Second line behind the shape check: nothing after `--` can be read as a revision or an option
   it("closes the positional list with --", async () => {
     const run = vi.fn().mockResolvedValue({ code: 0, stdout: "", stderr: "", timedOut: false });
