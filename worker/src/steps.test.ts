@@ -204,7 +204,7 @@ describe("runStep — a worker action", () => {
     const c = ctx({ state: { committed: true, commits: ["sha1"], pushed: false, prUrl: "", merged: false, summary: "", lastResult: completed } });
     await runStep(entry({ key: "push", deterministic: true }), c);
 
-    expect(c.delivery.push).toHaveBeenCalledWith("/wt", "cp-1/x", "sha1");
+    expect(c.delivery.push).toHaveBeenCalledWith("/wt", "cp-1/x", "sha1", undefined);
     expect(c.executor.execute).not.toHaveBeenCalled();
   });
 
@@ -212,7 +212,7 @@ describe("runStep — a worker action", () => {
     const c = ctx();
     await runStep(entry({ key: "push", deterministic: true }), c);
 
-    expect(c.delivery.push).toHaveBeenCalledWith("/wt", "cp-1/x", "");
+    expect(c.delivery.push).toHaveBeenCalledWith("/wt", "cp-1/x", "", undefined);
   });
 
   // RunState.commits is documented "oldest first", and the push step reads its *last* element —
@@ -226,7 +226,7 @@ describe("runStep — a worker action", () => {
 
     await runStep(entry({ key: "push", deterministic: true }), c);
 
-    expect(c.delivery.push).toHaveBeenCalledWith("/wt", "cp-1/x", "sha2");
+    expect(c.delivery.push).toHaveBeenCalledWith("/wt", "cp-1/x", "sha2", undefined);
   });
 
   it("remembers the pull request url, and that a merge happened", async () => {

@@ -38,12 +38,17 @@ export interface StepContext {
   signal?: AbortSignal;
   onEvent?: (event: StreamEvent) => void;
   baseSha: string;
+  /** See Worktree.configBaseline — what the config said before the agent ran (BP-346). */
+  configBaseline?: readonly string[] | null;
   runner: Runner;
 }
 
 // A push or a merge that throws must not reach the pipeline's outer catch: that requeues and
 // destroys the worktree, and after a failed push the worktree is the only copy of the work.
-async function runWorkerAction(entry: SnapshotEntry, ctx: StepContext): Promise<StepOutcome> {
+async function runWorkerAction(
+  entry: SnapshotEntry,
+  ctx: StepContext,
+): Promise<StepOutcome> {
   try {
     return await deliver(entry, ctx);
   } catch (error) {
@@ -51,41 +56,64 @@ async function runWorkerAction(entry: SnapshotEntry, ctx: StepContext): Promise<
   }
 }
 
-async function deliver(entry: SnapshotEntry, ctx: StepContext): Promise<StepOutcome> {
+async function deliver(
+  entry: SnapshotEntry,
+  ctx: StepContext,
+): Promise<StepOutcome> {
   switch (entry.key) {
     case "push": {
-      const wrong = await unexpectedHistory(ctx.runner, ctx.worktreePath, ctx.baseSha, ctx.state.commits);
-      if (wrong) return { kind: "error", message: `refusing to push: ${wrong}` };
+      const wrong = await unexpectedHistory(
+        ctx.runner,
+        ctx.worktreePath,
+        ctx.baseSha,
+        ctx.state.commits,
+      );
+      if (wrong)
+        return { kind: "error", message: `refusing to push: ${wrong}` };
       await ctx.delivery.push(
         ctx.worktreePath,
         ctx.branch,
-        ctx.state.commits[ctx.state.commits.length - 1] ?? ""
+        ctx.state.commits[ctx.state.commits.length - 1] ?? "",
+        ctx.configBaseline,
       );
       ctx.state.pushed = true;
       return { kind: "ok" };
     }
 
     case "pull-request":
-      ctx.state.prUrl = await ctx.delivery.openPr(ctx.worktreePath, ctx.task, ctx.state.summary);
+      ctx.state.prUrl = await ctx.delivery.openPr(
+        ctx.worktreePath,
+        ctx.task,
+        ctx.state.summary,
+      );
       return { kind: "ok" };
 
     case "merge":
       // agentProblems refuses this shape on save, but a snapshot taken before that rule existed
       // still has to fail loudly rather than merge nothing and report a delivery
       if (!ctx.state.prUrl) {
-        return { kind: "error", message: "the merge step ran with no pull request to merge" };
+        return {
+          kind: "error",
+          message: "the merge step ran with no pull request to merge",
+        };
       }
       await ctx.delivery.merge(ctx.worktreePath, ctx.state.prUrl);
       ctx.state.merged = true;
       return { kind: "ok" };
 
     default:
-      return { kind: "error", message: `this worker implements no action named ${entry.key}` };
+      return {
+        kind: "error",
+        message: `this worker implements no action named ${entry.key}`,
+      };
   }
 }
 
 /** One position in the sequence: a call to the model, or something the worker does itself. */
-export async function runStep(entry: SnapshotEntry, ctx: StepContext): Promise<StepOutcome> {
+export async function runStep(
+  entry: SnapshotEntry,
+  ctx: StepContext,
+): Promise<StepOutcome> {
   if (entry.deterministic) return runWorkerAction(entry, ctx);
 
   const outcome = await ctx.executor.execute({
@@ -104,7 +132,8 @@ export async function runStep(entry: SnapshotEntry, ctx: StepContext): Promise<S
 
   if (outcome.kind === "usage_limit") return { kind: "usage_limit" };
   if (outcome.kind === "timeout") return { kind: "timeout" };
-  if (outcome.kind === "error") return { kind: "error", message: outcome.message };
+  if (outcome.kind === "error")
+    return { kind: "error", message: outcome.message };
   if (outcome.result.status === "blocked") {
     return { kind: "blocked", reason: outcome.result.blockedReason };
   }
@@ -117,7 +146,9 @@ export async function runStep(entry: SnapshotEntry, ctx: StepContext): Promise<S
   // only copy of the work.
   if (entry.capability === "edit") {
     try {
-      const sha = await ctx.commit(`${ctx.task.taskKey}: ${entry.name.toLowerCase()}`);
+      const sha = await ctx.commit(
+        `${ctx.task.taskKey}: ${entry.name.toLowerCase()}`,
+      );
       if (sha) ctx.state.commits.push(sha);
       // Sticky, not overwritten: a later edit step that finds nothing to commit must not erase what
       // an earlier one already did.

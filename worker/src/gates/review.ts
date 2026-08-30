@@ -139,6 +139,7 @@ async function reviewCheckout(
   runner: Runner,
   worktreePath: string,
   headSha: string,
+  configBaseline?: readonly string[] | null,
   signal?: AbortSignal,
 ): Promise<{ path: string } | { refusal: string }> {
   // A checkout runs smudge filters, so this is an execution point in the same sense staging is:
@@ -147,13 +148,11 @@ async function reviewCheckout(
   // Nothing under .git is ever tracked, so protected-paths cannot see it, and there is no key to
   // override because the filter's name is the agent's to choose. Same scan BP-403 put before
   // staging, for the same reason, before the checkout rather than after it.
-  // What it finds, not everything plantable: `git config --local --list` reads one scope. It does
-  // not expand `include.path`, does not read the per-worktree scope behind `extensions.worktreeConfig`,
-  // and does not read `~/.gitconfig` — the three BP-346 names, and the first of which was measured
-  // firing a smudge filter through this gate's own flags. This call is the third to rest on that
-  // scan, after delivery.push and commitAll, and it is the one that runs before an action the
-  // pipeline takes on its own behalf rather than one the agent asked for.
-  const planted = await plantedConfig(runner, worktreePath);
+  // Since BP-346 the scan reads every scope the agent writes and refuses `include.path` rather
+  // than following it, and the baseline is what lets it judge `~/.gitconfig` without refusing the
+  // machine's own credential helper. This is the third caller of it, after delivery.push and
+  // commitAll, and the one that runs before an action the pipeline takes on its own behalf.
+  const planted = await plantedConfig(runner, worktreePath, configBaseline);
   if (planted) {
     return {
       refusal: `the checkout's git config carries ${planted}, which git would run while checking the change out for review — a human has to look at this`,
@@ -257,6 +256,7 @@ export function reviewGate(
         runner,
         context.worktreePath,
         context.diff.headSha,
+        context.configBaseline,
         context.signal,
       );
       if ("refusal" in checkout) return { ok: false, reason: checkout.refusal };

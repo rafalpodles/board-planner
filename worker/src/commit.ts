@@ -9,7 +9,8 @@ const TIMEOUT_MS = 60_000;
 export async function commitAll(
   runner: Runner,
   worktreePath: string,
-  message: string
+  message: string,
+  configBaseline?: readonly string[] | null,
 ): Promise<string> {
   const git = (args: string[]) =>
     runner.run("git", gitArgs(args), {
@@ -46,26 +47,30 @@ export async function commitAll(
   // local scope at all. So this refuses a filter written where that scan can see it, which is not
   // the same as refusing every filter; BP-346 is what closes the rest. The refusal below says what
   // was found and deliberately promises nothing about what was not looked for.
-  const planted = await plantedConfig(runner, worktreePath);
+  const planted = await plantedConfig(runner, worktreePath, configBaseline);
   if (planted) {
     throw new Error(
       // Phrased to fit both of plantedConfig's answers: a key, and the sentinel it returns when the
       // config cannot be read at all. "sets an unreadable git config" was nonsense for the second.
-      `refusing to stage: the checkout now has ${planted}, which it did not when the repository was approved`
+      `refusing to stage: the checkout now has ${planted}, which it did not when the repository was approved`,
     );
   }
 
   const status = await git(["status", "--porcelain"]);
-  if (status.code !== 0) throw new Error(`git status failed: ${status.stderr || status.stdout}`);
+  if (status.code !== 0)
+    throw new Error(`git status failed: ${status.stderr || status.stdout}`);
   if (!status.stdout.trim()) return "";
 
   const add = await git(["add", "--all", "--"]);
-  if (add.code !== 0) throw new Error(`git add failed: ${add.stderr || add.stdout}`);
+  if (add.code !== 0)
+    throw new Error(`git add failed: ${add.stderr || add.stdout}`);
 
   const commit = await git(["commit", "--no-verify", "-m", message]);
-  if (commit.code !== 0) throw new Error(`git commit failed: ${commit.stderr || commit.stdout}`);
+  if (commit.code !== 0)
+    throw new Error(`git commit failed: ${commit.stderr || commit.stdout}`);
 
   const head = await git(["rev-parse", "HEAD"]);
-  if (head.code !== 0) throw new Error(`git rev-parse failed: ${head.stderr || head.stdout}`);
+  if (head.code !== 0)
+    throw new Error(`git rev-parse failed: ${head.stderr || head.stdout}`);
   return head.stdout.trim();
 }
