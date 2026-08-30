@@ -325,6 +325,21 @@ function checklistOrRefusal(value: unknown): ChecklistInput[] | TaskServiceResul
   return items;
 }
 
+/**
+ * Whether the schema's own caster takes this value — asked of the caster rather than restated.
+ * `Number([])` is 0 and `Number([5])` is 5, yet Mongoose refuses both, so a hand-rolled rule
+ * reading "anything Number() makes finite" lets an array past the guard and into the CastError
+ * the guard exists to prevent.
+ */
+function castsToSchema(field: "description" | "order", value: unknown): boolean {
+  try {
+    Task.schema.path(field).cast(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** What Mongoose's Date cast accepts: a Date, a timestamp, or a string it can parse. */
 function castsToDate(value: unknown): boolean {
   if (value instanceof Date) return !Number.isNaN(value.getTime());
@@ -360,6 +375,18 @@ function schemaValuesOrRefusal(values: Body): TaskServiceResult | null {
   const dueDate = values.dueDate;
   if ("dueDate" in values && dueDate !== null && dueDate !== "" && !castsToDate(dueDate)) {
     return { ok: false, error: `Invalid due date "${dueDate}"`, status: 400 };
+  }
+
+  // Both go straight to the write, so a shape the cast throws on left the route as a 500 — and on
+  // create that 500 lands past the `$inc`, spending a task number on a task that never exists
+  // (BP-445). Clearing either field is untouched: the caster takes `null` itself, and both writers
+  // default an absent one before they ask.
+  if ("description" in values && !castsToSchema("description", values.description)) {
+    return { ok: false, error: "Description must be text", status: 400 };
+  }
+
+  if ("order" in values && !castsToSchema("order", values.order)) {
+    return { ok: false, error: "Order must be a number", status: 400 };
   }
 
   return null;
@@ -439,7 +466,9 @@ export async function createTask(
   const normalised = normaliseRecurrence(body.recurrence);
   if (!normalised.ok) return { ok: false, error: normalised.error, status: 400 };
   const recurrence = normalised.value;
-  const schemaRefusal = schemaValuesOrRefusal({ priority, dueDate, recurrence });
+  const description = body.description ?? "";
+  const order = body.order ?? 0;
+  const schemaRefusal = schemaValuesOrRefusal({ priority, dueDate, recurrence, description, order });
   if (schemaRefusal) return schemaRefusal;
 
   const sprint = (await sprintBelongsToProject(projectId, body.sprint)) ? body.sprint : null;
@@ -468,7 +497,7 @@ export async function createTask(
     project: projectId,
     taskNumber: project.taskCounter,
     title,
-    description: body.description ?? "",
+    description,
     priority,
     category,
     status,
@@ -479,7 +508,7 @@ export async function createTask(
     sprint,
     customFieldValues,
     recurrence,
-    order: body.order ?? 0,
+    order,
     createdBy: actorId,
   });
 
