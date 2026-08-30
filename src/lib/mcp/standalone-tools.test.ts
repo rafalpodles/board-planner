@@ -48,6 +48,18 @@ async function connected(client: ReturnType<typeof stubClient>) {
 }
 
 describe("the standalone MCP server, driven rather than read", () => {
+  // Guards the instrument. `mcp-server/src/*` imports zod by bare specifier, so with the sibling
+  // package's dependencies missing it resolves upwards to the app's zod 3 and every assertion
+  // below would quietly exercise the hook that is already covered.
+  it("is really running the other zod", async () => {
+    const [standaloneZod, appZod] = await Promise.all([
+      import("../../../mcp-server/node_modules/zod"),
+      import("zod"),
+    ]);
+
+    expect(standaloneZod.z).not.toBe(appZod.z);
+  });
+
   it("refuses an undeclared parameter and keeps the hint its own zod major produces", async () => {
     const client = stubClient();
     const call = await connected(client);

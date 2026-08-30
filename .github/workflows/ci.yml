@@ -21,6 +21,14 @@ jobs:
           cache: npm
       - run: npm ci
 
+      # standalone-tools.test.ts drives mcp-server's registrations through mcp-server's own SDK and
+      # its own zod, which is the only thing that exercises the zod-4 half of the shared
+      # strict-input helper — the app is on zod 3 and never calls that branch (BP-497). So this job
+      # needs the sibling package installed, not merely checked out.
+      - name: Standalone MCP server dependencies
+        working-directory: mcp-server
+        run: npm ci
+
       - name: Types
         run: npx tsc --noEmit
 

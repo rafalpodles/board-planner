@@ -222,7 +222,12 @@ export function registerTools(server: McpServer, client: ApiClient): void {
     async ({ taskKey, title, description, priority, category, assignee, agent, acceptanceCriteria, fields }) => {
       // Before the lookup, so a call that changes nothing costs nothing and the refusal is the
       // first thing that happens rather than the last
-      if (![title, description, priority, category, assignee, agent, acceptanceCriteria, fields].some((v) => v !== undefined)) {
+      if (
+        ![title, description, priority, category, assignee, agent, acceptanceCriteria].some(
+          (v) => v !== undefined
+        ) &&
+        !Object.keys(fields || {}).length
+      ) {
         throw new Error(`update_task ${NOTHING_TO_CHANGE}`);
       }
 

@@ -225,6 +225,20 @@ describe("an update that names nothing to change", () => {
     expect(update).not.toHaveBeenCalled();
   });
 
+  // `fields: {}` names a parameter but no field, so it used to pass the early check and reach the
+  // task lookup before the backstop refused it
+  it("counts an empty fields object as naming nothing, before any lookup", async () => {
+    const resolve = vi.spyOn(PlannerClient.prototype, "resolveTaskKey");
+    const update = vi.spyOn(PlannerClient.prototype, "updateTask").mockResolvedValue({});
+
+    const { refused, said } = await call("update_task", { taskKey: "BP-1", fields: {} });
+
+    expect(refused).toBe(true);
+    expect(said).toContain("nothing to change");
+    expect(resolve).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+  });
+
   it("is refused for a sprint too", async () => {
     vi.spyOn(PlannerClient.prototype, "getProjectByKey").mockResolvedValue({
       _id: "p1",
