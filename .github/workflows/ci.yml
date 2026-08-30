@@ -21,16 +21,19 @@ jobs:
           cache: npm
       - run: npm ci
 
-      # standalone-tools.test.ts drives mcp-server's registrations through mcp-server's own SDK and
-      # its own zod, which is the only thing that exercises the zod-4 half of the shared
-      # strict-input helper — the app is on zod 3 and never calls that branch (BP-497). So this job
-      # needs the sibling package installed, not merely checked out.
-      - name: Standalone MCP server dependencies
-        working-directory: mcp-server
-        run: npm ci
-
+      # Deliberately before the sibling package is installed: the Docker image never has
+      # mcp-server/node_modules (.dockerignore drops **/node_modules) and `next build` type-checks
+      # everything tsconfig globs, so a literal path into it compiles here and breaks the
+      # production build. Installing first hid exactly that, and Railway found it (BP-501).
       - name: Types
         run: npx tsc --noEmit
+
+      # Needed to RUN the standalone spec, not to type-check it. Runs even when the types failed,
+      # so that failure stays the one reported rather than cascading into a missing module
+      - name: Standalone MCP server dependencies
+        if: ${{ !cancelled() }}
+        working-directory: mcp-server
+        run: npm ci
 
       # Runs even when the type check failed: the group guard lives here, and a spec that belongs
       # to no CI job is exactly the thing you want to hear about while you are still editing

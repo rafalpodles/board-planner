@@ -9,8 +9,15 @@ import { describe, it, expect, vi } from "vitest";
  * its own registrations.
  */
 
+// Every path into the sibling package's node_modules is built rather than written, because
+// tsconfig globs **/*.ts and `next build` type-checks what it globs: a literal specifier here is
+// resolved at build time, and .dockerignore drops **/node_modules, so the image cannot have it.
+// That broke the production build on main and no CI job could see it — the app job installs the
+// sibling package before it type-checks (BP-501).
+const STANDALONE_MODULES = "../../../mcp-server/node_modules";
+
 async function standalone() {
-  const sdk = "../../../mcp-server/node_modules/@modelcontextprotocol/sdk/dist/esm";
+  const sdk = `${STANDALONE_MODULES}/@modelcontextprotocol/sdk/dist/esm`;
   const { McpServer } = await import(`${sdk}/server/mcp.js`);
   const { Client } = await import(`${sdk}/client/index.js`);
   const { InMemoryTransport } = await import(`${sdk}/inMemory.js`);
@@ -53,7 +60,7 @@ describe("the standalone MCP server, driven rather than read", () => {
   // below would quietly exercise the hook that is already covered.
   it("is really running the other zod", async () => {
     const [standaloneZod, appZod] = await Promise.all([
-      import("../../../mcp-server/node_modules/zod"),
+      import(`${STANDALONE_MODULES}/zod`),
       import("zod"),
     ]);
 
