@@ -28,7 +28,8 @@ import { CommandResult, createRunner, Runner } from "./exec.js";
 // the remote, so an assertion that the branch landed could not tell the two apart
 const HOOK = (marker: string) => `#!/bin/sh\ntouch ${JSON.stringify(marker)}\nexit 1\n`;
 
-// refuseIfPlanted reads `git config --local --list` through the runner before the push. Where the
+// refuseIfPlanted reads `git config --list --show-scope --no-includes` through the runner before
+// the push (BP-346 widened it from `--local --list`). Where the
 // subject is an override rather than the guard, that one read is blinded: the planted key stays on
 // disk, so the real git still meets it, and only delivery's own look at the config comes back
 // empty. Without this the guard fires first, the push never runs, and every assertion below would
@@ -38,7 +39,7 @@ function pastTheGuard(): Runner {
   const clean: CommandResult = { code: 0, stdout: "", stderr: "", timedOut: false };
   return {
     run: (command, args, opts) =>
-      args.includes("config") && args.includes("--local")
+      args.includes("config") && args.includes("--list")
         ? Promise.resolve(clean)
         : real.run(command, args, opts),
   };
@@ -296,7 +297,7 @@ describe("delivery does not execute what the agent left in the repository", () =
     it("refuses when it cannot read the config at all", async () => {
       const runner: Runner = {
         run: (command, args, opts) =>
-          args.includes("config") && args.includes("--local")
+          args.includes("config") && args.includes("--list")
             ? Promise.resolve({ code: 128, stdout: "", stderr: "boom", timedOut: false })
             : createRunner().run(command, args, opts),
       };

@@ -154,7 +154,7 @@ function harness(overrides: Partial<PipelineDeps> = {}) {
   const delivery = deliverySpy();
   const createDelivery = vi.fn<PipelineDeps["createDelivery"]>(() => delivery);
   const workspace = {
-    create: vi.fn<Workspace["create"]>().mockResolvedValue({ path: "/wt", baseSha: "base1" }),
+    create: vi.fn<Workspace["create"]>().mockResolvedValue({ path: "/wt", baseSha: "base1" , configBaseline: [] }),
     destroy: vi.fn<Workspace["destroy"]>().mockResolvedValue(undefined),
     listWorktrees: vi.fn<Workspace["listWorktrees"]>().mockResolvedValue([]),
   };
@@ -244,7 +244,7 @@ describe("runTask", () => {
     const h = harness();
     await runTask(h.deps, merging);
 
-    expect(h.delivery.push).toHaveBeenCalledWith("/wt", "cp-158/worker", IMPLEMENT_COMMIT_SHA);
+    expect(h.delivery.push).toHaveBeenCalledWith("/wt", "cp-158/worker", IMPLEMENT_COMMIT_SHA, []);
     expect(h.delivery.openPr).toHaveBeenCalledWith("/wt", merging, "did it");
     expect(h.delivery.merge).toHaveBeenCalledWith("/wt", "https://x/pull/7");
     expect(h.reporter.merged).toHaveBeenCalledWith(merging, "https://x/pull/7", "did it");
@@ -260,7 +260,7 @@ describe("runTask", () => {
 
   it("diffs against the worktree's captured base sha, not the configured branch name", async () => {
     const h = harness({ config: { ...config, baseBranch: "develop" } });
-    h.workspace.create.mockResolvedValue({ path: "/wt", baseSha: "base111" });
+    h.workspace.create.mockResolvedValue({ path: "/wt", baseSha: "base111" , configBaseline: [] });
     await runTask(h.deps, task);
 
     expect(h.collectDiff).toHaveBeenCalledWith(h.runner, "/wt", "base111");
@@ -498,6 +498,9 @@ describe("runTask", () => {
 
     expect(gate.run).toHaveBeenCalledWith({
       worktreePath: "/wt",
+      // What the config said before the agent ran, handed to the gate rather than re-read: a gate
+      // that reads it now is reading the version the agent has had (BP-346)
+      configBaseline: [],
       task: merging,
       result: completed,
       diff,
@@ -692,7 +695,7 @@ describe("runTask", () => {
     const h = harness({ gateFor: () => rejectingGate("diff-size", "too big") });
     await runTask(h.deps, running("implement", "diff-size"));
 
-    expect(h.delivery.push).toHaveBeenCalledWith("/wt", "cp-158/worker", IMPLEMENT_COMMIT_SHA);
+    expect(h.delivery.push).toHaveBeenCalledWith("/wt", "cp-158/worker", IMPLEMENT_COMMIT_SHA, []);
     expect(h.workspace.destroy).toHaveBeenCalledWith("CP-158");
   });
 
@@ -742,7 +745,7 @@ describe("runTask", () => {
 
     await runTask(h.deps, twoWrites);
 
-    expect(h.delivery.push).toHaveBeenCalledWith("/wt", "cp-158/worker", LAST);
+    expect(h.delivery.push).toHaveBeenCalledWith("/wt", "cp-158/worker", LAST, []);
   });
 
   it("says so in the comment and keeps the worktree when the rejected branch will not push", async () => {
@@ -860,7 +863,7 @@ describe("runTask", () => {
 
   it("never rejects, even when the cleanup itself throws", async () => {
     const workspace = {
-      create: vi.fn<Workspace["create"]>().mockResolvedValue({ path: "/wt", baseSha: "base1" }),
+      create: vi.fn<Workspace["create"]>().mockResolvedValue({ path: "/wt", baseSha: "base1" , configBaseline: [] }),
       destroy: vi.fn<Workspace["destroy"]>(() => {
         throw new Error("worktree is locked");
       }),
@@ -911,7 +914,11 @@ describe("runTask", () => {
   it("ends the run when a later writing step leaves the tree unclean", async () => {
     let calls = 0;
     const runner = {
-      run: vi.fn<Runner["run"]>(async () => {
+      run: vi.fn<Runner["run"]>(async (_command, args) => {
+        // The pre-staging config scan is not one of the calls this fixture counts. Skipped by
+        // shape rather than counted: BP-403 added one call to it and BP-346 a second, and each
+        // time the numbering below moved while still reading as though it named the checks
+        if (args.includes("--list")) return shell("");
         calls += 1;
         // 1: the first commit's status, 2: the check after step one, 3: the second commit's status,
         // 4: the check after step two — the one that only exists because steps can follow steps

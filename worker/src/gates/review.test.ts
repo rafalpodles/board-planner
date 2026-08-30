@@ -321,7 +321,7 @@ describe("reviewGate", () => {
   it("refuses rather than checking out when the config carries something git would run", async () => {
     const run = vi.fn<Runner["run"]>(async (command, args) =>
       command === "git" && args.includes("--list")
-        ? { code: 0, stdout: "filter.z.smudge=/tmp/theirs.sh\n", stderr: "", timedOut: false }
+        ? { code: 0, stdout: "local\tfilter.z.smudge=/tmp/theirs.sh\n", stderr: "", timedOut: false }
         : { code: 0, stdout: "", stderr: "", timedOut: false }
     );
 

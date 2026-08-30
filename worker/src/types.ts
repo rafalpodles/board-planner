@@ -68,6 +68,8 @@ export interface DiffStats {
 
 export interface GateContext {
   worktreePath: string;
+  /** See Worktree.configBaseline — what the config said before the agent ran (BP-346). */
+  configBaseline?: readonly string[] | null;
   task: ClaimedTask;
   result: ExecutionResult;
   diff: DiffStats;
