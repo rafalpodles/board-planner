@@ -332,6 +332,31 @@ describe("what a turn records about its own cost", () => {
     expect(lastMessage().usage).toMatchObject({ calls: 2 });
   });
 
+  /**
+   * The most expensive shape a turn takes, and the one the operator most wants to hear about: it
+   * spent every step and stopped because it ran out, not because it was finished. Nothing asserted
+   * this arm, so the flag, the `$cond` that counts it and the sentence on the settings screen all
+   * rested on one untested line.
+   */
+  it("says when it ran out of steps rather than finishing", async () => {
+    chatCompletion.mockResolvedValue(
+      withUsage(toolCall("add_comment", { taskKey: "BP-1", body: "again" }), 10)
+    );
+
+    await turn([]);
+
+    expect(lastMessage().usage).toMatchObject({ hitStepLimit: true, calls: 15 });
+  });
+
+  // The control: a turn that finished says it did, so the flag is not simply always true
+  it("does not claim it ran out when it answered", async () => {
+    chatCompletion.mockResolvedValue(withUsage({ type: "text", content: "done" }, 10));
+
+    await turn([]);
+
+    expect(lastMessage().usage).toMatchObject({ hitStepLimit: false });
+  });
+
   // A provider that reports no usage must read as "unknown", never as free
   it("still counts the calls when the provider reports no usage at all", async () => {
     chatCompletion.mockResolvedValue({ type: "text", content: "done" });

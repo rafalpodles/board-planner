@@ -99,6 +99,9 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
    */
   const [usage, setUsage] = useState<PmUsageToday | null>(null);
   useEffect(() => {
+    // Behind the same gate as the card that renders it: a member never sees these numbers, so
+    // fetching them spends a request on data the screen will not show
+    if (!isAdmin) return;
     let cancelled = false;
     api
       .get(`/api/projects/${projectId}/pm/usage`)
@@ -110,7 +113,7 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
     return () => {
       cancelled = true;
     };
-  }, [api, projectId]);
+  }, [api, projectId, isAdmin]);
   const [transient, setTransient] = useState<Record<number, McpTransient>>({});
   const [newLinkLabel, setNewLinkLabel] = useState("");
   const [newLinkUrl, setNewLinkUrl] = useState("");
