@@ -49,6 +49,28 @@ const UNAUTHENTICATED = [
     honest: { username: "someone", password: "a-long-enough-password", fullName: "Someone" },
     answers: 403,
   },
+  // The four below were missed by the first enumeration: it searched src/app/api, and the OAuth
+  // routes live in src/app/oauth; and it matched the word "withAdmin" in a COMMENT on
+  // workers/register. Each reads a body before it checks a credential.
+  {
+    name: "worker registration",
+    path: "/api/workers/register",
+    honest: { name: "laptop", host: "office" },
+    answers: 401,
+  },
+  {
+    name: "OAuth client registration",
+    path: "/oauth/register",
+    honest: { redirect_uris: [] },
+    answers: 400,
+  },
+];
+
+// Form-encoded rather than JSON, and unauthenticated with no throttle at all, so the cap is the
+// only bound they have.
+const OAUTH_FORMS = [
+  { name: "OAuth token", path: "/oauth/token" },
+  { name: "OAuth authorize", path: "/oauth/authorize" },
 ];
 
 test.describe("handlers that run before any credential is checked", () => {
@@ -80,6 +102,21 @@ test.describe("handlers that run before any credential is checked", () => {
 
     expect(response.status(), await response.text()).toBe(200);
   });
+});
+
+test.describe("the OAuth endpoints, which take a form", () => {
+  for (const route of OAUTH_FORMS) {
+    test(`${route.name} refuses an oversized form`, async ({ request }) => {
+      const response = await request.post(route.path, {
+        headers: SAME_ORIGIN,
+        form: { grant_type: "authorization_code", code: OVERSIZE },
+      });
+
+      // These answer RFC 6749 error codes rather than 413: an over-cap body is unreadable, which
+      // is invalid_request, and a machine client acts on that.
+      expect(response.status(), await response.text()).toBe(400);
+    });
+  }
 });
 
 test.describe("uploads", () => {
