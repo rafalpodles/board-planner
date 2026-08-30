@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
+// A category name lands in the PM's SYSTEM prompt, and any member can write one (BP-321)
+import { hasControlCharacters } from "@/lib/identifiers";
 import { withProjectAccess, withProjectOwner } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { Task } from "@/models/task";
@@ -25,6 +27,12 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
   if (!name || typeof name !== "string" || !name.trim() || name.trim().length > 50) {
     return NextResponse.json(
       { error: "Category name is required (max 50 chars)" },
+      { status: 400 }
+    );
+  }
+  if (hasControlCharacters(name)) {
+    return NextResponse.json(
+      { error: "Category name cannot contain control characters" },
       { status: 400 }
     );
   }
@@ -61,6 +69,12 @@ export const PATCH = withProjectAccess(async (request, { params, user }) => {
   const target = renaming ? newName.trim() : name;
   if (renaming && target.length > 50) {
     return NextResponse.json({ error: "Category name is too long (max 50 chars)" }, { status: 400 });
+  }
+  if (renaming && hasControlCharacters(target)) {
+    return NextResponse.json(
+      { error: "Category name cannot contain control characters" },
+      { status: 400 }
+    );
   }
 
   const project = await Project.findById(projectId);

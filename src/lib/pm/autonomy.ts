@@ -1,11 +1,15 @@
 import { IPmAutonomy } from "@/types";
 
-// An unattended turn may not put work onto a machine, and since BP-419 **this list is the only
-// thing enforcing that.** It used to be belt and braces: the claim required assignedBy to equal the
-// machine's owner while assign_task always stamped the "pm" user, so nothing the PM assigned could
-// arm a machine whatever this list said. BP-419 made the PM's assignment a real hand-over, so that
-// second guarantee is gone — withholding assign_task from an unattended turn is now load-bearing,
-// not a tidy-up. Do not remove an entry here on the strength of the sentence that used to be above.
+// An unattended turn may not put work onto a machine. Since BP-419 this list is what enforces that
+// for the built-in tools: the claim used to refuse every PM assignment whatever this list said, and
+// a PM hand-over is now real (bounded by whose instruction it was), so withholding assign_task here
+// is load-bearing rather than a tidy-up.
+//
+// It is a list of NAMES, and that is its limit: BP-321 found MCP tools are exposed as
+// `mcp_<server>_<tool>`, so nothing here could ever name them and an unattended turn kept full
+// write access to a project's MCP server. That half is enforced by capability instead — runPmTurn's
+// `autonomous` flag withholds every write-capable MCP tool — and the two are separate on purpose,
+// because `add_comment` is a write this list deliberately allows a board review to keep.
 export const BOARD_REVIEW_DISALLOWED_TOOLS = ["change_status", "create_task", "assign_task"];
 
 export const NEEDS_HUMAN_REVIEW_DISALLOWED_TOOLS = ["change_status", "assign_task"];
