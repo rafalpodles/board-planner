@@ -108,7 +108,11 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
         ? `Not a timezone this server knows: ${typedTimezone}`
         : "A review has to run somewhere — name a timezone, for example Europe/Warsaw.";
   // What the project already has, which is by definition something the server accepted
-  const storedTimezone = project.pm?.autonomy?.timezone || DEFAULT_PM_AUTONOMY.timezone;
+  // The rule the SERVER uses, not a truthiness check: `turn-cap.ts` falls back when the stored
+  // zone is unreadable, so a legacy row holding "Warsaw" would otherwise be announced here while
+  // the count ran in Europe/Warsaw.
+  const stored = project.pm?.autonomy?.timezone;
+  const storedTimezone = stored && isValidTimezone(stored) ? stored : DEFAULT_PM_AUTONOMY.timezone;
 
   const typedCap = draft.value.dailyCap.trim();
   const capNumber = Number(typedCap);
@@ -294,7 +298,10 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
                 error={capError}
                 placeholder="Leave empty for the server default"
               />
-              <p className="mt-1 text-xs text-text-muted">Autonomous turns count against this too.</p>
+              <p className="mt-1 text-xs text-text-muted">
+                Autonomous turns count too, and so does a turn the model failed. Resets at midnight
+                in {storedTimezone}.
+              </p>
             </div>
           </div>
         </SettingsCard>
