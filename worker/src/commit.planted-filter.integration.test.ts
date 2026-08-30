@@ -19,10 +19,15 @@ import { createRunner } from "./exec.js";
  */
 
 const BASE = "aaaa\n";
-// The same length as BASE on purpose. git only reads a file's content — and so only runs the
-// filter — when size and stat cannot answer "modified?" on their own, so an equal-size edit is what
-// makes `git status` a content read too, and is the case that proves the refusal precedes it.
+// The same length as BASE on purpose: git reads a file's content — and so runs the filter — only
+// when size and stat cannot answer "modified?" on their own, so an equal-size edit is what makes
+// `git status` a content read too. The invariant is asserted below rather than left to the reader:
+// widening this string by one character silently turns the ordering cases into tests of `git add`
+// alone, and they stay green with the guard moved after `status`. Measured.
 const EDITED = "bbbb\n";
+// A file the agent newly wrote — the ordinary case in this pipeline. `git status` runs the filter
+// for an untracked file whatever its size, so this pins the ordering without depending on a length.
+const NEW_FILE = "something the agent wrote, of a length nobody has to keep equal to anything\n";
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, {
@@ -33,6 +38,10 @@ function git(cwd: string, ...args: string[]): string {
 }
 
 describe("commitAll against a planted filter", () => {
+  it("keeps the equal-size premise the ordering cases rest on", () => {
+    expect(EDITED.length).toBe(BASE.length);
+  });
+
   let dir: string;
   let work: string;
   let marker: string;
@@ -96,6 +105,17 @@ describe("commitAll against a planted filter", () => {
 
       if (RUNS_WHEN_STAGING[leaf]) {
         it("never runs the program — not at add, and not at the status before it", async () => {
+          await expect(commitAll(createRunner(), work, "BP-403: staged work")).rejects.toThrow();
+          expect(existsSync(marker)).toBe(false);
+        });
+
+        // The same ordering, pinned to something no fixture edit can quietly undo: for an untracked
+        // file `git status` runs the filter whatever the size, so this fails if the guard moves
+        // after `status` even when the equal-size premise above is broken.
+        it("never runs the program for a file the agent newly wrote", async () => {
+          writeFileSync(join(work, "a.txt"), BASE);
+          writeFileSync(join(work, "new.ts"), NEW_FILE);
+
           await expect(commitAll(createRunner(), work, "BP-403: staged work")).rejects.toThrow();
           expect(existsSync(marker)).toBe(false);
         });

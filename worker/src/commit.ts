@@ -25,9 +25,16 @@ export async function commitAll(
   // the worker stages the agent's work. gitArgs cannot close it: `-c` neutralises a key by name and
   // filter names are the agent's to choose, so there is no filter.* to override.
   //
-  // Before `status`, not merely before `add`. Measured on git 2.50.1: `git status --porcelain` does
-  // not run the filter when the file's size changed, and does run it when the size is the same,
-  // because that is when git has to read the content to answer.
+  // Before `status`, not merely before `add`. `git status --porcelain` reads a file's content —
+  // and so runs the filter — whenever size and stat cannot answer "modified?" on their own.
+  // Measured on git 2.50.1:
+  //
+  //   tracked, size changed    status: no     add: yes
+  //   tracked, same size       status: YES    add: yes
+  //   untracked, any size      status: YES    add: yes
+  //
+  // The untracked row is the one that matters here: a file the agent newly wrote is the ordinary
+  // case in this pipeline, and for it `status` runs the filter unconditionally.
   //
   // delivery.push runs this same scan, but that is after the payload has already executed here —
   // and a filter that deletes its own config on the way out sails past it.
@@ -42,7 +49,9 @@ export async function commitAll(
   const planted = await plantedConfig(runner, worktreePath);
   if (planted) {
     throw new Error(
-      `refusing to stage: the checkout's git config sets ${planted}, which was not there when the repository was approved`
+      // Phrased to fit both of plantedConfig's answers: a key, and the sentinel it returns when the
+      // config cannot be read at all. "sets an unreadable git config" was nonsense for the second.
+      `refusing to stage: the checkout now has ${planted}, which it did not when the repository was approved`
     );
   }
 

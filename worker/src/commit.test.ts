@@ -106,9 +106,19 @@ describe("commitAll against a planted config", () => {
     expect(run).toHaveBeenCalledTimes(1);
   });
 
-  it("lets an inert sibling key through, so a Git-LFS checkout still commits", async () => {
+  // Not "so a Git-LFS checkout still commits" — it does not, and saying so would be the reverse of
+  // the truth. A real LFS checkout sets filter.lfs.clean, which is refused here and was already
+  // refused by bindRepository's identical scan (repos.ts:196-200), so it never reached a commit
+  // before this change either. What must keep working is the inert sibling: `required` is not a
+  // program, and refusing it would fail every repository that merely mentions a filter.
+  it("lets an inert sibling leaf through", async () => {
     const { runner, run } = runnerReturning(dirty, clean, clean, { code: 0, stdout: "abc123\n" });
     expect(await commitAll(runner, "/wt", "m")).toBe("abc123");
     expect(run.mock.calls[2][1]).toContain("add");
+  });
+
+  it("refuses filter.lfs.clean like any other, which is what bindRepository already did", async () => {
+    const { runner } = runnerFor({ code: 0, stdout: "filter.lfs.clean=git-lfs clean -- %f\n" });
+    await expect(commitAll(runner, "/wt", "m")).rejects.toThrow(/refusing to stage.*filter\.lfs\.clean/);
   });
 });
