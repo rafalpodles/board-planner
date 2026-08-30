@@ -145,13 +145,42 @@ describe("GET /api/projects/:projectId/tasks — assignee filter", () => {
     expect(taskFind).not.toHaveBeenCalled();
   });
 
-  // It always worked, and this route is public REST
-  it("still takes an id", async () => {
+  // It always worked, and this route is public REST — but only after no account claims the value
+  it("still takes an id, once no account answers to it", async () => {
     const res = await GET(request("?assignee=507f1f77bcf86cd799439099"), ctx());
 
     expect(res.status).toBe(200);
-    expect(userFindOne).not.toHaveBeenCalled();
     expect(filterUsed()?.assignee).toBe("507f1f77bcf86cd799439099");
+  });
+
+  /**
+   * `USERNAME_PATTERN` is `^[a-z0-9][a-z0-9._-]{1,31}$`, so 24 hex characters is a name somebody
+   * may hold. Looking the id up first would answer their tasks with the silent empty list this
+   * whole change exists to remove.
+   */
+  it("prefers the person over the id when the name looks like one", async () => {
+    userFindOne.mockReturnValue({ lean: async () => ({ _id: "u9" }) });
+
+    await GET(request("?assignee=507f1f77bcf86cd799439099"), ctx());
+
+    expect(filterUsed()?.assignee).toBe("u9");
+  });
+
+  // An empty parameter is falsy, so the filter is skipped entirely — the same as every other
+  // parameter here, and one character away from meaning "assigned to nobody"
+  it("ignores an empty assignee rather than filtering on it", async () => {
+    const res = await GET(request("?assignee="), ctx());
+
+    expect(res.status).toBe(200);
+    expect(filterUsed()).not.toHaveProperty("assignee");
+  });
+
+  // The message reaches a model as a tool result, so it is not a place to echo an unbounded value
+  it("does not echo an unbounded parameter back", async () => {
+    const res = await GET(request(`?assignee=${"x".repeat(500)}`), ctx());
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.length).toBeLessThan(150);
   });
 
   // The control: without a parameter the filter must not mention the field at all, or every list
@@ -196,6 +225,17 @@ describe("GET /api/projects/:projectId/tasks — category and priority", () => {
 
     expect(res.status).toBe(200);
     expect(filterUsed()?.priority).toEqual({ $in: ["medium", null] });
+  });
+
+  // The escape both writers have, copied faithfully: a project that defines no categories at all
+  // must not have every category filter refused
+  it("lets any category through on a project that defines none", async () => {
+    projectFindById.mockReturnValue({ lean: async () => ({ categories: [] }) });
+
+    const res = await GET(request("?category=anything"), ctx());
+
+    expect(res.status).toBe(200);
+    expect(filterUsed()?.category).toBe("anything");
   });
 
   it("leaves an unknown status matching nothing, which is the older decision", async () => {

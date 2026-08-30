@@ -1,6 +1,6 @@
 import { test, expect, type APIRequestContext } from "@playwright/test";
 import { ADMIN_AUTH } from "./api";
-import { ADMIN_USERNAME, PROJECT_KEY, SIBLING_TASK_ID, seed } from "./seed";
+import { ADMIN_ID, ADMIN_USERNAME, PROJECT_KEY, SIBLING_TASK_ID, seed } from "./seed";
 
 /**
  * BP-502. `?assignee=rpo` was written straight into `filter.assignee`, which is an ObjectId on the
@@ -46,6 +46,16 @@ test("the assignee filter takes a username, which is what it is documented to ta
       expect(task.assignee?.username).toBe(ADMIN_USERNAME);
     }
     expect(assigned.length).toBeGreaterThan(0);
+  });
+
+  await test.step("and an id still works, against a real cast", async () => {
+    // The unit tests mock Mongoose, so "an id still works" is exactly the claim they cannot make
+    const res = await list(request, `?assignee=${String(ADMIN_ID)}`);
+
+    expect(res.status(), await res.text()).toBe(200);
+    const byId = await res.json();
+    expect(byId.length).toBeGreaterThan(0);
+    for (const task of byId) expect(task.assignee?.username).toBe(ADMIN_USERNAME);
   });
 
   await test.step("a username nobody holds is refused, not answered with an empty list", async () => {

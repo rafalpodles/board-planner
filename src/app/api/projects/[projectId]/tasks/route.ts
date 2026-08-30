@@ -22,9 +22,12 @@ export const GET = withProjectAccess(async (request, { params }) => {
 
   const statusParam = url.searchParams.get("status");
   if (statusParam) {
-    // Column ids are project-defined (CP-128); unknown ids simply match nothing. Deliberately
-    // unlike `category` and `priority` below: this one is comma-separated, so refusing the whole
-    // request because one id of several is unknown would be harsher than the answer is worth.
+    // Column ids are project-defined (CP-128); unknown ids simply match nothing. Left alone rather
+    // than settled: this one is comma-separated, so the answer is not the same yes/no as the two
+    // below — refusing only when NONE of the given ids exists is a third option, and it is the one
+    // worth having, because both MCP tools still describe the seeded ids as a closed list. An agent
+    // on a board that renamed its columns asks for `todo`, gets `200 []`, and reports that there is
+    // nothing to do. Its own ticket.
     const statuses = statusParam.split(",").filter(Boolean);
     if (statuses.length > 0) {
       filter.status = { $in: statuses };
@@ -41,38 +44,47 @@ export const GET = withProjectAccess(async (request, { params }) => {
      * `?assignee=rpo` reached Mongoose as a cast crash and answered 500. Every time. The comment on
      * the sprint branch below has warned against exactly this since it was written.
      *
-     * An id still works, because it always has and this route is public REST — the ambiguity is a
-     * 24-character hex username, which is a shape the pattern allows and nobody has.
+     * An id still works, because it always has and this route is public REST — but the **username
+     * is tried first**, because `USERNAME_PATTERN` allows 24 hex characters and somebody holding
+     * such a name would otherwise be looked up as an id and answered with the silent empty list
+     * this whole change exists to remove.
      *
      * Resolved, never access-checked: a task assigned to somebody before they lost access is still
-     * a task, and refusing to *look* for it would hide work rather than protect anything.
+     * a task, and refusing to *look* for it would hide work rather than protect anything. The cost
+     * is that this now distinguishes "no such account" from "no tasks" for any authenticated
+     * caller — see the ticket raised alongside this change.
      */
-    if (isValidObjectId(assignee)) {
+    const user = await User.findOne({ username: assignee.toLowerCase() }, "_id").lean();
+    if (user) {
+      filter.assignee = user._id;
+    } else if (isValidObjectId(assignee)) {
       filter.assignee = assignee;
     } else {
-      const user = await User.findOne({ username: assignee.toLowerCase() }, "_id").lean();
       // Refused rather than answered with an empty list, so a typo is distinguishable from
-      // "nothing is assigned to them" — the two look identical to a reader otherwise
-      if (!user) {
-        return NextResponse.json(
-          { error: `No account named "@${assignee}" — this filter takes a username.` },
-          { status: 400 }
-        );
-      }
-      filter.assignee = user._id;
+      // "nothing is assigned to them" — the two look identical to a reader otherwise.
+      // Sliced: this string reaches a model as a tool result, so it is not a place to echo an
+      // unbounded parameter back.
+      return NextResponse.json(
+        { error: `No account named "@${assignee.slice(0, 64)}" — this filter takes a username.` },
+        { status: 400 }
+      );
     }
   }
 
   const category = url.searchParams.get("category");
   if (category) {
-    // Refused, not silently unmatched. A category is project-defined, and BOTH writers already
-    // refuse an unknown one naming the project's list (`Invalid category "x" — project categories:
-    // …`), so a filter that answered [] would be the one place a typo looked like an empty board.
+    // Refused, not silently unmatched. A category is project-defined, and both writers already
+    // refuse an unknown one naming the project's list (`task-service.ts` create and update), so a
+    // filter that answered [] would be the one place a typo looked like an empty board.
+    //
+    // True of the CATEGORY writers specifically. The assignee writers do the opposite — an unknown
+    // username silently creates the task unassigned, or silently CLEARS the assignee on update —
+    // which is a worse asymmetry than this one and has its own ticket.
     const board = await Project.findById(projectId, "categories").lean();
     const names = (board?.categories || []).map((c: { name: string }) => c.name);
     if (names.length > 0 && !names.includes(category)) {
       return NextResponse.json(
-        { error: `Invalid category "${category}" — project categories: ${names.join(", ")}` },
+        { error: `Invalid category "${category.slice(0, 64)}" — project categories: ${names.join(", ")}` },
         { status: 400 }
       );
     }
@@ -85,7 +97,7 @@ export const GET = withProjectAccess(async (request, { params }) => {
     // typo answered as a fact
     if (!PRIORITIES.includes(priority as (typeof PRIORITIES)[number])) {
       return NextResponse.json(
-        { error: `Invalid priority "${priority}" — one of: ${PRIORITIES.join(", ")}` },
+        { error: `Invalid priority "${priority.slice(0, 64)}" — one of: ${PRIORITIES.join(", ")}` },
         { status: 400 }
       );
     }

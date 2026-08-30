@@ -75,7 +75,13 @@ export function registerPlannerTools(server: McpServer): void {
             "Filter by status (comma-separated): planned, todo, in_progress, in_review, needs_human_review, ready_to_test, done"
           ),
         assignee: z.string().optional().describe("Filter by assignee username"),
-        category: z.string().optional().describe("Filter by category: bug, doc, user-story, idea"),
+        // Project-defined, and since BP-502 an unknown one is refused rather than silently matched
+        // — so a description naming the seeded four as closed would *produce* 400s on a board that
+        // renamed them. The sibling package already words it this way.
+        category: z
+          .string()
+          .optional()
+          .describe("Filter by category (project-defined; defaults: bug, doc, user-story, idea)"),
         priority: z.string().optional().describe("Filter by priority: low, medium, high, urgent"),
       }),
     },
