@@ -911,7 +911,11 @@ describe("runTask", () => {
   it("ends the run when a later writing step leaves the tree unclean", async () => {
     let calls = 0;
     const runner = {
-      run: vi.fn<Runner["run"]>(async () => {
+      run: vi.fn<Runner["run"]>(async (_command, args) => {
+        // The pre-staging config scan is not one of the calls this fixture counts. Skipped by
+        // shape rather than counted: BP-403 added one call to it and BP-346 a second, and each
+        // time the numbering below moved while still reading as though it named the checks
+        if (args.includes("--list")) return shell("");
         calls += 1;
         // 1: the first commit's status, 2: the check after step one, 3: the second commit's status,
         // 4: the check after step two — the one that only exists because steps can follow steps
