@@ -1,3 +1,5 @@
+import { escapeRegex } from "./escape-regex";
+
 interface GitHubPR {
   number: number;
   title: string;
@@ -9,9 +11,7 @@ interface GitHubPR {
 }
 
 // Project keys are not format-validated, so a key like "C(" must not blow up the matcher
-export function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
+export { escapeRegex };
 
 export interface ParsedPR {
   number: number;

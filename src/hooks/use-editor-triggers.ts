@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useApi } from "@/hooks/use-api";
+import { escapeRegex } from "@/lib/escape-regex";
 import type { Trigger } from "@/hooks/use-trigger-autocomplete";
 
 interface Person {
@@ -61,7 +62,13 @@ export function useEditorTriggers(projectId: string, projectKey?: string): Trigg
               // Zero-width guard, because the whole match is what insertion replaces — a consuming
               // one would swallow the space before the key and paste the word onto it.
               // Case-insensitive, like the rendering and like every other key comparison here.
-              pattern: new RegExp(`(?<![\\w-])${projectKey}-([A-Za-z0-9_-]{0,30})$`, "i"),
+              // Escaped, like every server-side use of a key (`github.ts`, `gitlab.ts`): `Project.key`
+              // carries only `uppercase` and `trim`, so a stored key of `(((` throws inside this
+              // useMemo and takes the editor down for everyone who opens the task (BP-329).
+              pattern: new RegExp(
+                `(?<![\\w-])${escapeRegex(projectKey)}-([A-Za-z0-9_-]{0,30})$`,
+                "i"
+              ),
               suggest: async (query: string) => {
                 const tasks: { _id: string; taskNumber: number; title: string }[] = await api.get(
                   `/api/projects/${projectId}/tasks/suggest?q=${encodeURIComponent(query)}`

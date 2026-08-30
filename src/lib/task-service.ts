@@ -1660,6 +1660,9 @@ export async function claimNextTask(
   // that has never run one, and an instance without it simply has no PM assignments to honour.
   const pm = await pmUserId();
 
+  // The other five `updatePipeline: true` writes here interpolate only column ids resolved from
+  // the project's own board, slugified to `[a-z0-9_]` where they are created — safe by a validator
+  // elsewhere, so if that rule ever loosens they want `$literal` too (BP-329).
   return Task.findOneAndUpdate(
     {
       project: projectId,
@@ -1720,8 +1723,12 @@ export async function claimNextTask(
           // value as "the claim assigned it", which would blank the person's own assignment on
           // the first release and drop the task out of what any machine may claim.
           "execution.assignedByRun": false,
-          "execution.workerId": workerId,
-          "execution.runId": runId,
+          "execution.workerId": { $literal: workerId },
+          // `$literal`, because an aggregation `$set` reads a leading `$` as a FIELD PATH and
+          // Mongoose casts nothing in a pipeline update. Measured: `"$$REMOVE"` stored no runId at
+          // all and `"$execution.workerId"` stored that field's value, leaving the task active and
+          // held by a run nothing could address until the lease expired (BP-329).
+          "execution.runId": { $literal: runId },
           "execution.startedAt": new Date(),
           "execution.lastError": "",
           "execution.attempts": { $add: [{ $ifNull: ["$execution.attempts", 0] }, 1] },

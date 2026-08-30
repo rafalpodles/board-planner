@@ -50,6 +50,14 @@ export const POST = withWorker(async (request, { params, worker }) => {
   if (typeof runId !== "string" || !runId.trim()) {
     return NextResponse.json({ error: "runId is required" }, { status: 400 });
   }
+  // The claim writes this through an update pipeline, where a leading `$` is a field path rather
+  // than text (BP-329). The worker mints `randomUUID()`, which this admits with room to spare.
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(runId)) {
+    return NextResponse.json(
+      { error: "runId must be 1-64 characters of letters, digits, hyphen or underscore" },
+      { status: 400 }
+    );
+  }
 
   const machineOwnerId = ownerIdOf(worker.owner);
 
