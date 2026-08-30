@@ -60,6 +60,10 @@ export interface DiffStats {
   changedFiles: string[];
   patch: string;
   truncated: boolean;
+  // The commit the diff was taken against, resolved once to an object id rather than left as the
+  // ref `HEAD`. The review gate checks this out to read the change, so "what the reviewer saw" and
+  // "what the gates judged" are the same commit by construction (BP-404).
+  headSha: string;
 }
 
 export interface GateContext {

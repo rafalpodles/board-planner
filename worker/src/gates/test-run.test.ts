@@ -10,7 +10,7 @@ const context: GateContext = {
   worktreePath: "/wt",
   task: claimedTask({ title: "t", description: "d" }),
   result: { status: "completed", summary: "", filesChanged: [], testsAdded: [], blockedReason: "" },
-  diff: { changedLines: 10, changedFiles: ["src/a.ts"], patch: "", truncated: false },
+  diff: { changedLines: 10, changedFiles: ["src/a.ts"], patch: "", truncated: false, headSha: "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c" },
 };
 
 const ok: CommandResult = { code: 0, stdout: "", stderr: "", timedOut: false };
