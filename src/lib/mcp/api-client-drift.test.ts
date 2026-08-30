@@ -118,34 +118,19 @@ describe("the standalone MCP client does not drift from PlannerClient", () => {
 });
 
 /**
- * BP-497 landed the same strict-input fix in both copies. `mcp-server/src/index.ts` connects a
- * stdio transport at import time, so unlike the client it cannot be imported and driven the way
- * tools.strict.test.ts drives the in-app one — what is left to check is that it still routes every
- * tool through the helper, and that the helper itself has not diverged.
+ * BP-497 landed the same strict-input fix in both copies. What the standalone server *does* is
+ * driven for real in standalone-tools.test.ts, under its own SDK and its own zod major; what no
+ * test there can see is the two helper files drifting apart, because each side would still pass
+ * its own assertions.
  */
 describe("the standalone MCP server keeps the strict input the in-app one has", () => {
   const IN_APP_HELPER = join(process.cwd(), "src/lib/mcp/strict-input.ts");
   const STANDALONE_HELPER = join(process.cwd(), "mcp-server/src/strict-input.ts");
-  const STANDALONE_SERVER = join(process.cwd(), "mcp-server/src/index.ts");
 
   // The two packages are on different zod majors, which is why the helper passes both spellings
   // of the hook rather than branching — that is what lets the file be identical rather than merely
-  // similar, and identical is the only version of this a test can hold
+  // similar, and identical is the only version of this a single assertion can hold
   it("ships a byte-identical copy of the helper", () => {
     expect(readFileSync(STANDALONE_HELPER, "utf8")).toBe(readFileSync(IN_APP_HELPER, "utf8"));
-  });
-
-  it("registers every tool through it, with none left on the loose overload", () => {
-    const standalone = readFileSync(STANDALONE_SERVER, "utf8");
-
-    expect(standalone.match(/inputSchema: strictInput\(/g)).toHaveLength(12);
-    expect(standalone.match(/server\.tool\(/g)).toBeNull();
-  });
-
-  it("refuses an update that names nothing to change, the way the in-app one does", () => {
-    const standalone = readFileSync(STANDALONE_SERVER, "utf8");
-
-    expect(standalone).toContain("`update_task ${NOTHING_TO_CHANGE}`");
-    expect(standalone).toContain("`update_sprint ${NOTHING_TO_CHANGE}`");
   });
 });
