@@ -335,8 +335,12 @@ function castsToSchema(field: "description" | "order", value: unknown): boolean 
   try {
     Task.schema.path(field).cast(value);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    // Only the caster's own verdict counts as a refusal. A misspelt path, or a Task without a
+    // schema, throws here too — and that throw does not depend on the value, so answering 400 to
+    // it would refuse EVERY create with "your description is wrong". Measured, not imagined: the
+    // unit suite mocks the model as a bare object, and a bare `catch` failed 15 tests that way.
+    return (error as { name?: string } | null)?.name !== "CastError";
   }
 }
 
