@@ -860,6 +860,7 @@ export interface ITask {
   assignee: Types.ObjectId | IUser | null;
   // Who set assignee; absent on a task assigned before BP-358
   assignedBy?: Types.ObjectId | null;
+  pmAssignedFor?: Types.ObjectId | null;
   dueDate: Date | null;
   checklist: IChecklistItem[];
   linkedPRs: ILinkedPR[];
@@ -1088,6 +1089,7 @@ export interface ApiTask {
   // run unattended when its assignee handed it to themselves. Absent on anything assigned before
   // BP-358, where the answer is not recorded anywhere and is deliberately not guessed.
   assignedBy?: ApiUserSummary | string | null;
+  pmAssignedFor?: ApiUserSummary | string | null;
   dueDate: string | null;
   checklist: ApiChecklistItem[];
   linkedPRs: ApiLinkedPR[];

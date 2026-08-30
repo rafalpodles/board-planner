@@ -155,11 +155,21 @@ and `SIGINT` both finish the task in flight before the loop exits.
 
 ## Safety
 
-- **Nothing is claimed that was not offered.** A machine takes only a task its own owner assigned
-  to themselves — `{ assignee: ownerId, assignedBy: ownerId }` — and only once that task names an
-  agent, which is the hand-over gesture. A task with no agent is one a person is doing by hand, and
-  no machine looks at it. A task assigned by anyone else is never taken: the approval surface for
-  work somebody *else* hands you is a separate, later change.
+- **Nothing is claimed that was not offered.** A machine takes only a task its own owner asked to
+  have — and only once that task names an agent, which is the hand-over gesture. A task with no
+  agent is one a person is doing by hand, and no machine looks at it. A task another *person*
+  assigned is never taken: the approval surface for work somebody else hands you is a separate,
+  later change.
+
+  Two shapes qualify, and no others:
+
+  - `{ assignee: ownerId, assignedBy: ownerId }` — the owner handed it to themselves.
+  - `{ assignee: ownerId, assignedBy: <the PM>, pmAssignedFor: ownerId }` — the PM handed it over,
+    on the owner's own instruction. Since BP-419 the PM's assignment is a real hand-over rather
+    than a proposal nothing could accept; the second field is what keeps that narrow. The PM chat
+    is open to every project member, so without it a member could ask the PM to assign a task they
+    wrote to a colleague and have their own text run on that colleague's machine. An unattended PM
+    turn records nobody, so nothing it assigns is ever claimed.
 
   The owner is the account that enrolled this machine, deliberately not the worker's own identity:
   that is an auto-created `worker-<id>` account with kind `machine`, excluded from every list the

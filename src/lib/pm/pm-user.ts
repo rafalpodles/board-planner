@@ -3,8 +3,20 @@ import crypto from "crypto";
 import { connectDB } from "@/lib/db";
 import { User } from "@/models/user";
 import { IUser } from "@/types";
+import { PM_USERNAME } from "@/lib/pm/username";
 
-export const PM_USERNAME = "pm";
+export { PM_USERNAME };
+
+/**
+ * The PM's id, or null when the account does not exist yet. Deliberately not `getPmUser`, which
+ * upserts: this is called by the claim on every worker poll, and a poll must not be what brings
+ * the PM account into being on an instance that has never run one.
+ */
+export async function pmUserId(): Promise<string | null> {
+  await connectDB();
+  const pm = await User.findOne({ username: PM_USERNAME }, "_id").lean();
+  return pm ? String(pm._id) : null;
+}
 
 export async function getPmUser(): Promise<IUser> {
   await connectDB();

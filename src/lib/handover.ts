@@ -1,5 +1,6 @@
 import { ApiTask, ApiUserSummary, ColumnRole } from "@/types";
 import { AnyColumn, columnFor } from "@/lib/columns";
+import { PM_USERNAME } from "@/lib/pm/username";
 
 /**
  * Which of the claim's requirements this task fails, of the ones a browser can see. The claim
@@ -18,13 +19,14 @@ export type HandoverReason =
   | "not-approved-yet"
   | "unassigned"
   | "assigner-unrecorded"
-  | "assigned-by-someone-else";
+  | "assigned-by-someone-else"
+  | "pm-assigned-for-someone-else";
 
 export type Handover =
   | { runs: true }
   | { runs: false; reason: HandoverReason; by: string | null };
 
-type Judged = Pick<ApiTask, "agent" | "assignee" | "assignedBy" | "status">;
+type Judged = Pick<ApiTask, "agent" | "assignee" | "assignedBy" | "pmAssignedFor" | "status">;
 
 /**
  * The id behind a reference the API may or may not have populated. Both shapes reach the browser:
@@ -35,6 +37,11 @@ export function refIdOf(
 ): string | null {
   if (!ref) return null;
   return typeof ref === "string" ? ref : String(ref._id);
+}
+
+function assignedByPm(ref: ApiTask["assignedBy"]): boolean {
+  if (!ref || typeof ref === "string") return false;
+  return (ref as ApiUserSummary).username === PM_USERNAME;
 }
 
 function nameOf(ref: ApiTask["assignedBy"]): string | null {
@@ -77,6 +84,18 @@ export function handoverOf(task: Judged, columns?: AnyColumn[]): Handover {
   // does not record whether that person handed it to themselves, and guessing would invent consent.
   if (!assigner) return { runs: false, reason: "assigner-unrecorded", by: null };
 
+  // The PM is not somebody else (BP-419): its assignment is a real hand-over and the claim takes
+  // it, so saying "nothing will run this" here would contradict what the server does. Judged on the
+  // username because that is what the claim's own lookup resolves the PM by, and it is what the API
+  // populates. An `assignedBy` that arrived as a bare id cannot be judged — a writer echoing back
+  // what it sent carries one — so that case still reads as somebody else until the task is refetched.
+  if (assignedByPm(task.assignedBy)) {
+    // The claim pairs the PM's hand-over with the person who asked for it, so this has to as well
+    // — the dangerous direction is saying "it runs" about a task the server refuses.
+    return refIdOf(task.pmAssignedFor) === String(task.assignee._id)
+      ? { runs: true }
+      : { runs: false, reason: "pm-assigned-for-someone-else", by: nameOf(task.assignedBy) };
+  }
   if (assigner !== String(task.assignee._id)) {
     return { runs: false, reason: "assigned-by-someone-else", by: nameOf(task.assignedBy) };
   }

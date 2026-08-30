@@ -46,6 +46,14 @@ const taskSchema = new Schema<ITask>(
       ref: "User",
       default: null,
     },
+    // Whose instruction the PM assigned this on, when the PM is the assigner. Null everywhere
+    // else, including an unattended PM turn — and the claim pairs it with the assignee, so a PM
+    // hand-over runs only on the machine of the person who asked for it (BP-419).
+    pmAssignedFor: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
     dueDate: {
       type: Date,
       default: null,

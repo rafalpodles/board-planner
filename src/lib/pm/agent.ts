@@ -203,6 +203,10 @@ export async function runPmTurn(opts: {
     projectId: String(project._id),
     projectKey: project.key,
     pmUserId: String(pmUser._id),
+    // Who asked. An unattended turn (a board review, a needs-human-review trigger) is attributed to
+    // the PM itself, and `onWhoseInstruction` below turns that into "nobody" — which is what stops
+    // an unattended turn arming a machine.
+    triggeredByUserId: opts.triggeredByUserId,
   };
 
   const disallowedTools = opts.disallowedTools ?? [];
