@@ -164,6 +164,91 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
+/**
+ * BP-337 review. DELETE could not answer 409 until this change, so `Promise.all` was safe here and
+ * `handleBulkMove` two functions above already carried the lesson. The moment delete learned to
+ * refuse, one held task rejected the whole batch while the rest were already gone server-side.
+ */
+describe("Bulk delete with one task held by a worker", () => {
+  async function bulkDeleteBoth() {
+    api.del.mockImplementation((url: string) =>
+      url.endsWith("/t3") ? Promise.reject(heldError()) : Promise.resolve({})
+    );
+    await renderBoard();
+    await select("TP-2", "TP-3");
+    await rightClick("TP-2");
+    await click(screen.getByRole("button", { name: "Delete 2 tasks" }));
+    // The menu entry and the dialog's confirm carry the same label; the dialog's is the later one
+    const confirms = screen.getAllByRole("button", { name: "Delete 2 tasks" });
+    await click(confirms[confirms.length - 1]);
+  }
+
+  it("removes the tasks that were deleted, rather than leaving them on the board", async () => {
+    await bulkDeleteBoth();
+
+    await waitFor(() => expect(screen.queryByText("A free task")).toBeNull());
+    expect(screen.getByText("A task a worker is running")).toBeTruthy();
+  });
+
+  it("names the refused task rather than reporting a wholesale failure", async () => {
+    await bulkDeleteBoth();
+
+    await waitFor(() =>
+      expect(toast).toHaveBeenCalledWith(
+        "Deleted 1 of 2. TP-3 being executed by a worker.",
+        "error"
+      )
+    );
+    expect(toast).not.toHaveBeenCalledWith("Failed to delete tasks", "error");
+  });
+
+  // The dialog stayed open over cards that were already gone, and clicking it again re-deleted
+  // them into a 404
+  it("closes the confirmation even when part of the batch was refused", async () => {
+    await bulkDeleteBoth();
+
+    await waitFor(() => expect(screen.queryByText(/Delete 2 tasks\?/)).toBeNull());
+  });
+});
+
+/**
+ * BP-337 review. The board parks a refused *move* and asks; a refused delete reached the same
+ * endpoint shape and got a flat error, which is this ticket's own asymmetry one layer out.
+ */
+describe("Deleting one held task from the context menu", () => {
+  async function deleteHeldFromMenu() {
+    api.del.mockImplementation((url: string) =>
+      url.endsWith("/t3") ? Promise.reject(heldError()) : Promise.resolve({})
+    );
+    await renderBoard();
+    await rightClick("TP-3");
+    await click(screen.getByRole("button", { name: "Delete", exact: true }));
+    const confirms = screen.getAllByRole("button", { name: "Delete", exact: true });
+    await click(confirms[confirms.length - 1]);
+  }
+
+  it("asks instead of reporting a failure", async () => {
+    await deleteHeldFromMenu();
+
+    await waitFor(() => expect(heldDialog()).toBeTruthy());
+    expect(heldDialog()!.getByRole("button", { name: "Delete anyway" })).toBeTruthy();
+    expect(toast).not.toHaveBeenCalledWith("Failed to delete task", "error");
+    expect(screen.getByText("A task a worker is running")).toBeTruthy();
+  });
+
+  it("re-issues the delete with force when the person confirms", async () => {
+    await deleteHeldFromMenu();
+    await waitFor(() => expect(heldDialog()).toBeTruthy());
+    api.del.mockResolvedValue({});
+
+    await click(heldDialog()!.getByRole("button", { name: "Delete anyway" }));
+
+    await waitFor(() =>
+      expect(api.del).toHaveBeenLastCalledWith("/api/projects/p1/tasks/t3", { force: true })
+    );
+  });
+});
+
 describe("Bulk move with one task held by a worker", () => {
   async function bulkMoveBothToInProgress() {
     api.patch.mockImplementation((url: string) =>
