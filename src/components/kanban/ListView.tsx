@@ -355,49 +355,43 @@ export function ListView({
                 <SortHeader
                   label="Status"
                   column="status"
-                  className="hidden sm:table-cell min-w-28"
+                  className="min-w-28"
                 />
               )}
               {show("assignee") && (
                 <SortHeader
                   label="Assignee"
                   column="assignee"
-                  className="hidden md:table-cell"
                 />
               )}
               {show("priority") && (
                 <SortHeader
                   label="Priority"
                   column="priority"
-                  className="hidden md:table-cell"
                 />
               )}
               {show("sprint") && (
                 <SortHeader
                   label="Sprint"
                   column="sprint"
-                  className="hidden lg:table-cell"
                 />
               )}
               {show("category") && (
                 <SortHeader
                   label="Category"
                   column="category"
-                  className="hidden lg:table-cell"
                 />
               )}
               {show("dueDate") && (
                 <SortHeader
                   label="Due"
                   column="dueDate"
-                  className="hidden md:table-cell"
                 />
               )}
               {show("updatedAt") && (
                 <SortHeader
                   label="Updated"
                   column="updatedAt"
-                  className="hidden sm:table-cell"
                 />
               )}
               {fieldColumns.map((column) => (
@@ -405,7 +399,6 @@ export function ListView({
                   key={column.id}
                   label={column.label}
                   column={column.id}
-                  className="hidden lg:table-cell"
                 />
               ))}
             </tr>
@@ -535,15 +528,17 @@ export function ListView({
                     // then paint its overflow across the next cell
                     // The pointer lives on the title alone: the row opens the task,
                     // but a hand over the selects and the drag grip reads as wrong
-                    className="px-2 py-2 font-medium w-full max-w-0 overflow-hidden cursor-pointer"
+                    className="px-2 py-2 font-medium w-full min-w-44 lg:min-w-0 max-w-0 overflow-hidden cursor-pointer"
                     title={task.title}
                   >
-                    {/* No min-width: it would be a floor the table cannot go under,
-                        which is what forced the whole list to scroll sideways */}
+                    {/* The floor is dropped from lg up, where every column fits and a floor
+                        would only force the sideways scrolling 6ae1505 removed. Below it the
+                        row is meant to be wider than the phone, and without a floor the title
+                        would collapse to nothing rather than the row overflowing */}
                     <div className="truncate w-full">{task.title}</div>
                   </td>
                   {show("status") && (
-                    <td className="px-2 py-2 hidden sm:table-cell">
+                    <td className="px-2 py-2">
                       {onStatusChange ? (
                         <Combobox
                           value={task.status}
@@ -585,7 +580,7 @@ export function ListView({
                   )}
                   {show("assignee") && (
                     <td
-                      className="px-2 py-2 hidden md:table-cell text-text-muted"
+                      className="px-2 py-2 text-text-muted"
                       title={assigneeName}
                     >
                       {onAssigneeChange && assignableUsers.length > 0 ? (
@@ -603,7 +598,7 @@ export function ListView({
                     </td>
                   )}
                   {show("priority") && (
-                    <td className="px-2 py-2 hidden md:table-cell">
+                    <td className="px-2 py-2">
                       <EnumCell
                         value={task.priority}
                         options={PRIORITY_OPTIONS}
@@ -621,7 +616,7 @@ export function ListView({
                     </td>
                   )}
                   {show("sprint") && (
-                    <td className="px-2 py-2 hidden lg:table-cell text-xs max-w-32">
+                    <td className="px-2 py-2 text-xs max-w-32">
                       <EnumCell
                         value={task.sprint ?? ""}
                         options={[
@@ -676,7 +671,7 @@ export function ListView({
                     </td>
                   )}
                   {show("category") && (
-                    <td className="px-2 py-2 hidden lg:table-cell max-w-32">
+                    <td className="px-2 py-2 max-w-32">
                       <EnumCell
                         value={task.category}
                         options={categories.map((c) => ({
@@ -704,7 +699,7 @@ export function ListView({
                   )}
                   {show("dueDate") && (
                     <td
-                      className={`px-2 py-2 hidden md:table-cell text-xs max-w-24 ${dueDateInfo?.color || "text-text-muted"}`}
+                      className={`px-2 py-2 text-xs max-w-24 ${dueDateInfo?.color || "text-text-muted"}`}
                     >
                       <div className="truncate">
                         {dueDateInfo?.formatted || "—"}
@@ -712,7 +707,7 @@ export function ListView({
                     </td>
                   )}
                   {show("updatedAt") && (
-                    <td className="px-2 py-2 hidden sm:table-cell text-text-muted text-xs whitespace-nowrap">
+                    <td className="px-2 py-2 text-text-muted text-xs whitespace-nowrap">
                       {timeAgo(task.updatedAt)}
                     </td>
                   )}
@@ -749,7 +744,7 @@ export function ListView({
                     return (
                       <td
                         key={column.id}
-                        className="px-2 py-2 hidden lg:table-cell text-text-muted max-w-32"
+                        className="px-2 py-2 text-text-muted max-w-32"
                         title={text || undefined}
                       >
                         <EnumCell
