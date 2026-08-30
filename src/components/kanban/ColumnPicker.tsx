@@ -40,7 +40,6 @@ export function ColumnPicker({ hidden, onChange, customFields = [] }: ColumnPick
     };
   }, [open]);
 
-
   const shown = visibleCount(hidden, customFields);
   const columns = hideableColumns(customFields);
   const builtIn = columns.filter((c) => !c.field);

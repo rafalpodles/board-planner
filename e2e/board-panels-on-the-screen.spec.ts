@@ -23,12 +23,20 @@ interface Box {
   right: number;
   width: number;
   viewport: number;
+  /** "none" when the clamp decided the panel was already where it should be */
+  transform: string;
 }
 
 async function boxOf(page: Page, name: string): Promise<Box> {
   return page.getByRole(name === "Filters" ? "dialog" : "group", { name }).evaluate((el) => {
     const rect = el.getBoundingClientRect();
-    return { left: rect.left, right: rect.right, width: rect.width, viewport: window.innerWidth };
+    return {
+      left: rect.left,
+      right: rect.right,
+      width: rect.width,
+      viewport: window.innerWidth,
+      transform: getComputedStyle(el).transform,
+    };
   });
 }
 
@@ -65,7 +73,8 @@ for (const width of [360, 375, 390, 414, 430, 480, 600, 639, 640]) {
       // Reaching it is the point: a panel off the screen is one nobody can use
       await expect(page.getByRole("dialog", { name: "Filters" }).getByLabel("Assignee")).toBeVisible();
 
-      await page.keyboard.press("Escape");
+      // The List toggle is what closes Filters — it lives in the row above, and its mousedown is
+      // the outside click the panel listens for. Escape does not: only ColumnPicker binds it.
       await page.getByRole("button", { name: "List", exact: true }).click();
       await page.getByRole("button", { name: "Choose columns" }).click();
       expectOnScreen(await boxOf(page, "Columns"), `the Columns panel at ${width}px`);
@@ -85,14 +94,42 @@ test.describe("on a desktop", () => {
     await openPanel(page, "Filters");
     const filters = await boxOf(page, "Filters");
     expectOnScreen(filters, "the Filters panel on a desktop");
-    // Its full 340, not a clamped remnant: the clamp must do nothing at all here
+    // Its full 340, not a clamped remnant: a "fix" that shrank the panel instead of moving it
     expect(Math.round(filters.width)).toBe(340);
+    // And it did not MOVE either. Without this, a clamp that unconditionally pinned every panel to
+    // x=12 would pass everything above — on screen, full width, and torn off its button.
+    expect(filters.transform, "the clamp moved a panel that was already in place").toBe("none");
 
-    await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "List", exact: true }).click();
     await page.getByRole("button", { name: "Choose columns" }).click();
     const columns = await boxOf(page, "Columns");
     expectOnScreen(columns, "the Columns panel on a desktop");
     expect(Math.round(columns.width)).toBe(224);
+    expect(columns.transform, "the clamp moved a panel that was already in place").toBe("none");
+  });
+});
+
+/**
+ * The panel's own primary interaction moves its anchor. Picking a filter adds the count badge to
+ * the Filters button — measured at 375px, its right edge goes 98 to 120 — and below `sm` the panel
+ * is anchored to that edge, so it travels 22px with a shift computed before the click. 360 is where
+ * that runs off the screen; the same click at 375 lands one pixel inside it and proves nothing.
+ */
+test.describe("after a click inside the panel", () => {
+  test.use({ viewport: { width: 360, height: 800 }, hasTouch: true, isMobile: true });
+
+  test("the Filters panel is still on the screen", async ({ page }) => {
+    await signIn(page, "admin");
+    await openPanel(page, "Filters");
+    const before = await boxOf(page, "Filters");
+    expectOnScreen(before, "the Filters panel before the click");
+
+    const dialog = page.getByRole("dialog", { name: "Filters" });
+    await dialog.getByLabel("Priority").selectOption({ label: "High" });
+    // The premise: the anchor really did move. Without it this test passes on a build where the
+    // badge never appears, and says nothing about the clamp.
+    await expect(page.getByRole("button", { name: "Filters" })).toContainText("1");
+
+    expectOnScreen(await boxOf(page, "Filters"), "the Filters panel after picking a priority");
   });
 });
