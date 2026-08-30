@@ -1,19 +1,32 @@
+/**
+ * Building an `Intl.DateTimeFormat` is the expensive part, and `startOfDayInTimezone` asks the
+ * same question of the same zone about thirty times per call. Instances are stateless, so one per
+ * zone is kept; the set of zones a deployment uses is its projects', which is small.
+ */
+function formatter(kind: "hour" | "day", timeZone: string): Intl.DateTimeFormat {
+  const key = `${kind}\u0000${timeZone}`;
+  const cached = formatters.get(key);
+  if (cached) return cached;
+  const made =
+    kind === "hour"
+      ? new Intl.DateTimeFormat("en-GB", { timeZone, hour: "2-digit", hourCycle: "h23" })
+      : new Intl.DateTimeFormat("en-CA", {
+          timeZone,
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        });
+  formatters.set(key, made);
+  return made;
+}
+const formatters = new Map<string, Intl.DateTimeFormat>();
+
 export function hourInTimezone(date: Date, timeZone: string): number {
-  const value = new Intl.DateTimeFormat("en-GB", {
-    timeZone,
-    hour: "2-digit",
-    hourCycle: "h23",
-  }).format(date);
-  return Number(value);
+  return Number(formatter("hour", timeZone).format(date));
 }
 
 export function dayKeyInTimezone(date: Date, timeZone: string): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(date);
+  return formatter("day", timeZone).format(date);
 }
 
 /** How far ahead of UTC the zone is at this instant, in milliseconds. */
