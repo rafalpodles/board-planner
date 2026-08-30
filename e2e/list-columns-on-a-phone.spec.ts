@@ -1,5 +1,6 @@
-import { test, expect, type Page } from "@playwright/test";
-import { PROJECT_KEY, seed } from "./seed";
+import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
+import { ADMIN_AUTH } from "./api";
+import { PROJECT_ID, PROJECT_KEY, SIBLING_TASK_TITLE, seed } from "./seed";
 import { signIn } from "./session";
 
 /**
@@ -8,122 +9,201 @@ import { signIn } from "./session";
  * not a way round it either: a display:none cell takes no width, so the `overflow-x-auto` wrapper
  * had nothing past its edge.
  *
- * What is asserted here is that the picker is now the only thing deciding what renders, and that
- * the row is allowed to be wider than the phone so the columns it turns on are reachable — while
- * a desktop keeps the fit-in-one-screen layout 6ae1505 deliberately restored.
+ * What is asserted here is that the picker is now the only thing deciding what renders, that the
+ * row is wide enough to be panned to the columns it turns on, and that a desktop keeps the
+ * fit-in-one-screen layout 6ae1505 deliberately restored.
  */
 
 test.beforeEach(seed);
 
+/** Every built-in column, in the order `list-columns.ts` gives them */
+const SORTABLE_COLUMNS = [
+  "Status",
+  "Assignee",
+  "Priority",
+  "Sprint",
+  "Category",
+  "Due",
+  "Updated",
+];
+/** Off unless the picker turns them on — see DEFAULT_HIDDEN_BUILT_INS */
+const HIDDEN_BY_DEFAULT = ["Category", "Due", "Updated"];
+const PROJECT_FIELD = "Component";
+
+/** min-w-44, the floor that stops the title collapsing to nothing while the row overflows */
+const TITLE_FLOOR = "176px";
+
 const header = (page: Page, label: string) =>
   page.getByRole("button", { name: `Sort by ${label}`, exact: true });
+
+/**
+ * A project field that shows in the list, added through the production route. The seed's own
+ * fields are all `showInList: false`, and a project field's column carried a breakpoint pair like
+ * every other — so without one, a third of what this ticket fixed is unreachable from a test.
+ */
+async function addListedField(request: APIRequestContext) {
+  const created = await request.post(`/api/projects/${String(PROJECT_ID)}/custom-fields`, {
+    headers: ADMIN_AUTH,
+    data: { name: PROJECT_FIELD, fieldType: "text", showInList: true },
+  });
+  expect(created.status()).toBe(201);
+}
 
 async function openList(page: Page) {
   await signIn(page);
   await page.goto(`/projects/${PROJECT_KEY}`);
   await page.getByRole("button", { name: "List", exact: true }).click();
   await expect(page.locator("table")).toBeVisible();
+  // The stored selection is applied by an effect, so until a default-hidden column is absent the
+  // page is still showing the pre-hydration state, where nothing is hidden at all
+  await expect(header(page, "Updated")).toHaveCount(0);
+}
+
+/** Turns on every column the picker offers, and proves it did */
+async function tickEveryColumn(page: Page) {
+  await page.getByRole("button", { name: "Choose columns" }).click();
+  const boxes = page.getByRole("group", { name: "Columns" }).getByRole("checkbox");
+  const count = await boxes.count();
+  expect(count).toBeGreaterThan(0);
+  for (let i = 0; i < count; i++) await boxes.nth(i).check();
+  // A panel that closed mid-loop leaves the rest silently unticked, and the control then covers
+  // fewer columns than its name claims
+  for (let i = 0; i < count; i++) await expect(boxes.nth(i)).toBeChecked();
 }
 
 /** The wrapper the table sits in, read from the table itself rather than a test-only hook */
 async function scroller(page: Page) {
   return page.locator("table").evaluate((table) => {
     const wrapper = table.parentElement as HTMLElement;
+    const style = getComputedStyle(wrapper);
     return {
-      overflowX: getComputedStyle(wrapper).overflowX,
+      overflowX: style.overflowX,
+      overscrollBehaviorX: style.overscrollBehaviorX,
       clientWidth: wrapper.clientWidth,
       scrollWidth: wrapper.scrollWidth,
     };
   });
 }
 
-/** Turns on every column the picker offers, leaving it open */
-async function tickEveryColumn(page: Page) {
-  await page.getByRole("button", { name: "Choose columns" }).click();
-  const boxes = page.getByRole("group", { name: "Columns" }).getByRole("checkbox");
-  for (let i = 0; i < (await boxes.count()); i++) await boxes.nth(i).check();
-}
-
-const TITLE_FLOOR = 176; // min-w-44, the floor that stops the title collapsing to nothing
+const titleCell = (page: Page) => page.locator(`td[title="${SIBLING_TASK_TITLE}"]`);
 
 test.describe("on a phone", () => {
-  test.use({ viewport: { width: 375, height: 780 }, hasTouch: true, isMobile: true });
+  test.use({ viewport: { width: 375, height: 800 }, hasTouch: true, isMobile: true });
 
-  test("a ticked column renders, and the row can be panned to reach it", async ({ page }) => {
+  test("the columns that are on by default are on the screen, not only in the picker", async ({
+    page,
+  }) => {
     await openList(page);
 
-    await test.step("the columns on by default are on the screen, not only in the picker", async () => {
-      await expect(header(page, "Status")).toBeVisible();
-      await expect(header(page, "Assignee")).toBeVisible();
-      await expect(header(page, "Priority")).toBeVisible();
-    });
+    for (const label of SORTABLE_COLUMNS.filter((c) => !HIDDEN_BY_DEFAULT.includes(c))) {
+      await expect(header(page, label), `${label} is on by default`).toBeVisible();
+    }
+    for (const label of HIDDEN_BY_DEFAULT) {
+      await expect(header(page, label), `${label} is off by default`).toHaveCount(0);
+    }
 
-    await test.step("the row is wider than the phone, so the far columns are reachable", async () => {
-      const wrapper = await scroller(page);
-      expect(wrapper.overflowX).toBe("auto");
-      expect(wrapper.scrollWidth).toBeGreaterThan(wrapper.clientWidth);
-    });
-
-    await test.step("the title keeps a readable width rather than collapsing", async () => {
-      // The title cell carries the full title as its `title` attribute; the key cell carries the key
-      const width = await page
-        .locator('td[title="Free to move"]')
-        .evaluate((td) => td.getBoundingClientRect().width);
-      expect(width).toBeGreaterThanOrEqual(TITLE_FLOOR);
-    });
-
-    await test.step("a column the picker turns on appears, and turning it off removes it", async () => {
-      await expect(header(page, "Updated")).toHaveCount(0);
-
-      await page.getByRole("button", { name: "Choose columns" }).click();
-
-      // The panel is anchored to the button's right edge, and the toolbar wraps the button to the
-      // left of a phone — so a 224px panel used to open at x=-128, entirely past the screen
-      const panel = await page
-        .getByRole("group", { name: "Columns" })
-        .evaluate((el) => {
-          const r = el.getBoundingClientRect();
-          return { left: r.left, right: r.right, viewport: window.innerWidth };
-        });
-      expect(panel.left).toBeGreaterThanOrEqual(0);
-      expect(panel.right).toBeLessThanOrEqual(panel.viewport);
-
-      const updated = page.getByRole("checkbox", { name: "Updated", exact: true });
-      await expect(updated).not.toBeChecked();
-      await updated.check();
-      await expect(header(page, "Updated")).toBeVisible();
-
-      await updated.uncheck();
-      await expect(header(page, "Updated")).toHaveCount(0);
-    });
-  });
-});
-
-test.describe("on a desktop", () => {
-  // 1024 rather than a roomier width on purpose: it is the narrowest viewport the floor is
-  // dropped at, so it is the only one where dropping it can be seen. Measured with the floor left
-  // in place at every width, every column ticked: 1024 gives a 798px row in a 730px scrollport
-  // and a title pinned at its 176px floor, while 1152 and 1280 fit with 236px and 364px of title
-  // to spare. A control written at 1280 passes whether the floor reaches desktop or not.
-  test.use({ viewport: { width: 1024, height: 800 } });
-
-  test("every column at once still fits in one screen", async ({ page }) => {
-    await openList(page);
-    await expect(header(page, "Status")).toBeVisible();
-    await expect(header(page, "Sprint")).toBeVisible();
-
-    expect((await scroller(page)).scrollWidth).toBe((await scroller(page)).clientWidth);
-
-    // 6ae1505 stopped the list scrolling sideways, and what it was fixing was every column
-    // competing at once — not the default six, which have slack to spare. The phone's title floor
-    // is dropped from lg up so that decision survives, and only this case can catch putting it
-    // back: with six columns a 176px floor is under what the title gets anyway.
-    await tickEveryColumn(page);
-    await expect(header(page, "Updated")).toBeVisible();
+    const cell = titleCell(page);
+    expect(await cell.evaluate((td) => getComputedStyle(td).minWidth)).toBe(TITLE_FLOOR);
+    expect(await cell.evaluate((td) => td.getBoundingClientRect().width)).toBeGreaterThanOrEqual(
+      parseInt(TITLE_FLOOR, 10),
+    );
 
     const wrapper = await scroller(page);
-    expect(wrapper.scrollWidth).toBe(wrapper.clientWidth);
+    expect(wrapper.overflowX).toBe("auto");
+    expect(wrapper.scrollWidth).toBeGreaterThan(wrapper.clientWidth);
+    // Without it, panning to the end of the row chains into the browser's back gesture
+    expect(wrapper.overscrollBehaviorX).toBe("contain");
+  });
+
+  test("every column the picker offers renders, and the row pans to the far one", async ({
+    page,
+    request,
+  }) => {
+    await addListedField(request);
+    await openList(page);
+    await tickEveryColumn(page);
+
+    for (const label of [...SORTABLE_COLUMNS, PROJECT_FIELD]) {
+      await expect(header(page, label), `${label} was ticked`).toBeVisible();
+    }
+    // The count the ticket caught lying: eight built-ins plus the project field, all rendered
+    await expect(page.getByRole("button", { name: "Choose columns" })).toContainText("10/10");
+
+    const panned = await page.locator("table").evaluate((table) => {
+      const wrapper = table.parentElement as HTMLElement;
+      wrapper.scrollLeft = wrapper.scrollWidth;
+      const last = table.querySelector("thead th:last-child") as HTMLElement;
+      const port = wrapper.getBoundingClientRect();
+      const box = last.getBoundingClientRect();
+      return {
+        scrollLeft: wrapper.scrollLeft,
+        label: last.textContent?.trim(),
+        inside: box.left >= port.left - 1 && box.right <= port.right + 1,
+      };
+    });
+    expect(panned.scrollLeft, "the row had nowhere to pan").toBeGreaterThan(0);
+    expect(panned.label).toBe(PROJECT_FIELD);
+    expect(panned.inside, "the far column cannot be panned into view").toBe(true);
+
+    await page.getByRole("checkbox", { name: "Updated", exact: true }).uncheck();
+    await expect(header(page, "Updated")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Choose columns" })).toContainText("9/10");
   });
 });
 
+/**
+ * The panel's anchor is only correct at some widths, and which ones depends on whether the toolbar
+ * row wrapped — 375 wraps the Columns button to the left, 390 and up do not. Measured with a fixed
+ * anchor: `right-0` opens 128px past the left edge at 375, `left-0` opens 73-113px past the right
+ * edge at 390-480. A check written at one width passes whichever way the anchoring is wrong.
+ */
+for (const width of [375, 390, 414, 430, 700]) {
+  test.describe(`at ${width}px`, () => {
+    test.use({ viewport: { width, height: 800 }, hasTouch: true, isMobile: true });
 
+    test("the column picker's panel opens on the screen", async ({ page }) => {
+      await openList(page);
+      await page.getByRole("button", { name: "Choose columns" }).click();
+
+      const panel = await page.getByRole("group", { name: "Columns" }).evaluate((el) => {
+        const box = el.getBoundingClientRect();
+        return { left: box.left, right: box.right, viewport: window.innerWidth };
+      });
+      expect(panel.left, `panel starts ${-panel.left}px past the left edge`).toBeGreaterThanOrEqual(
+        0,
+      );
+      expect(
+        panel.right,
+        `panel ends ${panel.right - panel.viewport}px past the right edge`,
+      ).toBeLessThanOrEqual(panel.viewport);
+
+      // Reaching it is the point: an off-screen panel is one nothing can tick
+      await page.getByRole("checkbox", { name: "Updated", exact: true }).check();
+      await expect(header(page, "Updated")).toBeVisible();
+    });
+  });
+}
+
+test.describe("on a desktop", () => {
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  test("the title floor is off, and every column at once still fits in one screen", async ({
+    page,
+    request,
+  }) => {
+    await addListedField(request);
+    await openList(page);
+    await tickEveryColumn(page);
+    await expect(header(page, PROJECT_FIELD)).toBeVisible();
+
+    // 6ae1505 stopped the list scrolling sideways by removing a floor exactly like the phone's, so
+    // the rule itself is asserted rather than one of its consequences: at 1280 the title gets far
+    // more than 176px anyway, and a fit assertion alone passes whether the floor reaches desktop
+    // or not. Measured with the floor left on at every width: it pins the title at 176px and
+    // overflows by 68px at 1024, and by 136px at 1080.
+    expect(await titleCell(page).evaluate((td) => getComputedStyle(td).minWidth)).toBe("0px");
+
+    const wrapper = await scroller(page);
+    expect(wrapper.scrollWidth).toBeLessThanOrEqual(wrapper.clientWidth + 1);
+  });
+});
