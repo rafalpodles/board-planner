@@ -323,10 +323,9 @@ function castsToSchema(field: string, value: unknown): boolean {
     caster.cast(value);
     return true;
   } catch (error) {
-    // Only the caster's own verdict counts as a refusal. Anything else it throws does not depend
-    // on the value, so answering 400 to it would refuse EVERY create with "your description is
-    // wrong". Measured, not imagined: the unit suite mocks the model as a bare object, and a bare
-    // `catch` around a missing path failed 15 tests that way.
+    // Only a CastError is a refusal. Anything else `cast` throws does not depend on the value, so
+    // answering 400 to it would refuse EVERY create with "your description is wrong". A *missing*
+    // path is not caught here at all — `casterFor` threw before the try, deliberately.
     return (error as { name?: string } | null)?.name !== "CastError";
   }
 }
@@ -375,7 +374,9 @@ function checklistOrRefusal(value: unknown): ChecklistInput[] | TaskServiceResul
     const row = (raw ?? {}) as Record<string, unknown>;
     const item: ChecklistInput = { text: text.trim() };
 
-    if ("done" in row) {
+    // `null` is dropped rather than stored, the same as `_id` below: the Boolean cast takes it,
+    // but `done` is typed as a boolean everywhere that reads it, and the schema default is false.
+    if ("done" in row && row.done !== null) {
       if (!castsToSchema("checklist.done", row.done)) {
         return { ok: false, error: "A criterion is either done or it is not", status: 400 };
       }

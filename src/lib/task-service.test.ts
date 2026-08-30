@@ -4101,6 +4101,9 @@ describe("an acceptance criterion neither writer will store", () => {
           { text: "a", done: "yes", mischief: "dropped", createdBy: "someone else" },
           { text: "b", done: 1 },
           { text: "c", _id: "" },
+          // `done: null` is dropped too, so the row falls to the schema default rather than
+          // storing a null where every reader expects a boolean
+          { text: "d", done: null },
         ],
       } as never,
       WHO
@@ -4112,6 +4115,7 @@ describe("an acceptance criterion neither writer will store", () => {
       { text: "b", done: 1 },
       // A blank id is a row that has none yet — the key is dropped so Mongoose mints one
       { text: "c" },
+      { text: "d" },
     ]);
   });
 
