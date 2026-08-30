@@ -12,7 +12,12 @@ docker compose up -d --build
 ```
 
 Open <http://localhost:3000>. The first account you create on the sign-in page becomes the instance
-admin; every account after that is created from Settings → Users.
+admin; every account after that is created from Settings → Users. **Create it before anyone else can
+reach the address.** An instance with no users offers "First time? Create Account" to whoever asks,
+and the first account made is the administrator — there is no invitation and no setup token. Once it
+exists the offer disappears and `POST /api/users` refuses a second bootstrap, so the window is open
+exactly as long as the instance is empty and reachable. On a deployment that goes live the moment it
+builds, that window starts before you have opened the page.
 
 Stop it with `docker compose down`. The database lives in the `mongo-data` volume and survives that;
 `docker compose down -v` deletes it.
