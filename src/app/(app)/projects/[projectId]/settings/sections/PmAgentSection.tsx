@@ -294,7 +294,10 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
                 error={capError}
                 placeholder="Leave empty for the server default"
               />
-              <p className="mt-1 text-xs text-text-muted">Autonomous turns count against this too.</p>
+              <p className="mt-1 text-xs text-text-muted">
+                Autonomous turns count too, and so does a turn the model failed. Resets at midnight
+                in {storedTimezone}.
+              </p>
             </div>
           </div>
         </SettingsCard>
