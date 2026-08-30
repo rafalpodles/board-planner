@@ -51,7 +51,13 @@ export async function readJsonBody<T = Record<string, unknown>>(
   }
 
   try {
-    return { ok: true, value: JSON.parse(new TextDecoder().decode(body)) as T };
+    const parsed: unknown = JSON.parse(new TextDecoder().decode(body));
+    // A body of literal `null` parses to null, and every caller here reaches straight for a field.
+    // A null is an object as far as the typeof check goes, so that check alone is not the guard,
+    // and `body.name` on it is a TypeError answered as a 500 to an unauthenticated caller. Anything
+    // that is not an object becomes an empty one, so the route's own "required" refusal answers.
+    const value = typeof parsed === "object" && parsed !== null ? parsed : {};
+    return { ok: true, value: value as T };
   } catch {
     return {
       ok: false,

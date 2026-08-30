@@ -99,6 +99,15 @@ describe("readJsonBody", () => {
     if (!result.ok) expect(result.response.status).toBe(400);
   });
 
+  it("turns a body that is not an object into one, so a field read is not a 500", async () => {
+    // A null passes the typeof check, so that check on its own does not catch this one.
+    for (const scalar of ["null", "5", "true", '"a string"']) {
+      const result = await readJsonBody(request(scalar));
+      expect(result.ok, scalar).toBe(true);
+      if (result.ok) expect(() => (result.value as { name?: string }).name).not.toThrow();
+    }
+  });
+
   it("treats a request with no body at all as an empty object", async () => {
     const result = await readJsonBody(
       new Request("https://app.example.com/api/anything", { method: "POST" })
