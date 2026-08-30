@@ -592,10 +592,18 @@ test.describe("who may read a dashboard", () => {
     await signIn(page, "member");
     await page.goto(dashboardUrl(SECOND_PROJECT_KEY));
 
-    // `.first()`: the page fetches under React's double-invoked effect in development, so the
-    // refusal can raise one toast or two, and asserting on the set is a coin toss
-    await expect(page.getByTestId("toast").first()).toHaveText(/Failed to load dashboard/);
-    await expect(page.getByRole("heading", { name: "Dashboard" })).toHaveCount(0);
+    /**
+     * A banner that stays, not a toast that is gone in three seconds — and one that says which
+     * refusal this was. Before BP-448 this asserted `/Failed to load dashboard/` on a toast, and
+     * what the reader was left with once it expired was a spinner that never stopped.
+     */
+    await expect(page.getByTestId("dashboard-error")).toContainText(
+      "You do not have access to this board"
+    );
+    // The heading is chrome and now renders above the banner, deliberately, so the reader can see
+    // which page refused them. The charts are the thing that must not be there.
+    await expect(page.getByRole("heading", { name: "Status Breakdown" })).toHaveCount(0);
+    await expect(page.getByTestId("toast")).toHaveCount(0);
   });
 });
 
