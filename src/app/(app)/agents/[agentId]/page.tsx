@@ -7,8 +7,12 @@ import {
   CollisionDetection,
   DndContext,
   DragOverlay,
+  KeyboardCode,
+  KeyboardCoordinateGetter,
   KeyboardSensor,
   PointerSensor,
+  closestCorners,
+  getFirstCollision,
   pointerWithin,
   rectIntersection,
   useSensor,
@@ -31,6 +35,79 @@ import { BlockBody, Bucket, Palette } from "../components/blocks";
 const collisionDetection: CollisionDetection = (args) => {
   const byPointer = pointerWithin(args);
   return byPointer.length > 0 ? byPointer : rectIntersection(args);
+};
+
+const ARROWS: string[] = [
+  KeyboardCode.Down,
+  KeyboardCode.Up,
+  KeyboardCode.Left,
+  KeyboardCode.Right,
+];
+
+/**
+ * Where an arrow key moves the drag.
+ *
+ * `sortableKeyboardCoordinates` computes the next position from the items of a `SortableContext`.
+ * A bucket entry is a `useSortable` and lives in one; a palette block is a plain `useDraggable`
+ * and belongs to none, so the getter had nothing to compute from and returned nothing — dnd-kit
+ * announced "Picked up draggable item new:implement" and then every arrow key did nothing at all,
+ * for ever (BP-455). Composing an agent was the one thing that screen could not be made to do
+ * without a mouse.
+ *
+ * A sortable active is handed straight back to the sortable getter, so every gesture that worked
+ * before this change still runs the code that made it work. Everything else searches the droppable
+ * rectangles in the direction pressed, which is what dnd-kit does for its own multiple-container
+ * example.
+ *
+ * **Deleting the delegation changes no assertion in the spec beside this file, and that is
+ * measured rather than assumed.** Four shapes were tried: two entries; three entries with the
+ * first travelling to the end; three entries whose rows are deliberately unequal in height (58,
+ * 42, 58 px, since `sortableKeyboardCoordinates` differs from the search below only by an offset
+ * of `collisionRect.height - newRect.height`); and an entry moved from one bucket to another. The
+ * search answers identically in all four.
+ *
+ * It is kept anyway, and the reason is minimum change rather than evidence: the palette path is
+ * what was broken, and replacing the library's getter for a case it was written for buys nothing.
+ * A future reader who wants this line gone should delete it knowing the suite will stay green.
+ */
+const keyboardCoordinates: KeyboardCoordinateGetter = (event, args) => {
+  const { active, collisionRect, droppableRects, droppableContainers } = args.context;
+  if (active?.data.current?.sortable) return sortableKeyboardCoordinates(event, args);
+  if (!ARROWS.includes(event.code)) return;
+  event.preventDefault();
+  if (!active || !collisionRect) return;
+
+  const ahead = droppableContainers.getEnabled().filter((container) => {
+    const rect = droppableRects.get(container.id);
+    if (!rect) return false;
+    switch (event.code) {
+      case KeyboardCode.Down:
+        return collisionRect.top < rect.top;
+      case KeyboardCode.Up:
+        return collisionRect.top > rect.top;
+      case KeyboardCode.Right:
+        return collisionRect.left < rect.left;
+      case KeyboardCode.Left:
+        return collisionRect.left > rect.left;
+      default:
+        return false;
+    }
+  });
+
+  const id = getFirstCollision(
+    closestCorners({
+      active,
+      collisionRect,
+      droppableRects,
+      droppableContainers: ahead,
+      pointerCoordinates: null,
+    }),
+    "id"
+  );
+  if (id == null) return;
+
+  const rect = droppableRects.get(id);
+  return rect && { x: rect.left, y: rect.top };
 };
 
 export default function AgentDetailPage() {
@@ -57,7 +134,7 @@ export default function AgentDetailPage() {
       : isAdmin);
 
   const lookup = (key: string) => [...store.allSteps, ...store.allGates].find((b) => b.key === key);
-  const { entries, dragging, composition, onDragStart, onDragEnd, remove } = useComposition(
+  const { entries, dragging, composition, onDragStart, onDragEnd, addTo, remove } = useComposition(
     agent?.composition,
     lookup
   );
@@ -72,7 +149,7 @@ export default function AgentDetailPage() {
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+    useSensor(KeyboardSensor, { coordinateGetter: keyboardCoordinates })
   );
 
   if (store.loading) return <PageHeader title="Agent" subtitle="Loading" />;
@@ -229,7 +306,9 @@ export default function AgentDetailPage() {
             ))}
           </div>
 
-          {mayEdit && <Palette steps={store.allSteps} gates={store.allGates} />}
+          {mayEdit && (
+            <Palette steps={store.allSteps} gates={store.allGates} onAdd={addTo} />
+          )}
         </div>
 
         <DragOverlay>
