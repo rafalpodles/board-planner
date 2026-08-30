@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ApiCustomField } from "@/types";
 import {
   defaultHidden,
@@ -20,6 +20,8 @@ interface ColumnPickerProps {
 export function ColumnPicker({ hidden, onChange, customFields = [] }: ColumnPickerProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [shiftX, setShiftX] = useState(0);
 
   useEffect(() => {
     if (!open) return;
@@ -35,6 +37,28 @@ export function ColumnPicker({ hidden, onChange, customFields = [] }: ColumnPick
       document.removeEventListener("mousedown", onClickOutside);
       document.removeEventListener("keydown", onKey);
     };
+  }, [open]);
+
+  /**
+   * The panel is anchored to the button's right edge, and the button is the last item in a
+   * wrapping toolbar — so where it sits depends on whether the row wrapped, which depends on the
+   * width, the sort control's current label and whether the board is read-only. Measured with a
+   * fixed anchor: `right-0` opens 128px past the left edge of a 375px phone, where the row wraps
+   * and the button lands at x=20; `left-0` opens 73-113px past the right edge at 390-480, where it
+   * does not. No static anchor is right at both, so the panel is measured and pulled back in —
+   * Combobox does the same thing for the same reason.
+   */
+  useLayoutEffect(() => {
+    if (!open) {
+      setShiftX(0);
+      return;
+    }
+    const box = panelRef.current?.getBoundingClientRect();
+    if (!box) return;
+    const gutter = 12;
+    const past = box.right - (window.innerWidth - gutter);
+    const short = gutter - box.left;
+    setShiftX(short > 0 ? short : past > 0 ? -past : 0);
   }, [open]);
 
   const shown = visibleCount(hidden, customFields);
@@ -69,9 +93,11 @@ export function ColumnPicker({ hidden, onChange, customFields = [] }: ColumnPick
 
       {open && (
         <div
+          ref={panelRef}
           role="group"
           aria-label="Columns"
-          className="absolute right-0 top-full z-40 mt-1 w-56 rounded-xl border border-border bg-bg-card p-2 shadow-lg"
+          style={shiftX ? { transform: `translateX(${shiftX}px)` } : undefined}
+          className="absolute right-0 top-full z-40 mt-1 w-56 max-w-[calc(100vw-1.5rem)] rounded-xl border border-border bg-bg-card p-2 shadow-lg"
         >
           {builtIn.map((column) => (
             <label
