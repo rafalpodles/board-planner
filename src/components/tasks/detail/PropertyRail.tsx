@@ -71,6 +71,11 @@ function HandoverNotice({ handover }: { handover: Handover | null }) {
         // person doing the assigning is the one being assigned, so telling a colleague to "assign
         // it again" would be handing them a gesture that writes nothing.
         ? "Nothing will run this. It was assigned before the board recorded who hands work over; its assignee can record that by assigning it to themselves again."
+        : handover.reason === "pm-assigned-for-someone-else"
+        // The PM may hand work over, but only on the assignee's own instruction: the chat is open
+        // to every project member, and otherwise asking it to assign a colleague's task would
+        // start a run on that colleague's machine.
+        ? "Nothing will run this. The PM assigned it on somebody else's instruction — a machine runs a PM hand-over only for the person who asked for it."
         : `Nothing will run this. ${handover.by ?? "Somebody else"} assigned it, and a machine takes only work its owner assigned to themselves.`;
 
   return (

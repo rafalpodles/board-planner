@@ -2982,10 +2982,11 @@ describe("a machine claims its owner's work", () => {
   }
 
   it("asks only for tasks its owner assigned to themselves, on an instance with no PM", async () => {
-    const filter = await claimFilterFor(OWNER);
+    const matches = sift(await claimFilterFor(OWNER));
 
-    expect(filter.assignee).toBe(OWNER);
-    expect(filter.assignedBy).toEqual({ $in: [OWNER] });
+    expect((await claimFilterFor(OWNER)).assignee).toBe(OWNER);
+    expect(matches(task({ assignee: OWNER, assignedBy: OWNER }))).toBe(true);
+    expect(matches(task({ assignee: OWNER, assignedBy: "6a732075133f935b19154cf1" }))).toBe(false);
   });
 
   /**
@@ -3005,13 +3006,34 @@ describe("a machine claims its owner's work", () => {
       pmUserIdMock.mockResolvedValue(PM);
     });
 
-    it("takes a task the PM assigned to its owner", async () => {
+    it("takes a task the PM assigned to its owner, on the owner's own instruction", async () => {
       const matches = sift(await claimFilterFor(OWNER));
 
-      expect(matches(task({ assignee: OWNER, assignedBy: PM }))).toBe(true);
+      expect(matches(task({ assignee: OWNER, assignedBy: PM, pmAssignedFor: OWNER }))).toBe(true);
     });
 
-    it("still takes a task the owner assigned to themselves", async () => {
+    /**
+     * The escalation this pairing exists to stop. The PM chat is reachable by every project member
+     * (`check(user, projectId, "access")`), and `assign_task` does not require the assignee to be
+     * the person asking — so without `pmAssignedFor` a member could write a task, put a global
+     * agent on it, ask the PM to assign it to a colleague, and have their own text run on that
+     * colleague's machine with that colleague's credentials. The old filter refused every PM
+     * assignment, so this path did not exist before BP-419 and must not be opened by it.
+     */
+    it("refuses a task the PM assigned on somebody else's instruction", async () => {
+      const matches = sift(await claimFilterFor(OWNER));
+
+      expect(matches(task({ assignee: OWNER, assignedBy: PM, pmAssignedFor: THIRD }))).toBe(false);
+    });
+
+    // An unattended turn — a board review, a needs-human-review trigger — records nobody
+    it("refuses a task the PM assigned with nobody driving the turn", async () => {
+      const matches = sift(await claimFilterFor(OWNER));
+
+      expect(matches(task({ assignee: OWNER, assignedBy: PM, pmAssignedFor: null }))).toBe(false);
+    });
+
+    it("still takes a task the owner assigned to themselves, with no PM record at all", async () => {
       const matches = sift(await claimFilterFor(OWNER));
 
       expect(matches(task({ assignee: OWNER, assignedBy: OWNER }))).toBe(true);

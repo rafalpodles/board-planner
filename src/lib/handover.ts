@@ -19,13 +19,14 @@ export type HandoverReason =
   | "not-approved-yet"
   | "unassigned"
   | "assigner-unrecorded"
-  | "assigned-by-someone-else";
+  | "assigned-by-someone-else"
+  | "pm-assigned-for-someone-else";
 
 export type Handover =
   | { runs: true }
   | { runs: false; reason: HandoverReason; by: string | null };
 
-type Judged = Pick<ApiTask, "agent" | "assignee" | "assignedBy" | "status">;
+type Judged = Pick<ApiTask, "agent" | "assignee" | "assignedBy" | "pmAssignedFor" | "status">;
 
 /**
  * The id behind a reference the API may or may not have populated. Both shapes reach the browser:
@@ -88,7 +89,14 @@ export function handoverOf(task: Judged, columns?: AnyColumn[]): Handover {
   // username because that is what the claim's own lookup resolves the PM by, and it is what the API
   // populates. An `assignedBy` that arrived as a bare id cannot be judged — a writer echoing back
   // what it sent carries one — so that case still reads as somebody else until the task is refetched.
-  if (assigner !== String(task.assignee._id) && !assignedByPm(task.assignedBy)) {
+  if (assignedByPm(task.assignedBy)) {
+    // The claim pairs the PM's hand-over with the person who asked for it, so this has to as well
+    // — the dangerous direction is saying "it runs" about a task the server refuses.
+    return refIdOf(task.pmAssignedFor) === String(task.assignee._id)
+      ? { runs: true }
+      : { runs: false, reason: "pm-assigned-for-someone-else", by: nameOf(task.assignedBy) };
+  }
+  if (assigner !== String(task.assignee._id)) {
     return { runs: false, reason: "assigned-by-someone-else", by: nameOf(task.assignedBy) };
   }
   return { runs: true };

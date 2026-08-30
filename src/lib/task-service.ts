@@ -460,7 +460,9 @@ function schemaValuesOrRefusal(values: Body): TaskServiceResult | null {
 export async function createTask(
   projectId: string,
   actorId: string,
-  body: Body
+  body: Body,
+  // See updateTask's parameter of the same name (BP-419): only the PM's tools pass it.
+  onWhoseInstruction: string | null = null
 ): Promise<TaskServiceResult> {
   await connectDB();
 
@@ -575,6 +577,7 @@ export async function createTask(
     status,
     assignee: assigneeId,
     assignedBy: assigneeId ? actorId : null,
+    pmAssignedFor: assigneeId ? onWhoseInstruction : null,
     dueDate,
     // Cast at the write, the way `order` and `description` are: the rows carry `done` and `_id`
     // exactly as the body sent them, judged but not coerced
@@ -857,7 +860,11 @@ export async function updateTask(
   taskId: string,
   body: Body,
   actorId: string,
-  force = false
+  force = false,
+  // Only the PM's own tools pass this, and only ever with the user driving that turn. Deliberately
+  // a parameter rather than a field on `body`: `body` is what an HTTP caller sends, and a field on
+  // it would let anyone who can PUT a task nominate whose machine may run it (BP-419).
+  onWhoseInstruction: string | null = null
 ): Promise<TaskServiceResult> {
   await connectDB();
 
@@ -1043,6 +1050,9 @@ export async function updateTask(
     const takesItOn = !oldTask.assignedBy && String(actorId) === String(updates.assignee ?? "");
     if (moved || takesItOn) {
       updates.assignedBy = actorId;
+      // Written every time `assignedBy` is, so it can never outlive the hand-over it describes: a
+      // person reassigning a task the PM once handed over clears it back to null.
+      updates.pmAssignedFor = onWhoseInstruction;
     }
   }
 
@@ -1347,9 +1357,10 @@ export async function assignTask(
   projectId: string,
   taskId: string,
   username: string | null,
-  actorId: string
+  actorId: string,
+  onWhoseInstruction: string | null = null
 ): Promise<TaskServiceResult> {
-  return updateTask(projectId, taskId, { assignee: username }, actorId);
+  return updateTask(projectId, taskId, { assignee: username }, actorId, false, onWhoseInstruction);
 }
 
 async function createNextRecurrence(
@@ -1616,7 +1627,6 @@ export async function claimNextTask(
   // Looked up rather than upserted: a poll must not be what creates the PM account on an instance
   // that has never run one, and an instance without it simply has no PM assignments to honour.
   const pm = await pmUserId();
-  const assigners = pm ? [ownerId, pm] : [ownerId];
 
   return Task.findOneAndUpdate(
     {
@@ -1641,7 +1651,19 @@ export async function claimNextTask(
       // to be reassigned regardless — which stamps `assignedBy` through updateTask. The agent
       // picker says so on the task itself.
       assignee: ownerId,
-      assignedBy: { $in: assigners },
+      // Either the owner handed it to themselves, or the PM did it on the owner's own instruction.
+      // The second clause is what keeps this narrow: the PM chat is reachable by any project
+      // member, so without `pmAssignedFor` a member could ask the PM to assign a task they wrote to
+      // a colleague, and that colleague's machine would run their text. An unattended turn records
+      // nobody, so nothing it assigns is ever claimed.
+      $and: [
+        {
+          $or: [
+            { assignedBy: ownerId },
+            ...(pm ? [{ assignedBy: pm, pmAssignedFor: ownerId }] : []),
+          ],
+        },
+      ],
       // Choosing an agent is the hand-over; a task naming none is one a person is doing
       agent: { $ne: null },
       // On an array field this means "holds none of them", so a task with no blockers, one whose

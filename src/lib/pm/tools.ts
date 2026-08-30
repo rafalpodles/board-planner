@@ -21,6 +21,30 @@ export interface PmToolContext {
   projectId: string;
   projectKey: string;
   pmUserId: string;
+  /** The user whose turn this is. Equal to pmUserId when nobody is driving it. */
+  triggeredByUserId: string;
+}
+
+/**
+ * The person on whose instruction the PM is assigning, or null when nobody is.
+ *
+ * BP-419 made a PM assignment claimable, and the claim's own filter pairs this with
+ * `assignee: <machine owner>` — so a machine runs a PM hand-over only when the person who asked
+ * for it is the person receiving it. Without this, the PM chat is reachable by any project member
+ * (`check(user, projectId, "access")`), and asking it to assign a task to a colleague would start
+ * a run on that colleague's machine, carrying text the member wrote. The old filter refused every
+ * PM assignment, so that path did not exist before this change and must not be opened by it.
+ */
+function onWhoseInstruction(ctx: PmToolContext): string | null {
+  return ctx.triggeredByUserId && ctx.triggeredByUserId !== ctx.pmUserId
+    ? ctx.triggeredByUserId
+    : null;
+}
+
+/** createTask, carrying whose instruction the PM is acting on — see onWhoseInstruction */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function createTaskOnInstruction(ctx: PmToolContext, body: any) {
+  return createTask(ctx.projectId, ctx.pmUserId, body, onWhoseInstruction(ctx));
 }
 
 export interface PmToolOutcome {
@@ -134,13 +158,27 @@ async function whyItWillNotRun(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handover = handoverOf(task as any, getProjectColumns(project));
   if (handover.runs) return "";
-  if (handover.reason === "no-agent") {
-    return "no agent is named on it, so nothing will run it — a task naming none is one a person is doing";
+  // A switch with no fall-through on purpose: the first version of this returned "" for the three
+  // reasons it did not name, and two of them are reachable *immediately after a successful
+  // assignment* — `updateTask` stamps `assignedBy` only when the assignee actually moves, so
+  // re-assigning a legacy task to the person who already holds it leaves the assigner unrecorded,
+  // and re-assigning a task somebody else handed over leaves theirs. Both then answered
+  // "BP-x → @rpo" with no caveat and were never claimed: the exact silence this ticket exists to
+  // end, reproduced inside the feature written to end it.
+  switch (handover.reason) {
+    case "no-agent":
+      return "no agent is named on it, so nothing will run it — a task naming none is one a person is doing";
+    case "not-approved-yet":
+      return "it is not in a column a machine claims from, so nothing will run it yet";
+    case "unassigned":
+      return "it ended up assigned to nobody, so nothing will run it";
+    case "assigner-unrecorded":
+      return "the board has no record of who handed it over — it was already assigned to them, so this changed nothing — and nothing will run it until its assignee assigns it to themselves";
+    case "assigned-by-someone-else":
+      return "somebody else is still recorded as having assigned it — it was already assigned to them, so this changed nothing — and a machine takes only work its owner or the PM handed over";
+    case "pm-assigned-for-someone-else":
+      return "it was handed over on somebody else's instruction, so nothing will run it";
   }
-  if (handover.reason === "not-approved-yet") {
-    return "it is not in a column a machine claims from, so nothing will run it yet";
-  }
-  return "";
 }
 
 export const PM_TOOLS: Record<string, PmTool> = {
@@ -313,7 +351,7 @@ export const PM_TOOLS: Record<string, PmTool> = {
       const createFields = Object.keys(resolvedFields).length
         ? { customFieldValues: resolvedFields }
         : {};
-      const result = await createTask(ctx.projectId, ctx.pmUserId, {
+      const result = await createTaskOnInstruction(ctx, {
         title,
         description: str(args.description),
         priority: args.priority,
@@ -437,7 +475,13 @@ export const PM_TOOLS: Record<string, PmTool> = {
       const resolved = await resolveTask(ctx, args.taskKey);
       if ("error" in resolved) return { result: { error: resolved.error } };
       const username = args.username === null ? null : str(args.username).trim() || null;
-      const result = await assignTask(ctx.projectId, String(resolved.task._id), username, ctx.pmUserId);
+      const result = await assignTask(
+        ctx.projectId,
+        String(resolved.task._id),
+        username,
+        ctx.pmUserId,
+        onWhoseInstruction(ctx)
+      );
       if (!result.ok) return { result: { error: result.error } };
       const key = `${ctx.projectKey}-${result.data.taskNumber}`;
       const assignee =
