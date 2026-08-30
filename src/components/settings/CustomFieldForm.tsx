@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import {
   ApiCustomField,
   CUSTOM_FIELD_TYPES,
@@ -54,6 +54,9 @@ interface CustomFieldFormProps {
  */
 export function CustomFieldForm({ field, onSubmit, onCancel }: CustomFieldFormProps) {
   const [draft, setDraft] = useState<FieldDraft>(() => draftFrom(field));
+  // The visible label is the name, pointed at the control rather than left beside it — the way
+  // `Select` does it. Without this the field announced as "combo box, text" (BP-498).
+  const typeId = useId();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -106,8 +109,11 @@ export function CustomFieldForm({ field, onSubmit, onCancel }: CustomFieldFormPr
       </div>
 
       <div>
-        <label className="mb-1 block text-sm font-medium text-text-muted">Type</label>
+        <label htmlFor={typeId} className="mb-1 block text-sm font-medium text-text-muted">
+          Type
+        </label>
         <select
+          id={typeId}
           value={draft.fieldType}
           disabled={editing}
           onChange={(e) => set("fieldType", e.target.value as CustomFieldType)}

@@ -51,6 +51,12 @@ export function scrollSettingsToTop() {
 function DirtyDot({ className = "" }: { className?: string }) {
   return (
     <span
+      // The dot lives inside the section's nav button, so without this its `title` folds into that
+      // button's accessible name and "Board" is announced as "Board Unsaved changes". The five
+      // markers BP-450 dealt with were spelled `title="Unsaved"`; this one was worded differently
+      // and a grep for that string missed it. The dirty state is already conveyed by the section's
+      // own contents, so there is nothing to replace it with here.
+      aria-hidden="true"
       title="Unsaved changes"
       className={`h-1.5 w-1.5 shrink-0 rounded-full bg-warning ${className}`}
     />

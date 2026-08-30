@@ -73,6 +73,30 @@ describe("SettingsShell", () => {
     expect(container.querySelectorAll('[title="Unsaved changes"]').length).toBeGreaterThan(0);
   });
 
+  /**
+   * BP-498. The marker sits inside the item's own button, so its `title` folds into that button's
+   * accessible name and a dirty section announced as "General Unsaved changes". The five markers
+   * BP-450 fixed were spelled `title="Unsaved"`, which is why a grep for that string missed this
+   * one — and `Select.test.tsx` has had exactly this assertion for its own marker since.
+   *
+   * The test above passes either way: it selects the dot by `title`, which `aria-hidden` does not
+   * affect. This is the one that separates them.
+   */
+  it("keeps the unsaved marker out of the item's name", () => {
+    const { container } = render(<SettingsShell groups={SELECTED} active="general" onSelect={() => {}}>body</SettingsShell>);
+
+    const marker = container.querySelector('[title="Unsaved changes"]');
+    expect(marker).not.toBeNull();
+    expect(marker!.getAttribute("aria-hidden")).toBe("true");
+
+    // The control, and what the reader actually hears: the button is still named for its section
+    for (const button of container.querySelectorAll("button")) {
+      if ((button.textContent ?? "").includes("General")) {
+        expect(button.textContent?.replace(/\s+/g, " ").trim()).toBe("General");
+      }
+    }
+  });
+
   it("renders the sidebar slots around the groups", () => {
     render(
       <SettingsShell groups={ROUTED} active="profile" sidebarTop={<input aria-label="Search settings" />} sidebarFooter={<p>Admin only</p>}>

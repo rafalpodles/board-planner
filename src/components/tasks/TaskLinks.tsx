@@ -232,6 +232,7 @@ export function TaskLinks({
       {showPicker ? (
         <div className="border border-border rounded-lg p-2 space-y-2">
           <select
+            aria-label="Link type"
             value={pickerType}
             onChange={(e) => setPickerType(e.target.value as DependencyType)}
             className="focus-ring w-full bg-bg-input border border-border rounded px-2 py-1 text-sm cursor-pointer"

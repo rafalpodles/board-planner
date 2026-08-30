@@ -862,6 +862,7 @@ export function IntegrationsSection({
                   <div className="space-y-2">
                     <div className="flex gap-2">
                       <select
+                        aria-label="New channel type"
                         value={newChannelType}
                         onChange={(e) =>
                           setNewChannelType(

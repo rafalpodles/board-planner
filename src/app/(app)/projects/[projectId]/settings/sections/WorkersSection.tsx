@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { useDraft } from "@/hooks/use-draft";
 import { useToast } from "@/components/ui/Toast";
@@ -61,6 +61,8 @@ function draftFrom(project: ApiProject): Draft {
 }
 
 export function WorkersSection({ projectId, project, replaceProject, isAdmin }: SectionProps) {
+  // A <p> beside a control is not its name (BP-498)
+  const defaultAgentId = useId();
   const store = useStore();
   const agentApi = useApi();
   const [defaultAgent, setDefaultAgent] = useState(String(project.worker?.agent ?? ""));
@@ -292,8 +294,11 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
         description="Offered first when somebody picks the agent for a task here. It runs nothing by itself — a task with no agent chosen is one a person is doing."
       >
         <div className="max-w-md">
-          <p className="text-sm font-medium mb-2">Default agent</p>
+          <label htmlFor={defaultAgentId} className="text-sm font-medium mb-2 block">
+            Default agent
+          </label>
           <select
+            id={defaultAgentId}
             value={defaultAgent}
             disabled={!isAdmin || store.loading}
             onChange={(e) => saveDefaultAgent(e.target.value)}
