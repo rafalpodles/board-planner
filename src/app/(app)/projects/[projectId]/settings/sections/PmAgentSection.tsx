@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useApi } from "@/hooks/use-api";
+import { isValidTimezone } from "@/lib/time";
 import { useDraft } from "@/hooks/use-draft";
 import { useToast } from "@/components/ui/Toast";
 import { ApiProject } from "@/types";
@@ -85,6 +86,25 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
   const [newLinkUrl, setNewLinkUrl] = useState("");
 
   const servers = draft.value.mcpServers;
+  /**
+   * The same two refusals `validatePmConfig` gives, asked here so they reach the field rather
+   * than arriving as a toast after the save — with the draft still dirty and nothing saying which
+   * field was at fault. `reviewHour` and `reviewInterval` were already safe this way: one is
+   * clamped before posting and the other comes from a fixed select.
+   */
+  const typedTimezone = draft.value.timezone.trim();
+  const timezoneError =
+    typedTimezone && !isValidTimezone(typedTimezone)
+      ? `Not a timezone this server knows: ${typedTimezone}`
+      : "";
+  const typedCap = draft.value.dailyCap.trim();
+  const capNumber = Number(typedCap);
+  const capError =
+    typedCap &&
+    (!Number.isFinite(capNumber) || !Number.isInteger(capNumber) || capNumber < 0 || capNumber > 1000)
+      ? "A whole number of turns, 0 to 1000. 0 means the server's own default."
+      : "";
+
   const reviewTimes = reviewHoursOfDay(
     firstReviewHour({ reviewHour: Number(draft.value.reviewHour) }),
     Number(draft.value.reviewInterval)
@@ -102,6 +122,12 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
   }
 
   async function savePm(options?: { silent?: boolean }): Promise<boolean> {
+    // The field already says what is wrong; sending it would answer 400 and say the same thing
+    // one round trip later, in a toast that does not name the field.
+    if (timezoneError || capError) {
+      if (!options?.silent) toast(timezoneError || capError, "error");
+      return false;
+    }
     const v = draft.value;
     const pm: Record<string, unknown> = {
       contextNotes: v.contextNotes,
@@ -247,6 +273,7 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
                 value={draft.value.dailyCap}
                 dirty={draft.isDirty("dailyCap")}
                 onChange={(e) => draft.set("dailyCap", e.target.value)}
+                error={capError}
                 placeholder="Leave empty for the server default"
               />
               <p className="mt-1 text-xs text-text-muted">Autonomous turns count against this too.</p>
@@ -371,14 +398,17 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
                 value={draft.value.timezone}
                 dirty={draft.isDirty("timezone")}
                 onChange={(e) => draft.set("timezone", e.target.value)}
+                error={timezoneError}
                 placeholder="Europe/Warsaw"
               />
             </div>
             <p className="text-xs text-text-muted">
               {reviewTimes.length === 1 ? "One review a day" : `${reviewTimes.length} reviews a day`}
-              , at {reviewTimes.map((h) => `${String(h).padStart(2, "0")}:00`).join(", ")} in{" "}
-              {draft.value.timezone.trim() || "the project timezone"}. Each one uses a turn from the
-              daily cap.
+              , at {reviewTimes.map((h) => `${String(h).padStart(2, "0")}:00`).join(", ")}{" "}
+              {timezoneError
+                ? "— in a timezone this server cannot read, so it will not run until that is fixed"
+                : `in ${typedTimezone || "the project timezone"}`}
+              . Each one uses a turn from the daily cap.
             </p>
           </div>
         )}
