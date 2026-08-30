@@ -7,7 +7,7 @@ import { buildUserContent } from "./attachments";
 import { getPmUser, PM_USERNAME } from "./pm-user";
 import { chatCompletion, OrChatMessage } from "./openrouter";
 import { isPmRunnable, pmDisabledReason, resolvePmModel } from "./availability";
-import { PM_TOOLS, pmToolDefinitions, PmToolContext } from "./tools";
+import { PM_TOOLS, pmToolDefinitions, PmToolContext, refuseUndeclaredArgs } from "./tools";
 import { discoverMcpTools, callMcpTool, McpRuntime, MAX_MCP_CALLS_PER_TURN } from "./mcp-tools";
 import { replayHistory, stripSpoofedLabels, HISTORY_AUTHOR_PREFIX } from "./history";
 import { pmThreadFilter } from "./thread";
@@ -324,10 +324,15 @@ export async function runPmTurn(opts: {
         }
       } else {
         const tool = PM_TOOLS[call.name];
+        const undeclared = tool ? refuseUndeclaredArgs(tool, call.args || {}) : null;
         if (!tool) {
           result = { error: `Unknown tool: ${call.name}` };
         } else if (tool.write && writeActions >= MAX_WRITE_ACTIONS) {
           result = { error: `Write-action limit (${MAX_WRITE_ACTIONS}) reached for this turn — summarize what you did instead.` };
+        } else if (undeclared) {
+          // Before execute, so the refusal is the whole outcome: a tool that half-applied a call
+          // and reported success is what BP-497 was filed for, on the same tool name (BP-500)
+          result = { error: undeclared };
         } else {
           try {
             const outcome = await tool.execute(call.args || {}, ctx);

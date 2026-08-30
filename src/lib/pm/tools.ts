@@ -12,6 +12,7 @@ import {
   addComment,
 } from "@/lib/task-service";
 import { OrToolDefinition } from "./openrouter";
+import { unknownParameterMessage, NOTHING_TO_CHANGE } from "@/lib/mcp/strict-input";
 import { buildBoardDigest } from "./board-review";
 
 export interface PmToolContext {
@@ -84,6 +85,29 @@ function str(value: unknown, fallback = ""): string {
   return typeof value === "string" ? value : fallback;
 }
 
+/**
+ * BP-500. The tools whitelist the fields they apply and used to drop the rest without a word, which
+ * is the shape BP-497 fixed on the two MCP servers: a model that names `status` here is told the
+ * update succeeded and reads its own intention back. The schema the model is given now says
+ * `additionalProperties: false`, and this is the half that enforces it.
+ */
+const PM_TOOL_HINTS: Record<string, string> = {
+  status: "the change_status tool",
+  assignee: "the assign_task tool",
+  checklist: "acceptanceCriteria, a markdown checklist",
+  difficulty: "the fields parameter, keyed by field name",
+  component: "the fields parameter, keyed by field name",
+  customFieldValues: "the fields parameter, keyed by field name",
+};
+
+export function refuseUndeclaredArgs(tool: PmTool, args: Record<string, unknown>): string | null {
+  const declared =
+    (tool.definition.parameters as { properties?: Record<string, unknown> }).properties || {};
+  const stray = Object.keys(args).filter((key) => !Object.hasOwn(declared, key));
+
+  return stray.length ? unknownParameterMessage(stray, PM_TOOL_HINTS, tool.write) : null;
+}
+
 export const PM_TOOLS: Record<string, PmTool> = {
   list_tasks: {
     write: false,
@@ -98,6 +122,7 @@ export const PM_TOOLS: Record<string, PmTool> = {
           limit: { type: "number", description: "Max results, default 50, cap 100" },
           offset: { type: "number", description: "Skip N results (pagination)" },
         },
+        additionalProperties: false,
       },
     },
     async execute(args, ctx) {
@@ -128,6 +153,7 @@ export const PM_TOOLS: Record<string, PmTool> = {
         type: "object",
         properties: { taskKey: { type: "string" } },
         required: ["taskKey"],
+        additionalProperties: false,
       },
     },
     async execute(args, ctx) {
@@ -161,7 +187,7 @@ export const PM_TOOLS: Record<string, PmTool> = {
     definition: {
       name: "get_project_stats",
       description: "Task counts by status for the project.",
-      parameters: { type: "object", properties: {} },
+      parameters: { type: "object", properties: {}, additionalProperties: false },
     },
     async execute(_args, ctx) {
       const rows = await Task.aggregate([
@@ -181,7 +207,7 @@ export const PM_TOOLS: Record<string, PmTool> = {
       name: "get_board_digest",
       description:
         "Scan the open board for tasks missing acceptance criteria or a description, tasks sitting in the same column for a long time, and likely duplicates by title. Heuristic — confirm with get_task before acting.",
-      parameters: { type: "object", properties: {} },
+      parameters: { type: "object", properties: {}, additionalProperties: false },
     },
     async execute(_args, ctx) {
       const digest = await buildBoardDigest(ctx.projectId);
@@ -201,6 +227,7 @@ export const PM_TOOLS: Record<string, PmTool> = {
           limit: { type: "number", description: "Max results, default 20" },
         },
         required: ["taskKey"],
+        additionalProperties: false,
       },
     },
     async execute(args, ctx) {
@@ -240,6 +267,7 @@ export const PM_TOOLS: Record<string, PmTool> = {
           assignee: { type: "string", description: "Username, optional" },
         },
         required: ["title"],
+        additionalProperties: false,
       },
     },
     async execute(args, ctx) {
@@ -289,6 +317,7 @@ export const PM_TOOLS: Record<string, PmTool> = {
           dueDate: { type: "string", description: "YYYY-MM-DD or empty to clear" },
         },
         required: ["taskKey"],
+        additionalProperties: false,
       },
     },
     async execute(args, ctx) {
@@ -309,7 +338,7 @@ export const PM_TOOLS: Record<string, PmTool> = {
         body.customFieldValues = { ...merged, ...updates };
       }
       if (Object.keys(body).length === 0) {
-        return { result: { error: "Provide at least one field to update" } };
+        return { result: { error: `update_task ${NOTHING_TO_CHANGE}` } };
       }
       const result = await updateTask(ctx.projectId, String(resolved.task._id), body, ctx.pmUserId);
       if (!result.ok) return { result: { error: result.error } };
@@ -333,6 +362,7 @@ export const PM_TOOLS: Record<string, PmTool> = {
           status: { type: "string", description: "A column id of this project's board (see the system prompt)" },
         },
         required: ["taskKey", "status"],
+        additionalProperties: false,
       },
     },
     async execute(args, ctx) {
@@ -365,6 +395,7 @@ export const PM_TOOLS: Record<string, PmTool> = {
           username: { type: ["string", "null"], description: "Username or null to unassign" },
         },
         required: ["taskKey", "username"],
+        additionalProperties: false,
       },
     },
     async execute(args, ctx) {
@@ -401,6 +432,7 @@ export const PM_TOOLS: Record<string, PmTool> = {
           body: { type: "string" },
         },
         required: ["taskKey", "body"],
+        additionalProperties: false,
       },
     },
     async execute(args, ctx) {
