@@ -70,7 +70,7 @@ const completed: ExecutionResult = {
 const statuses: StatusIds = { approved: "ready", review: "checking", done: "shipped" };
 const board = ["ready", "doing", "checking", "shipped"];
 
-const diff: DiffStats = { changedLines: 10, changedFiles: ["a.ts"], patch: "d", truncated: false, headSha: "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c" };
+const diff: DiffStats = { changedLines: 10, changedFiles: ["a.ts"], patch: "d", truncated: false, headSha: "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c" , symlinks: []};
 
 const config: WorkerConfig = {
   apiBaseUrl: "http://localhost:3000",

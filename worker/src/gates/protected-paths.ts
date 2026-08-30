@@ -1,4 +1,6 @@
-import { Gate } from "../types.js";
+import { posix } from "node:path";
+
+import { DiffStats, Gate } from "../types.js";
 
 // The CLI loads these from its cwd as instructions and configuration, above any "untrusted data"
 // boundary a prompt can draw
@@ -65,10 +67,51 @@ export function protectedPaths(files: string[]): string[] {
   return files.filter(isProtectedPath);
 }
 
+/**
+ * A committed symlink whose target leaves the checkout, with where it goes.
+ *
+ * `--numstat` renders a symlink as one added line in a file of that name — measured, a
+ * `deep -> /etc/passwd` and a one-line text file are the same three fields — so the list of paths
+ * this gate reads cannot tell them apart, and every rule above is about paths. What that buys an
+ * agent is a door: the run's own worktree, or anything else on the machine, re-attached at a name
+ * inside the tree and readable from any step that reads files there, including a reviewer given a
+ * checkout precisely so it could not reach them (BP-509).
+ *
+ * Judged by resolving the target against the link's own directory, not by touching the disk: a
+ * relative link that stays inside the tree is ordinary, and `docs/x -> ../README.md` is inside even
+ * though it leaves `docs/`.
+ */
+export function escapingSymlinks(
+  symlinks: DiffStats["symlinks"],
+): { path: string; target: string }[] {
+  return symlinks.filter(({ path, target }) => {
+    if (posix.isAbsolute(target)) return true;
+    const resolved = posix.normalize(posix.join(posix.dirname(path), target));
+    if (resolved === ".." || resolved.startsWith("../")) return true;
+    // "inside the checkout" and "somewhere this may point" are not the same set. `.git` is
+    // agent-writable and holds hooks, config and the object store; a committed `h -> .git/hooks`
+    // makes `h/pre-commit` a tracked-looking path that no rule above matches, and this package
+    // exists because what lives under `.git` is invisible to every gate (BP-509 review).
+    return resolved === ".git" || resolved.startsWith(".git/");
+  });
+}
+
 export function protectedPathsGate(): Gate {
   return {
     name: "protected-paths",
     async run({ diff }) {
+      const escaping = escapingSymlinks(diff.symlinks);
+      if (escaping.length > 0) {
+        return {
+          ok: false,
+          reason: `the change adds a symlink pointing out of the checkout (${escaping
+            .map(({ path, target }) => `${path} → ${target}`)
+            .join(
+              ", ",
+            )}). Every rule this gate applies is about paths, and a symlink is one path that stands for another — so a later step reading inside the tree would be reading whatever that names. A human has to look at this.`,
+        };
+      }
+
       const hits = protectedPaths(diff.changedFiles);
       if (hits.length === 0) return { ok: true, reason: "" };
 

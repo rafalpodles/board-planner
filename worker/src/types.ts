@@ -60,6 +60,13 @@ export interface DiffStats {
   changedFiles: string[];
   patch: string;
   truncated: boolean;
+  /**
+   * The symlinks the change adds or rewrites, with what they point at. `--numstat` renders a
+   * symlink as one added line in a file of that name, indistinguishable from an ordinary one-line
+   * file — measured — so a gate reading `changedFiles` alone cannot see that the change added a
+   * door out of the checkout (BP-509).
+   */
+  symlinks: { path: string; target: string }[];
   // The commit the diff was taken against, resolved once to an object id rather than left as the
   // ref `HEAD`. The review gate checks this out to read the change, so "what the reviewer saw" and
   // "what the gates judged" are the same commit by construction (BP-404).

@@ -7,7 +7,11 @@ const GIT_TIMEOUT_MS = 60_000;
 const BASE_OBJECT_ID = /^[0-9a-f]{7,64}$/;
 const MAX_PATCH_CHARS = 200_000;
 
-async function git(runner: Runner, args: string[], opts: RunOpts): Promise<string> {
+async function git(
+  runner: Runner,
+  args: string[],
+  opts: RunOpts,
+): Promise<string> {
   const result = await runner.run("git", gitArgs(args), {
     ...opts,
     env: { ...childEnv(), ...opts.env, ...GIT_SAFE_ENV },
@@ -28,10 +32,14 @@ function resolveRenamedPath(rawPath: string): string {
     return `${prefix}${renamedTo}${suffix}`;
   }
   const arrowIndex = rawPath.indexOf(" => ");
-  return arrowIndex === -1 ? rawPath : rawPath.slice(arrowIndex + " => ".length);
+  return arrowIndex === -1
+    ? rawPath
+    : rawPath.slice(arrowIndex + " => ".length);
 }
 
-function parseNumstat(output: string): Pick<DiffStats, "changedLines" | "changedFiles"> {
+function parseNumstat(
+  output: string,
+): Pick<DiffStats, "changedLines" | "changedFiles"> {
   let changedLines = 0;
   const changedFiles: string[] = [];
 
@@ -62,7 +70,7 @@ function boundPatch(patch: string): Pick<DiffStats, "patch" | "truncated"> {
 export async function collectDiff(
   runner: Runner,
   worktreePath: string,
-  baseSha: string
+  baseSha: string,
 ): Promise<DiffStats> {
   // BP-327 put a guard here because the base arrived as free policy text: `--output=<path>` in
   // git's option slot writes that file under the operator's uid, and a positional that no `--` can
@@ -72,7 +80,7 @@ export async function collectDiff(
   // here would mean some caller went back to naming something the agent can rewrite.
   if (!BASE_OBJECT_ID.test(baseSha)) {
     throw new Error(
-      `refusing base ${JSON.stringify(baseSha)}: git would not read it as an object id`
+      `refusing base ${JSON.stringify(baseSha)}: git would not read it as an object id`,
     );
   }
 
@@ -82,17 +90,29 @@ export async function collectDiff(
   // the agent can rewrite between two calls, so a diff taken from one commit and a review taken
   // from another was a timing question rather than a guarantee — and the review gate now checks
   // this sha out to read the change (BP-404). Same rule the base already follows two blocks up.
-  const headSha = (await git(runner, ["rev-parse", "--verify", "HEAD^{commit}"], opts)).trim();
+  const headSha = (
+    await git(runner, ["rev-parse", "--verify", "HEAD^{commit}"], opts)
+  ).trim();
   if (!BASE_OBJECT_ID.test(headSha)) {
-    throw new Error(`refusing head ${JSON.stringify(headSha)}: git would not read it as an object id`);
+    throw new Error(
+      `refusing head ${JSON.stringify(headSha)}: git would not read it as an object id`,
+    );
   }
 
   // Two trees, not a range: a merge-base is computed from history, and history is what the agent
   // rewrites to hide a file from this diff (BP-382).
   const numstatOutput = await git(
     runner,
-    ["diff", "--no-ext-diff", "--no-textconv", "--numstat", baseSha, headSha, "--"],
-    opts
+    [
+      "diff",
+      "--no-ext-diff",
+      "--no-textconv",
+      "--numstat",
+      baseSha,
+      headSha,
+      "--",
+    ],
+    opts,
   );
   const { changedLines, changedFiles } = parseNumstat(numstatOutput);
 
@@ -106,8 +126,34 @@ export async function collectDiff(
   // instead of a blanket repo setting — measured with the attribute and driver both planted: an
   // unguarded call returns an empty patch and runs the textconv program, which is Bash back under
   // an agent this pipeline took Bash away from.
-  const patchOutput = await git(runner, ["diff", "--no-ext-diff", "--no-textconv", baseSha, headSha, "--"], opts);
+  // A third read, and the cheapest way to learn a thing `--numstat` cannot express: it prints a
+  // symlink as `1  0  <path>`, exactly like a one-line text file. The mode is in `--raw`, and the
+  // blob a symlink names IS its target, so one cat-file per symlink answers where it points. Runs
+  // for every diff; the cat-file loop runs only when a symlink is actually there.
+  const rawOutput = await git(
+    runner,
+    ["diff", "--no-ext-diff", "--no-textconv", "--raw", baseSha, headSha, "--"],
+    opts,
+  );
+  const symlinks: DiffStats["symlinks"] = [];
+  for (const line of rawOutput.split("\n")) {
+    // `:<oldmode> <newmode> <oldsha> <newsha> <status>\t<path>`, and a rename carries two paths —
+    // the destination is the last, which is the one that exists after the change
+    if (!line.startsWith(":")) continue;
+    const [meta, ...paths] = line.split("\t");
+    const fields = meta.slice(1).split(/\s+/);
+    if (fields[1] !== "120000") continue;
+    const path = paths[paths.length - 1];
+    const target = await git(runner, ["cat-file", "blob", fields[3]], opts);
+    symlinks.push({ path, target: target.trim() });
+  }
+
+  const patchOutput = await git(
+    runner,
+    ["diff", "--no-ext-diff", "--no-textconv", baseSha, headSha, "--"],
+    opts,
+  );
   const { patch, truncated } = boundPatch(patchOutput);
 
-  return { changedLines, changedFiles, patch, truncated, headSha };
+  return { changedLines, changedFiles, patch, truncated, headSha, symlinks };
 }

@@ -22,7 +22,7 @@ function ctx(changedLines: number): GateContext {
       changedLines,
       changedFiles: ["src/a.ts"],
       patch: "diff --git a/src/a.ts b/src/a.ts\n+one",
-      truncated: false, headSha: "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c"
+      truncated: false, headSha: "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c", symlinks: []
     },
   };
 }
