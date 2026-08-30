@@ -34,6 +34,23 @@ describe("a committed symlink that leaves the checkout", () => {
     expect(verdict.ok).toBe(false);
   });
 
+  // `.git` is inside the checkout and is the one directory in it that no gate can see into
+  it("is refused when it points into .git, which is inside the checkout but not safe", async () => {
+    const verdict = await gate.run(
+      context(
+        ["hooks", "sub/cfg"],
+        [
+          { path: "hooks", target: ".git/hooks" },
+          { path: "sub/cfg", target: "../.git/config" },
+        ]
+      )
+    );
+
+    expect(verdict.ok).toBe(false);
+    expect(verdict.reason).toContain("hooks");
+    expect(verdict.reason).toContain("sub/cfg");
+  });
+
   /**
    * The controls, and without them "detects symlinks" and "refuses one-line files" would be
    * indistinguishable — which is the whole reason this was invisible.

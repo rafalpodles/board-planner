@@ -87,7 +87,12 @@ export function escapingSymlinks(
   return symlinks.filter(({ path, target }) => {
     if (posix.isAbsolute(target)) return true;
     const resolved = posix.normalize(posix.join(posix.dirname(path), target));
-    return resolved === ".." || resolved.startsWith("../");
+    if (resolved === ".." || resolved.startsWith("../")) return true;
+    // "inside the checkout" and "somewhere this may point" are not the same set. `.git` is
+    // agent-writable and holds hooks, config and the object store; a committed `h -> .git/hooks`
+    // makes `h/pre-commit` a tracked-looking path that no rule above matches, and this package
+    // exists because what lives under `.git` is invisible to every gate (BP-509 review).
+    return resolved === ".git" || resolved.startsWith(".git/");
   });
 }
 

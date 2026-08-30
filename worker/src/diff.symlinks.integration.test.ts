@@ -81,6 +81,21 @@ describe("collectDiff and the symlinks a change adds", () => {
     expect(diff.changedFiles).toContain("plain.txt");
   });
 
+  /**
+   * The rename form. `--raw` prints two paths for an `R` status, and the destination is the last —
+   * the one that exists after the change. Nothing asserted that until the BP-509 review mutated
+   * `paths[paths.length - 1]` to `paths[0]` and watched the suite stay green.
+   */
+  it("takes the destination path when a symlink is renamed, not the source", async () => {
+    git(work, "mv", "outside", "moved");
+    git(work, "commit", "--quiet", "-m", "rename it");
+
+    const diff = await collectDiff(createRunner(), work, baseSha);
+
+    expect(diff.symlinks.map((s) => s.path)).toContain("moved");
+    expect(diff.symlinks.map((s) => s.path)).not.toContain("outside");
+  });
+
   it("says a change with no symlink has none, rather than leaving the field undefined", async () => {
     const dir2 = mkdtempSync(join(tmpdir(), "bp509-plain-"));
     const plain = join(dir2, "work");
