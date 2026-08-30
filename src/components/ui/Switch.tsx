@@ -53,7 +53,13 @@ export function Switch({
         <span className="min-w-0">
           <span className="flex items-center gap-1.5 text-[13.5px] font-medium text-text">
             {label}
-            {dirty && <span className="h-1.5 w-1.5 rounded-full bg-warning" title="Unsaved" />}
+            {dirty && (
+              <span
+                aria-hidden="true"
+                className="h-1.5 w-1.5 rounded-full bg-warning"
+                title="Unsaved"
+              />
+            )}
           </span>
           {hint && (
             <span id={hintId} className="mt-0.5 block text-xs text-text-muted">
