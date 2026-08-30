@@ -161,10 +161,11 @@ describe("the project's default agent", () => {
   const GLOBAL = { _id: "a3", name: "Default", scope: "global", projectId: null, projectName: null, description: "" };
   const MINE = { _id: "a4", name: "My own", scope: "user", projectId: null, projectName: null, description: "" };
 
+  // Found by the heading beside it, not by one of its options: keying on "No default" made every
+  // test in here go red when that option was removed, so one mutation lit four lamps.
   function picker() {
-    return screen.getAllByRole("combobox").find((el) =>
-      [...el.querySelectorAll("option")].some((o) => (o.textContent || "").includes("No default"))
-    ) as HTMLSelectElement;
+    const heading = screen.getByText("Default agent");
+    return heading.parentElement!.querySelector("select") as HTMLSelectElement;
   }
 
   it("offers this board's agents and the global ones, and no others", async () => {
