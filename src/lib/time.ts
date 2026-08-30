@@ -1,12 +1,21 @@
 /**
  * Building an `Intl.DateTimeFormat` is the expensive part, and `startOfDayInTimezone` asks the
  * same question of the same zone about thirty times per call. Instances are stateless, so one per
- * zone is kept; the set of zones a deployment uses is its projects', which is small.
+ * zone is kept.
+ *
+ * Bounded, because the key is NOT canonical: `Intl` accepts "EuRoPe/WaRsAw", so `isValidTimezone`
+ * agrees and a stored zone can differ from another in case alone — 2^26 of them for that one name,
+ * every one a distinct entry. Canonicalising the key would cost the construction this exists to
+ * avoid, so the map is emptied instead once it passes more zones than a deployment has. The thirty
+ * calls in a row that motivate it all share one key, so a cleared map costs one rebuild.
  */
+const MAX_CACHED_ZONES = 64;
+
 function formatter(kind: "hour" | "day", timeZone: string): Intl.DateTimeFormat {
   const key = `${kind}\u0000${timeZone}`;
   const cached = formatters.get(key);
   if (cached) return cached;
+  if (formatters.size >= MAX_CACHED_ZONES) formatters.clear();
   const made =
     kind === "hour"
       ? new Intl.DateTimeFormat("en-GB", { timeZone, hour: "2-digit", hourCycle: "h23" })
@@ -29,31 +38,6 @@ export function dayKeyInTimezone(date: Date, timeZone: string): string {
   return formatter("day", timeZone).format(date);
 }
 
-/** How far ahead of UTC the zone is at this instant, in milliseconds. */
-function zoneOffsetMs(date: Date, timeZone: string): number {
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone,
-    hourCycle: "h23",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).formatToParts(date);
-  const at = (type: string) => Number(parts.find((p) => p.type === type)?.value);
-  const asIfUTC = Date.UTC(
-    at("year"),
-    at("month") - 1,
-    at("day"),
-    at("hour"),
-    at("minute"),
-    at("second")
-  );
-  // Both sides are whole seconds; the date's own milliseconds would otherwise leak into the offset
-  return asIfUTC - Math.floor(date.getTime() / 1000) * 1000;
-}
-
 const A_DAY_AND_SOME = 26 * 60 * 60 * 1000;
 
 /**
@@ -71,14 +55,17 @@ export function startOfDayInTimezone(date: Date, timeZone: string): Date {
   const key = dayKeyInTimezone(date, timeZone);
   const isTheDay = (t: number) => dayKeyInTimezone(new Date(t), timeZone) === key;
 
+  /**
+   * A day runs to 25 hours where the clocks go back, and to about 48 where a zone crossed the date
+   * line by repeating a calendar date — Pacific/Apia did exactly that in 1892. So the lower bound
+   * is stepped back until it is genuinely a different day rather than assumed to be one after a
+   * single span: returning it unchecked handed back an arbitrary instant from the middle of the
+   * day, which is not what this function is for.
+   */
   let before = date.getTime() - A_DAY_AND_SOME;
-  const within = date.getTime();
-  // A day can run to 25 hours where the clocks go back, never to 26 — so `before` is the previous
-  // day whatever the zone does. Asserted rather than assumed would need a throw; instead the loop
-  // simply returns `within` if it ever were not, which is the safe direction for a cap.
-  if (isTheDay(before)) return new Date(before);
+  for (let i = 0; i < 4 && isTheDay(before); i += 1) before -= A_DAY_AND_SOME;
 
-  let after = within;
+  let after = date.getTime();
   while (after - before > 1) {
     const mid = before + Math.floor((after - before) / 2);
     if (isTheDay(mid)) after = mid;

@@ -45,6 +45,43 @@ describe("startOfDayInTimezone", () => {
    * arithmetic version: subtracting the offset from wall midnight violated `sameDay` seven times,
    * all of them in Santiago on the day its midnight does not exist.
    */
+  /**
+   * Two instants the search's lower bound used to fall inside. Juneau's 1867 transfer from Russia
+   * moved the date line and the calendar; Apia repeated 4 July 1892 outright, so that day is about
+   * 48 hours long. Neither is reachable from the cap — both callers pass `new Date()` — but the
+   * function is exported, and it used to hand back an instant from the middle of the day.
+   */
+  it.each([
+    ["America/Juneau, 1867", "1867-10-19T12:00:00Z", "America/Juneau"],
+    ["Pacific/Apia repeating 4 July 1892", "1892-07-04T12:00:00Z", "Pacific/Apia"],
+  ])("is still the day's own start for %s", (_label, at, zone) => {
+    const start = startOfDayInTimezone(new Date(at), zone);
+    expect(dayKeyInTimezone(start, zone)).toBe(dayKeyInTimezone(new Date(at), zone));
+    expect(dayKeyInTimezone(new Date(start.getTime() - 1), zone)).not.toBe(
+      dayKeyInTimezone(start, zone)
+    );
+  });
+
+  /**
+   * The formatter cache is bounded, and emptying it mid-run must not change an answer. The zones
+   * here are the same one in different casings, which `Intl` accepts and `isValidTimezone`
+   * therefore agrees with — the very reason the bound exists.
+   */
+  it("gives the same answer after the formatter cache has been emptied", () => {
+    const at = new Date("2026-08-30T09:00:00Z");
+    const expected = startOfDayInTimezone(at, "Europe/Warsaw").toISOString();
+
+    for (let i = 0; i < 200; i += 1) {
+      const cased = "Europe/Warsaw"
+        .split("")
+        .map((c, n) => ((i >> n % 8) & 1 ? c.toUpperCase() : c.toLowerCase()))
+        .join("");
+      expect(startOfDayInTimezone(at, cased).toISOString()).toBe(expected);
+    }
+
+    expect(startOfDayInTimezone(at, "Europe/Warsaw").toISOString()).toBe(expected);
+  });
+
   it("is always the first instant of that zone's day containing the given one", () => {
     const zones = [
       "UTC", "Europe/Warsaw", "America/New_York", "Asia/Kolkata", "Pacific/Kiritimati",
