@@ -417,3 +417,41 @@ test.describe("on a phone", () => {
     await expect(bar).not.toHaveValue("");
   });
 });
+
+/**
+ * BP-329. The board's own key is interpolated into a RegExp so that typing it offers the board's
+ * tasks — and `Project.key` carries no pattern on the model or on either route that writes one, so
+ * a key made of regex punctuation is storable today. Unescaped it threw inside a useMemo, which is
+ * a render, which is the whole task page.
+ *
+ * By id, deliberately: `resolveProjectId` refuses a key that fails PROJECT_KEY_PATTERN, so such a
+ * board answers 404 to its own key and is reachable only by its ObjectId — which every route
+ * accepts first, and which is the URL this page renders under.
+ */
+test.describe("a board whose key is regex punctuation", () => {
+  // A key that fails to COMPILE, not merely one that over-matches: `A.C` unescaped is a valid
+  // regex and the page survives it, so it could not tell the fix from its absence. `POST
+  // /api/projects` stores `key.trim().toUpperCase()` and checks no pattern, so this is storable
+  // through the ordinary route today (BP-312).
+  const AWKWARD = "C(";
+
+  test.beforeEach(async () => {
+    const handle = await db();
+    await handle.collection("projects").updateOne({ _id: PROJECT_ID }, { $set: { key: AWKWARD } });
+  });
+
+  test("opens its tasks, and still offers them by key", async ({ page }) => {
+    await signIn(page);
+    await page.goto(`/projects/${PROJECT_ID}/tasks/1`);
+
+    // The page rendering at all is the fix: unescaped, this threw before anything was drawn
+    await expect(page.getByText(HELD_TASK_TITLE).first()).toBeVisible();
+
+    // And the trigger still does its job — escaped, not stripped
+    const box = page.getByPlaceholder("Write a comment, @mention someone…");
+    await box.click();
+    await box.pressSequentially(`Blocked by ${AWKWARD}-`);
+
+    await expect(page.getByRole("listbox")).toBeVisible();
+  });
+});
