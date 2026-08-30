@@ -54,9 +54,15 @@ const ARROWS: string[] = [
  * for ever (BP-455). Composing an agent was the one thing that screen could not be made to do
  * without a mouse.
  *
- * A sortable active keeps the sortable getter exactly as it was, so reordering inside a bucket is
- * untouched. Everything else searches the droppable rectangles in the direction pressed, which is
- * what dnd-kit does for its own multiple-container example.
+ * A sortable active is handed straight back to the sortable getter, so reordering inside a bucket
+ * runs the code it ran before this change rather than a second implementation of it. Deleting that
+ * line changes no assertion in the spec beside this file — measured, with three entries and the
+ * first travelling to the end — so it is kept for the minimum-change reason and not because a test
+ * demands it: the library's getter accounts for the transforms a sorting strategy applies, and the
+ * search below does not.
+ *
+ * Everything else searches the droppable rectangles in the direction pressed, which is what
+ * dnd-kit does for its own multiple-container example.
  */
 const keyboardCoordinates: KeyboardCoordinateGetter = (event, args) => {
   const { active, collisionRect, droppableRects, droppableContainers } = args.context;

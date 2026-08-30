@@ -165,18 +165,22 @@ test("an agent can be composed end to end and saved, using no pointer at all", a
 /**
  * The half that already worked, asserted so the new coordinate getter cannot have taken it away:
  * a sortable active still goes through `sortableKeyboardCoordinates` exactly as before.
+ *
+ * Three entries, and the first travels to the end. Two was not enough to tell the delegation from
+ * the cross-container fallback — with one neighbour both pick the same rectangle, and removing the
+ * delegation left every assertion green.
  */
 test("reordering inside a bucket still works from the keyboard", async ({ page }) => {
   await openComposer(page);
 
-  await page.getByRole("button", { name: "Add Implement to a phase" }).click();
-  await page.getByLabel("Where to add Implement").getByRole("button", { name: "Analysis" }).click();
-  await page.getByRole("button", { name: "Add Review to a phase" }).click();
-  await page.getByLabel("Where to add Review").getByRole("button", { name: "Analysis" }).click();
+  for (const name of ["Implement", "Review", "Push"]) {
+    await page.getByRole("button", { name: `Add ${name} to a phase` }).click();
+    await page.getByLabel(`Where to add ${name}`).getByRole("button", { name: "Analysis" }).click();
+  }
 
   const order = async () =>
     (await bucket(page, "analysis").locator("li").allTextContents()).map((t) => t.trim().split("\n")[0]);
-  expect(await order()).toEqual(["Implement", "Review"]);
+  expect(await order()).toEqual(["Implement", "Review", "Push"]);
 
   /**
    * The one inside the bucket, not the palette block of the same name — a bare `hasText` match
@@ -204,10 +208,13 @@ test("reordering inside a bucket still works from the keyboard", async ({ page }
 
   // The drop target has to actually change before the drop, and the announcement is the only
   // signal that it has — pressing Space on the same tick drops it back where it started
-  const overBefore = await announced(page).textContent();
-  await page.keyboard.press("ArrowDown");
-  await expect.poll(() => announced(page).textContent()).not.toBe(overBefore);
+  let over = await announced(page).textContent();
+  for (let step = 0; step < 2; step += 1) {
+    await page.keyboard.press("ArrowDown");
+    await expect.poll(() => announced(page).textContent()).not.toBe(over);
+    over = await announced(page).textContent();
+  }
   await page.keyboard.press("Space");
 
-  await expect.poll(order).toEqual(["Review", "Implement"]);
+  await expect.poll(order).toEqual(["Review", "Push", "Implement"]);
 });
