@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { isValidTimezone } from "@/lib/time";
 import { useDraft } from "@/hooks/use-draft";
@@ -51,6 +51,7 @@ function pmDraftFrom(p: ApiProject) {
     enabled: p.pm?.enabled || false,
     model: p.pm?.model || "",
     dailyCap: p.pm?.dailyTurnCap ? String(p.pm.dailyTurnCap) : "",
+    dailyTokenCap: p.pm?.dailyTokenCap ? String(p.pm.dailyTokenCap) : "",
     contextNotes: p.pm?.contextNotes || "",
     links: (p.pm?.links || []).map((l) => ({ label: l.label, url: l.url })),
     dailyReview: p.pm?.autonomy?.dailyReview ?? false,
@@ -76,11 +77,40 @@ function pmDraftFrom(p: ApiProject) {
   };
 }
 
+interface PmUsageToday {
+  turns: { used: number; cap: number };
+  calls: number;
+  tokens: number;
+  tokenCap: number;
+  stepLimitHits: number;
+  maxCallsPerTurn: number;
+}
+
 export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: SectionProps) {
   const api = useApi();
   const { toast } = useToast();
 
   const draft = useDraft(pmDraftFrom(project));
+
+  /**
+   * What today has actually cost (BP-284). Read once on mount rather than polled: it is a number to
+   * inform a setting, not a live meter, and a settings screen that refetched on a timer would be
+   * spending requests to watch a number that changes when somebody else is chatting.
+   */
+  const [usage, setUsage] = useState<PmUsageToday | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .get(`/api/projects/${projectId}/pm/usage`)
+      .then((data) => {
+        if (!cancelled) setUsage(data as PmUsageToday);
+      })
+      // A settings screen that cannot show the spend still has to let the settings be edited
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [api, projectId]);
   const [transient, setTransient] = useState<Record<number, McpTransient>>({});
   const [newLinkLabel, setNewLinkLabel] = useState("");
   const [newLinkUrl, setNewLinkUrl] = useState("");
@@ -166,6 +196,7 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
       pm.enabled = v.enabled;
       pm.model = v.model.trim();
       pm.dailyTurnCap = v.dailyCap.trim() ? Number(v.dailyCap) : 0;
+      pm.dailyTokenCap = v.dailyTokenCap.trim() ? Number(v.dailyTokenCap) : 0;
       pm.mcpServers = v.mcpServers
         .filter((s) => s.name.trim() || s.url.trim())
         .map((s) => ({
@@ -300,10 +331,50 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
               />
               <p className="mt-1 text-xs text-text-muted">
                 Autonomous turns count too, and so does a turn the model failed. Resets at midnight
-                in {storedTimezone}.
+                in {storedTimezone}.{" "}
+                {/* The sentence this screen was missing: the cap above is in turns, and a turn is
+                    not one model call, so the number alone never said what it permitted. */}
+                <strong>One turn is up to {usage?.maxCallsPerTurn ?? 15} model calls</strong>, so
+                this is a rate limit rather than a budget.
+              </p>
+            </div>
+            <div>
+              <Input
+                label="Tokens per day"
+                type="number"
+                min={0}
+                value={draft.value.dailyTokenCap}
+                dirty={draft.isDirty("dailyTokenCap")}
+                onChange={(e) => draft.set("dailyTokenCap", e.target.value)}
+                placeholder="Leave empty for no ceiling"
+              />
+              <p className="mt-1 text-xs text-text-muted">
+                The budget, in what the model actually bills. Empty means no ceiling — set one from
+                what you see below rather than from a guess.
               </p>
             </div>
           </div>
+
+          {usage && (
+            <div
+              data-testid="pm-usage-today"
+              className="mt-4 rounded-lg border border-border bg-bg-input/40 px-3 py-2 text-sm"
+            >
+              <p className="m-0 text-text-muted">
+                Today: <strong className="text-text">{usage.turns.used}</strong> turns,{" "}
+                <strong className="text-text">{usage.calls}</strong> model calls,{" "}
+                <strong className="text-text">{usage.tokens.toLocaleString()}</strong> tokens
+                {usage.tokenCap > 0 && <> of {usage.tokenCap.toLocaleString()}</>}.
+                {usage.stepLimitHits > 0 && (
+                  <>
+                    {" "}
+                    {usage.stepLimitHits} turn{usage.stepLimitHits === 1 ? "" : "s"} ran out of steps
+                    rather than finishing — those cost the most.
+                  </>
+                )}
+              </p>
+            </div>
+          )}
         </SettingsCard>
       ) : (
         <div className="mb-4 flex gap-3 rounded-xl border border-primary/40 bg-primary/10 px-4 py-3 text-sm">
