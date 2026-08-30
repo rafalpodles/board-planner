@@ -49,7 +49,7 @@ Claude automatically picks up tasks in `todo` status and processes them through 
 
 Which of them a project's autonomous worker (Settings → Workers) may take follows the task's assignee, not a project-wide setting. A machine belongs to one person — whoever enrolled it — and it takes a task only when **all** of these hold:
 
-- the task is assigned to that person, and **that same person did the assigning** (`assignedBy`). Work somebody else hands you is a proposal; nothing runs it unattended, and the surface for accepting one does not exist yet.
+- the task is assigned to that person, and the assigner (`assignedBy`) is either **that same person** or **the PM agent**. Work another *person* hands you is a proposal; nothing runs it unattended, and the surface for accepting one does not exist yet. The PM is not another person: since BP-419 its assignment is a real hand-over, because treating it as a proposal nobody could accept meant every task it assigned was unclaimable for ever, silently.
 - the task **names an agent**. Choosing one is the hand-over gesture; the field is `agent` on the task, set from the Agent row in the task detail or `update_task`'s `agent` parameter. No agent means a person is doing it, which is the default.
 - the project is enabled for workers, and the machine's owner can reach that project.
 
