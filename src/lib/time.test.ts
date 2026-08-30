@@ -82,7 +82,14 @@ describe("startOfDayInTimezone", () => {
     expect(startOfDayInTimezone(at, "Europe/Warsaw").toISOString()).toBe(expected);
   });
 
-  it("is always the first instant of that zone's day containing the given one", () => {
+  /**
+   * Declared long-running rather than left on the edge of the default 5 s. It runs in about a
+   * second here and timed out on a CI runner — the sweep is thousands of `Intl` formats, so the
+   * margin is the machine's, not the code's. Six-hourly rather than three: every DST transition is
+   * still crossed from both sides and every day still sampled, and the arithmetic mutation this
+   * exists to catch still dies (checked, not assumed).
+   */
+  it("is always the first instant of that zone's day containing the given one", { timeout: 30_000 }, () => {
     const zones = [
       "UTC", "Europe/Warsaw", "America/New_York", "Asia/Kolkata", "Pacific/Kiritimati",
       "Pacific/Niue", "Australia/Lord_Howe", "America/Santiago", "Asia/Beirut",
@@ -91,7 +98,7 @@ describe("startOfDayInTimezone", () => {
     const violations: string[] = [];
 
     for (const zone of zones) {
-      for (let t = Date.UTC(2025, 9, 1); t < Date.UTC(2027, 3, 1); t += 3 * 60 * 60 * 1000) {
+      for (let t = Date.UTC(2025, 9, 1); t < Date.UTC(2027, 3, 1); t += 6 * 60 * 60 * 1000) {
         const now = new Date(t);
         const start = startOfDayInTimezone(now, zone);
         const key = dayKeyInTimezone(now, zone);
