@@ -159,4 +159,34 @@ describe("POST /api/auth/forgot", () => {
     expect((await POST(post("   "))).status).toBe(400);
     expect((await POST(post(42))).status).toBe(400);
   });
+
+  /**
+   * BP-322. The throttle moved above the body read, and nothing said so: reverting the reorder left
+   * every test on this route and every end-to-end test green. An oversized body is what tells the
+   * two orders apart — 429 means the throttle ran first, 413 means the server read 70 KB from a
+   * caller it had already decided to refuse.
+   */
+  describe("the order the checks run in", () => {
+    const oversized = () =>
+      new Request("http://x/api/auth/forgot", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ identifier: "x".repeat(70 * 1024) }),
+      });
+
+    it("refuses a throttled caller without reading its body", async () => {
+      isEmailConfigured.mockReturnValue(true);
+      found(null);
+      for (let i = 0; i < 11; i++) await POST(post("someone"));
+
+      expect((await POST(oversized())).status).toBe(429);
+    });
+
+    it("still caps the body of a caller it has not throttled — the control", async () => {
+      isEmailConfigured.mockReturnValue(true);
+      found(null);
+
+      expect((await POST(oversized())).status).toBe(413);
+    });
+  });
 });

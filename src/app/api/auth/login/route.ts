@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { readJsonBody } from "@/lib/request-body";
 import { getClientIp, verifyCredentials } from "@/lib/auth";
 import { isDatabaseUnreachable } from "@/lib/db-errors";
 import { databaseUnavailable } from "@/lib/middleware";
@@ -14,12 +15,9 @@ export async function POST(request: Request) {
   const refusal = provenanceRefusal(request);
   if (refusal) return refusal;
 
-  let body: { username?: unknown; password?: unknown };
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
+  const read = await readJsonBody<{ username?: unknown; password?: unknown }>(request);
+  if (!read.ok) return read.response;
+  const body = read.value;
 
   const { username, password } = body;
   if (typeof username !== "string" || typeof password !== "string" || !username || !password) {

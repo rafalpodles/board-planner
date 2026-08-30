@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
+import { readJsonBody } from "@/lib/request-body";
 import { connectDB } from "@/lib/db";
 import { protocolOf } from "@/lib/middleware";
 import { PROTOCOL_VERSION } from "@/lib/worker-service";
 import { stripControlCharacters } from "@/lib/identifiers";
 import {
   DEVICE_ENROLMENT_TTL_MS,
-  TooManyPendingEnrolments,
   formatUserCode,
   startDeviceEnrolment,
 } from "@/lib/device-enrolment";
@@ -25,21 +25,6 @@ const ENROLMENTS_PER_WINDOW = 10;
 export async function POST(request: Request) {
   await connectDB();
 
-  const body = await request.json().catch(() => ({}));
-  // Stripped before it is ever stored, not only where it becomes a User's fullName: this value is
-  // rendered raw on /enrol/[userCode] BEFORE anyone approves it, and a bidi-override or zero-width
-  // character does not break a line or reach a script sink — it just makes the string on screen
-  // lie to whoever is deciding whether to trust it, which is the entire control this unauthenticated
-  // route has (BP-413 review).
-  const machineName = typeof body.name === "string"
-    ? stripControlCharacters(body.name).trim().slice(0, 120)
-    : "";
-  const machineHost = typeof body.host === "string"
-    ? stripControlCharacters(body.host).trim().slice(0, 200)
-    : "";
-  if (!machineName) {
-    return NextResponse.json({ error: "name is required" }, { status: 400 });
-  }
   if (protocolOf(request) !== PROTOCOL_VERSION) {
     return NextResponse.json(
       { error: `server speaks protocol ${PROTOCOL_VERSION}` },
@@ -55,17 +40,29 @@ export async function POST(request: Request) {
   if (await isRateLimited(throttleKey, anonymousMultiplier(clientIp, ENROLMENTS_PER_WINDOW))) {
     return NextResponse.json({ error: "too many enrolment attempts, try again later" }, { status: 429 });
   }
+  // Counted here rather than after the body is understood, so a flood of malformed or oversized
+  // requests still spends the budget it is costing — the forgot route counts on the same rule.
   await recordFailedAttempt(throttleKey);
 
-  let started;
-  try {
-    started = await startDeviceEnrolment({ machineName, machineHost });
-  } catch (error) {
-    if (error instanceof TooManyPendingEnrolments) {
-      return NextResponse.json({ error: error.message }, { status: 429 });
-    }
-    throw error;
+  const read = await readJsonBody(request);
+  if (!read.ok) return read.response;
+  const body = read.value;
+  // Stripped before it is ever stored, not only where it becomes a User's fullName: this value is
+  // rendered raw on /enrol/[userCode] BEFORE anyone approves it, and a bidi-override or zero-width
+  // character does not break a line or reach a script sink — it just makes the string on screen
+  // lie to whoever is deciding whether to trust it, which is the entire control this unauthenticated
+  // route has (BP-413 review).
+  const machineName = typeof body.name === "string"
+    ? stripControlCharacters(body.name).trim().slice(0, 120)
+    : "";
+  const machineHost = typeof body.host === "string"
+    ? stripControlCharacters(body.host).trim().slice(0, 200)
+    : "";
+  if (!machineName) {
+    return NextResponse.json({ error: "name is required" }, { status: 400 });
   }
+
+  const started = await startDeviceEnrolment({ machineName, machineHost });
   const base = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ?? "";
 
   return NextResponse.json(
