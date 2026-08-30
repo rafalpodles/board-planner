@@ -71,7 +71,9 @@ export function ColumnPicker({ hidden, onChange, customFields = [] }: ColumnPick
         <div
           role="group"
           aria-label="Columns"
-          className="absolute right-0 top-full z-40 mt-1 w-56 rounded-xl border border-border bg-bg-card p-2 shadow-lg"
+          // Anchored to the button's right edge, which puts a 224px panel off the left of a phone:
+          // the toolbar wraps and the button lands 20px from the edge. Below sm it anchors left
+          className="absolute right-0 top-full z-40 mt-1 w-56 max-sm:left-0 max-sm:right-auto rounded-xl border border-border bg-bg-card p-2 shadow-lg"
         >
           {builtIn.map((column) => (
             <label
