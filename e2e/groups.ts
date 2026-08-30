@@ -42,6 +42,7 @@ export const GROUPS = {
     "project-settings.spec.ts",
     "project-dashboard.spec.ts",
     "dashboard-reads-the-board.spec.ts",
+    "dashboard-says-why.spec.ts",
     "instance-settings.spec.ts",
     "settings-mobile-nav.spec.ts",
     "instance-audit.spec.ts",
@@ -72,6 +73,7 @@ export const GROUPS = {
     "board-feed-notifications.spec.ts",
     "pm-chat.spec.ts",
     "pm-autonomy.spec.ts",
+    "select-has-a-name.spec.ts",
     "removed-member-notifications.spec.ts",
   ],
 } as const satisfies Record<string, readonly string[]>;
