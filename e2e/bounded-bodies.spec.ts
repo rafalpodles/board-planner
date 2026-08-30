@@ -92,4 +92,54 @@ test.describe("uploads", () => {
 
     expect(response.status(), await response.text()).toBe(413);
   });
+
+  /**
+   * The test above cannot tell the fix from the bug: with the Content-Length check removed, the 6 MB
+   * part is parsed and then refused by the file-size check with the same 413. Verified — that
+   * mutation left it green.
+   *
+   * This one separates them. The envelope is over the request ceiling while the file itself is
+   * under the 5 MB limit, so only a check that reads Content-Length can refuse it; the check that
+   * reads file.size has to allocate the whole body first and then finds nothing wrong with it.
+   */
+  test("refuses an envelope over the ceiling even when the file inside it is not", async ({
+    request,
+  }) => {
+    await request.post("/api/auth/login", {
+      headers: SAME_ORIGIN,
+      data: { username: ADMIN_USERNAME, password: ADMIN_PASSWORD },
+    });
+
+    const response = await request.post("/api/uploads", {
+      headers: SAME_ORIGIN,
+      multipart: {
+        projectId: PROJECT_KEY,
+        padding: "p".repeat(400 * 1024),
+        file: {
+          name: "under-the-limit.png",
+          mimeType: "image/png",
+          buffer: Buffer.alloc(5 * 1000 * 1000),
+        },
+      },
+    });
+
+    expect(response.status(), await response.text()).toBe(413);
+  });
+
+  test("still accepts an ordinary attachment — the control", async ({ request }) => {
+    await request.post("/api/auth/login", {
+      headers: SAME_ORIGIN,
+      data: { username: ADMIN_USERNAME, password: ADMIN_PASSWORD },
+    });
+
+    const response = await request.post("/api/uploads", {
+      headers: SAME_ORIGIN,
+      multipart: {
+        projectId: PROJECT_KEY,
+        file: { name: "small.png", mimeType: "image/png", buffer: Buffer.alloc(1024) },
+      },
+    });
+
+    expect(response.status(), await response.text()).not.toBe(413);
+  });
 });
