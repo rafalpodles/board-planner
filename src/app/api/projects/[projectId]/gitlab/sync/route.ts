@@ -6,7 +6,7 @@ import { Task } from "@/models/task";
 import { fetchMergeRequests, matchMRsToTasks, parseGitlabRepo } from "@/lib/gitlab";
 import { logActivity } from "@/lib/activity";
 import { decryptSecret } from "@/lib/encryption";
-import { columnIdsWithRole, getProjectColumns } from "@/lib/columns";
+import { mergedReviewDestination } from "@/lib/columns";
 import { projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
 
 export const POST = withProjectAccess(async (_request, { params, user }) => {
@@ -51,7 +51,7 @@ export const POST = withProjectAccess(async (_request, { params, user }) => {
     const message = err instanceof Error ? err.message : "GitLab request failed";
     return NextResponse.json({ error: message }, { status: 502 });
   }
-  const matchedMRs = matchMRsToTasks(rawMRs, project.key);
+  const matchedMRs = matchMRsToTasks(rawMRs, project.key, project.formerKeys || []);
 
   const mrsByTask = new Map<number, typeof matchedMRs>();
   for (const mr of matchedMRs) {
@@ -82,24 +82,13 @@ export const POST = withProjectAccess(async (_request, { params, user }) => {
     task.linkedPRs = [...others, ...mrDocs] as typeof task.linkedPRs;
     linked += mrs.length;
 
-    // Auto-transition: a merged MR moves a task out of the first review column into the next one.
-    // Keyed on the role, not on the seeded ids — those matched nothing on a renamed board, so this
-    // opted out silently and looked like a sync that simply had nothing to do.
     const hasMerged = mrs.some((mr) => mr.state === "merged");
-    const reviewIds = columnIdsWithRole(project, "review");
-    const nextReview = reviewIds[reviewIds.indexOf(task.status) + 1];
-    if (hasMerged && reviewIds.includes(task.status) && nextReview) {
+    const destination = hasMerged ? mergedReviewDestination(project, task.status) : undefined;
+    if (destination) {
       const oldStatus = task.status;
-      task.status = nextReview as typeof task.status;
+      task.status = destination as typeof task.status;
       autoTransitioned++;
-      await logActivity(
-        String(task._id),
-        user._id,
-        "status_changed",
-        "status",
-        oldStatus,
-        "ready_to_test"
-      );
+      await logActivity(String(task._id), user._id, "status_changed", "status", oldStatus, destination);
     }
 
     await task.save();
