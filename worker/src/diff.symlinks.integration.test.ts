@@ -87,13 +87,29 @@ describe("collectDiff and the symlinks a change adds", () => {
    * `paths[paths.length - 1]` to `paths[0]` and watched the suite stay green.
    */
   it("takes the destination path when a symlink is renamed, not the source", async () => {
-    git(work, "mv", "outside", "moved");
-    git(work, "commit", "--quiet", "-m", "rename it");
+    // The rename has to be what `baseSha..HEAD` sees, so the link exists at base and the run moves
+    // it. The first version created it after base, which git reports as a plain addition with one
+    // path — the two-path form the code handles was never reached, and the mutation survived.
+    const dir2 = mkdtempSync(join(tmpdir(), "bp509-rename-"));
+    const renamed = join(dir2, "work");
+    execFileSync("git", ["init", "--quiet", "-b", "main", renamed], { stdio: "pipe" });
+    git(renamed, "config", "user.email", "w@e");
+    git(renamed, "config", "user.name", "w");
+    symlinkSync("/etc/passwd", join(renamed, "before"));
+    git(renamed, "add", "-A");
+    git(renamed, "commit", "--quiet", "-m", "base");
+    const base = git(renamed, "rev-parse", "HEAD").trim();
+    git(renamed, "mv", "before", "after");
+    git(renamed, "commit", "--quiet", "-m", "the run renames it");
 
-    const diff = await collectDiff(createRunner(), work, baseSha);
+    // The premise: git really does report this as one row with two paths
+    const raw = git(renamed, "diff", "--raw", "-M", base, "HEAD", "--").trim();
+    expect(raw.split("\t")).toHaveLength(3);
 
-    expect(diff.symlinks.map((s) => s.path)).toContain("moved");
-    expect(diff.symlinks.map((s) => s.path)).not.toContain("outside");
+    const diff = await collectDiff(createRunner(), renamed, base);
+
+    expect(diff.symlinks.map((s) => s.path)).toEqual(["after"]);
+    rmSync(dir2, { recursive: true, force: true });
   });
 
   it("says a change with no symlink has none, rather than leaving the field undefined", async () => {
