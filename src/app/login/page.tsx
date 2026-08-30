@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, FormEvent } from "react";
+import { useState, useEffect, FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { safeNextPath } from "@/lib/next-path";
 import Image from "next/image";
@@ -15,10 +15,28 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
   const [isRegister, setIsRegister] = useState(false);
+  // null until the server answers. Hidden while unknown and hidden on a failure: offering to
+  // create the first administrator on an instance that already has one is the bug (BP-268), and
+  // the sign-in form below works either way.
+  const [unclaimed, setUnclaimed] = useState<boolean | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
   const router = useRouter();
+
+  // Asked of the server rather than guessed. This decides what is offered, not what is allowed:
+  // POST /api/users counts the users itself and refuses a second bootstrap whatever this says, so
+  // re-opening the form from the DOM buys nothing.
+  useEffect(() => {
+    let live = true;
+    fetch("/api/auth/instance")
+      .then((res) => (res.ok ? res.json() : { unclaimed: false }))
+      .then((data) => live && setUnclaimed(data.unclaimed === true))
+      .catch(() => live && setUnclaimed(false));
+    return () => {
+      live = false;
+    };
+  }, []);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -109,14 +127,16 @@ export default function LoginPage() {
           </p>
         )}
 
-        <button
-          onClick={() => setIsRegister(!isRegister)}
-          className="mt-4 w-full text-center text-sm text-text-muted hover:text-text min-h-[44px]"
-        >
-          {isRegister
-            ? "Already have an account? Sign In"
-            : "First time? Create Account"}
-        </button>
+        {unclaimed && (
+          <button
+            onClick={() => setIsRegister(!isRegister)}
+            className="mt-4 w-full text-center text-sm text-text-muted hover:text-text min-h-[44px]"
+          >
+            {isRegister
+              ? "Already have an account? Sign In"
+              : "First time? Create Account"}
+          </button>
+        )}
       </div>
     </div>
   );
