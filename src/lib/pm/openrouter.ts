@@ -22,11 +22,48 @@ export interface OrToolCall {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type OrChatMessage = Record<string, any>;
 
+/**
+ * What one round-trip cost, as the provider reported it. Absent when the response carried no
+ * `usage` block — every OpenRouter model returns one today, but a stub or a future provider need
+ * not, and a missing number must read as "unknown" rather than as zero (BP-284).
+ */
+export interface OrUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
 export type OrCompletionResult =
-  | { type: "text"; content: string }
-  | { type: "tool_calls"; content: string; calls: OrToolCall[]; assistantMessage: OrChatMessage }
+  | { type: "text"; content: string; usage?: OrUsage }
+  | {
+      type: "tool_calls";
+      content: string;
+      calls: OrToolCall[];
+      assistantMessage: OrChatMessage;
+      usage?: OrUsage;
+    }
   | { type: "aborted" }
   | { type: "error"; error: string };
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function usageOf(data: any): OrUsage | undefined {
+  const usage = data?.usage;
+  if (!usage || typeof usage !== "object") return undefined;
+  const prompt = Number(usage.prompt_tokens);
+  const completion = Number(usage.completion_tokens);
+  const total = Number(usage.total_tokens);
+  if (!Number.isFinite(prompt) && !Number.isFinite(completion) && !Number.isFinite(total)) {
+    return undefined;
+  }
+  const promptTokens = Number.isFinite(prompt) ? prompt : 0;
+  const completionTokens = Number.isFinite(completion) ? completion : 0;
+  return {
+    promptTokens,
+    completionTokens,
+    // Some providers omit the total; adding the two is what it means
+    totalTokens: Number.isFinite(total) ? total : promptTokens + completionTokens,
+  };
+}
 
 export async function chatCompletion(opts: {
   model: string;
@@ -105,8 +142,14 @@ export async function chatCompletion(opts: {
         }
       }
     );
-    return { type: "tool_calls", content: message.content || "", calls, assistantMessage: message };
+    return {
+      type: "tool_calls",
+      content: message.content || "",
+      calls,
+      assistantMessage: message,
+      usage: usageOf(data),
+    };
   }
 
-  return { type: "text", content: message.content || "" };
+  return { type: "text", content: message.content || "", usage: usageOf(data) };
 }
