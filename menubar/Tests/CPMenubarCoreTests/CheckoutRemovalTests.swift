@@ -130,6 +130,33 @@ final class CheckoutRemovalTests: XCTestCase {
     }
 
 
+    /// BP-422's second line, and the only place it can be exercised: `check` now refuses a linked
+    /// worktree before the list is built, so nothing reaching real git can produce this shape. What
+    /// the invariant says is that the FIRST entry is never returned — `git worktree list` names the
+    /// repository's main checkout there, whichever worktree it was run from, and filtering on
+    /// `root` alone left it in the list exactly when `root` was not it.
+    func testTheFirstWorktreeListedIsNeverOfferedForDeletion() {
+        let git = Git()
+        git.present = ["/checkouts/SB", "/checkouts/elsewhere", "/checkouts/cp-worktrees/w1/bp-1"]
+        git.answers["worktree"] = (
+            0,
+            """
+            worktree /checkouts/elsewhere
+            HEAD abc
+
+            worktree /checkouts/SB
+            HEAD def
+
+            worktree /checkouts/cp-worktrees/w1/bp-1
+            HEAD ghi
+            """
+        )
+
+        let verdict = git.removal().check(path: "/checkouts/SB", workerIsBusy: false)
+
+        XCTAssertEqual(verdict, .go(worktrees: ["/checkouts/cp-worktrees/w1/bp-1"]))
+    }
+
     /// A worktree somebody removed with `rm -rf` and never pruned. It is still registered, and
     /// there is nothing on disk to lose — so it must not appear in the list the caller deletes,
     /// or the removal fails on it every poll for ever (BP-418).
