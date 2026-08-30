@@ -59,6 +59,7 @@ export const GROUPS = {
   ],
   people: [
     "day-zero.spec.ts",
+    "bounded-bodies.spec.ts",
     "sessions-and-auth.spec.ts",
     "admin-sets-password.spec.ts",
     "reset-by-email.spec.ts",

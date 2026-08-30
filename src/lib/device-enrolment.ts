@@ -53,16 +53,23 @@ export interface StartedEnrolment {
 // Unauthenticated on purpose: the machine has nothing to authenticate with yet, which is the whole
 // point. Nothing is granted here — a row in "pending" is worth nothing until a signed-in person
 // confirms it, and it reaps itself in fifteen minutes if nobody does.
-// Each pending row costs a bcrypt.hash to create and sits in the collection until it reaps, so
-// the number of them one unapproved caller can hold open has to be bounded somewhere (BP-305)
-export const MAX_PENDING_ENROLMENTS = 20;
-
-export class TooManyPendingEnrolments extends Error {
-  constructor() {
-    super("too many enrolments are already waiting for approval");
-    this.name = "TooManyPendingEnrolments";
-  }
-}
+/**
+ * How many pending rows the collection holds at once. It is a storage bound and nothing more.
+ *
+ * It used to refuse the caller that hit it, and it counted every caller's rows rather than one
+ * caller's — the comment said "one unapproved caller" and the query said everybody (BP-305). So
+ * twenty anonymous posts denied enrolment to every genuine operator until the rows reaped, over
+ * and over. Scoping the count to the caller does not fix it either: `machineName` and `machineHost`
+ * come from the request, and `getClientIp` is null on any instance that has not set
+ * TRUSTED_PROXY_HOPS — which is the default (BP-318).
+ *
+ * So the ceiling drops the oldest pending row instead of refusing the newest. A pending row is
+ * worth nothing until a signed-in person approves it, the rate limit above still bounds how fast
+ * rows can be made, and an operator who asks to enrol always gets a code. What a flood can still
+ * do is age somebody's row out before they finish typing it; at this size and that rate limit
+ * that takes minutes, where refusing took one request.
+ */
+export const MAX_PENDING_ENROLMENTS = 100;
 
 export async function startDeviceEnrolment(
   input: { machineName: string; machineHost: string },
@@ -70,11 +77,16 @@ export async function startDeviceEnrolment(
 ): Promise<StartedEnrolment> {
   await connectDB();
 
-  const pending = await DeviceEnrolment.countDocuments({
-    status: "pending",
-    expiresAt: { $gt: now },
-  });
-  if (pending >= MAX_PENDING_ENROLMENTS) throw new TooManyPendingEnrolments();
+  const live = { status: "pending", expiresAt: { $gt: now } };
+  const pending = await DeviceEnrolment.countDocuments(live);
+  if (pending >= MAX_PENDING_ENROLMENTS) {
+    const surplus = await DeviceEnrolment.find(live)
+      .sort({ createdAt: 1 })
+      .limit(pending - MAX_PENDING_ENROLMENTS + 1)
+      .select("_id")
+      .lean();
+    await DeviceEnrolment.deleteMany({ _id: { $in: surplus.map((row) => row._id) } });
+  }
 
   const deviceCode = `${DEVICE_PREFIX}${crypto.randomBytes(32).toString("hex")}`;
   const expiresAt = new Date(now.getTime() + DEVICE_ENROLMENT_TTL_MS);

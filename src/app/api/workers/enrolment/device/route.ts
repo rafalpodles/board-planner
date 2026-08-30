@@ -6,7 +6,6 @@ import { PROTOCOL_VERSION } from "@/lib/worker-service";
 import { stripControlCharacters } from "@/lib/identifiers";
 import {
   DEVICE_ENROLMENT_TTL_MS,
-  TooManyPendingEnrolments,
   formatUserCode,
   startDeviceEnrolment,
 } from "@/lib/device-enrolment";
@@ -64,15 +63,7 @@ export async function POST(request: Request) {
   }
 
 
-  let started;
-  try {
-    started = await startDeviceEnrolment({ machineName, machineHost });
-  } catch (error) {
-    if (error instanceof TooManyPendingEnrolments) {
-      return NextResponse.json({ error: error.message }, { status: 429 });
-    }
-    throw error;
-  }
+  const started = await startDeviceEnrolment({ machineName, machineHost });
   const base = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ?? "";
 
   return NextResponse.json(

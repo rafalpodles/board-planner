@@ -6,6 +6,11 @@ import { withAuth, resolveProjectId } from "@/lib/middleware";
 import { check } from "@/lib/grants";
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+// The whole multipart envelope, not the file: part headers, the boundary and the projectId field
+// come to a few hundred bytes, so the slack is generous rather than tuned. Its job is to bound
+// what the process allocates, which the file-size check below cannot do — that one runs after
+// formData() has already materialised every part.
+const MAX_UPLOAD_REQUEST_BYTES = MAX_FILE_SIZE + 64 * 1024;
 
 const ALLOWED_MIME_TYPES = new Set([
   "image/jpeg",
@@ -26,6 +31,15 @@ const ALLOWED_MIME_TYPES = new Set([
 
 export const POST = withAuth(async (request, { user }) => {
   await connectDB();
+
+  // Content-Length is absent on a chunked request and can lie on any request, so this bounds the
+  // ordinary case only; the file.size check further down stays as the backstop for the rest. It is
+  // here because that backstop runs twenty-nine lines and several round trips after the body has
+  // been allocated, so the 5 MB limit bounded what reached GridFS rather than what was buffered.
+  const declared = Number(request.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > MAX_UPLOAD_REQUEST_BYTES) {
+    return NextResponse.json({ error: "File too large. Maximum size is 5MB." }, { status: 413 });
+  }
 
   const formData = await request.formData();
   const file = formData.get("file") as File | null;

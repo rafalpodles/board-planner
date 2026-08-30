@@ -7,10 +7,12 @@ const findOneAndUpdate = vi.fn();
 const updateOne = vi.fn();
 const projectLean = vi.fn();
 const countDocuments = vi.fn();
+const deleteMany = vi.fn();
+const sort = vi.fn();
 
 vi.mock("./db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/deviceEnrolment", () => ({
-  DeviceEnrolment: { create, findOne, find, findOneAndUpdate, updateOne, countDocuments },
+  DeviceEnrolment: { create, findOne, find, findOneAndUpdate, updateOne, countDocuments, deleteMany },
 }));
 // The poll now also reads the approved project, so the app knows what to clone
 vi.mock("@/models/project", () => ({
@@ -18,6 +20,7 @@ vi.mock("@/models/project", () => ({
 }));
 
 const {
+  MAX_PENDING_ENROLMENTS,
   startDeviceEnrolment,
   pollDeviceEnrolment,
   denyDeviceEnrolment,
@@ -29,6 +32,14 @@ const bcrypt = (await import("bcryptjs")).default;
 
 function candidates(rows: unknown[]) {
   find.mockReturnValue({ limit: () => Promise.resolve(rows) });
+}
+
+// The eviction query: find(live).sort(...).limit(n).select("_id").lean()
+function oldestPending(rows: unknown[]) {
+  sort.mockReturnValue({
+    limit: () => ({ select: () => ({ lean: () => Promise.resolve(rows) }) }),
+  });
+  find.mockReturnValue({ sort });
 }
 
 beforeEach(() => {
@@ -106,15 +117,38 @@ describe("the cost of a poll", () => {
     expect(create.mock.calls[0][0].deviceCodePrefix).toBe(started.deviceCode.slice(0, 12));
   });
 
-  // The old candidate window was sort({createdAt:-1}).limit(200), so sustained flooding pushed an
-  // approved enrolment out of it and its poll answered "expired" forever
-  it("caps how many enrolments one flood can leave waiting for approval", async () => {
-    countDocuments.mockResolvedValue(20);
+  // BP-322: the ceiling counted everybody's rows and refused the caller who hit it, so twenty
+  // anonymous posts closed enrolment for every genuine operator until they reaped.
+  it("does not refuse an operator because the window is full", async () => {
+    countDocuments.mockResolvedValue(MAX_PENDING_ENROLMENTS);
+    oldestPending([{ _id: "oldest" }]);
 
-    await expect(
-      startDeviceEnrolment({ machineName: "MacBook", machineHost: "" })
-    ).rejects.toThrow(/waiting for approval/);
-    expect(create).not.toHaveBeenCalled();
+    const started = await startDeviceEnrolment({ machineName: "MacBook", machineHost: "" });
+
+    expect(started.userCode).toBeTruthy();
+    expect(create).toHaveBeenCalled();
+  });
+
+  it("makes room by dropping the oldest pending row", async () => {
+    countDocuments.mockResolvedValue(MAX_PENDING_ENROLMENTS + 2);
+    oldestPending([{ _id: "a" }, { _id: "b" }, { _id: "c" }]);
+
+    await startDeviceEnrolment({ machineName: "MacBook", machineHost: "" });
+
+    // Ascending, so it is the oldest that goes. Descending would evict the row the operator is
+    // holding at that moment and leave the flood's own rows in place.
+    expect(sort).toHaveBeenCalledWith({ createdAt: 1 });
+    expect(find.mock.calls[0][0]).toMatchObject({ status: "pending" });
+    expect(deleteMany).toHaveBeenCalledWith({ _id: { $in: ["a", "b", "c"] } });
+  });
+
+  it("touches nothing while the window has room — the control", async () => {
+    countDocuments.mockResolvedValue(3);
+
+    await startDeviceEnrolment({ machineName: "MacBook", machineHost: "" });
+
+    expect(deleteMany).not.toHaveBeenCalled();
+    expect(create).toHaveBeenCalled();
   });
 });
 
