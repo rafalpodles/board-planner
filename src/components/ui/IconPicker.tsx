@@ -59,7 +59,13 @@ export function IconPicker({ value, onChange, label, dirty }: IconPickerProps) {
         <div className="text-xs text-text-muted">
           <span className="flex items-center gap-1.5">
             Shown in the sidebar, search and the board header
-            {dirty && <span className="h-1.5 w-1.5 rounded-full bg-warning" title="Unsaved" />}
+            {dirty && (
+              <span
+                aria-hidden="true"
+                className="h-1.5 w-1.5 rounded-full bg-warning"
+                title="Unsaved"
+              />
+            )}
           </span>
         </div>
       </div>

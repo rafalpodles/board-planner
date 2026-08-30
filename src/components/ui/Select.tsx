@@ -1,6 +1,6 @@
 "use client";
 
-import { SelectHTMLAttributes, forwardRef } from "react";
+import { SelectHTMLAttributes, forwardRef, useId } from "react";
 
 interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
   label?: string;
@@ -11,17 +11,29 @@ interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
 }
 
 export const Select = forwardRef<HTMLSelectElement, SelectProps>(
-  ({ label, error, options, placeholder, dirty, className = "", ...props }, ref) => {
+  ({ label, error, options, placeholder, dirty, className = "", id, ...props }, ref) => {
+    const generated = useId();
+    const selectId = id ?? generated;
     return (
       <div className="w-full">
         {label && (
-          <label className="flex items-center gap-2 text-sm font-medium text-text-muted mb-1">
+          <label
+            htmlFor={selectId}
+            className="flex items-center gap-2 text-sm font-medium text-text-muted mb-1"
+          >
             {label}
-            {dirty && <span className="h-1.5 w-1.5 rounded-full bg-warning" title="Unsaved" />}
+            {dirty && (
+              <span
+                aria-hidden="true"
+                className="h-1.5 w-1.5 rounded-full bg-warning"
+                title="Unsaved"
+              />
+            )}
           </label>
         )}
         <select
           ref={ref}
+          id={selectId}
           className={`focus-ring w-full rounded-lg border bg-bg-input px-3 py-2 text-text min-h-[44px]
             disabled:opacity-50 disabled:pointer-events-none
             ${error ? "border-danger" : dirty ? "border-warning/60" : "border-border"}
