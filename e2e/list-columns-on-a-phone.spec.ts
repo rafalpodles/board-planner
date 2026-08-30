@@ -197,10 +197,9 @@ test.describe("on a desktop", () => {
     await expect(header(page, PROJECT_FIELD)).toBeVisible();
 
     // 6ae1505 stopped the list scrolling sideways by removing a floor exactly like the phone's, so
-    // the rule itself is asserted rather than one of its consequences: at 1280 the title gets far
-    // more than 176px anyway, and a fit assertion alone passes whether the floor reaches desktop
-    // or not. Measured with the floor left on at every width: it pins the title at 176px and
-    // overflows by 68px at 1024, and by 136px at 1080.
+    // the rule itself is asserted rather than one of its consequences: at this width the title
+    // gets far more than 176px on its own, so a floor left on here would change nothing and a fit
+    // assertion alone would pass whether it reached desktop or not.
     expect(await titleCell(page).evaluate((td) => getComputedStyle(td).minWidth)).toBe("0px");
 
     const wrapper = await scroller(page);
