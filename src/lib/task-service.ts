@@ -1013,6 +1013,11 @@ export async function updateTask(
     ? { assignee: null, assignedBy: null, ...updates }
     : updates;
 
+  // Same rule as `onlyOrder`, for the other way a write can not be an edit: an empty body leaves
+  // `updatedAt` as the only field that moved, which is the one a caller reads as proof something
+  // was written (BP-497). `leavesColumn` is checked because that arm writes through $unset alone.
+  const writesNothing = Object.keys(setFields).length === 0 && !leavesColumn;
+
   // Who the task belongs to once this update lands. Read off `setFields` rather than off
   // `updates`, because a status change that leaves the active column while a run holds the task
   // blanks the assignee in that same write — so a forced release leaves the task belonging to
@@ -1054,7 +1059,7 @@ export async function updateTask(
     { _id: taskId, project: projectId },
     // One `$set`, so nothing decided after `setFields` was built can reach one arm and not the other
     { $set: setFields, ...(leavesColumn ? { $unset: UNSET_RUN } : {}) },
-    { returnDocument: "after", runValidators: true, timestamps: !onlyOrder }
+    { returnDocument: "after", runValidators: true, timestamps: !onlyOrder && !writesNothing }
   ).populate(taskPopulateFields);
 
   if (!task) {

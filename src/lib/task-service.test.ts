@@ -1505,6 +1505,57 @@ describe("releaseTask only applies to a task the run still holds", () => {
 
 // Before CP-250 only a fixed list of columns reached the history, so every project-defined field
 // — which since CP-213 is most of what people edit — changed in silence.
+/**
+ * BP-497 review. `updatedAt` is the field a caller reads as proof a write landed, which is why an
+ * update that is not an edit must not move it. `onlyOrder` had covered the reorder half of that
+ * since the board started dragging cards, untested; the empty-body half was still open.
+ */
+describe("updateTask and the writes that are not edits", () => {
+  function setup() {
+    vi.clearAllMocks();
+    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    findOne.mockReturnValue({
+      lean: () => Promise.resolve({ _id: "t1", taskNumber: 7, status: "doing", title: "x" }),
+      populate: () => ({
+        lean: () => Promise.resolve({ _id: "t1", taskNumber: 7, status: "doing", title: "x" }),
+      }),
+    });
+    findOneAndUpdate.mockReturnValue({
+      populate: () => Promise.resolve({ _id: "t1", taskNumber: 7, status: "doing" }),
+    });
+  }
+
+  function timestampsOf() {
+    return findOneAndUpdate.mock.calls[0][2].timestamps;
+  }
+
+  // The control: without it, a guard that switched timestamps off for everything would read
+  // exactly like the two assertions below passing
+  it("stamps an ordinary edit", async () => {
+    setup();
+
+    await updateTask("p1", "t1", { title: "renamed" }, "actor");
+
+    expect(timestampsOf()).toBe(true);
+  });
+
+  it("does not stamp a card dragged inside its column", async () => {
+    setup();
+
+    await updateTask("p1", "t1", { order: 3 }, "actor");
+
+    expect(timestampsOf()).toBe(false);
+  });
+
+  it("does not stamp a body that sets nothing at all", async () => {
+    setup();
+
+    await updateTask("p1", "t1", {}, "actor");
+
+    expect(timestampsOf()).toBe(false);
+  });
+});
+
 describe("updateTask writing project fields to the history", () => {
   const difficulty = {
     _id: "f-diff",
