@@ -58,6 +58,7 @@ export const GROUPS = {
     "mcp-oauth.spec.ts",
   ],
   people: [
+    "day-zero.spec.ts",
     "sessions-and-auth.spec.ts",
     "admin-sets-password.spec.ts",
     "reset-by-email.spec.ts",
