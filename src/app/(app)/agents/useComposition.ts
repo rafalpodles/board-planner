@@ -111,6 +111,16 @@ export function useComposition(source: AgentComposition | undefined, lookup: Loo
     });
   }
 
+  /**
+   * Adding without dragging. The drag is the only way a block reaches a bucket, and it is the one
+   * gesture a keyboard and a touch screen are worst at — dnd-kit announced the pick-up and then
+   * refused to move (BP-455). Appends, because a bucket is an ordered sequence and the end is the
+   * only position a control with no pointer can mean.
+   */
+  function addTo(bucket: AgentBucket, key: string) {
+    setEntries((prev) => ({ ...prev, [bucket]: [...prev[bucket], { uid: nextUid(), key }] }));
+  }
+
   function remove(uid: string) {
     setEntries((prev) => {
       const bucket = AGENT_BUCKETS.find((b) => prev[b].some((e) => e.uid === uid));
@@ -119,5 +129,13 @@ export function useComposition(source: AgentComposition | undefined, lookup: Loo
     });
   }
 
-  return { entries, dragging, composition: toComposition(entries), onDragStart, onDragEnd, remove };
+  return {
+    entries,
+    dragging,
+    composition: toComposition(entries),
+    onDragStart,
+    onDragEnd,
+    addTo,
+    remove,
+  };
 }

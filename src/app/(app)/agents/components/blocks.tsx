@@ -4,6 +4,8 @@ import { useDraggable, useDroppable } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { AgentBucket, ApiAgentBlock } from "@/types";
+import { Popover } from "@/components/ui/Popover";
+import { BUCKETS } from "../catalog";
 
 export const NEW_PREFIX = "new:";
 export const BUCKET_PREFIX = "bucket:";
@@ -40,7 +42,13 @@ export function BlockBody({ block }: { block: ApiAgentBlock }) {
   );
 }
 
-export function PaletteItem({ block }: { block: ApiAgentBlock }) {
+export function PaletteItem({
+  block,
+  onAdd,
+}: {
+  block: ApiAgentBlock;
+  onAdd: (bucket: AgentBucket, key: string) => void;
+}) {
   const { setNodeRef, attributes, listeners, isDragging } = useDraggable({
     id: `${NEW_PREFIX}${block.key}`,
   });
@@ -48,25 +56,69 @@ export function PaletteItem({ block }: { block: ApiAgentBlock }) {
   return (
     <li
       ref={setNodeRef}
-      {...attributes}
-      {...listeners}
-      className={`cursor-grab rounded-lg border border-border bg-bg-card px-3 py-2 transition-colors hover:border-border-strong ${
+      className={`flex items-center gap-2 rounded-lg border border-border bg-bg-card px-3 py-2 transition-colors hover:border-border-strong ${
         isDragging ? "opacity-40" : ""
       }`}
     >
-      <BlockBody block={block} />
+      {/* The drag lives on the body rather than the row, so the Add control is not a button
+          nested inside dnd-kit's role="button" */}
+      <span {...attributes} {...listeners} className="min-w-0 flex-1 cursor-grab">
+        <BlockBody block={block} />
+      </span>
+      <Popover
+        align="right"
+        width="w-44"
+        label={`Where to add ${block.name}`}
+        trigger={({ toggle }) => (
+          <button
+            type="button"
+            onClick={toggle}
+            aria-label={`Add ${block.name} to a phase`}
+            className="focus-ring shrink-0 rounded-md border border-border px-2 py-1 text-[12px] leading-none text-text-muted hover:border-border-strong hover:text-text"
+          >
+            Add
+          </button>
+        )}
+      >
+        {({ close }) => (
+          <ul className="flex flex-col">
+            {BUCKETS.map((bucket) => (
+              <li key={bucket.id}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onAdd(bucket.id, block.key);
+                    close();
+                  }}
+                  className="focus-ring w-full rounded-md px-2 py-1.5 text-left text-[13px] hover:bg-bg-hover"
+                >
+                  {bucket.label}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Popover>
     </li>
   );
 }
 
-export function Palette({ steps, gates }: { steps: ApiAgentBlock[]; gates: ApiAgentBlock[] }) {
+export function Palette({
+  steps,
+  gates,
+  onAdd,
+}: {
+  steps: ApiAgentBlock[];
+  gates: ApiAgentBlock[];
+  onAdd: (bucket: AgentBucket, key: string) => void;
+}) {
   return (
     <aside className="lg:sticky lg:top-4 lg:self-start">
       <h2 className="text-[10.5px] font-bold uppercase tracking-wider text-text-muted">Steps</h2>
       <p className="mb-2 mt-1 text-[12px] text-text-muted">Work. Each one is a fresh session.</p>
       <ul className="mb-5 flex flex-col gap-2">
         {steps.map((block) => (
-          <PaletteItem key={block.key} block={block} />
+          <PaletteItem key={block.key} block={block} onAdd={onAdd} />
         ))}
       </ul>
 
@@ -74,7 +126,7 @@ export function Palette({ steps, gates }: { steps: ApiAgentBlock[]; gates: ApiAg
       <p className="mb-2 mt-1 text-[12px] text-text-muted">Checks. They only say yes or no.</p>
       <ul className="flex flex-col gap-2">
         {gates.map((block) => (
-          <PaletteItem key={block.key} block={block} />
+          <PaletteItem key={block.key} block={block} onAdd={onAdd} />
         ))}
       </ul>
     </aside>
@@ -159,6 +211,7 @@ export function Bucket({
 
       <ul
         ref={setNodeRef}
+        data-testid={`bucket-${id}`}
         className={`flex min-h-[72px] flex-col gap-2 rounded-lg border border-dashed p-2 transition-colors ${
           isOver ? "border-primary bg-primary/5" : "border-border"
         }`}
