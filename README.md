@@ -16,7 +16,8 @@ admin; every account after that is created from Settings → Users. **Create it 
 reach the address.** An instance with no users offers "First time? Create Account" to whoever asks,
 and the first account made is the administrator — there is no invitation and no setup token. Once it
 exists the offer disappears and `POST /api/users` refuses a second bootstrap, so the window is open
-exactly as long as the instance is empty and reachable. On a deployment that goes live the moment it
+as long as the instance is empty and reachable. Two requests arriving inside that window can both be
+answered before either account is written, and both are then administrators. On a deployment that goes live the moment it
 builds, that window starts before you have opened the page.
 
 Stop it with `docker compose down`. The database lives in the `mongo-data` volume and survives that;

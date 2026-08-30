@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { ADMIN_USERNAME, seed, wipe } from "./seed";
 
 /**
@@ -11,6 +11,18 @@ import { ADMIN_USERNAME, seed, wipe } from "./seed";
  */
 
 const TOGGLE = "First time? Create Account";
+
+/**
+ * `/login` is statically prerendered and the toggle starts hidden, so `toHaveCount(0)` is satisfied
+ * before the page has asked anything — the first version of the two absence assertions below passed
+ * with the endpoint mutated to answer `unclaimed: true` unconditionally, which is the whole server
+ * half of the fix removed. Waiting for the answer is what makes the absence mean something.
+ */
+async function afterTheInstanceAnswers(page: Page, act: () => Promise<unknown>) {
+  const answered = page.waitForResponse((res) => res.url().includes("/api/auth/instance"));
+  await act();
+  await answered;
+}
 
 test.describe("an instance nobody has claimed", () => {
   test.beforeEach(wipe);
@@ -37,11 +49,16 @@ test.describe("an instance nobody has claimed", () => {
     );
     await page.getByRole("button", { name: "Create Account" }).click();
     expect((await created).status()).toBe(201);
-
-    // The role is the point of the bootstrap, and it is not visible on the login page
-    const admin = await (await request.get("/api/auth/instance")).json();
-    expect(admin).toEqual({ unclaimed: false });
     await expect(page).not.toHaveURL(/\/login/);
+
+    // The role is the point of the bootstrap and the login page never shows it. Read through the
+    // browser's own session rather than off the 201 body: the page signs in and navigates, and a
+    // response body read across that navigation hangs. Without this assertion the test's title was
+    // the only thing claiming the role, and minting "member" instead left the whole suite green.
+    const me = await page.request.get("/api/auth/me");
+    expect(await me.json()).toMatchObject({ username: "firstadmin", role: "admin" });
+
+    expect(await (await request.get("/api/auth/instance")).json()).toEqual({ unclaimed: false });
   });
 
   test("stops offering it once the instance has been claimed", async ({ page, request }) => {
@@ -58,7 +75,7 @@ test.describe("an instance nobody has claimed", () => {
     });
     expect(claimed.status()).toBe(201);
 
-    await page.reload();
+    await afterTheInstanceAnswers(page, () => page.reload());
     await expect(page.getByRole("button", { name: TOGGLE })).toHaveCount(0);
   });
 });
@@ -70,7 +87,7 @@ test.describe("an instance that already has users", () => {
    * The control. Without it, a page that rendered nothing at all would satisfy the arm above.
    */
   test("offers no account creation, and signing in still works", async ({ page }) => {
-    await page.goto("/login");
+    await afterTheInstanceAnswers(page, () => page.goto("/login"));
 
     await expect(page.getByRole("button", { name: "Sign In" })).toBeVisible();
     await expect(page.getByRole("button", { name: TOGGLE })).toHaveCount(0);
@@ -83,10 +100,12 @@ test.describe("an instance that already has users", () => {
   });
 
   /**
-   * The endpoint is the whole control: hiding the toggle is about what is offered. It carries the
-   * provenance a direct request has, so the refusal is the bootstrap rule rather than the
-   * provenance check — the first version of this passed on provenance alone and would have gone
-   * on passing with the bootstrap rule deleted.
+   * The endpoint is the whole control: hiding the toggle is about what is offered.
+   *
+   * The 403 here comes from the "must be an authenticated admin" arm, reached *because* the user
+   * count is non-zero — `provenanceRefusal` is only called on the bootstrap branch. Asserted by
+   * mutation: forcing `isBootstrap` true turns this red with a 201. The `sec-fetch-site` header is
+   * inert on this path and kept only so the request is the same shape as the one above.
    */
   test("refuses a bootstrap posted straight at the endpoint", async ({ request }) => {
     const res = await request.post("/api/users", {

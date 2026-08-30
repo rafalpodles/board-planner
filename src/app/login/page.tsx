@@ -32,7 +32,13 @@ export default function LoginPage() {
     fetch("/api/auth/instance")
       .then((res) => (res.ok ? res.json() : { unclaimed: false }))
       .then((data) => live && setUnclaimed(data.unclaimed === true))
-      .catch(() => live && setUnclaimed(false));
+      .catch((err) => {
+        // Says why rather than failing silently: on a fresh instance whose database is flapping,
+        // the operator otherwise gets a sign-in page with no way to create the first account and
+        // no explanation. A reload retries it.
+        console.warn("could not ask whether this instance has been claimed", err);
+        if (live) setUnclaimed(false);
+      });
     return () => {
       live = false;
     };

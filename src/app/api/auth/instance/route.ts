@@ -17,10 +17,13 @@ import { User } from "@/models/user";
  * believes. This exists so the page can stop offering the doomed path, which is a question about
  * what to render and not about what is allowed.
  *
- * It tells an anonymous caller that the instance is unclaimed. That is the same fact the old page
- * published by offering the path, and the same one a single POST already established, so it adds
- * no reach — but it is a fact worth stating plainly in the install docs rather than leaving for
- * somebody to discover.
+ * It does tell an anonymous caller that the instance is unclaimed, and that is a small addition
+ * rather than nothing: `/login` is statically prerendered and used to offer the path either way, so
+ * the cheapest previous probe was a **write**. A GET answers it now, unlogged and unthrottled,
+ * where `/api/auth/login` has `withLockout` and `/api/auth/forgot` throttles on its source key.
+ * Left that way deliberately — `POST /api/users` remains the whole of the control, and the window
+ * this discloses is named in the README rather than hidden — but it is a real difference and not
+ * one to describe as none.
  */
 export async function GET() {
   try {
