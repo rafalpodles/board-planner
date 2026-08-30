@@ -531,10 +531,10 @@ export function ListView({
                     className="px-2 py-2 font-medium w-full min-w-44 lg:min-w-0 max-w-0 overflow-hidden cursor-pointer"
                     title={task.title}
                   >
-                    {/* The floor is dropped from lg up, where every column fits and a floor
-                        would only force the sideways scrolling 6ae1505 removed. Below it the
-                        row is meant to be wider than the phone, and without a floor the title
-                        would collapse to nothing rather than the row overflowing */}
+                    {/* Dropped from lg up, where a floor only brings back the sideways scrolling
+                        6ae1505 removed — at 1024 with every column on it pins the title at 176px
+                        and pushes the row 68px past the scrollport. Below lg the row overflows
+                        either way; the floor is what stops the title collapsing to nothing */}
                     <div className="truncate w-full">{task.title}</div>
                   </td>
                   {show("status") && (

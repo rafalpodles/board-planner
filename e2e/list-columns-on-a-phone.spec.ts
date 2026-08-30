@@ -37,6 +37,13 @@ async function scroller(page: Page) {
   });
 }
 
+/** Turns on every column the picker offers, leaving it open */
+async function tickEveryColumn(page: Page) {
+  await page.getByRole("button", { name: "Choose columns" }).click();
+  const boxes = page.getByRole("group", { name: "Columns" }).getByRole("checkbox");
+  for (let i = 0; i < (await boxes.count()); i++) await boxes.nth(i).check();
+}
+
 const TITLE_FLOOR = 176; // min-w-44, the floor that stops the title collapsing to nothing
 
 test.describe("on a phone", () => {
@@ -93,19 +100,30 @@ test.describe("on a phone", () => {
 });
 
 test.describe("on a desktop", () => {
-  test.use({ viewport: { width: 1280, height: 800 } });
+  // 1024 rather than a roomier width on purpose: it is the narrowest viewport the floor is
+  // dropped at, so it is the only one where dropping it can be seen. Measured with the floor left
+  // in place at every width, every column ticked: 1024 gives a 798px row in a 730px scrollport
+  // and a title pinned at its 176px floor, while 1152 and 1280 fit with 236px and 364px of title
+  // to spare. A control written at 1280 passes whether the floor reaches desktop or not.
+  test.use({ viewport: { width: 1024, height: 800 } });
 
-  test("the same columns render, and the default list still fits in one screen", async ({
-    page,
-  }) => {
+  test("every column at once still fits in one screen", async ({ page }) => {
     await openList(page);
     await expect(header(page, "Status")).toBeVisible();
     await expect(header(page, "Sprint")).toBeVisible();
 
-    // 6ae1505 removed the sideways scrolling on purpose. The phone's floor is dropped from lg up
-    // precisely so that decision survives, and this is what would catch putting it back.
+    expect((await scroller(page)).scrollWidth).toBe((await scroller(page)).clientWidth);
+
+    // 6ae1505 stopped the list scrolling sideways, and what it was fixing was every column
+    // competing at once — not the default six, which have slack to spare. The phone's title floor
+    // is dropped from lg up so that decision survives, and only this case can catch putting it
+    // back: with six columns a 176px floor is under what the title gets anyway.
+    await tickEveryColumn(page);
+    await expect(header(page, "Updated")).toBeVisible();
+
     const wrapper = await scroller(page);
     expect(wrapper.scrollWidth).toBe(wrapper.clientWidth);
   });
 });
+
 
