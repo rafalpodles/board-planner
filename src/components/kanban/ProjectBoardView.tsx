@@ -63,6 +63,9 @@ export function ProjectBoardView({
     confirmContextDelete,
     setConfirmContextDelete,
     heldMove,
+    heldDelete,
+    setHeldDelete,
+    forceHeldDelete,
     setHeldMove,
     forceHeldMove,
     reload,
@@ -386,6 +389,25 @@ export function ProjectBoardView({
         title="Delete Task"
         message="Are you sure you want to delete this task? This action cannot be undone."
         confirmLabel="Delete"
+      />
+
+      {/* The delete was refused for the same reason, and asks separately because the cost is not
+          the same one: a forced move takes the task off the worker, a forced delete takes the
+          task. */}
+      <ConfirmDialog
+        open={!!heldDelete}
+        onClose={() => {
+          setHeldDelete(null);
+          reload();
+        }}
+        onConfirm={forceHeldDelete}
+        title="This task is being executed"
+        message={
+          heldDelete
+            ? `${heldDelete.taskKey} is being executed by ${heldDelete.conflict.workerName || heldDelete.conflict.workerId || "a worker"} (phase ${heldDelete.conflict.phase}). Deleting it takes the task off that worker, and the task and its comments are gone for good.`
+            : ""
+        }
+        confirmLabel="Delete anyway"
       />
 
       {/* The move was refused because a worker is running the task. Taking it costs that run,
