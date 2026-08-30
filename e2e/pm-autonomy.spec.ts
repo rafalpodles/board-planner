@@ -61,15 +61,8 @@ const scheduleSwitch = (page: Page) =>
 const escalationSwitch = (page: Page) =>
   page.getByRole("switch", { name: 'Review tasks that land in "Needs human review"' });
 
-/**
- * The interval picker, reached by structure rather than by its label.
- *
- * `Select` renders its `<label>` with no `htmlFor` and does not wrap the control, so the select
- * has no accessible name and `getByLabel("How often")` finds nothing — BP-450. Replace this with
- * `getByLabel` the day that lands.
- */
-const reviewInterval = (page: Page) =>
-  page.getByText("How often", { exact: true }).locator("xpath=following-sibling::select");
+/** The interval picker, reached the way a person reaches it */
+const reviewInterval = (page: Page) => page.getByLabel("How often");
 
 /** The input is `sr-only` under a label that swallows the pointer, so the click goes to the label
  *  — the same way `field-history.spec.ts` drives one. */

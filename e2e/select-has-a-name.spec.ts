@@ -41,13 +41,17 @@ async function pmSettings(page: Page) {
   await page.goto(`/projects/${PROJECT_KEY}/settings?section=pm`);
   await expect(page.getByRole("heading", { name: "When it acts on its own" })).toBeVisible();
   // "How often" renders only while the schedule is on, and it is the field the ticket was found on
-  await page.getByLabel("Run a board review on a schedule").locator("xpath=ancestor::label[1]").click();
+  await page
+    .getByRole("switch", { name: "Review the board on a schedule" })
+    .locator("xpath=ancestor::label[1]")
+    .click();
   await expect(page.getByLabel("Timezone")).toBeVisible();
 }
 
-async function taskFieldSettings(page: Page) {
-  await page.goto(`/projects/${PROJECT_KEY}/settings?section=task-fields`);
-  await expect(page.getByRole("heading", { name: "Task fields" })).toBeVisible();
+async function sprintForm(page: Page) {
+  await page.goto(`/projects/${PROJECT_KEY}/sprints`);
+  await page.getByRole("button", { name: "New Sprint" }).click();
+  await expect(page.getByRole("heading", { name: "New Sprint" })).toBeVisible();
 }
 
 async function newTaskForm(page: Page) {
@@ -66,7 +70,7 @@ async function agentComposer(page: Page) {
 
 const SURFACES: [string, (page: Page) => Promise<void>][] = [
   ["the PM autonomy form", pmSettings],
-  ["the task-field settings", taskFieldSettings],
+  ["the sprint form", sprintForm],
   ["the new-task form", newTaskForm],
   ["the agent composer", agentComposer],
 ];
@@ -112,5 +116,11 @@ test("getByLabel reaches the select, and selecting through it works", async ({ p
   const howOften = page.getByLabel("How often");
   await howOften.selectOption("6");
   await expect(howOften).toHaveValue("6");
-  await expect(page.getByText(/4 reviews a day/)).toBeVisible();
+
+  /**
+   * The preview is derived from the value, so this is where a select that reads but does not
+   * drive would show. Every six hours from 09:00 gives 09, 15 and 21; the default of once a day
+   * gives 09 alone, so 15:00 appears only because the select actually moved.
+   */
+  await expect(page.getByText(/3 reviews a day, at 09:00, 15:00, 21:00/)).toBeVisible();
 });
