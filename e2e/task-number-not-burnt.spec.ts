@@ -132,7 +132,7 @@ const UNCASTABLE: { body: Record<string, unknown>; says: RegExp }[] = [
   { body: { description: ["a"] }, says: /description/i },
   // BP-499: the row's other keys rode uncast into the write, past the `$inc`
   { body: { checklist: [{ text: "a", done: {} }] }, says: /done/i },
-  { body: { checklist: [{ text: "a", _id: "nope" }] }, says: /id/i },
+  { body: { checklist: [{ text: "a", _id: "nope" }] }, says: /criterion.*id/i },
 ];
 
 test("order and description cannot burn a number either", async ({ request }) => {
