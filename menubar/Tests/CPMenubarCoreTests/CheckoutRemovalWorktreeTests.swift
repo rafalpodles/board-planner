@@ -205,8 +205,12 @@ final class CheckoutRemovalWorktreeTests: XCTestCase {
         let (checkout, worktree) = repoWithWorktree()
 
         switch removal().check(path: worktree, workerIsBusy: false) {
-        case .refused:
-            break
+        case .refused(let reason):
+            // Live in this arm too, so the test is never merely silent: the refusal is about the
+            // worktree the operator named, not about the repository behind it
+            XCTAssertFalse(
+                reason.contains(resolved(checkout)),
+                "the refusal names the repository rather than the path it was asked about: \(reason)")
         case .go(let worktrees):
             XCTAssertFalse(
                 worktrees.map(resolved).contains(resolved(checkout)),
