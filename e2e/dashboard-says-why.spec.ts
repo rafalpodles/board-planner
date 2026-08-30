@@ -134,7 +134,11 @@ test("only the project request failing still draws the charts", async ({ page })
   // `Promise.all` rejected on this and rendered nothing at all
   await expect(page.getByRole("heading", { name: "Status Breakdown" })).toBeVisible();
   await expect(errorBanner(page)).toHaveCount(0);
-  await expect(page.getByTestId("dashboard-settings-warning")).toBeVisible();
+  // …and says so, including that a count is missing and not merely mislabelled — a reader looking
+  // at a dash where a number belongs has to be told why
+  const warning = page.getByTestId("dashboard-settings-warning");
+  await expect(warning).toBeVisible();
+  await expect(warning).toContainText("In Progress cannot be counted");
 
   /**
    * `statusBreakdown` is keyed by this board's own ids, and the defaults do not contain `col_wip`.
