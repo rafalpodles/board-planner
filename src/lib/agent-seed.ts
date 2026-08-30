@@ -173,24 +173,18 @@ export async function seedAgents() {
     { upsert: true }
   );
 
-  await adoptTheMergingAgent();
 }
 
 /**
- * A project that merged its own work did so through `worker.policy.autoMerge`, and that flag is
- * gone: merging is a Merge step now. Without this, every such project silently falls back to the
- * Default agent, which stops at the pull request — the worker would keep running and quietly stop
- * doing the last thing the project asked of it.
+ * `adoptTheMergingAgent` stood here: it pointed every project carrying the retired
+ * `worker.policy.autoMerge` flag at the Merging agent, wherever `worker.agent` was null.
  *
- * Only where no agent has been chosen, so it never overrides a decision somebody has since made,
- * and it matches nothing on the next boot.
+ * Removed with BP-458, which makes a null default something a project admin can deliberately
+ * choose — and the schema defaults that field to null, so a cleared project was indistinguishable
+ * from one that never had a default. Left in place it re-adopted the agent on the next boot, and
+ * its own comment claimed it "matches nothing on the next boot", which had stopped being true.
+ *
+ * Safe to drop rather than narrow: since BP-358 `worker.agent` is not a claim-time fallback at
+ * all — `snapshotFor` resolves the task's own agent and nothing else — so this only ever moved a
+ * suggestion in the picker, never what a worker runs. Projects it already reached keep it.
  */
-async function adoptTheMergingAgent() {
-  const merging = await Agent.findOne({ scope: "global", name: MERGING_AGENT_NAME }, "_id").lean();
-  if (!merging) return;
-
-  await Project.updateMany(
-    { "worker.policy.autoMerge": true, "worker.agent": { $in: [null, undefined] } },
-    { $set: { "worker.agent": merging._id } }
-  );
-}
