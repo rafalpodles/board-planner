@@ -249,6 +249,32 @@ test.describe("the autonomy form", () => {
     expect((await storedPm()).dailyTurnCap).toBe(40);
   });
 
+  /**
+   * BP-453. The cap counted from the *host's* midnight, so the hint could not have said which
+   * day it meant. Now it names the board's own zone, and says a turn the model failed still
+   * counts — the decision that ticket asked to be recorded and made visible.
+   */
+  test("the turn-cap hint names the board's own day, and follows it when it changes", async ({
+    page,
+  }) => {
+    await signIn(page);
+    await openPmSettings(page);
+
+    const hint = page.getByText(/Resets at midnight in/);
+    await expect(hint).toContainText("Europe/Warsaw");
+    await expect(hint).toContainText("a turn the model failed");
+
+    // The control, and the reason this is not an assertion about a hardcoded string: change the
+    // board's zone through the form and the sentence has to follow it.
+    await flip(scheduleSwitch(page));
+    await page.getByLabel("Timezone").fill("Asia/Tokyo");
+    await saveSettings(page);
+    await page.reload();
+
+    await expect(page.getByText(/Resets at midnight in/)).toContainText("Asia/Tokyo");
+    await expect(page.getByText(/Resets at midnight in/)).not.toContainText("Europe/Warsaw");
+  });
+
   test("saves the escalation switch on its own", async ({ page }) => {
     await signIn(page);
     await openPmSettings(page);
