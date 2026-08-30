@@ -493,6 +493,9 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
                 <div className="flex flex-wrap items-center gap-2">
                   {isAdmin && (
                     <select
+                      // Per row: several servers can be listed, and one name for all of them is
+                      // ambiguous to a reader and a strict-mode collision to a test
+                      aria-label={`Authentication for ${server.name || `Server ${i + 1}`}`}
                       value={server.authType}
                       onChange={(e) =>
                         updateServer(i, { authType: e.target.value as "none" | "bearer" | "oauth" })
