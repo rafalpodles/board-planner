@@ -343,7 +343,11 @@ export function ListView({
       strategy={verticalListSortingStrategy}
     >
     <div className="my-4 border border-border rounded-lg overflow-hidden">
-      <div className="overflow-x-auto">
+      {/* A live horizontal scroller for the first time: until the breakpoint hiding went, a
+          display:none cell took no width and there was nothing past the edge. The two guards the
+          board's scroller carries come with it — without overscroll-x-contain, panning to the end
+          of a row chains into the browser's back gesture */}
+      <div className="overflow-x-auto overscroll-x-contain" style={{ WebkitOverflowScrolling: "touch" }}>
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-bg-input text-text-muted text-xs border-b border-border">
@@ -355,49 +359,43 @@ export function ListView({
                 <SortHeader
                   label="Status"
                   column="status"
-                  className="hidden sm:table-cell min-w-28"
+                  className="min-w-28"
                 />
               )}
               {show("assignee") && (
                 <SortHeader
                   label="Assignee"
                   column="assignee"
-                  className="hidden md:table-cell"
                 />
               )}
               {show("priority") && (
                 <SortHeader
                   label="Priority"
                   column="priority"
-                  className="hidden md:table-cell"
                 />
               )}
               {show("sprint") && (
                 <SortHeader
                   label="Sprint"
                   column="sprint"
-                  className="hidden lg:table-cell"
                 />
               )}
               {show("category") && (
                 <SortHeader
                   label="Category"
                   column="category"
-                  className="hidden lg:table-cell"
                 />
               )}
               {show("dueDate") && (
                 <SortHeader
                   label="Due"
                   column="dueDate"
-                  className="hidden md:table-cell"
                 />
               )}
               {show("updatedAt") && (
                 <SortHeader
                   label="Updated"
                   column="updatedAt"
-                  className="hidden sm:table-cell"
                 />
               )}
               {fieldColumns.map((column) => (
@@ -405,7 +403,6 @@ export function ListView({
                   key={column.id}
                   label={column.label}
                   column={column.id}
-                  className="hidden lg:table-cell"
                 />
               ))}
             </tr>
@@ -535,15 +532,19 @@ export function ListView({
                     // then paint its overflow across the next cell
                     // The pointer lives on the title alone: the row opens the task,
                     // but a hand over the selects and the drag grip reads as wrong
-                    className="px-2 py-2 font-medium w-full max-w-0 overflow-hidden cursor-pointer"
+                    className="px-2 py-2 font-medium w-full min-w-44 lg:min-w-0 max-w-0 overflow-hidden cursor-pointer"
                     title={task.title}
                   >
-                    {/* No min-width: it would be a floor the table cannot go under,
-                        which is what forced the whole list to scroll sideways */}
+                    {/* Dropped from lg up, where 6ae1505 chose a squeezed title over a row that
+                        scrolls sideways. Below it the choice goes the other way, because the
+                        squeeze is worse there: measured with the six default columns, 768 gives a
+                        53px title without the floor and a 176px one with it, at the cost of a
+                        597px row in a 474px scrollport. From about 900 the floor stops binding —
+                        the title is over 176px on its own — so this only decides small screens */}
                     <div className="truncate w-full">{task.title}</div>
                   </td>
                   {show("status") && (
-                    <td className="px-2 py-2 hidden sm:table-cell">
+                    <td className="px-2 py-2">
                       {onStatusChange ? (
                         <Combobox
                           value={task.status}
@@ -585,7 +586,7 @@ export function ListView({
                   )}
                   {show("assignee") && (
                     <td
-                      className="px-2 py-2 hidden md:table-cell text-text-muted"
+                      className="px-2 py-2 text-text-muted"
                       title={assigneeName}
                     >
                       {onAssigneeChange && assignableUsers.length > 0 ? (
@@ -603,7 +604,7 @@ export function ListView({
                     </td>
                   )}
                   {show("priority") && (
-                    <td className="px-2 py-2 hidden md:table-cell">
+                    <td className="px-2 py-2">
                       <EnumCell
                         value={task.priority}
                         options={PRIORITY_OPTIONS}
@@ -621,7 +622,7 @@ export function ListView({
                     </td>
                   )}
                   {show("sprint") && (
-                    <td className="px-2 py-2 hidden lg:table-cell text-xs max-w-32">
+                    <td className="px-2 py-2 text-xs max-w-32">
                       <EnumCell
                         value={task.sprint ?? ""}
                         options={[
@@ -676,7 +677,7 @@ export function ListView({
                     </td>
                   )}
                   {show("category") && (
-                    <td className="px-2 py-2 hidden lg:table-cell max-w-32">
+                    <td className="px-2 py-2 max-w-32">
                       <EnumCell
                         value={task.category}
                         options={categories.map((c) => ({
@@ -704,7 +705,7 @@ export function ListView({
                   )}
                   {show("dueDate") && (
                     <td
-                      className={`px-2 py-2 hidden md:table-cell text-xs max-w-24 ${dueDateInfo?.color || "text-text-muted"}`}
+                      className={`px-2 py-2 text-xs max-w-24 ${dueDateInfo?.color || "text-text-muted"}`}
                     >
                       <div className="truncate">
                         {dueDateInfo?.formatted || "—"}
@@ -712,7 +713,7 @@ export function ListView({
                     </td>
                   )}
                   {show("updatedAt") && (
-                    <td className="px-2 py-2 hidden sm:table-cell text-text-muted text-xs whitespace-nowrap">
+                    <td className="px-2 py-2 text-text-muted text-xs whitespace-nowrap">
                       {timeAgo(task.updatedAt)}
                     </td>
                   )}
@@ -749,7 +750,7 @@ export function ListView({
                     return (
                       <td
                         key={column.id}
-                        className="px-2 py-2 hidden lg:table-cell text-text-muted max-w-32"
+                        className="px-2 py-2 text-text-muted max-w-32"
                         title={text || undefined}
                       >
                         <EnumCell
