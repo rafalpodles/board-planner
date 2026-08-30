@@ -76,6 +76,20 @@ const bucket = (page: Page, id: string) => page.getByTestId(`bucket-${id}`);
 const grip = (page: Page, name: string) =>
   page.locator('[aria-roledescription="draggable"]').filter({ hasText: name }).first();
 
+/**
+ * dnd-kit's own live region, which is where this bug was measured in the first place: the pick-up
+ * was announced and then no arrow key ever produced a second line.
+ *
+ * Asserting on it is also the synchronisation. A drag is processed on the next tick, so pressing
+ * Space and ArrowLeft back to back leaves the second key arriving before the sensor has started —
+ * which is exactly how the first version of this spec failed while the feature worked.
+ */
+const announced = (page: Page) =>
+  // Two DndContexts render on this page, so two live regions exist and only one is ever speaking.
+  // An empty filter is not circular: with nothing announced this resolves to no element at all,
+  // and the assertion still fails.
+  page.locator('[id^="DndLiveRegion"]').filter({ hasText: /./ });
+
 test("a block reaches a bucket with the keyboard alone, and lands where it said", async ({
   page,
 }) => {
@@ -89,10 +103,19 @@ test("a block reaches a bucket with the keyboard alone, and lands where it said"
 
   await grip(page, "Implement").focus();
   await page.keyboard.press("Space");
-  // The palette is the right-hand column, so the buckets are to the left
-  await page.keyboard.press("ArrowLeft");
-  await page.keyboard.press("Space");
+  await expect(announced(page)).toContainText("Picked up draggable item new:implement");
 
+  // The palette is the right-hand column, so the buckets are to the left. This line is the whole
+  // ticket: before the fix, no arrow key ever produced it.
+  await page.keyboard.press("ArrowLeft");
+  await expect(announced(page)).toContainText(
+    "was moved over droppable area bucket:analysis"
+  );
+
+  await page.keyboard.press("Space");
+  await expect(announced(page)).toContainText("was dropped over droppable area bucket:analysis");
+
+  // It landed where the announcement said it would
   await expect(bucket(page, "analysis")).toContainText("Implement");
 });
 
@@ -155,9 +178,35 @@ test("reordering inside a bucket still works from the keyboard", async ({ page }
     (await bucket(page, "analysis").locator("li").allTextContents()).map((t) => t.trim().split("\n")[0]);
   expect(await order()).toEqual(["Implement", "Review"]);
 
-  await grip(page, "Implement").focus();
+  /**
+   * The one inside the bucket, not the palette block of the same name — a bare `hasText` match
+   * picks up `new:implement` and reorders nothing, which is how this read as a regression when it
+   * was a locator.
+   */
+  const inBucket = bucket(page, "analysis")
+    // "sortable", not "draggable": useSortable names its own role description, which is the tell
+    // that this entry is in a SortableContext and the palette block is not
+    .locator('[aria-roledescription="sortable"]')
+    .filter({ hasText: "Implement" })
+    .first();
+
+  await inBucket.focus();
   await page.keyboard.press("Space");
+  /**
+   * A sortable entry is already over its own droppable, so dnd-kit replaces the pick-up line with
+   * a move line on the same tick — which is the transcript the ticket recorded. Waiting for
+   * "Picked up" here times out against working code.
+   */
+  await expect(announced(page)).toContainText("was moved over droppable area");
+  await expect(announced(page), "the palette block was picked up instead").not.toContainText(
+    "new:implement"
+  );
+
+  // The drop target has to actually change before the drop, and the announcement is the only
+  // signal that it has — pressing Space on the same tick drops it back where it started
+  const overBefore = await announced(page).textContent();
   await page.keyboard.press("ArrowDown");
+  await expect.poll(() => announced(page).textContent()).not.toBe(overBefore);
   await page.keyboard.press("Space");
 
   await expect.poll(order).toEqual(["Review", "Implement"]);
