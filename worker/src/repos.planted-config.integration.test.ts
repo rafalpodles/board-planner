@@ -139,6 +139,12 @@ describe("plantedConfig against a real repository", () => {
   });
 
   it("refuses a directory that is not a checkout, rather than reading the machine as clean", async () => {
-    expect(await plantedConfig(createRunner(), dir, [])).toBe("an unreadable git config");
+    // The baseline is the machine's own config, taken from the same non-repository directory, so
+    // nothing here can be "new" and only the readability probe can refuse. With `[]` instead, the
+    // machine's own global keys count as planted and the case passes without the probe at all —
+    // the right verdict for the wrong reason.
+    const baseline = await configBaseline(createRunner(), dir);
+
+    expect(await plantedConfig(createRunner(), dir, baseline)).toBe("an unreadable git config");
   });
 });
