@@ -149,6 +149,7 @@ const server = createServer((req, res) => {
     const escalated = /^Task (\S+) was just moved to "needs_human_review"/m.exec(text ?? "");
     if (escalated && !toolHasRun) {
       reply(res, {
+        usage: { prompt_tokens: 1000, completion_tokens: 200, total_tokens: 1200 },
         choices: [
           {
             finish_reason: "tool_calls",
@@ -191,6 +192,7 @@ const server = createServer((req, res) => {
       // pass. Delaying *this* answer is what holds the turn open while its action chips show.
       if (toolHasRun) {
         reply(res, {
+            usage: { prompt_tokens: 1000, completion_tokens: 200, total_tokens: 1200 },
           choices: [{ finish_reason: "stop", message: { role: "assistant", content: "Done." } }],
         });
         return;
@@ -202,6 +204,7 @@ const server = createServer((req, res) => {
       }
       if (!call.name) {
         reply(res, {
+            usage: { prompt_tokens: 1000, completion_tokens: 200, total_tokens: 1200 },
           choices: [
             { finish_reason: "stop", message: { role: "assistant", content: call.say ?? "Noted." } },
           ],
@@ -209,6 +212,8 @@ const server = createServer((req, res) => {
         return;
       }
       reply(res, {
+        // A real provider reports what the call cost on every answer; BP-284 reads it
+        usage: { prompt_tokens: 1000, completion_tokens: 200, total_tokens: 1200 },
         choices: [
           {
             finish_reason: "tool_calls",

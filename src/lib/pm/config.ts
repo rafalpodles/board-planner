@@ -49,6 +49,21 @@ export function validatePmConfig(
   ) {
     return { valid: false, error: "pm.dailyTurnCap must be an integer 0-1000 (0 = server default)" };
   }
+  // A ceiling in tokens, so the bound is a different order from the turn cap's. 0 is no ceiling.
+  // Without this the field never reaches the value below, and the input that sets it reports
+  // success while writing nothing (BP-284).
+  const dailyTokenCap = pm.dailyTokenCap ?? 0;
+  if (
+    typeof dailyTokenCap !== "number" ||
+    !Number.isInteger(dailyTokenCap) ||
+    dailyTokenCap < 0 ||
+    dailyTokenCap > 1_000_000_000
+  ) {
+    return {
+      valid: false,
+      error: "pm.dailyTokenCap must be a whole number of tokens, 0 to 1000000000 (0 = no ceiling)",
+    };
+  }
   const links = pm.links ?? [];
   if (!Array.isArray(links) || links.length > MAX_LINKS) {
     return { valid: false, error: `pm.links must be an array of up to ${MAX_LINKS} items` };
@@ -171,6 +186,7 @@ export function validatePmConfig(
       contextNotes,
       links: cleanLinks,
       dailyTurnCap,
+      dailyTokenCap,
       mcpServers: cleanServers,
       autonomy,
     },

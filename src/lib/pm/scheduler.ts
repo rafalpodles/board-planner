@@ -1,7 +1,7 @@
 import { connectDB } from "@/lib/db";
 import { Project } from "@/models/project";
 import { runPmTurn } from "./agent";
-import { isOverDailyTurnCap } from "./turn-cap";
+import { dailyPmSpend, isOverDailyTurnCap } from "./turn-cap";
 import { acquireTurnLock, releaseTurnLock } from "./turn-lock";
 import { drainPmTriggers } from "./triggers";
 import { getPmUser } from "./pm-user";
@@ -58,6 +58,15 @@ async function runBoardReview(
   const { over, cap } = await isOverDailyTurnCap(projectId, pm);
   if (over) {
     console.warn(`PM board review skipped for ${projectKey}: turn cap (${cap}) reached`);
+    return;
+  }
+
+  const spend = await dailyPmSpend(projectId, pm);
+  if (spend.over) {
+    console.warn(
+      `PM board review skipped for ${projectKey}: token cap reached ` +
+        `(${spend.tokens} of ${spend.cap} across ${spend.calls} calls)`
+    );
     return;
   }
   const abort = acquireTurnLock(projectId, pmUserId);

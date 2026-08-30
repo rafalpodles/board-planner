@@ -260,7 +260,12 @@ OPENAI_API_KEY=           # Optional — AI task generation
 OPENROUTER_API_KEY=       # Optional — PM agent (chat-driven project manager)
 PM_MODEL=                 # Optional — PM agent model (default: moonshotai/kimi-k2.6)
 PM_MAX_TOKENS=            # Optional — PM agent max output tokens per call (default: 8192)
-PM_DAILY_TURN_CAP=        # Optional — PM agent turns per project per day (default: 100)
+PM_DAILY_TURN_CAP=        # Optional — PM agent turns per project per day (default: 100). A RATE
+                          # limit, not a budget: one turn is up to 15 model round-trips, so this
+                          # permits between 100 and 1500 calls (BP-284)
+PM_DAILY_TOKEN_CAP=       # Optional — tokens per project per day; unset means no ceiling. The
+                          # budget, in what the model bills. Settings → PM Agent shows the day's
+                          # real turns, calls and tokens to set it from
 PM_SCHEDULER_TICK_MS=     # Optional — PM autonomy scheduler tick (default: 300000)
 WEBHOOK_SIGNING_SECRET=   # Optional — HMACs outgoing webhook deliveries (x-boardplanner-signature)
 DIGEST_HOUR=              # Optional — hour the opt-in daily digest goes out (default 7)

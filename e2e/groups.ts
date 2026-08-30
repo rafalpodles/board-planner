@@ -79,6 +79,7 @@ export const GROUPS = {
     "pm-trust-boundary.spec.ts",
     "pm-assignment-is-a-handover.spec.ts",
     "pm-autonomy.spec.ts",
+    "pm-what-a-turn-costs.spec.ts",
     "select-has-a-name.spec.ts",
     "removed-member-notifications.spec.ts",
   ],

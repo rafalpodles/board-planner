@@ -37,7 +37,11 @@ vi.mock("@/lib/columns", () => ({
 }));
 vi.mock("./pm-user", () => ({ getPmUser: async () => ({ _id: "pm-user-id" }) }));
 vi.mock("./agent", () => ({ runPmTurn }));
-vi.mock("./turn-cap", () => ({ isOverDailyTurnCap: async () => ({ over: false, cap: 100 }) }));
+vi.mock("./turn-cap", () => ({
+  isOverDailyTurnCap: async () => ({ over: false, cap: 100 }),
+  // The token ceiling is off by default, which is what an unconfigured project answers (BP-284)
+  dailyPmSpend: async () => ({ over: false, cap: 0, tokens: 0, calls: 0, stepLimitHits: 0 }),
+}));
 vi.mock("./turn-lock", () => ({
   acquireTurnLock: () => new AbortController(),
   releaseTurnLock: vi.fn(),

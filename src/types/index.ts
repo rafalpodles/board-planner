@@ -487,6 +487,8 @@ export interface IPmConfig {
   contextNotes: string;
   links: IPmLink[];
   dailyTurnCap?: number;
+  /** Tokens per project per day; 0 is no ceiling (BP-284) */
+  dailyTokenCap?: number;
   mcpServers?: IPmMcpServer[];
   autonomy?: IPmAutonomy;
 }
@@ -732,11 +734,23 @@ export interface PmMessageTrigger {
   taskKey?: string;
 }
 
+/** What one PM turn cost, summed over its round-trips (BP-284) */
+export interface IPmUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  /** Round-trips to the model — the number `dailyTurnCap` was mistaken for */
+  calls: number;
+  /** The turn stopped because it ran out of steps, not because it was finished */
+  hitStepLimit: boolean;
+}
+
 export interface IPmMessage {
   _id: Types.ObjectId;
   project: Types.ObjectId;
   role: "user" | "assistant";
   content: string;
+  usage?: IPmUsage;
   actions: IPmAction[];
   attachments: PmAttachment[];
   trigger: PmMessageTrigger;
@@ -1012,6 +1026,8 @@ export interface ApiPmConfig {
   contextNotes: string;
   links: IPmLink[];
   dailyTurnCap?: number;
+  /** Tokens per project per day; 0 is no ceiling (BP-284) */
+  dailyTokenCap?: number;
   mcpServers?: ApiPmMcpServer[];
   autonomy?: IPmAutonomy;
 }

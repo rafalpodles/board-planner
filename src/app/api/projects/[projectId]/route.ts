@@ -152,7 +152,9 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
     if (user.role !== "admin") {
-      const instanceFields = ["enabled", "model", "dailyTurnCap", "mcpServers"];
+      // dailyTokenCap belongs here beside dailyTurnCap: the screen puts them in the same
+      // admin-only card, and a gate the API does not enforce is a claim the screen cannot keep
+      const instanceFields = ["enabled", "model", "dailyTurnCap", "dailyTokenCap", "mcpServers"];
       const rejected = instanceFields.filter((f) => body.pm[f] !== undefined);
       if (rejected.length > 0) {
         return NextResponse.json(
@@ -163,6 +165,7 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
       body.pm.enabled = existing.pm?.enabled ?? false;
       body.pm.model = existing.pm?.model ?? "";
       body.pm.dailyTurnCap = existing.pm?.dailyTurnCap ?? 0;
+      body.pm.dailyTokenCap = existing.pm?.dailyTokenCap ?? 0;
     }
     const pmResult = validatePmConfig(body.pm);
     if (!pmResult.valid) {

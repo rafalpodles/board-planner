@@ -7,7 +7,7 @@ vi.mock("@/lib/encryption", () => ({
 }));
 vi.mock("@/lib/url-validation", () => ({ isAllowedMcpServerUrl: () => true }));
 
-const { mergeMcpServerTokens } = await import("./config");
+const { mergeMcpServerTokens, validatePmConfig } = await import("./config");
 
 function server(overrides: Record<string, unknown> = {}) {
   return {
@@ -188,5 +188,47 @@ describe("mergeMcpServerTokens and moved OAuth credentials", () => {
       expect(result.value[0].oauth?.clientId).toBe("client-1");
       expect(result.value[0].oauth?.status).toBe("connected");
     }
+  });
+});
+
+/**
+ * BP-284. `validatePmConfig` rebuilds `pm` from a whitelist and the PUT then `$set`s the whole
+ * subdocument — so a field missing from the rebuild is not merely ignored, it is **erased**. The
+ * first cut of the token ceiling shipped with the field absent here: the settings input posted,
+ * got a 200, showed a success toast, and wrote nothing. This is the test that would have caught it.
+ */
+describe("validatePmConfig and the cost controls", () => {
+  const base = { enabled: true, model: "m", contextNotes: "", links: [], mcpServers: [] };
+  const valid = (over: Record<string, unknown> = {}) =>
+    validatePmConfig({ ...base, ...over } as never);
+
+  it("keeps the token ceiling, so the input that sets it is not writing into a void", () => {
+    const result = valid({ dailyTokenCap: 500_000 });
+
+    expect(result.valid).toBe(true);
+    expect(result.valid && result.value.dailyTokenCap).toBe(500_000);
+  });
+
+  // The control beside it: the field it joins is unchanged
+  it("still keeps the turn cap", () => {
+    const result = valid({ dailyTurnCap: 40, dailyTokenCap: 1 });
+
+    expect(result.valid && result.value.dailyTurnCap).toBe(40);
+  });
+
+  it("defaults the ceiling to none rather than dropping it", () => {
+    const result = valid();
+
+    expect(result.valid && result.value.dailyTokenCap).toBe(0);
+  });
+
+  /**
+   * A negative cap would make `cap > 0 && tokens >= cap` false for ever — a ceiling that reads as
+   * set on the screen and enforces nothing, which is worse than no ceiling at all.
+   */
+  it("refuses a ceiling that could never bind", () => {
+    expect(valid({ dailyTokenCap: -1 }).valid).toBe(false);
+    expect(valid({ dailyTokenCap: 1.5 }).valid).toBe(false);
+    expect(valid({ dailyTokenCap: "lots" }).valid).toBe(false);
   });
 });
