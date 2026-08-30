@@ -12,20 +12,27 @@ import { z } from "zod";
  * `hints` names the replacement where there is one. `writes` is whether this tool writes at all,
  * because "nothing was written" is misleading on a tool that never would.
  */
+export function unknownParameterMessage(
+  keys: string[],
+  hints: Record<string, string> = {},
+  writes = false
+): string {
+  return `Not a parameter of this tool: ${keys
+    .map((key) =>
+      // Own keys only: "__proto__", "constructor" and "toString" are stray keys a confused
+      // client really sends, and an inherited hit renders Object.prototype into the message
+      Object.hasOwn(hints, key) ? `"${key}" — use ${hints[key]}` : `"${key}"`
+    )
+    .join("; ")}.${writes ? " Nothing was written." : ""}`;
+}
+
 export function strictInput<Shape extends z.ZodRawShape>(
   shape: Shape,
   options: { hints?: Record<string, string>; writes?: boolean } = {}
 ) {
   const { hints = {}, writes = false } = options;
 
-  const message = (keys: string[]) =>
-    `Not a parameter of this tool: ${keys
-      .map((key) =>
-        // Own keys only: "__proto__", "constructor" and "toString" are stray keys a confused
-        // client really sends, and an inherited hit renders Object.prototype into the message
-        Object.hasOwn(hints, key) ? `"${key}" — use ${hints[key]}` : `"${key}"`
-      )
-      .join("; ")}.${writes ? " Nothing was written." : ""}`;
+  const message = (keys: string[]) => unknownParameterMessage(keys, hints, writes);
 
   type Issue = { code: string; keys?: string[] };
   // zod 3 spells this hook errorMap and zod 4 spells it error; mcp-server is on a different major
