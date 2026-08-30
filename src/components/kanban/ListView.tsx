@@ -343,7 +343,11 @@ export function ListView({
       strategy={verticalListSortingStrategy}
     >
     <div className="my-4 border border-border rounded-lg overflow-hidden">
-      <div className="overflow-x-auto">
+      {/* A live horizontal scroller for the first time: until the breakpoint hiding went, a
+          display:none cell took no width and there was nothing past the edge. The two guards the
+          board's scroller carries come with it — without overscroll-x-contain, panning to the end
+          of a row chains into the browser's back gesture */}
+      <div className="overflow-x-auto overscroll-x-contain" style={{ WebkitOverflowScrolling: "touch" }}>
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-bg-input text-text-muted text-xs border-b border-border">
