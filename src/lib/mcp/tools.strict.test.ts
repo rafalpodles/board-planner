@@ -214,7 +214,7 @@ describe("an update that names nothing to change", () => {
     });
   });
 
-  // updatedAt is the one field an empty PATCH moves, and it is the field that reads as proof
+  // updatedAt is the one field an empty write moves, and it is the field that reads as proof
   it("is refused rather than sent as an empty write", async () => {
     const update = vi.spyOn(PlannerClient.prototype, "updateTask").mockResolvedValue({});
 
