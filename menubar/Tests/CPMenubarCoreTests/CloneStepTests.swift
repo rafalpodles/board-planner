@@ -81,6 +81,38 @@ final class CloneStepTests: XCTestCase {
         XCTAssertFalse(git.calls.contains { $0.contains("clone") }, "cloning over an existing one would be destructive")
     }
 
+    /// BP-422. A linked worktree has a `.git` — a file rather than a directory, which `exists`
+    /// cannot tell apart — and answers `remote get-url`, `fetch` and `push --dry-run` exactly as
+    /// its repository does, so every other check here passed on one. Adopting it hands the app a
+    /// directory inside a repository it does not own, and unticking the project then deletes that
+    /// repository.
+    func testItRefusesToAdoptALinkedWorktree() {
+        let git = Git()
+        git.present = ["/p/TP/.git"]
+        git.results["--git-dir"] = (0, "/elsewhere/repo/.git/worktrees/TP")
+        git.results["--git-common-dir"] = (0, "/elsewhere/repo/.git")
+
+        let outcome = git.step().run(repositoryURL: "https://github.com/o/r", parent: "/p", projectKey: "TP")
+
+        guard case .failed(let reason) = outcome else {
+            return XCTFail("expected a refusal, got \(outcome)")
+        }
+        XCTAssertTrue(reason.contains("worktree"), "the refusal has to say what it found: \(reason)")
+        XCTAssertFalse(git.calls.contains { $0.contains("fetch") }, "and it refuses before touching the network")
+    }
+
+    /// An answer git could not give is not an ordinary checkout — the same rule CheckoutRemoval
+    /// applies, and for the same reason: unexamined is not clean.
+    func testItRefusesToAdoptADirectoryGitWillNotDescribe() {
+        let git = Git()
+        git.present = ["/p/TP/.git"]
+        git.results["--git-common-dir"] = (128, "not a git repository")
+
+        guard case .failed = git.step().run(
+            repositoryURL: "https://github.com/o/r", parent: "/p", projectKey: "TP")
+        else { return XCTFail("expected a refusal") }
+    }
+
     func testSomethingElseAlreadyAtTheDestinationIsNotClobbered() {
         let git = Git()
         git.present = ["/p/TP"]
