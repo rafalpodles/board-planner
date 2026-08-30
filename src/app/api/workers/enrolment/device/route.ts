@@ -62,7 +62,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "name is required" }, { status: 400 });
   }
 
-
   const started = await startDeviceEnrolment({ machineName, machineHost });
   const base = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ?? "";
 

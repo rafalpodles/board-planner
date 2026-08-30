@@ -55,18 +55,17 @@ describe("readJsonBody", () => {
 
   it("refuses on Content-Length without pulling anything itself", async () => {
     const { stream, state } = countingBody(MAX_JSON_BODY_BYTES * 4);
-    const req = request(stream, { "content-length": String(MAX_JSON_BODY_BYTES * 4) });
-    // undici pulls one chunk of its own accord shortly after a streaming Request is constructed,
-    // so the absolute figure measures the test harness rather than the code. The delta is the
-    // claim: this refusal consumes nothing.
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    const before = state.pulled;
-
-    const result = await readJsonBody(req);
+    const result = await readJsonBody(
+      request(stream, { "content-length": String(MAX_JSON_BODY_BYTES * 4) })
+    );
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.response.status).toBe(413);
-    expect(state.pulled).toBe(before);
+    // undici pulls one chunk of its own accord shortly after a streaming Request is constructed, so
+    // zero is not assertable — but reading the body would take five chunks to reach the cap, so one
+    // is still the difference between refusing on the header and refusing on the stream. Written as
+    // a ceiling rather than a before/after delta, which needed a sleep and raced the event loop.
+    expect(state.pulled).toBeLessThanOrEqual(16 * 1024);
   });
 
   it("stops mid-stream when Content-Length is absent, which is the case that matters", async () => {
@@ -87,6 +86,9 @@ describe("readJsonBody", () => {
     const result = await readJsonBody(request(stream, { "content-length": "10" }));
 
     expect(result.ok).toBe(false);
+    // Named, because 512 KB of "a" is not valid JSON either: without this the refusal could be the
+    // 400 and the test would read the same.
+    if (!result.ok) expect(result.response.status).toBe(413);
     expect(state.pulled).toBeLessThan(MAX_JSON_BODY_BYTES * 8);
   });
 

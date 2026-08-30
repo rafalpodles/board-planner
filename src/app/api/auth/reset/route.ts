@@ -62,7 +62,6 @@ export async function POST(request: Request) {
     );
   }
 
-
   await connectDB();
 
   // Hashed before the token is spent, for the same reason the length is checked first: bcrypt

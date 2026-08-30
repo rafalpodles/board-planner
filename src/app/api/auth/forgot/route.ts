@@ -81,7 +81,6 @@ export async function POST(request: Request) {
     );
   }
 
-
   await connectDB();
 
   const typed = identifier.trim();

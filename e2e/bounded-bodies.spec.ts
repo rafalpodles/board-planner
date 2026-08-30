@@ -25,15 +25,29 @@ test.beforeEach(async () => {
   await seed();
 });
 
+// `answers` is the status each route gives its honest payload today. Asserting the exact number
+// rather than "not 413" is what makes these controls controls: `.not.toBe(413)` was satisfied by a
+// route returning 500 for everything, so four of the five proved only that the server was running.
 const UNAUTHENTICATED = [
-  { name: "login", path: "/api/auth/login", honest: { username: "nobody", password: "nope" } },
-  { name: "password reset request", path: "/api/auth/forgot", honest: { identifier: "nobody" } },
-  { name: "password reset", path: "/api/auth/reset", honest: { token: "nope", newPassword: "x" } },
-  { name: "device enrolment", path: "/api/workers/enrolment/device", honest: { name: "laptop" } },
+  { name: "login", path: "/api/auth/login", honest: { username: "nobody", password: "nope" }, answers: 401 },
+  // 503 because this instance has no SMTP configured, which is the point: the request reached
+  // the route's own logic instead of being turned away by the cap.
+  { name: "password reset request", path: "/api/auth/forgot", honest: { identifier: "nobody" }, answers: 503 },
+  { name: "password reset", path: "/api/auth/reset", honest: { token: "nope", newPassword: "x" }, answers: 400 },
+  { name: "device enrolment", path: "/api/workers/enrolment/device", honest: { name: "laptop" }, answers: 201 },
   {
     name: "enrolment poll",
     path: "/api/workers/enrolment/device/token",
     honest: { deviceCode: "cpd_nope" },
+    answers: 410,
+  },
+  // The bootstrap branch of this one reads its body before it looks at a credential, so the cap
+  // has to be in front of that too. On a seeded instance the honest answer is the refusal.
+  {
+    name: "user creation",
+    path: "/api/users",
+    honest: { username: "someone", password: "a-long-enough-password", fullName: "Someone" },
+    answers: 403,
   },
 ];
 
@@ -54,10 +68,7 @@ test.describe("handlers that run before any credential is checked", () => {
         data: route.honest,
       });
 
-      // The control. What the answer IS depends on the route — wrong password, unknown identifier,
-      // protocol mismatch — and none of that matters here. What matters is that the cap did not
-      // turn it away: a 413 on this line is the fix refusing honest input.
-      expect(response.status(), await response.text()).not.toBe(413);
+      expect(response.status(), await response.text()).toBe(route.answers);
     });
   }
 
@@ -72,7 +83,7 @@ test.describe("handlers that run before any credential is checked", () => {
 });
 
 test.describe("uploads", () => {
-  test("refuses an oversized upload before it is allocated", async ({ request }) => {
+  test("refuses an upload whose file is over the limit", async ({ request }) => {
     await request.post("/api/auth/login", {
       headers: SAME_ORIGIN,
       data: { username: ADMIN_USERNAME, password: ADMIN_PASSWORD },

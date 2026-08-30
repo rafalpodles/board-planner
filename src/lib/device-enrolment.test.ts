@@ -9,6 +9,7 @@ const projectLean = vi.fn();
 const countDocuments = vi.fn();
 const deleteMany = vi.fn();
 const sort = vi.fn();
+const select = vi.fn();
 
 vi.mock("./db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/deviceEnrolment", () => ({
@@ -35,9 +36,18 @@ function candidates(rows: unknown[]) {
 }
 
 // The eviction query: find(live).sort(...).limit(n).select("_id").lean()
+//
+// limit() honours its argument. A mock that ignored it returned every row it was given whatever the
+// source asked for, so the deleteMany assertion below was reading the fixture rather than the
+// arithmetic — .limit(1) left the collection permanently over its ceiling and the test stayed green.
 function oldestPending(rows: unknown[]) {
+  select.mockImplementation(() => ({ lean: () => Promise.resolve(taken) }));
+  let taken: unknown[] = [];
   sort.mockReturnValue({
-    limit: () => ({ select: () => ({ lean: () => Promise.resolve(rows) }) }),
+    limit: (n: number) => {
+      taken = rows.slice(0, n);
+      return { select };
+    },
   });
   find.mockReturnValue({ sort });
 }
@@ -127,6 +137,8 @@ describe("the cost of a poll", () => {
 
     expect(started.userCode).toBeTruthy();
     expect(create).toHaveBeenCalled();
+    // At exactly the ceiling one row has to go, or the collection sits one over it from here on
+    expect(deleteMany).toHaveBeenCalledWith({ _id: { $in: ["oldest"] } });
   });
 
   it("makes room by dropping the oldest pending row", async () => {
@@ -138,7 +150,15 @@ describe("the cost of a poll", () => {
     // Ascending, so it is the oldest that goes. Descending would evict the row the operator is
     // holding at that moment and leave the flood's own rows in place.
     expect(sort).toHaveBeenCalledWith({ createdAt: 1 });
-    expect(find.mock.calls[0][0]).toMatchObject({ status: "pending" });
+    // Expired rows reap on Mongo's own schedule, so counting them would let the ceiling be held
+    // down by rows that are already dead
+    expect(find.mock.calls[0][0]).toEqual({
+      status: "pending",
+      expiresAt: { $gt: expect.any(Date) },
+    });
+    expect(select).toHaveBeenCalledWith("_id");
+    // Three, because it is two over the ceiling and one more is about to be created. Asking for
+    // fewer leaves the collection over it for good.
     expect(deleteMany).toHaveBeenCalledWith({ _id: { $in: ["a", "b", "c"] } });
   });
 
