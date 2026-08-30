@@ -11,30 +11,44 @@ function runnerFor(...results: Result[]) {
   return { runner: { run } as never, run };
 }
 
-// commitAll's first call is the pre-staging config scan (BP-403), so every case that expects to
-// reach `status` needs a clean answer for it first. The cases below read as though they start at
-// status; only the scan's own tests use runnerFor directly.
+// commitAll's first calls are the pre-staging config scan (BP-403), so every case that expects to
+// reach `status` needs clean answers for it first. Two of them since BP-346: one asking whether
+// this repository's own config can be read at all, one reading the effective config. The cases
+// below read as though they start at status; only the scan's own tests use runnerFor directly.
+// Found by subcommand rather than by index: two calls were prepended in BP-403 and a third in
+// BP-346, and each time every index-based assertion below moved with it while still reading as
+// though it named a call
+function callWith(run: ReturnType<typeof vi.fn>, subcommand: string): string[] {
+  const call = run.mock.calls.find(([, args]) => (args as string[]).includes(subcommand));
+  if (!call) throw new Error(`git ${subcommand} was never run`);
+  return call[1] as string[];
+}
+
 function runnerReturning(...results: Result[]) {
-  return runnerFor(noPlantedConfig, ...results);
+  return runnerFor(readableConfig, noPlantedConfig, ...results);
 }
 
 const clean = { code: 0, stdout: "" };
-const noPlantedConfig = { code: 0, stdout: "core.bare=false\nfilter.lfs.required=true\n" };
+// BP-346: the scan reads `--list --show-scope --no-includes`, so every line git returns is
+// `<scope>\t<key>=<value>` — a fixture without the scope describes an answer git no longer gives
+const local = (...lines: string[]) => lines.map((line) => `local\t${line}`).join("\n") + "\n";
+const readableConfig = { code: 0, stdout: "core.bare=false\n" };
+const noPlantedConfig = { code: 0, stdout: local("core.bare=false", "filter.lfs.required=true") };
 const dirty = { code: 0, stdout: " M src/a.ts\n" };
 
 describe("commitAll", () => {
   it("does nothing when the agent left the tree clean", async () => {
     const { runner, run } = runnerReturning(clean);
     await commitAll(runner, "/wt", "BP-1: something");
-    expect(run).toHaveBeenCalledTimes(2);
+    // The two scan calls and `status`, and nothing after it
+    expect(run).toHaveBeenCalledTimes(3);
   });
 
   it("stages everything and commits when there is something to commit", async () => {
     const { runner, run } = runnerReturning(dirty, clean, clean, clean);
     await commitAll(runner, "/wt", "BP-1: something");
-    expect(run.mock.calls[2][1]).toContain("add");
-    expect(run.mock.calls[3][1]).toContain("commit");
-    expect(run.mock.calls[3][1]).toContain("BP-1: something");
+    expect(callWith(run, "add")).toContain("add");
+    expect(callWith(run, "commit")).toContain("BP-1: something");
   });
 
   // The agent can write .git/hooks/pre-commit with the Write tool it needs for the task itself
@@ -44,7 +58,7 @@ describe("commitAll", () => {
     for (const call of run.mock.calls) {
       expect(call[1]).toContain("core.hooksPath=/dev/null");
     }
-    expect(run.mock.calls[3][1]).toContain("--no-verify");
+    expect(callWith(run, "commit")).toContain("--no-verify");
   });
 
   it("throws when the commit fails, rather than reporting a run that committed nothing", async () => {
@@ -61,7 +75,7 @@ describe("commitAll", () => {
   it("keeps the message out of git's option slot", async () => {
     const { runner, run } = runnerReturning(dirty, clean, clean, clean);
     await commitAll(runner, "/wt", "--amend");
-    const args = run.mock.calls[3][1] as string[];
+    const args = callWith(run, "commit");
     expect(args[args.indexOf("-m") + 1]).toBe("--amend");
   });
 
@@ -90,13 +104,13 @@ describe("commitAll", () => {
 describe("commitAll against a planted config", () => {
   for (const leaf of ["clean", "smudge", "process"]) {
     it(`refuses before it reads the tree when filter.z.${leaf} is set`, async () => {
-      const { runner, run } = runnerFor({ code: 0, stdout: `filter.z.${leaf}=/tmp/payload.sh\n` });
+      const { runner, run } = runnerFor(readableConfig, { code: 0, stdout: local(`filter.z.${leaf}=/tmp/payload.sh`) });
       await expect(commitAll(runner, "/wt", "m")).rejects.toThrow(
         new RegExp(`refusing to stage.*filter\\.z\\.${leaf}`)
       );
       // The scan and nothing else: no status, no add, so no call that reads a file's content
-      expect(run).toHaveBeenCalledTimes(1);
-      expect(run.mock.calls[0][1]).toContain("--list");
+      expect(run).toHaveBeenCalledTimes(2);
+      expect(run.mock.calls[1][1]).toContain("--show-scope");
     });
   }
 
@@ -114,11 +128,11 @@ describe("commitAll against a planted config", () => {
   it("lets an inert sibling leaf through", async () => {
     const { runner, run } = runnerReturning(dirty, clean, clean, { code: 0, stdout: "abc123\n" });
     expect(await commitAll(runner, "/wt", "m")).toBe("abc123");
-    expect(run.mock.calls[2][1]).toContain("add");
+    expect(callWith(run, "add")).toContain("add");
   });
 
   it("refuses filter.lfs.clean like any other, which is what bindRepository already did", async () => {
-    const { runner } = runnerFor({ code: 0, stdout: "filter.lfs.clean=git-lfs clean -- %f\n" });
+    const { runner } = runnerFor(readableConfig, { code: 0, stdout: local("filter.lfs.clean=git-lfs clean -- %f") });
     await expect(commitAll(runner, "/wt", "m")).rejects.toThrow(/refusing to stage.*filter\.lfs\.clean/);
   });
 });

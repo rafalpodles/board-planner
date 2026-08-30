@@ -3,6 +3,7 @@ import { tmpdir } from "os";
 import { join, resolve, sep } from "path";
 import { WorkerConfig } from "./config.js";
 import { childEnv } from "./env.js";
+import { configBaseline } from "./repos.js";
 import { CommandResult, Runner } from "./exec.js";
 import { gitArgs, GIT_SAFE_ENV } from "./git-safety.js";
 
@@ -35,6 +36,14 @@ export interface Worktree {
   path: string;
   /** Resolved before the agent runs and held in this process: a ref name is rewritable by the run. */
   baseSha: string;
+  /**
+   * What the effective git config said before the agent ran, held in this process for the same
+   * reason `baseSha` is. A baseline on disk is one the agent can edit — it runs as this uid with
+   * no filesystem sandbox — and this is what lets a scan tell `~/.gitconfig`'s ordinary credential
+   * helper from one that appeared during the run (BP-346). `null` when git would not answer, which
+   * leaves the machine scopes unjudged rather than refusing the machine.
+   */
+  configBaseline: string[] | null;
 }
 
 export interface Workspace {
@@ -277,7 +286,7 @@ export function createWorkspace(
       await removeIfRegistered(path);
       // -B resets the branch instead of failing if a crashed previous attempt already created it
       await git(["worktree", "add", "-B", branch, "--", path, baseSha]);
-      return { path, baseSha };
+      return { path, baseSha, configBaseline: await configBaseline(runner, path) };
     },
 
     async destroy(taskKey) {

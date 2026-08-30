@@ -14,8 +14,17 @@ const MAX_OUTPUT_CHARS = 2000;
 const PR_URL = /https?:\/\/[^\s"'<>]*\/pull\/\d+/g;
 
 export interface Delivery {
-  push(worktreePath: string, branch: string, commit: string): Promise<void>;
-  openPr(worktreePath: string, task: ClaimedTask, summary: string): Promise<string>;
+  push(
+    worktreePath: string,
+    branch: string,
+    commit: string,
+    configBaseline?: readonly string[] | null,
+  ): Promise<void>;
+  openPr(
+    worktreePath: string,
+    task: ClaimedTask,
+    summary: string,
+  ): Promise<string>;
   merge(worktreePath: string, prUrl: string): Promise<void>;
 }
 
@@ -34,8 +43,11 @@ function outputTail(result: CommandResult): string {
 
 function failure(label: string, result: CommandResult, note = ""): Error {
   const suffix = note ? ` (${note})` : "";
-  if (result.timedOut) return new Error(`${label} timed out after ${TIMEOUT_MS}ms${suffix}`);
-  return new Error(`${label} failed (exit ${result.code})${suffix}: ${outputTail(result)}`);
+  if (result.timedOut)
+    return new Error(`${label} timed out after ${TIMEOUT_MS}ms${suffix}`);
+  return new Error(
+    `${label} failed (exit ${result.code})${suffix}: ${outputTail(result)}`,
+  );
 }
 
 function lastPrUrl(text: string): string {
@@ -44,8 +56,12 @@ function lastPrUrl(text: string): string {
 }
 
 function prTitle(task: ClaimedTask): string {
-  const title = scrub(`${task.taskKey}: ${task.title}`).replace(/\s+/g, " ").trim();
-  return title.length <= MAX_TITLE_CHARS ? title : `${title.slice(0, MAX_TITLE_CHARS - 3)}...`;
+  const title = scrub(`${task.taskKey}: ${task.title}`)
+    .replace(/\s+/g, " ")
+    .trim();
+  return title.length <= MAX_TITLE_CHARS
+    ? title
+    : `${title.slice(0, MAX_TITLE_CHARS - 3)}...`;
 }
 
 // Scrubbed here as well as on the board path. The PR body is the more public sink of the two —
@@ -135,12 +151,17 @@ export function hardenedGitConfig(): NodeJS.ProcessEnv {
 // account is active. Present means the identity travels with the call, so a `gh auth switch` in
 // another terminal — global machine state, shared with every process on the box — cannot decide
 // mid-run who this worker pushes as (BP-373).
-export function createDelivery(runner: Runner, baseBranch?: string, githubToken?: string): Delivery {
+export function createDelivery(
+  runner: Runner,
+  baseBranch?: string,
+  githubToken?: string,
+): Delivery {
   // The second sink baseBranch reaches, after `git diff`. applyPolicy already refuses anything
   // that is not a ref name; dropping the flag here rather than passing it on means the worst a
   // value that got past it can do is open the pull request against the repository's own default.
   const trimmedBase = baseBranch?.trim() ?? "";
-  const baseArgs = trimmedBase && isGitRefName(trimmedBase) ? ["--base", trimmedBase] : [];
+  const baseArgs =
+    trimmedBase && isGitRefName(trimmedBase) ? ["--base", trimmedBase] : [];
   // Both names, not just the one gh prefers: an inherited GITHUB_TOKEN would otherwise decide the
   // identity behind the pin's back, and the failure it produces is a push that succeeds as the
   // wrong account rather than one that fails.
@@ -158,12 +179,22 @@ export function createDelivery(runner: Runner, baseBranch?: string, githubToken?
   // shells out to; `-c` covers only the process we spawn ourselves. That is also why delivery does
   // not use git-safety's gitArgs like every other call site: HARDENED_CONFIG carries the same keys
   // and more, at the same precedence, and reaches gh's inner invocations as well.
-  function run(command: string, args: string[], cwd: string): Promise<CommandResult> {
+  function run(
+    command: string,
+    args: string[],
+    cwd: string,
+  ): Promise<CommandResult> {
     return runner.run(command, args, {
       cwd,
       timeoutMs: TIMEOUT_MS,
       env: {
-        ...childEnv(["SSH_AUTH_SOCK", "GH_TOKEN", "GITHUB_TOKEN", "GH_CONFIG_DIR", "XDG_CONFIG_HOME"]),
+        ...childEnv([
+          "SSH_AUTH_SOCK",
+          "GH_TOKEN",
+          "GITHUB_TOKEN",
+          "GH_CONFIG_DIR",
+          "XDG_CONFIG_HOME",
+        ]),
         ...pinnedIdentity,
         ...hardenedGitConfig(),
       },
@@ -174,25 +205,32 @@ export function createDelivery(runner: Runner, baseBranch?: string, githubToken?
   // the push outright if the agent wrote an executable key at all — including one the list does
   // not name. Push is where it is worth paying for, being the call that hands the checkout's own
   // config a credential; gh carries its token in the environment, so openPr and merge do not.
-  async function refuseIfPlanted(worktreePath: string): Promise<void> {
-    const planted = await plantedConfig(runner, worktreePath);
+  async function refuseIfPlanted(
+    worktreePath: string,
+    configBaseline?: readonly string[] | null,
+  ): Promise<void> {
+    const planted = await plantedConfig(runner, worktreePath, configBaseline);
     if (planted) {
       throw new Error(
-        `refusing to push: the checkout's git config sets ${planted}, which was not there when the repository was approved`
+        `refusing to push: the checkout's git config sets ${planted}, which was not there when the repository was approved`,
       );
     }
   }
 
-  async function mergeState(worktreePath: string, prUrl: string): Promise<MergeState> {
+  async function mergeState(
+    worktreePath: string,
+    prUrl: string,
+  ): Promise<MergeState> {
     const result = await run(
       "gh",
       ["pr", "view", prUrl, "--json", "state", ...repoArgs(prUrl)],
-      worktreePath
+      worktreePath,
     );
     if (result.code !== 0) return "unknown";
     try {
       const parsed: unknown = JSON.parse(result.stdout);
-      if (!isRecord(parsed) || typeof parsed.state !== "string") return "unknown";
+      if (!isRecord(parsed) || typeof parsed.state !== "string")
+        return "unknown";
       return parsed.state === "MERGED" ? "merged" : "unmerged";
     } catch {
       return "unknown";
@@ -200,7 +238,7 @@ export function createDelivery(runner: Runner, baseBranch?: string, githubToken?
   }
 
   return {
-    async push(worktreePath, branch, commit) {
+    async push(worktreePath, branch, commit, configBaseline) {
       // Refused rather than falling back to the branch name: the worktree's ref store is exactly
       // what an agent running inside it can rewrite, so a push that trusts the branch name sends
       // whatever that store now says HEAD is, not what a reviewer approved (BP-382).
@@ -218,7 +256,7 @@ export function createDelivery(runner: Runner, baseBranch?: string, githubToken?
       // applyPolicy spends on baseBranch, and a branch here is always `<taskKey>/worker`.
       if (!isGitRefName(branch)) {
         throw new Error(
-          `refusing to push: ${JSON.stringify(branch)} is not a git ref name, and the push refspec is built from it`
+          `refusing to push: ${JSON.stringify(branch)} is not a git ref name, and the push refspec is built from it`,
         );
       }
       // a retried attempt rebuilds the branch off the base, so what the previous attempt pushed is
@@ -244,7 +282,7 @@ export function createDelivery(runner: Runner, baseBranch?: string, githubToken?
           "--",
           `${commit}:refs/heads/${branch}`,
         ]),
-        worktreePath
+        worktreePath,
       );
       if (result.code !== 0) throw failure("git push", result);
     },
@@ -252,14 +290,24 @@ export function createDelivery(runner: Runner, baseBranch?: string, githubToken?
     async openPr(worktreePath, task, summary) {
       const result = await run(
         "gh",
-        ["pr", "create", "--title", prTitle(task), "--body", prBody(summary), ...baseArgs],
-        worktreePath
+        [
+          "pr",
+          "create",
+          "--title",
+          prTitle(task),
+          "--body",
+          prBody(summary),
+          ...baseArgs,
+        ],
+        worktreePath,
       );
 
       if (result.code === 0) {
         const url = lastPrUrl(result.stdout) || lastPrUrl(result.stderr);
         if (!url) {
-          throw new Error(`gh pr create printed no pull request url: ${outputTail(result)}`);
+          throw new Error(
+            `gh pr create printed no pull request url: ${outputTail(result)}`,
+          );
         }
         return url;
       }
@@ -278,8 +326,15 @@ export function createDelivery(runner: Runner, baseBranch?: string, githubToken?
       // to the base branch first, which git refuses while the main clone has it checked out
       const result = await run(
         "gh",
-        ["pr", "merge", prUrl, "--merge", "--delete-branch", ...repoArgs(prUrl)],
-        worktreePath
+        [
+          "pr",
+          "merge",
+          prUrl,
+          "--merge",
+          "--delete-branch",
+          ...repoArgs(prUrl),
+        ],
+        worktreePath,
       );
       if (result.code === 0) return;
 
@@ -288,7 +343,7 @@ export function createDelivery(runner: Runner, baseBranch?: string, githubToken?
       throw failure(
         "gh pr merge",
         result,
-        state === "unknown" ? "merge state could not be confirmed" : ""
+        state === "unknown" ? "merge state could not be confirmed" : "",
       );
     },
   };

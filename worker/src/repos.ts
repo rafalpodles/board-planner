@@ -20,7 +20,9 @@ export interface RepoDeps {
   workerId: string;
 }
 
-type BindResult = { ok: true; path: string; worktreeRoot: string } | { ok: false; reason: string };
+type BindResult =
+  | { ok: true; path: string; worktreeRoot: string }
+  | { ok: false; reason: string };
 
 const GIT_TIMEOUT_MS = 60_000;
 
@@ -74,9 +76,12 @@ const EXECUTABLE_LEAVES: Record<string, string[]> = {
 };
 
 function sensitiveLocation(path: string): string | null {
-  const root = SENSITIVE_ROOTS.find((dir) => path === dir || path.startsWith(`${dir}${sep}`));
+  const root = SENSITIVE_ROOTS.find(
+    (dir) => path === dir || path.startsWith(`${dir}${sep}`),
+  );
   if (root) return `${path} is under the sensitive directory ${root}`;
-  if (path.split(sep).includes("node_modules")) return `${path} contains a node_modules segment`;
+  if (path.split(sep).includes("node_modules"))
+    return `${path} contains a node_modules segment`;
   return null;
 }
 
@@ -97,7 +102,9 @@ function dangerousFamilyLeaf(key: string): boolean {
 // unrecognised value) is treated as permissive, since this module's own git calls are the
 // user-initiated case "user" allows.
 function isPermissiveProtocolAllow(key: string, value: string): boolean {
-  const isAllowKey = key === "protocol.allow" || (key.startsWith("protocol.") && key.endsWith(".allow"));
+  const isAllowKey =
+    key === "protocol.allow" ||
+    (key.startsWith("protocol.") && key.endsWith(".allow"));
   return isAllowKey && value.trim().toLowerCase() !== "never";
 }
 
@@ -130,21 +137,145 @@ function git(runner: Runner, cwd: string, args: string[]) {
   });
 }
 
-/**
- * The key the agent planted, or "" if it planted none. The same scan bindRepository runs, against
- * the config as it stands *after* the agent has had the checkout — which is the version that
- * matters for a call carrying GH_TOKEN and SSH_AUTH_SOCK.
- */
-export async function plantedConfig(runner: Runner, cwd: string): Promise<string> {
-  const result = await git(runner, cwd, ["config", "--local", "--list"]);
-  // Unreadable is not the same as clean: a config this cannot read is one it cannot clear either.
-  if (result.code !== 0 || result.timedOut) return "an unreadable git config";
-  return dangerousConfigEntry(result.stdout) ?? "";
+// `--show-scope` because the answer depends on who could have written the entry, and
+// `--no-includes` because following an include is worse than not following it: measured on git
+// 2.50.1, `--list` defaults includes ON, the included value is labelled with the *including*
+// file's scope, and the file's content can be replaced between the scan and the use —
+//
+//     scan sees:  credential.helper=echo benign
+//     (the include file is rewritten)
+//     git uses:   !sh -c '…'
+//
+// So the indirection is refused as itself below rather than read through. That also means nothing
+// of the operator's own included configuration is ever parsed by this scan.
+const CONFIG_LIST_ARGS = ["config", "--list", "--show-scope", "--no-includes"];
+
+// The scopes the agent writes *inside the repository*, which this pipeline created for the run —
+// anything executable there is the agent's by construction. `global`, `system` and the `unknown`
+// scope git reports for command-line and environment values are the operator's machine, where a
+// credential helper is ordinary: measured on a normally-configured Mac, the effective config
+// carries five executable keys, every one of them legitimate and every one of them a match for
+// the rules below. Judging those without a baseline refuses the machine, not the attacker.
+const REPO_SCOPES = ["local", "worktree"];
+
+// include.path and includeIf.* carry no program themselves; they carry the file that does.
+const INDIRECTION_KEYS = ["include.path", "includeif."];
+
+interface ConfigEntry {
+  scope: string;
+  key: string;
+  value: string;
+  raw: string;
 }
 
-export async function bindRepository(deps: RepoDeps, proposedPath: string): Promise<BindResult> {
+function parseConfigList(output: string): ConfigEntry[] {
+  const entries: ConfigEntry[] = [];
+  for (const raw of output.split("\n")) {
+    if (!raw.trim()) continue;
+    const tab = raw.indexOf("\t");
+    if (tab === -1) continue;
+    const scope = raw.slice(0, tab);
+    const rest = raw.slice(tab + 1);
+    const eq = rest.indexOf("=");
+    entries.push({
+      scope,
+      key: (eq === -1 ? rest : rest.slice(0, eq)).toLowerCase(),
+      value: eq === -1 ? "" : rest.slice(eq + 1),
+      raw,
+    });
+  }
+  return entries;
+}
+
+function isIndirection(key: string): boolean {
+  return INDIRECTION_KEYS.some(
+    (prefix) => key === prefix || key.startsWith(prefix),
+  );
+}
+
+function executes(key: string, value: string): boolean {
+  if (EXACT_DANGEROUS_KEYS.includes(key)) return true;
+  if (key.startsWith("alias.")) return true;
+  if (dangerousFamilyLeaf(key)) return true;
+  if (isPermissiveProtocolAllow(key, value)) return true;
+  if (usesExtTransport(value)) return true;
+  return false;
+}
+
+/**
+ * Everything the effective config says before the agent has touched the checkout, as raw
+ * `scope\tkey=value` lines. Held in this process and never written down: the agent runs as this
+ * uid with no filesystem sandbox, so a baseline on disk is a baseline it can edit. Same reason
+ * `Worktree.baseSha` is carried rather than re-read.
+ *
+ * `null` when git could not answer. That is not "clean" and not "everything is new" — it means the
+ * scan falls back to judging the repository's own scopes, which it can always judge on their own.
+ */
+export async function configBaseline(
+  runner: Runner,
+  cwd: string,
+): Promise<string[] | null> {
+  const result = await git(runner, cwd, CONFIG_LIST_ARGS);
+  if (result.code !== 0 || result.timedOut) return null;
+  return parseConfigList(result.stdout).map((entry) => entry.raw);
+}
+
+/**
+ * The key the agent planted, or "" if it planted none.
+ *
+ * Two rules, because two questions. Inside the repository — `local` and `worktree`, both of which
+ * this pipeline created for this run — anything that executes is the agent's, and so is any
+ * `include.path` pointing somewhere this cannot vouch for. Outside it, on the operator's own
+ * machine, only what *appeared since* `baseline` counts: a `gh` credential helper in `~/.gitconfig`
+ * is why the guard exists at all, not evidence against the run.
+ *
+ * Without a baseline the machine scopes are not judged. That is deliberate and it is still
+ * strictly more than the local-only scan it replaces — it adds the worktree scope and the
+ * indirection — but a caller that can pass one closes `~/.gitconfig` too (BP-346).
+ */
+export async function plantedConfig(
+  runner: Runner,
+  cwd: string,
+  baseline?: readonly string[] | null,
+): Promise<string> {
+  // Two questions, two calls. `--local --list` fails outside a checkout and `--list` does not — it
+  // answers with the machine's global config instead — so widening the scan would have turned
+  // "this is not a repository" into "this repository is clean" without anything going red.
+  // Measured: exit 128 became exit 0 (BP-346).
+  const readable = await git(runner, cwd, ["config", "--local", "--list"]);
+  if (readable.code !== 0 || readable.timedOut)
+    return "an unreadable git config";
+
+  const result = await git(runner, cwd, CONFIG_LIST_ARGS);
+  // Unreadable is not the same as clean: a config this cannot read is one it cannot clear either.
+  if (result.code !== 0 || result.timedOut) return "an unreadable git config";
+
+  const entries = parseConfigList(result.stdout);
+  const known = new Set(baseline ?? []);
+  for (const entry of entries) {
+    const insideTheRepo = REPO_SCOPES.includes(entry.scope);
+    const appearedSince = baseline != null && !known.has(entry.raw);
+    if (!insideTheRepo && !appearedSince) continue;
+
+    if (isIndirection(entry.key)) {
+      return `${entry.key} (${entry.scope}), which points at a file this cannot vouch for`;
+    }
+    if (executes(entry.key, entry.value)) {
+      return `${entry.key} (${entry.scope})`;
+    }
+  }
+  return "";
+}
+
+export async function bindRepository(
+  deps: RepoDeps,
+  proposedPath: string,
+): Promise<BindResult> {
   if (!isAbsolute(proposedPath) || proposedPath.split(sep).includes("..")) {
-    return { ok: false, reason: `${proposedPath} must be an absolute path free of ".."` };
+    return {
+      ok: false,
+      reason: `${proposedPath} must be an absolute path free of ".."`,
+    };
   }
 
   let allowlist: string[];
@@ -154,7 +285,10 @@ export async function bindRepository(deps: RepoDeps, proposedPath: string): Prom
     return { ok: false, reason: (error as Error).message };
   }
   if (!allowlist.includes(proposedPath)) {
-    return { ok: false, reason: `${proposedPath} is not approved on this machine — add it to repos.json` };
+    return {
+      ok: false,
+      reason: `${proposedPath} is not approved on this machine — add it to repos.json`,
+    };
   }
 
   let resolved: string;
@@ -164,7 +298,10 @@ export async function bindRepository(deps: RepoDeps, proposedPath: string): Prom
     return { ok: false, reason: (error as Error).message };
   }
   if (resolved !== proposedPath) {
-    return { ok: false, reason: `${proposedPath} resolves to ${resolved} — allowlist entries may not be symlinks` };
+    return {
+      ok: false,
+      reason: `${proposedPath} resolves to ${resolved} — allowlist entries may not be symlinks`,
+    };
   }
 
   const sensitive = sensitiveLocation(proposedPath);
@@ -185,7 +322,10 @@ export async function bindRepository(deps: RepoDeps, proposedPath: string): Prom
     return { ok: false, reason: `${proposedPath} is group- or world-writable` };
   }
 
-  const toplevel = await git(deps.runner, proposedPath, ["rev-parse", "--show-toplevel"]);
+  const toplevel = await git(deps.runner, proposedPath, [
+    "rev-parse",
+    "--show-toplevel",
+  ]);
   if (toplevel.code !== 0 || toplevel.timedOut) {
     return { ok: false, reason: `${proposedPath} is not a git repository` };
   }
@@ -193,9 +333,16 @@ export async function bindRepository(deps: RepoDeps, proposedPath: string): Prom
     return { ok: false, reason: `${proposedPath} is not its own git toplevel` };
   }
 
-  const config = await git(deps.runner, proposedPath, ["config", "--local", "--list"]);
+  const config = await git(deps.runner, proposedPath, [
+    "config",
+    "--local",
+    "--list",
+  ]);
   if (config.code !== 0 || config.timedOut) {
-    return { ok: false, reason: `could not read git config in ${proposedPath}` };
+    return {
+      ok: false,
+      reason: `could not read git config in ${proposedPath}`,
+    };
   }
   const dangerous = dangerousConfigEntry(config.stdout);
   if (dangerous) {
@@ -227,7 +374,7 @@ export function createAllowlistReader(stateDir: string): () => string {
     const { mode } = statSync(path);
     if (mode & 0o077) {
       throw new Error(
-        `${path} is readable by group or others (mode ${(mode & 0o777).toString(8)}); run chmod 600 on it`
+        `${path} is readable by group or others (mode ${(mode & 0o777).toString(8)}); run chmod 600 on it`,
       );
     }
     return readFileSync(path, "utf8");
@@ -243,20 +390,25 @@ export function createAllowlistReader(stateDir: string): () => string {
 // directory is a fault — and reporting [] for a fault made the server wipe its stored inventory,
 // leaving a worker that looked live, enabled and error-free while claiming nothing.
 export type InventoryResult =
-  | { ok: true; repos: RepoInventory[] }
-  | { ok: false; reason: string };
+  { ok: true; repos: RepoInventory[] } | { ok: false; reason: string };
 
 export async function repoInventory(
-  deps: Pick<RepoDeps, "runner" | "readAllowlist">
+  deps: Pick<RepoDeps, "runner" | "readAllowlist">,
 ): Promise<InventoryResult> {
   let allowlist: unknown;
   try {
     allowlist = JSON.parse(deps.readAllowlist()).repos ?? [];
   } catch (error) {
-    return { ok: false, reason: `could not read repos.json: ${(error as Error).message}` };
+    return {
+      ok: false,
+      reason: `could not read repos.json: ${(error as Error).message}`,
+    };
   }
   if (!Array.isArray(allowlist)) {
-    return { ok: false, reason: "repos.json: `repos` must be an array of absolute paths" };
+    return {
+      ok: false,
+      reason: "repos.json: `repos` must be an array of absolute paths",
+    };
   }
 
   const repos: RepoInventory[] = [];
@@ -264,7 +416,11 @@ export async function repoInventory(
     if (typeof path !== "string" || !isAbsolute(path)) continue;
     // A directory that has gone away, or has no origin, is simply not offered — one bad entry must
     // not cost this machine every other checkout it could serve.
-    const result = await git(deps.runner, path, ["remote", "get-url", "origin"]).catch(() => null);
+    const result = await git(deps.runner, path, [
+      "remote",
+      "get-url",
+      "origin",
+    ]).catch(() => null);
     const remote = result && result.code === 0 ? result.stdout.trim() : "";
     if (remote) repos.push({ remote, path });
   }
