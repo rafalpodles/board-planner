@@ -130,6 +130,21 @@ final class CheckoutRemovalTests: XCTestCase {
     }
 
 
+    /// Unexamined is not clean — the rule this whole file is built on, applied to the one question
+    /// that decides whether the path is a repository at all. Without it the answer git could not
+    /// give would be read as "an ordinary checkout" and the repository would be deleted.
+    func testADirectoryGitWillNotDescribeIsARefusal() {
+        let git = Git()
+        git.answers["--git-common-dir"] = (128, "fatal: not a git repository")
+
+        let verdict = git.removal().check(path: "/checkouts/SB", workerIsBusy: false)
+
+        guard case .refused(let reason) = verdict else {
+            return XCTFail("expected a refusal, got \(verdict)")
+        }
+        XCTAssertTrue(reason.contains("could not tell"), reason)
+    }
+
     /// BP-422's second line, and the only place it can be exercised: `check` now refuses a linked
     /// worktree before the list is built, so nothing reaching real git can produce this shape. What
     /// the invariant says is that the FIRST entry is never returned — `git worktree list` names the
