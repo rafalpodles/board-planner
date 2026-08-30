@@ -155,8 +155,12 @@ export function agentProblems(composition: AgentComposition, lookup: Lookup): Pr
   if (mergeAt !== -1 && mergeAt < sequence.length - 1) {
     problems.push({
       severity: "broken",
+      // By display name, like every other message here and every other surface in the product.
+      // Raw keys read as "protected-paths, test-run runs after…" where the block beside the
+      // banner says "Protected files" and "Tests pass".
       message: `Merge is not last: ${sequence
         .slice(mergeAt + 1)
+        .map((key) => lookup(key)?.name ?? key)
         .join(", ")} runs after the change has already landed, so nothing there can stop it. Move Merge to the end.`,
     });
   }
