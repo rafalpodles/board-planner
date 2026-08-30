@@ -68,9 +68,12 @@ const UNAUTHENTICATED = [
 
 // Form-encoded rather than JSON, and unauthenticated with no throttle at all, so the cap is the
 // only bound they have.
+// `unreadable` is the answer each gives a body it could not read. Asserting the status alone would
+// not do: an uncapped route parses the oversized form and then refuses it as a bad grant, with the
+// same 400. The text is what separates "refused before reading" from "read, then disliked".
 const OAUTH_FORMS = [
-  { name: "OAuth token", path: "/oauth/token" },
-  { name: "OAuth authorize", path: "/oauth/authorize" },
+  { name: "OAuth token", path: "/oauth/token", unreadable: /x-www-form-urlencoded/ },
+  { name: "OAuth authorize", path: "/oauth/authorize", unreadable: /not a form/ },
 ];
 
 test.describe("handlers that run before any credential is checked", () => {
@@ -114,7 +117,9 @@ test.describe("the OAuth endpoints, which take a form", () => {
 
       // These answer RFC 6749 error codes rather than 413: an over-cap body is unreadable, which
       // is invalid_request, and a machine client acts on that.
-      expect(response.status(), await response.text()).toBe(400);
+      const body = await response.text();
+      expect(response.status(), body).toBe(400);
+      expect(body).toMatch(route.unreadable);
     });
   }
 });
