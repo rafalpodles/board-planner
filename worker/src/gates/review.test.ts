@@ -27,7 +27,7 @@ function context(diff: Partial<DiffStats> = {}, task: Partial<ClaimedTask> = {})
       testsAdded: ["a.test.ts"],
       blockedReason: "",
     },
-    diff: { changedLines: 2, changedFiles: ["a.ts"], patch, truncated: false, headSha: "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c", ...diff },
+    diff: { changedLines: 2, changedFiles: ["a.ts"], patch, truncated: false, headSha: "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c", symlinks: [], ...diff },
   };
 }
 

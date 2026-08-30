@@ -1,12 +1,61 @@
 import { describe, it, expect } from "vitest";
 import { protectedPathsGate, PROTECTED_PATHS_BRIEF } from "./protected-paths.js";
-import { GateContext } from "../types.js";
+import { DiffStats, GateContext } from "../types.js";
 
-function context(changedFiles: string[]): GateContext {
-  return { diff: { changedFiles } } as GateContext;
+function context(changedFiles: string[], symlinks: DiffStats["symlinks"] = []): GateContext {
+  return { diff: { changedFiles, symlinks } } as GateContext;
 }
 
 const gate = protectedPathsGate();
+
+/**
+ * BP-509. Every rule this gate applies is about a path, and `--numstat` renders a symlink as one
+ * added line in a file of that name — measured, `deep -> /etc/passwd` and a one-line text file are
+ * the same three fields. So the gate could not see that a change had added a door out of the tree.
+ */
+describe("a committed symlink that leaves the checkout", () => {
+  const gate = protectedPathsGate();
+
+  it("is refused, and the refusal says where it points", async () => {
+    const verdict = await gate.run(
+      context(["src/deep"], [{ path: "src/deep", target: "/Users/rpo/Documents" }])
+    );
+
+    expect(verdict.ok).toBe(false);
+    expect(verdict.reason).toContain("src/deep");
+    expect(verdict.reason).toContain("/Users/rpo/Documents");
+  });
+
+  it("is refused when it climbs out with .. rather than naming an absolute path", async () => {
+    const verdict = await gate.run(
+      context(["src/deep"], [{ path: "src/deep", target: "../../elsewhere" }])
+    );
+
+    expect(verdict.ok).toBe(false);
+  });
+
+  /**
+   * The controls, and without them "detects symlinks" and "refuses one-line files" would be
+   * indistinguishable — which is the whole reason this was invisible.
+   */
+  it("passes an ordinary one-line file added at exactly the same path", async () => {
+    expect((await gate.run(context(["src/deep"]))).ok).toBe(true);
+  });
+
+  it("passes a symlink that stays inside the tree, including one that leaves its own directory", async () => {
+    const verdict = await gate.run(
+      context(
+        ["docs/readme", "src/local"],
+        [
+          { path: "docs/readme", target: "../README.md" },
+          { path: "src/local", target: "./other.ts" },
+        ]
+      )
+    );
+
+    expect(verdict.ok).toBe(true);
+  });
+});
 
 describe("protectedPathsGate", () => {
   it("passes an ordinary change", async () => {
