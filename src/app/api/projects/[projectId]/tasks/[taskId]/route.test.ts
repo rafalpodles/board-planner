@@ -1,13 +1,22 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const updateTask = vi.fn();
+const heldRunRefusal = vi.fn();
+const taskFindOne = vi.fn();
+const taskDeleteOne = vi.fn();
+const projectFindById = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/task-service", () => ({
   updateTask,
+  heldRunRefusal,
   toApiExecution: (e: unknown) => e,
+  taskPopulateFields: [],
 }));
-vi.mock("@/models/task", () => ({ Task: { findOne: vi.fn(), find: vi.fn(), updateMany: vi.fn(), findOneAndDelete: vi.fn() } }));
+vi.mock("@/models/task", () => ({
+  Task: { findOne: taskFindOne, find: vi.fn(), updateMany: vi.fn(), deleteOne: taskDeleteOne, findOneAndDelete: vi.fn() },
+}));
+vi.mock("@/models/project", () => ({ Project: { findById: projectFindById } }));
 vi.mock("@/models/comment", () => ({ Comment: { deleteMany: vi.fn() } }));
 vi.mock("@/models/activityLog", () => ({ ActivityLog: { deleteMany: vi.fn() } }));
 vi.mock("@/models/notification", () => ({ Notification: { deleteMany: vi.fn() } }));
@@ -28,7 +37,7 @@ vi.mock("@/lib/middleware", () => ({
       }),
 }));
 
-const { PUT } = await import("./route");
+const { PUT, DELETE } = await import("./route");
 
 const TASK = "507f1f77bcf86cd799439011";
 
@@ -42,9 +51,28 @@ function request(body: unknown, asMachine = false) {
 
 const ctx = () => ({ params: Promise.resolve({ projectId: "p1", taskId: TASK }) });
 
+function deleteRequest(body?: unknown, asMachine = false) {
+  return new Request(`https://app.example.com/api/projects/p1/tasks/${TASK}`, {
+    method: "DELETE",
+    headers: { "content-type": "application/json", ...(asMachine ? { "x-machine": "1" } : {}) },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+}
+
+const HELD = {
+  ok: false as const,
+  error: "TP-7 is being executed by mac (phase agent). Stop the worker, or move it anyway.",
+  status: 409,
+  runConflict: { workerId: "w1", workerName: "mac", phase: "agent", phaseAt: null },
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
   updateTask.mockResolvedValue({ ok: true, data: { _id: TASK } });
+  taskFindOne.mockResolvedValue({ _id: TASK, taskNumber: 7, execution: {} });
+  taskDeleteOne.mockResolvedValue({ deletedCount: 1 });
+  projectFindById.mockReturnValue({ lean: () => Promise.resolve({ key: "TP" }) });
+  heldRunRefusal.mockResolvedValue(null);
 });
 
 // BP-320: PATCH .../status refused force from a machine credential; PUT .../tasks/:id reaches the
@@ -120,5 +148,61 @@ describe("PUT .../tasks/:taskId and the agent", () => {
     await PUT(roleOf("admin"), ctx());
 
     expect(updateTask.mock.calls[0]).toEqual(updateTask.mock.calls[1]);
+  });
+});
+
+/**
+ * BP-337. Three writers refuse to take a task off a running worker and demand `force`; DELETE was
+ * the fourth and asked nothing, while reaching a stronger outcome than any of them — the task is
+ * not moved, it is gone, with the comments the run was writing into it.
+ */
+describe("DELETE .../tasks/:taskId and the run hold", () => {
+  it("refuses a task a run holds, with the 409 shape the other writers give", async () => {
+    heldRunRefusal.mockResolvedValue(HELD);
+
+    const res = await DELETE(deleteRequest(), ctx());
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).runConflict).toMatchObject({ workerName: "mac", phase: "agent" });
+    expect(taskDeleteOne).not.toHaveBeenCalled();
+  });
+
+  it("deletes when a person forces, which is what the dialog resends", async () => {
+    heldRunRefusal.mockResolvedValue(HELD);
+
+    const res = await DELETE(deleteRequest({ force: true }), ctx());
+
+    expect(res.status).toBe(200);
+    expect(taskDeleteOne).toHaveBeenCalled();
+    // Not even asked: forcing is the answer to the question, so the refusal is not computed
+    expect(heldRunRefusal).not.toHaveBeenCalled();
+  });
+
+  it("refuses force from a machine credential, and does not read the task at all", async () => {
+    const res = await DELETE(deleteRequest({ force: true }, true), ctx());
+
+    expect(res.status).toBe(403);
+    expect(taskFindOne).not.toHaveBeenCalled();
+    expect(taskDeleteOne).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The control. Without it "refuses held tasks" and "delete is broken" are the same observation,
+   * and the ordinary case is the one every board click takes.
+   */
+  it("still deletes an unheld task, with no body at all on the request", async () => {
+    const res = await DELETE(deleteRequest(), ctx());
+
+    expect(res.status).toBe(200);
+    expect(taskDeleteOne).toHaveBeenCalledWith({ _id: TASK, project: "p1" });
+  });
+
+  it("still answers 404 for a task that is not there, rather than reading it as held", async () => {
+    taskFindOne.mockResolvedValue(null);
+
+    const res = await DELETE(deleteRequest(), ctx());
+
+    expect(res.status).toBe(404);
+    expect(taskDeleteOne).not.toHaveBeenCalled();
   });
 });
