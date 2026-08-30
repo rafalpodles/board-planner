@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { readJsonBody } from "@/lib/request-body";
 import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
 import { getClientIp, MIN_PASSWORD_LENGTH, PASSWORD_COST_FACTOR } from "@/lib/auth";
@@ -31,12 +32,9 @@ export async function POST(request: Request) {
   const refusal = provenanceRefusal(request);
   if (refusal) return refusal;
 
-  let body: { token?: unknown; newPassword?: unknown };
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
+  const read = await readJsonBody<{ token?: unknown; newPassword?: unknown }>(request);
+  if (!read.ok) return read.response;
+  const body = read.value;
 
   const { token, newPassword } = body;
   if (typeof token !== "string" || typeof newPassword !== "string") {

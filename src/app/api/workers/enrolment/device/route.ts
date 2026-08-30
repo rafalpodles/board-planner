@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { readJsonBody } from "@/lib/request-body";
 import { connectDB } from "@/lib/db";
 import { protocolOf } from "@/lib/middleware";
 import { PROTOCOL_VERSION } from "@/lib/worker-service";
@@ -25,7 +26,9 @@ const ENROLMENTS_PER_WINDOW = 10;
 export async function POST(request: Request) {
   await connectDB();
 
-  const body = await request.json().catch(() => ({}));
+  const read = await readJsonBody(request);
+  if (!read.ok) return read.response;
+  const body = read.value;
   // Stripped before it is ever stored, not only where it becomes a User's fullName: this value is
   // rendered raw on /enrol/[userCode] BEFORE anyone approves it, and a bidi-override or zero-width
   // character does not break a line or reach a script sink — it just makes the string on screen

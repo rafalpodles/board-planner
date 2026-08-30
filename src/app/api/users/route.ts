@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { readJsonBody } from "@/lib/request-body";
 import {
   FULL_NAME_RULE,
   isValidFullName,
@@ -27,7 +28,11 @@ export const GET = withAdmin(async () => {
 export async function POST(request: Request) {
   await connectDB();
 
-  const body = await request.json();
+  const read = await readJsonBody<{ username?: string; password?: string; fullName?: string; email?: string }>(
+    request
+  );
+  if (!read.ok) return read.response;
+  const body = read.value;
   const { username, password, fullName } = body;
 
   if (!username || !password || !fullName) {

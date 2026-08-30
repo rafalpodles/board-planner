@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { readJsonBody } from "@/lib/request-body";
 import { connectDB } from "@/lib/db";
 import { getClientIp } from "@/lib/auth";
 import { APP_NAME } from "@/lib/brand";
@@ -31,12 +32,9 @@ export async function POST(request: Request) {
   const refusal = provenanceRefusal(request);
   if (refusal) return refusal;
 
-  let body: { identifier?: unknown };
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
+  const read = await readJsonBody<{ identifier?: unknown }>(request);
+  if (!read.ok) return read.response;
+  const body = read.value;
 
   const { identifier } = body;
   if (typeof identifier !== "string" || !identifier.trim()) {
