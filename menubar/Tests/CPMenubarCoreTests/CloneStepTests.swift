@@ -12,6 +12,12 @@ final class CloneStepTests: XCTestCase {
                 run: { tool, args, _ in
                     self.calls.append([tool] + args)
                     for (needle, result) in self.results where args.contains(needle) { return result }
+                    // An ordinary checkout answers both of these with the same relative `.git`.
+                    // Without it every stub would look like a directory git cannot describe, which
+                    // CloneStep now refuses to adopt (BP-422)
+                    if args.contains("--git-dir") || args.contains("--git-common-dir") {
+                        return (0, ".git")
+                    }
                     return (0, "")
                 },
                 exists: { self.present.contains($0) })

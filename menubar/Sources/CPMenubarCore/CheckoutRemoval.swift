@@ -49,6 +49,25 @@ public struct CheckoutRemoval: Sendable {
             return .refused(reason: "\(path) is inside the checkout at \(root), not the checkout itself")
         }
 
+        // The guard above cannot tell a repository from one of its linked worktrees: a worktree is
+        // a work tree, `--show-toplevel` answers with the worktree's own path, and the comparison
+        // just passed on a checkout looking at itself. What follows would then be asked about the
+        // wrong thing — `worktree list` names the repository's main checkout first, and this used
+        // to hand it back as something to delete, taking the object store every other worktree of
+        // that repository shares (BP-422).
+        let gitDir = run(["-C", path, "rev-parse", "--git-dir"], path)
+        let commonDir = run(["-C", path, "rev-parse", "--git-common-dir"], path)
+        switch LinkedWorktreeCheck.kind(gitDir: gitDir, commonDir: commonDir, relativeTo: path) {
+        case .linkedWorktree:
+            return .refused(
+                reason: "\(path) is a linked worktree, not a repository — this removes a repository together with its worktrees, and cannot remove a worktree from the repository it belongs to. Use `git worktree remove`.")
+        case nil:
+            return .refused(
+                reason: "could not tell whether \(path) is a repository or one of its worktrees")
+        case .repository:
+            break
+        }
+
         let dirty = run(["-C", path, "status", "--porcelain"], path)
         guard dirty.code == 0 else {
             return .refused(reason: "could not tell whether \(path) has uncommitted changes")
@@ -117,12 +136,19 @@ public struct CheckoutRemoval: Sendable {
         output.split(separator: "\n").map(String.init).filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
     }
 
-    /// Every `worktree <path>` line except the checkout itself.
+    /// Every `worktree <path>` line except the checkout itself — and except the repository's main
+    /// checkout, which `git worktree list` always names first.
+    ///
+    /// Dropping `root` alone was the whole of BP-422: asked about a linked worktree, `root` *is*
+    /// that worktree, so the main checkout survived the filter and came back as something to
+    /// delete. `check` refuses that case before this runs; the `dropFirst` is the second line, so
+    /// the list is incapable of naming a repository rather than merely never asked to.
     private func linkedWorktrees(_ output: String, root: String) -> [String] {
         lines(output)
             .compactMap { line in
                 line.hasPrefix("worktree ") ? String(line.dropFirst("worktree ".count)) : nil
             }
+            .dropFirst()
             .filter { !sameDirectory($0, root) }
     }
 

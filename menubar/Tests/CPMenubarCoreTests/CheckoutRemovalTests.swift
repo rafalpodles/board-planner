@@ -15,6 +15,10 @@ final class CheckoutRemovalTests: XCTestCase {
                     for (needle, answer) in self.answers where args.contains(needle) { return answer }
                     // A clean checkout with no worktrees, unless a test says otherwise
                     if args.contains("--show-toplevel") { return (0, "/checkouts/SB\n") }
+                    // A repository rather than one of its worktrees: the two answers agree
+                    if args.contains("--git-dir") || args.contains("--git-common-dir") {
+                        return (0, ".git")
+                    }
                     if args.contains("--porcelain") && args.contains("worktree") {
                         return (0, "worktree /checkouts/SB\nHEAD abc\n")
                     }

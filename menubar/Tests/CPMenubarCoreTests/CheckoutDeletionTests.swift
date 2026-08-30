@@ -109,6 +109,7 @@ final class CheckoutDeletionTests: XCTestCase {
         CheckoutRemoval(
             run: { args, _ in
                 if args.contains("--show-toplevel") { return (0, "/co\n") }
+                if args.contains("--git-dir") || args.contains("--git-common-dir") { return (0, ".git") }
                 if args.contains("worktree") {
                     let listed = (["/co"] + worktrees).map { "worktree \($0)" }.joined(separator: "\n\n")
                     return (0, listed)
