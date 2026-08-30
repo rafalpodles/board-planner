@@ -2,6 +2,12 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { ApiClient } from "./api-client.js";
+import {
+  strictInput,
+  NOTHING_TO_CHANGE,
+  CREATE_TASK_HINTS,
+  UPDATE_TASK_HINTS,
+} from "./strict-input.js";
 
 const APP_NAME = "Board Planner";
 
@@ -22,20 +28,24 @@ const server = new McpServer({
 
 // --- Project tools ---
 
-server.tool(
+server.registerTool(
   "list_projects",
-  `List all projects in ${APP_NAME}`,
-  {},
+  {
+    description: `List all projects in ${APP_NAME}`,
+    inputSchema: strictInput({}),
+  },
   async () => {
     const projects = await client.listProjects();
     return { content: [{ type: "text", text: JSON.stringify(projects, null, 2) }] };
   }
 );
 
-server.tool(
+server.registerTool(
   "get_project",
-  "Get project details by project key (e.g. 'CP') or project ID",
-  { identifier: z.string().describe("Project key (e.g. 'CP') or project ID") },
+  {
+    description: "Get project details by project key (e.g. 'CP') or project ID",
+    inputSchema: strictInput({ identifier: z.string().describe("Project key (e.g. 'CP') or project ID") }),
+  },
   async ({ identifier }) => {
     let project;
     try {
@@ -49,15 +59,17 @@ server.tool(
 
 // --- Task tools ---
 
-server.tool(
+server.registerTool(
   "list_tasks",
-  "List tasks in a project with optional filters",
   {
-    project: z.string().describe("Project key (e.g. 'CP')"),
-    status: z.string().optional().describe("Filter by status (comma-separated): planned, todo, in_progress, in_review, needs_human_review, ready_to_test, done"),
-    assignee: z.string().optional().describe("Filter by assignee username"),
-    category: z.string().optional().describe("Filter by category (project-defined; defaults: bug, doc, user-story, idea)"),
-    priority: z.string().optional().describe("Filter by priority: low, medium, high, urgent"),
+    description: "List tasks in a project with optional filters",
+    inputSchema: strictInput({
+      project: z.string().describe("Project key (e.g. 'CP')"),
+      status: z.string().optional().describe("Filter by status (comma-separated): planned, todo, in_progress, in_review, needs_human_review, ready_to_test, done"),
+      assignee: z.string().optional().describe("Filter by assignee username"),
+      category: z.string().optional().describe("Filter by category (project-defined; defaults: bug, doc, user-story, idea)"),
+      priority: z.string().optional().describe("Filter by priority: low, medium, high, urgent"),
+    }),
   },
   async ({ project, status, assignee, category, priority }) => {
     const proj = await client.getProjectByKey(project) as { _id: string };
@@ -72,10 +84,12 @@ server.tool(
   }
 );
 
-server.tool(
+server.registerTool(
   "get_task",
-  "Get full task details by task key (e.g. 'CP-1')",
-  { taskKey: z.string().describe("Task key (e.g. 'CP-1')") },
+  {
+    description: "Get full task details by task key (e.g. 'CP-1')",
+    inputSchema: strictInput({ taskKey: z.string().describe("Task key (e.g. 'CP-1')") }),
+  },
   async ({ taskKey }) => {
     const { projectId, task } = await resolveTaskKey(taskKey);
     const fullTask = await client.getTask(projectId, (task as { _id: string })._id);
@@ -134,25 +148,27 @@ function resolveFieldsByName(
   return values;
 }
 
-server.tool(
+server.registerTool(
   "create_task",
-  "Create a new task in a project",
   {
-    project: z.string().describe("Project key (e.g. 'CP')"),
-    title: z.string().describe("Task title"),
-    description: z.string().optional().describe("Task description"),
-    priority: z.string().optional().describe("Priority: low, medium, high, or urgent (default: medium)"),
-    category: z.string().optional().describe("Category — one of the project's configured categories (defaults: bug, doc, user-story, idea)"),
-    assignee: z.string().optional().describe("Assignee username"),
-    status: z.string().optional().describe("Initial status (default: planned)"),
-    acceptanceCriteria: z.string().optional().describe("Acceptance criteria (markdown checklist, converted to structured checklist items)"),
-    fields: z
-      .record(z.string(), z.any())
-      .optional()
-      .describe(
-        "Project-defined fields keyed by field name, e.g. { \"Difficulty\": \"L\", \"Component\": \"ui\" }. " +
-          "Since CP-214 this is the only way to set them — see get_project for the field list."
-      ),
+    description: "Create a new task in a project",
+    inputSchema: strictInput({
+      project: z.string().describe("Project key (e.g. 'CP')"),
+      title: z.string().describe("Task title"),
+      description: z.string().optional().describe("Task description"),
+      priority: z.string().optional().describe("Priority: low, medium, high, or urgent (default: medium)"),
+      category: z.string().optional().describe("Category — one of the project's configured categories (defaults: bug, doc, user-story, idea)"),
+      assignee: z.string().optional().describe("Assignee username"),
+      status: z.string().optional().describe("Initial status (default: planned)"),
+      acceptanceCriteria: z.string().optional().describe("Acceptance criteria (markdown checklist, converted to structured checklist items)"),
+      fields: z
+        .record(z.string(), z.any())
+        .optional()
+        .describe(
+          "Project-defined fields keyed by field name, e.g. { \"Difficulty\": \"L\", \"Component\": \"ui\" }. " +
+            "Since CP-214 this is the only way to set them — see get_project for the field list."
+        ),
+    }, CREATE_TASK_HINTS),
   },
   async ({ project, title, description, priority, category, assignee, status, acceptanceCriteria, fields }) => {
     const proj = await client.getProjectByKey(project) as { _id: string; customFields?: FieldDef[] };
@@ -182,33 +198,35 @@ server.tool(
   }
 );
 
-server.tool(
+server.registerTool(
   "update_task",
-  "Update an existing task's fields by task key",
   {
-    taskKey: z.string().describe("Task key (e.g. 'CP-1')"),
-    title: z.string().optional(),
-    description: z.string().optional(),
-    priority: z.string().optional().describe("Priority: low, medium, high, or urgent"),
-    category: z.string().optional(),
-    assignee: z.string().optional().describe("Assignee username. Empty string to unassign."),
-    agent: z
-      .string()
-      .optional()
-      .describe(
-        "Which agent runs this task on a machine, by name. Choosing one is the hand-over: the " +
-          "machine belonging to the task's assignee takes it and runs that agent, and only when " +
-          "that person assigned it to themselves. Empty string means nobody — the default, and " +
-          "what a task somebody is doing by hand looks like. Instance admins only."
-      ),
-    acceptanceCriteria: z.string().optional().describe("Acceptance criteria (markdown checklist, converted to structured checklist items)"),
-    fields: z
-      .record(z.string(), z.any())
-      .optional()
-      .describe(
-        "Project-defined fields keyed by field name, e.g. { \"Difficulty\": \"L\", \"Component\": \"ui\" }. " +
-          "Since CP-214 this is the only way to set them — see get_project for the field list."
-      ),
+    description: "Update an existing task's fields by task key",
+    inputSchema: strictInput({
+      taskKey: z.string().describe("Task key (e.g. 'CP-1')"),
+      title: z.string().optional(),
+      description: z.string().optional(),
+      priority: z.string().optional().describe("Priority: low, medium, high, or urgent"),
+      category: z.string().optional(),
+      assignee: z.string().optional().describe("Assignee username. Empty string to unassign."),
+      agent: z
+        .string()
+        .optional()
+        .describe(
+          "Which agent runs this task on a machine, by name. Choosing one is the hand-over: the " +
+            "machine belonging to the task's assignee takes it and runs that agent, and only when " +
+            "that person assigned it to themselves. Empty string means nobody — the default, and " +
+            "what a task somebody is doing by hand looks like. Instance admins only."
+        ),
+      acceptanceCriteria: z.string().optional().describe("Acceptance criteria (markdown checklist, converted to structured checklist items)"),
+      fields: z
+        .record(z.string(), z.any())
+        .optional()
+        .describe(
+          "Project-defined fields keyed by field name, e.g. { \"Difficulty\": \"L\", \"Component\": \"ui\" }. " +
+            "Since CP-214 this is the only way to set them — see get_project for the field list."
+        ),
+    }, UPDATE_TASK_HINTS),
   },
   async ({ taskKey, title, description, priority, category, assignee, agent, acceptanceCriteria, fields }) => {
     const { projectId, task } = await resolveTaskKey(taskKey);
@@ -253,17 +271,23 @@ server.tool(
       }
     }
 
+    // An empty update still bumps updatedAt, which is the one field that reads as proof
+    // something was written (BP-497)
+    if (Object.keys(data).length === 0) throw new Error(`update_task ${NOTHING_TO_CHANGE}`);
+
     const updated = await client.updateTask(projectId, (task as { _id: string })._id, data);
     return { content: [{ type: "text", text: JSON.stringify(updated, null, 2) }] };
   }
 );
 
-server.tool(
+server.registerTool(
   "change_task_status",
-  "Change the status of a task. Statuses are the project's column ids (defaults: planned, todo, in_progress, in_review, needs_human_review, ready_to_test, done — see get_project for the actual list with roles)",
   {
-    taskKey: z.string().describe("Task key (e.g. 'CP-1')"),
-    status: z.string().describe("New status"),
+    description: "Change the status of a task. Statuses are the project's column ids (defaults: planned, todo, in_progress, in_review, needs_human_review, ready_to_test, done — see get_project for the actual list with roles)",
+    inputSchema: strictInput({
+      taskKey: z.string().describe("Task key (e.g. 'CP-1')"),
+      status: z.string().describe("New status"),
+    }),
   },
   async ({ taskKey, status }) => {
     const { projectId, task } = await resolveTaskKey(taskKey);
@@ -274,10 +298,12 @@ server.tool(
 
 // --- Sprint tools ---
 
-server.tool(
+server.registerTool(
   "list_sprints",
-  "List all sprints in a project",
-  { project: z.string().describe("Project key (e.g. 'CP')") },
+  {
+    description: "List all sprints in a project",
+    inputSchema: strictInput({ project: z.string().describe("Project key (e.g. 'CP')") }),
+  },
   async ({ project }) => {
     const proj = await client.getProjectByKey(project) as { _id: string };
     const sprints = await client.listSprints(proj._id);
@@ -285,15 +311,17 @@ server.tool(
   }
 );
 
-server.tool(
+server.registerTool(
   "create_sprint",
-  "Create a new sprint in a project",
   {
-    project: z.string().describe("Project key (e.g. 'CP')"),
-    name: z.string().describe("Sprint name"),
-    startDate: z.string().describe("Start date (YYYY-MM-DD)"),
-    endDate: z.string().describe("End date (YYYY-MM-DD)"),
-    goal: z.string().optional().describe("Sprint goal"),
+    description: "Create a new sprint in a project",
+    inputSchema: strictInput({
+      project: z.string().describe("Project key (e.g. 'CP')"),
+      name: z.string().describe("Sprint name"),
+      startDate: z.string().describe("Start date (YYYY-MM-DD)"),
+      endDate: z.string().describe("End date (YYYY-MM-DD)"),
+      goal: z.string().optional().describe("Sprint goal"),
+    }),
   },
   async ({ project, name, startDate, endDate, goal }) => {
     const proj = await client.getProjectByKey(project) as { _id: string };
@@ -302,17 +330,19 @@ server.tool(
   }
 );
 
-server.tool(
+server.registerTool(
   "update_sprint",
-  "Update an existing sprint (name, dates, goal, status)",
   {
-    project: z.string().describe("Project key (e.g. 'CP')"),
-    sprintId: z.string().describe("Sprint ID"),
-    name: z.string().optional(),
-    startDate: z.string().optional(),
-    endDate: z.string().optional(),
-    goal: z.string().optional(),
-    status: z.string().optional().describe("planned, active, or completed"),
+    description: "Update an existing sprint (name, dates, goal, status)",
+    inputSchema: strictInput({
+      project: z.string().describe("Project key (e.g. 'CP')"),
+      sprintId: z.string().describe("Sprint ID"),
+      name: z.string().optional(),
+      startDate: z.string().optional(),
+      endDate: z.string().optional(),
+      goal: z.string().optional(),
+      status: z.string().optional().describe("planned, active, or completed"),
+    }),
   },
   async ({ project, sprintId, ...data }) => {
     const proj = await client.getProjectByKey(project) as { _id: string };
@@ -322,6 +352,8 @@ server.tool(
     if (data.endDate !== undefined) updates.endDate = data.endDate;
     if (data.goal !== undefined) updates.goal = data.goal;
     if (data.status !== undefined) updates.status = data.status;
+    if (Object.keys(updates).length === 0) throw new Error(`update_sprint ${NOTHING_TO_CHANGE}`);
+
     const sprint = await client.updateSprint(proj._id, sprintId, updates);
     return { content: [{ type: "text", text: JSON.stringify(sprint, null, 2) }] };
   }
@@ -329,12 +361,14 @@ server.tool(
 
 // --- Comment tools ---
 
-server.tool(
+server.registerTool(
   "add_comment",
-  "Add a comment to a task by task key (e.g. 'CP-1')",
   {
-    taskKey: z.string().describe("Task key (e.g. 'CP-1')"),
-    body: z.string().describe("Comment text"),
+    description: "Add a comment to a task by task key (e.g. 'CP-1')",
+    inputSchema: strictInput({
+      taskKey: z.string().describe("Task key (e.g. 'CP-1')"),
+      body: z.string().describe("Comment text"),
+    }),
   },
   async ({ taskKey, body }) => {
     const { projectId, task } = await resolveTaskKey(taskKey);
@@ -343,10 +377,12 @@ server.tool(
   }
 );
 
-server.tool(
+server.registerTool(
   "list_comments",
-  "List all comments on a task by task key (e.g. 'CP-1')",
-  { taskKey: z.string().describe("Task key (e.g. 'CP-1')") },
+  {
+    description: "List all comments on a task by task key (e.g. 'CP-1')",
+    inputSchema: strictInput({ taskKey: z.string().describe("Task key (e.g. 'CP-1')") }),
+  },
   async ({ taskKey }) => {
     const { projectId, task } = await resolveTaskKey(taskKey);
     const comments = await client.listComments(projectId, (task as { _id: string })._id);
