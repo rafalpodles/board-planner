@@ -66,6 +66,26 @@ export function columnIdsWithRole(
     .map((c) => c.id);
 }
 
+// Where a merged merge request sends a task, or undefined if it sends it nowhere.
+//
+// One review column forward, never into or out of a column somebody flagged for a human. The flag
+// is the signal because it is already the repo's answer to "which column means a human needs to
+// look at this" (see escalationColumnId in ./escalation) — position is not: that helper falls back
+// to the FIRST review column, and column order is whatever somebody last dragged it into.
+//
+// The default board is the case that matters: three columns carry the review role, so advancing to
+// the merely-next one parked merged work in needs_human_review, which is flagged, and moved it back
+// out again on the next sync. Boards that flag nothing keep advancing one step, as before.
+export function mergedReviewDestination(
+  project: HasAnyColumns | null | undefined,
+  status: string
+): string | undefined {
+  const review = effectiveColumns(project?.columns).filter((c) => c.role === "review");
+  const from = review.findIndex((c) => c.id === status);
+  if (from < 0 || review[from].triggersPmReview) return undefined;
+  return review.slice(from + 1).find((c) => !c.triggersPmReview)?.id;
+}
+
 // The column a task is sitting in, or undefined if its status names no column the project has —
 // which happens to a task left behind by a column somebody deleted.
 export function columnFor(

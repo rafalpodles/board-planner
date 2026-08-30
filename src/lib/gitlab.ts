@@ -29,9 +29,16 @@ export async function fetchMergeRequests(
   return readBoundedJson(res, MAX_RESPONSE_BYTES);
 }
 
-// Same matching rules as GitHub PRs: project key + number in branch or title
-export function matchMRsToTasks(mrs: GitLabMR[], projectKey: string): ParsedPR[] {
-  const pattern = new RegExp(`${escapeRegex(projectKey)}[- ](\\d+)`, "i");
+// Same matching rules as GitHub PRs: project key + number in branch or title, and the keys the
+// project used to have — renaming a project renames every task at once, while the branches and MR
+// titles already on GitLab keep the prefix they were created with.
+export function matchMRsToTasks(
+  mrs: GitLabMR[],
+  projectKey: string,
+  formerKeys: string[] = []
+): ParsedPR[] {
+  const keys = [projectKey, ...formerKeys].filter(Boolean);
+  const pattern = new RegExp(`(?:${keys.map(escapeRegex).join("|")})[- ](\\d+)`, "i");
   const results: ParsedPR[] = [];
 
   for (const mr of mrs) {
