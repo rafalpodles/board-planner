@@ -4047,17 +4047,75 @@ describe("an acceptance criterion neither writer will store", () => {
 
   // The control. Adding a criterion is the gesture this must never break, and the padding proves
   // the text is normalised rather than merely waved through.
+  /**
+   * A real ObjectId, because `_id` is one. This row used to read `_id: "c1"` — a value the schema
+   * cannot store, which reached `Task.create` through the spread and 500'd there (BP-499). The
+   * fixture was the shape of the bug.
+   */
+  const A_ROW_ID = "507f1f77bcf86cd799439011";
+
   it("stores ordinary criteria, trimmed, keeping the row's own id and done flag", async () => {
     const result = await updateTask(
       "p1",
       "t1",
-      { checklist: [{ _id: "c1", text: "  Ships with a test  ", done: true }] } as never,
+      { checklist: [{ _id: A_ROW_ID, text: "  Ships with a test  ", done: true }] } as never,
       WHO
     );
 
     expect(result.ok).toBe(true);
     expect(setStage(findOneAndUpdate.mock.calls[0][1]).checklist).toEqual([
-      { _id: "c1", text: "Ships with a test", done: true },
+      { _id: A_ROW_ID, text: "Ships with a test", done: true },
+    ]);
+  });
+
+  /**
+   * The keys the row is allowed to carry, and the two shapes that used to ride uncast into the
+   * write. `done` and `_id` are judged by the same caster the write will use; everything else the
+   * body invented is dropped rather than forwarded.
+   */
+  const REFUSED_ROWS: [string, Record<string, unknown>][] = [
+    ["a done flag that is an object", { text: "a", done: {} }],
+    ["a done flag that is a list", { text: "a", done: ["x"] }],
+    ["a done flag that is not a word the cast knows", { text: "a", done: "maybe" }],
+    ["an id that is not one", { text: "a", _id: "nope" }],
+    ["an id that is an object", { text: "a", _id: {} }],
+  ];
+
+  describe.each(REFUSED_ROWS)("%s", (_label, row) => {
+    it("is refused with a 400, and nothing is written", async () => {
+      const result = await updateTask("p1", "t1", { checklist: [row] } as never, WHO);
+
+      expect(result).toMatchObject({ ok: false, status: 400 });
+      expect(findOneAndUpdate, "the update reached the model anyway").not.toHaveBeenCalled();
+    });
+  });
+
+  it("takes the flags the cast takes, and drops the keys the row invented", async () => {
+    const result = await updateTask(
+      "p1",
+      "t1",
+      {
+        checklist: [
+          // "yes" and 1 are both booleans to Mongoose, so a guard stricter than the cast would
+          // refuse a row the schema would have stored
+          { text: "a", done: "yes", mischief: "dropped", createdBy: "someone else" },
+          { text: "b", done: 1 },
+          { text: "c", _id: "" },
+          // `done: null` is dropped too, so the row falls to the schema default rather than
+          // storing a null where every reader expects a boolean
+          { text: "d", done: null },
+        ],
+      } as never,
+      WHO
+    );
+
+    expect(result.ok).toBe(true);
+    expect(setStage(findOneAndUpdate.mock.calls[0][1]).checklist).toEqual([
+      { text: "a", done: "yes" },
+      { text: "b", done: 1 },
+      // A blank id is a row that has none yet — the key is dropped so Mongoose mints one
+      { text: "c" },
+      { text: "d" },
     ]);
   });
 
@@ -4157,6 +4215,9 @@ describe("nothing a create is refused for costs a task number", () => {
     ["an order given as an array", { order: [] }],
     ["a description that is not text", { description: {} }],
     ["a description given as an array", { description: ["a"] }],
+    // BP-499: a checklist row's other keys rode uncast into the write — on create, past the `$inc`
+    ["a criterion whose done flag is an object", { checklist: [{ text: "a", done: {} }] }],
+    ["a criterion whose id is not one", { checklist: [{ text: "a", _id: "nope" }] }],
   ];
 
   describe.each(REFUSED)("%s", (_label, over) => {
@@ -4179,6 +4240,23 @@ describe("nothing a create is refused for costs a task number", () => {
     expect(result).toMatchObject({ ok: false, status: 400 });
     expect(taskCreate).not.toHaveBeenCalled();
     expect(projectFindOneAndUpdate, "a refused create still spent a task number").not.toHaveBeenCalled();
+  });
+
+  /**
+   * A board with no categories at all skips the name check, and the cast is what would then throw
+   * — past the `$inc`. Not reachable through the API today (the delete route refuses to remove the
+   * last category), so this closes the case and removes the need to know that.
+   */
+  it("refuses a category that is not text even when the board has no categories", async () => {
+    findById.mockReturnValue({ lean: () => Promise.resolve({ ...board, categories: [] }) });
+
+    const refused = await createTask("p1", "actor", { title: "Ordinary title", category: {} });
+    expect(refused).toMatchObject({ ok: false, status: 400 });
+    expect(projectFindOneAndUpdate, "a refused create still spent a task number").not.toHaveBeenCalled();
+
+    // The control: with no categories to check against, any ordinary string is still accepted
+    const created = await createTask("p1", "actor", { title: "Ordinary title", category: "chore" });
+    expect(created.ok).toBe(true);
   });
 
   // The control the whole block rests on: "the counter did not move" is equally true of a create
@@ -4266,6 +4344,9 @@ describe("a value the schema will not store is refused by updateTask too", () =>
     ["an order given as an array", { order: [] }],
     ["a description that is not text", { description: {} }],
     ["a description given as an array", { description: ["a"] }],
+    // BP-499: a checklist row's other keys rode uncast into the write — on create, past the `$inc`
+    ["a criterion whose done flag is an object", { checklist: [{ text: "a", done: {} }] }],
+    ["a criterion whose id is not one", { checklist: [{ text: "a", _id: "nope" }] }],
   ];
 
   describe.each(REFUSED)("%s", (_label, body) => {
