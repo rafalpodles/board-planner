@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { MAX_JSON_BODY_BYTES, readFormBody as readBoundedFormBody } from "./request-body";
 
 export const ACCESS_TOKEN_TTL_SECONDS = 60 * 60; // 1h
 export const REFRESH_TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30; // 30d
@@ -61,10 +62,15 @@ export function newClientId(): string {
  * itself when its access token lapses. §5.2 calls that `invalid_request`, and the difference
  * matters to a machine: a 400 naming the error is something a client acts on, a 500 is not (BP-444).
  */
+/**
+ * Bounded, because both callers are unauthenticated, answer CORS `*`, and the token endpoint has no
+ * throttle at all — so an oversized form was work anybody could spend without holding anything.
+ * 64 KB against a handful of form fields whose longest is a redirect URI.
+ *
+ * An over-cap body comes back as null, which the callers already report as `invalid_request`
+ * rather than 413: these endpoints answer RFC 6749 error codes, and a client acts on those.
+ */
 export async function readFormBody(req: Request): Promise<FormData | null> {
-  try {
-    return await req.formData();
-  } catch {
-    return null;
-  }
+  const read = await readBoundedFormBody(req, MAX_JSON_BODY_BYTES);
+  return read.ok ? read.value : null;
 }

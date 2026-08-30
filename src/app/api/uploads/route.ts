@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { readFormBody } from "@/lib/request-body";
 import mongoose from "mongoose";
 import { Readable } from "stream";
 import { connectDB } from "@/lib/db";
@@ -32,16 +33,13 @@ const ALLOWED_MIME_TYPES = new Set([
 export const POST = withAuth(async (request, { user }) => {
   await connectDB();
 
-  // Content-Length is absent on a chunked request and can lie on any request, so this bounds the
-  // ordinary case only; the file.size check further down stays as the backstop for the rest. It is
-  // here because that backstop runs twenty-nine lines and several round trips after the body has
-  // been allocated, so the 5 MB limit bounded what reached GridFS rather than what was buffered.
-  const declared = Number(request.headers.get("content-length"));
-  if (Number.isFinite(declared) && declared > MAX_UPLOAD_REQUEST_BYTES) {
-    return NextResponse.json({ error: "File too large. Maximum size is 5MB." }, { status: 413 });
-  }
-
-  const formData = await request.formData();
+  // Counted through, not just declared. The file.size check further down cannot be the bound:
+  // it runs twenty-nine lines and several round trips after the body has been materialised, so
+  // the 5 MB limit governs what reaches GridFS rather than what the process allocates — and a
+  // request that simply omits Content-Length walked past a header check on its own.
+  const read = await readFormBody(request, MAX_UPLOAD_REQUEST_BYTES);
+  if (!read.ok) return read.response;
+  const formData = read.value;
   const file = formData.get("file") as File | null;
   const projectId = String(formData.get("projectId") || "");
 

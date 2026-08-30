@@ -138,7 +138,7 @@ describe("the cost of a poll", () => {
     expect(started.userCode).toBeTruthy();
     expect(create).toHaveBeenCalled();
     // At exactly the ceiling one row has to go, or the collection sits one over it from here on
-    expect(deleteMany).toHaveBeenCalledWith({ _id: { $in: ["oldest"] } });
+    expect(deleteMany.mock.calls[0][0]).toMatchObject({ _id: { $in: ["oldest"] } });
   });
 
   it("makes room by dropping the oldest pending row", async () => {
@@ -157,9 +157,15 @@ describe("the cost of a poll", () => {
       expiresAt: { $gt: expect.any(Date) },
     });
     expect(select).toHaveBeenCalledWith("_id");
-    // Three, because it is two over the ceiling and one more is about to be created. Asking for
-    // fewer leaves the collection over it for good.
-    expect(deleteMany).toHaveBeenCalledWith({ _id: { $in: ["a", "b", "c"] } });
+    // The delete carries the same filter as the find. On ids alone, a row approved in between is
+    // removed with its credential and the machine polls for something nobody can hand it.
+    // Three ids, because it is two over the ceiling and one more is about to be created. Asking
+    // for fewer leaves the collection over its ceiling for good.
+    expect(deleteMany.mock.calls[0][0]).toEqual({
+      status: "pending",
+      expiresAt: { $gt: expect.any(Date) },
+      _id: { $in: ["a", "b", "c"] },
+    });
   });
 
   it("touches nothing while the window has room — the control", async () => {

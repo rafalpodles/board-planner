@@ -85,7 +85,10 @@ export async function startDeviceEnrolment(
       .limit(pending - MAX_PENDING_ENROLMENTS + 1)
       .select("_id")
       .lean();
-    await DeviceEnrolment.deleteMany({ _id: { $in: surplus.map((row) => row._id) } });
+    // ...live, not the ids alone: a row approved between the find and the delete would otherwise be
+    // removed with its credential, leaving the browser told "approved" and the machine polling 410
+    // for a row nobody can produce.
+    await DeviceEnrolment.deleteMany({ ...live, _id: { $in: surplus.map((row) => row._id) } });
   }
 
   const deviceCode = `${DEVICE_PREFIX}${crypto.randomBytes(32).toString("hex")}`;

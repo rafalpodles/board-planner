@@ -60,6 +60,52 @@ export async function readJsonBody<T = Record<string, unknown>>(
   }
 }
 
+/**
+ * The same bound over a form-encoded or multipart body.
+ *
+ * Content-Length alone is not a cap: it is absent on a chunked request, and a chunked request is
+ * exactly how the check is walked past — the same envelope answered 413 with a length and 200
+ * without one. So the body is piped through a counter and the parse reads the capped copy: what a
+ * caller can make the process allocate is bounded whatever it claims about its own length, or
+ * declines to claim.
+ */
+export async function readFormBody(
+  request: Request,
+  maxBytes: number
+): Promise<JsonBody<FormData>> {
+  const declared = Number(request.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > maxBytes) return tooLarge(maxBytes);
+  if (!request.body) return { ok: true, value: new FormData() };
+
+  let over = false;
+  let size = 0;
+  const counted = request.body.pipeThrough(
+    new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) {
+        if ((size += chunk.byteLength) > maxBytes) {
+          over = true;
+          controller.error(new Error("body over cap"));
+          return;
+        }
+        controller.enqueue(chunk);
+      },
+    })
+  );
+
+  try {
+    const value = await new Response(counted, {
+      headers: { "content-type": request.headers.get("content-type") ?? "" },
+    }).formData();
+    return { ok: true, value };
+  } catch {
+    if (over) return tooLarge(maxBytes);
+    return {
+      ok: false,
+      response: NextResponse.json({ error: "request body could not be read" }, { status: 400 }),
+    };
+  }
+}
+
 function tooLarge(maxBytes: number): { ok: false; response: NextResponse } {
   return {
     ok: false,

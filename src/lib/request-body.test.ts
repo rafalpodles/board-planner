@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { readJsonBody, MAX_JSON_BODY_BYTES } from "./request-body";
+import { readJsonBody, readFormBody, MAX_JSON_BODY_BYTES } from "./request-body";
 
 /**
  * BP-322. The point of the cap is what does NOT happen: an oversized body must be refused without
@@ -112,5 +112,84 @@ describe("readJsonBody", () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.response.status).toBe(413);
+  });
+});
+
+/**
+ * A Content-Length check is not a cap on its own: omit the header and it has nothing to read. That
+ * is how the upload limit was walked past — the same envelope answered 413 with a length and 200
+ * without one, storing the file. So the body is counted through a stream.
+ */
+describe("readFormBody", () => {
+  async function multipart(fields: Record<string, string>) {
+    const form = new FormData();
+    for (const [k, v] of Object.entries(fields)) form.append(k, v);
+    const encoded = new Response(form);
+    return {
+      bytes: new Uint8Array(await encoded.arrayBuffer()),
+      contentType: encoded.headers.get("content-type") ?? "",
+    };
+  }
+
+  function streamed(bytes: Uint8Array, contentType: string, declareLength: boolean) {
+    const state = { pulled: 0 };
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        state.pulled += bytes.byteLength;
+        controller.enqueue(bytes);
+        controller.close();
+      },
+    });
+    return {
+      state,
+      request: new Request("https://app.example.com/api/uploads", {
+        method: "POST",
+        headers: {
+          "content-type": contentType,
+          ...(declareLength ? { "content-length": String(bytes.byteLength) } : {}),
+        },
+        body: stream,
+        duplex: "half",
+      } as RequestInit),
+    };
+  }
+
+  it("parses an ordinary form — the control", async () => {
+    const { bytes, contentType } = await multipart({ projectId: "BP", note: "hello" });
+    const result = await readFormBody(streamed(bytes, contentType, true).request, 1024 * 1024);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.get("projectId")).toBe("BP");
+  });
+
+  it("refuses a body over the cap that declares its length", async () => {
+    const { bytes, contentType } = await multipart({ padding: "p".repeat(200 * 1024) });
+    const result = await readFormBody(streamed(bytes, contentType, true).request, 64 * 1024);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.response.status).toBe(413);
+  });
+
+  it("refuses the same body when it declares no length at all", async () => {
+    // The bypass: a chunked request carries no Content-Length, so a header check sees nothing to
+    // refuse and the parser allocates the whole thing.
+    const { bytes, contentType } = await multipart({ padding: "p".repeat(200 * 1024) });
+    const result = await readFormBody(streamed(bytes, contentType, false).request, 64 * 1024);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.response.status).toBe(413);
+  });
+
+  it("answers 400 for a body that is not a form", async () => {
+    const request = new Request("https://app.example.com/api/uploads", {
+      method: "POST",
+      headers: { "content-type": "multipart/form-data; boundary=nope" },
+      body: "not a form at all",
+    });
+
+    const result = await readFormBody(request, 64 * 1024);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.response.status).toBe(400);
   });
 });
