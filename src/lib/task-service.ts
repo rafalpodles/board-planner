@@ -290,10 +290,55 @@ function titleOrRefusal(value: unknown): string | TaskServiceResult {
   return title;
 }
 
-/** The rows a checklist is made of, as they arrive from a request body. */
+/**
+ * The schema's own caster for a field, `a.b` reaching into a subdocument array.
+ *
+ * Throws rather than returning undefined when the path is gone. A guard that cannot ask the caster
+ * would otherwise allow every value silently — and the unit suite mocks the model, so a renamed
+ * field would take the guard with it and nothing would go red (BP-499).
+ */
+function casterFor(field: string): { cast: (value: unknown) => unknown } {
+  const [head, ...rest] = field.split(".");
+  const path = Task.schema?.path(head);
+  const resolved = rest.length
+    ? (path as unknown as { schema?: { path: (p: string) => unknown } } | undefined)?.schema?.path(
+        rest.join(".")
+      )
+    : path;
+  if (!resolved) {
+    throw new Error(`task-service: the Task schema has no path "${field}"`);
+  }
+  return resolved as { cast: (value: unknown) => unknown };
+}
+
+/**
+ * Whether the schema's own caster takes this value — asked of the caster rather than restated.
+ * `Number([])` is 0 and `Number([5])` is 5, yet Mongoose refuses both, so a hand-rolled rule
+ * reading "anything Number() makes finite" lets an array past the guard and into the CastError
+ * the guard exists to prevent.
+ */
+function castsToSchema(field: string, value: unknown): boolean {
+  const caster = casterFor(field);
+  try {
+    caster.cast(value);
+    return true;
+  } catch (error) {
+    // Only a CastError is a refusal. Anything else `cast` throws does not depend on the value, so
+    // answering 400 to it would refuse EVERY create with "your description is wrong". A *missing*
+    // path is not caught here at all — `casterFor` threw before the try, deliberately.
+    return (error as { name?: string } | null)?.name !== "CastError";
+  }
+}
+
+/**
+ * The rows a checklist is made of, as they arrive from a request body. `done` and `_id` are held
+ * as they arrived rather than as their types: the write casts them, and a guard that pre-coerced
+ * would be a second implementation of the cast.
+ */
 interface ChecklistInput {
   text: string;
-  done?: boolean;
+  done?: unknown;
+  _id?: unknown;
 }
 
 /**
@@ -319,29 +364,37 @@ function checklistOrRefusal(value: unknown): ChecklistInput[] | TaskServiceResul
     if (!isValidCriterionText(text.trim())) {
       return { ok: false, error: CRITERION_TEXT_RULE, status: 400 };
     }
-    // Spread first so an existing row keeps its `_id` and `done`; only the text is normalised
-    items.push({ ...(raw as ChecklistInput), text: text.trim() });
+    /**
+     * Allowlisted, not spread. The spread that stood here kept an existing row's `_id` and `done`
+     * — and every other key the body carried, uncast, straight into `Task.create`, which on create
+     * is past the `$inc` that mints the task number. `{"done": {}}` and a mangled `_id` were a 500
+     * and a permanently burnt number (BP-499). The two worth keeping are judged by the same caster
+     * the write will use.
+     */
+    const row = (raw ?? {}) as Record<string, unknown>;
+    const item: ChecklistInput = { text: text.trim() };
+
+    // `null` is dropped rather than stored, the same as `_id` below: the Boolean cast takes it,
+    // but `done` is typed as a boolean everywhere that reads it, and the schema default is false.
+    if ("done" in row && row.done !== null) {
+      if (!castsToSchema("checklist.done", row.done)) {
+        return { ok: false, error: "A criterion is either done or it is not", status: 400 };
+      }
+      item.done = row.done;
+    }
+
+    // Blank means a row that has no id yet, which is what the screen sends for a new criterion —
+    // dropping the key lets Mongoose mint one, where keeping `null` would store a null id.
+    if ("_id" in row && row._id !== null && row._id !== "") {
+      if (!castsToSchema("checklist._id", row._id)) {
+        return { ok: false, error: "A criterion's id is not an id", status: 400 };
+      }
+      item._id = row._id;
+    }
+
+    items.push(item);
   }
   return items;
-}
-
-/**
- * Whether the schema's own caster takes this value — asked of the caster rather than restated.
- * `Number([])` is 0 and `Number([5])` is 5, yet Mongoose refuses both, so a hand-rolled rule
- * reading "anything Number() makes finite" lets an array past the guard and into the CastError
- * the guard exists to prevent.
- */
-function castsToSchema(field: "description" | "order", value: unknown): boolean {
-  try {
-    Task.schema.path(field).cast(value);
-    return true;
-  } catch (error) {
-    // Only the caster's own verdict counts as a refusal. A misspelt path, or a Task without a
-    // schema, throws here too — and that throw does not depend on the value, so answering 400 to
-    // it would refuse EVERY create with "your description is wrong". Measured, not imagined: the
-    // unit suite mocks the model as a bare object, and a bare `catch` failed 15 tests that way.
-    return (error as { name?: string } | null)?.name !== "CastError";
-  }
 }
 
 /** What Mongoose's Date cast accepts: a Date, a timestamp, or a string it can parse. */
@@ -391,6 +444,13 @@ function schemaValuesOrRefusal(values: Body): TaskServiceResult | null {
 
   if ("order" in values && !castsToSchema("order", values.order)) {
     return { ok: false, error: "Order must be a number", status: 400 };
+  }
+
+  // The name check below is skipped on a board with no categories at all, and the cast is what
+  // would then throw. Unreachable today — the delete route refuses to remove the last one — so
+  // this closes the case rather than a live hole, and removes the need to know that.
+  if ("category" in values && !castsToSchema("category", values.category)) {
+    return { ok: false, error: "Category must be text", status: 400 };
   }
 
   return null;
@@ -472,7 +532,14 @@ export async function createTask(
   const recurrence = normalised.value;
   const description = body.description ?? "";
   const order = body.order ?? 0;
-  const schemaRefusal = schemaValuesOrRefusal({ priority, dueDate, recurrence, description, order });
+  const schemaRefusal = schemaValuesOrRefusal({
+    priority,
+    dueDate,
+    recurrence,
+    description,
+    order,
+    category,
+  });
   if (schemaRefusal) return schemaRefusal;
 
   const sprint = (await sprintBelongsToProject(projectId, body.sprint)) ? body.sprint : null;
@@ -508,7 +575,9 @@ export async function createTask(
     assignee: assigneeId,
     assignedBy: assigneeId ? actorId : null,
     dueDate,
-    checklist,
+    // Cast at the write, the way `order` and `description` are: the rows carry `done` and `_id`
+    // exactly as the body sent them, judged but not coerced
+    checklist: checklist as ITask["checklist"],
     sprint,
     customFieldValues,
     recurrence,
