@@ -207,7 +207,11 @@ describe("Bulk delete with one task held by a worker", () => {
   it("closes the confirmation even when part of the batch was refused", async () => {
     await bulkDeleteBoth();
 
-    await waitFor(() => expect(screen.queryByText(/Delete 2 tasks\?/)).toBeNull());
+    // The dialog's message, not its button label — the first version of this looked for text no
+    // dialog ever rendered, so it read null whether the dialog was open or not
+    await waitFor(() =>
+      expect(screen.queryByText(/Are you sure you want to delete 2 tasks/)).toBeNull()
+    );
   });
 });
 
