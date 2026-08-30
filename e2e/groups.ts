@@ -46,6 +46,7 @@ export const GROUPS = {
     "settings-mobile-nav.spec.ts",
     "instance-audit.spec.ts",
     "agents-catalog.spec.ts",
+    "agent-editor-permissions.spec.ts",
     "agent-picker-scoping.spec.ts",
     "project-default-agent.spec.ts",
     "external-integrations.spec.ts",
