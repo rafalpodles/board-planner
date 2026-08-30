@@ -114,3 +114,51 @@ test("the token ceiling refuses nothing while it is unset", async ({ page, reque
     .toBeGreaterThan(0);
   expect((await usage(request)).turns.used).toBe(1);
 });
+
+/**
+ * The ceiling, driven the whole way: set through the product, then met.
+ *
+ * This is also the test whose absence let a dead input ship. The first cut dropped
+ * `dailyTokenCap` in `validatePmConfig`'s whitelist rebuild, so the settings screen reported
+ * success and wrote nothing — and this spec fails at the **save**, one step before the refusal it
+ * is nominally about.
+ */
+test("a ceiling set through the product is stored, and then refuses a turn", async ({
+  page,
+  request,
+}) => {
+  await test.step("it is actually stored", async () => {
+    const saved = await request.put(`/api/projects/${PROJECT_ID}`, {
+      headers: ADMIN_AUTH,
+      data: { pm: { enabled: true, model: "e2e/stub-model", dailyTokenCap: 1 } },
+    });
+    expect(saved.status(), await saved.text()).toBe(200);
+
+    // Read back, not assumed: a 200 says the request was accepted, never that the field survived
+    expect((await usage(request)).tokenCap).toBe(1);
+  });
+
+  await test.step("a turn spends past it", async () => {
+    await signIn(page, "admin");
+    await page.goto(`/projects/${PROJECT_KEY}/pm`);
+    await expect(page.getByPlaceholder(/Message the PM/)).toBeVisible();
+    await say(page, "say something", {});
+    await expect
+      .poll(async () => (await usage(request)).tokens, { timeout: 40_000 })
+      .toBeGreaterThan(1);
+  });
+
+  await test.step("and the next one is refused, saying what it cost and why the turn cap did not stop it", async () => {
+    const refused = await request.post(`/api/projects/${PROJECT_KEY}/pm/chat`, {
+      headers: ADMIN_AUTH,
+      data: { message: "again" },
+    });
+
+    expect(refused.status()).toBe(429);
+    const { error } = await refused.json();
+    expect(error).toMatch(/token cap/i);
+    expect(error).toMatch(/model calls/);
+    // The sentence the ticket is about
+    expect(error).toMatch(/up to 15 calls/);
+  });
+});

@@ -369,6 +369,10 @@ export async function runPmTurn(opts: {
               const summary = `MCP write on ${mcpTool.serverName}: ${mcpTool.toolName}`;
               action = { type: "action", tool: mcpTool.exposedName, summary };
               assistantMessage.actions.push({ tool: mcpTool.exposedName, summary, at: new Date() });
+              // Recorded at the mid-loop saves too: a turn killed by a deploy or the route's
+              // 300s ceiling would otherwise store zero, under-reporting the long turns this
+              // counting exists for — see abandoned.ts, which patches content and never usage.
+              record();
               await assistantMessage.save();
               opts.onEvent?.(action);
             }
@@ -402,6 +406,8 @@ export async function runPmTurn(opts: {
                 summary: outcome.action.summary,
                 at: new Date(),
               });
+              // Same reason as the save above
+              record();
               await assistantMessage.save();
               opts.onEvent?.(action);
             }
