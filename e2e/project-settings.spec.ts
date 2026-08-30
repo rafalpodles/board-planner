@@ -1,6 +1,8 @@
 import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
+import mongoose from "mongoose";
 import { ADMIN_AUTH } from "./api";
 import {
+  E2E_MONGODB_URI,
   HELD_TASK_KEY,
   PROJECT_ID,
   PROJECT_KEY,
@@ -88,6 +90,88 @@ async function save(page: Page, saved: "Columns saved" | "Categories saved") {
   await expect(page.getByText(saved)).toBeVisible();
   await expect(saveButton(page)).toBeHidden();
 }
+
+test.describe("Board · the Done role", () => {
+  /** Sends a column set straight to the endpoint, which is where the rule lives */
+  async function putColumns(request: APIRequestContext, columns: unknown[]) {
+    return request.put(`/api/projects/${PROJECT_ID}/columns`, {
+      headers: ADMIN_AUTH,
+      data: { columns },
+    });
+  }
+
+  test("a board cannot be saved out of having one", async ({ request }) => {
+    const before = await storedColumns(request);
+    const done = before.find((c) => c.role === "done");
+    // The premise: this board HAS a Done column, so the refusal below is about removing it
+    expect(done, "the seeded board has no Done column, so this proves nothing").toBeDefined();
+
+    const res = await putColumns(
+      request,
+      before.map((c) => (c.role === "done" ? { ...c, role: "review" } : c))
+    );
+
+    expect(res.status()).toBe(400);
+    expect((await res.json()).error).toMatch(/needs a column meaning Done/);
+    // Refused, not partially applied
+    expect((await storedColumns(request)).find((c) => c.role === "done")?.id).toBe(done!.id);
+  });
+
+  // The control, in the same run: the endpoint is not simply refusing everything
+  test("and every other column change still saves", async ({ request }) => {
+    const before = await storedColumns(request);
+
+    const res = await putColumns(
+      request,
+      before.map((c) => (c.role === "backlog" ? { ...c, label: "Someday" } : c))
+    );
+
+    expect(res.status(), await res.text()).toBe(200);
+    expect((await storedColumns(request)).map((c) => c.label)).toContain("Someday");
+  });
+
+  /**
+   * The half that decides the shape of the whole fix. Refusing the *state* rather than the
+   * transition would lock a board saved before this rule existed out of every column edit —
+   * including the one that repairs it. Written straight to the database, because the endpoint this
+   * spec is testing is now the thing that will not produce such a board.
+   */
+  test("a board that already has none can still be repaired", async ({ request }) => {
+    if (mongoose.connection.readyState === 0) await mongoose.connect(E2E_MONGODB_URI);
+    const db = mongoose.connection.db!;
+    const before = await storedColumns(request);
+    await db.collection("projects").updateOne(
+      { _id: PROJECT_ID },
+      { $set: { columns: before.filter((c) => c.role !== "done") } }
+    );
+    // The premise, read back rather than assumed
+    expect((await storedColumns(request)).some((c) => c.role === "done")).toBe(false);
+
+    const repaired = await putColumns(
+      request,
+      (await storedColumns(request)).map((c) =>
+        c.role === "review" && c.label === "Ready to Test" ? { ...c, role: "done" } : c
+      )
+    );
+
+    expect(repaired.status(), await repaired.text()).toBe(200);
+    expect((await storedColumns(request)).some((c) => c.role === "done")).toBe(true);
+  });
+
+  test("the settings screen says what such a board loses", async ({ page }) => {
+    await signIn(page);
+    await openSection(page, "Board");
+
+    const warning = page.getByText(/No column means Done/i);
+    // The control first: an ordinary board shows no warning, so its appearance below is the change
+    await expect(warning).toHaveCount(0);
+
+    await roleOf(page, "Done").selectOption("review");
+
+    await expect(warning).toBeVisible();
+    await expect(page.getByText(/worker stops enforcing task dependencies/)).toBeVisible();
+  });
+});
 
 test.describe("Board · Columns", () => {
   test("a column added here is on the board the server serves, and survives a reload", async ({
