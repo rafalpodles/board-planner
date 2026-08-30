@@ -123,21 +123,26 @@ async function storedTask() {
  * here because a guard written as "anything Number() makes finite" passes every other arm and
  * still lets these two through to the CastError it was added to prevent.
  */
-const UNCASTABLE: Record<string, unknown>[] = [
-  { order: "abc" },
-  { order: {} },
-  { order: [] },
-  { order: [5] },
-  { description: {} },
-  { description: ["a"] },
+const UNCASTABLE: { body: Record<string, unknown>; says: RegExp }[] = [
+  { body: { order: "abc" }, says: /order/i },
+  { body: { order: {} }, says: /order/i },
+  { body: { order: [] }, says: /order/i },
+  { body: { order: [5] }, says: /order/i },
+  { body: { description: {} }, says: /description/i },
+  { body: { description: ["a"] }, says: /description/i },
+  // BP-499: the row's other keys rode uncast into the write, past the `$inc`
+  { body: { checklist: [{ text: "a", done: {} }] }, says: /done/i },
+  { body: { checklist: [{ text: "a", _id: "nope" }] }, says: /id/i },
 ];
 
 test("order and description cannot burn a number either", async ({ request }) => {
   const before = await taskCounter();
 
-  for (const body of UNCASTABLE) {
+  for (const { body, says } of UNCASTABLE) {
     const said = JSON.stringify(body);
-    expect(await refusedCreate(request, body), said).toMatch(/order|description/i);
+    // The field this arm actually carries, not `/order|description/`: a loose alternation cannot
+    // tell an `order` arm answered by the description guard from one answered correctly
+    expect(await refusedCreate(request, body), said).toMatch(says);
     expect(await taskCounter(), said).toBe(before);
   }
 
@@ -146,13 +151,23 @@ test("order and description cannot burn a number either", async ({ request }) =>
   // would have taken must still create — and must mint exactly one number doing it.
   const created = await request.post(`/api/projects/${PROJECT_KEY}/tasks`, {
     headers: ADMIN_AUTH,
-    data: { title: "Ordered by a string", order: "2", description: "plain text" },
+    data: {
+      title: "Ordered by a string",
+      order: "2",
+      description: "plain text",
+      // "yes" is a boolean to Mongoose, and an unknown key must be dropped rather than forwarded
+      checklist: [{ text: "Ships with a test", done: "yes", mischief: "dropped" }],
+    },
   });
   expect(created.status(), await created.text()).toBe(201);
 
   const task = await created.json();
   expect(task.order).toBe(2);
   expect(task.description).toBe("plain text");
+  expect(task.checklist[0]).toMatchObject({ text: "Ships with a test", done: true });
+  expect(task.checklist[0].mischief).toBeUndefined();
+  // Mongoose minted the row's id, because the body sent none
+  expect(String(task.checklist[0]._id)).toMatch(/^[0-9a-f]{24}$/);
   expect(task.taskNumber).toBe(before + 1);
   expect(await taskCounter()).toBe(before + 1);
 });
@@ -160,18 +175,19 @@ test("order and description cannot burn a number either", async ({ request }) =>
 test("the same two shapes are refused on update, and nothing is written", async ({ request }) => {
   const before = await storedTask();
 
-  for (const body of UNCASTABLE) {
+  for (const { body, says } of UNCASTABLE) {
     const said = JSON.stringify(body);
     const response = await request.put(`/api/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_ID}`, {
       headers: ADMIN_AUTH,
       data: body,
     });
     expect(response.status(), `${said} — ${await response.text()}`).toBe(400);
-    expect(await response.text(), said).toMatch(/order|description/i);
+    expect(await response.text(), said).toMatch(says);
 
     const after = await storedTask();
     expect(after.order, said).toBe(before.order);
     expect(after.description, said).toBe(before.description);
+    expect(after.checklist, said).toEqual(before.checklist);
   }
 
   // The control again: the update path has to keep taking what the cast takes, or a board reorder
