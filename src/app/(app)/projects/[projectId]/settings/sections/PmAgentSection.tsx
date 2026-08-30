@@ -5,7 +5,7 @@ import { useApi } from "@/hooks/use-api";
 import { isValidTimezone } from "@/lib/time";
 import { useDraft } from "@/hooks/use-draft";
 import { useToast } from "@/components/ui/Toast";
-import { ApiProject } from "@/types";
+import { ApiProject, DEFAULT_PM_AUTONOMY } from "@/types";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { Textarea } from "@/components/ui/Textarea";
@@ -93,10 +93,23 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
    * clamped before posting and the other comes from a fixed select.
    */
   const typedTimezone = draft.value.timezone.trim();
-  const timezoneError =
-    typedTimezone && !isValidTimezone(typedTimezone)
-      ? `Not a timezone this server knows: ${typedTimezone}`
-      : "";
+  const timezoneReadable = isValidTimezone(typedTimezone);
+  /**
+   * Only while the schedule is on, which is the only time this field is rendered. Judging it
+   * always meant an unreadable value typed and then undone by switching the schedule off went on
+   * refusing **every** later save — of context notes, of links, of anything — through a toast
+   * about a field no longer on screen. That is the very failure this change exists to remove.
+   */
+  const timezoneError = !draft.value.dailyReview
+    ? ""
+    : timezoneReadable
+      ? ""
+      : typedTimezone
+        ? `Not a timezone this server knows: ${typedTimezone}`
+        : "A review has to run somewhere — name a timezone, for example Europe/Warsaw.";
+  // What the project already has, which is by definition something the server accepted
+  const storedTimezone = project.pm?.autonomy?.timezone || DEFAULT_PM_AUTONOMY.timezone;
+
   const typedCap = draft.value.dailyCap.trim();
   const capNumber = Number(typedCap);
   const capError =
@@ -125,7 +138,9 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
     // The field already says what is wrong; sending it would answer 400 and say the same thing
     // one round trip later, in a toast that does not name the field.
     if (timezoneError || capError) {
-      if (!options?.silent) toast(timezoneError || capError, "error");
+      // Not gated on `silent`: connectOauth saves silently first, and swallowing this made
+      // Connect a button that flickered and did nothing with no reason given anywhere.
+      toast(timezoneError || capError, "error");
       return false;
     }
     const v = draft.value;
@@ -136,7 +151,10 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
         dailyReview: v.dailyReview,
         reviewHour: firstReviewHour({ reviewHour: Number(v.reviewHour) }),
         reviewIntervalHours: Number(v.reviewInterval) || 24,
-        timezone: v.timezone.trim(),
+        // The server judges this whether or not the schedule is on, and an empty string is not
+        // nullish so its `??` fallback never fires. A hidden, unreadable value must not be what
+        // blocks an unrelated save.
+        timezone: timezoneReadable ? v.timezone.trim() : storedTimezone,
         handleNeedsHumanReview: v.handleNhr,
       },
     };
@@ -403,12 +421,17 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
               />
             </div>
             <p className="text-xs text-text-muted">
-              {reviewTimes.length === 1 ? "One review a day" : `${reviewTimes.length} reviews a day`}
-              , at {reviewTimes.map((h) => `${String(h).padStart(2, "0")}:00`).join(", ")}{" "}
-              {timezoneError
-                ? "— in a timezone this server cannot read, so it will not run until that is fixed"
-                : `in ${typedTimezone || "the project timezone"}`}
-              . Each one uses a turn from the daily cap.
+              {timezoneError ? (
+                <>Name a timezone this server knows and the schedule will appear here.</>
+              ) : (
+                <>
+                  {reviewTimes.length === 1
+                    ? "One review a day"
+                    : `${reviewTimes.length} reviews a day`}
+                  , at {reviewTimes.map((h) => `${String(h).padStart(2, "0")}:00`).join(", ")} in{" "}
+                  {typedTimezone}. Each one uses a turn from the daily cap.
+                </>
+              )}
             </p>
           </div>
         )}
