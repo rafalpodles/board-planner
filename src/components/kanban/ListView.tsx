@@ -535,10 +535,12 @@ export function ListView({
                     className="px-2 py-2 font-medium w-full min-w-44 lg:min-w-0 max-w-0 overflow-hidden cursor-pointer"
                     title={task.title}
                   >
-                    {/* Dropped from lg up, where a floor only brings back the sideways scrolling
-                        6ae1505 removed — at 1024 with every column on it pins the title at 176px
-                        and pushes the row 68px past the scrollport. Below lg the row overflows
-                        either way; the floor is what stops the title collapsing to nothing */}
+                    {/* Dropped from lg up, where 6ae1505 chose a squeezed title over a row that
+                        scrolls sideways. Below it the choice goes the other way, because the
+                        squeeze is worse there: measured with the six default columns, 768 gives a
+                        53px title without the floor and a 176px one with it, at the cost of a
+                        597px row in a 474px scrollport. From about 900 the floor stops binding —
+                        the title is over 176px on its own — so this only decides small screens */}
                     <div className="truncate w-full">{task.title}</div>
                   </td>
                   {show("status") && (
