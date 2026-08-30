@@ -77,11 +77,21 @@ export async function collectDiff(
   }
 
   const opts: RunOpts = { cwd: worktreePath, timeoutMs: GIT_TIMEOUT_MS };
+
+  // Resolved once, and every read below names the object id rather than the ref. `HEAD` is a file
+  // the agent can rewrite between two calls, so a diff taken from one commit and a review taken
+  // from another was a timing question rather than a guarantee — and the review gate now checks
+  // this sha out to read the change (BP-404). Same rule the base already follows two blocks up.
+  const headSha = (await git(runner, ["rev-parse", "--verify", "HEAD^{commit}"], opts)).trim();
+  if (!BASE_OBJECT_ID.test(headSha)) {
+    throw new Error(`refusing head ${JSON.stringify(headSha)}: git would not read it as an object id`);
+  }
+
   // Two trees, not a range: a merge-base is computed from history, and history is what the agent
   // rewrites to hide a file from this diff (BP-382).
   const numstatOutput = await git(
     runner,
-    ["diff", "--no-ext-diff", "--no-textconv", "--numstat", baseSha, "HEAD", "--"],
+    ["diff", "--no-ext-diff", "--no-textconv", "--numstat", baseSha, headSha, "--"],
     opts
   );
   const { changedLines, changedFiles } = parseNumstat(numstatOutput);
@@ -96,8 +106,8 @@ export async function collectDiff(
   // instead of a blanket repo setting — measured with the attribute and driver both planted: an
   // unguarded call returns an empty patch and runs the textconv program, which is Bash back under
   // an agent this pipeline took Bash away from.
-  const patchOutput = await git(runner, ["diff", "--no-ext-diff", "--no-textconv", baseSha, "HEAD", "--"], opts);
+  const patchOutput = await git(runner, ["diff", "--no-ext-diff", "--no-textconv", baseSha, headSha, "--"], opts);
   const { patch, truncated } = boundPatch(patchOutput);
 
-  return { changedLines, changedFiles, patch, truncated };
+  return { changedLines, changedFiles, patch, truncated, headSha };
 }

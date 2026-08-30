@@ -14,7 +14,7 @@ function context(diff: Partial<DiffStats>): GateContext {
       testsAdded: [],
       blockedReason: "",
     },
-    diff: { changedLines: 10, changedFiles: [], patch: "", truncated: false, ...diff },
+    diff: { changedLines: 10, changedFiles: [], patch: "", truncated: false, headSha: "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c", ...diff },
   };
 }
 

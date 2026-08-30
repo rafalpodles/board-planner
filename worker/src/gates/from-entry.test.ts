@@ -22,7 +22,7 @@ function ctx(changedLines: number): GateContext {
       changedLines,
       changedFiles: ["src/a.ts"],
       patch: "diff --git a/src/a.ts b/src/a.ts\n+one",
-      truncated: false,
+      truncated: false, headSha: "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c"
     },
   };
 }
@@ -33,6 +33,14 @@ const idleRunner = { run: vi.fn() } as never;
 // deliberately not the built-in constants — a project that pinned a limit before the catalog
 // existed must keep it.
 const FALLBACKS = { maxDiffLines: 400, maxDiffFiles: 10, reviewModel: "opus" };
+
+// BP-404: the review gate asks git for a config scan and a clean checkout before it runs the
+// reviewer, so the reviewer's argv is no longer the first call recorded.
+function reviewerArgv(run: { mock: { calls: unknown[][] } }): string[] {
+  const call = run.mock.calls.find(([command]) => command === "claude");
+  if (!call) throw new Error("the reviewer was never run");
+  return call[1] as string[];
+}
 
 describe("gateFromEntry", () => {
   // Two Size gates in one agent have to be distinguishable in the comment that refuses
@@ -95,7 +103,7 @@ describe("gateFromEntry", () => {
     expect(gate?.name).toBe("security-review");
     await gate!.run(ctx(5));
 
-    const argv = run.mock.calls[0][1] as string[];
+    const argv = reviewerArgv(run);
     expect(argv[argv.indexOf("--model") + 1]).toBe("sonnet");
     expect(argv[argv.indexOf("--append-system-prompt") + 1]).toMatch(/injection/i);
   });
@@ -115,7 +123,7 @@ describe("gateFromEntry", () => {
     );
     await gate!.run(ctx(5));
 
-    const argv = run.mock.calls[0][1] as string[];
+    const argv = reviewerArgv(run);
     expect(argv[argv.indexOf("--model") + 1]).toBe("sonnet");
     expect(argv[argv.indexOf("--append-system-prompt") + 1]).not.toMatch(/injection/i);
   });
