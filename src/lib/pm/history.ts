@@ -82,7 +82,13 @@ export async function replayHistory(
           : labelled,
       });
     }
-    const summaries = (entry.actions || []).map((a) => a?.summary).filter(Boolean);
+    // Stripped as well as encoded. `create_task`'s summary is `Created ${key}: ${title}` — the
+    // title verbatim, written by whoever can edit the board — so the sentinels get the same
+    // treatment here as in a message's own text. The encoding stops it closing the sentence; this
+    // stops it reading as a second, trusted one inside the value.
+    const summaries = (entry.actions || [])
+      .map((a) => (a?.summary ? stripSpoofedLabels(a.summary) : ""))
+      .filter(Boolean);
     if (summaries.length > 0) {
       messages.push({
         // Not the system channel, and not raw. A summary carries board text a project member wrote

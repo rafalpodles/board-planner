@@ -117,12 +117,24 @@ const server = createServer((req, res) => {
         (n, m) => n + kindsOf(m).filter((k) => k === "image_url").length,
         0
       ),
-      // The contents, not a count: replayHistory also emits system rows for past board actions, so
-      // a count cannot say whether a particular instruction was sent.
+      // The contents, not a count: a count cannot say whether a particular instruction was sent.
+      // Since BP-321 the record of past board actions is NOT among these — it is a user-role DATA
+      // message — which is exactly what pm-trust-boundary.spec.ts asserts.
       systems: messages
         .filter((m) => m?.role === "system")
         .map((m) => String(m?.content ?? "").slice(0, 200)),
       roles: messages.map((m) => m?.role),
+      // Every message, whole and untruncated, so a test can ask which CHANNEL a given string
+      // arrived in rather than only whether it arrived. Text parts only; images are counted above.
+      contents: messages.map((m) => ({
+        role: m?.role,
+        text:
+          typeof m?.content === "string"
+            ? m.content
+            : (m?.content ?? [])
+                .map((part) => (typeof part?.text === "string" ? part.text : ""))
+                .join(" "),
+      })),
     };
 
     const toolHasRun = messages.some((m) => m?.role === "tool");
