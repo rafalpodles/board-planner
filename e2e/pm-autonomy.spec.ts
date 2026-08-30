@@ -160,6 +160,58 @@ test.describe("the autonomy form", () => {
     await expect(page.getByLabel("Timezone")).toHaveValue("Europe/London");
   });
 
+  /**
+   * BP-454. Both fields accepted values `validatePmConfig` answers 400 for, and the preview line
+   * read them back as though it had understood — "…at 09:00, 21:00 in Warsaw" for the typo.
+   */
+  test("refuses a timezone the server cannot read, at the field, before the save", async ({
+    page,
+  }) => {
+    await signIn(page);
+    await openPmSettings(page);
+    await flip(scheduleSwitch(page));
+
+    // The control first: a real zone is accepted and the preview names it
+    await page.getByLabel("Timezone").fill("Europe/London");
+    await expect(page.getByText(/in Europe\/London/)).toBeVisible();
+
+    await page.getByLabel("Timezone").fill("Warsaw");
+    await expect(page.getByText("Not a timezone this server knows: Warsaw")).toBeVisible();
+    // and the preview stops echoing it back as though it had understood
+    await expect(page.getByText(/in Warsaw/)).toHaveCount(0);
+    await expect(page.getByText(/cannot read/)).toBeVisible();
+
+    // Nothing is sent: the field already says what is wrong, and a 400 would say it again a
+    // round trip later without naming the field
+    let sent = false;
+    page.on("request", (r) => {
+      if (r.method() === "PUT" && r.url().includes("/api/projects/")) sent = true;
+    });
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await page.waitForTimeout(700);
+    expect(sent, "the form posted a body the server would refuse").toBe(false);
+  });
+
+  test("refuses a turn cap that is not a whole number in range", async ({ page }) => {
+    await signIn(page);
+    await openPmSettings(page);
+
+    const cap = page.getByLabel("Turns per day");
+    // The control: a whole number in range is accepted and saves
+    await cap.fill("40");
+    await expect(page.getByText(/whole number of turns/)).toHaveCount(0);
+    await saveSettings(page);
+    expect((await storedPm()).dailyTurnCap).toBe(40);
+
+    for (const bad of ["12.5", "-1", "1001"]) {
+      await cap.fill(bad);
+      await expect(page.getByText(/whole number of turns/), bad).toBeVisible();
+    }
+
+    // and the stored value is still the one that was valid
+    expect((await storedPm()).dailyTurnCap).toBe(40);
+  });
+
   test("saves the escalation switch on its own", async ({ page }) => {
     await signIn(page);
     await openPmSettings(page);
