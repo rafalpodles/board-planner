@@ -66,19 +66,24 @@ export function columnIdsWithRole(
     .map((c) => c.id);
 }
 
-// Where a merged pull request or merge request sends a task, or undefined if it sends it nowhere.
-// Only the FIRST review column advances, and it advances to the LAST one. Both halves are load-bearing:
-// the default board has three review columns (in_review, needs_human_review, ready_to_test), so
-// "the next review column" lands merged work in the queue that exists for a human to look at, and
-// lets a merged branch pull a task back OUT of that queue. A board with one review column, or none,
-// transitions nothing.
+// Where a merged merge request sends a task, or undefined if it sends it nowhere.
+//
+// One review column forward, never into or out of a column somebody flagged for a human. The flag
+// is the signal because it is already the repo's answer to "which column means a human needs to
+// look at this" (see escalationColumnId in ./escalation) — position is not: that helper falls back
+// to the FIRST review column, and column order is whatever somebody last dragged it into.
+//
+// The default board is the case that matters: three columns carry the review role, so advancing to
+// the merely-next one parked merged work in needs_human_review, which is flagged, and moved it back
+// out again on the next sync. Boards that flag nothing keep advancing one step, as before.
 export function mergedReviewDestination(
   project: HasAnyColumns | null | undefined,
   status: string
 ): string | undefined {
-  const reviewIds = columnIdsWithRole(project, "review");
-  const destination = reviewIds[reviewIds.length - 1];
-  return status === reviewIds[0] && destination !== status ? destination : undefined;
+  const review = effectiveColumns(project?.columns).filter((c) => c.role === "review");
+  const from = review.findIndex((c) => c.id === status);
+  if (from < 0 || review[from].triggersPmReview) return undefined;
+  return review.slice(from + 1).find((c) => !c.triggersPmReview)?.id;
 }
 
 // The column a task is sitting in, or undefined if its status names no column the project has —

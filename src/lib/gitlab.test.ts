@@ -61,14 +61,30 @@ describe("matchMRsToTasks", () => {
     );
   });
 
-  it("does not let a former key be a regex, or match a longer key it is a prefix of", () => {
-    const matched = matchMRsToTasks(
-      [mr({ iid: 1, branch: "b.-7/dots" }), mr({ iid: 2, branch: "bpx-8/longer" })],
-      "BP",
-      ["B."]
-    );
-    // "B." must match "B." literally, not "BP"; and neither key matches "BPX-8"
-    expect(matched.map((m) => [m.number, m.matchedTaskNumber])).toEqual([[1, 7]]);
+  it("does not let a key be read as a regex", () => {
+    // "B." unescaped matches "bx-7"; escaped it matches only a literal "B.". Asserting the branch
+    // that DOES contain "b." would pass either way — the fixture would be doing the work, not the
+    // escaping. src/lib/github.test.ts had this right and this was written weaker.
+    expect(matchMRsToTasks([mr({ branch: "bx-7/any-letter" })], "BP", ["B."])).toEqual([]);
+    expect(matchMRsToTasks([mr({ branch: "b.-7/literal" })], "BP", ["B."])).toHaveLength(1);
+  });
+
+  it("survives a former key that is not a valid regex on its own", () => {
+    expect(() => matchMRsToTasks([mr({ branch: "c(-1/x" })], "BP", ["C("])).not.toThrow();
+    expect(matchMRsToTasks([mr({ branch: "c(-1/x" })], "BP", ["C("])).toHaveLength(1);
+  });
+
+  it("does not match a longer key it is a prefix of", () => {
+    expect(matchMRsToTasks([mr({ branch: "bpx-8/longer" })], "BP")).toEqual([]);
+  });
+
+  it("ignores an empty former key instead of matching every branch with a number", () => {
+    // Without the filter the alternation becomes "(?:BP|)[- ](\\d+)", which matches "chore-3"
+    expect(matchMRsToTasks([mr({ branch: "chore-3/unrelated" })], "BP", [""])).toEqual([]);
+  });
+
+  it("accepts a space between key and number, which the docstring promises", () => {
+    expect(matchMRsToTasks([mr({ branch: "x", title: "BP 5 in a title" })], "BP")).toHaveLength(1);
   });
 
   it("reads a merged merge request as merged, and carries its merge time", () => {

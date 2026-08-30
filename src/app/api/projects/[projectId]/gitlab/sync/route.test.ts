@@ -4,8 +4,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
  * BP-429. The post-fetch half of sync had no test at any level, which is how three separate things
  * stayed wrong in it: the matcher never got the project's former keys, the merged-MR transition sent
  * a task to the wrong column, and the activity log recorded a destination the task did not go to.
- * Only the network is stubbed — matching, linking, the per-provider replacement rule and the
- * transition all run for real.
+ * The database, the models and auth are stubbed along with the network; the matcher, the
+ * per-provider replacement rule and the transition itself all run for real.
  */
 
 const fetchMergeRequests = vi.fn();
@@ -126,6 +126,9 @@ describe("POST .../gitlab/sync — linking", () => {
     await POST(request(), ctx());
 
     expect(doc.linkedPRs).toHaveLength(2);
+    // Without this, every assertion in this file is about an object mutated in memory and
+    // nothing proves the route ever wrote it back.
+    expect(doc.save).toHaveBeenCalled();
   });
 });
 
@@ -170,6 +173,9 @@ describe("POST .../gitlab/sync — the merged-MR transition", () => {
     expect(doc.status).toBe("needs_human_review");
     expect(body.autoTransitioned).toBe(0);
     expect(logActivity).not.toHaveBeenCalled();
+    // The control: the route reached this task and linked its merge request, so the status
+    // standing still is a decision rather than a sync that did nothing at all.
+    expect(body.prsLinked).toBe(1);
   });
 
   it("moves nothing when no merge request is merged — the control", async () => {
@@ -184,22 +190,49 @@ describe("POST .../gitlab/sync — the merged-MR transition", () => {
     expect(body.prsLinked).toBe(1);
   });
 
-  it("leaves a task that is already in the destination alone", async () => {
+  it("leaves a task that is already in the last review column alone", async () => {
     const doc = task({ status: "ready_to_test" });
     taskFindOne.mockResolvedValue(doc);
     fetchMergeRequests.mockResolvedValue([mr({ state: "merged", merged_at: "2026-08-02T00:00:00Z" })]);
 
-    expect((await (await POST(request(), ctx())).json()).autoTransitioned).toBe(0);
+    const body = await (await POST(request(), ctx())).json();
+
+    expect(doc.status).toBe("ready_to_test");
+    expect(body.autoTransitioned).toBe(0);
+    expect(body.prsLinked).toBe(1);
   });
 
-  it("transitions on a board with no seeded column id in it at all", async () => {
+  it("does not lift a task out of a flagged column even when that column sorts first", async () => {
+    // The rule reads the flag, not the position. Under the positional one this board — the same
+    // columns, dragged into a different order — moved a task straight out of the human queue,
+    // which is what the two tests above are named after preventing.
+    const reordered = [
+      { id: "needs_human_review", label: "Needs Human Review", color: "#000", role: "review", order: 0, triggersPmReview: true },
+      { id: "in_review", label: "In Review", color: "#000", role: "review", order: 1 },
+      { id: "ready_to_test", label: "Ready to Test", color: "#000", role: "review", order: 2 },
+      { id: "done", label: "Done", color: "#000", role: "done", order: 3 },
+    ];
+    projectFindById.mockReturnValue({ lean: () => project({ columns: reordered }) });
+    const doc = task({ status: "needs_human_review" });
+    taskFindOne.mockResolvedValue(doc);
+    fetchMergeRequests.mockResolvedValue([mr({ state: "merged", merged_at: "2026-08-02T00:00:00Z" })]);
+
+    const body = await (await POST(request(), ctx())).json();
+
+    expect(doc.status).toBe("needs_human_review");
+    expect(body.prsLinked).toBe(1);
+  });
+
+  it("transitions nothing on a board whose one review column is both first and last", async () => {
     projectFindById.mockReturnValue({ lean: () => project({ columns: RENAMED_COLUMNS }) });
     const doc = task({ status: "checking" });
     taskFindOne.mockResolvedValue(doc);
     fetchMergeRequests.mockResolvedValue([mr({ state: "merged", merged_at: "2026-08-02T00:00:00Z" })]);
 
-    // One review column, so it is both first and last: nothing to advance into.
-    expect((await (await POST(request(), ctx())).json()).autoTransitioned).toBe(0);
+    // One review column, so there is nothing to advance into.
+    const body = await (await POST(request(), ctx())).json();
+    expect(body.autoTransitioned).toBe(0);
+    expect(body.prsLinked).toBe(1);
     expect(doc.status).toBe("checking");
   });
 

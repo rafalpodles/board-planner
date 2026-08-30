@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   columnFor,
   columnIdsWithRole,
+  mergedReviewDestination,
   defaultStatusFor,
   getColumnIds,
   roleOf,
@@ -106,5 +107,79 @@ describe("resolving columns by role", () => {
     const roles = new Set(renamed.map((c) => c.role));
     for (const role of roles) expect(ROLE_ORDER[role]).toBeTypeOf("number");
     expect(ROLE_ORDER.active).toBeLessThan(ROLE_ORDER.done);
+  });
+});
+
+/**
+ * BP-429. A merged merge request advances a task one review column, never into or out of a column
+ * somebody flagged for a human. Every shape below is a board a project can actually build in
+ * settings, and the first version of this rule — "the first review column advances to the last" —
+ * was wrong on four of them.
+ */
+describe("mergedReviewDestination", () => {
+  const col = (id: string, role: string, order: number, flagged = false) =>
+    ({ id, label: id, color: "#000", role, order, triggersPmReview: flagged }) as never;
+
+  const board = (cols: unknown[]) => ({ columns: cols as never[] });
+
+  it("skips the flagged column on the default board rather than parking merged work in it", () => {
+    expect(mergedReviewDestination(null, "in_review")).toBe("ready_to_test");
+  });
+
+  it("never moves a task out of the flagged column, wherever that column sorts", () => {
+    expect(mergedReviewDestination(null, "needs_human_review")).toBeUndefined();
+
+    // Column order is whatever somebody last dragged it into, so it cannot be what decides this.
+    const reordered = board([
+      col("needs_human_review", "review", 0, true),
+      col("in_review", "review", 1),
+      col("ready_to_test", "review", 2),
+      col("done", "done", 3),
+    ]);
+    expect(mergedReviewDestination(reordered, "needs_human_review")).toBeUndefined();
+    expect(mergedReviewDestination(reordered, "in_review")).toBe("ready_to_test");
+  });
+
+  it("advances one step, not to the end, when the middle column is a real step", () => {
+    const pipeline = board([
+      col("code_review", "review", 0),
+      col("qa", "review", 1),
+      col("uat", "review", 2),
+      col("shipped", "done", 3),
+    ]);
+    // "First advances to last" sent this straight to uat, skipping two columns somebody built.
+    expect(mergedReviewDestination(pipeline, "code_review")).toBe("qa");
+    expect(mergedReviewDestination(pipeline, "qa")).toBe("uat");
+    expect(mergedReviewDestination(pipeline, "uat")).toBeUndefined();
+  });
+
+  it("transitions nothing on a board with one review column, or none", () => {
+    const one = board([col("building", "active", 0), col("checking", "review", 1), col("shipped", "done", 2)]);
+    expect(mergedReviewDestination(one, "checking")).toBeUndefined();
+
+    const none = board([col("building", "active", 0), col("shipped", "done", 1)]);
+    expect(mergedReviewDestination(none, "building")).toBeUndefined();
+  });
+
+  it("reads the board in its own order, not the order it happens to be stored in", () => {
+    const unsorted = board([
+      col("ready_to_test", "review", 2),
+      col("in_review", "review", 0),
+      col("needs_human_review", "review", 1, true),
+    ]);
+    expect(mergedReviewDestination(unsorted, "in_review")).toBe("ready_to_test");
+  });
+
+  it("says nowhere for a status the board has no column for", () => {
+    expect(mergedReviewDestination(null, "a_column_somebody_deleted")).toBeUndefined();
+  });
+
+  it("steps over a non-review column standing between two review ones", () => {
+    const interleaved = board([
+      col("in_review", "review", 0),
+      col("fixing", "active", 1),
+      col("ready_to_test", "review", 2),
+    ]);
+    expect(mergedReviewDestination(interleaved, "in_review")).toBe("ready_to_test");
   });
 });

@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 /**
- * BP-429. The GitHub half of this pair already carried former keys; its transition was the half
- * still keyed to the seeded column ids, so on a renamed board it opted out silently and read as a
- * sync that simply had nothing to do. Both routes now share one rule, which is the only thing that
- * stops them drifting apart again — drift between them is what this ticket was.
+ * BP-429. This route is unchanged by that ticket; the tests are what it was missing. Its
+ * transition is still keyed to the seeded column ids, so a board that renamed them opts out in
+ * silence — asserted below rather than fixed, because which column merged work lands in is a
+ * decision about the pipeline and not one to take while adding a missing argument to a matcher.
+ * The network is stubbed; the matcher, the linking rule and the transition all run for real.
  */
 
 const fetchPullRequests = vi.fn();
@@ -81,7 +82,24 @@ describe("POST .../github/sync", () => {
     projectFindById.mockReturnValue({ lean: () => project({ formerKeys: ["CP"] }) });
     fetchPullRequests.mockResolvedValue([pr({ ref: "cp-5/old-prefix" })]);
 
-    expect((await (await POST(request(), ctx())).json()).prsLinked).toBe(1);
+    const body = await (await POST(request(), ctx())).json();
+
+    expect(body.prsFound).toBe(1);
+    expect(body.tasksLinked).toBe(1);
+    expect(body.prsLinked).toBe(1);
+  });
+
+  it("writes the links to the task and saves it", async () => {
+    const doc = task();
+    taskFindOne.mockResolvedValue(doc);
+    fetchPullRequests.mockResolvedValue([pr({ number: 1 })]);
+
+    await POST(request(), ctx());
+
+    expect(doc.linkedPRs).toHaveLength(1);
+    // Without this, every assertion here is about an object mutated in memory and nothing
+    // proves the route ever wrote it back.
+    expect(doc.save).toHaveBeenCalled();
   });
 
   it("replaces this provider's entries and leaves GitLab's alone", async () => {
@@ -100,6 +118,18 @@ describe("POST .../github/sync", () => {
       ["gitlab", 99],
       ["github", 1],
     ]);
+  });
+
+  it("replaces a link with no provider recorded, because a link predating the field is this one's", async () => {
+    // This is the route where the `?? "github"` default is observable: read the other way, the
+    // legacy row would survive as a duplicate of the pull request that just replaced it.
+    const doc = task({ linkedPRs: [{ number: 7, url: "https://github.com/o/r/pull/7" }] });
+    taskFindOne.mockResolvedValue(doc);
+    fetchPullRequests.mockResolvedValue([pr({ number: 1 })]);
+
+    await POST(request(), ctx());
+
+    expect(doc.linkedPRs.map((p: { number: number }) => p.number)).toEqual([1]);
   });
 
   it("moves a merged task out of review, and records where it went", async () => {
@@ -121,29 +151,21 @@ describe("POST .../github/sync", () => {
     );
   });
 
-  it("transitions on a renamed board, where it used to opt out silently", async () => {
-    projectFindById.mockReturnValue({ lean: () => project({ columns: RENAMED_COLUMNS }) });
-    const doc = task({ status: "checking" });
-    taskFindOne.mockResolvedValue(doc);
-    fetchPullRequests.mockResolvedValue([pr({ merged_at: "2026-08-02T00:00:00Z" })]);
-
-    await POST(request(), ctx());
-
-    expect(doc.status).toBe("verifying");
-  });
-
-  it("does not lift a task out of the queue a human was asked to look at", async () => {
+  it("leaves a task a human was asked to look at where it is", async () => {
     const doc = task({ status: "needs_human_review" });
     taskFindOne.mockResolvedValue(doc);
     fetchPullRequests.mockResolvedValue([pr({ merged_at: "2026-08-02T00:00:00Z" })]);
 
-    await POST(request(), ctx());
+    const body = await (await POST(request(), ctx())).json();
 
     expect(doc.status).toBe("needs_human_review");
     expect(logActivity).not.toHaveBeenCalled();
+    // The control: the route ran and did its other work, so the silence above is a decision
+    // rather than a sync that never reached this task.
+    expect(body.prsLinked).toBe(1);
   });
 
-  it("moves nothing when nothing is merged — the control", async () => {
+  it("moves nothing when nothing is merged", async () => {
     const doc = task({ status: "in_review" });
     taskFindOne.mockResolvedValue(doc);
     fetchPullRequests.mockResolvedValue([pr({ state: "open" })]);
@@ -151,6 +173,22 @@ describe("POST .../github/sync", () => {
     const body = await (await POST(request(), ctx())).json();
 
     expect(doc.status).toBe("in_review");
+    expect(body.autoTransitioned).toBe(0);
+    expect(body.prsLinked).toBe(1);
+  });
+
+  it("transitions nothing on a board that renamed its columns — the known gap, pinned", async () => {
+    // BP-110 made GitLab's transition role-based and left this one keyed to the seeded ids, so a
+    // renamed board gets a sync that reports success and moves nothing. Asserted so that whoever
+    // closes it has to come here and say so, instead of finding a test that agrees either way.
+    projectFindById.mockReturnValue({ lean: () => project({ columns: RENAMED_COLUMNS }) });
+    const doc = task({ status: "checking" });
+    taskFindOne.mockResolvedValue(doc);
+    fetchPullRequests.mockResolvedValue([pr({ merged_at: "2026-08-02T00:00:00Z" })]);
+
+    const body = await (await POST(request(), ctx())).json();
+
+    expect(doc.status).toBe("checking");
     expect(body.autoTransitioned).toBe(0);
     expect(body.prsLinked).toBe(1);
   });
