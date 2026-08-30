@@ -100,7 +100,10 @@ describe("plantedConfig against a real repository", () => {
     const local = execFileSync("git", ["config", "--local", "--list"], { cwd: linked, encoding: "utf8" });
     expect(local).not.toContain("sshcommand");
 
-    const said = await plantedConfig(createRunner(), linked, await configBaseline(createRunner(), work));
+    // The baseline is taken AFTER the key is planted, so "it appeared since" cannot be what refuses
+    // it — only the scope being one the agent writes can. Without this the case passes with the
+    // worktree scope removed from that list entirely
+    const said = await plantedConfig(createRunner(), linked, await configBaseline(createRunner(), linked));
     expect(said).toContain("core.sshcommand");
     expect(said).toContain("worktree");
   });
