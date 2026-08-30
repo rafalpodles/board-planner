@@ -7,6 +7,7 @@ import {
   NOTHING_TO_CHANGE,
   CREATE_TASK_HINTS,
   UPDATE_TASK_HINTS,
+  CHANGE_STATUS_HINTS,
 } from "./strict-input.js";
 
 const APP_NAME = "Board Planner";
@@ -168,7 +169,7 @@ server.registerTool(
           "Project-defined fields keyed by field name, e.g. { \"Difficulty\": \"L\", \"Component\": \"ui\" }. " +
             "Since CP-214 this is the only way to set them — see get_project for the field list."
         ),
-    }, CREATE_TASK_HINTS),
+    }, { hints: CREATE_TASK_HINTS, writes: true }),
   },
   async ({ project, title, description, priority, category, assignee, status, acceptanceCriteria, fields }) => {
     const proj = await client.getProjectByKey(project) as { _id: string; customFields?: FieldDef[] };
@@ -226,9 +227,15 @@ server.registerTool(
           "Project-defined fields keyed by field name, e.g. { \"Difficulty\": \"L\", \"Component\": \"ui\" }. " +
             "Since CP-214 this is the only way to set them — see get_project for the field list."
         ),
-    }, UPDATE_TASK_HINTS),
+    }, { hints: UPDATE_TASK_HINTS, writes: true }),
   },
   async ({ taskKey, title, description, priority, category, assignee, agent, acceptanceCriteria, fields }) => {
+    // Before the lookup, so a call that changes nothing costs nothing and the refusal is the
+    // first thing that happens rather than the last
+    if (![title, description, priority, category, assignee, agent, acceptanceCriteria, fields].some((v) => v !== undefined)) {
+      throw new Error(`update_task ${NOTHING_TO_CHANGE}`);
+    }
+
     const { projectId, task } = await resolveTaskKey(taskKey);
     const data: Record<string, unknown> = {};
 
@@ -287,7 +294,7 @@ server.registerTool(
     inputSchema: strictInput({
       taskKey: z.string().describe("Task key (e.g. 'CP-1')"),
       status: z.string().describe("New status"),
-    }),
+    }, { hints: CHANGE_STATUS_HINTS, writes: true }),
   },
   async ({ taskKey, status }) => {
     const { projectId, task } = await resolveTaskKey(taskKey);
@@ -321,7 +328,7 @@ server.registerTool(
       startDate: z.string().describe("Start date (YYYY-MM-DD)"),
       endDate: z.string().describe("End date (YYYY-MM-DD)"),
       goal: z.string().optional().describe("Sprint goal"),
-    }),
+    }, { writes: true }),
   },
   async ({ project, name, startDate, endDate, goal }) => {
     const proj = await client.getProjectByKey(project) as { _id: string };
@@ -342,9 +349,13 @@ server.registerTool(
       endDate: z.string().optional(),
       goal: z.string().optional(),
       status: z.string().optional().describe("planned, active, or completed"),
-    }),
+    }, { writes: true }),
   },
   async ({ project, sprintId, ...data }) => {
+    if (![data.name, data.startDate, data.endDate, data.goal, data.status].some((v) => v !== undefined)) {
+      throw new Error(`update_sprint ${NOTHING_TO_CHANGE}`);
+    }
+
     const proj = await client.getProjectByKey(project) as { _id: string };
     const updates: Record<string, unknown> = {};
     if (data.name !== undefined) updates.name = data.name;
@@ -368,7 +379,7 @@ server.registerTool(
     inputSchema: strictInput({
       taskKey: z.string().describe("Task key (e.g. 'CP-1')"),
       body: z.string().describe("Comment text"),
-    }),
+    }, { writes: true }),
   },
   async ({ taskKey, body }) => {
     const { projectId, task } = await resolveTaskKey(taskKey);
