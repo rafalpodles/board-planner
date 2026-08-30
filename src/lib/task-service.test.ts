@@ -4238,6 +4238,23 @@ describe("nothing a create is refused for costs a task number", () => {
     expect(projectFindOneAndUpdate, "a refused create still spent a task number").not.toHaveBeenCalled();
   });
 
+  /**
+   * A board with no categories at all skips the name check, and the cast is what would then throw
+   * — past the `$inc`. Not reachable through the API today (the delete route refuses to remove the
+   * last category), so this closes the case and removes the need to know that.
+   */
+  it("refuses a category that is not text even when the board has no categories", async () => {
+    findById.mockReturnValue({ lean: () => Promise.resolve({ ...board, categories: [] }) });
+
+    const refused = await createTask("p1", "actor", { title: "Ordinary title", category: {} });
+    expect(refused).toMatchObject({ ok: false, status: 400 });
+    expect(projectFindOneAndUpdate, "a refused create still spent a task number").not.toHaveBeenCalled();
+
+    // The control: with no categories to check against, any ordinary string is still accepted
+    const created = await createTask("p1", "actor", { title: "Ordinary title", category: "chore" });
+    expect(created.ok).toBe(true);
+  });
+
   // The control the whole block rests on: "the counter did not move" is equally true of a create
   // that refuses everything, and a task number nobody mints is a bug of its own.
   it("mints the number and writes the task when the body is answerable", async () => {
