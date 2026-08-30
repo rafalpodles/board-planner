@@ -33,7 +33,9 @@ export async function POST(request: Request) {
   if (refusal) return refusal;
 
   // Ahead of the body, because a throttle consulted afterwards bounds the status code rather
-  // than the work: the read is an I/O wait a flood can hold open (BP-322).
+  // than the work: the read is an I/O wait a flood can hold open (BP-322). One consequence worth
+  // knowing: past the ceiling an SMTP-less instance answers 429 rather than the 503 below that
+  // exists to stop somebody waiting for a link nothing will send.
   const clientIp = getClientIp(request);
   const throttleKey = sourceKey(clientIp ?? "-", "password-reset");
   // anonymousMultiplier, because with no trusted proxy configured getClientIp returns null and

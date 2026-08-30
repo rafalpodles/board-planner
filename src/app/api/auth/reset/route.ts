@@ -35,6 +35,10 @@ export async function POST(request: Request) {
   // Ahead of the body for the same reason it is ahead of bcrypt: the read is work too (BP-322).
   // Guessing 32 random bytes is not the worry; unmetered work is. Two indexed reads and a bcrypt
   // per anonymous request is a bill anybody can run up.
+  //
+  // The cost of counting here is that a request refused later for its own reasons — a password
+  // under the minimum, a body that is not JSON — spends a slot too. That is the intended trade:
+  // the alternative leaves the cheapest way to spend the server's time the one way that is free.
   const clientIp = getClientIp(request);
   const throttleKey = sourceKey(clientIp ?? "-", "password-reset-use");
   if (await isRateLimited(throttleKey, anonymousMultiplier(clientIp, ATTEMPTS_PER_SOURCE))) {
