@@ -29,9 +29,15 @@ describe("generatePassword", () => {
   });
 
   // A modulo over 56 values would make the first 32 letters of the alphabet twice as likely
+  //
+  // 1200 draws, not 400. At 400 this assertion fails on correct code about one run in 500 —
+  // measured over 20000 trials: 41 exceeded the 1.8 bound, worst 1.965, while `counts.size` never
+  // missed a symbol. It reddened a run of this suite for a branch that touches nothing near it.
+  // At 1200 the same 20000 trials produced no failure and a worst ratio of 1.464, so the margin is
+  // real rather than tuned to the last observed value.
   it("spreads across the whole alphabet", () => {
     const counts = new Map<string, number>();
-    for (const ch of Array.from({ length: 400 }, () => generatePassword()).join("")) {
+    for (const ch of Array.from({ length: 1200 }, () => generatePassword()).join("")) {
       counts.set(ch, (counts.get(ch) ?? 0) + 1);
     }
 

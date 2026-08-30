@@ -73,6 +73,7 @@ export const GROUPS = {
     "in-app-notifications.spec.ts",
     "board-feed-notifications.spec.ts",
     "pm-chat.spec.ts",
+    "pm-assignment-is-a-handover.spec.ts",
     "pm-autonomy.spec.ts",
     "select-has-a-name.spec.ts",
     "removed-member-notifications.spec.ts",
