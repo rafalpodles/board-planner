@@ -177,19 +177,55 @@ test.describe("the autonomy form", () => {
 
     await page.getByLabel("Timezone").fill("Warsaw");
     await expect(page.getByText("Not a timezone this server knows: Warsaw")).toBeVisible();
-    // and the preview stops echoing it back as though it had understood
+    // and the preview stops echoing it back inside a sentence about what will happen
     await expect(page.getByText(/in Warsaw/)).toHaveCount(0);
-    await expect(page.getByText(/cannot read/)).toBeVisible();
+    await expect(page.getByText(/reviews? a day/)).toHaveCount(0);
+    await expect(page.getByText(/Name a timezone this server knows/)).toBeVisible();
 
     // Nothing is sent: the field already says what is wrong, and a 400 would say it again a
-    // round trip later without naming the field
-    let sent = false;
+    // round trip later without naming the field.
+    let sent = 0;
     page.on("request", (r) => {
-      if (r.method() === "PUT" && r.url().includes("/api/projects/")) sent = true;
+      if (r.method() === "PUT" && r.url().includes("/api/projects/")) sent += 1;
     });
     await page.getByRole("button", { name: "Save changes" }).click();
     await page.waitForTimeout(700);
-    expect(sent, "the form posted a body the server would refuse").toBe(false);
+    expect(sent, "the form posted a body the server would refuse").toBe(0);
+
+    // The positive control, and it is the whole test: a counter that cannot rise reads exactly
+    // like a refusal that works. Fixing the field and saving must move it.
+    await page.getByLabel("Timezone").fill("Europe/London");
+    await saveSettings(page);
+    expect(sent, "the listener never observes a PUT, so the zero above proves nothing").toBe(1);
+  });
+
+  // Clearing the field is how a person removes a typo, and the server has no fallback for "":
+  // its `??` never fires on an empty string, so this was the likeliest way to hit the 400.
+  test("an emptied timezone is refused too, and is not what gets posted", async ({ page }) => {
+    await signIn(page);
+    await openPmSettings(page);
+    await flip(scheduleSwitch(page));
+
+    await page.getByLabel("Timezone").fill("");
+    await expect(page.getByText(/A review has to run somewhere/)).toBeVisible();
+  });
+
+  // A value typed and then undone by switching the schedule off used to go on refusing every
+  // later save, through a toast about a field no longer on screen.
+  test("an unreadable timezone stops mattering once the schedule is off", async ({ page }) => {
+    await signIn(page);
+    await openPmSettings(page);
+
+    await flip(scheduleSwitch(page));
+    await page.getByLabel("Timezone").fill("Warsaw");
+    await expect(page.getByText(/Not a timezone this server knows/)).toBeVisible();
+
+    await flip(scheduleSwitch(page));
+    await saveSettings(page);
+
+    // and what reached the server is the zone the project already had, not the typo
+    const stored = (await storedPm()) as { autonomy: { timezone: string } };
+    expect(stored.autonomy.timezone).toBe("Europe/Warsaw");
   });
 
   test("refuses a turn cap that is not a whole number in range", async ({ page }) => {
@@ -208,7 +244,15 @@ test.describe("the autonomy form", () => {
       await expect(page.getByText(/whole number of turns/), bad).toBeVisible();
     }
 
-    // and the stored value is still the one that was valid
+    // Pressing Save is the part that matters. Without it this only proved the error renders —
+    // the early return could be deleted and the test would stay green.
+    let sent = 0;
+    page.on("request", (r) => {
+      if (r.method() === "PUT" && r.url().includes("/api/projects/")) sent += 1;
+    });
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await page.waitForTimeout(700);
+    expect(sent).toBe(0);
     expect((await storedPm()).dailyTurnCap).toBe(40);
   });
 
