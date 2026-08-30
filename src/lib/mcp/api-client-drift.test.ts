@@ -116,3 +116,21 @@ describe("the standalone MCP client does not drift from PlannerClient", () => {
     expect(missing).toEqual(["resolveTaskKey"]);
   });
 });
+
+/**
+ * BP-497 landed the same strict-input fix in both copies. What the standalone server *does* is
+ * driven for real in standalone-tools.test.ts, under its own SDK and its own zod major; what no
+ * test there can see is the two helper files drifting apart, because each side would still pass
+ * its own assertions.
+ */
+describe("the standalone MCP server keeps the strict input the in-app one has", () => {
+  const IN_APP_HELPER = join(process.cwd(), "src/lib/mcp/strict-input.ts");
+  const STANDALONE_HELPER = join(process.cwd(), "mcp-server/src/strict-input.ts");
+
+  // The two packages are on different zod majors, which is why the helper passes both spellings
+  // of the hook rather than branching — that is what lets the file be identical rather than merely
+  // similar, and identical is the only version of this a single assertion can hold
+  it("ships a byte-identical copy of the helper", () => {
+    expect(readFileSync(STANDALONE_HELPER, "utf8")).toBe(readFileSync(IN_APP_HELPER, "utf8"));
+  });
+});

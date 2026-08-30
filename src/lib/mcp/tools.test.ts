@@ -6,12 +6,17 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 type Handler = (args: Record<string, unknown>, extra: unknown) => Promise<unknown>;
 
-// The registration is the only export, so the tools are reached by capturing what it registers
+// The registration is the only export, so the tools are reached by capturing what it registers.
+// This calls the callbacks directly and so skips the SDK's parse step — tools.strict.test.ts is
+// the one that drives the real transport.
 function registered() {
-  const tools = new Map<string, { schema: Record<string, z.ZodTypeAny>; handler: Handler }>();
+  const tools = new Map<string, { schema: z.ZodObject<z.ZodRawShape>; handler: Handler }>();
   const server = {
-    tool: (name: string, _desc: string, schema: Record<string, z.ZodTypeAny>, handler: Handler) =>
-      tools.set(name, { schema, handler }),
+    registerTool: (
+      name: string,
+      config: { inputSchema: z.ZodObject<z.ZodRawShape> },
+      handler: Handler
+    ) => tools.set(name, { schema: config.inputSchema, handler }),
   } as unknown as McpServer;
   registerPlannerTools(server);
   return tools;
@@ -39,7 +44,7 @@ describe("update_task and the agent that runs it", () => {
   }
 
   it("offers the parameter at all", () => {
-    expect(Object.keys(registered().get("update_task")!.schema)).toContain("agent");
+    expect(Object.keys(registered().get("update_task")!.schema.shape)).toContain("agent");
   });
 
   it("resolves the agent by name and sends its id", async () => {

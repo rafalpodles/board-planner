@@ -132,7 +132,7 @@ Practicalities that cost real time to rediscover:
 
 ### Conventions
 - Task keys: `BP-1`, `BP-2` — use these when referencing tasks. Pull requests opened under the old `CP-` prefix still link, because the project keeps its former keys.
-- **Project-defined fields go through the generic `fields` parameter**, keyed by field name: `fields: { "Difficulty": "L", "Component": "ui" }`. CP-214 removed the `difficulty` and `component` parameters that used to exist alongside it — a client still passing them gets nothing set. `get_project` lists the field names a project actually has.
+- **Project-defined fields go through the generic `fields` parameter**, keyed by field name: `fields: { "Difficulty": "L", "Component": "ui" }`. CP-214 removed the `difficulty` and `component` parameters that used to exist alongside it, and since BP-497 a client still passing them is refused, with the refusal naming the parameter and pointing at `fields`. That holds for any parameter a tool does not declare: the input schemas are strict, so a stray key is an error rather than a key quietly dropped from an otherwise successful write. `get_project` lists the field names a project actually has.
 - Assignees use **usernames** (not IDs). `claude` = Claude Code, `rpo` = you. Routing keys on the assignee, so a task meant to run on your machine is assigned to `rpo`, not to `claude`.
 - **Handing work to a machine is `update_task`'s `agent` parameter**, named rather than by id — the id appears in no MCP response. Instance admins only, and refused for an agent nobody has composed yet.
 - Branch naming: `bp-<number>/<short-slug>` (e.g. `bp-3/dropdown-menu`)
@@ -244,9 +244,10 @@ mcp-server/           # Standalone MCP server (stdio transport)
 - **A held task refuses to move**: while a run holds a task (`execution.runId` set), a status change
   that would leave the column is refused with **409**, naming the worker and its phase — through
   every writer: the board, the edit form, MCP `update_task`, and the PM agent. `force: true` on the
-  request is the way past it, and the board asks for it with a confirm dialog rather than a toast.
-  The PM agent is deliberately given no way to force: an unattended agent must not take work off a
-  machine. Staying in the column — a reorder, or resending the status already held — never touches
+  request is the way past it, and the board asks for it with a confirm dialog rather than a toast —
+  but only from a person's session. `machineMayNotForce` (`src/lib/force-guard.ts`) refuses it from
+  any machine credential, which is what every API token and MCP connection is, and the PM agent is
+  given no way to name it at all: an unattended agent must not take work off a machine. Staying in the column — a reorder, or resending the status already held — never touches
   the run. Staleness is **not** judged by silence: `agent` reports on tool use rather than on a
   clock, so a worker thinking for minutes is indistinguishable from a dead one. A genuinely
   abandoned run is reclaimed after `EXECUTION_LEASE_MS` (2 h) with attempt accounting.

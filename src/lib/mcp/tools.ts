@@ -4,6 +4,13 @@ import { z } from "zod";
 import { PlannerClient } from "./planner-client";
 import { resolveFieldsByName } from "@/lib/custom-fields";
 import { APP_NAME } from "@/lib/brand";
+import {
+  strictInput,
+  NOTHING_TO_CHANGE,
+  CREATE_TASK_HINTS,
+  UPDATE_TASK_HINTS,
+  CHANGE_STATUS_HINTS,
+} from "./strict-input";
 
 type ToolExtra = { authInfo?: AuthInfo };
 
@@ -24,14 +31,23 @@ function json(value: unknown) {
 export function registerPlannerTools(server: McpServer): void {
   // --- Projects ---
 
-  server.tool("list_projects", `List all projects in ${APP_NAME}`, {}, async (_args, extra) => {
-    return json(await clientFrom(extra).listProjects());
-  });
+  server.registerTool(
+    "list_projects",
+    {
+      description: `List all projects in ${APP_NAME}`,
+      inputSchema: strictInput({}),
+    },
+    async (_args, extra) => {
+      return json(await clientFrom(extra).listProjects());
+    }
+  );
 
-  server.tool(
+  server.registerTool(
     "get_project",
-    "Get project details by project key (e.g. 'CP') or project ID",
-    { identifier: z.string().describe("Project key (e.g. 'CP') or project ID") },
+    {
+      description: "Get project details by project key (e.g. 'CP') or project ID",
+      inputSchema: strictInput({ identifier: z.string().describe("Project key (e.g. 'CP') or project ID") }),
+    },
     async ({ identifier }, extra) => {
       const client = clientFrom(extra);
       let project: unknown;
@@ -46,20 +62,22 @@ export function registerPlannerTools(server: McpServer): void {
 
   // --- Tasks ---
 
-  server.tool(
+  server.registerTool(
     "list_tasks",
-    "List tasks in a project with optional filters",
     {
-      project: z.string().describe("Project key (e.g. 'CP')"),
-      status: z
-        .string()
-        .optional()
-        .describe(
-          "Filter by status (comma-separated): planned, todo, in_progress, in_review, needs_human_review, ready_to_test, done"
-        ),
-      assignee: z.string().optional().describe("Filter by assignee username"),
-      category: z.string().optional().describe("Filter by category: bug, doc, user-story, idea"),
-      priority: z.string().optional().describe("Filter by priority: low, medium, high, urgent"),
+      description: "List tasks in a project with optional filters",
+      inputSchema: strictInput({
+        project: z.string().describe("Project key (e.g. 'CP')"),
+        status: z
+          .string()
+          .optional()
+          .describe(
+            "Filter by status (comma-separated): planned, todo, in_progress, in_review, needs_human_review, ready_to_test, done"
+          ),
+        assignee: z.string().optional().describe("Filter by assignee username"),
+        category: z.string().optional().describe("Filter by category: bug, doc, user-story, idea"),
+        priority: z.string().optional().describe("Filter by priority: low, medium, high, urgent"),
+      }),
     },
     async ({ project, status, assignee, category, priority }, extra) => {
       const client = clientFrom(extra);
@@ -73,10 +91,12 @@ export function registerPlannerTools(server: McpServer): void {
     }
   );
 
-  server.tool(
+  server.registerTool(
     "get_task",
-    "Get full task details by task key (e.g. 'CP-1')",
-    { taskKey: z.string().describe("Task key (e.g. 'CP-1')") },
+    {
+      description: "Get full task details by task key (e.g. 'CP-1')",
+      inputSchema: strictInput({ taskKey: z.string().describe("Task key (e.g. 'CP-1')") }),
+    },
     async ({ taskKey }, extra) => {
       const client = clientFrom(extra);
       const { projectId, taskId } = await client.resolveTaskKey(taskKey);
@@ -84,34 +104,36 @@ export function registerPlannerTools(server: McpServer): void {
     }
   );
 
-  server.tool(
+  server.registerTool(
     "create_task",
-    "Create a new task in a project",
     {
-      project: z.string().describe("Project key (e.g. 'CP')"),
-      title: z.string().describe("Task title"),
-      description: z.string().optional().describe("Task description"),
-      priority: z.string().optional().describe("Priority: low, medium, high, or urgent (default: medium)"),
-      category: z.string().optional().describe("Category: bug, doc, user-story, idea"),
-      assignee: z
-        .string()
-        .optional()
-        .describe(
-          "Assignee username. A new task never names an agent — hand it to a machine with " +
-            "update_task once it exists."
-        ),
-      status: z.string().optional().describe("Initial status (default: planned)"),
-      acceptanceCriteria: z
-        .string()
-        .optional()
-        .describe("Acceptance criteria (markdown checklist, converted to structured checklist items)"),
-      fields: z
-        .record(z.any())
-        .optional()
-        .describe(
-          "Project-defined fields keyed by field name, e.g. { \"Owoce\": \"Apples\" }. " +
-            "get_project lists this project's fields and the options each one accepts."
-        ),
+      description: "Create a new task in a project",
+      inputSchema: strictInput({
+        project: z.string().describe("Project key (e.g. 'CP')"),
+        title: z.string().describe("Task title"),
+        description: z.string().optional().describe("Task description"),
+        priority: z.string().optional().describe("Priority: low, medium, high, or urgent (default: medium)"),
+        category: z.string().optional().describe("Category: bug, doc, user-story, idea"),
+        assignee: z
+          .string()
+          .optional()
+          .describe(
+            "Assignee username. A new task never names an agent — hand it to a machine with " +
+              "update_task once it exists."
+          ),
+        status: z.string().optional().describe("Initial status (default: planned)"),
+        acceptanceCriteria: z
+          .string()
+          .optional()
+          .describe("Acceptance criteria (markdown checklist, converted to structured checklist items)"),
+        fields: z
+          .record(z.any())
+          .optional()
+          .describe(
+            "Project-defined fields keyed by field name, e.g. { \"Owoce\": \"Apples\" }. " +
+              "get_project lists this project's fields and the options each one accepts."
+          ),
+      }, { hints: CREATE_TASK_HINTS, writes: true }),
     },
     async ({ project, title, description, priority, category, assignee, status, acceptanceCriteria, fields }, extra) => {
       const client = clientFrom(extra);
@@ -146,38 +168,51 @@ export function registerPlannerTools(server: McpServer): void {
     }
   );
 
-  server.tool(
+  server.registerTool(
     "update_task",
-    "Update an existing task's fields by task key",
     {
-      taskKey: z.string().describe("Task key (e.g. 'CP-1')"),
-      title: z.string().optional(),
-      description: z.string().optional(),
-      priority: z.string().optional().describe("Priority: low, medium, high, or urgent"),
-      category: z.string().optional(),
-      assignee: z.string().optional().describe("Assignee username. Empty string to unassign."),
-      agent: z
-        .string()
-        .optional()
-        .describe(
-          "Which agent runs this task on a machine, by name. Choosing one is the hand-over: the " +
-            "machine belonging to the task's assignee takes it and runs that agent, and only when " +
-            "that person assigned it to themselves. Empty string means nobody — the default, and " +
-            "what a task somebody is doing by hand looks like. Instance admins only."
-        ),
-      acceptanceCriteria: z
-        .string()
-        .optional()
-        .describe("Acceptance criteria (markdown checklist, converted to structured checklist items)"),
-      fields: z
-        .record(z.any())
-        .optional()
-        .describe(
-          "Project-defined fields keyed by field name. Only the named fields change; " +
-            "the task's other field values are left alone. get_project lists them."
-        ),
+      description: "Update an existing task's fields by task key",
+      inputSchema: strictInput({
+        taskKey: z.string().describe("Task key (e.g. 'CP-1')"),
+        title: z.string().optional(),
+        description: z.string().optional(),
+        priority: z.string().optional().describe("Priority: low, medium, high, or urgent"),
+        category: z.string().optional(),
+        assignee: z.string().optional().describe("Assignee username. Empty string to unassign."),
+        agent: z
+          .string()
+          .optional()
+          .describe(
+            "Which agent runs this task on a machine, by name. Choosing one is the hand-over: the " +
+              "machine belonging to the task's assignee takes it and runs that agent, and only when " +
+              "that person assigned it to themselves. Empty string means nobody — the default, and " +
+              "what a task somebody is doing by hand looks like. Instance admins only."
+          ),
+        acceptanceCriteria: z
+          .string()
+          .optional()
+          .describe("Acceptance criteria (markdown checklist, converted to structured checklist items)"),
+        fields: z
+          .record(z.any())
+          .optional()
+          .describe(
+            "Project-defined fields keyed by field name. Only the named fields change; " +
+              "the task's other field values are left alone. get_project lists them."
+          ),
+      }, { hints: UPDATE_TASK_HINTS, writes: true }),
     },
     async ({ taskKey, title, description, priority, category, assignee, agent, acceptanceCriteria, fields }, extra) => {
+      // Before the lookup, so a call that changes nothing costs nothing and the refusal is the
+      // first thing that happens rather than the last
+      if (
+        ![title, description, priority, category, assignee, agent, acceptanceCriteria].some(
+          (v) => v !== undefined
+        ) &&
+        !Object.keys(fields || {}).length
+      ) {
+        throw new Error(`update_task ${NOTHING_TO_CHANGE}`);
+      }
+
       const client = clientFrom(extra);
       const { projectId, taskId } = await client.resolveTaskKey(taskKey);
       const data: Record<string, unknown> = {};
@@ -231,16 +266,22 @@ export function registerPlannerTools(server: McpServer): void {
         }
       }
 
+      // Backstop for a call that named `fields` but no field in it. The refusal above catches
+      // everything else, before the lookup
+      if (Object.keys(data).length === 0) throw new Error(`update_task ${NOTHING_TO_CHANGE}`);
+
       return json(await client.updateTask(projectId, taskId, data));
     }
   );
 
-  server.tool(
+  server.registerTool(
     "change_task_status",
-    "Change the status of a task. Valid: planned, todo, in_progress, in_review, needs_human_review, ready_to_test, done",
     {
-      taskKey: z.string().describe("Task key (e.g. 'CP-1')"),
-      status: z.string().describe("New status"),
+      description: "Change the status of a task. Valid: planned, todo, in_progress, in_review, needs_human_review, ready_to_test, done",
+      inputSchema: strictInput({
+        taskKey: z.string().describe("Task key (e.g. 'CP-1')"),
+        status: z.string().describe("New status"),
+      }, { hints: CHANGE_STATUS_HINTS, writes: true }),
     },
     async ({ taskKey, status }, extra) => {
       const client = clientFrom(extra);
@@ -251,10 +292,12 @@ export function registerPlannerTools(server: McpServer): void {
 
   // --- Sprints ---
 
-  server.tool(
+  server.registerTool(
     "list_sprints",
-    "List all sprints in a project",
-    { project: z.string().describe("Project key (e.g. 'CP')") },
+    {
+      description: "List all sprints in a project",
+      inputSchema: strictInput({ project: z.string().describe("Project key (e.g. 'CP')") }),
+    },
     async ({ project }, extra) => {
       const client = clientFrom(extra);
       const proj = await client.getProjectByKey(project);
@@ -262,15 +305,17 @@ export function registerPlannerTools(server: McpServer): void {
     }
   );
 
-  server.tool(
+  server.registerTool(
     "create_sprint",
-    "Create a new sprint in a project",
     {
-      project: z.string().describe("Project key (e.g. 'CP')"),
-      name: z.string().describe("Sprint name"),
-      startDate: z.string().describe("Start date (YYYY-MM-DD)"),
-      endDate: z.string().describe("End date (YYYY-MM-DD)"),
-      goal: z.string().optional().describe("Sprint goal"),
+      description: "Create a new sprint in a project",
+      inputSchema: strictInput({
+        project: z.string().describe("Project key (e.g. 'CP')"),
+        name: z.string().describe("Sprint name"),
+        startDate: z.string().describe("Start date (YYYY-MM-DD)"),
+        endDate: z.string().describe("End date (YYYY-MM-DD)"),
+        goal: z.string().optional().describe("Sprint goal"),
+      }, { writes: true }),
     },
     async ({ project, name, startDate, endDate, goal }, extra) => {
       const client = clientFrom(extra);
@@ -279,19 +324,25 @@ export function registerPlannerTools(server: McpServer): void {
     }
   );
 
-  server.tool(
+  server.registerTool(
     "update_sprint",
-    "Update an existing sprint (name, dates, goal, status)",
     {
-      project: z.string().describe("Project key (e.g. 'CP')"),
-      sprintId: z.string().describe("Sprint ID"),
-      name: z.string().optional(),
-      startDate: z.string().optional(),
-      endDate: z.string().optional(),
-      goal: z.string().optional(),
-      status: z.string().optional().describe("planned, active, or completed"),
+      description: "Update an existing sprint (name, dates, goal, status)",
+      inputSchema: strictInput({
+        project: z.string().describe("Project key (e.g. 'CP')"),
+        sprintId: z.string().describe("Sprint ID"),
+        name: z.string().optional(),
+        startDate: z.string().optional(),
+        endDate: z.string().optional(),
+        goal: z.string().optional(),
+        status: z.string().optional().describe("planned, active, or completed"),
+      }, { writes: true }),
     },
     async ({ project, sprintId, name, startDate, endDate, goal, status }, extra) => {
+      if (![name, startDate, endDate, goal, status].some((v) => v !== undefined)) {
+        throw new Error(`update_sprint ${NOTHING_TO_CHANGE}`);
+      }
+
       const client = clientFrom(extra);
       const proj = await client.getProjectByKey(project);
       const updates: Record<string, unknown> = {};
@@ -300,18 +351,22 @@ export function registerPlannerTools(server: McpServer): void {
       if (endDate !== undefined) updates.endDate = endDate;
       if (goal !== undefined) updates.goal = goal;
       if (status !== undefined) updates.status = status;
+      if (Object.keys(updates).length === 0) throw new Error(`update_sprint ${NOTHING_TO_CHANGE}`);
+
       return json(await client.updateSprint(proj._id, sprintId, updates));
     }
   );
 
   // --- Comments ---
 
-  server.tool(
+  server.registerTool(
     "add_comment",
-    "Add a comment to a task by task key (e.g. 'CP-1')",
     {
-      taskKey: z.string().describe("Task key (e.g. 'CP-1')"),
-      body: z.string().describe("Comment text"),
+      description: "Add a comment to a task by task key (e.g. 'CP-1')",
+      inputSchema: strictInput({
+        taskKey: z.string().describe("Task key (e.g. 'CP-1')"),
+        body: z.string().describe("Comment text"),
+      }, { writes: true }),
     },
     async ({ taskKey, body }, extra) => {
       const client = clientFrom(extra);
@@ -320,10 +375,12 @@ export function registerPlannerTools(server: McpServer): void {
     }
   );
 
-  server.tool(
+  server.registerTool(
     "list_comments",
-    "List all comments on a task by task key (e.g. 'CP-1')",
-    { taskKey: z.string().describe("Task key (e.g. 'CP-1')") },
+    {
+      description: "List all comments on a task by task key (e.g. 'CP-1')",
+      inputSchema: strictInput({ taskKey: z.string().describe("Task key (e.g. 'CP-1')") }),
+    },
     async ({ taskKey }, extra) => {
       const client = clientFrom(extra);
       const { projectId, taskId } = await client.resolveTaskKey(taskKey);
