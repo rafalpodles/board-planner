@@ -7,7 +7,8 @@ import { Project } from "@/models/project";
 import { runPmTurn } from "@/lib/pm/agent";
 import { isPmAvailable } from "@/lib/pm/config";
 import { acquireTurnLock, releaseTurnLock } from "@/lib/pm/turn-lock";
-import { isOverDailyTurnCap } from "@/lib/pm/turn-cap";
+import { dailyPmSpend, isOverDailyTurnCap } from "@/lib/pm/turn-cap";
+import { MAX_STEPS } from "@/lib/pm/agent";
 import { isPmRunnable, pmDisabledReason, resolvePmModel } from "@/lib/pm/availability";
 import { IMAGE_MIME_TYPES, MAX_ATTACHMENTS_PER_MESSAGE, anyAttachmentReadable, modelAcceptsImages } from "@/lib/pm/attachments";
 import { databaseUnavailable, resolveProjectId } from "@/lib/middleware";
@@ -138,6 +139,21 @@ export async function POST(
   if (over) {
     return NextResponse.json(
       { error: `Daily PM turn cap (${cap}) reached for this project` },
+      { status: 429 }
+    );
+  }
+
+  // The second ceiling, in the units the operator pays in. Off unless configured, so this refuses
+  // nothing that works today (BP-284).
+  const spend = await dailyPmSpend(projectId, project.pm);
+  if (spend.over) {
+    return NextResponse.json(
+      {
+        error:
+          `Daily PM token cap reached for this project: ${spend.tokens.toLocaleString()} of ` +
+          `${spend.cap.toLocaleString()} tokens across ${spend.calls} model calls. ` +
+          `A turn is up to ${MAX_STEPS} calls, which is why the turn cap alone does not bound this.`,
+      },
       { status: 429 }
     );
   }

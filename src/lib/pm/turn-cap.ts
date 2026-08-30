@@ -1,7 +1,8 @@
+import { Types } from "mongoose";
 import { PmMessage } from "@/models/pmMessage";
 import { DEFAULT_PM_AUTONOMY } from "@/types";
 import { isValidTimezone, startOfDayInTimezone } from "@/lib/time";
-import { resolveDailyTurnCap } from "./availability";
+import { resolveDailyTokenCap, resolveDailyTurnCap } from "./availability";
 
 /**
  * A turn is counted when it is *started*, and a turn the provider then refused is still one — the
@@ -29,4 +30,52 @@ export async function isOverDailyTurnCap(
     createdAt: { $gte: startOfDay },
   });
   return { over: used >= cap, cap, used };
+}
+
+/**
+ * What the PM has spent on this project today, and whether that is over the token ceiling.
+ *
+ * Derived from the stored turns rather than accumulated into the project, exactly as the turn count
+ * above is: there is no counter to drift, no migration, and a turn deleted from the thread stops
+ * counting against the day the same way it stops counting as a turn.
+ *
+ * `calls` is reported beside the tokens because it is the number the turn cap was mistaken for —
+ * seeing "40 turns, 380 calls" is what makes the difference legible (BP-284).
+ */
+export async function dailyPmSpend(
+  projectId: string,
+  pm: { dailyTokenCap?: number; autonomy?: { timezone?: string } }
+): Promise<{ over: boolean; cap: number; tokens: number; calls: number; stepLimitHits: number }> {
+  const cap = await resolveDailyTokenCap(pm.dailyTokenCap);
+  const zone = pm.autonomy?.timezone;
+  const startOfDay = startOfDayInTimezone(
+    new Date(),
+    zone && isValidTimezone(zone) ? zone : DEFAULT_PM_AUTONOMY.timezone
+  );
+  const [totals] = await PmMessage.aggregate<{
+    tokens: number;
+    calls: number;
+    stepLimitHits: number;
+  }>([
+    { $match: { project: new Types.ObjectId(projectId), createdAt: { $gte: startOfDay } } },
+    {
+      $group: {
+        _id: null,
+        tokens: { $sum: { $ifNull: ["$usage.totalTokens", 0] } },
+        calls: { $sum: { $ifNull: ["$usage.calls", 0] } },
+        // Turns that ran out of steps rather than finishing — the most expensive shape a turn has
+        stepLimitHits: { $sum: { $cond: [{ $eq: ["$usage.hitStepLimit", true] }, 1, 0] } },
+      },
+    },
+  ]);
+
+  const tokens = totals?.tokens ?? 0;
+  return {
+    // A cap of 0 is no cap: `over` must not become true for every project the moment this ships
+    over: cap > 0 && tokens >= cap,
+    cap,
+    tokens,
+    calls: totals?.calls ?? 0,
+    stepLimitHits: totals?.stepLimitHits ?? 0,
+  };
 }

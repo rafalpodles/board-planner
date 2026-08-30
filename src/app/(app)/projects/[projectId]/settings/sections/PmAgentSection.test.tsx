@@ -6,7 +6,10 @@ import { SettingsProvider } from "@/components/settings/settings-context";
 import { ApiProject } from "@/types";
 
 const { api, toast } = vi.hoisted(() => ({
-  api: { post: vi.fn(), put: vi.fn() },
+  // `get` reads today's PM spend on mount (BP-284). Rejecting rather than resolving keeps these
+  // cases about what they were about: the section renders its settings whether or not the number
+  // is available, which is the behaviour the catch beside the call exists for.
+  api: { post: vi.fn(), put: vi.fn(), get: vi.fn(() => Promise.reject(new Error("not stubbed here"))) },
   toast: vi.fn(),
 }));
 

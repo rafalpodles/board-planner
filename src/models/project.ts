@@ -132,6 +132,8 @@ const projectSchema = new Schema<IProject>(
       model: { type: String, default: "" },
       contextNotes: { type: String, default: "" },
       dailyTurnCap: { type: Number, default: 0 },
+      // 0 is no ceiling, and is the default on purpose — see resolveDailyTokenCap (BP-284)
+      dailyTokenCap: { type: Number, default: 0 },
       autonomy: {
         dailyReview: { type: Boolean, default: false },
         reviewHour: { type: Number, default: 9, min: 0, max: 23 },

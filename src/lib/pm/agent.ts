@@ -15,7 +15,9 @@ import { pmThreadFilter } from "./thread";
 import { getProjectColumns, defaultStatusFor } from "@/lib/columns";
 import { APP_NAME } from "@/lib/brand";
 
-const MAX_STEPS = 15;
+/** Round-trips one turn may make. Exported because the cap the operator sees is in turns, and the
+ * screens that show it have to be able to say what a turn can cost (BP-284). */
+export const MAX_STEPS = 15;
 const MAX_WRITE_ACTIONS = 10;
 const HISTORY_LIMIT = 30;
 const TOOL_RESULT_MAX_CHARS = 6000;
@@ -252,8 +254,20 @@ export async function runPmTurn(opts: {
   // screenshot is as likely to mint tasks as to ask what it is for (BP-451).
   const imageOnly = !opts.userMessage.trim() && Array.isArray(userContent);
 
+  /**
+   * What this turn is costing, summed as it goes (BP-284). A turn is up to MAX_STEPS round-trips,
+   * so `dailyTurnCap` — which counts turns — says nothing about spend on its own. Written on every
+   * exit, including the ones that fail: a turn that burned nine calls and then hit a provider error
+   * cost nine calls, and a record that forgave them would understate exactly the runs that hurt.
+   */
+  const spend = { promptTokens: 0, completionTokens: 0, totalTokens: 0, calls: 0, hitStepLimit: false };
+  const record = () => {
+    assistantMessage.usage = { ...spend };
+  };
+
   const finalize = async (content: string): Promise<PmTurnResult> => {
     assistantMessage.content = content;
+    record();
     await assistantMessage.save();
     return { ok: true, message: assistantMessage.toObject() as IPmMessage };
   };
@@ -287,6 +301,7 @@ export async function runPmTurn(opts: {
       ? `Executed before stopping: ${done.join("; ")}. Those actions stand — they are not rolled back.`
       : `No board actions had run yet.`;
     assistantMessage.content = `⏹ Stopped by user. ${where}`;
+    record();
     await assistantMessage.save();
     return { ok: true, interrupted: true, message: assistantMessage.toObject() as IPmMessage };
   };
@@ -299,12 +314,22 @@ export async function runPmTurn(opts: {
 
     const completion = await chatCompletion({ model, messages, tools: toolDefinitions, signal: opts.signal });
 
+    // Counted before the result is judged: the call was made and billed whatever it answered
+    spend.calls++;
+    if ("usage" in completion && completion.usage) {
+      spend.promptTokens += completion.usage.promptTokens;
+      spend.completionTokens += completion.usage.completionTokens;
+      spend.totalTokens += completion.usage.totalTokens;
+    }
+
     if (completion.type === "aborted") {
       return interrupted();
     }
 
     if (completion.type === "error") {
       assistantMessage.content = `⚠️ ${completion.error}`;
+      // A turn that burned nine calls and then met a provider error cost nine calls
+      record();
       await assistantMessage.save();
       return { ok: false, message: assistantMessage.toObject() as IPmMessage, error: completion.error };
     }
@@ -344,6 +369,10 @@ export async function runPmTurn(opts: {
               const summary = `MCP write on ${mcpTool.serverName}: ${mcpTool.toolName}`;
               action = { type: "action", tool: mcpTool.exposedName, summary };
               assistantMessage.actions.push({ tool: mcpTool.exposedName, summary, at: new Date() });
+              // Recorded at the mid-loop saves too: a turn killed by a deploy or the route's
+              // 300s ceiling would otherwise store zero, under-reporting the long turns this
+              // counting exists for — see abandoned.ts, which patches content and never usage.
+              record();
               await assistantMessage.save();
               opts.onEvent?.(action);
             }
@@ -377,6 +406,8 @@ export async function runPmTurn(opts: {
                 summary: outcome.action.summary,
                 at: new Date(),
               });
+              // Same reason as the save above
+              record();
               await assistantMessage.save();
               opts.onEvent?.(action);
             }
@@ -393,6 +424,10 @@ export async function runPmTurn(opts: {
       });
     }
   }
+
+  // Falling out of the loop means MAX_STEPS was spent rather than the turn finishing, which is a
+  // different event and the most expensive one a turn can be
+  spend.hitStepLimit = true;
 
   const summary =
     assistantMessage.actions.length > 0

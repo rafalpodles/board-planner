@@ -7,7 +7,7 @@ import { pillToneForRole } from "@/lib/email-template";
 import { explicitEscalationColumnId } from "@/lib/escalation";
 import { getPmUser } from "./pm-user";
 import { runPmTurn } from "./agent";
-import { isOverDailyTurnCap } from "./turn-cap";
+import { dailyPmSpend, isOverDailyTurnCap } from "./turn-cap";
 import { acquireTurnLock, releaseTurnLock } from "./turn-lock";
 import { NEEDS_HUMAN_REVIEW_DISALLOWED_TOOLS, buildNeedsHumanReviewPrompt } from "./autonomy";
 import { getProjectColumns } from "@/lib/columns";
@@ -122,6 +122,16 @@ export async function runPmTrigger(trigger: IPmTrigger): Promise<PmTriggerOutcom
   const { over, cap } = await isOverDailyTurnCap(projectId, project.pm);
   if (over) {
     await settleTrigger(trigger, "failed", `Daily turn cap (${cap}) reached`);
+    return "ran";
+  }
+
+  const spend = await dailyPmSpend(projectId, project.pm);
+  if (spend.over) {
+    await settleTrigger(
+      trigger,
+      "failed",
+      `Daily token cap reached: ${spend.tokens.toLocaleString()} of ${spend.cap.toLocaleString()}`
+    );
     return "ran";
   }
 
