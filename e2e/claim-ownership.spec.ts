@@ -1,4 +1,5 @@
 import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
+import { randomUUID } from "node:crypto";
 import mongoose from "mongoose";
 import { changeStatus, claimNextTask, releaseTask, updateTask } from "@/lib/task-service";
 // Statically, though nothing here calls it: `agentUsableOnProject` reaches this model through a
@@ -1047,6 +1048,32 @@ test.describe("what the machine refuses at the moment it picks the work up", () 
     expect((await read(copy._id)).status).toBe(APPROVED);
   });
 
+  // BP-329. The runId is the only caller-controlled string the claim interpolates into an update
+  // PIPELINE, where Mongoose casts nothing and a leading `$` is a field path. Refused at the door,
+  // and written as `$literal` regardless — the two tests below are the door, the ones at the end of
+  // this file are the write.
+  for (const shape of ["$$REMOVE", "$execution.workerId", "a".repeat(65), "run 1", "run/1"]) {
+    test(`refuses a runId of ${JSON.stringify(shape)}`, async ({ request }) => {
+      const armed = await addTask({ assignee: OWNER, assignedBy: OWNER, agent: MINE });
+
+      const answer = await claim(request, shape);
+
+      expect(answer.status(), await answer.text()).toBe(400);
+      // Not merely refused: the work is still there to be claimed by a request that asks properly
+      expect((await read(armed)).status).toBe(APPROVED);
+    });
+  }
+
+  // The control the refusals are worthless without: the shape the worker actually mints
+  test("takes the work when the runId is the uuid a worker mints", async ({ request }) => {
+    const armed = await addTask({ assignee: OWNER, assignedBy: OWNER, agent: MINE });
+
+    const answer = await claim(request, randomUUID());
+
+    expect(answer.status(), await answer.text()).toBe(200);
+    expect((await read(armed)).status).toBe(ACTIVE);
+  });
+
   // A dangling owner is not a match for anybody, least of all for the machine standing in front of
   // it: populate renders a deleted reference as null, and only the stored id decides here
   test("refuses one whose owner no longer exists at all", async ({ request }) => {
@@ -1057,5 +1084,44 @@ test.describe("what the machine refuses at the moment it picks the work up", () 
 
     expect((await claim(request, "run-orphan")).status()).toBe(204);
     expect((await read(armed)).status).toBe(APPROVED);
+  });
+});
+
+/**
+ * BP-329, the other half. The route above refuses these shapes, so the only way to reach the write
+ * with one is to call the service the way the route does — which is what the `$literal` in
+ * `claimNextTask` is for: it protects the write from every caller there will ever be, not just the
+ * one this repository can see today.
+ */
+test.describe("a run identity is text, whatever it looks like", () => {
+  test("an ordinary uuid is stored verbatim", async () => {
+    const armed = await addTask();
+    const runId = randomUUID();
+
+    await claimNextTask(String(PROJECT_ID), WORKER, runId, String(OWNER));
+
+    expect((await read(armed)).execution.runId).toBe(runId);
+  });
+
+  // Without `$literal` this stored NOTHING: the task went active holding a run with no identity, so
+  // no report could address it and nothing but the two-hour lease could get it back.
+  test("$$REMOVE is a run identity, not an instruction to drop the field", async () => {
+    const armed = await addTask();
+
+    await claimNextTask(String(PROJECT_ID), WORKER, "$$REMOVE", String(OWNER));
+
+    expect((await read(armed)).execution.runId).toBe("$$REMOVE");
+  });
+
+  // Whether a field path resolves to another field's value or to nothing depends on what the
+  // document already carries; either way the stored identity is not the text that was sent
+  test("a field path is a run identity, not the value of that field", async () => {
+    const armed = await addTask();
+
+    await claimNextTask(String(PROJECT_ID), WORKER, "$execution.workerId", String(OWNER));
+
+    const after = await read(armed);
+    expect(after.execution.runId).toBe("$execution.workerId");
+    expect(after.execution.workerId).toBe(WORKER);
   });
 });

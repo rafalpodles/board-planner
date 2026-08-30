@@ -284,6 +284,37 @@ describe("POST /tasks/claim", () => {
     expect(claimNextTask).not.toHaveBeenCalled();
   });
 
+  // BP-329. The runId lands in an aggregation `$set`, where a leading `$` is a field path rather
+  // than text — so a claim carrying one stored an identity that was not the text sent: nothing at
+  // all, or, on a task claimed once before, the previous run's workerId. The write wraps it in
+  // `$literal` too; this is the half that refuses to carry it at all.
+  it("returns 400 for a runId shaped like an aggregation expression, without claiming", async () => {
+    for (const runId of ["$$REMOVE", "$execution.workerId", "$$ROOT", "run.1", "a".repeat(65)]) {
+      const response = await POST(request(authed, { runId }), {
+        params: Promise.resolve({ projectId: "CP" }),
+      });
+      expect(response.status, runId).toBe(400);
+    }
+
+    expect(claimNextTask).not.toHaveBeenCalled();
+  });
+
+  // The control: the shape a worker actually mints is `randomUUID()`, and a validator that refuses
+  // that refuses every claim there is
+  it("carries the uuid a worker mints straight through to the claim", async () => {
+    const runId = "0c8cd177-0341-4880-8bea-490d0c9702a4";
+    claimNextTask.mockResolvedValueOnce(null);
+
+    const response = await POST(request(authed, { runId }), {
+      params: Promise.resolve({ projectId: "CP" }),
+    });
+
+    expect(response.status).toBe(204);
+    // The runId's position, not the whole call: what the other arguments carry is every other test
+    // in this file's subject
+    expect(claimNextTask.mock.calls[0][2]).toBe(runId);
+  });
+
   it("returns 400 when the body is not valid JSON, without claiming", async () => {
     const malformed = new Request("http://localhost/api/projects/CP/tasks/claim", {
       method: "POST",
