@@ -15,13 +15,9 @@ export interface PmHistoryEntry {
   triggeredBy?: unknown;
 }
 
-export const HISTORY_AUTHOR_PREFIX = "[from @";
+import { ACTION_RECORD_LABEL, HISTORY_AUTHOR_PREFIX } from "./labels";
 
-/**
- * The label the system prompt names as its record of past turns. Exported so the prompt, the strip
- * below and the tests all say it once.
- */
-export const ACTION_RECORD_LABEL = "Board actions executed in the previous assistant turn";
+export { ACTION_RECORD_LABEL, HISTORY_AUTHOR_PREFIX };
 
 /**
  * The two markers the system prompt tells the model to trust. Written as patterns rather than

@@ -137,6 +137,8 @@ export async function runPmTrigger(trigger: IPmTrigger): Promise<PmTriggerOutcom
 
   try {
     const result = await runPmTurn({
+      // Nobody is driving this one — see runPmTurn's `autonomous` (BP-321)
+      autonomous: true,
       projectId,
       userMessage: buildNeedsHumanReviewPrompt(trigger.taskKey),
       triggeredByUserId: String(pmUser._id),

@@ -69,6 +69,8 @@ async function runBoardReview(
     const digest = await buildBoardDigest(projectId);
     if (!digest) return;
     const result = await runPmTurn({
+      // Nobody is driving this one — see runPmTurn's `autonomous` (BP-321)
+      autonomous: true,
       projectId,
       userMessage: buildBoardReviewPrompt(projectKey, renderBoardDigest(digest)),
       storedMessage: digestHeadline(digest),

@@ -50,8 +50,14 @@ vi.mock("./availability", () => ({
   pmDisabledReason: () => "",
   resolvePmModel: async () => "test/model",
 }));
+// A function, not a constant: BP-321's withholding is about which MCP tools a turn is offered, and
+// a mock that always answers "none" can only ever prove the empty case.
+const discoverMcpToolsMock = vi.fn(async () => ({
+  tools: new Map<string, unknown>(),
+  serverNames: [] as string[],
+}));
 vi.mock("./mcp-tools", () => ({
-  discoverMcpTools: async () => ({ tools: new Map(), serverNames: [] }),
+  discoverMcpTools: () => discoverMcpToolsMock(),
   callMcpTool: vi.fn(),
   MAX_MCP_CALLS_PER_TURN: 5,
 }));
@@ -93,13 +99,14 @@ function toolCall(name: string, args: Record<string, unknown>) {
   };
 }
 
-function turn(disallowedTools: string[]) {
+function turn(disallowedTools: string[], autonomous = false) {
   return runPmTurn({
     projectId: PROJECT._id,
     userMessage: "trigger",
     triggeredByUserId: "pm-user-id",
     trigger: { type: "needs_human_review", taskKey: "BP-1" },
     disallowedTools,
+    autonomous,
   });
 }
 
@@ -191,5 +198,77 @@ describe("a tool call naming a parameter the tool does not declare", () => {
     await turn([]);
 
     expect(changeStatusExecute).toHaveBeenCalled();
+  });
+});
+
+/**
+ * BP-321, finding 3. `disallowedTools` is a list of exact names, MCP tools are exposed as
+ * `mcp_<server>_<tool>`, and both autonomy lists name only the four built-in PM tools — so no MCP
+ * tool was ever withheld from an unattended turn. On a project with a write-enabled MCP server,
+ * an injected autonomous turn kept full write access to it. That is the arm that reaches furthest
+ * now that a PM assignment can put work on a machine (BP-419).
+ */
+describe("an unattended turn and a project's MCP server", () => {
+  const mcpTool = (exposedName: string, write: boolean): [string, unknown] => [
+    exposedName,
+    {
+      exposedName,
+      serverName: "acme",
+      toolName: exposedName,
+      write,
+      definition: { name: exposedName, description: "", parameters: { type: "object", properties: {} } },
+      client: {},
+    },
+  ];
+
+  beforeEach(() => {
+    discoverMcpToolsMock.mockResolvedValue({
+      tools: new Map([
+        mcpTool("mcp_acme_create_ticket", true),
+        mcpTool("mcp_acme_list_tickets", false),
+      ]) as never,
+      serverNames: ["acme"],
+    });
+  });
+
+  const offered = () =>
+    chatCompletion.mock.calls[0][0].tools.map((t: { name: string }) => t.name) as string[];
+
+  it("is offered no MCP tool that writes", async () => {
+    chatCompletion.mockResolvedValue({ type: "text", content: "done" });
+
+    await turn(NEEDS_HUMAN_REVIEW_DISALLOWED_TOOLS, true);
+
+    expect(offered()).not.toContain("mcp_acme_create_ticket");
+  });
+
+  // The control, in the same run: withholding writes must not be "withholding everything", or the
+  // board review loses the reads it exists to do
+  it("keeps the read-only ones", async () => {
+    chatCompletion.mockResolvedValue({ type: "text", content: "done" });
+
+    await turn(NEEDS_HUMAN_REVIEW_DISALLOWED_TOOLS, true);
+
+    expect(offered()).toContain("mcp_acme_list_tickets");
+  });
+
+  // The other control: a turn somebody is driving is unchanged
+  it("leaves an attended turn with both", async () => {
+    chatCompletion.mockResolvedValue({ type: "text", content: "done" });
+
+    await turn([], false);
+
+    expect(offered()).toEqual(expect.arrayContaining(["mcp_acme_create_ticket", "mcp_acme_list_tickets"]));
+  });
+
+  it("refuses the withheld MCP tool at dispatch, not only in the list it offers", async () => {
+    chatCompletion
+      .mockResolvedValueOnce(toolCall("mcp_acme_create_ticket", {}))
+      .mockResolvedValueOnce({ type: "text", content: "done" });
+
+    const result = await turn(NEEDS_HUMAN_REVIEW_DISALLOWED_TOOLS, true);
+
+    expect(result.ok).toBe(true);
+    expect(toolReplies().join("\n")).toContain("is not available in this turn");
   });
 });

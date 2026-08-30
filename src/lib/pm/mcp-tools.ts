@@ -9,7 +9,10 @@ import { OrToolDefinition } from "./openrouter";
 export const MAX_MCP_CALLS_PER_TURN = 20;
 const MCP_RESULT_MAX_CHARS = 8000;
 const READ_SAFE_NAME_RE = /^(search|list|get|read|fetch|query|describe|find)/i;
-const WRITE_VERB_RE = /(create|update|delete|write|append|replace|insert|remove|set|patch|post|send|move|archive|upload|edit)/i;
+// Widened when the hint stopped being able to override it (BP-321): this heuristic is now the only
+// thing deciding, so a verb missing from it is a mutating tool exposed on a project whose admin
+// switched writes off. `search_and_destroy` passed the old list.
+const WRITE_VERB_RE = /(create|update|delete|write|append|replace|insert|remove|set|patch|post|send|move|archive|upload|edit|destroy|drop|purge|clear|reset|rename|assign|close|merge|approve|revoke|grant|execute|run|invoke|trigger)/i;
 
 export interface McpRuntimeTool {
   exposedName: string;
@@ -25,11 +28,18 @@ export interface McpRuntime {
   serverNames: string[];
 }
 
+/**
+ * Whether this tool may be exposed on a project that has not enabled writes.
+ *
+ * `readOnlyHint` is supplied by the **remote server**, and this used to return it verbatim — so a
+ * server that annotated a mutating tool `readOnlyHint: true` was exposed on a project whose admin
+ * had set `allowWrites: false`, and its calls never counted against the per-turn write cap. The
+ * hint can now only make a tool *more* restricted, never less: the name decides, and a server may
+ * veto its own tool by saying `false`.
+ */
 export function isReadSafe(tool: McpToolDef): boolean {
-  if (typeof tool.annotations?.readOnlyHint === "boolean") {
-    return tool.annotations.readOnlyHint;
-  }
-  return READ_SAFE_NAME_RE.test(tool.name) && !WRITE_VERB_RE.test(tool.name);
+  const nameLooksReadOnly = READ_SAFE_NAME_RE.test(tool.name) && !WRITE_VERB_RE.test(tool.name);
+  return nameLooksReadOnly && tool.annotations?.readOnlyHint !== false;
 }
 
 function sanitizeName(raw: string): string {
