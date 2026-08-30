@@ -76,6 +76,10 @@ vi.mock("./tools", () => ({
     assign_task: { write: true, execute: assignTaskExecute },
     add_comment: { write: true, execute: addCommentExecute },
   },
+  // Stands in for the real guard, which tools.arg-guard.test.ts drives against the real schemas.
+  // What is under test here is that the dispatcher consults it at all, and before execute
+  refuseUndeclaredArgs: (_tool: unknown, args: Record<string, unknown>) =>
+    "stray" in args ? 'Not a parameter of this tool: "stray".' : null,
 }));
 
 const { runPmTurn } = await import("./agent");
@@ -159,5 +163,33 @@ describe("autonomous turns cannot hand work to a machine", () => {
   it("withholds assign_task from the scheduled board review too", () => {
     expect(BOARD_REVIEW_DISALLOWED_TOOLS).toContain("assign_task");
     expect(BOARD_REVIEW_DISALLOWED_TOOLS).toContain("change_status");
+  });
+});
+
+/**
+ * BP-500. The tools whitelist what they apply and dropped the rest in silence — the shape BP-497
+ * fixed on the MCP servers, on the same tool name, reachable from an autonomous turn.
+ */
+describe("a tool call naming a parameter the tool does not declare", () => {
+  it("is refused without the tool running", async () => {
+    chatCompletion
+      .mockResolvedValueOnce(toolCall("change_status", { taskKey: "BP-1", stray: "done" }))
+      .mockResolvedValueOnce({ type: "text", assistantMessage: { role: "assistant", content: "ok" }, content: "ok" });
+
+    await turn([]);
+
+    expect(changeStatusExecute).not.toHaveBeenCalled();
+    expect(toolReplies().join("\n")).toContain("stray");
+  });
+
+  // The control: the same path still runs a call whose parameters are all declared
+  it("still runs a call that names only what the tool declares", async () => {
+    chatCompletion
+      .mockResolvedValueOnce(toolCall("change_status", { taskKey: "BP-1" }))
+      .mockResolvedValueOnce({ type: "text", assistantMessage: { role: "assistant", content: "ok" }, content: "ok" });
+
+    await turn([]);
+
+    expect(changeStatusExecute).toHaveBeenCalled();
   });
 });
