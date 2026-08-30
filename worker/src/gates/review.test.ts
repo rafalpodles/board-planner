@@ -27,15 +27,32 @@ function context(diff: Partial<DiffStats> = {}, task: Partial<ClaimedTask> = {})
       testsAdded: ["a.test.ts"],
       blockedReason: "",
     },
-    diff: { changedLines: 2, changedFiles: ["a.ts"], patch, truncated: false, ...diff },
+    diff: { changedLines: 2, changedFiles: ["a.ts"], patch, truncated: false, headSha: "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c", ...diff },
   };
 }
 
+// BP-404: the gate asks git two things before it reviews — whether the checkout's config carries
+// anything git would run while checking out, and then for the checkout itself — so the reviewer is
+// no longer the first call, and these tests find it by name rather than by index.
 function claudeStdout(stdout: string, overrides: Partial<CommandResult> = {}) {
-  const run = vi
-    .fn<Runner["run"]>()
-    .mockResolvedValue({ code: 0, stdout, stderr: "", timedOut: false, ...overrides });
+  const run = vi.fn<Runner["run"]>(async (command) =>
+    command === "git"
+      ? { code: 0, stdout: "", stderr: "", timedOut: false }
+      : { code: 0, stdout, stderr: "", timedOut: false, ...overrides }
+  );
   return { runner: { run }, run };
+}
+
+function claudeCall(run: ReturnType<typeof claudeStdout>["run"]) {
+  const call = run.mock.calls.find(([command]) => command === "claude");
+  if (!call) throw new Error("the reviewer was never run");
+  return call;
+}
+
+function gitCall(run: ReturnType<typeof claudeStdout>["run"], subcommand: string) {
+  const call = run.mock.calls.find(([command, args]) => command === "git" && args.includes(subcommand));
+  if (!call) throw new Error(`git ${subcommand} was never run`);
+  return call;
 }
 
 function claudeReturning(verdict: unknown) {
@@ -43,7 +60,7 @@ function claudeReturning(verdict: unknown) {
 }
 
 function promptOf(run: ReturnType<typeof claudeStdout>["run"]): string {
-  return run.mock.calls[0][1].join(" ");
+  return claudeCall(run)[1].join(" ");
 }
 
 describe("reviewGate", () => {
@@ -134,7 +151,7 @@ describe("reviewGate", () => {
 
     await reviewGate(runner, TIMEOUT_MS).run(context());
 
-    const args = run.mock.calls[0][1];
+    const args = claudeCall(run)[1];
     // --tools, not --allowedTools: the latter only skips the permission prompt, so it left the
     // reviewer able to write while this test said otherwise
     expect(args[args.indexOf("--tools") + 1]).toBe("Read Grep Glob");
@@ -149,7 +166,7 @@ describe("reviewGate", () => {
 
     await reviewGate(runner, TIMEOUT_MS, "sonnet").run(context());
 
-    const args = run.mock.calls[0][1];
+    const args = claudeCall(run)[1];
     expect(args[args.indexOf("--model") + 1]).toBe("sonnet");
   });
 
@@ -158,7 +175,7 @@ describe("reviewGate", () => {
 
     await reviewGate(runner, TIMEOUT_MS, "  ").run(context());
 
-    const args = run.mock.calls[0][1];
+    const args = claudeCall(run)[1];
     expect(args[args.indexOf("--model") + 1]).toBe("opus");
     expect(args).not.toContain("");
   });
@@ -168,7 +185,7 @@ describe("reviewGate", () => {
 
     await reviewGate(runner, TIMEOUT_MS).run(context());
 
-    const args = run.mock.calls[0][1];
+    const args = claudeCall(run)[1];
     expect(args[args.indexOf("--output-format") + 1]).toBe("json");
     expect(args[args.indexOf("--json-schema") + 1]).toContain('"required":["approved","reason"]');
   });
@@ -192,14 +209,73 @@ describe("reviewGate", () => {
     expect(run).not.toHaveBeenCalled();
   });
 
-  it("reviews inside the worktree under the given budget", async () => {
+  it("reviews under the given budget", async () => {
     const { runner, run } = claudeReturning({ approved: true, reason: "" });
 
     await reviewGate(runner, TIMEOUT_MS).run(context());
 
-    expect(run.mock.calls[0][0]).toBe("claude");
-    expect(run.mock.calls[0][2].cwd).toBe("/wt");
-    expect(run.mock.calls[0][2].timeoutMs).toBe(TIMEOUT_MS);
+    expect(claudeCall(run)[2].timeoutMs).toBe(TIMEOUT_MS);
+  });
+
+  /**
+   * BP-404. The CLI loads CLAUDE.md, .claude/ and .mcp.json from its cwd as instructions, and a
+   * committed one-line .gitignore naming CLAUDE.md makes an untracked CLAUDE.md invisible to
+   * `diff --numstat` and to `status --porcelain` alike. Starting the reviewer anywhere the agent
+   * could write is the whole bug, so the assertion is about where it does NOT run.
+   */
+  it("does not review in the worktree the agent wrote in", async () => {
+    const { runner, run } = claudeReturning({ approved: true, reason: "" });
+
+    await reviewGate(runner, TIMEOUT_MS).run(context());
+
+    expect(claudeCall(run)[2].cwd).not.toBe("/wt");
+  });
+
+  it("reviews in the checkout it made, of the commit the diff was taken from", async () => {
+    const { runner, run } = claudeReturning({ approved: true, reason: "" });
+
+    await reviewGate(runner, TIMEOUT_MS).run(context());
+
+    const [, addArgs] = gitCall(run, "worktree");
+    expect(addArgs).toContain("--detach");
+    // The object id collectDiff resolved, so the reviewer reads the commit the gates judged
+    expect(addArgs).toContain(context().diff.headSha);
+    // and the reviewer's cwd is that checkout rather than any other directory
+    expect(claudeCall(run)[2].cwd).toBe(addArgs[addArgs.length - 2]);
+  });
+
+  /**
+   * A checkout runs smudge filters, so it is an execution point in the same sense staging is —
+   * `[filter "z"] smudge = <script>` plus `* filter=z` in .git/info/attributes runs that script as
+   * this process's uid, measured through `git worktree add`. BP-403 put this scan before staging;
+   * this is the same scan before the checkout.
+   */
+  it("refuses rather than checking out when the config carries something git would run", async () => {
+    const run = vi.fn<Runner["run"]>(async (command, args) =>
+      command === "git" && args.includes("--list")
+        ? { code: 0, stdout: "filter.z.smudge=/tmp/theirs.sh\n", stderr: "", timedOut: false }
+        : { code: 0, stdout: "", stderr: "", timedOut: false }
+    );
+
+    const result = await reviewGate({ run }, TIMEOUT_MS).run(context());
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/filter\.z\.smudge/);
+    expect(run.mock.calls.find(([command, args]) => command === "git" && args.includes("worktree")))
+      .toBeUndefined();
+    expect(run.mock.calls.find(([command]) => command === "claude")).toBeUndefined();
+  });
+
+  // A review checkout left behind is a copy of the change sitting in a world-readable tmpdir
+  it("removes the checkout afterwards, including when the reviewer rejected the change", async () => {
+    const { runner, run } = claudeReturning({ approved: false, reason: "no" });
+
+    await reviewGate(runner, TIMEOUT_MS).run(context());
+
+    const [, removeArgs] = gitCall(run, "remove");
+    const [, addArgs] = gitCall(run, "add");
+    expect(removeArgs).toContain("--force");
+    expect(removeArgs[removeArgs.length - 1]).toBe(addArgs[addArgs.length - 2]);
   });
 
   it("never passes an API key so the subscription is used", async () => {
@@ -208,8 +284,8 @@ describe("reviewGate", () => {
 
     await reviewGate(runner, TIMEOUT_MS).run(context());
 
-    expect(run.mock.calls[0][2].env?.ANTHROPIC_API_KEY).toBeUndefined();
-    expect(run.mock.calls[0][2].env?.PATH).toBe(process.env.PATH);
+    expect(claudeCall(run)[2].env?.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(claudeCall(run)[2].env?.PATH).toBe(process.env.PATH);
   });
 
   it("keeps the operator's own credentials out of the reviewer's environment", async () => {
@@ -222,7 +298,7 @@ describe("reviewGate", () => {
 
     await reviewGate(runner, TIMEOUT_MS).run(context());
 
-    const env = run.mock.calls[0][2].env;
+    const env = claudeCall(run)[2].env;
     expect(env?.CP_API_TOKEN).toBeUndefined();
     expect(env?.GH_TOKEN).toBeUndefined();
     expect(env?.HOME).toBe("/Users/someone");
@@ -234,7 +310,7 @@ describe("reviewGate", () => {
 
     await reviewGate(runner, TIMEOUT_MS).run({ ...context(), signal: controller.signal });
 
-    expect(run.mock.calls[0][2].signal).toBe(controller.signal);
+    expect(claudeCall(run)[2].signal).toBe(controller.signal);
   });
 
   it("fails closed when the reviewer output cannot be parsed, keeping the raw output", async () => {

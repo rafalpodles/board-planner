@@ -7,12 +7,18 @@ import { collectDiff } from "./diff.js";
 // response keys stay about the git subcommand, the same convention workspace.test.ts uses.
 const HARDENING_PREFIX = gitArgs([]);
 const BASE_SHA = "abc1234";
+// BP-404: collectDiff resolves HEAD to an object id before it reads anything, and names that id in
+// both diffs, so the review gate can check out the same commit the gates judged. Every stub here
+// answers that call first.
+const HEAD_SHA = "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c";
+const HEAD_RESOLVED = { code: 0, stdout: `${HEAD_SHA}\n`, stderr: "", timedOut: false };
 
 function recordingRunner(calls: string[][], responses: Record<string, Partial<CommandResult>> = {}) {
   const run = vi.fn(async (_command: string, args: string[]): Promise<CommandResult> => {
     const stripped = args.slice(HARDENING_PREFIX.length);
     calls.push(stripped);
-    return { code: 0, stdout: "", stderr: "", timedOut: false, ...responses[stripped[0]] };
+    const fallback = stripped[0] === "rev-parse" ? HEAD_RESOLVED : {};
+    return { code: 0, stdout: "", stderr: "", timedOut: false, ...fallback, ...responses[stripped[0]] };
   });
   return { run };
 }
@@ -21,6 +27,7 @@ describe("collectDiff", () => {
   it("counts changed lines and files from numstat", async () => {
     const run = vi
       .fn()
+      .mockResolvedValueOnce(HEAD_RESOLVED)
       .mockResolvedValueOnce({
         code: 0,
         stdout: "3\t1\tsrc/a.ts\n10\t0\tsrc/a.test.ts\n",
@@ -40,6 +47,7 @@ describe("collectDiff", () => {
   it("treats binary markers as zero lines", async () => {
     const run = vi
       .fn()
+      .mockResolvedValueOnce(HEAD_RESOLVED)
       .mockResolvedValueOnce({ code: 0, stdout: "-\t-\timage.png\n", stderr: "", timedOut: false })
       .mockResolvedValueOnce({ code: 0, stdout: "", stderr: "", timedOut: false });
 
@@ -52,6 +60,7 @@ describe("collectDiff", () => {
   it("resolves a renamed file to its post-rename path, in both numstat shorthands", async () => {
     const run = vi
       .fn()
+      .mockResolvedValueOnce(HEAD_RESOLVED)
       .mockResolvedValueOnce({
         code: 0,
         stdout: "0\t0\tsrc/{old => new}/a.ts\n2\t1\told-name.ts => new-name.ts\n",
@@ -86,6 +95,7 @@ describe("collectDiff", () => {
   it("throws when the patch call fails, instead of silently returning a truncated patch", async () => {
     const run = vi
       .fn()
+      .mockResolvedValueOnce(HEAD_RESOLVED)
       .mockResolvedValueOnce({ code: 0, stdout: "1\t0\tsrc/a.ts\n", stderr: "", timedOut: false })
       .mockResolvedValueOnce({ code: 1, stdout: "", stderr: "out of memory", timedOut: false });
 
@@ -96,6 +106,7 @@ describe("collectDiff", () => {
     const patchAtLimit = "x".repeat(200_000);
     const run = vi
       .fn()
+      .mockResolvedValueOnce(HEAD_RESOLVED)
       .mockResolvedValueOnce({ code: 0, stdout: "1\t0\tsrc/a.ts\n", stderr: "", timedOut: false })
       .mockResolvedValueOnce({ code: 0, stdout: patchAtLimit, stderr: "", timedOut: false });
 
@@ -109,6 +120,7 @@ describe("collectDiff", () => {
     const oversizedPatch = "x".repeat(200_001);
     const run = vi
       .fn()
+      .mockResolvedValueOnce(HEAD_RESOLVED)
       .mockResolvedValueOnce({ code: 0, stdout: "1\t0\tsrc/a.ts\n", stderr: "", timedOut: false })
       .mockResolvedValueOnce({ code: 0, stdout: oversizedPatch, stderr: "", timedOut: false });
 
@@ -130,7 +142,9 @@ describe("collectDiff", () => {
     expect(diffCalls).toHaveLength(2);
     for (const call of diffCalls) {
       expect(call[call.length - 1]).toBe("--");
-      expect(call.slice(-3, -1)).toEqual([BASE_SHA, "HEAD"]);
+      // The object id, not the ref: HEAD is a file the agent can rewrite between the two calls,
+      // and the review gate checks this same id out (BP-404)
+      expect(call.slice(-3, -1)).toEqual([BASE_SHA, HEAD_SHA]);
     }
     expect(calls.flat().join(" ")).not.toContain("...");
   });
@@ -142,6 +156,7 @@ describe("collectDiff", () => {
   // two things it actually asserts.
   it("passes -c core.pager=cat and GIT_CONFIG_NOSYSTEM=1 on every call it makes", async () => {
     const run = vi.fn().mockResolvedValue({ code: 0, stdout: "", stderr: "", timedOut: false });
+    run.mockResolvedValueOnce(HEAD_RESOLVED);
     await collectDiff({ run }, "/wt", BASE_SHA);
 
     expect(run.mock.calls.length).toBeGreaterThan(0);
@@ -185,19 +200,25 @@ describe("collectDiff", () => {
     }
 
     const run = vi.fn().mockResolvedValue({ code: 0, stdout: "", stderr: "", timedOut: false });
+    run.mockResolvedValueOnce(HEAD_RESOLVED);
     await expect(collectDiff({ run }, "/wt", BASE_SHA)).resolves.toBeDefined();
   });
 
   // Second line behind the shape check: nothing after `--` can be read as a revision or an option
   it("closes the positional list with --", async () => {
     const run = vi.fn().mockResolvedValue({ code: 0, stdout: "", stderr: "", timedOut: false });
+    run.mockResolvedValueOnce(HEAD_RESOLVED);
 
     await collectDiff({ run }, "/wt", BASE_SHA);
 
-    for (const call of run.mock.calls) {
+    // The rev-parse that resolves HEAD is deliberately not in this list: it takes no pathspec, so
+    // there is no positional list to close, and its one argument is a revision by construction
+    const diffCalls = run.mock.calls.filter((call) => call[1].includes("diff"));
+    expect(diffCalls).toHaveLength(2);
+    for (const call of diffCalls) {
       expect(call[1][call[1].length - 1]).toBe("--");
       expect(call[1]).toContain(BASE_SHA);
-      expect(call[1]).toContain("HEAD");
+      expect(call[1]).toContain(HEAD_SHA);
     }
   });
 });
