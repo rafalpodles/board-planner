@@ -203,3 +203,18 @@ test("the PM says so when the hand-over it just made cannot complete", async ({ 
   expect(summary).toContain(`${PROJECT_KEY}-${task.number} → @admin`);
   expect(summary).toMatch(/no agent is named on it/);
 });
+
+test("and says so when the project is not enabled for workers at all", async ({ page }) => {
+  // The other half of "not every hand-over completes": the task is perfect, the instance is not.
+  await (await db()).collection("projects").updateOne(
+    { _id: PROJECT_ID },
+    { $set: { "worker.enabled": false } }
+  );
+  const task = await addTask();
+  await signIn(page, "admin");
+
+  const actions = await pmAssigns(page, `${PROJECT_KEY}-${task.number}`, "admin");
+
+  const summary = actions.find((a) => a.tool === "assign_task")?.summary ?? "";
+  expect(summary).toMatch(/not enabled for workers/);
+});
