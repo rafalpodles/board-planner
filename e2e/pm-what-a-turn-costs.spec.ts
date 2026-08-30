@@ -2,6 +2,7 @@ import { test, expect, type APIRequestContext, type Page } from "@playwright/tes
 import { ADMIN_AUTH } from "./api";
 import { PROJECT_ID, PROJECT_KEY, seed } from "./seed";
 import { signIn } from "./session";
+import { PM_STUB_URL } from "../playwright.config";
 
 /**
  * BP-284. `pm.dailyTurnCap` counts turns, and a turn is up to fifteen model round-trips — so a
@@ -12,6 +13,18 @@ import { signIn } from "./session";
  */
 
 test.beforeEach(seed);
+
+/**
+ * The stub is one process for the whole run and carries per-directive state (its `failTimes`
+ * counter, its escalation path), so a neighbouring spec can leave it answering in prose where this
+ * one needs a tool call — and then "one turn, more than one call" is false for a reason that has
+ * nothing to do with the code. A turn another file left running would refuse this one with a 409
+ * as well. Both ends reset: this spec passed alone and failed after the group.
+ */
+test.beforeEach(async ({ request }) => {
+  await request.post(`${PM_STUB_URL}/reset`);
+  await request.post(`/api/projects/${PROJECT_KEY}/pm/interrupt`, { headers: ADMIN_AUTH });
+});
 
 test.afterEach(async ({ request }) => {
   await request.post(`/api/projects/${PROJECT_KEY}/pm/interrupt`, { headers: ADMIN_AUTH });
@@ -49,11 +62,22 @@ test("a turn's real cost is recorded and shown, in calls and tokens", async ({ p
       name: "create_task",
       arguments: { title: "Something to do", description: "" },
     });
+    /**
+     * Waits for the turn to have RUN, not for it to have been asked. `turns.used` counts stored
+     * user messages, so it reaches 1 the moment the request is accepted — before a single call has
+     * been made. This spec passed alone and failed after a loaded group on exactly that: `calls`
+     * read 0 while `turns.used` read 1.
+     *
+     * The wait and the assertion are different propositions on purpose: "at least one call was
+     * made" is what says the turn ran, and "more than one" is the claim this ticket is about, so a
+     * turn that really did cost one call still fails below.
+     */
     await expect
-      .poll(async () => (await usage(request)).turns.used, { timeout: 40_000 })
-      .toBe(1);
+      .poll(async () => (await usage(request)).calls, { timeout: 40_000 })
+      .toBeGreaterThan(0);
 
     const spent = await usage(request);
+    expect(spent.turns.used).toBe(1);
     // The whole point of the ticket: one turn, more than one call
     expect(spent.calls).toBeGreaterThan(1);
     expect(spent.tokens).toBeGreaterThan(0);
@@ -84,8 +108,9 @@ test("the token ceiling refuses nothing while it is unset", async ({ page, reque
   await expect(page.getByPlaceholder(/Message the PM/)).toBeVisible();
   await say(page, "say something", {});
 
-  await expect(page.getByText("PM Agent", { exact: true }).first()).toBeVisible({ timeout: 40_000 });
+  // Same reasoning as above: the call count is what says the turn ran
   await expect
-    .poll(async () => (await usage(request)).turns.used, { timeout: 40_000 })
-    .toBe(1);
+    .poll(async () => (await usage(request)).calls, { timeout: 40_000 })
+    .toBeGreaterThan(0);
+  expect((await usage(request)).turns.used).toBe(1);
 });
