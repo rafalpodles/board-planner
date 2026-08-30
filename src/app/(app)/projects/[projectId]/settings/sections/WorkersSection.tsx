@@ -308,7 +308,7 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
               )
               .map((a) => (
                 <option key={a._id} value={a._id}>
-                  {a.projectName ? `${a.name} — ${a.projectName}` : a.name}
+                  {a.name}
                 </option>
               ))}
           </select>

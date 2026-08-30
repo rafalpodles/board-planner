@@ -19,10 +19,17 @@ export const PUT = withProjectAccess(async (request, { params, user }) => {
   }
 
   const body = await request.json();
-  const agentId = typeof body.agentId === "string" ? body.agentId : "";
+  const raw = (body as { agentId?: unknown }).agentId;
+  // Absent, null, or the wrong type is a malformed request and not a request to clear. Coercing
+  // it to "" made `{}` and a typo'd key answer 200 and null the field — "did not say" and
+  // "asked to clear" cannot be the same wire message on a route an API token can reach.
+  if (typeof raw !== "string") {
+    return NextResponse.json({ error: "agentId is required" }, { status: 400 });
+  }
+  const agentId = raw;
 
-  // The empty string clears it. A default that could be set and never unset left a project stuck
-  // with a suggestion it had outgrown, and the picker with no way back (BP-458).
+  // The empty string, and only that, clears it. A default that could be set and never unset left
+  // a project stuck with a suggestion it had outgrown, and the picker with no way back (BP-458).
   if (!agentId) {
     await Project.updateOne({ _id: projectId }, { $set: { "worker.agent": null } });
     return NextResponse.json({ ok: true });
