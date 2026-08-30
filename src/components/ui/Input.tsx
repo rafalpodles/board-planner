@@ -20,7 +20,13 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
             className="flex items-center gap-2 text-sm font-medium text-text-muted mb-1"
           >
             {label}
-            {dirty && <span className="h-1.5 w-1.5 rounded-full bg-warning" title="Unsaved" />}
+            {dirty && (
+              <span
+                aria-hidden="true"
+                className="h-1.5 w-1.5 rounded-full bg-warning"
+                title="Unsaved"
+              />
+            )}
           </label>
         )}
         <input
