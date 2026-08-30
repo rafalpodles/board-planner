@@ -193,6 +193,7 @@ const {
   MAX_PHASE_LENGTH,
   EXECUTION_LEASE_MS,
   personalAgentAlienTo,
+  heldRunRefusal,
 } = await import("./task-service");
 
 const { logActivity } = await import("@/lib/activity");
@@ -4528,3 +4529,53 @@ describe("a value the schema will not store is refused by updateTask too", () =>
 
 // BP-461. `setMonth` does not clamp: 31 January + 1 month is 3 March, so a monthly series skipped
 // February and then kept drifting, because the occurrence after that was computed from the 3rd.
+
+
+/**
+ * BP-337. The delete route asks this rather than composing a fourth wording for the refusal three
+ * other writers already give. Its own test because the route's mocks it out entirely, and the e2e
+ * asserts the dialog the client composes — so nothing was reading what this actually returns.
+ */
+describe("heldRunRefusal", () => {
+  const held = { execution: { runId: "r1", workerId: "w1", phase: "agent" }, taskNumber: 42 };
+
+  it("says nothing about a task no run holds", async () => {
+    expect(await heldRunRefusal({ execution: {}, taskNumber: 42 }, "TP")).toBeNull();
+  });
+
+  it("names the task, the worker and the phase", async () => {
+    workerFindById.mockReturnValue({ lean: () => Promise.resolve({ name: "mac-mini" }) });
+
+    const refusal = await heldRunRefusal(held, "TP");
+
+    expect(refusal?.status).toBe(409);
+    expect(refusal?.error).toContain("TP-42");
+    expect(refusal?.error).toContain("mac-mini");
+    expect(refusal?.error).toContain("phase agent");
+    expect(refusal?.runConflict).toMatchObject({ workerId: "w1", workerName: "mac-mini" });
+  });
+
+  // The refusal is advice, and advice about the wrong act is worse than none
+  it("names the act the caller was attempting, not always a move", async () => {
+    workerFindById.mockReturnValue({ lean: () => Promise.resolve({ name: "mac-mini" }) });
+
+    expect((await heldRunRefusal(held, "TP", "delete"))?.error).toContain("delete it anyway");
+    expect((await heldRunRefusal(held, "TP"))?.error).toContain("move it anyway");
+  });
+
+  // A project whose key could not be read still has to produce a name a person recognises
+  it("falls back to a bare number when the project key is missing", async () => {
+    workerFindById.mockReturnValue({ lean: () => Promise.resolve({ name: "mac-mini" }) });
+
+    expect((await heldRunRefusal(held, undefined))?.error).toContain("42");
+  });
+
+  it("still refuses when the worker has no name to give", async () => {
+    workerFindById.mockReturnValue({ lean: () => Promise.resolve(null) });
+
+    const refusal = await heldRunRefusal(held, "TP");
+
+    expect(refusal?.status).toBe(409);
+    expect(refusal?.error).toContain("w1");
+  });
+});

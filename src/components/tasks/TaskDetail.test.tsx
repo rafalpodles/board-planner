@@ -187,6 +187,40 @@ describe("TaskDetail", () => {
    * phone or a tablet had no delete anyone could find. The overflow menu is that affordance:
    * two taps from an open task, and through the same confirmation as the rail.
    */
+  /**
+   * BP-337. A delete the server refuses because a run holds the task is a question, not an error —
+   * the same shape the status change already answers with a second dialog. A toast here would
+   * report a failure for something the operator can simply say yes to, and the outcome is stronger
+   * than a status change: the task and its comments are gone rather than moved.
+   */
+  it("asks again when a run holds the task, and resends the delete with force", async () => {
+    api.del
+      .mockRejectedValueOnce({
+        status: 409,
+        body: {
+          runConflict: { workerId: "w1", workerName: "mac", phase: "agent", phaseAt: null },
+        },
+      })
+      .mockResolvedValueOnce({});
+    const onClose = vi.fn();
+    renderDetail({ onClose });
+    await loaded();
+
+    await act(async () => screen.getByRole("button", { name: "More actions" }).click());
+    const menu = within(screen.getByRole("listbox", { name: "More actions" }));
+    await act(async () => menu.getByRole("option", { name: "Delete task" }).click());
+    await act(async () => screen.getByRole("button", { name: "Delete" }).click());
+
+    // The refusal names the worker and its phase rather than saying the delete failed
+    expect(screen.getByText(/being executed by mac \(phase agent\)/)).toBeTruthy();
+    expect(onClose).not.toHaveBeenCalled();
+
+    await act(async () => screen.getByRole("button", { name: "Delete anyway" }).click());
+
+    expect(api.del).toHaveBeenLastCalledWith("/api/projects/TP/tasks/t1", { force: true });
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+  });
+
   it("offers delete from the overflow menu, behind the same confirmation", async () => {
     api.del.mockResolvedValue({});
     const onClose = vi.fn();
@@ -202,7 +236,7 @@ describe("TaskDetail", () => {
 
     await act(async () => screen.getByRole("button", { name: "Delete" }).click());
 
-    expect(api.del).toHaveBeenCalledWith("/api/projects/TP/tasks/t1");
+    expect(api.del).toHaveBeenCalledWith("/api/projects/TP/tasks/t1", undefined);
     await waitFor(() => expect(onClose).toHaveBeenCalled());
   });
 
