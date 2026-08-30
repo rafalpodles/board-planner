@@ -47,6 +47,7 @@ export const GROUPS = {
     "instance-audit.spec.ts",
     "agents-catalog.spec.ts",
     "agent-editor-permissions.spec.ts",
+    "compose-without-a-mouse.spec.ts",
     "agent-picker-scoping.spec.ts",
     "project-default-agent.spec.ts",
     "external-integrations.spec.ts",

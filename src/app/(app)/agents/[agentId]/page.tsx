@@ -7,8 +7,12 @@ import {
   CollisionDetection,
   DndContext,
   DragOverlay,
+  KeyboardCode,
+  KeyboardCoordinateGetter,
   KeyboardSensor,
   PointerSensor,
+  closestCorners,
+  getFirstCollision,
   pointerWithin,
   rectIntersection,
   useSensor,
@@ -31,6 +35,67 @@ import { BlockBody, Bucket, Palette } from "../components/blocks";
 const collisionDetection: CollisionDetection = (args) => {
   const byPointer = pointerWithin(args);
   return byPointer.length > 0 ? byPointer : rectIntersection(args);
+};
+
+const ARROWS: string[] = [
+  KeyboardCode.Down,
+  KeyboardCode.Up,
+  KeyboardCode.Left,
+  KeyboardCode.Right,
+];
+
+/**
+ * Where an arrow key moves the drag.
+ *
+ * `sortableKeyboardCoordinates` computes the next position from the items of a `SortableContext`.
+ * A bucket entry is a `useSortable` and lives in one; a palette block is a plain `useDraggable`
+ * and belongs to none, so the getter had nothing to compute from and returned nothing — dnd-kit
+ * announced "Picked up draggable item new:implement" and then every arrow key did nothing at all,
+ * for ever (BP-455). Composing an agent was the one thing that screen could not be made to do
+ * without a mouse.
+ *
+ * A sortable active keeps the sortable getter exactly as it was, so reordering inside a bucket is
+ * untouched. Everything else searches the droppable rectangles in the direction pressed, which is
+ * what dnd-kit does for its own multiple-container example.
+ */
+const keyboardCoordinates: KeyboardCoordinateGetter = (event, args) => {
+  const { active, collisionRect, droppableRects, droppableContainers } = args.context;
+  if (active?.data.current?.sortable) return sortableKeyboardCoordinates(event, args);
+  if (!ARROWS.includes(event.code)) return;
+  event.preventDefault();
+  if (!active || !collisionRect) return;
+
+  const ahead = droppableContainers.getEnabled().filter((container) => {
+    const rect = droppableRects.get(container.id);
+    if (!rect) return false;
+    switch (event.code) {
+      case KeyboardCode.Down:
+        return collisionRect.top < rect.top;
+      case KeyboardCode.Up:
+        return collisionRect.top > rect.top;
+      case KeyboardCode.Right:
+        return collisionRect.left < rect.left;
+      case KeyboardCode.Left:
+        return collisionRect.left > rect.left;
+      default:
+        return false;
+    }
+  });
+
+  const id = getFirstCollision(
+    closestCorners({
+      active,
+      collisionRect,
+      droppableRects,
+      droppableContainers: ahead,
+      pointerCoordinates: null,
+    }),
+    "id"
+  );
+  if (id == null) return;
+
+  const rect = droppableRects.get(id);
+  return rect && { x: rect.left, y: rect.top };
 };
 
 export default function AgentDetailPage() {
@@ -57,7 +122,7 @@ export default function AgentDetailPage() {
       : isAdmin);
 
   const lookup = (key: string) => [...store.allSteps, ...store.allGates].find((b) => b.key === key);
-  const { entries, dragging, composition, onDragStart, onDragEnd, remove } = useComposition(
+  const { entries, dragging, composition, onDragStart, onDragEnd, addTo, remove } = useComposition(
     agent?.composition,
     lookup
   );
@@ -72,7 +137,7 @@ export default function AgentDetailPage() {
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+    useSensor(KeyboardSensor, { coordinateGetter: keyboardCoordinates })
   );
 
   if (store.loading) return <PageHeader title="Agent" subtitle="Loading" />;
@@ -229,7 +294,9 @@ export default function AgentDetailPage() {
             ))}
           </div>
 
-          {mayEdit && <Palette steps={store.allSteps} gates={store.allGates} />}
+          {mayEdit && (
+            <Palette steps={store.allSteps} gates={store.allGates} onAdd={addTo} />
+          )}
         </div>
 
         <DragOverlay>
