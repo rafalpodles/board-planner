@@ -20,6 +20,7 @@ import { categoryColor } from "@/lib/category-colors";
 import { SortContext, sortTasks } from "@/lib/task-sort";
 import { ListColumnId } from "@/lib/list-columns";
 import { ColumnPicker } from "./ColumnPicker";
+import { usePanelClamp } from "@/hooks/use-panel-clamp";
 import {
   BoardFilterValues,
   PersistedBoardFilters,
@@ -110,6 +111,9 @@ export function BoardFilters({
   const [initialized, setInitialized] = useState(false);
   const [filters, setFilters] = useState<Filters>({ search: "", ...EMPTY_FILTERS });
   const [showFilters, setShowFilters] = useState(false);
+  // Where this panel opens depends on whether the wrapping toolbar put its button at the left or
+  // the right edge, which no breakpoint can express — see the hook (BP-501)
+  const filtersPanel = usePanelClamp(showFilters);
   const popoverRef = useRef<HTMLDivElement>(null);
 
   // Reading localStorage during render produces an SSR/client hydration mismatch
@@ -395,8 +399,16 @@ export function BoardFilters({
 
         {showFilters && (
           <div
+            ref={filtersPanel.ref}
+            style={filtersPanel.style}
             role="dialog"
             aria-label="Filters"
+            // `right-0` below sm put a 340px panel 242px past the left edge of every phone — the
+            // Filters button is the FIRST visible item in the row (the search box and its separator
+            // are md:block), so it stands about 20px from the left and a right-anchored panel opens
+            // off the screen. `max-w-[calc(100vw-1.5rem)]` never applied: 340 is already under that
+            // at 375. The clamp is what actually keeps it on screen; the anchors below only decide
+            // where it starts from.
             className="absolute right-0 top-full z-40 mt-1 w-[340px] max-w-[calc(100vw-1.5rem)] rounded-xl border border-border bg-bg-card p-3 shadow-lg sm:left-0 sm:right-auto"
           >
             {chips.length > 0 && (
