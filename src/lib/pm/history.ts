@@ -27,7 +27,15 @@ export { ACTION_RECORD_LABEL, HISTORY_AUTHOR_PREFIX };
  */
 const SPOOFABLE = [
   { pattern: /\[\s*from\s*@/gi, replacement: "(from @" },
-  { pattern: new RegExp(ACTION_RECORD_LABEL.replace(/ /g, "\\s+"), "gi"), replacement: "(quoted) board actions" },
+  {
+    // Escaped before the spaces become `\s+`: the label has no regex metacharacters today, and the
+    // day somebody adds a "." to it this would start matching wider, silently.
+    pattern: new RegExp(
+      ACTION_RECORD_LABEL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/ /g, "\\s+"),
+      "gi"
+    ),
+    replacement: "(quoted) board actions",
+  },
 ];
 
 function authorOf(entry: PmHistoryEntry): string | null {

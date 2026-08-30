@@ -38,8 +38,7 @@ describe("isReadSafe", () => {
 
   /**
    * The heuristic became load-bearing when the hint stopped being able to override it, so the verbs
-   * it does not know are now the gap. These are the ones added with that change; each reads as a
-   * mutation to a person and passed the old list.
+   * it does not know are now the gap. Each of these reads as a mutation to a person.
    */
   it("knows the verbs it had to learn once the hint could no longer override it", () => {
     for (const name of [
@@ -50,6 +49,38 @@ describe("isReadSafe", () => {
       "read_and_execute_script",
       "query_then_revoke_tokens",
     ]) {
+      expect(isReadSafe(tool(name, true)), name).toBe(false);
+    }
+  });
+
+  /**
+   * The other half of the same change, and the one a control over three invented names could not
+   * see. Matched as a substring, every name here was refused — and on a project with writes off a
+   * refusal is final, because `toolAllowlist` only narrows and never restores. These are real tool
+   * names from the GitHub MCP server and its neighbours.
+   */
+  it("does not refuse a read whose name merely contains a write verb", () => {
+    for (const name of [
+      "get_settings",          // "set"
+      "list_datasets",         // "set"
+      "get_offset",            // "set"
+      "list_presets",          // "reset"
+      "list_closed_issues",    // "close"
+      "get_merged_pull_requests", // "merge", but the token is "merged"
+      "list_assignees",        // "assign", token is "assignees"
+      "get_dropdown_options",  // "drop"
+      "list_workflow_runs",
+      "get_run_status",
+      "get_grant",
+    ]) {
+      expect(isReadSafe(tool(name)), name).toBe(true);
+    }
+  });
+
+  // A mutation never reaches the verb list at all unless it is dressed as a read, which is what
+  // makes leaving `run` and `grant` out of it safe
+  it("refuses a name that does not start as a read, whatever it contains", () => {
+    for (const name of ["run_script", "grant_access", "do_the_thing", "trigger_deploy"]) {
       expect(isReadSafe(tool(name, true)), name).toBe(false);
     }
   });
