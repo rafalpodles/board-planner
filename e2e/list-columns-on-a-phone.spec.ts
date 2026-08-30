@@ -58,12 +58,9 @@ test.describe("on a phone", () => {
     });
 
     await test.step("the title keeps a readable width rather than collapsing", async () => {
+      // The title cell carries the full title as its `title` attribute; the key cell carries the key
       const width = await page
-        .locator("tbody tr")
-        .first()
-        .locator("td")
-        .filter({ hasText: "Free to move" })
-        .first()
+        .locator('td[title="Free to move"]')
         .evaluate((td) => td.getBoundingClientRect().width);
       expect(width).toBeGreaterThanOrEqual(TITLE_FLOOR);
     });
@@ -72,6 +69,18 @@ test.describe("on a phone", () => {
       await expect(header(page, "Updated")).toHaveCount(0);
 
       await page.getByRole("button", { name: "Choose columns" }).click();
+
+      // The panel is anchored to the button's right edge, and the toolbar wraps the button to the
+      // left of a phone — so a 224px panel used to open at x=-128, entirely past the screen
+      const panel = await page
+        .getByRole("group", { name: "Columns" })
+        .evaluate((el) => {
+          const r = el.getBoundingClientRect();
+          return { left: r.left, right: r.right, viewport: window.innerWidth };
+        });
+      expect(panel.left).toBeGreaterThanOrEqual(0);
+      expect(panel.right).toBeLessThanOrEqual(panel.viewport);
+
       const updated = page.getByRole("checkbox", { name: "Updated", exact: true });
       await expect(updated).not.toBeChecked();
       await updated.check();
@@ -99,3 +108,4 @@ test.describe("on a desktop", () => {
     expect(wrapper.scrollWidth).toBe(wrapper.clientWidth);
   });
 });
+

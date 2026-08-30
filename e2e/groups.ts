@@ -36,6 +36,7 @@ export const GROUPS = {
     "ios-focus-zoom.spec.ts",
     "board-toolbar-geometry.spec.ts",
     "board-move-without-drag.spec.ts",
+    "list-columns-on-a-phone.spec.ts",
   ],
   project: [
     "project-lifecycle.spec.ts",
