@@ -97,6 +97,19 @@ vi.mock("@/models/task", async () => ({
 }));
 vi.mock("@/models/project", () => ({ Project: { findById, findOneAndUpdate: projectFindOneAndUpdate } }));
 vi.mock("@/models/user", () => ({ User: { findOne: userFindOne, findById: userFindById } }));
+/**
+ * Mocked as its own module, not through the User mock (BP-419). `User.findOne` here is a blanket
+ * stub that answers every lookup the same way, and the PM's is one of several — so a test setting
+ * it to "the person this task is moving to" would have made that person the PM, and the filter
+ * would have widened to admit exactly the account those tests exist to keep out. Passing for the
+ * wrong reason, in the security tests.
+ */
+const pmUserIdMock = vi.fn<() => Promise<string | null>>();
+vi.mock("@/lib/pm/pm-user", () => ({
+  pmUserId: () => pmUserIdMock(),
+  PM_USERNAME: "pm",
+  getPmUser: vi.fn(),
+}));
 const agentFindById = vi.fn();
 vi.mock("@/models/agent", () => ({ Agent: { findById: agentFindById } }));
 
@@ -156,6 +169,11 @@ beforeEach(() => {
   // every earlier test's calls too, and pass or fail on the order the file happens to run in.
   canBeAssignedMock.mockClear();
   canBeAssignedMock.mockResolvedValue(true);
+  // claimNextTask looks the PM account up on every call (BP-419). The default is an instance that
+  // has never run one, so a test saying nothing about the PM gets the pre-BP-419 filter and the
+  // PM's presence is something a test has to ask for.
+  pmUserIdMock.mockReset();
+  pmUserIdMock.mockResolvedValue(null);
 });
 
 const {
@@ -2963,11 +2981,56 @@ describe("a machine claims its owner's work", () => {
     return findOneAndUpdate.mock.calls[0]?.[0];
   }
 
-  it("asks only for tasks its owner assigned to themselves", async () => {
+  it("asks only for tasks its owner assigned to themselves, on an instance with no PM", async () => {
     const filter = await claimFilterFor(OWNER);
 
     expect(filter.assignee).toBe(OWNER);
-    expect(filter.assignedBy).toBe(OWNER);
+    expect(filter.assignedBy).toEqual({ $in: [OWNER] });
+  });
+
+  /**
+   * BP-419. The PM is a first-party actor, and its assignment is a real hand-over — before this,
+   * every task it assigned failed this filter for ever, silently, because a non-match and an empty
+   * queue are the same answer.
+   *
+   * Judged by running the filter over documents rather than by reading the clause: what matters is
+   * which tasks MongoDB would return, and `$in` containing an id proves nothing on its own about
+   * the assignee it is paired with.
+   */
+  describe("and the PM's assignment is one of them", () => {
+    const PM = "6a732075133f935b19154cf0";
+    const THIRD = "6a732075133f935b19154cf1";
+
+    beforeEach(() => {
+      pmUserIdMock.mockResolvedValue(PM);
+    });
+
+    it("takes a task the PM assigned to its owner", async () => {
+      const matches = sift(await claimFilterFor(OWNER));
+
+      expect(matches(task({ assignee: OWNER, assignedBy: PM }))).toBe(true);
+    });
+
+    it("still takes a task the owner assigned to themselves", async () => {
+      const matches = sift(await claimFilterFor(OWNER));
+
+      expect(matches(task({ assignee: OWNER, assignedBy: OWNER }))).toBe(true);
+    });
+
+    // The control, and the whole reason this is narrow rather than "the consent model was dropped":
+    // a PERSON assigning you work is still a proposal, and nothing runs it unattended.
+    it("refuses a task another person assigned to its owner", async () => {
+      const matches = sift(await claimFilterFor(OWNER));
+
+      expect(matches(task({ assignee: OWNER, assignedBy: THIRD }))).toBe(false);
+    });
+
+    // The PM widening who may hand work over must not widen whose machine receives it
+    it("refuses a task the PM assigned to somebody else", async () => {
+      const matches = sift(await claimFilterFor(OWNER));
+
+      expect(matches(task({ assignee: THIRD, assignedBy: PM }))).toBe(false);
+    });
   });
 
   // The alternative that used to sit beside it. A task assigned to the worker's own `worker-<id>`

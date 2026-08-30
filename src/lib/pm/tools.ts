@@ -14,6 +14,8 @@ import {
 import { OrToolDefinition } from "./openrouter";
 import { unknownParameterMessage, NOTHING_TO_CHANGE } from "@/lib/mcp/strict-input";
 import { buildBoardDigest } from "./board-review";
+import { handoverOf } from "@/lib/handover";
+import { getProjectColumns } from "@/lib/columns";
 
 export interface PmToolContext {
   projectId: string;
@@ -106,6 +108,39 @@ export function refuseUndeclaredArgs(tool: PmTool, args: Record<string, unknown>
   const stray = Object.keys(args).filter((key) => !Object.hasOwn(declared, key));
 
   return stray.length ? unknownParameterMessage(stray, PM_TOOL_HINTS, tool.write) : null;
+}
+
+
+/**
+ * Why nothing will run this task, or "" when nothing about it is in the way.
+ *
+ * BP-419 made the PM's assignment a real hand-over, but not every hand-over completes: a task
+ * naming no agent is one a person is doing, and a project not enabled for workers runs nothing at
+ * all. Those have to be said where the PM says it assigned the work — the Agent row on the task
+ * detail is a view nobody reopens after reading "BP-x → @rafal" in the chat.
+ *
+ * Deliberately not a promise of the opposite. The claim also weighs open blockers, spent attempts
+ * and whether that person owns a live machine at all, none of which is knowable here, so "" means
+ * "no reason found", never "it will run".
+ */
+async function whyItWillNotRun(
+  projectId: string,
+  task: { agent?: unknown; assignee?: unknown; assignedBy?: unknown; status?: unknown }
+): Promise<string> {
+  const project = await Project.findById(projectId, "columns worker").lean();
+  if (!project || project.worker?.enabled !== true) {
+    return "this project is not enabled for workers, so nothing will run it";
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handover = handoverOf(task as any, getProjectColumns(project));
+  if (handover.runs) return "";
+  if (handover.reason === "no-agent") {
+    return "no agent is named on it, so nothing will run it — a task naming none is one a person is doing";
+  }
+  if (handover.reason === "not-approved-yet") {
+    return "it is not in a column a machine claims from, so nothing will run it yet";
+  }
+  return "";
 }
 
 export const PM_TOOLS: Record<string, PmTool> = {
@@ -413,9 +448,24 @@ export const PM_TOOLS: Record<string, PmTool> = {
       if (username && !assignee) {
         return { result: { error: `User '${username}' not found — task ${key} is now unassigned` } };
       }
+      if (!assignee) {
+        return {
+          result: { task: key, assignee: null },
+          action: { tool: "assign_task", taskKey: key, summary: `${key} unassigned` },
+        };
+      }
+
+      // Said in the same breath as the assignment, rather than left to a view nobody reopens
+      const blocked = await whyItWillNotRun(ctx.projectId, result.data);
       return {
-        result: { task: key, assignee },
-        action: { tool: "assign_task", taskKey: key, summary: assignee ? `${key} → @${assignee}` : `${key} unassigned` },
+        result: blocked
+          ? { task: key, assignee, willRun: false, note: `Assigned, but ${blocked}.` }
+          : { task: key, assignee },
+        action: {
+          tool: "assign_task",
+          taskKey: key,
+          summary: blocked ? `${key} → @${assignee} (${blocked})` : `${key} → @${assignee}`,
+        },
       };
     },
   },
