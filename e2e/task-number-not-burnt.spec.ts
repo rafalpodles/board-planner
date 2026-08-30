@@ -1,6 +1,14 @@
 import { test, expect, type APIRequestContext } from "@playwright/test";
+import mongoose from "mongoose";
 import { ADMIN_AUTH } from "./api";
-import { PROJECT_KEY, PROJECT_NAME, seed } from "./seed";
+import {
+  E2E_MONGODB_URI,
+  PROJECT_ID,
+  PROJECT_KEY,
+  PROJECT_NAME,
+  SIBLING_TASK_ID,
+  seed,
+} from "./seed";
 import { signIn } from "./session";
 
 /**
@@ -78,4 +86,101 @@ test("a refused create leaves the next task number unspent", async ({ page, requ
   const card = page.locator(`a[href="/projects/${PROJECT_KEY}/tasks/${SEEDED_TASKS + 1}"]`);
   await expect(card).toContainText("The number nothing burnt");
   await expect(card).toContainText(`${PROJECT_KEY}-${SEEDED_TASKS + 1}`);
+});
+
+/**
+ * BP-445. `description` and `order` were never on BP-438's list and were handed straight to
+ * `Task.create`, so a body the cast throws on answered 500 *and* spent a number — the failure
+ * above, through two fields it did not name.
+ *
+ * The counter is read off the project document rather than inferred from the task list. The
+ * numbers of tasks that already exist cannot move when nothing is created, which is how a first
+ * pass of this measurement reported all six arms clean: an instrument that cannot register the
+ * defect reads exactly like an absence of one.
+ */
+
+async function taskCounter(): Promise<number> {
+  if (mongoose.connection.readyState === 0) await mongoose.connect(E2E_MONGODB_URI);
+  const handle = mongoose.connection.db;
+  if (!handle) throw new Error("no database handle");
+  const project = await handle.collection("projects").findOne({ _id: PROJECT_ID });
+  return project?.taskCounter as number;
+}
+
+async function storedTask() {
+  if (mongoose.connection.readyState === 0) await mongoose.connect(E2E_MONGODB_URI);
+  const handle = mongoose.connection.db;
+  if (!handle) throw new Error("no database handle");
+  const task = await handle.collection("tasks").findOne({ _id: SIBLING_TASK_ID });
+  if (!task) throw new Error("the sibling task is not seeded");
+  return task;
+}
+
+/**
+ * `Number([])` is 0 and `Number([5])` is 5 — both finite, and both refused by Mongoose. They are
+ * here because a guard written as "anything Number() makes finite" passes every other arm and
+ * still lets these two through to the CastError it was added to prevent.
+ */
+const UNCASTABLE: Record<string, unknown>[] = [
+  { order: "abc" },
+  { order: {} },
+  { order: [] },
+  { order: [5] },
+  { description: {} },
+  { description: ["a"] },
+];
+
+test("order and description cannot burn a number either", async ({ request }) => {
+  const before = await taskCounter();
+
+  for (const body of UNCASTABLE) {
+    const said = JSON.stringify(body);
+    expect(await refusedCreate(request, body), said).toMatch(/order|description/i);
+    expect(await taskCounter(), said).toBe(before);
+  }
+
+  // The control, and the half of the claim a refusal cannot make: the guard has to be exactly as
+  // lenient as the cast it stands in for. Mongoose reads "2" as the number 2, so a body the schema
+  // would have taken must still create — and must mint exactly one number doing it.
+  const created = await request.post(`/api/projects/${PROJECT_KEY}/tasks`, {
+    headers: ADMIN_AUTH,
+    data: { title: "Ordered by a string", order: "2", description: "plain text" },
+  });
+  expect(created.status(), await created.text()).toBe(201);
+
+  const task = await created.json();
+  expect(task.order).toBe(2);
+  expect(task.description).toBe("plain text");
+  expect(task.taskNumber).toBe(before + 1);
+  expect(await taskCounter()).toBe(before + 1);
+});
+
+test("the same two shapes are refused on update, and nothing is written", async ({ request }) => {
+  const before = await storedTask();
+
+  for (const body of UNCASTABLE) {
+    const said = JSON.stringify(body);
+    const response = await request.put(`/api/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_ID}`, {
+      headers: ADMIN_AUTH,
+      data: body,
+    });
+    expect(response.status(), `${said} — ${await response.text()}`).toBe(400);
+    expect(await response.text(), said).toMatch(/order|description/i);
+
+    const after = await storedTask();
+    expect(after.order, said).toBe(before.order);
+    expect(after.description, said).toBe(before.description);
+  }
+
+  // The control again: the update path has to keep taking what the cast takes, or a board reorder
+  // — which is the only gesture that ever sends `order` — would refuse every drag.
+  const accepted = await request.put(`/api/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_ID}`, {
+    headers: ADMIN_AUTH,
+    data: { order: "7", description: "written by the update path" },
+  });
+  expect(accepted.status(), await accepted.text()).toBe(200);
+
+  const after = await storedTask();
+  expect(after.order).toBe(7);
+  expect(after.description).toBe("written by the update path");
 });
