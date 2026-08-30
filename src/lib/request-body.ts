@@ -11,7 +11,15 @@ import { NextResponse } from "next/server";
  */
 export const MAX_JSON_BODY_BYTES = 64 * 1024;
 
-export type JsonBody<T> = { ok: true; value: T } | { ok: false; response: NextResponse };
+/**
+ * `reason` is for the handful of callers with a person on the other end. This reader knows a body
+ * was too big; it does not know the request was somebody dragging a photo onto a task, and
+ * "request body must be at most 5308416 bytes" tells them nothing they can act on. A caller that
+ * has a better sentence translates; the rest return `response` as it stands.
+ */
+export type BodyRefusal = { ok: false; reason: "too-large" | "unreadable"; response: NextResponse };
+
+export type JsonBody<T> = { ok: true; value: T } | BodyRefusal;
 
 /**
  * Content-Length is a claim, not a measurement: it is absent on a chunked request and can simply
@@ -61,7 +69,9 @@ export async function readJsonBody<T = Record<string, unknown>>(
   } catch {
     return {
       ok: false,
-      response: NextResponse.json({ error: "request body is not valid JSON" }, { status: 400 }),
+      reason: "unreadable" as const,
+      // The wording five other routes already use for this
+      response: NextResponse.json({ error: "Invalid JSON body" }, { status: 400 }),
     };
   }
 }
@@ -107,14 +117,16 @@ export async function readFormBody(
     if (over) return tooLarge(maxBytes);
     return {
       ok: false,
+      reason: "unreadable" as const,
       response: NextResponse.json({ error: "request body could not be read" }, { status: 400 }),
     };
   }
 }
 
-function tooLarge(maxBytes: number): { ok: false; response: NextResponse } {
+function tooLarge(maxBytes: number): BodyRefusal {
   return {
     ok: false,
+    reason: "too-large",
     response: NextResponse.json(
       { error: `request body must be at most ${maxBytes} bytes` },
       { status: 413 }

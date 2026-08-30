@@ -143,7 +143,12 @@ test.describe("uploads", () => {
       },
     });
 
-    expect(response.status(), await response.text()).toBe(413);
+    const body = await response.text();
+    expect(response.status(), body).toBe(413);
+    // The sentence too, not only the status. Asserting the status alone is how a generic
+    // "request body must be at most 5308416 bytes" replaced this and was caught by a spec in
+    // another file rather than by the one covering the change.
+    expect(body).toMatch(/Maximum size is 5MB/);
   });
 
   /**
@@ -176,7 +181,9 @@ test.describe("uploads", () => {
       },
     });
 
-    expect(response.status(), await response.text()).toBe(413);
+    const body = await response.text();
+    expect(response.status(), body).toBe(413);
+    expect(body).toMatch(/Maximum size is 5MB/);
   });
 
   test("still accepts an ordinary attachment — the control", async ({ request }) => {
