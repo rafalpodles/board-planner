@@ -12,6 +12,7 @@ import {
   SECOND_PROJECT_ID,
   SECOND_PROJECT_KEY,
   SECOND_PROJECT_NAME,
+  SIBLING_TASK_KEY,
   expireAccessToken,
   seed,
   stripAccessExpiry,
@@ -377,6 +378,50 @@ test.describe("MCP OAuth handshake", () => {
     const projects = await session.callTool("list_projects");
     const keys = ((projects.parsed ?? []) as { key: string }[]).map((p) => p.key);
     expect(keys).toEqual(expect.arrayContaining([PROJECT_KEY, SECOND_PROJECT_KEY]));
+  });
+
+  /**
+   * BP-497. `update_task` was called with `checklist`, which it does not declare — zod stripped the
+   * key, the tool wrote nothing, and the answer was 200 with the task back and `updatedAt` bumped.
+   * The response was not the tell and cannot be: the check is the read-back.
+   */
+  test("a parameter the tool does not declare is refused, and nothing moves", async ({
+    page,
+    request,
+  }) => {
+    const { accessToken } = await authorize(page, request, { projects: "all" });
+    const session = new McpSession(request, accessToken);
+    await session.open();
+
+    const before = await session.callTool("get_task", { taskKey: SIBLING_TASK_KEY });
+
+    // `description` is declared and rides along on purpose: with it the update is not empty, so
+    // the other refusal in this tool — "named nothing to change" — cannot be what answers
+    const refused = await session.callTool("update_task", {
+      taskKey: SIBLING_TASK_KEY,
+      description: "should not land either",
+      checklist: [{ text: "written by nobody" }],
+    });
+
+    expect(refused.raw.result?.isError, refused.text).toBe(true);
+    expect(refused.text).toContain("checklist");
+    expect(refused.text).toContain("acceptanceCriteria");
+
+    const after = await session.callTool("get_task", { taskKey: SIBLING_TASK_KEY });
+    expect(after.parsed.updatedAt).toBe(before.parsed.updatedAt);
+    expect(after.parsed.description).toBe(before.parsed.description);
+    expect(after.parsed.checklist).toEqual(before.parsed.checklist);
+
+    // The control. Without it a tool that refused everything would read exactly like this passing
+    const written = await session.callTool("update_task", {
+      taskKey: SIBLING_TASK_KEY,
+      description: "written through a parameter it does declare",
+    });
+    expect(written.raw.result?.isError ?? false, written.text).toBe(false);
+
+    const readBack = await session.callTool("get_task", { taskKey: SIBLING_TASK_KEY });
+    expect(readBack.parsed.description).toBe("written through a parameter it does declare");
+    expect(readBack.parsed.updatedAt).not.toBe(before.parsed.updatedAt);
   });
 
   test("a token limited to one project reaches only that project's board", async ({

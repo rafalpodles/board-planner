@@ -63,11 +63,21 @@ beforeEach(() => {
 });
 
 describe("a parameter the tool does not declare is refused, not dropped", () => {
+  // Every stray key below travels with a parameter the tool DOES declare. Without one the write
+  // is empty either way and the refusal below it — "named nothing to change" — answers instead,
+  // which reads as this passing while the strictness it names is gone.
   it("names the parameter and writes nothing", async () => {
     const update = vi.spyOn(PlannerClient.prototype, "updateTask").mockResolvedValue({});
-    const resolve = vi.spyOn(PlannerClient.prototype, "resolveTaskKey");
+    const resolve = vi.spyOn(PlannerClient.prototype, "resolveTaskKey").mockResolvedValue({
+      projectId: "p1",
+      taskId: "t1",
+    });
 
-    const { refused, said } = await call("update_task", { taskKey: "BP-1", checklist: [] });
+    const { refused, said } = await call("update_task", {
+      taskKey: "BP-1",
+      title: "renamed",
+      checklist: [],
+    });
 
     expect(refused).toBe(true);
     expect(said).toContain("checklist");
@@ -77,19 +87,29 @@ describe("a parameter the tool does not declare is refused, not dropped", () => 
   });
 
   it("says to use acceptanceCriteria for a checklist", async () => {
-    const { said } = await call("update_task", { taskKey: "BP-1", checklist: [] });
+    const { said } = await call("update_task", { taskKey: "BP-1", title: "renamed", checklist: [] });
     expect(said).toContain("acceptanceCriteria");
   });
 
   // The same call that lost `checklist` also carried status: "done", and status is a different tool
   it("says to use change_task_status for a status", async () => {
-    const { refused, said } = await call("update_task", { taskKey: "BP-1", status: "done" });
+    const { refused, said } = await call("update_task", {
+      taskKey: "BP-1",
+      title: "renamed",
+      status: "done",
+    });
+
     expect(refused).toBe(true);
     expect(said).toContain("change_task_status");
   });
 
   // CP-214 removed these two parameters and a client still passing them got nothing set
   it("points difficulty at the fields parameter on create_task", async () => {
+    vi.spyOn(PlannerClient.prototype, "getProjectByKey").mockResolvedValue({
+      _id: "p1",
+      key: "BP",
+      customFields: [],
+    } as never);
     const create = vi.spyOn(PlannerClient.prototype, "createTask").mockResolvedValue({});
 
     const { refused, said } = await call("create_task", { project: "BP", title: "x", difficulty: "L" });
