@@ -104,7 +104,10 @@ async function pmServers(page: Page) {
 async function customFieldForm(page: Page) {
   await page.goto(`/projects/${PROJECT_KEY}/settings?section=fields`);
   await page.getByRole("button", { name: "+ Add field" }).click();
-  await expect(page.getByLabel("Type")).toBeVisible();
+  // Waits on the form's OTHER field on purpose. Waiting on the select this ticket names would make
+  // its absence a "locator not found" in the helper, where the sweep below prints the offending
+  // element instead — a worse message for the failure that matters.
+  await expect(page.getByPlaceholder("Component")).toBeVisible();
 }
 
 async function workerSettings(page: Page) {
@@ -126,7 +129,8 @@ async function integrationSettings(page: Page) {
 async function dependencyPicker(page: Page) {
   await page.goto(`/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`);
   await page.getByRole("button", { name: "+ Add dependency" }).click();
-  await expect(page.getByLabel("Link type")).toBeVisible();
+  // The search box, not the select — same reasoning as the custom field form above
+  await expect(page.getByPlaceholder("Search tasks...")).toBeVisible();
 }
 
 const SURFACES: [string, (page: Page) => Promise<void>][] = [
