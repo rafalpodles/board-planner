@@ -85,10 +85,13 @@ function SortableEntry({
   entry,
   onRemove,
   lookup,
+  readOnly = false,
 }: {
   entry: Entry;
   onRemove: () => void;
   lookup: Lookup;
+  /** Shows the composition without the controls that edit it, for a reader who cannot save */
+  readOnly?: boolean;
 }) {
   const { setNodeRef, attributes, listeners, transform, transition, isDragging } = useSortable({
     id: entry.uid,
@@ -104,18 +107,26 @@ function SortableEntry({
         isDragging ? "relative z-10 opacity-85" : ""
       }`}
     >
-      <span {...attributes} {...listeners} className="min-w-0 flex-1 cursor-grab">
-        <BlockBody block={block} />
-      </span>
-      <button
-        onClick={onRemove}
-        aria-label={`Remove ${block.name}`}
-        className="focus-ring shrink-0 rounded p-1 text-text-muted transition-colors hover:text-danger"
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4">
-          <path d="M6 18L18 6M6 6l12 12" strokeLinecap="round" />
-        </svg>
-      </button>
+      {readOnly ? (
+        <span className="min-w-0 flex-1">
+          <BlockBody block={block} />
+        </span>
+      ) : (
+        <>
+          <span {...attributes} {...listeners} className="min-w-0 flex-1 cursor-grab">
+            <BlockBody block={block} />
+          </span>
+          <button
+            onClick={onRemove}
+            aria-label={`Remove ${block.name}`}
+            className="focus-ring shrink-0 rounded p-1 text-text-muted transition-colors hover:text-danger"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4">
+              <path d="M6 18L18 6M6 6l12 12" strokeLinecap="round" />
+            </svg>
+          </button>
+        </>
+      )}
     </li>
   );
 }
@@ -127,6 +138,7 @@ export function Bucket({
   entries,
   onRemove,
   lookup,
+  readOnly = false,
 }: {
   id: AgentBucket;
   label: string;
@@ -134,6 +146,7 @@ export function Bucket({
   entries: Entry[];
   onRemove: (uid: string) => void;
   lookup: Lookup;
+  readOnly?: boolean;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: `${BUCKET_PREFIX}${id}` });
 
@@ -156,13 +169,16 @@ export function Bucket({
               key={entry.uid}
               entry={entry}
               lookup={lookup}
+              readOnly={readOnly}
               onRemove={() => onRemove(entry.uid)}
             />
           ))}
         </SortableContext>
 
         {entries.length === 0 && (
-          <p className="py-3 text-center text-[12px] text-text-muted">Drag a step or a gate here.</p>
+          <p className="py-3 text-center text-[12px] text-text-muted">
+            {readOnly ? "Nothing here." : "Drag a step or a gate here."}
+          </p>
         )}
       </ul>
     </section>
