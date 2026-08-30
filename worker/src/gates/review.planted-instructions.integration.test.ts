@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { reviewGate } from "./review.js";
@@ -32,7 +33,7 @@ function git(cwd: string, ...args: string[]): string {
   }).toString();
 }
 
-type Seen = { cwd?: string; instructions?: boolean; committed?: boolean };
+type Seen = { cwd?: string; instructions?: boolean; committed?: boolean; argv?: string[] };
 
 /** Real git, stubbed reviewer. The stub reports what it could read, not what it was told. */
 function lookingReviewer(seen: Seen): Runner {
@@ -42,6 +43,7 @@ function lookingReviewer(seen: Seen): Runner {
       if (command !== "claude") return real.run(command, args, opts);
       const cwd = opts.cwd ?? "";
       seen.cwd = cwd;
+      seen.argv = args;
       seen.instructions = existsSync(join(cwd, "CLAUDE.md"));
       seen.committed = existsSync(join(cwd, "a.ts"));
       return {
@@ -129,6 +131,31 @@ describe("the review gate against an ignored instruction file", () => {
     // a gate that ran the reviewer in an empty directory would satisfy the assertion above
     expect(seen.committed).toBe(true);
     expect(seen.cwd).not.toBe(work);
+  });
+
+  /**
+   * The scope these assertions cover, said out loud rather than left to be discovered.
+   *
+   * The first version of this file asserted only about the checkout's own directory — and the
+   * review of this branch showed the attack keeps that property while moving the plant one level
+   * up: `$TMPDIR` is the checkout's parent, `TMPDIR` is on childEnv's allowlist, the agent writes
+   * unsandboxed, and the CLI reads CLAUDE.md from every directory above the cwd. Measured with the
+   * real CLI, the plant was obeyed and both tests here stayed green.
+   *
+   * So this asserts the honest shape: the ancestor really is reachable — isolation by directory
+   * does not and cannot close it — and what closes it is the flag.
+   */
+  it("does not pretend the checkout's ancestors are out of the agent's reach", async () => {
+    const seen: Seen = {};
+    writeFileSync(join(tmpdir(), "cp-review-ancestor-probe"), "");
+
+    await reviewGate(lookingReviewer(seen), 30_000).run(context());
+
+    // The parent of the reviewer's cwd is a directory anything running as this uid can write to
+    expect(dirname(seen.cwd!)).toBe(tmpdir());
+    // and the only reason a CLAUDE.md there does not steer the reviewer is this
+    expect(seen.argv).toContain("--safe-mode");
+    rmSync(join(tmpdir(), "cp-review-ancestor-probe"), { force: true });
   });
 
   it("leaves no copy of the change behind", async () => {
