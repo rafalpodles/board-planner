@@ -114,7 +114,9 @@ export const DELETE = withProjectAccess(async (request, { params, user }) => {
   // fourth writer that takes a task out of a worker's hands and the only one that asked nothing —
   // and it reaches a strictly stronger outcome than the three that do, since the task is not moved
   // but gone, with the comments the run was writing into it (BP-337).
-  const task = await Task.findOne({ _id: taskId, project: projectId });
+  const task = await Task.findOne({ _id: taskId, project: projectId })
+    .select("execution taskNumber")
+    .lean();
 
   if (!task) {
     return NextResponse.json({ error: "Task not found" }, { status: 404 });
@@ -122,8 +124,8 @@ export const DELETE = withProjectAccess(async (request, { params, user }) => {
 
   if (force !== true) {
     const project = await Project.findById(projectId, "key").lean();
-    const refusal = await heldRunRefusal(task, project?.key as string | undefined);
-    if (refusal && !refusal.ok) {
+    const refusal = await heldRunRefusal(task, project?.key as string | undefined, "delete");
+    if (refusal) {
       return NextResponse.json(
         { error: refusal.error, ...(refusal.runConflict ? { runConflict: refusal.runConflict } : {}) },
         { status: refusal.status }

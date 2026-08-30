@@ -227,8 +227,8 @@ describe("Deleting one held task from the context menu", () => {
     );
     await renderBoard();
     await rightClick("TP-3");
-    await click(screen.getByRole("button", { name: "Delete", exact: true }));
-    const confirms = screen.getAllByRole("button", { name: "Delete", exact: true });
+    await click(screen.getByRole("button", { name: "Delete" }));
+    const confirms = screen.getAllByRole("button", { name: "Delete" });
     await click(confirms[confirms.length - 1]);
   }
 

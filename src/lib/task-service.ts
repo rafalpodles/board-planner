@@ -184,22 +184,33 @@ export function runHolding(task: {
  * `null` when no run holds the task, which is the ordinary case and reads as "carry on".
  */
 export async function heldRunRefusal(
-  task: { execution?: ITaskExecution; taskNumber: number },
-  projectKey: string | null | undefined
-): Promise<TaskServiceResult | null> {
+  // The shape runHolding actually reads, not ITaskExecution: demanding the whole subdocument makes
+  // every caller build fields this never looks at
+  task: { execution?: Parameters<typeof runHolding>[0]["execution"]; taskNumber: number },
+  projectKey: string | null | undefined,
+  action = "move"
+  // Never the success branch: this only ever answers "no, and here is why", so a caller does not
+  // have to narrow a union it can never see the other side of
+): Promise<Extract<TaskServiceResult, { ok: false }> | null> {
   const conflict = runHolding(task);
   if (!conflict) return null;
-  return refuseHeldRun(conflict, taskKeyOf(projectKey, task.taskNumber));
+  return refuseHeldRun(conflict, taskKeyOf(projectKey, task.taskNumber), action);
 }
 
-async function refuseHeldRun(conflict: RunConflict, taskKey: string): Promise<TaskServiceResult> {
+async function refuseHeldRun(
+  conflict: RunConflict,
+  taskKey: string,
+  // The three writers that move a task say "move it anyway"; delete reaches the same refusal and
+  // told the caller to move it, which is advice about a different act (BP-337 review)
+  action = "move"
+): Promise<Extract<TaskServiceResult, { ok: false }>> {
   const worker = conflict.workerId
     ? await Worker.findById(conflict.workerId, "name").lean()
     : null;
   const name = (worker?.name as string) || conflict.workerId || "a worker";
   return {
     ok: false,
-    error: `${taskKey} is being executed by ${name} (phase ${conflict.phase}). Stop the worker, or move it anyway to take the task from it.`,
+    error: `${taskKey} is being executed by ${name} (phase ${conflict.phase}). Stop the worker, or ${action} it anyway to take the task from it.`,
     status: 409,
     runConflict: { ...conflict, ...(worker?.name ? { workerName: worker.name as string } : {}) },
   };

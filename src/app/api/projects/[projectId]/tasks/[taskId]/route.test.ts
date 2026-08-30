@@ -5,6 +5,10 @@ const heldRunRefusal = vi.fn();
 const taskFindOne = vi.fn();
 const taskDeleteOne = vi.fn();
 const projectFindById = vi.fn();
+const commentDeleteMany = vi.fn();
+const activityDeleteMany = vi.fn();
+const notificationDeleteMany = vi.fn();
+const taskUpdateMany = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/task-service", () => ({
@@ -14,12 +18,12 @@ vi.mock("@/lib/task-service", () => ({
   taskPopulateFields: [],
 }));
 vi.mock("@/models/task", () => ({
-  Task: { findOne: taskFindOne, find: vi.fn(), updateMany: vi.fn(), deleteOne: taskDeleteOne, findOneAndDelete: vi.fn() },
+  Task: { findOne: taskFindOne, find: vi.fn(), updateMany: taskUpdateMany, deleteOne: taskDeleteOne, findOneAndDelete: vi.fn() },
 }));
 vi.mock("@/models/project", () => ({ Project: { findById: projectFindById } }));
-vi.mock("@/models/comment", () => ({ Comment: { deleteMany: vi.fn() } }));
-vi.mock("@/models/activityLog", () => ({ ActivityLog: { deleteMany: vi.fn() } }));
-vi.mock("@/models/notification", () => ({ Notification: { deleteMany: vi.fn() } }));
+vi.mock("@/models/comment", () => ({ Comment: { deleteMany: commentDeleteMany } }));
+vi.mock("@/models/activityLog", () => ({ ActivityLog: { deleteMany: activityDeleteMany } }));
+vi.mock("@/models/notification", () => ({ Notification: { deleteMany: notificationDeleteMany } }));
 vi.mock("@/models/worker", () => ({ Worker: { find: vi.fn() } }));
 vi.mock("@/lib/middleware", () => ({
   withProjectAccess:
@@ -69,7 +73,10 @@ const HELD = {
 beforeEach(() => {
   vi.clearAllMocks();
   updateTask.mockResolvedValue({ ok: true, data: { _id: TASK } });
-  taskFindOne.mockResolvedValue({ _id: TASK, taskNumber: 7, execution: {} });
+  // The route reads only the two fields the hold check needs, so the chain is select().lean()
+  taskFindOne.mockReturnValue({
+    select: () => ({ lean: () => Promise.resolve({ _id: TASK, taskNumber: 7, execution: {} }) }),
+  });
   taskDeleteOne.mockResolvedValue({ deletedCount: 1 });
   projectFindById.mockReturnValue({ lean: () => Promise.resolve({ key: "TP" }) });
   heldRunRefusal.mockResolvedValue(null);
@@ -197,8 +204,32 @@ describe("DELETE .../tasks/:taskId and the run hold", () => {
     expect(taskDeleteOne).toHaveBeenCalledWith({ _id: TASK, project: "p1" });
   });
 
+  /**
+   * PUT has this assertion and DELETE did not, which is the BP-320 shape again: `!force` would let
+   * `{ force: "yes" }` past the hold check AND past machineMayNotForce, which tests `=== true`.
+   */
+  it("treats a force that is not literally true as no force at all", async () => {
+    heldRunRefusal.mockResolvedValue(HELD);
+
+    const res = await DELETE(deleteRequest({ force: "yes" }), ctx());
+
+    expect(res.status).toBe(409);
+    expect(taskDeleteOne).not.toHaveBeenCalled();
+  });
+
+  // The ticket's own premise is that the task goes "with the comments the run was writing into
+  // it", and nothing asserted that half — before this change or after it
+  it("takes the comments, activity, notifications and inbound links with it", async () => {
+    await DELETE(deleteRequest(), ctx());
+
+    expect(commentDeleteMany).toHaveBeenCalledWith({ task: TASK });
+    expect(activityDeleteMany).toHaveBeenCalledWith({ task: TASK });
+    expect(notificationDeleteMany).toHaveBeenCalledWith({ task: TASK });
+    expect(taskUpdateMany).toHaveBeenCalledWith({ blockedBy: TASK }, { $pull: { blockedBy: TASK } });
+  });
+
   it("still answers 404 for a task that is not there, rather than reading it as held", async () => {
-    taskFindOne.mockResolvedValue(null);
+    taskFindOne.mockReturnValue({ select: () => ({ lean: () => Promise.resolve(null) }) });
 
     const res = await DELETE(deleteRequest(), ctx());
 
