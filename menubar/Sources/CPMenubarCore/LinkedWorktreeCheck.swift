@@ -30,7 +30,10 @@ public enum LinkedWorktreeCheck {
         // the path before they are compared, rather than compared as the strings they arrived as
         let resolve: (String) -> String? = { answer in
             let trimmed = answer.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { return nil }
+            // `git rev-parse` echoes an option it does not know and exits 0, so on a git without
+            // `--git-common-dir` the answer is the flag itself. That is not a path, and the exit
+            // code alone would have let it through as one (BP-422 review).
+            guard !trimmed.isEmpty, !trimmed.hasPrefix("-") else { return nil }
             let absolute = trimmed.hasPrefix("/")
                 ? trimmed
                 : (path as NSString).appendingPathComponent(trimmed)

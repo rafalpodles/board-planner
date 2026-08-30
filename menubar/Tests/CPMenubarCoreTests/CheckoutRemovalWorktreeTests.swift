@@ -187,18 +187,27 @@ final class CheckoutRemovalWorktreeTests: XCTestCase {
             XCTFail("expected a refusal, got \(verdict) — the repository at \(checkout) would be deleted")
             return
         }
+        // Not `contains("worktree")`: every neighbouring refusal in this file says that word too —
+        // "one of its worktrees", "could not list the worktrees of" — so it would pass for a guard
+        // that had stopped telling the two apart (BP-422 review)
         XCTAssertTrue(
-            reason.contains("worktree"),
+            reason.contains("is a linked worktree"),
             "the refusal has to say what the path is, not just that it is not allowed: \(reason)")
     }
 
     /// Belt and braces, and the second half of the ticket: whatever the verdict, the list of things
-    /// to delete may never contain a repository's main checkout. A future guard that answered `.go`
-    /// here would still have to answer it with an empty list.
+    /// to delete may never contain a repository's main checkout.
+    ///
+    /// Written as a switch with no silent arm on purpose. The first version was `if case .go`, and
+    /// against this branch `check` refuses — so the body never ran and the test executed no
+    /// assertion at all while reading like a guard (BP-422 review).
     func testNoVerdictAboutAWorktreeEverNamesTheMainCheckout() {
         let (checkout, worktree) = repoWithWorktree()
 
-        if case .go(let worktrees) = removal().check(path: worktree, workerIsBusy: false) {
+        switch removal().check(path: worktree, workerIsBusy: false) {
+        case .refused:
+            break
+        case .go(let worktrees):
             XCTAssertFalse(
                 worktrees.map(resolved).contains(resolved(checkout)),
                 "the main checkout is not something unticking a worktree may delete")

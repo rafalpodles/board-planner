@@ -108,9 +108,13 @@ final class CloneStepTests: XCTestCase {
         git.present = ["/p/TP/.git"]
         git.results["--git-common-dir"] = (128, "not a git repository")
 
-        guard case .failed = git.step().run(
+        guard case .failed(let reason) = git.step().run(
             repositoryURL: "https://github.com/o/r", parent: "/p", projectKey: "TP")
         else { return XCTFail("expected a refusal") }
+        // Without this the test passes when the exit-code guard is gone: the stubbed error text
+        // resolves to a path that is not `.git`, so the answer becomes "linked worktree" and the
+        // outcome is still `.failed` — the right verdict for the wrong reason (BP-422 review)
+        XCTAssertTrue(reason.contains("could not say"), reason)
     }
 
     func testSomethingElseAlreadyAtTheDestinationIsNotClobbered() {
@@ -267,6 +271,29 @@ final class GitSafeEnvironmentTests: XCTestCase {
 
         XCTAssertEqual(hardened["PATH"], "/opt/homebrew/bin", "the resolved PATH is the whole point of it")
         XCTAssertEqual(hardened["GH_TOKEN"], "gho_x")
+    }
+
+    /// BP-422 review, measured through this app's own spawn path: `GIT_COMMON_DIR` in the
+    /// inherited environment makes a healthy repository read as a linked worktree and refuses to
+    /// remove it, and `GIT_DIR` makes every question the removal guard asks get answered about a
+    /// different repository while the path it authorises for deletion is still the one it was
+    /// given — the only measured way to defeat that guard.
+    func testItDoesNotInheritTheVariablesThatPointGitAtAnotherRepository() {
+        let hardened = GitSafeEnvironment.apply(to: [
+            "PATH": "/usr/bin",
+            "GIT_DIR": "/elsewhere/.git",
+            "GIT_COMMON_DIR": "/elsewhere/.git",
+            "GIT_WORK_TREE": "/elsewhere",
+            "GIT_INDEX_FILE": "/elsewhere/.git/index",
+        ])
+
+        XCTAssertNil(hardened["GIT_DIR"])
+        XCTAssertNil(hardened["GIT_COMMON_DIR"])
+        XCTAssertNil(hardened["GIT_WORK_TREE"])
+        XCTAssertNil(hardened["GIT_INDEX_FILE"])
+        // Removed, not emptied: an empty GIT_DIR is a git dir named "", not an absent one
+        XCTAssertFalse(hardened.keys.contains("GIT_DIR"))
+        XCTAssertEqual(hardened["PATH"], "/usr/bin", "the control — hardening is not a wipe")
     }
 
     // ~/.gitconfig is deliberately NOT taken out of the picture, unlike the worker's delivery path:

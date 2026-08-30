@@ -60,7 +60,7 @@ public struct CheckoutRemoval: Sendable {
         switch LinkedWorktreeCheck.kind(gitDir: gitDir, commonDir: commonDir, relativeTo: path) {
         case .linkedWorktree:
             return .refused(
-                reason: "\(path) is a linked worktree, not a repository — this removes a repository together with its worktrees, and cannot remove a worktree from the repository it belongs to. Use `git worktree remove`.")
+                reason: "\(path) is a linked worktree, not a repository — this removes a repository together with its worktrees, and cannot remove a worktree from the repository it belongs to. Drop it in Preferences → Repositories → Remove, which gives up the grant and deletes nothing.")
         case nil:
             return .refused(
                 reason: "could not tell whether \(path) is a repository or one of its worktrees")
@@ -141,8 +141,17 @@ public struct CheckoutRemoval: Sendable {
     ///
     /// Dropping `root` alone was the whole of BP-422: asked about a linked worktree, `root` *is*
     /// that worktree, so the main checkout survived the filter and came back as something to
-    /// delete. `check` refuses that case before this runs; the `dropFirst` is the second line, so
-    /// the list is incapable of naming a repository rather than merely never asked to.
+    /// delete. `check` refuses that case before this runs, so this is the second line rather than
+    /// the fix — and it is positional, not intrinsic: it holds because git names the main worktree
+    /// first, which `testWorktreeListNamesTheMainCheckoutFirstEvenFromAWorktree` pins and the
+    /// BP-422 review measured across a locked worktree, a prunable entry mid-list, four
+    /// registrations, and after `worktree move` and `prune`.
+    ///
+    /// Positional was chosen over deriving the main checkout from `--git-common-dir` and filtering
+    /// it by identity, which reads like the stronger guard and is not: fed the truncated listing
+    /// BP-427 describes, identity stops matching and hands the repository back, while the truncated
+    /// entry is still first. The `root` filter below is unreachable for every input real git can
+    /// produce, and kept because it is the one that states the intent.
     private func linkedWorktrees(_ output: String, root: String) -> [String] {
         lines(output)
             .compactMap { line in
