@@ -31,6 +31,14 @@ export async function commitAll(
   //
   // delivery.push runs this same scan, but that is after the payload has already executed here —
   // and a filter that deletes its own config on the way out sails past it.
+  //
+  // What this does not reach. The scan is `git config --local --list`, and three scopes are
+  // invisible to it — measured on git 2.50.1, each one planted and each one's program run:
+  // a filter reached through `include.path` (that listing defaults to --no-includes), one in a
+  // per-worktree config behind `extensions.worktreeConfig`, and one in ~/.gitconfig, which is not
+  // local scope at all. So this refuses a filter written where that scan can see it, which is not
+  // the same as refusing every filter; BP-346 is what closes the rest. The refusal below says what
+  // was found and deliberately promises nothing about what was not looked for.
   const planted = await plantedConfig(runner, worktreePath);
   if (planted) {
     throw new Error(
