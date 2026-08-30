@@ -149,6 +149,45 @@ describe("a parameter the tool does not declare is refused, not dropped", () => 
     expect(update).toHaveBeenCalledWith("p1", "t1", { title: "renamed" });
   });
 
+  // hints is an object literal, so an unguarded hints[key] finds Object.prototype's members —
+  // and "__proto__" and "constructor" are exactly the stray keys a confused client sends
+  it("does not render Object.prototype into the message for a key named after it", async () => {
+    stubTheWriteThatShouldNotHappen();
+
+    // `constructor` cannot be used here: the SDK's own params schema rejects an arguments object
+    // carrying it before any tool schema sees it, so the reachable cases are the other inherited
+    // members. JSON.parse is how a real transport builds this — an object literal with __proto__
+    // sets the prototype instead of an own key
+    const { refused, said } = await call(
+      "update_task",
+      JSON.parse('{"taskKey":"BP-1","title":"renamed","toString":1,"__proto__":1,"hasOwnProperty":1}')
+    );
+
+    expect(refused).toBe(true);
+    expect(said).toContain('"toString"');
+    expect(said).not.toContain("native code");
+    expect(said).not.toContain("[object Object]");
+    expect(said).not.toMatch(/use function|use \[object/);
+  });
+
+  // "Nothing was written" on a tool that never writes invites the reader to think one was tried
+  it("claims nothing was written only where something could have been", async () => {
+    vi.spyOn(PlannerClient.prototype, "getProjectByKey").mockResolvedValue({
+      _id: "p1",
+      key: "BP",
+    } as never);
+    vi.spyOn(PlannerClient.prototype, "listTasks").mockResolvedValue([]);
+
+    const read = await call("list_tasks", { project: "BP", sprint: "s1" });
+    const write = await call("add_comment", { taskKey: "BP-1", body: "x", author: "nobody" });
+
+    expect(read.refused).toBe(true);
+    expect(read.said).not.toContain("Nothing was written");
+    // the control: the same helper does say it where a write was the point
+    expect(write.refused).toBe(true);
+    expect(write.said).toContain("Nothing was written");
+  });
+
   // Not asserted through tools/list: zod-to-json-schema emits additionalProperties: false for a
   // stripping object too, so the advertised schema reads identically either way and cannot carry
   // this. The schemas themselves can, and there are twelve of them to keep honest.
