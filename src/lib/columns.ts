@@ -66,6 +66,21 @@ export function columnIdsWithRole(
     .map((c) => c.id);
 }
 
+// Where a merged pull request or merge request sends a task, or undefined if it sends it nowhere.
+// Only the FIRST review column advances, and it advances to the LAST one. Both halves are load-bearing:
+// the default board has three review columns (in_review, needs_human_review, ready_to_test), so
+// "the next review column" lands merged work in the queue that exists for a human to look at, and
+// lets a merged branch pull a task back OUT of that queue. A board with one review column, or none,
+// transitions nothing.
+export function mergedReviewDestination(
+  project: HasAnyColumns | null | undefined,
+  status: string
+): string | undefined {
+  const reviewIds = columnIdsWithRole(project, "review");
+  const destination = reviewIds[reviewIds.length - 1];
+  return status === reviewIds[0] && destination !== status ? destination : undefined;
+}
+
 // The column a task is sitting in, or undefined if its status names no column the project has —
 // which happens to a task left behind by a column somebody deleted.
 export function columnFor(

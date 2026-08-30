@@ -6,7 +6,7 @@ import { Task } from "@/models/task";
 import { fetchPullRequests, matchPRsToTasks, parseRepoString } from "@/lib/github";
 import { logActivity } from "@/lib/activity";
 import { decryptSecret } from "@/lib/encryption";
-import { getProjectColumns } from "@/lib/columns";
+import { mergedReviewDestination } from "@/lib/columns";
 import { projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
 
 export const POST = withProjectAccess(async (_request, { params, user }) => {
@@ -77,22 +77,13 @@ export const POST = withProjectAccess(async (_request, { params, user }) => {
     task.linkedPRs = [...others, ...prDocs] as typeof task.linkedPRs;
     linked += prs.length;
 
-    // Auto-transition: merged PR + task in_review → ready_to_test.
-    // Keyed to the seeded column ids; projects that removed either column opt out.
     const hasMerged = prs.some((pr) => pr.state === "merged");
-    const columnIds = new Set(getProjectColumns(project).map((c) => c.id));
-    if (hasMerged && task.status === "in_review" && columnIds.has("ready_to_test")) {
+    const destination = hasMerged ? mergedReviewDestination(project, task.status) : undefined;
+    if (destination) {
       const oldStatus = task.status;
-      task.status = "ready_to_test";
+      task.status = destination as typeof task.status;
       autoTransitioned++;
-      await logActivity(
-        String(task._id),
-        user._id,
-        "status_changed",
-        "status",
-        oldStatus,
-        "ready_to_test"
-      );
+      await logActivity(String(task._id), user._id, "status_changed", "status", oldStatus, destination);
     }
 
     await task.save();
