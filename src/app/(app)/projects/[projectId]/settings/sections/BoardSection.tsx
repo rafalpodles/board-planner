@@ -212,6 +212,19 @@ export function BoardSection({ projectId, project, patchProject, stats }: Sectio
         ))}
       </div>
 
+      {/* The board this warns about can no longer be *created* — the columns endpoint refuses to
+          remove the last Done column — but one saved before that rule existed still needs telling,
+          and this is the screen where it is repaired. */}
+      {!draft.value.columns.some((c) => c.role === "done") && (
+        <div className="mb-3 flex gap-2 rounded-lg border-l-2 border-warning bg-warning/10 px-3 py-2 text-sm">
+          <span aria-hidden>⚠</span>
+          <p className="m-0">
+            No column means <strong>{ROLE_LABELS.done.label}</strong>. Sprint progress reads 0% for
+            every sprint, and the worker stops enforcing task dependencies — both without saying so.
+          </p>
+        </div>
+      )}
+
       {!draft.value.columns.some((c) => c.role === "approved") && (
         <div className="mb-3 flex gap-2 rounded-lg border-l-2 border-warning bg-warning/10 px-3 py-2 text-sm">
           <span aria-hidden>⚠</span>

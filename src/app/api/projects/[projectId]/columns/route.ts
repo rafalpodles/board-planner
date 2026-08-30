@@ -93,6 +93,32 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
     });
   }
 
+  /**
+   * The `done` role is load-bearing in four places that all resolve it to `[]` and carry on
+   * silently: a sprint's `doneCount` and the sprint page's progress both read 0 for ever, and the
+   * worker's blocker gate skips itself — dependency enforcement off rather than stuck (BP-280).
+   * Nothing said so, anywhere, and nothing in the audit log either.
+   *
+   * Refused only as a **transition**, never as a state. A board that already has no done column
+   * must keep being able to save every other change — otherwise this fix would lock such a board
+   * out of the very screen where it is repaired, and out of every unrelated column edit besides.
+   * That also means no production census is needed to make this safe: the rule refuses the act
+   * that creates the problem, never the board that already has it.
+   */
+  const hadDone = (project.columns || []).some((c) => c.role === "done");
+  const willHaveDone = clean.some((c) => c.role === "done");
+  if (hadDone && !willHaveDone) {
+    return NextResponse.json(
+      {
+        error:
+          "A board needs a column meaning Done. Without one, sprint progress reads 0% for ever " +
+          "and the worker stops enforcing task dependencies — both silently. Give another column " +
+          "the Done role first, then remove this one.",
+      },
+      { status: 400 }
+    );
+  }
+
   const removed = (project.columns || []).filter((c) => !usedIds.has(c.id));
   for (const col of removed) {
     const inUse = await Task.find({ project: projectId, status: col.id })

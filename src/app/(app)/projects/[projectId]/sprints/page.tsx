@@ -270,6 +270,7 @@ export default function SprintsPage() {
                   sprints={board.sprints}
                   doneCount={doneCount}
                   totalCount={totalCount}
+                  canMeasureDone={doneIds.size > 0}
                   estimate={estimate}
                   readOnly={sprintIsReadOnly}
                   view={view}

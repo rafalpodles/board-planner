@@ -11,6 +11,8 @@ interface SprintHeaderProps {
   sprints: ApiSprint[];
   doneCount: number;
   totalCount: number;
+  /** False when the board defines no column meaning Done, so `doneCount` is 0 for a reason */
+  canMeasureDone?: boolean;
   estimate?: { total: number; done: number; label: string };
   readOnly: boolean;
   view: "board" | "planning";
@@ -70,6 +72,7 @@ export function SprintHeader({
   sprints,
   doneCount,
   totalCount,
+  canMeasureDone = true,
   estimate,
   readOnly,
   view,
@@ -218,15 +221,25 @@ export function SprintHeader({
       <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-text-muted">
         {range && <span>{range}</span>}
         {remaining && <span>{remaining}</span>}
-        <div className="h-1.5 max-w-[16rem] flex-1 overflow-hidden rounded-full bg-bg-input">
-          <div
-            className="h-full rounded-full bg-primary transition-all"
-            style={{ width: `${progress}%` }}
-          />
-        </div>
-        <span data-testid="sprint-progress" className="tabular-nums">
-          {doneCount}/{totalCount}
-        </span>
+        {canMeasureDone && (
+          <div className="h-1.5 max-w-[16rem] flex-1 overflow-hidden rounded-full bg-bg-input">
+            <div
+              className="h-full rounded-full bg-primary transition-all"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+        )}
+        {canMeasureDone ? (
+          <span data-testid="sprint-progress" className="tabular-nums">
+            {doneCount}/{totalCount}
+          </span>
+        ) : (
+          // 0/N here would be a statement about the sprint. It is a statement about the board: no
+          // column carries the Done role, so nothing can ever count as finished (BP-311).
+          <span data-testid="sprint-progress-unmeasurable" className="text-warning">
+            no Done column — progress cannot be measured
+          </span>
+        )}
         {estimate && (
           <span
             data-testid="sprint-estimate-progress"
