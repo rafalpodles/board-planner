@@ -365,8 +365,12 @@ test.describe("closing a sprint from the header", () => {
     });
 
     await openSprints(page);
-    // The counts follow, though they prove less: the server's own aggregation says 0/2 too
-    await expect(progress(page)).toHaveText("0/2");
+    // Since BP-311 the header says why it cannot count rather than printing 0/2, which was a
+    // statement about the sprint where the truth is about the board
+    await expect(page.getByTestId("sprint-progress-unmeasurable")).toHaveText(
+      /no Done column/i
+    );
+    await expect(progress(page)).toHaveCount(0);
 
     await page.getByRole("button", { name: "Complete", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "Complete Sprint" });

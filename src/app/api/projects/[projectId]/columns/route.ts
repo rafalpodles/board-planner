@@ -5,6 +5,7 @@ import { Project } from "@/models/project";
 import { Task } from "@/models/task";
 import { logProjectAudit } from "@/lib/projectAudit";
 import { COLUMN_ROLES, ColumnRole } from "@/types";
+import { columnIdsWithRole } from "@/lib/columns";
 
 const MAX_COLUMNS = 12;
 const MAX_LABEL = 40;
@@ -105,7 +106,10 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
    * That also means no production census is needed to make this safe: the rule refuses the act
    * that creates the problem, never the board that already has it.
    */
-  const hadDone = (project.columns || []).some((c) => c.role === "done");
+  // Through `effectiveColumns`, like every other reader: a project stored with `columns: []` is
+  // shown the seven defaults everywhere — including this very editor — so reading the raw array
+  // would answer "there was never a Done column" about a board whose admin can see one.
+  const hadDone = columnIdsWithRole(project, "done").length > 0;
   const willHaveDone = clean.some((c) => c.role === "done");
   if (hadDone && !willHaveDone) {
     return NextResponse.json(

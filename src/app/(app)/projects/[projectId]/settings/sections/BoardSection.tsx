@@ -219,8 +219,9 @@ export function BoardSection({ projectId, project, patchProject, stats }: Sectio
         <div className="mb-3 flex gap-2 rounded-lg border-l-2 border-warning bg-warning/10 px-3 py-2 text-sm">
           <span aria-hidden>⚠</span>
           <p className="m-0">
-            No column means <strong>{ROLE_LABELS.done.label}</strong>. Sprint progress reads 0% for
-            every sprint, and the worker stops enforcing task dependencies — both without saying so.
+            No column means <strong>{ROLE_LABELS.done.label}</strong>. Nothing can be finished:
+            sprint progress cannot be measured, and the worker stops enforcing task dependencies —
+            that one without saying so anywhere.
           </p>
         </div>
       )}

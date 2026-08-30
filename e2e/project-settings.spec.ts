@@ -1,9 +1,8 @@
 import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
-import mongoose from "mongoose";
 import { ADMIN_AUTH } from "./api";
 import {
-  E2E_MONGODB_URI,
   HELD_TASK_KEY,
+  demoteDoneColumn,
   PROJECT_ID,
   PROJECT_KEY,
   SIBLING_TASK_KEY,
@@ -131,31 +130,65 @@ test.describe("Board · the Done role", () => {
   });
 
   /**
-   * The half that decides the shape of the whole fix. Refusing the *state* rather than the
-   * transition would lock a board saved before this rule existed out of every column edit —
-   * including the one that repairs it. Written straight to the database, because the endpoint this
-   * spec is testing is now the thing that will not produce such a board.
+   * The half that decides the shape of the whole fix, and the assertion that separates it from the
+   * rule it rejects.
+   *
+   * A **state** rule (`if (!willHaveDone) refuse`) passes every other test in this block: each of
+   * them either starts from a board that has Done or supplies one in the request. What only the
+   * transition rule allows is a done-less board saving a change that has nothing to do with Done —
+   * which is every edit somebody would make while repairing it, and the reason refusing the state
+   * would lock a board out of this very screen.
+   *
+   * `demoteDoneColumn` rather than a hand-rolled write: it is the fixture the sprint specs already
+   * use, and it fails loudly if it matches nothing.
    */
-  test("a board that already has none can still be repaired", async ({ request }) => {
-    if (mongoose.connection.readyState === 0) await mongoose.connect(E2E_MONGODB_URI);
-    const db = mongoose.connection.db!;
-    const before = await storedColumns(request);
-    await db.collection("projects").updateOne(
-      { _id: PROJECT_ID },
-      { $set: { columns: before.filter((c) => c.role !== "done") } }
-    );
+  test("a board that already has none keeps saving unrelated changes, and can be repaired", async ({
+    request,
+  }) => {
+    await demoteDoneColumn();
     // The premise, read back rather than assumed
     expect((await storedColumns(request)).some((c) => c.role === "done")).toBe(false);
 
-    const repaired = await putColumns(
-      request,
-      (await storedColumns(request)).map((c) =>
-        c.role === "review" && c.label === "Ready to Test" ? { ...c, role: "done" } : c
-      )
-    );
+    await test.step("an edit that does not mention Done still saves", async () => {
+      const unrelated = await putColumns(
+        request,
+        (await storedColumns(request)).map((c) =>
+          c.role === "backlog" ? { ...c, label: "Someday" } : c
+        )
+      );
 
-    expect(repaired.status(), await repaired.text()).toBe(200);
-    expect((await storedColumns(request)).some((c) => c.role === "done")).toBe(true);
+      expect(unrelated.status(), await unrelated.text()).toBe(200);
+      expect((await storedColumns(request)).map((c) => c.label)).toContain("Someday");
+    });
+
+    await test.step("and the board can be given the role back", async () => {
+      const repaired = await putColumns(
+        request,
+        (await storedColumns(request)).map((c) =>
+          c.label === "Ready to Test" ? { ...c, role: "done" } : c
+        )
+      );
+
+      expect(repaired.status(), await repaired.text()).toBe(200);
+      expect((await storedColumns(request)).some((c) => c.role === "done")).toBe(true);
+    });
+  });
+
+  /**
+   * The path a person actually walks. Everything above drives the endpoint; this one presses Save
+   * in the editor, which is where the refusal is met and where the draft has to survive it.
+   */
+  test("pressing Save on a done-less draft says why, and keeps the work", async ({ page }) => {
+    await signIn(page);
+    await openSection(page, "Board");
+
+    await roleOf(page, "Done").selectOption("review");
+    await saveButton(page).click();
+
+    await expect(page.getByText(/needs a column meaning Done/)).toBeVisible();
+    // The draft is not thrown away: the Save button is still offered, with the change still in it
+    await expect(saveButton(page)).toBeVisible();
+    await expect(roleOf(page, "Done")).toHaveValue("review");
   });
 
   test("the settings screen says what such a board loses", async ({ page }) => {

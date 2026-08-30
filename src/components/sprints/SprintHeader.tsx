@@ -240,7 +240,9 @@ export function SprintHeader({
             no Done column — progress cannot be measured
           </span>
         )}
-        {estimate && (
+        {/* Gated on the same answer: `estimateDone` filters by the same empty done ids, so this
+            span read "0/34 points" beside a sentence saying the count is impossible */}
+        {canMeasureDone && estimate && (
           <span
             data-testid="sprint-estimate-progress"
             className="min-w-0 truncate tabular-nums"
