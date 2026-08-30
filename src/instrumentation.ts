@@ -52,21 +52,15 @@ export async function register() {
         console.error("Failed to seed the agent catalog:", error);
       });
 
-      const { Agent } = await import("@/models/agent");
-      const fallback = await Agent.findOne({ scope: "global", name: "Default" }, "_id").lean();
-      if (fallback) {
-        // worker.agent is no longer a claim-time fallback — BP-358 made snapshotFor stop reading
-        // Project. Its job now is the agent the task picker offers first on a new task, which a
-        // later change wires up. The backfill still has to reach every project, not only newly
-        // created ones, so that suggestion points at a real agent everywhere.
-        const backfilled = await Project.updateMany(
-          { "worker.agent": { $in: [null, undefined] } },
-          { $set: { "worker.agent": fallback._id } }
-        );
-        if (backfilled.modifiedCount > 0) {
-          console.log(`Backfilled the default agent on ${backfilled.modifiedCount} project(s)`);
-        }
-      }
+      // The backfill that stood here set `worker.agent` to the shipped Default on every project
+      // where it was null — on **every start**, not once. It existed so the task picker's first
+      // suggestion always pointed at a real agent, and BP-458 makes that unnecessary: no default
+      // is now a state the picker names ("No default — the task picker starts empty") and one a
+      // project admin can deliberately choose. Left in place it undid that choice at the next
+      // restart, because the schema defaults the field to null and a cleared project is therefore
+      // indistinguishable from one that never had a default.
+      //
+      // Projects it already reached keep what it wrote; removing it unsets nothing.
 
       const { startPmScheduler } = await import("@/lib/pm/scheduler");
       startPmScheduler();
