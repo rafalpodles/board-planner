@@ -86,8 +86,14 @@ const taskExists = vi.fn(async (_filter?: unknown): Promise<unknown> => null);
 
 vi.mock("./db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/worker", () => ({ Worker: { findById: workerFindById } }));
-vi.mock("@/models/task", () => ({
-  Task: { findOneAndUpdate, updateMany, updateOne, findOne, find, findByIdAndUpdate, findById: taskFindById, create: taskCreate, exists: taskExists },
+// The real schema, because `order` and `description` are guarded by asking the schema's own
+// caster rather than restating it. A mock without one cannot answer, the guard cannot tell "I
+// could not ask" from "the value is wrong", and every assertion below would be measuring a stub.
+vi.mock("@/models/task", async () => ({
+  Task: {
+    schema: (await vi.importActual<typeof import("@/models/task")>("@/models/task")).Task.schema,
+    findOneAndUpdate, updateMany, updateOne, findOne, find, findByIdAndUpdate, findById: taskFindById, create: taskCreate, exists: taskExists,
+  },
 }));
 vi.mock("@/models/project", () => ({ Project: { findById, findOneAndUpdate: projectFindOneAndUpdate } }));
 vi.mock("@/models/user", () => ({ User: { findOne: userFindOne, findById: userFindById } }));
@@ -4146,6 +4152,11 @@ describe("nothing a create is refused for costs a task number", () => {
     ["a recurrence the schema does not know", { recurrence: { frequency: "hourly", interval: 1 } }],
     ["a recurrence interval below the minimum", { recurrence: { frequency: "weekly", interval: 0 } }],
     ["a recurrence interval that is not a number", { recurrence: { frequency: "weekly", interval: "often" } }],
+    // The two BP-438 never named, and both landed past the `$inc`
+    ["an order the cast will not take", { order: "abc" }],
+    ["an order given as an array", { order: [] }],
+    ["a description that is not text", { description: {} }],
+    ["a description given as an array", { description: ["a"] }],
   ];
 
   describe.each(REFUSED)("%s", (_label, over) => {
@@ -4193,6 +4204,23 @@ describe("nothing a create is refused for costs a task number", () => {
     });
   });
 
+  /**
+   * The other half of BP-445's claim, and the half a refusal cannot make: the guard has to be
+   * exactly as lenient as the cast it stands in for. Mongoose reads "2" as 2 and `true` as 1, so
+   * a guard written as "must already be a number" would refuse a body the schema takes — and the
+   * value has to reach the write cast, not raw.
+   */
+  it("takes what the cast takes, and writes what the cast would write", async () => {
+    const result = await createTask("p1", "actor", {
+      title: "Ordinary title",
+      order: "2",
+      description: "plain text",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(taskCreate.mock.calls[0][0]).toMatchObject({ order: "2", description: "plain text" });
+  });
+
   // The default arms of the same values: a body naming none of them still writes, so the guard
   // cannot be refusing absence.
   it("still creates a task that names none of them", async () => {
@@ -4234,6 +4262,10 @@ describe("a value the schema will not store is refused by updateTask too", () =>
     ["a recurrence with no frequency", { recurrence: { interval: 2 } }],
     ["a recurrence interval below the minimum", { recurrence: { frequency: "daily", interval: 0 } }],
     ["a recurrence that is not an object at all", { recurrence: "weekly" }],
+    ["an order the cast will not take", { order: "abc" }],
+    ["an order given as an array", { order: [] }],
+    ["a description that is not text", { description: {} }],
+    ["a description given as an array", { description: ["a"] }],
   ];
 
   describe.each(REFUSED)("%s", (_label, body) => {
@@ -4264,6 +4296,15 @@ describe("a value the schema will not store is refused by updateTask too", () =>
 
     expect((await updateTask("p1", "t1", { dueDate: "" }, WHO)).ok).toBe(true);
     expect((await updateTask("p1", "t1", { dueDate: null, recurrence: null }, WHO)).ok).toBe(true);
+
+    // BP-445's lenient arm on this path. A board reorder is the only gesture that ever sends
+    // `order`, so a guard stricter than the cast would refuse every drag.
+    const reordered = await updateTask("p1", "t1", { order: "7", description: "text" }, WHO);
+    expect(reordered.ok).toBe(true);
+    expect(setStage(findOneAndUpdate.mock.calls.at(-1)![1])).toMatchObject({
+      order: "7",
+      description: "text",
+    });
   });
 });
 
