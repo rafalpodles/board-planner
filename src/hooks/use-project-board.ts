@@ -40,6 +40,11 @@ export interface ProjectBoard {
   heldMove: { retry: () => Promise<unknown>; conflict: RunConflict; taskKey: string } | null;
   setHeldMove: (held: ProjectBoard["heldMove"]) => void;
   forceHeldMove: () => Promise<void>;
+  // Its own state, not heldMove's: that dialog says moving costs the run, and this one costs the
+  // task. One wording cannot be true of both (BP-337).
+  heldDelete: { retry: () => Promise<unknown>; conflict: RunConflict; taskKey: string } | null;
+  setHeldDelete: (held: ProjectBoard["heldDelete"]) => void;
+  forceHeldDelete: () => Promise<void>;
   handleStatusChange: (taskId: string, status: string) => Promise<void>;
   handleTaskDrop: (taskId: string, status: string, dropIndex: number) => Promise<void>;
   handleReorder: (orderedIds: string[]) => Promise<void>;
@@ -99,6 +104,7 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
   // Carries the retry rather than a request body: the board reaches the same refusal through two
   // different endpoints, and both have to offer the same way out.
   const [heldMove, setHeldMove] = useState<ProjectBoard["heldMove"]>(null);
+  const [heldDelete, setHeldDelete] = useState<ProjectBoard["heldDelete"]>(null);
   const [confirmContextDelete, setConfirmContextDelete] = useState<string | null>(null);
 
   const [viewMode, setViewModeState] = useState<"board" | "list">(() => {
@@ -238,22 +244,37 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
   }
 
   async function handleBulkDelete() {
+    const ids = Array.from(selectedTasks);
     setBulkDeleting(true);
-    try {
-      await Promise.all(
-        Array.from(selectedTasks).map((id) =>
-          api.del(`/api/projects/${projectId}/tasks/${id}`)
-        )
-      );
-      setTasks((prev) => prev.filter((t) => !selectedTasks.has(t._id)));
-      const count = selectedTasks.size;
-      setSelectedTasks(new Set());
-      setConfirmBulkDelete(false);
-      toast(`Deleted ${count} task${count === 1 ? "" : "s"}`, "success");
-    } catch {
-      toast("Failed to delete tasks", "error");
-    } finally {
-      setBulkDeleting(false);
+    // Settled, not all — the same lesson handleBulkMove already carries, and delete inherited the
+    // problem the moment it learned to answer 409: one held task rejected the whole batch while
+    // the rest were already gone server-side, so the board said nothing worked, kept the deleted
+    // cards on screen, and left the dialog open over them (BP-337 review).
+    const outcomes = await Promise.allSettled(ids.map((id) => api.del(`/api/projects/${projectId}/tasks/${id}`)));
+    setBulkDeleting(false);
+
+    const deleted = new Set(ids.filter((_, i) => outcomes[i].status === "fulfilled"));
+    const held = outcomes
+      .map((outcome, i) => ({ outcome, id: ids[i] }))
+      .filter(({ outcome }) => {
+        if (outcome.status !== "rejected") return false;
+        const failure = outcome.reason as { status?: number; body?: { runConflict?: unknown } };
+        return failure?.status === 409 && !!failure.body?.runConflict;
+      })
+      .map(({ id }) => tasks.find((t) => t._id === id)?.taskNumber)
+      .filter(Boolean);
+
+    setTasks((prev) => prev.filter((t) => !deleted.has(t._id)));
+    setSelectedTasks(new Set());
+    setConfirmBulkDelete(false);
+
+    if (deleted.size === ids.length) {
+      toast(`Deleted ${ids.length} task${ids.length === 1 ? "" : "s"}`, "success");
+    } else if (held.length > 0) {
+      const names = held.map((n) => `${project?.key}-${n}`).join(", ");
+      toast(`Deleted ${deleted.size} of ${ids.length}. ${names} being executed by a worker.`, "error");
+    } else {
+      toast(`Deleted ${deleted.size} of ${ids.length}`, "error");
     }
   }
 
@@ -441,16 +462,48 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
     }
   }
 
-  async function handleContextDelete(taskId: string) {
+  async function handleContextDelete(taskId: string, force?: boolean) {
+    const remove = (asForce?: boolean) =>
+      api.del(
+        `/api/projects/${projectId}/tasks/${taskId}`,
+        asForce ? { force: true } : undefined
+      );
     try {
-      await api.del(`/api/projects/${projectId}/tasks/${taskId}`);
+      await remove(force);
       setTasks((prev) => prev.filter((t) => t._id !== taskId));
       toast("Task deleted", "success");
-    } catch {
+    } catch (err) {
+      // The board already parks a refused *move* and asks; a refused delete reached the same
+      // endpoint shape and got a flat error instead, which is the asymmetry this ticket is about
+      // one layer out (BP-337 review).
+      const failure = err as { status?: number; body?: { runConflict?: RunConflict } };
+      if (failure?.status === 409 && failure.body?.runConflict) {
+        const task = tasks.find((t) => t._id === taskId);
+        setConfirmContextDelete(null);
+        setHeldDelete({
+          retry: () => remove(true),
+          conflict: failure.body.runConflict,
+          taskKey: `${project?.key}-${task?.taskNumber}`,
+        });
+        return;
+      }
       toast("Failed to delete task", "error");
     } finally {
       setConfirmContextDelete(null);
     }
+  }
+
+  async function forceHeldDelete() {
+    if (!heldDelete) return;
+    const pending = heldDelete;
+    setHeldDelete(null);
+    try {
+      await pending.retry();
+      toast("Task deleted", "success");
+    } catch {
+      toast("Failed to delete task", "error");
+    }
+    loadData();
   }
 
   return {
@@ -477,6 +530,9 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
     confirmContextDelete,
     setConfirmContextDelete,
     heldMove,
+    heldDelete,
+    setHeldDelete,
+    forceHeldDelete,
     setHeldMove,
     forceHeldMove,
     handleStatusChange,

@@ -643,3 +643,105 @@ test("a run that has gone quiet still holds its task", async ({ page, request })
     expect(task.execution?.phase).toBe(RUN_PHASE);
   });
 });
+
+/**
+ * BP-337. Three writers refuse to take a task off a running worker; delete was the fourth and
+ * asked nothing, while reaching a stronger outcome than any of them — the task is not moved, it is
+ * gone, with the comments the run was writing into it. The worker's next call 404s mid-run with the
+ * branch already pushed, and nothing tells it the task was deleted rather than the server broken.
+ */
+test("deleting a task a worker is running is refused, and confirming takes it anyway", async ({
+  page,
+  request,
+}) => {
+  await signIn(page);
+  await page.goto(cardHref(HELD_TASK_NUMBER));
+  // The property rail's own control, not the overflow menu: that menu is lg:hidden, so at this
+  // viewport it does not exist. The component test reaches it because jsdom applies no CSS.
+  const deleteTask = page.getByRole("button", { name: "Delete task" });
+  await expect(deleteTask).toBeVisible();
+  // Again after the navigation: signIn installs the observer on the board, and going to the task
+  // replaces the document with it — the first version of this asserted against an undefined array
+  await recordToasts(page);
+
+  async function askToDelete() {
+    await deleteTask.click();
+    await page.getByRole("button", { name: "Delete", exact: true }).click();
+  }
+
+  await test.step("the delete endpoint refuses it", async () => {
+    // Waiting for the response rather than for the dialog's text: the board renders optimistically,
+    // and the whole question here is what the server did
+    const refusal = page.waitForResponse(
+      (res) =>
+        res.url().endsWith(`/tasks/${HELD_TASK_ID}`) &&
+        res.request().method() === "DELETE" &&
+        res.status() === 409
+    );
+
+    await askToDelete();
+    await refusal;
+
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByRole("heading", { name: "This task is being executed" })).toBeVisible();
+    await expect(dialog).toContainText(
+      `${HELD_TASK_KEY} is being executed by ${WORKER_NAME} (phase ${RUN_PHASE})`
+    );
+
+    // Still there, which is the point: a refusal that had already deleted it would read the same
+    // on screen until the next load
+    expect((await readTask(request, HELD_TASK_NUMBER)).taskNumber).toBe(HELD_TASK_NUMBER);
+  });
+
+  await test.step("confirming deletes it, and says so with force", async () => {
+    const forced = page.waitForResponse(
+      (res) =>
+        res.url().endsWith(`/tasks/${HELD_TASK_ID}`) &&
+        res.request().method() === "DELETE" &&
+        res.status() === 200
+    );
+
+    await page.getByRole("dialog").getByRole("button", { name: "Delete anyway" }).click();
+    expect((await forced).request().postDataJSON()).toMatchObject({ force: true });
+
+    await expectToast(page, "Task deleted");
+    const gone = await request.get(
+      `/api/projects/${PROJECT_KEY}/tasks/${HELD_TASK_NUMBER}`,
+      { headers: ADMIN_AUTH }
+    );
+    expect(gone.status()).toBe(404);
+  });
+});
+
+/**
+ * The control, and without it "refuses held tasks" and "delete is broken" are the same observation.
+ * The unheld task is the one every ordinary board click takes.
+ */
+test("deleting a task no worker is running still goes through on the first ask", async ({
+  page,
+  request,
+}) => {
+  await signIn(page);
+  await page.goto(cardHref(SIBLING_TASK_NUMBER));
+  const deleteTask = page.getByRole("button", { name: "Delete task" });
+  await expect(deleteTask).toBeVisible();
+
+  const deleted = page.waitForResponse(
+    (res) =>
+      res.url().endsWith(`/tasks/${SIBLING_TASK_ID}`) &&
+      res.request().method() === "DELETE" &&
+      res.status() === 200
+  );
+
+  await deleteTask.click();
+  await page.getByRole("button", { name: "Delete", exact: true }).click();
+  await deleted;
+
+  // No second question was asked
+  await expect(page.getByRole("heading", { name: "This task is being executed" })).toHaveCount(0);
+
+  const gone = await request.get(`/api/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`, {
+    headers: ADMIN_AUTH,
+  });
+  expect(gone.status()).toBe(404);
+});

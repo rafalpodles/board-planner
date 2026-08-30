@@ -149,6 +149,9 @@ function TaskDetailView({
     conflict: RunConflict;
     retry: () => Promise<unknown>;
   } | null>(null);
+  // Deliberately its own state rather than reusing heldStatus: the two dialogs say different
+  // things about what is lost, and one is undoable while the other is not (BP-337)
+  const [heldDelete, setHeldDelete] = useState<RunConflict | null>(null);
   const [addingChild, setAddingChild] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -262,13 +265,26 @@ function TaskDetailView({
     }
   }
 
-  async function handleDelete() {
+  async function handleDelete(force?: boolean) {
     setDeleting(true);
     try {
-      await api.del(`/api/projects/${projectId}/tasks/${task._id}`);
+      await api.del(
+        `/api/projects/${projectId}/tasks/${task._id}`,
+        force ? { force: true } : undefined
+      );
       toast("Task deleted", "success");
       onClose();
-    } catch {
+    } catch (err) {
+      // The same shape the status change already handles, and it has to be handled here for a
+      // stronger reason: a status change takes the task off the worker, a delete takes the task.
+      // A toast would report an error for something that is a question (BP-337).
+      const failure = err as { status?: number; body?: { runConflict?: RunConflict } };
+      if (failure?.status === 409 && failure.body?.runConflict) {
+        setDeleting(false);
+        setConfirmDelete(false);
+        setHeldDelete(failure.body.runConflict);
+        return;
+      }
       toast("Failed to delete task", "error");
       setDeleting(false);
       setConfirmDelete(false);
@@ -480,9 +496,26 @@ function TaskDetailView({
       <ConfirmDialog
         open={confirmDelete}
         onClose={() => setConfirmDelete(false)}
-        onConfirm={handleDelete}
+        onConfirm={() => handleDelete()}
         title="Delete Task"
         message={`Are you sure you want to delete ${taskKey} "${task.title}"? This action cannot be undone.`}
+        loading={deleting}
+      />
+
+      <ConfirmDialog
+        open={!!heldDelete}
+        onClose={() => setHeldDelete(null)}
+        onConfirm={() => {
+          setHeldDelete(null);
+          return handleDelete(true);
+        }}
+        title="This task is being executed"
+        message={
+          heldDelete
+            ? `${taskKey} is being executed by ${heldDelete.workerName || heldDelete.workerId || "a worker"} (phase ${heldDelete.phase}). Deleting it takes the task off that worker, and the task and its comments are gone for good.`
+            : ""
+        }
+        confirmLabel="Delete anyway"
         loading={deleting}
       />
 
