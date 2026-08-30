@@ -69,7 +69,13 @@ describe("runPmTrigger", () => {
     await runPmTrigger(trigger);
 
     expect(runPmTurn).toHaveBeenCalledWith(
-      expect.objectContaining({ disallowedTools: NEEDS_HUMAN_REVIEW_DISALLOWED_TOOLS })
+      // `autonomous` as well as the name list, and they are not the same guarantee: the list is
+      // matched by exact name and MCP tools are `mcp_<server>_<tool>`, so nothing in it could ever
+      // withhold one. Dropping this flag leaves every other assertion in this file green (BP-321).
+      expect.objectContaining({
+        disallowedTools: NEEDS_HUMAN_REVIEW_DISALLOWED_TOOLS,
+        autonomous: true,
+      })
     );
     expect(findByIdAndUpdate).toHaveBeenCalledWith(
       "t1",

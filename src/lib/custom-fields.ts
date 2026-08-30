@@ -4,6 +4,10 @@ import {
   ICustomFieldOption,
   OPTION_FIELD_TYPES,
 } from "@/types";
+import { hasControlCharacters } from "@/lib/identifiers";
+
+/** An option value reaches the PM's system prompt, and had no limit at all before BP-321 */
+export const MAX_OPTION_VALUE_LENGTH = 100;
 
 type LegacyOption = string | Partial<ICustomFieldOption>;
 
@@ -204,6 +208,14 @@ export function parseOptions(
     const source = typeof raw === "string" ? { value: raw } : (raw as Partial<ICustomFieldOption>);
     const value = String(source?.value ?? "").trim();
     if (!value) return { error: "Every option needs a value" };
+    // Both because this reaches the PM's system prompt and any member can write it (BP-321): it had
+    // no length limit at all, and nothing stopped a newline starting a line of its own there.
+    if (value.length > MAX_OPTION_VALUE_LENGTH) {
+      return { error: `An option value must be ${MAX_OPTION_VALUE_LENGTH} characters or less` };
+    }
+    if (hasControlCharacters(value)) {
+      return { error: "An option value cannot contain control characters" };
+    }
     // Keep the id of an option that already exists, or every task loses it on rename.
     // `||` not `??`: the editor sends "" for a row the user just added, and ?? keeps
     // an empty string — which then reads as "no value" everywhere downstream, and
