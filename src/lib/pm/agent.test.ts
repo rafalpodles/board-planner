@@ -15,6 +15,7 @@ function pmMessage() {
   const doc = {
     actions: [] as { tool: string; summary: string }[],
     content: "",
+    usage: undefined as undefined | Record<string, number | boolean>,
     save: vi.fn().mockResolvedValue(undefined),
     toObject: vi.fn(() => ({ content: doc.content, actions: doc.actions })),
   };
@@ -32,9 +33,14 @@ vi.mock("@/models/user", () => ({
     }),
   },
 }));
+const createdMessages: ReturnType<typeof pmMessage>[] = [];
 vi.mock("@/models/pmMessage", () => ({
   PmMessage: {
-    create: vi.fn(async () => pmMessage()),
+    create: vi.fn(async () => {
+      const doc = pmMessage();
+      createdMessages.push(doc);
+      return doc;
+    }),
     find: () => ({
       sort: () => ({ limit: () => ({ populate: () => ({ lean: () => Promise.resolve([]) }) }) }),
     }),
@@ -270,5 +276,68 @@ describe("an unattended turn and a project's MCP server", () => {
 
     expect(result.ok).toBe(true);
     expect(toolReplies().join("\n")).toContain("is not available in this turn");
+  });
+});
+
+/**
+ * BP-284. `dailyTurnCap` counts turns, and this loop makes up to MAX_STEPS round-trips per turn, so
+ * the cap permitted a fifteen-fold range of spend. The provider reports usage on every response and
+ * the client discarded it; the turn now records what it cost, on every exit including the ones that
+ * fail — a turn that burned nine calls and then met a provider error cost nine calls.
+ */
+describe("what a turn records about its own cost", () => {
+  const withUsage = (result: object, tokens: number) => ({
+    ...result,
+    usage: { promptTokens: tokens, completionTokens: tokens, totalTokens: tokens * 2 },
+  });
+
+  const lastMessage = () => createdMessages[createdMessages.length - 1];
+
+  beforeEach(() => {
+    createdMessages.length = 0;
+  });
+
+  it("sums the round-trips it made, not the one turn it is", async () => {
+    chatCompletion
+      .mockResolvedValueOnce(withUsage(toolCall("add_comment", { taskKey: "BP-1", body: "x" }), 100))
+      .mockResolvedValueOnce(withUsage({ type: "text", content: "done" }, 50));
+
+    await turn([]);
+
+    expect(lastMessage().usage).toMatchObject({
+      calls: 2,
+      promptTokens: 150,
+      completionTokens: 150,
+      totalTokens: 300,
+      hitStepLimit: false,
+    });
+  });
+
+  // The control: one call is one call, so the number is not inflated by the loop itself
+  it("records a single round-trip as one", async () => {
+    chatCompletion.mockResolvedValue(withUsage({ type: "text", content: "done" }, 10));
+
+    await turn([]);
+
+    expect(lastMessage().usage).toMatchObject({ calls: 1, totalTokens: 20 });
+  });
+
+  it("counts a call the provider then failed, because it was still made", async () => {
+    chatCompletion
+      .mockResolvedValueOnce(withUsage(toolCall("add_comment", { taskKey: "BP-1", body: "x" }), 100))
+      .mockResolvedValueOnce({ type: "error", error: "provider exploded" });
+
+    await turn([]);
+
+    expect(lastMessage().usage).toMatchObject({ calls: 2 });
+  });
+
+  // A provider that reports no usage must read as "unknown", never as free
+  it("still counts the calls when the provider reports no usage at all", async () => {
+    chatCompletion.mockResolvedValue({ type: "text", content: "done" });
+
+    await turn([]);
+
+    expect(lastMessage().usage).toMatchObject({ calls: 1, totalTokens: 0 });
   });
 });
