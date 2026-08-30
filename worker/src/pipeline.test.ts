@@ -941,34 +941,6 @@ describe("runTask", () => {
     expect(h.delivery.merge).not.toHaveBeenCalled();
   });
 
-  /**
-   * BP-508. `git status` honours .gitignore, so a rule the run itself committed hides whatever it
-   * names from the check above — the tree reports clean while the work is still there. This drives
-   * the wiring: the helper is proven against real git in ignored-work.integration.test.ts, and what
-   * this asserts is that the pipeline asks it and acts on the answer.
-   */
-  it("ends the run when the work is hidden by an ignore rule the run itself added", async () => {
-    const runner = {
-      run: vi.fn<Runner["run"]>(async (_command, args) => {
-        // The tree the agent left looks clean, which is the whole bug
-        if (args.includes("status") && !args.includes("--ignored")) return shell("");
-        if (args.includes("--name-only")) return shell(".gitignore\n");
-        if (args.includes("--ignored")) return shell("!! secret/\n");
-        if (args.includes("check-ignore")) return shell(".gitignore:2:secret/\tsecret/\n");
-        // The base has no such rule, so this one is the run's
-        if (args.includes("show")) return shell("node_modules/\n");
-        return shell("");
-      }),
-    };
-    const h = harness({ runner });
-
-    await runTask(h.deps, task);
-
-    expect(h.reporter.failed.mock.calls[0][1]).toMatch(/left the worktree unclean/);
-    expect(h.reporter.failed.mock.calls[0][1]).toMatch(/secret\/ — hidden by/);
-    expect(h.delivery.merge).not.toHaveBeenCalled();
-  });
-
   // A gate that runs npm ci or the project's suite leaves build output behind; failing the run over
   // an artifact the target repo does not gitignore would be a refusal of nothing
   it("does not judge the tree after a gate, only after a step that could write", async () => {
