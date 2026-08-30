@@ -62,6 +62,14 @@ beforeEach(() => {
   vi.restoreAllMocks();
 });
 
+function stubTheWriteThatShouldNotHappen() {
+  vi.spyOn(PlannerClient.prototype, "resolveTaskKey").mockResolvedValue({
+    projectId: "p1",
+    taskId: "t1",
+  });
+  vi.spyOn(PlannerClient.prototype, "updateTask").mockResolvedValue({});
+}
+
 describe("a parameter the tool does not declare is refused, not dropped", () => {
   // Every stray key below travels with a parameter the tool DOES declare. Without one the write
   // is empty either way and the refusal below it — "named nothing to change" — answers instead,
@@ -86,13 +94,20 @@ describe("a parameter the tool does not declare is refused, not dropped", () => 
     expect(resolve).not.toHaveBeenCalled();
   });
 
+  // Stubbed even though the refusal lands first: without it a regression stops being a failed
+  // assertion and starts being a real outbound request
   it("says to use acceptanceCriteria for a checklist", async () => {
+    stubTheWriteThatShouldNotHappen();
+
     const { said } = await call("update_task", { taskKey: "BP-1", title: "renamed", checklist: [] });
+
     expect(said).toContain("acceptanceCriteria");
   });
 
   // The same call that lost `checklist` also carried status: "done", and status is a different tool
   it("says to use change_task_status for a status", async () => {
+    stubTheWriteThatShouldNotHappen();
+
     const { refused, said } = await call("update_task", {
       taskKey: "BP-1",
       title: "renamed",
