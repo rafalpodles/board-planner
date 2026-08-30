@@ -22,10 +22,17 @@ async function db() {
   return handle;
 }
 
+/**
+ * The descriptions are load-bearing, and unevenly so. `BlockBody` renders one as a `<p>`, and an
+ * empty one collapses to no line box — so a block with a description is a taller row than one
+ * without. `sortableKeyboardCoordinates` and the fallback search differ only by an offset term of
+ * `{ collisionRect.height - newRect.height }`, which is zero while every row is identical; with
+ * all three descriptions blank, deleting the delegation left the whole spec green.
+ */
 const BLOCKS = [
-  { key: "implement", name: "Implement", capability: "edit" },
-  { key: "push", name: "Push", capability: "read-only", deterministic: true },
-  { key: "review", name: "Review", capability: "read-only" },
+  { key: "implement", name: "Implement", description: "Make the change", capability: "edit" },
+  { key: "push", name: "Push", description: "Send it somewhere", capability: "read-only", deterministic: true },
+  { key: "review", name: "Review", description: "", capability: "read-only" },
 ];
 
 let agentId: string;
@@ -38,7 +45,6 @@ test.beforeEach(async () => {
   await handle.collection("agentblocks").insertMany(
     BLOCKS.map((b) => ({
       kind: "step",
-      description: "",
       builtIn: true,
       gateKind: "",
       params: {},
@@ -88,17 +94,18 @@ const announced = (page: Page) =>
   // Two DndContexts render on this page, so two live regions exist and only one is ever speaking.
   // An empty filter is not circular: with nothing announced this resolves to no element at all,
   // and the assertion still fails.
-  page.locator('[id^="DndLiveRegion"]').filter({ hasText: /./ });
+  page.locator('[id^="DndLiveRegion"]').filter({ hasText: /./ }).last();
 
 test("a block reaches a bucket with the keyboard alone, and lands where it said", async ({
   page,
 }) => {
   await openComposer(page);
 
-  // The control: every bucket starts empty, so "Implement is in Implementation" below cannot be
-  // true of the page as it loads
+  // The control: every bucket starts empty, so the assertion below cannot be true of the page as
+  // it loads. Counted rather than negated — `not.toContainText` also passes on a bucket that has
+  // not rendered, which is the opposite of what this is meant to establish.
   for (const id of ["analysis", "implementation", "verification", "delivery"]) {
-    await expect(bucket(page, id)).not.toContainText("Implement");
+    await expect(bucket(page, id).locator("li"), id).toHaveCount(0);
   }
 
   await grip(page, "Implement").focus();
@@ -163,6 +170,36 @@ test("an agent can be composed end to end and saved, using no pointer at all", a
 });
 
 /**
+ * A sortable active crossing *containers*, which is the gesture the delegation is most likely to
+ * matter for — the entry leaves one SortableContext for another.
+ */
+test("an entry already in a bucket can be moved to another one from the keyboard", async ({
+  page,
+}) => {
+  await openComposer(page);
+
+  await page.getByRole("button", { name: "Add Implement to a phase" }).click();
+  await page.getByLabel("Where to add Implement").getByRole("button", { name: "Analysis" }).click();
+  await expect(bucket(page, "analysis").locator("li")).toHaveCount(1);
+
+  const entry = bucket(page, "analysis")
+    .locator('[aria-roledescription="sortable"]')
+    .filter({ hasText: "Implement" })
+    .first();
+  await entry.focus();
+  await page.keyboard.press("Space");
+  await expect(announced(page)).toContainText("was moved over droppable area");
+
+  let over = await announced(page).textContent();
+  await page.keyboard.press("ArrowDown");
+  await expect.poll(() => announced(page).textContent()).not.toBe(over);
+  await page.keyboard.press("Space");
+
+  await expect(bucket(page, "analysis").locator("li")).toHaveCount(0);
+  await expect(bucket(page, "implementation")).toContainText("Implement");
+});
+
+/**
  * The half that already worked, asserted so the new coordinate getter cannot have taken it away:
  * a sortable active still goes through `sortableKeyboardCoordinates` exactly as before.
  *
@@ -178,8 +215,12 @@ test("reordering inside a bucket still works from the keyboard", async ({ page }
     await page.getByLabel(`Where to add ${name}`).getByRole("button", { name: "Analysis" }).click();
   }
 
+  // The name span, not the row: `allTextContents` on the row returns name and description run
+  // together, and the `.split("\n")` that used to stand here never had a newline to find
   const order = async () =>
-    (await bucket(page, "analysis").locator("li").allTextContents()).map((t) => t.trim().split("\n")[0]);
+    (await bucket(page, "analysis").locator("li .font-medium").allTextContents()).map((t) =>
+      t.trim()
+    );
   expect(await order()).toEqual(["Implement", "Review", "Push"]);
 
   /**

@@ -54,15 +54,21 @@ const ARROWS: string[] = [
  * for ever (BP-455). Composing an agent was the one thing that screen could not be made to do
  * without a mouse.
  *
- * A sortable active is handed straight back to the sortable getter, so reordering inside a bucket
- * runs the code it ran before this change rather than a second implementation of it. Deleting that
- * line changes no assertion in the spec beside this file — measured, with three entries and the
- * first travelling to the end — so it is kept for the minimum-change reason and not because a test
- * demands it: the library's getter accounts for the transforms a sorting strategy applies, and the
- * search below does not.
+ * A sortable active is handed straight back to the sortable getter, so every gesture that worked
+ * before this change still runs the code that made it work. Everything else searches the droppable
+ * rectangles in the direction pressed, which is what dnd-kit does for its own multiple-container
+ * example.
  *
- * Everything else searches the droppable rectangles in the direction pressed, which is what
- * dnd-kit does for its own multiple-container example.
+ * **Deleting the delegation changes no assertion in the spec beside this file, and that is
+ * measured rather than assumed.** Four shapes were tried: two entries; three entries with the
+ * first travelling to the end; three entries whose rows are deliberately unequal in height (58,
+ * 42, 58 px, since `sortableKeyboardCoordinates` differs from the search below only by an offset
+ * of `collisionRect.height - newRect.height`); and an entry moved from one bucket to another. The
+ * search answers identically in all four.
+ *
+ * It is kept anyway, and the reason is minimum change rather than evidence: the palette path is
+ * what was broken, and replacing the library's getter for a case it was written for buys nothing.
+ * A future reader who wants this line gone should delete it knowing the suite will stay green.
  */
 const keyboardCoordinates: KeyboardCoordinateGetter = (event, args) => {
   const { active, collisionRect, droppableRects, droppableContainers } = args.context;
