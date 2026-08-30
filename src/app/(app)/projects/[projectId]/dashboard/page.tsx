@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useCallback, useEffect, useState } from "react";
+import { useParams } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
 import { ApiProject, STATUS_LABELS, TaskStatus } from "@/types";
 import { columnIdsWithRole, effectiveColumns } from "@/lib/columns";
-import { useToast } from "@/components/ui/Toast";
+import { Button } from "@/components/ui/Button";
 import { PageHeader } from "@/components/shell/PageHeader";
 
 interface Stats {
@@ -239,35 +239,80 @@ function CreatedVsCompletedChart({ data }: { data: Stats["createdOverTime"] }) {
   );
 }
 
+/**
+ * The refusal in words, from the status the API already reports. The server's own text is
+ * deliberately unhelpful for two of these — `withProjectAccess` answers "Forbidden" or "Project
+ * not found" and the split between them is a security decision, not a message (`middleware.ts`),
+ * so the sentence a reader gets is made here rather than echoed.
+ */
+function whyItFailed(reason: unknown): string {
+  const { status, message } = (reason ?? {}) as { status?: number; message?: string };
+  if (status === 403) return "You do not have access to this board.";
+  if (status === 404) return "There is no board here — the link may be stale.";
+  return message
+    ? `The dashboard could not be loaded: ${message}`
+    : "The dashboard could not be loaded.";
+}
+
 export default function DashboardPage() {
   const { projectId } = useParams<{ projectId: string }>();
-  const router = useRouter();
   const api = useApi();
-  const { toast } = useToast();
 
   const [stats, setStats] = useState<Stats | null>(null);
   const [project, setProject] = useState<ApiProject | null>(null);
   const projectName = project?.name ?? "";
   const [loading, setLoading] = useState(true);
+  const [failure, setFailure] = useState("");
+  const [settingsFailed, setSettingsFailed] = useState(false);
 
-  useEffect(() => {
-    Promise.all([
+  const load = useCallback(() => {
+    setLoading(true);
+    /**
+     * Settled rather than all. `Promise.all` rejects on the first failure, so a perfectly good
+     * `/stats` was thrown away because the *project* request failed — and the project is only the
+     * subtitle and the column names. Each answer is now taken on its own (BP-448).
+     */
+    Promise.allSettled([
       api.get(`/api/projects/${projectId}/stats`),
       api.get(`/api/projects/${projectId}`),
     ])
       .then(([s, p]) => {
-        setStats(s);
-        setProject(p);
+        setProject(p.status === "fulfilled" ? p.value : null);
+        setSettingsFailed(p.status === "rejected");
+        setStats(s.status === "fulfilled" ? s.value : null);
+        setFailure(s.status === "rejected" ? whyItFailed(s.reason) : "");
       })
-      .catch(() => toast("Failed to load dashboard", "error"))
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
-  if (loading || !stats) {
+  useEffect(load, [load]);
+
+  if (loading) {
     return (
       <div className="flex justify-center py-12">
         <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary border-t-transparent" />
+      </div>
+    );
+  }
+
+  /**
+   * `loading` going false while `stats` stayed null used to leave the old guard holding, so the
+   * page showed a toast for three seconds and then span for ever. Nothing said what happened.
+   */
+  if (!stats) {
+    return (
+      <div className="max-w-7xl mx-auto w-full">
+        <PageHeader title="Dashboard" subtitle={projectName} />
+        <div
+          data-testid="dashboard-error"
+          className="rounded-xl border border-danger/40 bg-danger/10 px-4 py-6 text-center"
+        >
+          <p className="text-sm">{failure}</p>
+          <Button variant="secondary" className="mt-4" onClick={load}>
+            Try again
+          </Button>
+        </div>
       </div>
     );
   }
@@ -296,6 +341,18 @@ export default function DashboardPage() {
   return (
     <div className="max-w-7xl mx-auto w-full">
       <PageHeader title="Dashboard" subtitle={projectName} />
+
+      {settingsFailed && (
+        <div
+          data-testid="dashboard-settings-warning"
+          className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-warning/40 bg-warning/10 px-4 py-3 text-sm"
+        >
+          <span>The board&apos;s own settings could not be loaded, so columns and categories show default names and colours.</span>
+          <Button variant="secondary" size="sm" onClick={load}>
+            Try again
+          </Button>
+        </div>
+      )}
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
