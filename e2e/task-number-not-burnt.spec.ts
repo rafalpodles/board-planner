@@ -43,7 +43,9 @@ async function refusedCreate(
   const body = await response.text();
   // 400 rather than 500 is half the point: three of these used to escape as an uncaught
   // ValidationError, which says nothing a caller can act on
-  expect(response.status(), body).toBe(400);
+  // The request body, not just the answer: the arms differ only in the value they carry, so a
+  // failure that names only the response cannot say which shape got through.
+  expect(response.status(), `${JSON.stringify(over)} — ${body}`).toBe(400);
   return body;
 }
 
