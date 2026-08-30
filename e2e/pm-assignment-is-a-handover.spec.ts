@@ -182,13 +182,49 @@ test("a task the PM assigned is claimed by the machine, and the board shows the 
  * The control, and the reason this change is "the PM is not somebody else" rather than "the consent
  * model was dropped". Without it, everything above reads identically to having deleted the guard.
  */
-test("a task another person assigned is still refused, in the same queue", async ({ request }) => {
+test("a task another person assigned is still refused, beside one that is taken", async ({
+  request,
+}) => {
+  // Both in the same queue, and the legitimate one claimed first: a bare 204 is also what a
+  // mis-wired rig produces — a missing agentblocks row, a stale lastSeenAt, a verdictFor refusal —
+  // and without a positive control in the same body a broken fixture reads exactly like a guard.
   const proposed = await addTask({ assignee: ADMIN_ID, assignedBy: MEMBER_ID });
+  const legitimate = await addTask({ assignee: ADMIN_ID, assignedBy: ADMIN_ID });
 
-  const claimed = await claim(request, "run-proposal");
+  const first = await claim(request, "run-legitimate");
+  expect(first.status(), await first.text()).toBe(200);
+  expect(String((await first.json())._id)).toBe(String(legitimate.id));
 
-  expect(claimed.status(), await claimed.text()).toBe(204);
+  const second = await claim(request, "run-proposal");
+  expect(second.status(), await second.text()).toBe(204);
   expect((await read(proposed.id)).status).toBe(APPROVED);
+});
+
+/**
+ * The escalation this change would otherwise have opened, driven the whole way rather than argued.
+ * The PM chat is reachable by every project member, and `assign_task` does not require the assignee
+ * to be the person asking — so a member can hand a colleague's machine a task they wrote. The claim
+ * pairs the PM's hand-over with the person who asked for it, and this is what proves the pairing.
+ */
+test("a member cannot use the PM to start a run on somebody else's machine", async ({
+  page,
+  request,
+}) => {
+  const task = await addTask();
+  await signIn(page, "member");
+
+  const actions = await pmAssigns(page, `${PROJECT_KEY}-${task.number}`, "admin");
+  expect(actions.map((a) => a.tool)).toContain("assign_task");
+
+  // The assignment itself is allowed and really happened — this is not "the PM refused"
+  const stored = await read(task.id);
+  expect(String(stored.assignee)).toBe(String(ADMIN_ID));
+  expect(String(stored.pmAssignedFor)).toBe(String(MEMBER_ID));
+
+  // ...but the admin's machine does not take work the admin never asked for
+  const claimed = await claim(request, "run-escalation");
+  expect(claimed.status(), await claimed.text()).toBe(204);
+  expect((await read(task.id)).status).toBe(APPROVED);
 });
 
 test("the PM says so when the hand-over it just made cannot complete", async ({ page }) => {

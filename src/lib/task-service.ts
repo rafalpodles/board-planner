@@ -738,6 +738,11 @@ export async function changeStatus(
   ).populate([
     { path: "assignee", select: "username fullName" },
     { path: "createdBy", select: "username fullName" },
+    // `assignedBy` too, though nothing feeds this response to the Agent row today: handoverOf tells
+    // the PM apart by the username populate puts here, so a caller that ever did would get
+    // "somebody else assigned it" printed over a task the machine is about to take. One line, and
+    // it removes the whole class rather than documenting it.
+    { path: "assignedBy", select: "username fullName" },
   ]);
 
   if (!task) {

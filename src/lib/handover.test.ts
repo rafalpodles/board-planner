@@ -153,3 +153,54 @@ describe("handoverOf", () => {
     });
   });
 });
+
+/**
+ * BP-419. The claim admits a PM hand-over, paired with the person who asked for it. This row has to
+ * agree with that filter in both directions, and the dangerous direction is `runs: true` over a task
+ * the server refuses — the reader is then told to expect a run that never comes.
+ */
+describe("handoverOf and a PM hand-over", () => {
+  const PM = { _id: "pm1", username: "pm", fullName: "PM Agent" };
+
+  it("runs when the PM assigned it on the assignee's own instruction", () => {
+    expect(
+      handoverOf(task({ assignedBy: { ...PM }, pmAssignedFor: { ...RAFAL } }), BOARD)
+    ).toEqual({ runs: true });
+  });
+
+  it("refuses when the PM assigned it on somebody else's instruction", () => {
+    expect(
+      handoverOf(task({ assignedBy: { ...PM }, pmAssignedFor: { ...KRZYSIEK } }), BOARD)
+    ).toEqual({ runs: false, reason: "pm-assigned-for-someone-else", by: "PM Agent" });
+  });
+
+  // An unattended turn — a board review, a needs-human-review trigger — records nobody
+  it("refuses when the PM assigned it with nobody driving the turn", () => {
+    expect(handoverOf(task({ assignedBy: { ...PM }, pmAssignedFor: null }), BOARD)).toEqual({
+      runs: false,
+      reason: "pm-assigned-for-someone-else",
+      by: "PM Agent",
+    });
+  });
+
+  /**
+   * The limit of judging by username, stated as a test so it cannot quietly stop being true. A
+   * writer echoing back what it sent carries a bare id, and this function cannot tell the PM from
+   * anyone else then — it reads as an ordinary third party. Kept honest in the safe direction:
+   * "nothing will run this" about a task that might, never the reverse.
+   */
+  it("cannot recognise the PM through a bare id, and errs towards refusing", () => {
+    expect(handoverOf(task({ assignedBy: "pm1", pmAssignedFor: "u1" }), BOARD)).toEqual({
+      runs: false,
+      reason: "assigned-by-someone-else",
+      by: null,
+    });
+  });
+
+  // The control: a person is still not the PM, whatever pmAssignedFor happens to say
+  it("does not let a stray pmAssignedFor turn a colleague's assignment into a hand-over", () => {
+    expect(
+      handoverOf(task({ assignedBy: { ...KRZYSIEK }, pmAssignedFor: { ...RAFAL } }), BOARD)
+    ).toEqual({ runs: false, reason: "assigned-by-someone-else", by: "Krzysiek" });
+  });
+});
