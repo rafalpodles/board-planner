@@ -443,8 +443,11 @@ describe("claimNextTask", () => {
     await claimNextTask("p1", "worker-a", "run-1", OWNER);
 
     const set = claimSet(findOneAndUpdate.mock.calls[0]);
-    expect(set["execution.workerId"]).toBe("worker-a");
-    expect(set["execution.runId"]).toBe("run-1");
+    // Wrapped, because this is a pipeline `$set` and a bare string starting with `$` would be read
+    // as a field path. What that means in a real database is claim-ownership.spec.ts's subject —
+    // this only pins that the wrapper is still here (BP-329).
+    expect(set["execution.workerId"]).toEqual({ $literal: "worker-a" });
+    expect(set["execution.runId"]).toEqual({ $literal: "run-1" });
     // Incremented inside the pipeline, where the missing field has to be read as zero first: $inc
     // creates it, but a pipeline $set computing on it does not
     expect(set["execution.attempts"]).toEqual({

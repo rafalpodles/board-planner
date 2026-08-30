@@ -1113,7 +1113,8 @@ test.describe("a run identity is text, whatever it looks like", () => {
     expect((await read(armed)).execution.runId).toBe("$$REMOVE");
   });
 
-  // And this stored the WORKER'S OWN id — a claim whose identity was a copy of another field
+  // Whether a field path resolves to another field's value or to nothing depends on what the
+  // document already carries; either way the stored identity is not the text that was sent
   test("a field path is a run identity, not the value of that field", async () => {
     const armed = await addTask();
 

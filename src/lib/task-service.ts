@@ -1725,9 +1725,9 @@ export async function claimNextTask(
           "execution.assignedByRun": false,
           "execution.workerId": { $literal: workerId },
           // `$literal`, because an aggregation `$set` reads a leading `$` as a FIELD PATH and
-          // Mongoose casts nothing in a pipeline update. Measured: `"$$REMOVE"` stored no runId at
-          // all and `"$execution.workerId"` stored that field's value, leaving the task active and
-          // held by a run nothing could address until the lease expired (BP-329).
+          // Mongoose casts nothing in a pipeline update. Measured: both `"$$REMOVE"` and
+          // `"$execution.workerId"` stored no runId at all, leaving the task active and held by a
+          // run nothing could address until the lease expired (BP-329).
           "execution.runId": { $literal: runId },
           "execution.startedAt": new Date(),
           "execution.lastError": "",
