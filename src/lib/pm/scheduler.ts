@@ -52,7 +52,7 @@ export async function pmSchedulerTick(): Promise<void> {
 async function runBoardReview(
   projectId: string,
   projectKey: string,
-  pm: { dailyTurnCap?: number },
+  pm: { dailyTurnCap?: number; autonomy?: { timezone?: string } },
   pmUserId: string
 ): Promise<void> {
   const { over, cap } = await isOverDailyTurnCap(projectId, pm);
