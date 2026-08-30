@@ -38,6 +38,7 @@ import {
   storedExecution,
 } from "./seed";
 import { signIn as arriveSignedIn, signInThroughForm } from "./session";
+import { dragTo } from "./drag";
 
 // Per test, not once per run: the flow ends with the run released, so a retry or a second
 // iteration would otherwise start from a task no worker is holding
@@ -135,27 +136,21 @@ async function readTask(
 }
 
 /**
- * The board uses native HTML5 drag and drop, which Playwright's mouse cannot drive: Chromium
- * runs the drag on the OS, so no dragstart/drop ever reaches the page. The events are dispatched
- * by hand instead, sharing one live DataTransfer — the card writes its id into it on dragstart
- * and the column reads that id back on drop.
+ * Moves a card by dragging it. The docblock that stood here said Playwright's mouse cannot drive a
+ * native drag because Chromium runs it on the OS. That is measurably untrue — see e2e/drag.ts — and
+ * the hand-dispatched events it justified tested the app's handlers against themselves.
  */
 async function dragCardToColumn(page: Page, card: Locator, column: Locator) {
-  const dataTransfer = await page.evaluateHandle(() => new DataTransfer());
   const body = column.locator("[data-column-body]");
 
-  await card.dispatchEvent("dragstart", { dataTransfer });
-  await body.dispatchEvent("dragenter", { dataTransfer });
-  await body.dispatchEvent("dragover", { dataTransfer });
-
-  // The insertion marker is proof the column computed a drop index. Without one the drop falls
-  // through to the status endpoint instead — a different code path, and not the one under test.
-  await expect(column.locator("[data-column-body] > div.h-0\\.5")).toBeAttached();
-
-  await body.dispatchEvent("drop", { dataTransfer });
-  // No dragend: nothing listens for it, and a drop the server accepts moves the card out from
-  // under the locator, so dispatching one would fail on exactly the path that worked
-  await dataTransfer.dispose();
+  await dragTo(page, card, body, {
+    // The insertion marker is proof the column computed a drop index. Without one the drop falls
+    // through to the status endpoint instead — a different code path, and not the one under test.
+    // Read with the button still down, which is the only time it exists.
+    duringDrag: async () => {
+      await expect(column.locator("[data-column-body] > div.h-0\\.5")).toBeAttached();
+    },
+  });
 }
 
 test("a task a worker is running cannot be dragged away without confirming", async ({

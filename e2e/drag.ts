@@ -63,7 +63,14 @@ export async function dragTo(
   const startX = from.x + from.width / 2;
   const startY = from.y + from.height / 2;
   const endX = to.x + to.width / 2;
-  const endY = atTop ? to.y + 3 : to.y + Math.min(to.height / 2, 80);
+  // Low in the target, not in the middle of it. The column appends at the end only when the drop
+  // lands on the body itself (`e.target === e.currentTarget`), and the middle of a column that
+  // holds cards is a card — which computes an insertion index next to that card instead, or none
+  // at all when the card is the one being dragged. The hand-dispatched version aimed its dragover
+  // straight at the body and so never had to choose.
+  const endY = atTop
+    ? to.y + 3
+    : Math.min(to.y + to.height - 20, (viewport?.height ?? to.y + to.height) - 10);
 
   await page.mouse.move(startX, startY);
   await page.mouse.down();
