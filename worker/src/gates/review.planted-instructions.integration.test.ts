@@ -106,6 +106,7 @@ describe("the review gate against an ignored instruction file", () => {
         patch: "diff --git a/a.ts b/a.ts\n",
         truncated: false,
         headSha,
+        symlinks: [],
       },
     };
   }

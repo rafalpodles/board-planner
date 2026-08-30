@@ -12,6 +12,9 @@ const BASE_SHA = "abc1234";
 // answers that call first.
 const HEAD_SHA = "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c";
 const HEAD_RESOLVED = { code: 0, stdout: `${HEAD_SHA}\n`, stderr: "", timedOut: false };
+// BP-509: collectDiff reads `--raw` between the numstat and the patch, for the file modes numstat
+// cannot express. Empty means "this change added no symlink".
+const NO_SYMLINKS = { code: 0, stdout: "", stderr: "", timedOut: false };
 
 function recordingRunner(calls: string[][], responses: Record<string, Partial<CommandResult>> = {}) {
   const run = vi.fn(async (_command: string, args: string[]): Promise<CommandResult> => {
@@ -34,6 +37,7 @@ describe("collectDiff", () => {
         stderr: "",
         timedOut: false,
       })
+      .mockResolvedValueOnce(NO_SYMLINKS)
       .mockResolvedValueOnce({ code: 0, stdout: "diff --git ...", stderr: "", timedOut: false });
 
     const diff = await collectDiff({ run }, "/wt", BASE_SHA);
@@ -49,6 +53,7 @@ describe("collectDiff", () => {
       .fn()
       .mockResolvedValueOnce(HEAD_RESOLVED)
       .mockResolvedValueOnce({ code: 0, stdout: "-\t-\timage.png\n", stderr: "", timedOut: false })
+      .mockResolvedValueOnce(NO_SYMLINKS)
       .mockResolvedValueOnce({ code: 0, stdout: "", stderr: "", timedOut: false });
 
     const diff = await collectDiff({ run }, "/wt", BASE_SHA);
@@ -67,6 +72,7 @@ describe("collectDiff", () => {
         stderr: "",
         timedOut: false,
       })
+      .mockResolvedValueOnce(NO_SYMLINKS)
       .mockResolvedValueOnce({ code: 0, stdout: "diff --git ...", stderr: "", timedOut: false });
 
     const diff = await collectDiff({ run }, "/wt", BASE_SHA);
@@ -97,6 +103,7 @@ describe("collectDiff", () => {
       .fn()
       .mockResolvedValueOnce(HEAD_RESOLVED)
       .mockResolvedValueOnce({ code: 0, stdout: "1\t0\tsrc/a.ts\n", stderr: "", timedOut: false })
+      .mockResolvedValueOnce(NO_SYMLINKS)
       .mockResolvedValueOnce({ code: 1, stdout: "", stderr: "out of memory", timedOut: false });
 
     await expect(collectDiff({ run }, "/wt", BASE_SHA)).rejects.toThrow(/out of memory/);
@@ -108,6 +115,7 @@ describe("collectDiff", () => {
       .fn()
       .mockResolvedValueOnce(HEAD_RESOLVED)
       .mockResolvedValueOnce({ code: 0, stdout: "1\t0\tsrc/a.ts\n", stderr: "", timedOut: false })
+      .mockResolvedValueOnce(NO_SYMLINKS)
       .mockResolvedValueOnce({ code: 0, stdout: patchAtLimit, stderr: "", timedOut: false });
 
     const diff = await collectDiff({ run }, "/wt", BASE_SHA);
@@ -122,6 +130,7 @@ describe("collectDiff", () => {
       .fn()
       .mockResolvedValueOnce(HEAD_RESOLVED)
       .mockResolvedValueOnce({ code: 0, stdout: "1\t0\tsrc/a.ts\n", stderr: "", timedOut: false })
+      .mockResolvedValueOnce(NO_SYMLINKS)
       .mockResolvedValueOnce({ code: 0, stdout: oversizedPatch, stderr: "", timedOut: false });
 
     const diff = await collectDiff({ run }, "/wt", BASE_SHA);
@@ -138,8 +147,9 @@ describe("collectDiff", () => {
 
     await collectDiff(runner, "/wt", BASE_SHA);
 
+    // Three since BP-509: numstat, raw, patch — all three name the two trees
     const diffCalls = calls.filter((c) => c[0] === "diff");
-    expect(diffCalls).toHaveLength(2);
+    expect(diffCalls).toHaveLength(3);
     for (const call of diffCalls) {
       expect(call[call.length - 1]).toBe("--");
       // The object id, not the ref: HEAD is a file the agent can rewrite between the two calls,
@@ -229,7 +239,7 @@ describe("collectDiff", () => {
     // The rev-parse that resolves HEAD is deliberately not in this list: it takes no pathspec, so
     // there is no positional list to close, and its one argument is a revision by construction
     const diffCalls = run.mock.calls.filter((call) => call[1].includes("diff"));
-    expect(diffCalls).toHaveLength(2);
+    expect(diffCalls).toHaveLength(3);
     for (const call of diffCalls) {
       expect(call[1][call[1].length - 1]).toBe("--");
       expect(call[1]).toContain(BASE_SHA);
