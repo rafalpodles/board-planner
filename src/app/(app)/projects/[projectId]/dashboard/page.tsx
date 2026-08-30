@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
 import { ApiProject, STATUS_LABELS, TaskStatus } from "@/types";
@@ -265,7 +265,16 @@ export default function DashboardPage() {
   const [failure, setFailure] = useState("");
   const [settingsFailed, setSettingsFailed] = useState(false);
 
+  /**
+   * Which load is the current one. Retry is a button, so two can be in flight at once and
+   * `use-api` takes no AbortSignal — without this, pressing it while the server is still broken
+   * and again after it recovers lets the slow rejection land last and put the banner back over
+   * charts that had already rendered.
+   */
+  const generation = useRef(0);
+
   const load = useCallback(() => {
+    const mine = (generation.current += 1);
     setLoading(true);
     /**
      * Settled rather than all. `Promise.all` rejects on the first failure, so a perfectly good
@@ -277,12 +286,15 @@ export default function DashboardPage() {
       api.get(`/api/projects/${projectId}`),
     ])
       .then(([s, p]) => {
+        if (mine !== generation.current) return;
         setProject(p.status === "fulfilled" ? p.value : null);
         setSettingsFailed(p.status === "rejected");
         setStats(s.status === "fulfilled" ? s.value : null);
         setFailure(s.status === "rejected" ? whyItFailed(s.reason) : "");
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (mine === generation.current) setLoading(false);
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
@@ -308,7 +320,7 @@ export default function DashboardPage() {
           data-testid="dashboard-error"
           className="rounded-xl border border-danger/40 bg-danger/10 px-4 py-6 text-center"
         >
-          <p className="text-sm">{failure}</p>
+          <p className="text-sm">{failure || "The dashboard could not be loaded."}</p>
           <Button variant="secondary" className="mt-4" onClick={load}>
             Try again
           </Button>
@@ -332,11 +344,20 @@ export default function DashboardPage() {
     ...CATEGORY_COLORS,
     ...Object.fromEntries((project?.categories ?? []).map((c) => [c.name, c.color])),
   };
-  // Plural: a board may carry more than one column in flight, and task-service already sums them
-  const inFlight = columnIdsWithRole(project, "active").reduce(
-    (n, id) => n + (stats.statusBreakdown[id] || 0),
-    0
-  );
+  /**
+   * The only figure on the page this component computes rather than reads: `statusBreakdown` is
+   * keyed by the board's OWN column ids, so without the board there is no way to know which of
+   * them are in flight. The defaults would answer 0 for any board that renamed its active column
+   * — a wrong number sitting in a row of right ones, which is worse than no number.
+   *
+   * Plural: a board may carry more than one column in flight, and task-service already sums them.
+   */
+  const inFlight = project
+    ? columnIdsWithRole(project, "active").reduce(
+        (n, id) => n + (stats.statusBreakdown[id] || 0),
+        0
+      )
+    : null;
 
   return (
     <div className="max-w-7xl mx-auto w-full">
@@ -347,7 +368,10 @@ export default function DashboardPage() {
           data-testid="dashboard-settings-warning"
           className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-warning/40 bg-warning/10 px-4 py-3 text-sm"
         >
-          <span>The board&apos;s own settings could not be loaded, so columns and categories show default names and colours.</span>
+          <span>
+            The board&apos;s own settings could not be loaded. Columns and categories show default
+            names and colours, and In Progress cannot be counted without them.
+          </span>
           <Button variant="secondary" size="sm" onClick={load}>
             Try again
           </Button>
@@ -366,7 +390,7 @@ export default function DashboardPage() {
         </div>
         <div className="bg-bg-card border border-border rounded-lg p-4">
           <p className="text-sm text-text-muted">In Progress</p>
-          <p className="text-2xl font-bold text-status-in-progress">{inFlight}</p>
+          <p className="text-2xl font-bold text-status-in-progress">{inFlight ?? "—"}</p>
         </div>
         <div className="bg-bg-card border border-border rounded-lg p-4">
           <p className="text-sm text-text-muted">Completion</p>
