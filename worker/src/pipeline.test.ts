@@ -449,7 +449,9 @@ describe("runTask", () => {
   it("treats a worktree whose state cannot be read as dirty", async () => {
     let calls = 0;
     const runner = {
-      run: vi.fn<Runner["run"]>(async () => {
+      run: vi.fn<Runner["run"]>(async (_command, args) => {
+        // The pre-staging config scan (BP-403) is not one of the calls this fixture counts
+        if (args.includes("--list")) return shell("");
         calls += 1;
         return calls === 1
           ? shell("")
@@ -942,6 +944,8 @@ describe("runTask", () => {
         // test is about — an untampered range with no commits made must still pass it.
         if (args.includes("rev-list")) return shell("");
         if (args.includes("rev-parse")) return shell("base1");
+        // The pre-staging config scan (BP-403) is not one of the calls this fixture counts
+        if (args.includes("--list")) return shell("");
         calls += 1;
         return shell(calls > 2 ? "?? dist/main.js\n" : "");
       }),
@@ -1112,6 +1116,8 @@ describe("runTask", () => {
     let calls = 0;
     const runner = {
       run: vi.fn<Runner["run"]>(async (_command, args) => {
+        // The pre-staging config scan (BP-403) is not one of the calls this fixture counts
+        if (args.includes("--list")) return shell("");
         calls += 1;
         // rev-parse HEAD is what commitAll hands back as the sha it made — a real commit always
         // resolves it, so a mock that left it empty would prove nothing about state.committed
