@@ -26,6 +26,25 @@ const ENROLMENTS_PER_WINDOW = 10;
 export async function POST(request: Request) {
   await connectDB();
 
+  if (protocolOf(request) !== PROTOCOL_VERSION) {
+    return NextResponse.json(
+      { error: `server speaks protocol ${PROTOCOL_VERSION}` },
+      { status: 409 }
+    );
+  }
+
+  // Unauthenticated and costing a bcrypt.hash per call, so the address is the only bound there is
+  const clientIp = getClientIp(request);
+  const throttleKey = sourceKey(clientIp ?? "-", "device_enrolment");
+  // Shared key when there is no address, so the per-address figure would be a lever one caller
+  // could hold down against every machine trying to enrol
+  if (await isRateLimited(throttleKey, anonymousMultiplier(clientIp, ENROLMENTS_PER_WINDOW))) {
+    return NextResponse.json({ error: "too many enrolment attempts, try again later" }, { status: 429 });
+  }
+  // Counted here rather than after the body is understood, so a flood of malformed or oversized
+  // requests still spends the budget it is costing — the forgot route counts on the same rule.
+  await recordFailedAttempt(throttleKey);
+
   const read = await readJsonBody(request);
   if (!read.ok) return read.response;
   const body = read.value;
@@ -43,22 +62,7 @@ export async function POST(request: Request) {
   if (!machineName) {
     return NextResponse.json({ error: "name is required" }, { status: 400 });
   }
-  if (protocolOf(request) !== PROTOCOL_VERSION) {
-    return NextResponse.json(
-      { error: `server speaks protocol ${PROTOCOL_VERSION}` },
-      { status: 409 }
-    );
-  }
 
-  // Unauthenticated and costing a bcrypt.hash per call, so the address is the only bound there is
-  const clientIp = getClientIp(request);
-  const throttleKey = sourceKey(clientIp ?? "-", "device_enrolment");
-  // Shared key when there is no address, so the per-address figure would be a lever one caller
-  // could hold down against every machine trying to enrol
-  if (await isRateLimited(throttleKey, anonymousMultiplier(clientIp, ENROLMENTS_PER_WINDOW))) {
-    return NextResponse.json({ error: "too many enrolment attempts, try again later" }, { status: 429 });
-  }
-  await recordFailedAttempt(throttleKey);
 
   let started;
   try {

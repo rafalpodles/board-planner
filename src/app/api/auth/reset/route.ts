@@ -32,6 +32,19 @@ export async function POST(request: Request) {
   const refusal = provenanceRefusal(request);
   if (refusal) return refusal;
 
+  // Ahead of the body for the same reason it is ahead of bcrypt: the read is work too (BP-322).
+  // Guessing 32 random bytes is not the worry; unmetered work is. Two indexed reads and a bcrypt
+  // per anonymous request is a bill anybody can run up.
+  const clientIp = getClientIp(request);
+  const throttleKey = sourceKey(clientIp ?? "-", "password-reset-use");
+  if (await isRateLimited(throttleKey, anonymousMultiplier(clientIp, ATTEMPTS_PER_SOURCE))) {
+    return NextResponse.json(
+      { error: "Too many attempts. Try again in 15 minutes." },
+      { status: 429 }
+    );
+  }
+  await recordFailedAttempt(throttleKey);
+
   const read = await readJsonBody<{ token?: unknown; newPassword?: unknown }>(request);
   if (!read.ok) return read.response;
   const body = read.value;
@@ -49,17 +62,6 @@ export async function POST(request: Request) {
     );
   }
 
-  // Guessing 32 random bytes is not the worry; unmetered work is. Two indexed reads and a bcrypt
-  // per anonymous request is a bill anybody can run up.
-  const clientIp = getClientIp(request);
-  const throttleKey = sourceKey(clientIp ?? "-", "password-reset-use");
-  if (await isRateLimited(throttleKey, anonymousMultiplier(clientIp, ATTEMPTS_PER_SOURCE))) {
-    return NextResponse.json(
-      { error: "Too many attempts. Try again in 15 minutes." },
-      { status: 429 }
-    );
-  }
-  await recordFailedAttempt(throttleKey);
 
   await connectDB();
 

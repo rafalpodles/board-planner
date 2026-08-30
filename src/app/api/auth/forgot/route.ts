@@ -32,6 +32,24 @@ export async function POST(request: Request) {
   const refusal = provenanceRefusal(request);
   if (refusal) return refusal;
 
+  // Ahead of the body, because a throttle consulted afterwards bounds the status code rather
+  // than the work: the read is an I/O wait a flood can hold open (BP-322).
+  const clientIp = getClientIp(request);
+  const throttleKey = sourceKey(clientIp ?? "-", "password-reset");
+  // anonymousMultiplier, because with no trusted proxy configured getClientIp returns null and
+  // every caller on earth shares the key "-". A flat ceiling there is not a per-address limit at
+  // all: eleven requests from one attacker would close password reset for everybody, which is a
+  // lever an idle attacker can hold down. The registration and enrolment routes already do this.
+  if (await isRateLimited(throttleKey, anonymousMultiplier(clientIp, REQUESTS_PER_SOURCE))) {
+    return NextResponse.json(
+      { error: "Too many requests. Try again in 15 minutes." },
+      { status: 429 }
+    );
+  }
+  // Counted on every request, not only the ones that find an account: counting failures alone
+  // would leave the cheap path unmetered and time the difference for the caller.
+  await recordFailedAttempt(throttleKey);
+
   const read = await readJsonBody<{ identifier?: unknown }>(request);
   if (!read.ok) return read.response;
   const body = read.value;
@@ -63,21 +81,6 @@ export async function POST(request: Request) {
     );
   }
 
-  const clientIp = getClientIp(request);
-  const throttleKey = sourceKey(clientIp ?? "-", "password-reset");
-  // anonymousMultiplier, because with no trusted proxy configured getClientIp returns null and
-  // every caller on earth shares the key "-". A flat ceiling there is not a per-address limit at
-  // all: eleven requests from one attacker would close password reset for everybody, which is a
-  // lever an idle attacker can hold down. The registration and enrolment routes already do this.
-  if (await isRateLimited(throttleKey, anonymousMultiplier(clientIp, REQUESTS_PER_SOURCE))) {
-    return NextResponse.json(
-      { error: "Too many requests. Try again in 15 minutes." },
-      { status: 429 }
-    );
-  }
-  // Counted on every request, not only the ones that find an account: counting failures alone
-  // would leave the cheap path unmetered and time the difference for the caller.
-  await recordFailedAttempt(throttleKey);
 
   await connectDB();
 
