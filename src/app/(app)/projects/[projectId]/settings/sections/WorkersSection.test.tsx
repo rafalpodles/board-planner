@@ -15,9 +15,11 @@ vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
 vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast }) }));
 vi.mock("@/app/(app)/agents/store", () => ({ useStore: () => store }));
 
+const PROJECT_OID = "68b1000000000000000000a1";
+
 function project(over: Partial<ApiProject> = {}): ApiProject {
   return {
-    _id: "p1",
+    _id: PROJECT_OID,
     key: "TP",
     name: "Test Project",
     description: "",
@@ -49,7 +51,7 @@ function renderSection(isAdmin: boolean, over: Partial<ApiProject> = {}) {
   return render(
     <SettingsProvider register={vi.fn()} unregister={vi.fn()}>
       <WorkersSection
-        projectId="p1"
+        projectId="TP"
         project={project(over)}
         patchProject={vi.fn()}
         replaceProject={vi.fn()}
@@ -156,8 +158,10 @@ describe("what a finished run said on the way out", () => {
  * and could not be cleared once one was.
  */
 describe("the project's default agent", () => {
-  const OURS = { _id: "a1", name: "Ours", scope: "project", projectId: "p1", projectName: "Test Project", description: "" };
-  const THEIRS = { _id: "a2", name: "Theirs", scope: "project", projectId: "p9", projectName: "Other Board", description: "" };
+  // The settings route's param is the project KEY while ApiAgent.projectId is the ObjectId, so
+  // these must differ — with both "p1" the implementation could compare the wrong one and pass.
+  const OURS = { _id: "a1", name: "Ours", scope: "project", projectId: PROJECT_OID, projectName: "Test Project", description: "" };
+  const THEIRS = { _id: "a2", name: "Theirs", scope: "project", projectId: "68b0000000000000000000zz".slice(0, 24), projectName: "Other Board", description: "" };
   const GLOBAL = { _id: "a3", name: "Default", scope: "global", projectId: null, projectName: null, description: "" };
   const MINE = { _id: "a4", name: "My own", scope: "user", projectId: null, projectName: null, description: "" };
 
@@ -196,9 +200,14 @@ describe("the project's default agent", () => {
     const select = picker();
     expect(select.value).toBe("a3");
 
-    fireEvent.change(select, { target: { value: "" } });
+    // Through the option a person can actually pick. `fireEvent.change` with a raw value sets the
+    // select directly and works even when no such option is rendered — which left this green with
+    // the "No default" option deleted, proving only that the handler forwards its argument.
+    const clearOption = [...select.querySelectorAll("option")].find((o) => o.value === "");
+    expect(clearOption, "there is no option a person could pick to clear it").toBeTruthy();
+    fireEvent.change(select, { target: { value: clearOption!.value } });
     await waitFor(() =>
-      expect(api.put).toHaveBeenCalledWith("/api/projects/p1/agent", { agentId: "" })
+      expect(api.put).toHaveBeenCalledWith("/api/projects/TP/agent", { agentId: "" })
     );
   });
 

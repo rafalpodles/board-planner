@@ -68,6 +68,43 @@ test("a default can be set, and then cleared again", async ({ request }) => {
   expect(await storedDefault()).toBeNull();
 });
 
+test("a body that does not say is a refusal, not a clear", async ({ request }) => {
+  const handle = await db();
+  const inserted = await handle.collection("agents").insertOne({
+    name: "Runnable",
+    description: "",
+    scope: "project",
+    owner: null,
+    project: PROJECT_ID,
+    builtIn: false,
+    composition: RUNNABLE,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+  const agentId = String(inserted.insertedId);
+  await request.put(`/api/projects/${PROJECT_KEY}/agent`, { headers: ADMIN_AUTH, data: { agentId } });
+  expect(String(await storedDefault())).toBe(agentId);
+
+  // Coercing a missing or wrong-typed field to "" made every one of these answer 200 and null
+  // the default — "did not say" and "asked to clear" are not the same request.
+  for (const data of [{}, { agentId: null }, { agent: agentId }, { agentId: 7 }]) {
+    const response = await request.put(`/api/projects/${PROJECT_KEY}/agent`, {
+      headers: ADMIN_AUTH,
+      data,
+    });
+    expect(response.status(), JSON.stringify(data)).toBe(400);
+    expect(String(await storedDefault()), JSON.stringify(data)).toBe(agentId);
+  }
+
+  // The control: the one body that does mean clear still clears
+  const cleared = await request.put(`/api/projects/${PROJECT_KEY}/agent`, {
+    headers: ADMIN_AUTH,
+    data: { agentId: "" },
+  });
+  expect(cleared.status()).toBe(200);
+  expect(await storedDefault()).toBeNull();
+});
+
 test("an agent with nothing in it is still refused, and says why", async ({ request }) => {
   const handle = await db();
   const inserted = await handle.collection("agents").insertOne({
