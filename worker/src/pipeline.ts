@@ -9,6 +9,7 @@ import { recordFor, RunRecord } from "./run-record.js";
 import { isResultEvent, StreamEvent } from "./stream.js";
 import { Delivery } from "./delivery.js";
 import { childEnv } from "./env.js";
+import { hiddenByTheRunsOwnRules } from "./ignored-work.js";
 import { Runner } from "./exec.js";
 import { Executor } from "./executor.js";
 import { gitArgs, GIT_SAFE_ENV } from "./git-safety.js";
@@ -149,6 +150,7 @@ function whatLanded(state: RunState, branch: string): string {
 async function unfinishedWork(
   runner: Runner,
   worktreePath: string,
+  baseSha: string,
 ): Promise<string | null> {
   const result = await runner.run("git", gitArgs(["status", "--porcelain"]), {
     cwd: worktreePath,
@@ -159,7 +161,22 @@ async function unfinishedWork(
     return `\`git status\` timed out after ${GIT_TIMEOUT_MS}ms`;
   if (result.code !== 0)
     return `\`git status\` failed: ${result.stderr || result.stdout}`;
-  return result.stdout.trim() || null;
+  if (result.stdout.trim()) return result.stdout.trim();
+
+  // `status` honours .gitignore, so a rule this run committed hides whatever it names from the
+  // check above — measured, a `secret/` added to .gitignore in the run's own commit leaves the
+  // tree reporting clean while that directory holds work (BP-508). Asking `--ignored` instead
+  // would report node_modules and dist and fail every honest run, which is what the comment at
+  // the call site is about; this asks only whether the rule doing the hiding is the run's own.
+  const hidden = await hiddenByTheRunsOwnRules(runner, worktreePath, baseSha);
+  if (hidden === null)
+    return "`git status` could not be checked against the run's own ignore rules";
+  if (hidden.length === 0) return null;
+  return hidden
+    .map(
+      ({ path, rule }) => `${path} — hidden by \`${rule}\`, added by this run`,
+    )
+    .join("\n");
 }
 
 // The gate-rejected branch is still delivered for a human to see, so it gets the same provenance
@@ -543,7 +560,11 @@ export async function runTask(
       // artifact the target repo does not gitignore would fail a run that did nothing wrong.
       if (entry.kind !== "step" || entry.capability !== "edit") continue;
 
-      const leftover = await unfinishedWork(runner, worktree.path);
+      const leftover = await unfinishedWork(
+        runner,
+        worktree.path,
+        worktree.baseSha,
+      );
       if (leftover) {
         keepWorktree = true;
         settle("failed", `${entry.name} left the worktree unclean`);
