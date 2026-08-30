@@ -132,3 +132,51 @@ describe("PmAgentSection MCP connections — plain member (neither owner nor ins
     expect(screen.queryByText("MCP connections")).toBeNull();
   });
 });
+
+/**
+ * BP-453. The cap counts from midnight in the board's own zone, so the hint has to name the zone
+ * the SERVER will actually use — `turn-cap.ts` falls back when the stored one is unreadable, and a
+ * truthiness check here would announce a zone nothing counts in.
+ */
+describe("the turn-cap hint", () => {
+  // Cast because `timezone` is a required string on the type and the row this covers has none —
+  // a document written before the field existed, which is exactly the case being asserted.
+  const withZone = (timezone: string | undefined) =>
+    ({
+      autonomy: {
+        dailyReview: false,
+        reviewHour: 9,
+        reviewIntervalHours: 24,
+        timezone,
+        handleNeedsHumanReview: false,
+        lastReviewSlot: "",
+      },
+    }) as unknown as Pick<NonNullable<ApiProject["pm"]>, "autonomy">;
+
+  it("names the board's own zone", () => {
+    renderSection(true, { pm: { ...project().pm!, ...withZone("Asia/Tokyo") } });
+
+    expect(screen.getByText(/Resets at midnight in Asia\/Tokyo/)).toBeTruthy();
+  });
+
+  it("says a failed turn counts, which is the decision it exists to record", () => {
+    renderSection(true, { pm: { ...project().pm!, ...withZone("Asia/Tokyo") } });
+
+    expect(screen.getByText(/a turn the model failed/)).toBeTruthy();
+  });
+
+  // The legacy row `validatePmConfig` would refuse on write but which predates it. The server
+  // counts in Europe/Warsaw for this board; the hint must not claim otherwise.
+  it("names the fallback when the stored zone is one the server cannot read", () => {
+    renderSection(true, { pm: { ...project().pm!, ...withZone("Warsaw") } });
+
+    expect(screen.getByText(/Resets at midnight in Europe\/Warsaw/)).toBeTruthy();
+    expect(screen.queryByText(/midnight in Warsaw\./)).toBeNull();
+  });
+
+  it("names the fallback when the board never stored one at all", () => {
+    renderSection(true, { pm: { ...project().pm!, ...withZone(undefined) } });
+
+    expect(screen.getByText(/Resets at midnight in Europe\/Warsaw/)).toBeTruthy();
+  });
+});
