@@ -2,6 +2,7 @@ import { test, expect, type APIRequestContext, type Page } from "@playwright/tes
 import { ADMIN_AUTH } from "./api";
 import {
   HELD_TASK_KEY,
+  demoteDoneColumn,
   PROJECT_ID,
   PROJECT_KEY,
   SIBLING_TASK_KEY,
@@ -88,6 +89,122 @@ async function save(page: Page, saved: "Columns saved" | "Categories saved") {
   await expect(page.getByText(saved)).toBeVisible();
   await expect(saveButton(page)).toBeHidden();
 }
+
+test.describe("Board · the Done role", () => {
+  /** Sends a column set straight to the endpoint, which is where the rule lives */
+  async function putColumns(request: APIRequestContext, columns: unknown[]) {
+    return request.put(`/api/projects/${PROJECT_ID}/columns`, {
+      headers: ADMIN_AUTH,
+      data: { columns },
+    });
+  }
+
+  test("a board cannot be saved out of having one", async ({ request }) => {
+    const before = await storedColumns(request);
+    const done = before.find((c) => c.role === "done");
+    // The premise: this board HAS a Done column, so the refusal below is about removing it
+    expect(done, "the seeded board has no Done column, so this proves nothing").toBeDefined();
+
+    const res = await putColumns(
+      request,
+      before.map((c) => (c.role === "done" ? { ...c, role: "review" } : c))
+    );
+
+    expect(res.status()).toBe(400);
+    expect((await res.json()).error).toMatch(/needs a column meaning Done/);
+    // Refused, not partially applied
+    expect((await storedColumns(request)).find((c) => c.role === "done")?.id).toBe(done!.id);
+  });
+
+  // The control, in the same run: the endpoint is not simply refusing everything
+  test("and every other column change still saves", async ({ request }) => {
+    const before = await storedColumns(request);
+
+    const res = await putColumns(
+      request,
+      before.map((c) => (c.role === "backlog" ? { ...c, label: "Someday" } : c))
+    );
+
+    expect(res.status(), await res.text()).toBe(200);
+    expect((await storedColumns(request)).map((c) => c.label)).toContain("Someday");
+  });
+
+  /**
+   * The half that decides the shape of the whole fix, and the assertion that separates it from the
+   * rule it rejects.
+   *
+   * A **state** rule (`if (!willHaveDone) refuse`) passes every other test in this block: each of
+   * them either starts from a board that has Done or supplies one in the request. What only the
+   * transition rule allows is a done-less board saving a change that has nothing to do with Done —
+   * which is every edit somebody would make while repairing it, and the reason refusing the state
+   * would lock a board out of this very screen.
+   *
+   * `demoteDoneColumn` rather than a hand-rolled write: it is the fixture the sprint specs already
+   * use, and it fails loudly if it matches nothing.
+   */
+  test("a board that already has none keeps saving unrelated changes, and can be repaired", async ({
+    request,
+  }) => {
+    await demoteDoneColumn();
+    // The premise, read back rather than assumed
+    expect((await storedColumns(request)).some((c) => c.role === "done")).toBe(false);
+
+    await test.step("an edit that does not mention Done still saves", async () => {
+      const unrelated = await putColumns(
+        request,
+        (await storedColumns(request)).map((c) =>
+          c.role === "backlog" ? { ...c, label: "Someday" } : c
+        )
+      );
+
+      expect(unrelated.status(), await unrelated.text()).toBe(200);
+      expect((await storedColumns(request)).map((c) => c.label)).toContain("Someday");
+    });
+
+    await test.step("and the board can be given the role back", async () => {
+      const repaired = await putColumns(
+        request,
+        (await storedColumns(request)).map((c) =>
+          c.label === "Ready to Test" ? { ...c, role: "done" } : c
+        )
+      );
+
+      expect(repaired.status(), await repaired.text()).toBe(200);
+      expect((await storedColumns(request)).some((c) => c.role === "done")).toBe(true);
+    });
+  });
+
+  /**
+   * The path a person actually walks. Everything above drives the endpoint; this one presses Save
+   * in the editor, which is where the refusal is met and where the draft has to survive it.
+   */
+  test("pressing Save on a done-less draft says why, and keeps the work", async ({ page }) => {
+    await signIn(page);
+    await openSection(page, "Board");
+
+    await roleOf(page, "Done").selectOption("review");
+    await saveButton(page).click();
+
+    await expect(page.getByText(/needs a column meaning Done/)).toBeVisible();
+    // The draft is not thrown away: the Save button is still offered, with the change still in it
+    await expect(saveButton(page)).toBeVisible();
+    await expect(roleOf(page, "Done")).toHaveValue("review");
+  });
+
+  test("the settings screen says what such a board loses", async ({ page }) => {
+    await signIn(page);
+    await openSection(page, "Board");
+
+    const warning = page.getByText(/No column means Done/i);
+    // The control first: an ordinary board shows no warning, so its appearance below is the change
+    await expect(warning).toHaveCount(0);
+
+    await roleOf(page, "Done").selectOption("review");
+
+    await expect(warning).toBeVisible();
+    await expect(page.getByText(/worker stops enforcing task dependencies/)).toBeVisible();
+  });
+});
 
 test.describe("Board · Columns", () => {
   test("a column added here is on the board the server serves, and survives a reload", async ({
