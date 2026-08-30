@@ -1,11 +1,11 @@
 import { IPmAutonomy } from "@/types";
 
-// An unattended turn may not put work onto a machine: claimNextTask now requires the task's
-// assignedBy to equal the machine's owner, and assign_task always stamps assignedBy as the "pm"
-// user itself (task-service.ts's updateTask sets it from the actor, and ctx.pmUserId is that actor
-// here) — never the new assignee — so nothing this tool assigns can arm a machine even without
-// this list. Kept anyway: reassigning a person's work with nobody directing it is a problem of its
-// own, and the task text that drove the turn is written by whoever can edit the board.
+// An unattended turn may not put work onto a machine, and since BP-419 **this list is the only
+// thing enforcing that.** It used to be belt and braces: the claim required assignedBy to equal the
+// machine's owner while assign_task always stamped the "pm" user, so nothing the PM assigned could
+// arm a machine whatever this list said. BP-419 made the PM's assignment a real hand-over, so that
+// second guarantee is gone — withholding assign_task from an unattended turn is now load-bearing,
+// not a tidy-up. Do not remove an entry here on the strength of the sentence that used to be above.
 export const BOARD_REVIEW_DISALLOWED_TOOLS = ["change_status", "create_task", "assign_task"];
 
 export const NEEDS_HUMAN_REVIEW_DISALLOWED_TOOLS = ["change_status", "assign_task"];

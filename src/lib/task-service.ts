@@ -49,6 +49,7 @@ import type { NormalisedRecurrence } from "@/lib/recurrence";
 import { onTaskStatusChanged } from "@/lib/pm/triggers";
 import { canBeAssigned } from "@/lib/grants";
 import { workerUsername } from "@/lib/worker-user";
+import { pmUserId } from "@/lib/pm/pm-user";
 
 export const MAX_EXECUTION_ATTEMPTS = 3;
 
@@ -1612,13 +1613,22 @@ export async function claimNextTask(
   const done = columnIdsWithRole(project, "done");
   const openBlockers = done.length > 0 ? await openBlockersFor(projectId, approved, done) : [];
 
+  // Looked up rather than upserted: a poll must not be what creates the PM account on an instance
+  // that has never run one, and an instance without it simply has no PM assignments to honour.
+  const pm = await pmUserId();
+  const assigners = pm ? [ownerId, pm] : [ownerId];
+
   return Task.findOneAndUpdate(
     {
       project: projectId,
       status: { $in: approved },
-      // Assigned to the owner *by* the owner. Somebody else assigning you work is a proposal, and
-      // the surface for accepting one does not exist yet — so it is refused rather than run
-      // unattended.
+      // Assigned to the owner, by the owner or by the PM. A *person* assigning you work is still a
+      // proposal, and the surface for accepting one does not exist yet — so it is refused rather
+      // than run unattended. The PM is not somebody else: it is a first-party actor on this
+      // instance, and BP-419 is the decision that its assignment is a real hand-over rather than a
+      // proposal nothing could ever accept. What that rests on: an actor able to steer the PM can
+      // queue work onto a machine unattended, and BP-321 (injected text replayed to the model as
+      // system truth) is therefore a control on this, not a neighbouring bug.
       //
       // A task stored before BP-358 has no `assignedBy` key at all, and a missing field never
       // equals an ObjectId, so this refuses every one of them. That is the decision, not an
@@ -1631,7 +1641,7 @@ export async function claimNextTask(
       // to be reassigned regardless — which stamps `assignedBy` through updateTask. The agent
       // picker says so on the task itself.
       assignee: ownerId,
-      assignedBy: ownerId,
+      assignedBy: { $in: assigners },
       // Choosing an agent is the hand-over; a task naming none is one a person is doing
       agent: { $ne: null },
       // On an array field this means "holds none of them", so a task with no blockers, one whose
