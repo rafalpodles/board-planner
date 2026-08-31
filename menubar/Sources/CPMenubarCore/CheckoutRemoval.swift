@@ -181,8 +181,18 @@ public struct CheckoutRemoval: Sendable {
             // repository of its own.
             guard !sameDirectory(nestedRoot, root) else { continue }
 
-            let nestedDirty = run(["-C", nested, "status", "--porcelain"], nested)
-            let nestedUnpushed = run(["-C", nested, "log", "--all", "--not", "--remotes", "--oneline"], nested)
+            // The same two exclusions and the same submodule flag as the parent sweep above, for
+            // the same reasons. Bare `--all` here was worse than it was there: a `vendor/thesis`
+            // with maintenance enabled, or one `git notes add` in it, refused the PARENT checkout
+            // for ever — a refusal naming a repository the operator may not think of as theirs,
+            // that nothing they do to their own checkout clears.
+            let nestedDirty = run(
+                ["-C", nested, "status", "--porcelain", "--ignore-submodules=none"], nested)
+            let nestedUnpushed = run(
+                [
+                    "-C", nested, "log", "--exclude=refs/prefetch/*", "--exclude=refs/notes/*",
+                    "--all", "--not", "--remotes", "--oneline",
+                ], nested)
             let unexaminable = nestedDirty.code != 0 || nestedUnpushed.code != 0
             if unexaminable || !lines(nestedDirty.output).isEmpty || !lines(nestedUnpushed.output).isEmpty {
                 return .refused(
