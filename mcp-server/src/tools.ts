@@ -150,7 +150,7 @@ export function registerTools(server: McpServer, client: ApiClient): void {
         priority: z.string().optional().describe("Priority: low, medium, high, or urgent (default: medium)"),
         category: z.string().optional().describe("Category — one of the project's configured categories (defaults: bug, doc, user-story, idea)"),
         assignee: z.string().optional().describe("Assignee username"),
-        status: z.string().optional().describe("Initial status (default: planned)"),
+        status: z.string().optional().describe("Initial status — one of the project's column ids, get_project lists them (default: the board's first backlog column)"),
         acceptanceCriteria: z.string().optional().describe("Acceptance criteria (markdown checklist, converted to structured checklist items)"),
         fields: z
           .record(z.string(), z.any())

@@ -36,7 +36,7 @@ export const GET = withProjectAccess(async (request, { params }) => {
     // NONE of them exists, which is the shape that cannot mean anything but a typo: both MCP tools
     // described the seeded ids as a closed list, so an agent on a renamed board asked for `todo`,
     // was answered `200 []`, and reported that there was nothing to do (BP-511).
-    const statuses = statusParam.split(",").filter(Boolean);
+    const statuses = statusParam.split(",").map((id) => id.trim()).filter(Boolean);
     if (statuses.length > 0) {
       const columnIds = getColumnIds(board);
       if (!statuses.some((id) => columnIds.includes(id))) {

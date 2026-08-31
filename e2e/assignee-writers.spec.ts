@@ -70,6 +70,38 @@ test("a username nobody holds is refused, and the assignee it would have cleared
 });
 
 /**
+ * The lookup normalises, and after this change that is a refusal path: without it `@ADMIN` is a
+ * 400 naming an account that plainly exists. A silent no-op became a hard refusal, so the
+ * normalisation went from a nicety to load-bearing.
+ */
+test("a username is matched normalised, not literally", async ({ request }) => {
+  const shouted = await put(request, { assignee: `  ${ADMIN_USERNAME.toUpperCase()} ` });
+
+  expect(shouted.status(), await shouted.text()).toBe(200);
+  expect((await stored(request)).assignee?.username).toBe(ADMIN_USERNAME);
+});
+
+/**
+ * The shape a GET answers with, and what a REST client that PUTs the whole object back sends. The
+ * two writers disagreed about it: create coerced it to the string `[object Object]`, update let it
+ * past and into the cast, where it left the route a 500.
+ */
+test("an assignee that is not a username is refused rather than cast", async ({ request }) => {
+  for (const value of [{ _id: "x", username: "admin" }, 7, ["admin"]]) {
+    const refused = await put(request, { assignee: value });
+
+    expect(refused.status(), `assignee: ${JSON.stringify(value)} — ${await refused.text()}`).toBe(
+      400
+    );
+  }
+
+  // The message reaches a model as a tool result, so it is not a place to echo the argument back
+  const long = await put(request, { assignee: "x".repeat(5000) });
+  expect(long.status()).toBe(400);
+  expect((await long.json()).error.length).toBeLessThan(500);
+});
+
+/**
  * `""` is what a cleared picker sends. The assignee is an ObjectId ref and cannot hold one, so it
  * reached Mongoose as a cast and left the route a 500 — the one shape "unassign" arrives in that
  * the field refuses. Both forms send `null` instead, which is why this stood.

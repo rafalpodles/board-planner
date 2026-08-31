@@ -255,10 +255,20 @@ describe("GET /api/projects/:projectId/tasks — the status filter", () => {
     { id: "doing", label: "Doing", role: "active", order: 1 },
   ];
 
+  /**
+   * Projection-aware, and that is the whole point of it. A mock that answers the same document
+   * whatever it was asked for cannot see the route forgetting to LOAD `columns` — and that fails
+   * in the worst direction: `getColumnIds` then falls back to the built-in seven, so a board that
+   * renamed its columns is refused its own real ids. The e2e board cannot see it either, because
+   * its seeded columns are byte-identical to those defaults.
+   */
   beforeEach(() => {
-    projectFindById.mockReturnValue({
-      lean: async () => ({ categories: [{ name: "bug" }], columns: COLUMNS }),
-    });
+    projectFindById.mockImplementation((_id: unknown, projection?: string) => ({
+      lean: async () => ({
+        categories: [{ name: "bug" }],
+        ...(String(projection).split(/\s+/).includes("columns") ? { columns: COLUMNS } : {}),
+      }),
+    }));
   });
 
   it("refuses an id this board has no column for, naming the ones it has", async () => {
@@ -287,6 +297,23 @@ describe("GET /api/projects/:projectId/tasks — the status filter", () => {
 
     expect(res.status).toBe(200);
     expect(filterUsed()?.status).toEqual({ $in: ["doing", "in_progress"] });
+  });
+
+  // A comma list is what a caller types, and a space after the comma is the likeliest form of the
+  // mistake — it used to pass the gate on the first id and silently match nothing for the rest
+  it("trims the ids it was given", async () => {
+    const res = await GET(request("?status=doing,%20backlog"), ctx());
+
+    expect(res.status).toBe(200);
+    expect(filterUsed()?.status).toEqual({ $in: ["doing", "backlog"] });
+  });
+
+  // It reaches a model as a tool result, so the refusal is not a place to echo the parameter back
+  it("does not echo an unbounded status back into the refusal", async () => {
+    const res = await GET(request(`?status=${"x".repeat(5000)}`), ctx());
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.length).toBeLessThan(500);
   });
 
   // A board predating the seeding migration stores no columns and runs on the built-in seven, so

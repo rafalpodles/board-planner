@@ -122,7 +122,7 @@ export function registerPlannerTools(server: McpServer): void {
         title: z.string().describe("Task title"),
         description: z.string().optional().describe("Task description"),
         priority: z.string().optional().describe("Priority: low, medium, high, or urgent (default: medium)"),
-        category: z.string().optional().describe("Category: bug, doc, user-story, idea"),
+        category: z.string().optional().describe("Category — one of the project's configured categories (defaults: bug, doc, user-story, idea)"),
         assignee: z
           .string()
           .optional()
@@ -130,7 +130,7 @@ export function registerPlannerTools(server: McpServer): void {
             "Assignee username. A new task never names an agent — hand it to a machine with " +
               "update_task once it exists."
           ),
-        status: z.string().optional().describe("Initial status (default: planned)"),
+        status: z.string().optional().describe("Initial status — one of the project's column ids, get_project lists them (default: the board's first backlog column)"),
         acceptanceCriteria: z
           .string()
           .optional()

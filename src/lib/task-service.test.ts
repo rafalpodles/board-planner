@@ -3051,6 +3051,54 @@ describe("an assignee username nobody holds", () => {
     expect(result.ok).toBe(true);
     expect(taskCreate.mock.calls[0][0].assignee).toBe("u2");
   });
+
+  /**
+   * The lookup normalises, and after this change that is a refusal path rather than a silent
+   * no-op: without it `@RPO` is a 400 naming an account that plainly exists.
+   */
+  it("looks the name up normalised, so case and stray spaces are not a refusal", async () => {
+    held("kuba");
+
+    const result = await updateTask("p1", "t1", { assignee: "  KUBA " }, "actor");
+
+    expect(result.ok).toBe(true);
+    expect(userFindOne).toHaveBeenCalledWith({ username: "kuba" });
+  });
+
+  // The message reaches a model as a tool result, so it is not a place to echo an unbounded
+  // parameter back — the comment on `noSuchAccount` says so, and nothing held it to that
+  it("does not echo an unbounded username back into the refusal", async () => {
+    const result = await updateTask("p1", "t1", { assignee: "x".repeat(5000) }, "actor");
+
+    expect(result.ok).toBe(false);
+    expect((result as { error: string }).error.length).toBeLessThan(500);
+  });
+
+  /**
+   * The two writers disagreed about everything that was not a plain username. `createTask` coerced
+   * with `String()`, so a populated assignee — the shape a GET answers with, and what a client that
+   * PUTs the whole object back sends — became `@[object Object]`; `updateTask` let the same value
+   * past a `typeof` check and into the cast, where it left the route a **500**.
+   */
+  describe.each([
+    ["an object, which is what a populated assignee is", { _id: "u2", username: "kuba" }],
+    ["a number", 7],
+    ["an array", ["kuba"]],
+  ])("an assignee given as %s", (_label, value) => {
+    it("is refused by updateTask, rather than reaching the cast", async () => {
+      const result = await updateTask("p1", "t1", { assignee: value }, "actor");
+
+      expect(result).toMatchObject({ ok: false, status: 400 });
+      expect(findOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it("is refused by createTask in the same words, before a task number is spent", async () => {
+      const result = await createTask("p1", "actor", { title: "Ordinary title", assignee: value });
+
+      expect(result).toMatchObject({ ok: false, status: 400 });
+      expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
+    });
+  });
 });
 
 describe("createTask stamps who assigned it", () => {

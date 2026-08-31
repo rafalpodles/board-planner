@@ -127,10 +127,35 @@ function noAccessToAssign(username?: string | null): string {
 }
 
 // Its neighbour, and deliberately not its wording: the message is the only thing telling a caller
-// which repair to attempt, and "add them in Members" is not one for a name nobody holds. Sliced
-// because this string reaches a model as a tool result.
+// which repair to attempt, and "add them in Members" is not one for a name nobody holds. It names
+// where the right names live, because the caller most likely to read it is a model — the PM agent
+// has no roster tool at all. Sliced because this string reaches one as a tool result.
+//
+// Telling this apart from the refusal above says "@x exists" to anyone who can write to any board,
+// which is the account-existence oracle BP-502 opened on the read side. Left open on purpose and
+// deferred to its own ticket: closing it means scoping resolution to `canBeAssigned`, giving up the
+// property BP-502 chose — a task assigned to somebody before they lost access stays findable. What
+// this change adds is that both refusals now come BEFORE the write, so probing costs nothing and
+// leaves no activity row behind.
 function noSuchAccount(username: unknown): string {
-  return `No account named "@${String(username).slice(0, 64)}" — the assignee is a username.`;
+  return `No account named "@${String(username).slice(0, 64)}" — the assignee is a username, and the project's Members settings list the ones this board takes.`;
+}
+
+/**
+ * The one resolution both writers use, because they disagreed about everything that was not a
+ * plain username. `createTask` coerced with `String()`, so a populated assignee — the shape a GET
+ * answers with — became `@[object Object]`; `updateTask` let the same value past a `typeof` check
+ * and into the cast, where it left the route a 500.
+ */
+type ResolvedAssignee = { user: { _id: Types.ObjectId; username: string } };
+
+async function resolveAssignee(value: unknown): Promise<ResolvedAssignee | TaskServiceResult> {
+  if (typeof value !== "string") {
+    return { ok: false, error: "The assignee must be a username", status: 400 };
+  }
+  const user = await User.findOne({ username: value.trim().toLowerCase() });
+  if (!user) return { ok: false, error: noSuchAccount(value), status: 400 };
+  return { user: user as unknown as ResolvedAssignee["user"] };
 }
 
 // The one list, used by task-service's own writes and by both task routes. It was three copies
@@ -550,19 +575,15 @@ export async function createTask(
   }
 
   let assigneeId = null;
-  if (body.assignee) {
-    const assigneeUser = await User.findOne({
-      username: String(body.assignee).toLowerCase(),
-    });
-    // Refused rather than dropped. An unresolved name used to leave `assigneeId` null and answer
-    // 201 with the task unassigned, so a caller that misspelt one was told the assignment happened.
-    if (!assigneeUser) {
-      return { ok: false, error: noSuchAccount(body.assignee), status: 400 };
+  // Refused rather than dropped. An unresolved name used to leave `assigneeId` null and answer 201
+  // with the task unassigned, so a caller that misspelt one was told the assignment happened.
+  if (body.assignee !== undefined && body.assignee !== null && body.assignee !== "") {
+    const resolved = await resolveAssignee(body.assignee);
+    if (!("user" in resolved)) return resolved;
+    if (!(await canBeAssigned(String(resolved.user._id), projectId))) {
+      return { ok: false, error: noAccessToAssign(resolved.user.username), status: 400 };
     }
-    if (!(await canBeAssigned(String(assigneeUser._id), projectId))) {
-      return { ok: false, error: noAccessToAssign(assigneeUser.username), status: 400 };
-    }
-    assigneeId = assigneeUser._id;
+    assigneeId = resolved.user._id;
   }
 
   const priority = body.priority ?? DEFAULT_PRIORITY;
@@ -1048,20 +1069,16 @@ export async function updateTask(
 
   // "" is what a cleared picker sends, and an ObjectId ref cannot hold it — it reached the cast and
   // left the route a 500. Normalised first, as `sprint` and `agent` above are, so unassigning has
-  // one shape and the lookup below is only ever asked about a name somebody meant.
+  // one shape and the resolution below is only ever asked about a name somebody meant.
   if (updates.assignee === "") updates.assignee = null;
 
-  // Resolve assignee username to ObjectId if provided as string. A name nobody holds is refused,
-  // never resolved to null: that wrote `assignee: null` over whoever held the task and answered
-  // 200, so `update_task(assignee: "rafa")` unassigned them and said nothing (BP-511).
-  if (updates.assignee && typeof updates.assignee === "string") {
-    const assigneeUser = await User.findOne({
-      username: (updates.assignee as string).toLowerCase(),
-    });
-    if (!assigneeUser) {
-      return { ok: false, error: noSuchAccount(updates.assignee), status: 400 };
-    }
-    updates.assignee = assigneeUser._id;
+  // A name nobody holds is refused, never resolved to null: that wrote `assignee: null` over
+  // whoever held the task and answered 200, so `update_task(assignee: "rafa")` unassigned them and
+  // said nothing (BP-511).
+  if (updates.assignee !== undefined && updates.assignee !== null) {
+    const resolved = await resolveAssignee(updates.assignee);
+    if (!("user" in resolved)) return resolved;
+    updates.assignee = resolved.user._id;
   }
 
   // Stamped only when the assignee actually moves, and after it has been resolved to an id so the
