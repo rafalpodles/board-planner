@@ -73,6 +73,9 @@ public struct CheckoutRemoval: Sendable {
         // submodule, and one that made the parent report clean while the submodule held both
         // modified files and a commit on no remote (BP-423, measured).
         //
+        // Narrow by design: plain `status` already reports a dirty submodule as ` M sub`. This flag
+        // bites only where config told git to look away.
+        //
         // The cost is real and deliberate: a repository that ships `ignore = all` because its
         // submodule is always dirty now refuses, and its operator has done nothing wrong. Refusing
         // to delete is recoverable by hand; the other direction is not.
@@ -100,11 +103,26 @@ public struct CheckoutRemoval: Sendable {
         // for a checkout somebody walked away from and later unticked — leaves HEAD detached with
         // refs/heads/main still at the pushed tip and every other guard clean (BP-423, measured).
         //
-        // The stash check runs first for a reason measured here: `--all` is every ref under refs/,
-        // which includes refs/stash, so a single stashed change reports as "2 commits on no
-        // remote". True, and the wrong sentence to hand somebody — `git stash list` is what they
-        // would act on.
-        let unpushed = run(["-C", path, "log", "--all", "--not", "--remotes", "--oneline"], path)
+        // `--all` is every namespace under refs/, and two of them are not work anybody loses:
+        //
+        // - refs/prefetch/*, which `git maintenance start` writes hourly and deliberately keeps out
+        //   of the remote-tracking refs. Those commits came FROM the remote, so counting them as
+        //   "on no remote" refuses a pristine checkout — permanently, since the next prefetch
+        //   re-arms it. Measured against a repository with maintenance enabled.
+        // - refs/notes/*, which are not pushed by default. One `git notes add` refused the whole
+        //   checkout.
+        //
+        // Both were found by review after the first cut shipped `--all` bare. They are the failure
+        // this ticket is most exposed to: a guard widened until it refuses honest work.
+        //
+        // refs/stash stays in the sweep deliberately, which is why the stash check runs first: a
+        // single stashed change otherwise reports as "2 commits on no remote". True, and the wrong
+        // sentence to hand somebody — `git stash list` is what they would act on.
+        let unpushed = run(
+            [
+                "-C", path, "log", "--exclude=refs/prefetch/*", "--exclude=refs/notes/*",
+                "--all", "--not", "--remotes", "--oneline",
+            ], path)
         guard unpushed.code == 0 else {
             return .refused(reason: "could not tell whether \(path) has unpushed commits")
         }
@@ -122,8 +140,12 @@ public struct CheckoutRemoval: Sendable {
         //
         // So the guard is the shape that is recoverable-work-shaped on its own terms: an ignored
         // directory that is its own git repository, holding changes or commits that are on no
-        // remote. That is the `vendor/thesis` case this ticket measured, and it costs an honest
-        // checkout nothing.
+        // remote. It catches that shape when the ignored entry IS the repository; an ignored
+        // `vendor/` with a repository at `vendor/thesis` is not caught — see the bound below.
+        //
+        // It is not free, either: a nested repository that legitimately has no remote at all — a
+        // local scratch repo — refuses on every commit it holds. That is the direction this errs
+        // in deliberately, but "costs an honest checkout nothing" would be untrue.
         //
         // Deliberately NOT covered, decided by rpo rather than assumed: a plain ignored file. A
         // stray .env in a checkout this deletes is gone, and nothing here will stop it. Said out
@@ -132,12 +154,18 @@ public struct CheckoutRemoval: Sendable {
         // Only the listed entry is examined, not a walk beneath it: an ignored `vendor/` holding a
         // repository at `vendor/thesis` is missed. Bounded on purpose — the listing is the cheap
         // part and a recursive search of ignored trees is not.
+        // `-z`, because porcelain v1 quotes a path that needs it and a quoted path ends in `"`
+        // rather than `/`, so the directory test below skipped a nested repository under
+        // `my scratch/`. `core.quotePath=false` is not the fix — measured: it unquotes non-ASCII
+        // and leaves the space quoted. `-z` emits the path raw, and still marks a directory.
         let ignored = run(
-            ["-C", path, "status", "--porcelain", "--ignored", "--ignore-submodules=none"], path)
+            [
+                "-C", path, "status", "--porcelain", "-z", "--ignored", "--ignore-submodules=none",
+            ], path)
         guard ignored.code == 0 else {
             return .refused(reason: "could not tell what \(path) is ignoring")
         }
-        for entry in lines(ignored.output) where entry.hasPrefix("!! ") {
+        for entry in fields(ignored.output) where entry.hasPrefix("!! ") {
             let relative = String(entry.dropFirst(3))
             // Directories only, which git marks with a trailing slash. A repository is a directory,
             // and pointing a subprocess at a file as its working directory is not a no-op: the
@@ -161,7 +189,7 @@ public struct CheckoutRemoval: Sendable {
                     reason: "\(nestedRoot) is a separate repository inside \(path), and it "
                         + (unexaminable
                             ? "could not be examined"
-                            : "holds work that is on no remote"))
+                            : "holds work that exists nowhere else"))
             }
         }
 
@@ -184,7 +212,10 @@ public struct CheckoutRemoval: Sendable {
         // remove` honours it. This app deletes with FileManager, so without reading the `locked`
         // line it walked past the one guard a person set deliberately — and left the registration
         // behind (BP-423, measured). Unlocking is the documented way to say you meant it.
-        for entry in worktreeEntries(worktrees.output, root: root) where exists(entry.path) {
+        // Not filtered by `exists`: "on the external drive" is the canonical reason to lock a
+        // worktree, and an unmounted volume is exactly when the directory is absent. Deleting the
+        // checkout takes the object store that worktree depends on with it.
+        for entry in worktreeEntries(worktrees.output, root: root) {
             if let reason = entry.lockReason {
                 return .refused(
                     reason: reason.isEmpty
@@ -254,8 +285,9 @@ public struct CheckoutRemoval: Sendable {
 
     /// Each linked worktree with whatever `git worktree lock` recorded for it. A record runs from a
     /// `worktree` field to the next one, so the `locked` field is read against the entry it belongs
-    /// to rather than the listing as a whole — a locked main checkout would otherwise refuse every
-    /// removal in the folder.
+    /// to rather than the listing as a whole. Not because a locked main checkout is a risk — git
+    /// answers `the main working tree cannot be locked` — but because a `locked` field read against
+    /// the listing rather than its record would attach to whichever entry happened to precede it.
     ///
     /// `locked` with no reason is a bare field, which is why the reason is optional-but-present
     /// rather than a non-empty string: git records the lock either way.

@@ -293,6 +293,71 @@ final class CheckoutRemovalReachTests: XCTestCase {
 
         XCTAssertEqual(verdict(checkout), .go(worktrees: []))
     }
+
+    // MARK: - the widening that nearly refused everything
+
+    /// `git maintenance start` fetches hourly into refs/prefetch/* and deliberately leaves the
+    /// remote-tracking refs alone. Those commits came FROM the remote, so `--all` counted them as
+    /// work on no remote and refused a pristine checkout — permanently, since the next prefetch
+    /// re-arms it. Found by review after the first cut shipped `--all` bare.
+    func testAPrefetchRefDoesNotMakeACleanCheckoutRefuse() {
+        let checkout = cleanCheckout()
+        let head = git(checkout, ["rev-parse", "HEAD"]).output
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        _ = git(checkout, ["update-ref", "refs/prefetch/remotes/origin/main", head])
+
+        XCTAssertEqual(verdict(checkout), .go(worktrees: []))
+    }
+
+    /// Notes are not pushed by default, and one of them refused the whole checkout.
+    func testAGitNoteDoesNotMakeACleanCheckoutRefuse() {
+        let checkout = cleanCheckout()
+        _ = git(checkout, ["notes", "add", "-m", "reviewed by hand"])
+
+        XCTAssertTrue(
+            git(checkout, ["notes", "list"]).code == 0,
+            "the premise: this git supports notes")
+        XCTAssertEqual(verdict(checkout), .go(worktrees: []))
+    }
+
+    /// A tag on a pushed commit is not unpushed work either — the control on the other side of the
+    /// same widening.
+    func testATagOnAPushedCommitStillGoes() {
+        let checkout = cleanCheckout()
+        _ = git(checkout, ["tag", "v1"])
+        _ = git(checkout, ["tag", "-a", "v2", "-m", "annotated"])
+
+        XCTAssertEqual(verdict(checkout), .go(worktrees: []))
+    }
+
+    // MARK: - shapes the first cut skipped
+
+    /// core.quotePath quotes a path with a space, so it ends in `"` and the directory test missed
+    /// it — a nested repository under `my scratch/` was invisible.
+    func testANestedRepositoryUnderAQuotedDirectoryIsSeen() {
+        let checkout = cleanCheckout()
+        let nested = nestedRepo(in: checkout, at: "my scratch")
+        FileManager.default.createFile(
+            atPath: nested + "/draft.md", contents: Data("unsaved\n".utf8))
+
+        XCTAssertTrue(refusal(checkout).contains("separate repository"), refusal(checkout))
+    }
+
+    /// "on the external drive" is the reason people lock a worktree for, and an unmounted volume is
+    /// exactly when its directory is absent. The first cut filtered locks by `exists` and so
+    /// honoured the lock only while it did not matter.
+    func testALockedWorktreeOnAnUnmountedVolumeIsStillHonoured() {
+        let checkout = cleanCheckout()
+        let worktree = dir + "/cp-worktrees/BP-4"
+        _ = git(checkout, ["worktree", "add", "-q", "-b", "bp-4/worker", worktree])
+        _ = git(checkout, ["worktree", "lock", "--reason", "on the external drive", worktree])
+        try? FileManager.default.removeItem(atPath: worktree)
+
+        let reason = refusal(checkout)
+        XCTAssertTrue(reason.contains("locked"), reason)
+        XCTAssertTrue(reason.contains("external drive"), reason)
+    }
+
 }
 
 private extension RemovalVerdict {
