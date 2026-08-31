@@ -139,6 +139,10 @@ public struct CheckoutRemoval: Sendable {
         }
         for entry in lines(ignored.output) where entry.hasPrefix("!! ") {
             let relative = String(entry.dropFirst(3))
+            // Directories only, which git marks with a trailing slash. A repository is a directory,
+            // and pointing a subprocess at a file as its working directory is not a no-op: the
+            // spawn fails and a `waitUntilExit` on a task that never started waits for ever.
+            guard relative.hasSuffix("/") else { continue }
             let nested = (path as NSString).appendingPathComponent(relative)
             guard exists(nested) else { continue }
 
