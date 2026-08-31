@@ -229,4 +229,38 @@ final class CheckoutRemovalWorktreeTests: XCTestCase {
         }
         XCTAssertEqual(worktrees.count, 1, "the clean worktree is still taken with it")
     }
+
+    /// BP-427. `worktree list --porcelain` terminates each attribute with a newline, so a worktree
+    /// whose path contains one spans two lines and the parser keeps the prefix — measured on real
+    /// git as `…/odd/we` out of `…/odd/we\nird`. That truncated path is then never status-checked,
+    /// and later fails to delete, which is the partial-removal case in the same ticket.
+    ///
+    /// Only real git can answer this: a stub would emit whatever shape it was handed.
+    func testAWorktreeWhosePathContainsANewlineComesBackWhole() {
+        let dir = NSTemporaryDirectory() + "bp427-" + UUID().uuidString
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+
+        let origin = dir + "/origin.git"
+        let checkout = dir + "/checkout"
+        let odd = dir + "/we\nird"
+        _ = git(dir, ["init", "-q", "--bare", origin])
+        try? FileManager.default.createDirectory(atPath: checkout, withIntermediateDirectories: true)
+        _ = git(checkout, ["init", "-q", "-b", "main"])
+        FileManager.default.createFile(atPath: checkout + "/README", contents: Data("hi\n".utf8))
+        _ = git(checkout, ["add", "."])
+        _ = git(checkout, ["commit", "-qm", "one"])
+        _ = git(checkout, ["remote", "add", "origin", origin])
+        _ = git(checkout, ["push", "-q", "-u", "origin", "HEAD"])
+        _ = git(checkout, ["worktree", "add", "-q", odd, "-b", "odd"])
+
+        guard case .go(let worktrees) = removal().check(path: checkout, workerIsBusy: false) else {
+            return XCTFail("expected a go, got \(removal().check(path: checkout, workerIsBusy: false))")
+        }
+
+        XCTAssertEqual(
+            worktrees.map { ($0 as NSString).standardizingPath },
+            [(odd as NSString).standardizingPath],
+            "the path arrives with its newline, not cut at it")
+    }
 }
