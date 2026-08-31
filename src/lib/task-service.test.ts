@@ -3054,7 +3054,9 @@ describe("an assignee username nobody holds", () => {
 
   /**
    * The lookup normalises, and after this change that is a refusal path rather than a silent
-   * no-op: without it `@RPO` is a 400 naming an account that plainly exists.
+   * no-op: without it `@RPO` is a 400 naming an account that plainly exists. The schema normalises
+   * a query too (`username` is `lowercase`+`trim`), so the property survives either way and the
+   * e2e cannot tell them apart — what this pins is that the writer does not lean on that.
    */
   it("looks the name up normalised, so case and stray spaces are not a refusal", async () => {
     held("kuba");
@@ -3085,7 +3087,13 @@ describe("an assignee username nobody holds", () => {
     ["a number", 7],
     ["an array", ["kuba"]],
   ])("an assignee given as %s", (_label, value) => {
+    // Resolvable on purpose: a writer that coerced the value would find this account and answer
+    // 200, so the refusal below can only come from the type. Against the block's default fixture —
+    // nobody holds anything — a coercing writer refuses too, for the wrong reason, and the test
+    // could not tell the two apart.
     it("is refused by updateTask, rather than reaching the cast", async () => {
+      held("kuba");
+
       const result = await updateTask("p1", "t1", { assignee: value }, "actor");
 
       expect(result).toMatchObject({ ok: false, status: 400 });
@@ -3093,6 +3101,8 @@ describe("an assignee username nobody holds", () => {
     });
 
     it("is refused by createTask in the same words, before a task number is spent", async () => {
+      held("kuba");
+
       const result = await createTask("p1", "actor", { title: "Ordinary title", assignee: value });
 
       expect(result).toMatchObject({ ok: false, status: 400 });
