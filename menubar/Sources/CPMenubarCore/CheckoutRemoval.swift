@@ -114,6 +114,53 @@ public struct CheckoutRemoval: Sendable {
                 reason: "\(path) has \(commits.count) commit\(commits.count == 1 ? " that is" : "s that are") on no remote")
         }
 
+        // Ignored paths hold things that exist nowhere else, and `status` says nothing about them.
+        // The whole of `--ignored` cannot be the guard: measured on an ordinary clean checkout it
+        // reports twenty entries — .DS_Store, .next/, .env.local — so refusing on any of them
+        // refuses every real checkout on day one. And no git flag separates the .env.local, which
+        // is unrecoverable, from the .DS_Store, which is noise.
+        //
+        // So the guard is the shape that is recoverable-work-shaped on its own terms: an ignored
+        // directory that is its own git repository, holding changes or commits that are on no
+        // remote. That is the `vendor/thesis` case this ticket measured, and it costs an honest
+        // checkout nothing.
+        //
+        // Deliberately NOT covered, decided by rpo rather than assumed: a plain ignored file. A
+        // stray .env in a checkout this deletes is gone, and nothing here will stop it. Said out
+        // loud because the alternative is a guard set that reads as complete.
+        //
+        // Only the listed entry is examined, not a walk beneath it: an ignored `vendor/` holding a
+        // repository at `vendor/thesis` is missed. Bounded on purpose — the listing is the cheap
+        // part and a recursive search of ignored trees is not.
+        let ignored = run(
+            ["-C", path, "status", "--porcelain", "--ignored", "--ignore-submodules=none"], path)
+        guard ignored.code == 0 else {
+            return .refused(reason: "could not tell what \(path) is ignoring")
+        }
+        for entry in lines(ignored.output) where entry.hasPrefix("!! ") {
+            let relative = String(entry.dropFirst(3))
+            let nested = (path as NSString).appendingPathComponent(relative)
+            guard exists(nested) else { continue }
+
+            let top = run(["-C", nested, "rev-parse", "--show-toplevel"], nested)
+            guard top.code == 0 else { continue }
+            let nestedRoot = top.output.trimmingCharacters(in: .whitespacesAndNewlines)
+            // Answering with the checkout means this is an ordinary ignored path inside it, not a
+            // repository of its own.
+            guard !sameDirectory(nestedRoot, root) else { continue }
+
+            let nestedDirty = run(["-C", nested, "status", "--porcelain"], nested)
+            let nestedUnpushed = run(["-C", nested, "log", "--all", "--not", "--remotes", "--oneline"], nested)
+            let unexaminable = nestedDirty.code != 0 || nestedUnpushed.code != 0
+            if unexaminable || !lines(nestedDirty.output).isEmpty || !lines(nestedUnpushed.output).isEmpty {
+                return .refused(
+                    reason: "\(nestedRoot) is a separate repository inside \(path), and it "
+                        + (unexaminable
+                            ? "could not be examined"
+                            : "holds work that is on no remote"))
+            }
+        }
+
         let worktrees = run(["-C", path, "worktree", "list", "--porcelain", "-z"], path)
         guard worktrees.code == 0 else {
             return .refused(reason: "could not list the worktrees of \(path)")
