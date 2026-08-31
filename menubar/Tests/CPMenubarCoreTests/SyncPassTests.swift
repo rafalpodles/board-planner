@@ -212,7 +212,15 @@ final class SyncPassTests: XCTestCase {
             removal: removal,
             onStep: { steps.append($0) })
 
-        XCTAssertEqual(steps.count, 1)
+        // The step, not just the count: a `.failed` would also be one step, and would also leave
+        // the directory where it is.
+        XCTAssertEqual(
+            steps,
+            [
+                .refused(
+                    project: "OLD",
+                    reason: "the worker is running a task — stop it, or wait for it to finish")
+            ])
         XCTAssertTrue(FileManager.default.fileExists(atPath: path))
     }
 
