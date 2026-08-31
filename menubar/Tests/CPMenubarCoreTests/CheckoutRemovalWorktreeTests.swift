@@ -147,11 +147,13 @@ final class CheckoutRemovalWorktreeTests: XCTestCase {
     /// Premise two. `git worktree list` names the repository's main checkout first, whichever
     /// worktree it is run from — which is what put the repository at the top of the deletion list.
     /// Asserted separately so a failure here reads as "git changed", not "the guard changed".
+    // Driven with `-z`, like production: the property is about git's ordering and holds either way,
+    // but pinning it on output the app no longer parses is how a test and its subject drift.
     func testWorktreeListNamesTheMainCheckoutFirstEvenFromAWorktree() {
         let (checkout, worktree) = repoWithWorktree()
 
-        let listing = git(worktree, ["worktree", "list", "--porcelain"]).output
-        let first = listing.split(separator: "\n").first.map(String.init) ?? ""
+        let listing = git(worktree, ["worktree", "list", "--porcelain", "-z"]).output
+        let first = listing.split(separator: "\0").first.map(String.init) ?? ""
 
         XCTAssertTrue(first.hasPrefix("worktree "), "unexpected porcelain shape: \(listing)")
         XCTAssertEqual(
@@ -231,9 +233,11 @@ final class CheckoutRemovalWorktreeTests: XCTestCase {
     }
 
     /// BP-427. `worktree list --porcelain` terminates each attribute with a newline, so a worktree
-    /// whose path contains one spans two lines and the parser keeps the prefix — measured on real
-    /// git as `…/odd/we` out of `…/odd/we\nird`. That truncated path is then never status-checked,
-    /// and later fails to delete, which is the partial-removal case in the same ticket.
+    /// whose path contains one spans two lines and the parser keeps the prefix — `…/we` out of the
+    /// `…/we\nird` this test creates. The truncated path names nothing on disk, so the `exists`
+    /// filter drops it and the verdict is `.go(worktrees: [])`: the removal then reports having
+    /// deleted the checkout while that worktree is still there. A success that left something
+    /// behind, rather than the partial removal covered elsewhere in the ticket.
     ///
     /// Only real git can answer this: a stub would emit whatever shape it was handed.
     func testAWorktreeWhosePathContainsANewlineComesBackWhole() {

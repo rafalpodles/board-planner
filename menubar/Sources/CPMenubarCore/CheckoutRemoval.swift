@@ -136,6 +136,19 @@ public struct CheckoutRemoval: Sendable {
         output.split(separator: "\n").map(String.init).filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
     }
 
+    /// Split on NUL, not newline. `-z` terminates each attribute with NUL instead of "\n", which is
+    /// the only way a path containing a newline survives the listing: without it such a path spans
+    /// two lines and the parser keeps the prefix — measured on real git as `…/we` out of `…/we\nird`.
+    ///
+    /// What that cost is worse than it sounds. The truncated path names nothing on disk, so
+    /// `check`'s `exists` filter drops it and the verdict becomes `.go(worktrees: [])`: the removal
+    /// then reports `.removed` — "deleted /co" — while the live worktree is still there. It is not
+    /// the partial-removal case in the same ticket; it is a clean-looking success that left
+    /// something behind (BP-427).
+    private func fields(_ output: String) -> [String] {
+        output.split(separator: "\0").map(String.init)
+    }
+
     /// Every `worktree <path>` line except the checkout itself — and except the repository's main
     /// checkout, which `git worktree list` always names first.
     ///
@@ -155,22 +168,8 @@ public struct CheckoutRemoval: Sendable {
     ///
     /// BP-427 has since added `-z`, so that truncation no longer happens — which removes the case
     /// that made positional the safer of the two rather than merely the simpler. Positional is kept
-    /// because the property it rests on is the one measured across a locked worktree, a prunable
-    /// entry mid-list, four registrations, and `worktree move`; the argument above is recorded as
-    /// it was, with its premise now narrower.
-    /// Split on NUL, not newline. `-z` terminates each attribute with NUL instead of "\n", which
-    /// is the only way a path containing a newline survives the listing: without it such a path
-    /// spans two lines and the parser keeps the prefix — measured, `…/odd/we` out of `…/odd/we\nird`
-    /// — after which that worktree is never status-checked and later fails to delete (BP-427).
-    ///
-    /// The record separator becomes an empty field, which the filter below drops, so the shape the
-    /// rest of this reads is unchanged.
-    private func fields(_ output: String) -> [String] {
-        output.split(separator: "\0", omittingEmptySubsequences: false)
-            .map(String.init)
-            .filter { !$0.isEmpty }
-    }
-
+    /// because the property it rests on is the one measured above; the argument is recorded as it
+    /// was, with its premise now narrower.
     private func linkedWorktrees(_ output: String, root: String) -> [String] {
         fields(output)
             .compactMap { line in
