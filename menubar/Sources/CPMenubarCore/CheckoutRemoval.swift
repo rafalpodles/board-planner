@@ -68,7 +68,18 @@ public struct CheckoutRemoval: Sendable {
             break
         }
 
-        let dirty = run(["-C", path, "status", "--porcelain"], path)
+        // --ignore-submodules=none overrides `submodule.<name>.ignore = all`, which a repository
+        // can ship in its own committed .gitmodules — a common setting for a large vendored
+        // submodule, and one that made the parent report clean while the submodule held both
+        // modified files and a commit on no remote (BP-423, measured).
+        //
+        // Narrow by design: plain `status` already reports a dirty submodule as ` M sub`. This flag
+        // bites only where config told git to look away.
+        //
+        // The cost is real and deliberate: a repository that ships `ignore = all` because its
+        // submodule is always dirty now refuses, and its operator has done nothing wrong. Refusing
+        // to delete is recoverable by hand; the other direction is not.
+        let dirty = run(["-C", path, "status", "--porcelain", "--ignore-submodules=none"], path)
         guard dirty.code == 0 else {
             return .refused(reason: "could not tell whether \(path) has uncommitted changes")
         }
@@ -78,10 +89,40 @@ public struct CheckoutRemoval: Sendable {
                 reason: "\(path) has \(changed.count) uncommitted change\(changed.count == 1 ? "" : "s")")
         }
 
-        // Work that exists nowhere else. `--branches --not --remotes` catches both a branch ahead
-        // of its upstream and a branch that never had one — the second being the case a plain
-        // ahead/behind check misses, and the likelier one on a machine that writes branches.
-        let unpushed = run(["-C", path, "log", "--branches", "--not", "--remotes", "--oneline"], path)
+        // A stash is uncommitted work that `status` does not show, and it dies with the directory
+        let stash = run(["-C", path, "stash", "list"], path)
+        guard stash.code == 0 else {
+            return .refused(reason: "could not tell whether \(path) has stashed changes")
+        }
+        if !lines(stash.output).isEmpty {
+            return .refused(reason: "\(path) has stashed changes")
+        }
+
+        // Work that exists nowhere else. `--all` rather than `--branches`: the latter is the word
+        // that made a detached HEAD invisible, and an interrupted `rebase -i` — the likeliest state
+        // for a checkout somebody walked away from and later unticked — leaves HEAD detached with
+        // refs/heads/main still at the pushed tip and every other guard clean (BP-423, measured).
+        //
+        // `--all` is every namespace under refs/, and two of them are not work anybody loses:
+        //
+        // - refs/prefetch/*, which `git maintenance start` writes hourly and deliberately keeps out
+        //   of the remote-tracking refs. Those commits came FROM the remote, so counting them as
+        //   "on no remote" refuses a pristine checkout — permanently, since the next prefetch
+        //   re-arms it. Measured against a repository with maintenance enabled.
+        // - refs/notes/*, which are not pushed by default. One `git notes add` refused the whole
+        //   checkout.
+        //
+        // Both were found by review after the first cut shipped `--all` bare. They are the failure
+        // this ticket is most exposed to: a guard widened until it refuses honest work.
+        //
+        // refs/stash stays in the sweep deliberately, which is why the stash check runs first: a
+        // single stashed change otherwise reports as "2 commits on no remote". True, and the wrong
+        // sentence to hand somebody — `git stash list` is what they would act on.
+        let unpushed = run(
+            [
+                "-C", path, "log", "--exclude=refs/prefetch/*", "--exclude=refs/notes/*",
+                "--all", "--not", "--remotes", "--oneline",
+            ], path)
         guard unpushed.code == 0 else {
             return .refused(reason: "could not tell whether \(path) has unpushed commits")
         }
@@ -91,13 +132,75 @@ public struct CheckoutRemoval: Sendable {
                 reason: "\(path) has \(commits.count) commit\(commits.count == 1 ? " that is" : "s that are") on no remote")
         }
 
-        // A stash is uncommitted work that `status` does not show, and it dies with the directory
-        let stash = run(["-C", path, "stash", "list"], path)
-        guard stash.code == 0 else {
-            return .refused(reason: "could not tell whether \(path) has stashed changes")
+        // Ignored paths hold things that exist nowhere else, and `status` says nothing about them.
+        // The whole of `--ignored` cannot be the guard: measured on an ordinary clean checkout it
+        // reports twenty entries — .DS_Store, .next/, .env.local — so refusing on any of them
+        // refuses every real checkout on day one. And no git flag separates the .env.local, which
+        // is unrecoverable, from the .DS_Store, which is noise.
+        //
+        // So the guard is the shape that is recoverable-work-shaped on its own terms: an ignored
+        // directory that is its own git repository, holding changes or commits that are on no
+        // remote. It catches that shape when the ignored entry IS the repository; an ignored
+        // `vendor/` with a repository at `vendor/thesis` is not caught — see the bound below.
+        //
+        // It is not free, either: a nested repository that legitimately has no remote at all — a
+        // local scratch repo — refuses on every commit it holds. That is the direction this errs
+        // in deliberately, but "costs an honest checkout nothing" would be untrue.
+        //
+        // Deliberately NOT covered, decided by rpo rather than assumed: a plain ignored file. A
+        // stray .env in a checkout this deletes is gone, and nothing here will stop it. Said out
+        // loud because the alternative is a guard set that reads as complete.
+        //
+        // Only the listed entry is examined, not a walk beneath it: an ignored `vendor/` holding a
+        // repository at `vendor/thesis` is missed. Bounded on purpose — the listing is the cheap
+        // part and a recursive search of ignored trees is not.
+        // `-z`, because porcelain v1 quotes a path that needs it and a quoted path ends in `"`
+        // rather than `/`, so the directory test below skipped a nested repository under
+        // `my scratch/`. `core.quotePath=false` is not the fix — measured: it unquotes non-ASCII
+        // and leaves the space quoted. `-z` emits the path raw, and still marks a directory.
+        let ignored = run(
+            [
+                "-C", path, "status", "--porcelain", "-z", "--ignored", "--ignore-submodules=none",
+            ], path)
+        guard ignored.code == 0 else {
+            return .refused(reason: "could not tell what \(path) is ignoring")
         }
-        if !lines(stash.output).isEmpty {
-            return .refused(reason: "\(path) has stashed changes")
+        for entry in fields(ignored.output) where entry.hasPrefix("!! ") {
+            let relative = String(entry.dropFirst(3))
+            // Directories only, which git marks with a trailing slash. A repository is a directory,
+            // and pointing a subprocess at a file as its working directory is not a no-op: the
+            // spawn fails and a `waitUntilExit` on a task that never started waits for ever.
+            guard relative.hasSuffix("/") else { continue }
+            let nested = (path as NSString).appendingPathComponent(relative)
+            guard exists(nested) else { continue }
+
+            let top = run(["-C", nested, "rev-parse", "--show-toplevel"], nested)
+            guard top.code == 0 else { continue }
+            let nestedRoot = top.output.trimmingCharacters(in: .whitespacesAndNewlines)
+            // Answering with the checkout means this is an ordinary ignored path inside it, not a
+            // repository of its own.
+            guard !sameDirectory(nestedRoot, root) else { continue }
+
+            // The same two exclusions and the same submodule flag as the parent sweep above, for
+            // the same reasons. Bare `--all` here was worse than it was there: a `vendor/thesis`
+            // with maintenance enabled, or one `git notes add` in it, refused the PARENT checkout
+            // for ever — a refusal naming a repository the operator may not think of as theirs,
+            // that nothing they do to their own checkout clears.
+            let nestedDirty = run(
+                ["-C", nested, "status", "--porcelain", "--ignore-submodules=none"], nested)
+            let nestedUnpushed = run(
+                [
+                    "-C", nested, "log", "--exclude=refs/prefetch/*", "--exclude=refs/notes/*",
+                    "--all", "--not", "--remotes", "--oneline",
+                ], nested)
+            let unexaminable = nestedDirty.code != 0 || nestedUnpushed.code != 0
+            if unexaminable || !lines(nestedDirty.output).isEmpty || !lines(nestedUnpushed.output).isEmpty {
+                return .refused(
+                    reason: "\(nestedRoot) is a separate repository inside \(path), and it "
+                        + (unexaminable
+                            ? "could not be examined"
+                            : "holds work that exists nowhere else"))
+            }
         }
 
         let worktrees = run(["-C", path, "worktree", "list", "--porcelain", "-z"], path)
@@ -115,6 +218,22 @@ public struct CheckoutRemoval: Sendable {
         // a path that is not there throws when it is removed. Skipping only the status check left
         // one stale entry — the ordinary result of an `rm -rf` without `git worktree prune` —
         // failing the removal on every poll, for ever, which is what the old `try?` had hidden.
+        // `git worktree lock` is a refusal an operator wrote by hand, and git's own `worktree
+        // remove` honours it. This app deletes with FileManager, so without reading the `locked`
+        // line it walked past the one guard a person set deliberately — and left the registration
+        // behind (BP-423, measured). Unlocking is the documented way to say you meant it.
+        // Not filtered by `exists`: "on the external drive" is the canonical reason to lock a
+        // worktree, and an unmounted volume is exactly when the directory is absent. Deleting the
+        // checkout takes the object store that worktree depends on with it.
+        for entry in worktreeEntries(worktrees.output, root: root) {
+            if let reason = entry.lockReason {
+                return .refused(
+                    reason: reason.isEmpty
+                        ? "the worktree at \(entry.path) is locked"
+                        : "the worktree at \(entry.path) is locked: \(reason)")
+            }
+        }
+
         let linked = linkedWorktrees(worktrees.output, root: root).filter(exists)
         for worktree in linked {
             let dirty = run(["-C", worktree, "status", "--porcelain"], worktree)
@@ -171,12 +290,30 @@ public struct CheckoutRemoval: Sendable {
     /// because the property it rests on is the one measured above; the argument is recorded as it
     /// was, with its premise now narrower.
     private func linkedWorktrees(_ output: String, root: String) -> [String] {
-        fields(output)
-            .compactMap { line in
-                line.hasPrefix("worktree ") ? String(line.dropFirst("worktree ".count)) : nil
+        worktreeEntries(output, root: root).map(\.path)
+    }
+
+    /// Each linked worktree with whatever `git worktree lock` recorded for it. A record runs from a
+    /// `worktree` field to the next one, so the `locked` field is read against the entry it belongs
+    /// to rather than the listing as a whole. Not because a locked main checkout is a risk — git
+    /// answers `the main working tree cannot be locked` — but because a `locked` field read against
+    /// the listing rather than its record would attach to whichever entry happened to precede it.
+    ///
+    /// `locked` with no reason is a bare field, which is why the reason is optional-but-present
+    /// rather than a non-empty string: git records the lock either way.
+    private func worktreeEntries(_ output: String, root: String) -> [(path: String, lockReason: String?)] {
+        var entries: [(path: String, lockReason: String?)] = []
+        for field in fields(output) {
+            if field.hasPrefix("worktree ") {
+                entries.append((String(field.dropFirst("worktree ".count)), nil))
+            } else if field == "locked" || field.hasPrefix("locked ") {
+                guard !entries.isEmpty else { continue }
+                entries[entries.count - 1].lockReason =
+                    String(field.dropFirst("locked".count)).trimmingCharacters(in: .whitespaces)
             }
-            .dropFirst()
-            .filter { !sameDirectory($0, root) }
+        }
+        // Positional, as the docblock above argues: git names the repository's main checkout first.
+        return entries.dropFirst().filter { !sameDirectory($0.path, root) }
     }
 
     private func sameDirectory(_ a: String, _ b: String) -> Bool {
