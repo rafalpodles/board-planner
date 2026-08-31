@@ -189,6 +189,22 @@ and `SIGINT` both finish the task in flight before the loop exits.
   changes to `package.json`, lockfiles, `.npmrc`, hooks and workflows *before* the build gate runs
   npm on the worktree, and installs run with `--ignore-scripts`. Cost ordering alone would have
   executed agent-written lifecycle scripts first.
+- **Nothing is checked out of a poisoned clone, and a poisoned clone is not tried twice.** The
+  first thing a run does is read the shared checkout's own git config and refuse it if it carries a
+  key git would run — a `filter.<name>.smudge`, an `ext::` transport, an `include.path` this cannot
+  vouch for. That has to come first because `git worktree add` **checks files out**, and a checkout
+  is where a smudge filter runs: a key an earlier run's agent planted in `<main>/.git/config`
+  otherwise executes inside the call that creates the worktree, before any gate on that attempt has
+  seen anything. Measured on git 2.50.1.
+
+  Refusing alone would only hand the same clone to the next attempt, so the project is
+  **quarantined**: this machine stops claiming for it, the socket and the log say why, and the task
+  is handed back with its attempt refunded — it did nothing wrong. The quarantine is deliberately
+  not lifted by the next rebind, because a re-scan reading clean thirty seconds later is exactly
+  what re-planting produces. Remove the key, then restart the worker.
+
+  The key is **not** cleared for you. Writing to a config an attacker also writes is a race, and it
+  destroys the evidence of what was planted.
 - **No subprocess inherits the worker's secrets through its environment.** The child environment is
   an allowlist, so the worker's credential reaches neither the agent nor any dependency's install
   script. Only delivery carries what `git` and `gh` need for the remote — and it runs inside the

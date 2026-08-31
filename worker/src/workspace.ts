@@ -3,7 +3,7 @@ import { tmpdir } from "os";
 import { join, resolve, sep } from "path";
 import { WorkerConfig } from "./config.js";
 import { childEnv } from "./env.js";
-import { configBaseline } from "./repos.js";
+import { configBaseline, plantedConfig } from "./repos.js";
 import { CommandResult, Runner } from "./exec.js";
 import { gitArgs, GIT_SAFE_ENV } from "./git-safety.js";
 
@@ -29,6 +29,27 @@ export class BaseUnavailableError extends Error {
     super(message);
     this.name = "BaseUnavailableError";
     this.kind = kind;
+  }
+}
+
+/**
+ * The shared checkout carries a key git would run, and the run is over before it does.
+ *
+ * Its own class because the pipeline owes this a different answer from every other creation
+ * failure: the task did nothing, and the next task on this machine meets the same key.
+ */
+export class PoisonedCheckoutError extends Error {
+  /** What was found — a key with its scope, or plantedConfig's sentinel for a config it cannot read. */
+  readonly finding: string;
+
+  constructor(finding: string) {
+    // Phrased to fit both of plantedConfig's answers, the way commitAll's is: "sets an unreadable
+    // git config" is nonsense for the second.
+    super(
+      `refusing to check out: ${JSON.stringify(finding)} is in the shared checkout's git config, and a checkout is where git runs one`
+    );
+    this.name = "PoisonedCheckoutError";
+    this.finding = finding;
   }
 }
 
@@ -270,6 +291,19 @@ export function createWorkspace(
     async create(taskKey, slug) {
       const path = pathFor(taskKey);
       const branch = `${taskKey.toLowerCase()}/${slug}`;
+
+      // First, ahead of the fetch and well ahead of `worktree add`. That command checks files
+      // **out**, and a checkout is exactly where a `filter.<name>.smudge` runs — so a key planted
+      // in the shared `<main>/.git/config` by an earlier run's agent executes inside this call, on
+      // every later attempt, before any gate has seen anything. BP-403's guard is in `commitAll`,
+      // downstream of the run this one would already have started. Measured on git 2.50.1:
+      // workspace.planted-config.integration.test.ts plants one and watches git run it.
+      //
+      // No baseline is passed and none is wanted: the repository's own scopes are judged on their
+      // own, and this runs before the run whose changes a baseline would exist to date.
+      const planted = await plantedConfig(runner, config.repoPath);
+      if (planted) throw new PoisonedCheckoutError(planted);
+
       let baseSha: string;
       try {
         baseSha = await resolveBase();

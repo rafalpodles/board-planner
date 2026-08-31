@@ -205,6 +205,28 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   // before a task is claimed — checkRepo runs at every rebind — and spending an agent's run to
   // rediscover it at the build gate is the cost this map exists to stop (BP-379).
   const unusable = new Map<string, string>();
+  /**
+   * Projects this machine has stopped offering because their checkout itself is the problem — a
+   * git config carrying a key git runs on checkout, found by the run that refused to make one
+   * (BP-504).
+   *
+   * Deliberately not cleared on rebind, unlike `unusable` above. That map is recomputed from a
+   * static check and may legitimately change; this one records that something planted an
+   * executable key in a checkout this machine binds, and a re-scan reading clean thirty seconds
+   * later is exactly what re-planting produces. Refusing each attempt without this is the old
+   * requeue-against-an-unchanged-clone with the charge taken off: the loop claims again on the
+   * next pass, for ever. An operator removes the key and restarts the worker.
+   */
+  const quarantined = new Map<string, string>();
+
+  function quarantineProject(projectId: string, reason: string): void {
+    if (quarantined.has(projectId)) return;
+    quarantined.set(projectId, reason);
+    deps.logError(
+      `quarantining project ${projectId}: its checkout's git config carries ${reason}. ` +
+        `Nothing on this machine will claim for it again until the key is gone and this worker is restarted.`
+    );
+  }
 
   function configFor(projectId: string): WorkerConfig | null {
     const identity = loadIdentity(identityStore);
@@ -508,6 +530,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
           gateFor: gateFromEntry,
           recordRun: (project, record) => outbox.add({ kind: "run", projectId: project, record }),
           logError: deps.logError,
+          quarantineProject,
           runner: deps.runner,
           signal,
           telemetry,
@@ -531,7 +554,10 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     pollIntervalMs: () => policy.pollIntervalMs,
     // A project whose checkout cannot pass the gates is not claimed from. The refusal would arrive
     // anyway — at the build gate, after the agent has worked — with the reason this already has.
-    assignments: () => [...bound.keys()].filter((projectId) => !unusable.has(projectId)),
+    assignments: () =>
+      [...bound.keys()].filter(
+        (projectId) => !unusable.has(projectId) && !quarantined.has(projectId)
+      ),
     api,
     execute,
     sleep: deps.sleep,
@@ -598,7 +624,9 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
         project,
         // Empty when the project is claimable. Non-empty is the answer to "why is this machine
         // sitting on a project and doing nothing", which otherwise has no answer anywhere.
-        blocked: unusable.get(project) ?? "",
+        // Quarantine first: it is the answer that outranks a gate requirement, and the one an
+        // operator has to act on.
+        blocked: quarantined.get(project) ?? unusable.get(project) ?? "",
         baseBranch: repo.config.baseBranch,
         model: repo.config.model,
         reviewModel: repo.config.reviewModel,
