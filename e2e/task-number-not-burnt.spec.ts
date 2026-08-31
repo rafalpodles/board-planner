@@ -56,6 +56,8 @@ test("a refused create leaves the next task number unspent", async ({ page, requ
     expect(await refusedCreate(request, { category: "chore" })).toContain("category");
     expect(await refusedCreate(request, { dueDate: "next thursday" })).toContain("due date");
     expect(await refusedCreate(request, { recurrence: { interval: 0 } })).toContain("recurrence");
+    // BP-511: this one did not refuse at all — it created the task unassigned and answered 201
+    expect(await refusedCreate(request, { assignee: "nobody-here" })).toContain("nobody-here");
 
     const tasks = await request.get(`/api/projects/${PROJECT_KEY}/tasks`, { headers: ADMIN_AUTH });
     expect(await tasks.json()).toHaveLength(SEEDED_TASKS);

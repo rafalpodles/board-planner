@@ -1003,6 +1003,27 @@ export async function seedSecondEscalationColumn() {
   await mongoose.disconnect();
 }
 
+/**
+ * One column id this board does not share with `DEFAULT_PROJECT_COLUMNS`.
+ *
+ * The seeded columns are byte-identical to those seven, so a reader that forgets to LOAD a board's
+ * columns falls back to them and answers exactly as a correct one does — every claim that
+ * project-defined columns decide is invisible on this fixture. Renaming one id separates the two
+ * answers in both directions: the new id has to be accepted and the old one refused.
+ */
+export const RENAMED_COLUMN_ID = "parked";
+
+export async function seedRenamedColumn() {
+  const db = (await connect()).db!;
+  await db
+    .collection("projects")
+    .updateOne(
+      { _id: PROJECT_ID, "columns.id": "planned" },
+      { $set: { "columns.$.id": RENAMED_COLUMN_ID, "columns.$.label": "Parked" } }
+    );
+  await mongoose.disconnect();
+}
+
 /** seed(), minus the two session rows — see seedBoard. */
 export const seedWithoutSessions = () => seedBoard(false);
 
