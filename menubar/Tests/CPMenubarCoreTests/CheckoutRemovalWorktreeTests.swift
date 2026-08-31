@@ -147,11 +147,13 @@ final class CheckoutRemovalWorktreeTests: XCTestCase {
     /// Premise two. `git worktree list` names the repository's main checkout first, whichever
     /// worktree it is run from — which is what put the repository at the top of the deletion list.
     /// Asserted separately so a failure here reads as "git changed", not "the guard changed".
+    // Driven with `-z`, like production: the property is about git's ordering and holds either way,
+    // but pinning it on output the app no longer parses is how a test and its subject drift.
     func testWorktreeListNamesTheMainCheckoutFirstEvenFromAWorktree() {
         let (checkout, worktree) = repoWithWorktree()
 
-        let listing = git(worktree, ["worktree", "list", "--porcelain"]).output
-        let first = listing.split(separator: "\n").first.map(String.init) ?? ""
+        let listing = git(worktree, ["worktree", "list", "--porcelain", "-z"]).output
+        let first = listing.split(separator: "\0").first.map(String.init) ?? ""
 
         XCTAssertTrue(first.hasPrefix("worktree "), "unexpected porcelain shape: \(listing)")
         XCTAssertEqual(
@@ -228,5 +230,41 @@ final class CheckoutRemovalWorktreeTests: XCTestCase {
             return
         }
         XCTAssertEqual(worktrees.count, 1, "the clean worktree is still taken with it")
+    }
+
+    /// BP-427. `worktree list --porcelain` terminates each attribute with a newline, so a worktree
+    /// whose path contains one spans two lines and the parser keeps the prefix — `…/we` out of the
+    /// `…/we\nird` this test creates. The truncated path names nothing on disk, so the `exists`
+    /// filter drops it and the verdict is `.go(worktrees: [])`: the removal then reports having
+    /// deleted the checkout while that worktree is still there. A success that left something
+    /// behind, rather than the partial removal covered elsewhere in the ticket.
+    ///
+    /// Only real git can answer this: a stub would emit whatever shape it was handed.
+    func testAWorktreeWhosePathContainsANewlineComesBackWhole() {
+        let dir = NSTemporaryDirectory() + "bp427-" + UUID().uuidString
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+
+        let origin = dir + "/origin.git"
+        let checkout = dir + "/checkout"
+        let odd = dir + "/we\nird"
+        _ = git(dir, ["init", "-q", "--bare", origin])
+        try? FileManager.default.createDirectory(atPath: checkout, withIntermediateDirectories: true)
+        _ = git(checkout, ["init", "-q", "-b", "main"])
+        FileManager.default.createFile(atPath: checkout + "/README", contents: Data("hi\n".utf8))
+        _ = git(checkout, ["add", "."])
+        _ = git(checkout, ["commit", "-qm", "one"])
+        _ = git(checkout, ["remote", "add", "origin", origin])
+        _ = git(checkout, ["push", "-q", "-u", "origin", "HEAD"])
+        _ = git(checkout, ["worktree", "add", "-q", odd, "-b", "odd"])
+
+        guard case .go(let worktrees) = removal().check(path: checkout, workerIsBusy: false) else {
+            return XCTFail("expected a go, got \(removal().check(path: checkout, workerIsBusy: false))")
+        }
+
+        XCTAssertEqual(
+            worktrees.map { ($0 as NSString).standardizingPath },
+            [(odd as NSString).standardizingPath],
+            "the path arrives with its newline, not cut at it")
     }
 }
