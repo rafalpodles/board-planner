@@ -24,13 +24,23 @@ public struct PlannedRemoval: Equatable {
 public enum SyncStep: Equatable {
     case added(project: String, path: String)
     case removed(project: String, path: String)
-    /// The grant was dropped and nothing was deleted, because the directory had already gone.
-    /// Distinct from `.removed` because telling an operator a directory was deleted when it was
-    /// not is the kind of thing they only discover when they go looking for it.
+    /// The grant was dropped and the checkout directory was not deleted, because it had already
+    /// gone. Distinct from `.removed` because telling an operator a directory was deleted when it
+    /// was not is the kind of thing they only discover when they go looking for it.
+    ///
+    /// Says nothing about the checkout's worktrees. They can only have been deleted if the
+    /// directory vanished between the guard and the act, which needs a race — but "nothing was
+    /// deleted" would be a stronger claim than this case can make.
     case forgotten(project: String, path: String)
     /// A removal a guard said no to. Not a failure: the checkout is intact and the reason is one
     /// the operator can act on.
     case refused(project: String, reason: String)
+    /// A removal that deleted some of what it meant to and then stopped. Its own case rather than a
+    /// `.failed` carrying a longer sentence, for the reason `.forgotten` is its own case: the
+    /// difference between "nothing happened" and "some of it is gone" is the whole of what the
+    /// operator has afterwards, and a message naming only the path that failed reads as the first
+    /// while meaning the second.
+    case partiallyRemoved(project: String, removed: [String], reason: String)
     case failed(project: String, reason: String)
 }
 

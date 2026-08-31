@@ -1,6 +1,17 @@
 import XCTest
 @testable import CPMenubarCore
 
+/// A porcelain listing in the shape `-z` actually emits — every attribute NUL-terminated, records
+/// separated by an empty field. Written from the readable form so the fixtures below stay legible
+/// while the parser still sees its real input. Measured against git rather than assumed: `-z`
+/// swaps the "\n" terminator for "\0" and changes nothing else.
+func porcelainZ(_ readable: String) -> String {
+    readable
+        .split(separator: "\n", omittingEmptySubsequences: false)
+        .map { $0.trimmingCharacters(in: .whitespaces) }
+        .joined(separator: "\0") + "\0"
+}
+
 final class CheckoutRemovalTests: XCTestCase {
     private final class Git: @unchecked Sendable {
         /// Keyed on the git subcommand, so a test says what one answer is and inherits the rest
@@ -20,7 +31,7 @@ final class CheckoutRemovalTests: XCTestCase {
                         return (0, ".git")
                     }
                     if args.contains("--porcelain") && args.contains("worktree") {
-                        return (0, "worktree /checkouts/SB\nHEAD abc\n")
+                        return (0, porcelainZ("worktree /checkouts/SB\nHEAD abc"))
                     }
                     return (0, "")
                 },
@@ -110,6 +121,7 @@ final class CheckoutRemovalTests: XCTestCase {
         git.present = ["/checkouts/SB", "/checkouts/cp-worktrees/w1/bp-1", "/checkouts/cp-worktrees/w1/bp-2"]
         git.answers["worktree"] = (
             0,
+            porcelainZ(
             """
             worktree /checkouts/SB
             HEAD abc
@@ -120,6 +132,7 @@ final class CheckoutRemovalTests: XCTestCase {
             worktree /checkouts/cp-worktrees/w1/bp-2
             HEAD ghi
             """
+            )
         )
 
         let verdict = git.removal().check(path: "/checkouts/SB", workerIsBusy: false)
@@ -155,6 +168,7 @@ final class CheckoutRemovalTests: XCTestCase {
         git.present = ["/checkouts/SB", "/checkouts/elsewhere", "/checkouts/cp-worktrees/w1/bp-1"]
         git.answers["worktree"] = (
             0,
+            porcelainZ(
             """
             worktree /checkouts/elsewhere
             HEAD abc
@@ -165,6 +179,7 @@ final class CheckoutRemovalTests: XCTestCase {
             worktree /checkouts/cp-worktrees/w1/bp-1
             HEAD ghi
             """
+            )
         )
 
         let verdict = git.removal().check(path: "/checkouts/SB", workerIsBusy: false)
@@ -180,6 +195,7 @@ final class CheckoutRemovalTests: XCTestCase {
         git.present = ["/checkouts/SB", "/checkouts/cp-worktrees/w1/live"]
         git.answers["worktree"] = (
             0,
+            porcelainZ(
             """
             worktree /checkouts/SB
             HEAD abc
@@ -190,6 +206,7 @@ final class CheckoutRemovalTests: XCTestCase {
             worktree /checkouts/cp-worktrees/w1/pruned
             HEAD ghi
             """
+            )
         )
 
         XCTAssertEqual(
@@ -205,6 +222,7 @@ final class CheckoutRemovalTests: XCTestCase {
         git.present = ["/checkouts/SB", "/checkouts/cp-worktrees/w1/bp-1"]
         git.answers["worktree"] = (
             0,
+            porcelainZ(
             """
             worktree /checkouts/SB
             HEAD abc
@@ -212,6 +230,7 @@ final class CheckoutRemovalTests: XCTestCase {
             worktree /checkouts/cp-worktrees/w1/bp-1
             HEAD def
             """
+            )
         )
         // Only the worktree's status fails; the checkout's has already passed by then. The output
         // is empty on purpose: with a message here, dropping the exit-code guard would still refuse

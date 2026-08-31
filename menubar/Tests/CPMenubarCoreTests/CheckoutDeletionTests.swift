@@ -14,13 +14,17 @@ final class CheckoutDeletionTests: XCTestCase {
         var removed: [String] = []
         var forgotten: [String] = []
         var failOn: String?
+        var failForget = false
 
         func remove(_ path: String) throws {
             if path == failOn { throw Boom(path: path) }
             removed.append(path)
         }
 
-        func forget(_ path: String) throws { forgotten.append(path) }
+        func forget(_ path: String) throws {
+            if failForget { throw Boom(path: path) }
+            forgotten.append(path)
+        }
     }
 
     private func deletion(_ r: Recorder, exists: @escaping @Sendable (String) -> Bool = { _ in true })
@@ -49,11 +53,14 @@ final class CheckoutDeletionTests: XCTestCase {
         let step = deletion(r).perform(
             project: "BP", path: "/co", worktrees: ["/wt/one", "/wt/two", "/wt/three"])
 
-        guard case .failed(let project, let reason) = step else {
-            XCTFail("expected a failure, got \(step)")
+        // Partial, not failed: /wt/one is gone and saying only "/wt/two could not be removed"
+        // reads as nothing having happened (BP-427).
+        guard case .partiallyRemoved(let project, let removed, let reason) = step else {
+            XCTFail("expected a partial removal, got \(step)")
             return
         }
         XCTAssertEqual(project, "BP")
+        XCTAssertEqual(removed, ["/wt/one"], "what already went is named")
         XCTAssertTrue(reason.contains("/wt/two"), "the reason names the worktree: \(reason)")
         XCTAssertEqual(r.removed, ["/wt/one"], "it stops at the throw rather than carrying on")
         XCTAssertFalse(r.removed.contains("/co"), "the checkout survives a failed worktree delete")
@@ -111,8 +118,7 @@ final class CheckoutDeletionTests: XCTestCase {
                 if args.contains("--show-toplevel") { return (0, "/co\n") }
                 if args.contains("--git-dir") || args.contains("--git-common-dir") { return (0, ".git") }
                 if args.contains("worktree") {
-                    let listed = (["/co"] + worktrees).map { "worktree \($0)" }.joined(separator: "\n\n")
-                    return (0, listed)
+                    return (0, porcelainZ((["/co"] + worktrees).map { "worktree \($0)" }.joined(separator: "\n\n")))
                 }
                 return (0, "")
             },
@@ -141,5 +147,60 @@ final class CheckoutDeletionTests: XCTestCase {
 
         XCTAssertEqual(step, .removed(project: "BP", path: "/co"))
         XCTAssertEqual(r.removed, ["/wt/one", "/wt/two", "/co"])
+    }
+
+    // MARK: - BP-427: what the operator is told when only some of it went
+
+    /// The checkout itself refuses after both worktrees are already gone. The old step named the
+    /// checkout and nothing else, which reads as "nothing was deleted" — the opposite of the truth.
+    func testAFailedCheckoutDeleteStillNamesTheWorktreesThatWent() {
+        let r = Recorder()
+        r.failOn = "/co"
+
+        let step = deletion(r).perform(
+            project: "BP", path: "/co", worktrees: ["/wt/one", "/wt/two"])
+
+        XCTAssertEqual(
+            step,
+            .partiallyRemoved(
+                project: "BP", removed: ["/wt/one", "/wt/two"], reason: "could not remove /co"))
+        XCTAssertEqual(r.forgotten, [], "the grant stays, so the worker may still clean up")
+    }
+
+    /// Everything is deleted and only the allowlist write fails. The disk is in its final state and
+    /// the grant is not — the one case where "partly done" means the directory is gone.
+    func testAFailedForgetAfterEverythingWentIsStillPartial() {
+        let r = Recorder()
+        r.failForget = true
+
+        let step = deletion(r).perform(project: "BP", path: "/co", worktrees: ["/wt/one"])
+
+        guard case .partiallyRemoved(_, let removed, _) = step else {
+            return XCTFail("expected a partial removal, got \(step)")
+        }
+        XCTAssertEqual(removed, ["/wt/one", "/co"], "the checkout is gone and has to be named")
+    }
+
+    /// The control that keeps the new case honest: when the very first act throws, nothing went,
+    /// and "partly removed" would be its own kind of lie.
+    func testAFirstActThatThrowsIsStillAPlainFailure() {
+        let r = Recorder()
+        r.failOn = "/wt/one"
+
+        let step = deletion(r).perform(project: "BP", path: "/co", worktrees: ["/wt/one", "/wt/two"])
+
+        XCTAssertEqual(step, .failed(project: "BP", reason: "could not remove /wt/one"))
+        XCTAssertEqual(r.removed, [], "and nothing reached the disk")
+    }
+
+    /// The other control: a removal that finishes is reported exactly as it was before.
+    func testACompleteRemovalIsUnchanged() {
+        let r = Recorder()
+
+        let step = deletion(r).perform(project: "BP", path: "/co", worktrees: ["/wt/one"])
+
+        XCTAssertEqual(step, .removed(project: "BP", path: "/co"))
+        XCTAssertEqual(r.removed, ["/wt/one", "/co"])
+        XCTAssertEqual(r.forgotten, ["/co"])
     }
 }
