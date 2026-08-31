@@ -489,9 +489,6 @@ export const PM_TOOLS: Record<string, PmTool> = {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           ? (result.data.assignee as any).username
           : null;
-      if (username && !assignee) {
-        return { result: { error: `User '${username}' not found — task ${key} is now unassigned` } };
-      }
       if (!assignee) {
         return {
           result: { task: key, assignee: null },

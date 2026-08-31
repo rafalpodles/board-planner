@@ -2931,6 +2931,128 @@ describe("assigning somebody who cannot reach the board", () => {
   });
 });
 
+/**
+ * BP-511. The read side refuses a username nobody holds (BP-502); both writers did the opposite,
+ * and one of them destroyed data — an unknown name resolved to `null`, so `updateTask` cleared
+ * whoever held the task and answered 200, and `createTask` answered 201 with the task unassigned.
+ *
+ * Deliberately not folded into the block above. The two refusals must not share a message: "no
+ * access to this board" sends a reader to the project's Members settings, which is the wrong
+ * repair — and the only repair — for a name that is simply misspelt.
+ */
+describe("an assignee username nobody holds", () => {
+  const board = { categories: [{ name: "bug" }], ...customBoard };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    canBeAssignedMock.mockResolvedValue(true);
+    findById.mockReturnValue({ lean: () => Promise.resolve(board) });
+    const task = {
+      _id: "t1",
+      taskNumber: 1,
+      status: "doing",
+      title: "x",
+      assignee: { _id: "u1", username: "rpo", fullName: "Rafal" },
+      assignedBy: "u9",
+    };
+    findOne.mockReturnValue({
+      lean: () => Promise.resolve(task),
+      populate: () => ({ lean: () => Promise.resolve(task) }),
+    });
+    findOneAndUpdate.mockReturnValue({
+      populate: () => Promise.resolve({ _id: "t1", taskNumber: 1, title: "x", execution: {} }),
+    });
+    projectFindOneAndUpdate.mockResolvedValue({ _id: "p1", taskCounter: 12, key: "BP", ...board });
+    taskCreate.mockResolvedValue({ _id: "new" });
+    taskFindById.mockReturnValue({ populate: () => ({ lean: async () => ({ _id: "new" }) }) });
+    // Nobody holds it. The one fixture the whole block turns on.
+    userFindOne.mockResolvedValue(null);
+  });
+
+  const held = (username: string) => userFindOne.mockResolvedValue({ _id: "u2", username });
+
+  it("is refused by updateTask, naming the name that resolved to nobody", async () => {
+    const result = await updateTask("p1", "t1", { assignee: "rafa" }, "actor");
+
+    expect(result).toMatchObject({ ok: false, status: 400 });
+    expect(result).toMatchObject({ error: expect.stringContaining("rafa") });
+  });
+
+  // The data destruction, which is the whole ticket: the refusal is worth nothing if the write
+  // still goes out with `assignee: null` in it.
+  it("leaves the assignee the task already had, rather than clearing it", async () => {
+    await updateTask("p1", "t1", { assignee: "rafa" }, "actor");
+
+    expect(findOneAndUpdate, "an unknown username still reached the write").not.toHaveBeenCalled();
+  });
+
+  /**
+   * The two refusals are told apart by their words and by nothing else. An agent reading "no
+   * access to this board" goes looking for a Members setting; for a misspelt name there is none
+   * to find, and it has no other way to know that.
+   */
+  it("does not borrow the no-access wording, which names a different repair", async () => {
+    const missing = await updateTask("p1", "t1", { assignee: "rafa" }, "actor");
+
+    held("kuba");
+    canBeAssignedMock.mockResolvedValue(false);
+    const barred = await updateTask("p1", "t1", { assignee: "kuba" }, "actor");
+
+    expect(missing).toMatchObject({ error: expect.not.stringMatching(/no access to this board/i) });
+    expect(barred).toMatchObject({ error: expect.stringMatching(/no access to this board/i) });
+  });
+
+  // The control. Every assertion above would hold for a writer that refused every assignment.
+  it("still assigns a username somebody holds", async () => {
+    held("kuba");
+
+    const result = await updateTask("p1", "t1", { assignee: "kuba" }, "actor");
+
+    expect(result.ok).toBe(true);
+    expect(setStage(findOneAndUpdate.mock.calls[0][1]).assignee).toBe("u2");
+  });
+
+  // Unassigning is not an assignment to nobody-in-particular: null names no account, so there is
+  // nothing to resolve and nothing to refuse.
+  it("still unassigns on an explicit null", async () => {
+    const result = await updateTask("p1", "t1", { assignee: null }, "actor");
+
+    expect(result.ok).toBe(true);
+    expect(setStage(findOneAndUpdate.mock.calls[0][1]).assignee).toBeNull();
+  });
+
+  /**
+   * "" is what a cleared picker sends, and the assignee is an ObjectId ref, so it cannot hold one
+   * — it reached the cast and left the route a 500. Normalised to null the way `sprint` and
+   * `agent` already are, so "unassign" has one meaning rather than three.
+   */
+  it("reads an empty string as unassigning, not as a username to look up", async () => {
+    const result = await updateTask("p1", "t1", { assignee: "" }, "actor");
+
+    expect(result.ok).toBe(true);
+    expect(setStage(findOneAndUpdate.mock.calls[0][1]).assignee).toBeNull();
+    expect(userFindOne, "an empty string was looked up as a username").not.toHaveBeenCalled();
+  });
+
+  it("is refused by createTask too, before a task number is spent on it", async () => {
+    const result = await createTask("p1", "actor", { title: "Ordinary title", assignee: "rafa" });
+
+    expect(result).toMatchObject({ ok: false, status: 400 });
+    expect(result).toMatchObject({ error: expect.stringContaining("rafa") });
+    expect(taskCreate, "the task was created unassigned").not.toHaveBeenCalled();
+    expect(projectFindOneAndUpdate, "a refused create still spent a task number").not.toHaveBeenCalled();
+  });
+
+  it("still creates one for a username somebody holds", async () => {
+    held("kuba");
+
+    const result = await createTask("p1", "actor", { title: "Ordinary title", assignee: "kuba" });
+
+    expect(result.ok).toBe(true);
+    expect(taskCreate.mock.calls[0][0].assignee).toBe("u2");
+  });
+});
+
 describe("createTask stamps who assigned it", () => {
   beforeEach(() => {
     taskCreate.mockClear();

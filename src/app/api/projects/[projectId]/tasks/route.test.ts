@@ -194,9 +194,9 @@ describe("GET /api/projects/:projectId/tasks — assignee filter", () => {
 });
 
 /**
- * The same question asked of the two neighbouring filters, and answered differently for each.
- * `status` keeps matching nothing — it is comma-separated and its ids are project-defined, so
- * refusing the whole request over one unknown id of several is harsher than the answer is worth.
+ * The same question asked of the three neighbouring filters, and answered differently for each.
+ * `status` is the one that is comma-separated, so it refuses only when NONE of the ids it was given
+ * exists — see the block below.
  */
 describe("GET /api/projects/:projectId/tasks — category and priority", () => {
   it("refuses a category this project does not define, naming the ones it does", async () => {
@@ -238,10 +238,66 @@ describe("GET /api/projects/:projectId/tasks — category and priority", () => {
     expect(filterUsed()?.category).toBe("anything");
   });
 
-  it("leaves an unknown status matching nothing, which is the older decision", async () => {
-    const res = await GET(request("?status=no-such-column"), ctx());
+});
+
+/**
+ * BP-511. Both MCP tools described the seeded column ids as a closed list, while columns have been
+ * project-defined since CP-128 — so an agent on a renamed board asked for `todo`, was answered
+ * `200 []`, and reported that there was nothing to do.
+ *
+ * Refused only when none of the given ids exists. The filter is comma-separated, so one unknown id
+ * beside a real one is a narrower request rather than a typo, and refusing the whole of it would
+ * cost more than the empty list it prevents.
+ */
+describe("GET /api/projects/:projectId/tasks — the status filter", () => {
+  const COLUMNS = [
+    { id: "backlog", label: "Backlog", role: "backlog", order: 0 },
+    { id: "doing", label: "Doing", role: "active", order: 1 },
+  ];
+
+  beforeEach(() => {
+    projectFindById.mockReturnValue({
+      lean: async () => ({ categories: [{ name: "bug" }], columns: COLUMNS }),
+    });
+  });
+
+  it("refuses an id this board has no column for, naming the ones it has", async () => {
+    const res = await GET(request("?status=in_progress"), ctx());
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/project columns: backlog, doing/);
+    expect(taskFind).not.toHaveBeenCalled();
+  });
+
+  // The control: the same request against an id the board does define still filters
+  it("takes one it does define", async () => {
+    const res = await GET(request("?status=doing"), ctx());
 
     expect(res.status).toBe(200);
-    expect(filterUsed()?.status).toEqual({ $in: ["no-such-column"] });
+    expect(filterUsed()?.status).toEqual({ $in: ["doing"] });
+  });
+
+  /**
+   * One unknown id among real ones is left alone on purpose. A caller listing several columns is
+   * narrowing, and refusing the whole request over the one that has since been renamed would
+   * answer a smaller mistake with a bigger one.
+   */
+  it("takes a list where at least one id exists, unknown ids and all", async () => {
+    const res = await GET(request("?status=doing,in_progress"), ctx());
+
+    expect(res.status).toBe(200);
+    expect(filterUsed()?.status).toEqual({ $in: ["doing", "in_progress"] });
+  });
+
+  // A board predating the seeding migration stores no columns and runs on the built-in seven, so
+  // the seeded ids are what it must still answer to
+  it("judges a board with no stored columns by the built-in ones", async () => {
+    projectFindById.mockReturnValue({ lean: async () => ({ categories: [], columns: [] }) });
+
+    const seeded = await GET(request("?status=in_progress"), ctx());
+    expect(seeded.status).toBe(200);
+
+    const invented = await GET(request("?status=no-such-column"), ctx());
+    expect(invented.status).toBe(400);
   });
 });

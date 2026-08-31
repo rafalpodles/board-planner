@@ -68,11 +68,14 @@ export function registerPlannerTools(server: McpServer): void {
       description: "List tasks in a project with optional filters",
       inputSchema: strictInput({
         project: z.string().describe("Project key (e.g. 'CP')"),
+        // The same lie the category description carried, and a worse one: columns have been
+        // project-defined since CP-128, so an agent on a renamed board asked for `todo` and was
+        // answered an empty list it reported as "nothing to do" (BP-511).
         status: z
           .string()
           .optional()
           .describe(
-            "Filter by status (comma-separated): planned, todo, in_progress, in_review, needs_human_review, ready_to_test, done"
+            "Filter by status (comma-separated): the project's column ids — get_project lists them (defaults: planned, todo, in_progress, in_review, needs_human_review, ready_to_test, done)"
           ),
         assignee: z.string().optional().describe("Filter by assignee username"),
         // Project-defined, and since BP-502 an unknown one is refused rather than silently matched
@@ -283,7 +286,7 @@ export function registerPlannerTools(server: McpServer): void {
   server.registerTool(
     "change_task_status",
     {
-      description: "Change the status of a task. Valid: planned, todo, in_progress, in_review, needs_human_review, ready_to_test, done",
+      description: "Change the status of a task. Statuses are the project's column ids (defaults: planned, todo, in_progress, in_review, needs_human_review, ready_to_test, done — see get_project for the actual list with roles)",
       inputSchema: strictInput({
         taskKey: z.string().describe("Task key (e.g. 'CP-1')"),
         status: z.string().describe("New status"),

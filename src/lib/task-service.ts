@@ -126,6 +126,13 @@ function noAccessToAssign(username?: string | null): string {
   return `${who} has no access to this board, so the task cannot be assigned to them. A board owner can add them in the project's Members settings.`;
 }
 
+// Its neighbour, and deliberately not its wording: the message is the only thing telling a caller
+// which repair to attempt, and "add them in Members" is not one for a name nobody holds. Sliced
+// because this string reaches a model as a tool result.
+function noSuchAccount(username: unknown): string {
+  return `No account named "@${String(username).slice(0, 64)}" — the assignee is a username.`;
+}
+
 // The one list, used by task-service's own writes and by both task routes. It was three copies
 // until BP-358's review: `assignedBy` had to be added to each, and dropping it from any one left
 // that route answering with a bare ObjectId — so the Agent row's "Krzysiek assigned it" degraded
@@ -547,12 +554,15 @@ export async function createTask(
     const assigneeUser = await User.findOne({
       username: String(body.assignee).toLowerCase(),
     });
-    if (assigneeUser) {
-      if (!(await canBeAssigned(String(assigneeUser._id), projectId))) {
-        return { ok: false, error: noAccessToAssign(assigneeUser.username), status: 400 };
-      }
-      assigneeId = assigneeUser._id;
+    // Refused rather than dropped. An unresolved name used to leave `assigneeId` null and answer
+    // 201 with the task unassigned, so a caller that misspelt one was told the assignment happened.
+    if (!assigneeUser) {
+      return { ok: false, error: noSuchAccount(body.assignee), status: 400 };
     }
+    if (!(await canBeAssigned(String(assigneeUser._id), projectId))) {
+      return { ok: false, error: noAccessToAssign(assigneeUser.username), status: 400 };
+    }
+    assigneeId = assigneeUser._id;
   }
 
   const priority = body.priority ?? DEFAULT_PRIORITY;
@@ -1036,12 +1046,22 @@ export async function updateTask(
     updates["recurrence.anchorDay"] = null;
   }
 
-  // Resolve assignee username to ObjectId if provided as string
+  // "" is what a cleared picker sends, and an ObjectId ref cannot hold it — it reached the cast and
+  // left the route a 500. Normalised first, as `sprint` and `agent` above are, so unassigning has
+  // one shape and the lookup below is only ever asked about a name somebody meant.
+  if (updates.assignee === "") updates.assignee = null;
+
+  // Resolve assignee username to ObjectId if provided as string. A name nobody holds is refused,
+  // never resolved to null: that wrote `assignee: null` over whoever held the task and answered
+  // 200, so `update_task(assignee: "rafa")` unassigned them and said nothing (BP-511).
   if (updates.assignee && typeof updates.assignee === "string") {
     const assigneeUser = await User.findOne({
       username: (updates.assignee as string).toLowerCase(),
     });
-    updates.assignee = assigneeUser ? assigneeUser._id : null;
+    if (!assigneeUser) {
+      return { ok: false, error: noSuchAccount(updates.assignee), status: 400 };
+    }
+    updates.assignee = assigneeUser._id;
   }
 
   // Stamped only when the assignee actually moves, and after it has been resolved to an id so the

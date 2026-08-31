@@ -5,6 +5,7 @@ import { withProjectAccess } from "@/lib/middleware";
 import { Task } from "@/models/task";
 import { DEFAULT_PRIORITY, PRIORITIES } from "@/types";
 import { createTask, toApiExecution, taskPopulateFields } from "@/lib/task-service";
+import { getColumnIds } from "@/lib/columns";
 import { Worker } from "@/models/worker";
 import { User } from "@/models/user";
 import { Project } from "@/models/project";
@@ -21,15 +22,31 @@ export const GET = withProjectAccess(async (request, { params }) => {
   const filter: Record<string, unknown> = { project: projectId };
 
   const statusParam = url.searchParams.get("status");
+  const category = url.searchParams.get("category");
+  // One read, shared by the two project-defined filters below and skipped when neither is asked for
+  const board =
+    statusParam || category
+      ? await Project.findById(projectId, "categories columns").lean()
+      : null;
+
   if (statusParam) {
-    // Column ids are project-defined (CP-128); unknown ids simply match nothing. Left alone rather
-    // than settled: this one is comma-separated, so the answer is not the same yes/no as the two
-    // below — refusing only when NONE of the given ids exists is a third option, and it is the one
-    // worth having, because both MCP tools still describe the seeded ids as a closed list. An agent
-    // on a board that renamed its columns asks for `todo`, gets `200 []`, and reports that there is
-    // nothing to do. Its own ticket.
+    // Column ids are project-defined (CP-128), and this filter is comma-separated — so refusing the
+    // whole request over one unknown id of several would be harsher than the answer is worth, and a
+    // request naming a real column keeps matching nothing for the ids beside it. Refused only when
+    // NONE of them exists, which is the shape that cannot mean anything but a typo: both MCP tools
+    // described the seeded ids as a closed list, so an agent on a renamed board asked for `todo`,
+    // was answered `200 []`, and reported that there was nothing to do (BP-511).
     const statuses = statusParam.split(",").filter(Boolean);
     if (statuses.length > 0) {
+      const columnIds = getColumnIds(board);
+      if (!statuses.some((id) => columnIds.includes(id))) {
+        return NextResponse.json(
+          {
+            error: `Invalid status "${statusParam.slice(0, 64)}" — project columns: ${columnIds.join(", ")}`,
+          },
+          { status: 400 }
+        );
+      }
       filter.status = { $in: statuses };
     }
   }
@@ -71,16 +88,10 @@ export const GET = withProjectAccess(async (request, { params }) => {
     }
   }
 
-  const category = url.searchParams.get("category");
   if (category) {
-    // Refused, not silently unmatched. A category is project-defined, and both writers already
-    // refuse an unknown one naming the project's list (`task-service.ts` create and update), so a
-    // filter that answered [] would be the one place a typo looked like an empty board.
-    //
-    // True of the CATEGORY writers specifically. The assignee writers do the opposite — an unknown
-    // username silently creates the task unassigned, or silently CLEARS the assignee on update —
-    // which is a worse asymmetry than this one and has its own ticket.
-    const board = await Project.findById(projectId, "categories").lean();
+    // Refused, not silently unmatched. A category is project-defined, and both writers refuse an
+    // unknown one naming the project's list (`task-service.ts` create and update), so a filter that
+    // answered [] would be the one place a typo looked like an empty board.
     const names = (board?.categories || []).map((c: { name: string }) => c.name);
     if (names.length > 0 && !names.includes(category)) {
       return NextResponse.json(
