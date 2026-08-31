@@ -3,13 +3,12 @@
 Design, 2026-08-23. Tracked as BP-381. Rewritten after an independent review of the first draft
 found that its central guarantee did not hold.
 
-Depends on two things that are not on `main`:
+Both prerequisites have since landed on `main`:
 
-- **BP-380** (`e855703`) and the refusal that carries its own patch (`1f4dcac`), on
-  `bp-380/tell-the-agent`.
-- **BP-382**, which stops the gates reading a diff the agent can rewrite. That is a prerequisite,
-  not a neighbour: everything below rests on "the commit named in the record is the change that was
-  judged", and before BP-382 that sentence is false.
+- **BP-380** and the refusal that carries its own patch, merged as `32c83fd`.
+- **BP-382**, which stops the gates reading a diff the agent can rewrite, merged as `4f1657b`. It
+  was a prerequisite rather than a neighbour: everything below rests on "the commit named in the
+  record is the change that was judged", and before BP-382 that sentence was false.
 
 ## The problem
 
@@ -302,7 +301,7 @@ the worktree holds instead. `ExecutionPanel` is untouched and does not collide w
 
 ## Shape of the work
 
-`bp-381/accept-refused-change`, off `main` once BP-380 and BP-382 have landed there. Two commits:
+Off `main`, now that BP-380 and BP-382 are there. Two commits:
 
 1. the record, the marker, the reaper exemption, the `resolveStatusIds` role check, the two new
    protected paths, and the read-only panel;
