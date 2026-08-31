@@ -354,6 +354,10 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       // what almost every test here wants; two is what it takes to see whether a project is
       // claimed from AGAIN.
       passes?: number;
+      // Moves the clock on at each sleep, so a later pass really re-binds: refreshServerState is
+      // throttled by MIN_REFRESH_INTERVAL_MS and would otherwise return without doing anything,
+      // which makes "survives a rebind" a claim no test could see.
+      clockJumpOnSleepMs?: number;
     } = {}
   ) {
     let seenHeartbeat: HeartbeatDeps | undefined;
@@ -374,6 +378,11 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     const logError = vi.fn();
     let claims = 0;
     let slept = 0;
+    // wiring reads Date.now() directly for the refresh throttle, so this is what lets a test move
+    // past it. Restored in the same finally that removes the state directory.
+    let clockOffset = 0;
+    const wallClock = Date.now;
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => wallClock() + clockOffset);
     let localConfig: (() => LocalConfigView) | undefined;
 
     const api = {
@@ -406,6 +415,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       hostname: () => "host-1",
       // the loop only sleeps once it has nothing left to claim, which is one pass after the run
       sleep: async () => {
+        clockOffset += opts.clockJumpOnSleepMs ?? 0;
         if (++slept >= (opts.passes ?? 1)) stop();
       },
       log: vi.fn(),
@@ -473,6 +483,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     try {
       await worker.run();
     } finally {
+      clock.mockRestore();
       rmSync(stateDir, { recursive: true, force: true });
     }
 
@@ -1097,6 +1108,38 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         const run = await runOneTask(undefined, undefined, {
           tasks: [CLAIMED, CLAIMED],
           passes: 2,
+        });
+
+        expect(run.api.claim.mock.calls.length).toBeGreaterThan(1);
+      });
+
+      /**
+       * The rebind is what would undo this, and it is why the map is not cleared there the way
+       * `unusable` is: that one is recomputed from a static check, while this one records that
+       * something planted an executable key in a checkout this machine binds. A re-scan reading
+       * clean thirty seconds later is exactly what re-planting produces.
+       */
+      it("stays quarantined across a rebind", async () => {
+        const run = await runOneTask(undefined, undefined, {
+          scopedConfig: PLANTED,
+          tasks: [CLAIMED, CLAIMED],
+          passes: 2,
+          // Past MIN_REFRESH_INTERVAL_MS, so the second pass genuinely re-binds rather than
+          // returning from the throttle
+          clockJumpOnSleepMs: 60_000,
+        });
+
+        expect(run.api.claim).toHaveBeenCalledTimes(1);
+      });
+
+      // The control for the one above: the same two passes and the same clock jump, with nothing
+      // planted, keep claiming — so that assertion is about the quarantine surviving and not about
+      // a rebind that never happened.
+      it("re-binds and keeps claiming over that same jump when nothing is planted", async () => {
+        const run = await runOneTask(undefined, undefined, {
+          tasks: [CLAIMED, CLAIMED],
+          passes: 2,
+          clockJumpOnSleepMs: 60_000,
         });
 
         expect(run.api.claim.mock.calls.length).toBeGreaterThan(1);
