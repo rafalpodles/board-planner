@@ -115,7 +115,18 @@ async function dragCardToColumn(page: Page, card: Locator, column: Locator, onto
     duringDrag: wasEmpty
       ? undefined
       : async () => {
-          await expect(column.locator("[data-column-body] div.h-0\\.5").first()).toBeAttached();
+          // The selector is the assertion. A descendant match is happy with either marker, so it
+          // cannot tell a drop appended to the body from one inserted beside a card — with the
+          // hand-dispatched version that distinction could not go wrong, because the dragover was
+          // aimed at the body; with a real drag the landing point is geometry, and geometry drifts.
+          // Aiming the helper 30px lower left this green while "lands in the right place" landed
+          // somewhere else. A card-relative marker is nested inside the card's wrapper, so only
+          // that branch can take the descendant form.
+          await expect(
+            onto
+              ? column.locator("[data-column-body] div.h-0\\.5").first()
+              : column.locator("[data-column-body] > div.h-0\\.5")
+          ).toBeAttached();
         },
   });
 }

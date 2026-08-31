@@ -10,8 +10,9 @@ import { expect, type Locator, type Page } from "@playwright/test";
  * What the synthetic version tested was that the app's own handlers do what the app's own handlers
  * do; it would have stayed green with dragging broken in the browser (BP-493).
  *
- * One helper rather than two, because the two copies had already drifted into contradicting each
- * other about the same browser.
+ * One helper rather than two. The two copies did not disagree — both carried the same false claim —
+ * but they had drifted on how strictly each checked the result, which is the same maintenance
+ * problem arriving quietly.
  */
 
 /** Where in the target to release. `atTop` puts the pointer above a card's midpoint, which is how
@@ -46,15 +47,22 @@ export async function dragTo(
   const to = await box(target, "the drop target");
   const from = await box(card, "the card being dragged");
 
-  // Named rather than left to look like a failed drop: if the two cannot share the screen, no
-  // amount of aiming fixes it and the spec needs a wider viewport.
+  // Named rather than left to look like a failed drop: if either end is off the screen, no amount
+  // of aiming fixes it and the spec needs a wider viewport or a scroll of its own. Both axes,
+  // because a card below the fold produces the same silent no-drag as one off to the right.
   const viewport = page.viewportSize();
   if (viewport) {
     for (const [what, rect] of [["card", from], ["target", to]] as const) {
-      if (rect.x < 0 || rect.x + rect.width > viewport.width) {
+      const offscreen =
+        rect.x + rect.width <= 0 ||
+        rect.x >= viewport.width ||
+        rect.y + rect.height <= 0 ||
+        rect.y >= viewport.height;
+      if (offscreen) {
         throw new Error(
-          `the ${what} is off-screen (x ${Math.round(rect.x)}..${Math.round(rect.x + rect.width)} ` +
-            `against a ${viewport.width}px viewport) — a real drag cannot reach it`
+          `the ${what} is off-screen (x ${Math.round(rect.x)}..${Math.round(rect.x + rect.width)}, ` +
+            `y ${Math.round(rect.y)}..${Math.round(rect.y + rect.height)} against ` +
+            `${viewport.width}x${viewport.height}) — a real drag cannot reach it`
         );
       }
     }
@@ -64,22 +72,28 @@ export async function dragTo(
   const startY = from.y + from.height / 2;
   const endX = to.x + to.width / 2;
   // Low in the target, not in the middle of it. The column appends at the end only when the drop
-  // lands on the body itself (`e.target === e.currentTarget`), and the middle of a column that
-  // holds cards is a card — which computes an insertion index next to that card instead, or none
-  // at all when the card is the one being dragged. The hand-dispatched version aimed its dragover
-  // straight at the body and so never had to choose.
+  // lands on the body itself — `closest("[data-column-body]") === e.target` in Column's dragover;
+  // the sibling test there is against the column, not the body — and the middle of a column that
+  // holds cards is a card, which computes an insertion index beside that card instead. The
+  // hand-dispatched version aimed its dragover straight at the body and so never had to choose.
+  //
+  // Six pixels rather than three on the `atTop` path: rendering the insertion marker shifts the
+  // card down two, and three left about one pixel of headroom for the dragover that follows.
+  //
+  // The clamp is for a body running past the fold, which no current spec produces. It keeps the
+  // pointer on screen; it does NOT keep it on the body's empty part, so a spec that hits it wants
+  // to check where its drop actually landed.
   const endY = atTop
-    ? to.y + 3
+    ? to.y + 6
     : Math.min(to.y + to.height - 20, (viewport?.height ?? to.y + to.height) - 10);
 
   await page.mouse.move(startX, startY);
   await page.mouse.down();
-  // A short first move opens the drag session; jumping straight to the target can be taken as a
-  // click that happened to end elsewhere.
+  // Neither of the next two lines is load-bearing here — removing either leaves all 25 tests green,
+  // because the stepped move to the target emits sixteen dragovers on its own. They are kept as
+  // insurance on a slower machine, and labelled so nobody reads them as a mechanism the drop needs.
   await page.mouse.move(startX + 20, startY + 10, { steps: 6 });
   await page.mouse.move(endX, endY, { steps: 20 });
-  // Twice at the destination: the last `dragover` is what leaves the column's insertion state in
-  // the shape the drop reads.
   await page.mouse.move(endX, endY);
 
   if (duringDrag) await duringDrag();
