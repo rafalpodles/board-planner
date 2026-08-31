@@ -430,8 +430,8 @@ describe("createWorkspace", () => {
 
       await expect(withRemote(runner).create("BP-1", "worker")).rejects.toThrow();
 
-      expect(ranAny(run, "ls-remote")).toBe(false);
-      expect(ranAny(run, "fetch")).toBe(false);
+      expect(ranAny(run, "ls-remote"), "the remote was asked for the base ref").toBe(false);
+      expect(ranAny(run, "fetch"), "the poisoned clone was fetched into").toBe(false);
     });
 
     it("asks the shared checkout, which is where the key lives", async () => {
@@ -443,6 +443,40 @@ describe("createWorkspace", () => {
         (call[1] as string[]).join(" ").includes("config --list --show-scope")
       );
       expect((scan?.[2] as { cwd?: string })?.cwd).toBe(config.repoPath);
+    });
+
+    /**
+     * The scan and the checkout are separate processes with a fetch — two network round-trips —
+     * between them, so a config that was clean when it was read can be poisoned by the time
+     * anything is checked out. Measured against the real thing: replanting 50ms after the first
+     * scan got the payload run five times out of five.
+     *
+     * The second scan does not close that race and nothing short of not sharing `.git` would; it
+     * shortens the window from two round-trips to one spawn. Driven here by answering the second
+     * listing differently from the first, which is the deterministic form of the same thing.
+     */
+    it("reads the config again immediately before checking anything out", async () => {
+      let listings = 0;
+      const run = vi.fn(async (_command: string, args: string[]): Promise<CommandResult> => {
+        const key = args.slice(HARDENING_PREFIX.length).join(" ");
+        const answer = (stdout = "") => ({ code: 0, stdout, stderr: "", timedOut: false });
+        if (key === CONFIG_LIST) {
+          listings += 1;
+          return answer(listings === 1 ? "" : "local\tfilter.z.smudge=touch /tmp/pwned\n");
+        }
+        if (key === "worktree list --porcelain") return answer("");
+        if (args.join(" ") === LS_REMOTE) return answer("base1\trefs/heads/main\n");
+        if (args.join(" ") === FETCH) return answer();
+        if (key === "rev-parse --verify base1^{commit}") return answer("base1\n");
+        return answer();
+      });
+
+      await expect(withRemote({ run }).create("BP-1", "worker")).rejects.toMatchObject({
+        name: "PoisonedCheckoutError",
+      });
+
+      expect(listings, "the config was read only once").toBeGreaterThan(1);
+      expect(ranAny(run, "worktree add"), "the checkout happened anyway").toBe(false);
     });
 
     // The control. Every assertion above holds just as well for a create() that refused every

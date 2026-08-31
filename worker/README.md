@@ -197,11 +197,21 @@ and `SIGINT` both finish the task in flight before the loop exits.
   otherwise executes inside the call that creates the worktree, before any gate on that attempt has
   seen anything. Measured on git 2.50.1.
 
-  Refusing alone would only hand the same clone to the next attempt, so the project is
-  **quarantined**: this machine stops claiming for it, the socket and the log say why, and the task
-  is handed back with its attempt refunded — it did nothing wrong. The quarantine is deliberately
-  not lifted by the next rebind, because a re-scan reading clean thirty seconds later is exactly
-  what re-planting produces. Remove the key, then restart the worker.
+  The scan reads the repository's own scopes, so the calls that make the checkout also drop
+  `~/.gitconfig` — without that a filter defined there ran on a checkout with **nothing planted in
+  the repository at all**, and no scan of the repository could ever have seen it. Measured.
+
+  Refusing alone would only hand the same clone to the next attempt, so the checkout is
+  **quarantined**: this machine stops claiming for every project bound to it — the poison is in the
+  path's config, not in a project — and the task is handed back with its attempt refunded, because
+  it did nothing wrong. Settings → Workers shows it as a failed check naming the key, and the
+  worker's log says the same thing. The quarantine is deliberately not lifted by the next rebind,
+  because a re-scan reading clean thirty seconds later is exactly what re-planting produces. Remove
+  the key, then restart the worker.
+
+  Only a key somebody planted quarantines anything. A config git would not read at all — a checkout
+  being re-cloned, a machine under load — still refuses the run, because a config this cannot read
+  is one it cannot vouch for, but it does not latch the project off until the process restarts.
 
   The key is **not** cleared for you. Writing to a config an attacker also writes is a race, and it
   destroys the evidence of what was planted.
