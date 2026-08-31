@@ -201,6 +201,18 @@ export const PM_TOOLS: Record<string, PmTool> = {
     async execute(args, ctx) {
       const filter: Record<string, unknown> = { project: ctx.projectId };
       if (args.status !== undefined) {
+        // This tool queries Mongo directly, so the route's refusal does not cover it. Columns are
+        // project-defined, and an id the board has not got answered `[]` — which a model reports
+        // as "there is nothing to do" (BP-511).
+        const project = await Project.findById(ctx.projectId, "columns").lean();
+        const columnIds = getProjectColumns(project).map((c) => c.id);
+        if (!columnIds.includes(String(args.status))) {
+          return {
+            result: {
+              error: `Invalid status "${String(args.status).slice(0, 64)}" — project columns: ${columnIds.join(", ")}`,
+            },
+          };
+        }
         filter.status = args.status;
       }
       const limit = Math.min(Math.max(Number(args.limit) || 50, 1), 100);
@@ -489,9 +501,6 @@ export const PM_TOOLS: Record<string, PmTool> = {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           ? (result.data.assignee as any).username
           : null;
-      if (username && !assignee) {
-        return { result: { error: `User '${username}' not found — task ${key} is now unassigned` } };
-      }
       if (!assignee) {
         return {
           result: { task: key, assignee: null },

@@ -1,6 +1,14 @@
 import { test, expect, type APIRequestContext } from "@playwright/test";
 import { ADMIN_AUTH } from "./api";
-import { ADMIN_ID, ADMIN_USERNAME, PROJECT_KEY, SIBLING_TASK_ID, seed } from "./seed";
+import {
+  ADMIN_ID,
+  ADMIN_USERNAME,
+  PROJECT_KEY,
+  RENAMED_COLUMN_ID,
+  SIBLING_TASK_ID,
+  seed,
+  seedRenamedColumn,
+} from "./seed";
 
 /**
  * BP-502. `?assignee=rpo` was written straight into `filter.assignee`, which is an ObjectId on the
@@ -82,8 +90,30 @@ test("the neighbouring filters answer a typo rather than swallowing it", async (
   const high = await list(request, "?priority=high");
   expect(high.status(), await high.text()).toBe(200);
 
-  // And the older decision, unchanged: an unknown column id matches nothing rather than refusing
+  // The third answer, settled by BP-511: this filter is comma-separated, so it refuses only when
+  // NONE of the ids it was given exists — a real column beside an unknown one is a narrower
+  // request, not a typo
   const status = await list(request, "?status=no-such-column");
-  expect(status.status()).toBe(200);
-  expect(await status.json()).toEqual([]);
+  expect(status.status()).toBe(400);
+  expect((await status.json()).error).toMatch(/project columns:/);
+
+  const narrowed = await list(request, "?status=todo,no-such-column");
+  expect(narrowed.status(), await narrowed.text()).toBe(200);
+});
+
+/**
+ * The claim the refusal above rests on, and the one the fixture cannot make on its own: it is the
+ * BOARD's columns that decide, not the built-in seven. Reading a project without its `columns`
+ * falls back to those seven silently, which refuses a renamed board its own real ids — worse than
+ * the empty list this change exists to remove, and green against every other test in the suite.
+ */
+test("the columns that decide are the board's own", async ({ request }) => {
+  await seedRenamedColumn();
+
+  const renamed = await list(request, `?status=${RENAMED_COLUMN_ID}`);
+  expect(renamed.status(), await renamed.text()).toBe(200);
+
+  const gone = await list(request, "?status=planned");
+  expect(gone.status(), await gone.text()).toBe(400);
+  expect((await gone.json()).error).toContain(RENAMED_COLUMN_ID);
 });

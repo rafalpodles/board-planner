@@ -56,7 +56,7 @@ export function registerTools(server: McpServer, client: ApiClient): void {
       description: "List tasks in a project with optional filters",
       inputSchema: strictInput({
         project: z.string().describe("Project key (e.g. 'CP')"),
-        status: z.string().optional().describe("Filter by status (comma-separated): planned, todo, in_progress, in_review, needs_human_review, ready_to_test, done"),
+        status: z.string().optional().describe("Filter by status (comma-separated): the project's column ids — get_project lists them (defaults: planned, todo, in_progress, in_review, needs_human_review, ready_to_test, done)"),
         assignee: z.string().optional().describe("Filter by assignee username"),
         category: z.string().optional().describe("Filter by category (project-defined; defaults: bug, doc, user-story, idea)"),
         priority: z.string().optional().describe("Filter by priority: low, medium, high, urgent"),
@@ -150,7 +150,7 @@ export function registerTools(server: McpServer, client: ApiClient): void {
         priority: z.string().optional().describe("Priority: low, medium, high, or urgent (default: medium)"),
         category: z.string().optional().describe("Category — one of the project's configured categories (defaults: bug, doc, user-story, idea)"),
         assignee: z.string().optional().describe("Assignee username"),
-        status: z.string().optional().describe("Initial status (default: planned)"),
+        status: z.string().optional().describe("Initial status — one of the project's column ids, get_project lists them (default: the board's first backlog column)"),
         acceptanceCriteria: z.string().optional().describe("Acceptance criteria (markdown checklist, converted to structured checklist items)"),
         fields: z
           .record(z.string(), z.any())
