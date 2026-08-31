@@ -282,11 +282,18 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     claudeCalls: string[][] = [],
     onAgentStart?: (nth: number) => void,
     everyCall: string[][] = [],
-    remoteCalls: RemoteCall[] = []
+    remoteCalls: RemoteCall[] = [],
+    // What `config --list --show-scope` answers. Only that listing: `--local --list` is what
+    // bindRepository scans, and a key visible to both would be refused at binding time instead —
+    // which is the path BP-346 records as the one an include.path or worktree-scope key evades.
+    scopedConfig = ""
   ): Runner {
     return {
       async run(command, args, opts) {
         everyCall.push([command, ...args]);
+        if (command === "git" && args.includes("--show-scope")) {
+          return { code: 0, stdout: scopedConfig, stderr: "", timedOut: false };
+        }
         // everyCall keeps argv only, and the base lookup's hardening lives entirely in its
         // environment — workspace.ts composes those two calls' env instead of their args.
         if (command === "git" && (args[0] === "ls-remote" || args[0] === "fetch")) {
@@ -341,6 +348,12 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       // Claimed in order, one per pass of the loop, then the queue runs dry
       tasks?: ClaimedTask[];
       onAgentStart?: (nth: number) => void;
+      // What the checkout's scoped git config says, for the tests about a planted key
+      scopedConfig?: string;
+      // How many passes the loop is allowed before it is stopped. One is a single pass, which is
+      // what almost every test here wants; two is what it takes to see whether a project is
+      // claimed from AGAIN.
+      passes?: number;
     } = {}
   ) {
     let seenHeartbeat: HeartbeatDeps | undefined;
@@ -360,6 +373,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     const queue = opts.tasks ?? [CLAIMED];
     const logError = vi.fn();
     let claims = 0;
+    let slept = 0;
     let localConfig: (() => LocalConfigView) | undefined;
 
     const api = {
@@ -382,10 +396,18 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     let stop = (): void => {};
     const worker = createWorker({
       env: { ...ENV, CP_STATE_DIR: stateDir },
-      runner: streamingRunner(claudeCalls, opts.onAgentStart, everyCall, remoteCalls),
+      runner: streamingRunner(
+        claudeCalls,
+        opts.onAgentStart,
+        everyCall,
+        remoteCalls,
+        opts.scopedConfig
+      ),
       hostname: () => "host-1",
       // the loop only sleeps once it has nothing left to claim, which is one pass after the run
-      sleep: async () => stop(),
+      sleep: async () => {
+        if (++slept >= (opts.passes ?? 1)) stop();
+      },
       log: vi.fn(),
       logError,
       uid: 501,
@@ -1046,6 +1068,70 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       });
 
       expect(run.localConfig?.().projects[0].blocked).toContain("package-lock.json");
+    });
+
+    /**
+     * BP-504. A key git runs on checkout, planted in a scope `bindRepository`'s own scan does not
+     * read — the permanent window BP-346 records. The run refuses before `git worktree add` checks
+     * anything out, and the project is then quarantined, because refusing alone leaves the loop
+     * claiming the same clone on the next pass for ever.
+     */
+    describe("a checkout carrying a key git would run on checkout", () => {
+      const PLANTED = "worktree\tfilter.z.smudge=touch /tmp/pwned\n";
+
+      it("does not claim for that project again on the next pass", async () => {
+        const run = await runOneTask(undefined, undefined, {
+          scopedConfig: PLANTED,
+          tasks: [CLAIMED, CLAIMED],
+          passes: 2,
+        });
+
+        expect(run.api.claim).toHaveBeenCalledTimes(1);
+      });
+
+      // The control, and the reason the assertion above is about quarantine rather than about the
+      // loop merely backing off: with nothing planted, the same budget claims again. Counted as
+      // "more than once" rather than exactly twice — a pass that claimed something does not sleep
+      // before the next one, so the sleep budget is not the pass count.
+      it("keeps claiming over the same budget when nothing is planted", async () => {
+        const run = await runOneTask(undefined, undefined, {
+          tasks: [CLAIMED, CLAIMED],
+          passes: 2,
+        });
+
+        expect(run.api.claim.mock.calls.length).toBeGreaterThan(1);
+      });
+
+      it("never checks anything out of the poisoned clone", async () => {
+        const run = await runOneTask(undefined, undefined, { scopedConfig: PLANTED });
+
+        expect(
+          run.everyCall.some((call) => call.join(" ").includes("worktree add")),
+          "the worktree was created anyway"
+        ).toBe(false);
+      });
+
+      it("says on the socket why the project is not being worked on", async () => {
+        const run = await runOneTask(undefined, undefined, { scopedConfig: PLANTED });
+
+        expect(run.localConfig?.().projects[0].blocked).toContain("filter.z.smudge");
+      });
+
+      it("says it in the worker's own log too, with what an operator has to do", async () => {
+        const run = await runOneTask(undefined, undefined, { scopedConfig: PLANTED });
+
+        expect(run.logError).toHaveBeenCalledWith(
+          expect.stringContaining("quarantining project p1")
+        );
+        expect(run.logError).toHaveBeenCalledWith(expect.stringContaining("restarted"));
+      });
+
+      // The task is not the one at fault, and nothing ever resets execution.attempts
+      it("hands the task back rather than charging it for the machine's compromise", async () => {
+        const run = await runOneTask(undefined, undefined, { scopedConfig: PLANTED });
+
+        expect(run.api.release).toHaveBeenCalled();
+      });
     });
 
     it("claims as before from a repository that has what the gates need", async () => {

@@ -354,6 +354,20 @@ describe("the base lookup runs with the environment production gives it", () => 
     rmSync(dir, { recursive: true, force: true });
   });
 
+  /**
+   * BP-504 put a scan of the checkout's own config **ahead of** the checkout, and it now fires
+   * before this fixture can reach a fetch at all: `protocol.allow = always` and an `ext::`
+   * `insteadOf` are both repository-scope entries the scan refuses on their own. So the assertion
+   * moved from git's own `transport 'ext' not allowed` to the earlier refusal — the property, that
+   * the planted program never runs, is unchanged and still the point.
+   *
+   * What that costs, said plainly rather than left for somebody to discover: this file no longer
+   * proves end-to-end that `protocol.ext.allow=never` is what stops the fetch, because there is no
+   * longer a way to reach one through a repo-scope `insteadOf` — every scope such a key can live
+   * in is scanned first, and `GIT_CONFIG_GLOBAL=/dev/null` neutralises the operator's own file.
+   * The hardening is still watched: wiring.test.ts and delivery.test.ts assert the composed env
+   * carries that pair, and delivery.hooks.integration.test.ts drives real git with the flag on.
+   */
   it("does not execute a program the checkout wired into the fetch transport", async () => {
     const workspace = createWorkspace(
       { repoPath: parent, worktreeRoot: join(dir, "wt"), baseBranch: "main" } as WorkerConfig,
@@ -362,9 +376,12 @@ describe("the base lookup runs with the environment production gives it", () => 
       remoteUrl
     );
 
-    // Named rather than "it rejects": the message proves ls-remote answered and the fetch is where
-    // this stopped, so the refusal is the transport's and not the run failing somewhere earlier.
-    await expect(workspace.create("BP-1", "worker")).rejects.toThrow(/transport 'ext' not allowed/);
+    // Named rather than "it rejects": the message proves which layer stopped it, so a refusal
+    // arriving for some unrelated reason cannot pass for this one.
+    await expect(workspace.create("BP-1", "worker")).rejects.toMatchObject({
+      name: "PoisonedCheckoutError",
+      message: expect.stringContaining("protocol.allow"),
+    });
     expect(existsSync(marker)).toBe(false);
   });
 });
