@@ -205,6 +205,52 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   // before a task is claimed — checkRepo runs at every rebind — and spending an agent's run to
   // rediscover it at the build gate is the cost this map exists to stop (BP-379).
   const unusable = new Map<string, string>();
+  /**
+   * Projects this machine has stopped offering because their checkout itself is the problem — a
+   * git config carrying a key git runs on checkout, found by the run that refused to make one
+   * (BP-504).
+   *
+   * Deliberately not cleared on rebind, unlike `unusable` above. That map is recomputed from a
+   * static check and may legitimately change; this one records that something planted an
+   * executable key in a checkout this machine binds, and a re-scan reading clean thirty seconds
+   * later is exactly what re-planting produces. Refusing each attempt without this is the old
+   * requeue-against-an-unchanged-clone with the charge taken off: the loop claims again on the
+   * next pass, for ever. An operator removes the key and restarts the worker.
+   */
+  // Keyed on the CHECKOUT, not the project: `rebind` resolves a project's repository by remote, so
+  // several projects can share one path — and the poison is in that path's config, not in any
+  // project. Keyed per project, each sibling paid its own claim, its own refusal and its own
+  // window against a clone the machine already knew was poisoned.
+  const quarantined = new Map<string, string>();
+
+  const checkoutOf = (projectId: string): string =>
+    bound.get(projectId)?.path ?? `project:${projectId}`;
+
+  const quarantineReasonFor = (projectId: string): string | undefined =>
+    quarantined.get(checkoutOf(projectId));
+
+  function quarantineProject(projectId: string, reason: string): void {
+    const checkout = checkoutOf(projectId);
+    if (quarantined.has(checkout)) return;
+    quarantined.set(checkout, reason);
+    deps.logError(
+      `quarantining ${checkout}: its git config carries ${reason}. ` +
+        `Nothing on this machine will claim for any project on that checkout again until the key ` +
+        `is gone and this worker is restarted.`
+    );
+  }
+
+  // A failing check per quarantined checkout, composed where preflight is asked rather than at
+  // rebind: a quarantine happens mid-pass, and the report is the only place a person looking at
+  // Settings → Workers can learn that this machine has stopped serving a project on purpose.
+  // Without it the console reads `ready`, the menubar reads idle, and the sole account of it is a
+  // line on the worker's own stderr.
+  const quarantineChecks = (): PreflightCheck[] =>
+    [...quarantined.entries()].map(([checkout, reason]) => ({
+      name: "checkout quarantined",
+      ok: false,
+      detail: `${checkout}: its git config carries ${reason}. Remove the key, then restart this worker.`,
+    }));
 
   function configFor(projectId: string): WorkerConfig | null {
     const identity = loadIdentity(identityStore);
@@ -508,6 +554,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
           gateFor: gateFromEntry,
           recordRun: (project, record) => outbox.add({ kind: "run", projectId: project, record }),
           logError: deps.logError,
+          quarantineProject,
           runner: deps.runner,
           signal,
           telemetry,
@@ -531,7 +578,10 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     pollIntervalMs: () => policy.pollIntervalMs,
     // A project whose checkout cannot pass the gates is not claimed from. The refusal would arrive
     // anyway — at the build gate, after the agent has worked — with the reason this already has.
-    assignments: () => [...bound.keys()].filter((projectId) => !unusable.has(projectId)),
+    assignments: () =>
+      [...bound.keys()].filter(
+        (projectId) => !unusable.has(projectId) && !quarantineReasonFor(projectId)
+      ),
     api,
     execute,
     sleep: deps.sleep,
@@ -554,7 +604,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     repos: () => (inventoryError ? undefined : inventory),
     preflight: () => {
       if (!preflight) return undefined;
-      const checks = [...preflight.checks, ...repoChecks];
+      const checks = [...preflight.checks, ...repoChecks, ...quarantineChecks()];
       return { ok: checks.every((c) => c.ok), account: preflight.account, checks };
     },
     forgetEnrolmentToken: bootstrap.enrolmentTokenFile
@@ -598,7 +648,10 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
         project,
         // Empty when the project is claimable. Non-empty is the answer to "why is this machine
         // sitting on a project and doing nothing", which otherwise has no answer anywhere.
-        blocked: unusable.get(project) ?? "",
+        // Quarantine first, and nothing pins that order: a project failing its own gate checks is
+        // never claimed from (BP-379), so it never reaches the run that quarantines, and the two
+        // cannot both be set today. This is what it should say if that ever changes.
+        blocked: quarantineReasonFor(project) ?? unusable.get(project) ?? "",
         baseBranch: repo.config.baseBranch,
         model: repo.config.model,
         reviewModel: repo.config.reviewModel,

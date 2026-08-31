@@ -233,6 +233,15 @@ export async function configBaseline(
  * strictly more than the local-only scan it replaces — it adds the worktree scope and the
  * indirection — but a caller that can pass one closes `~/.gitconfig` too (BP-346).
  */
+/**
+ * What `plantedConfig` answers when git would not tell it. Named because the two answers are owed
+ * different treatment by a caller that acts on the finding: a key somebody planted repeats until a
+ * human removes it, while a config that could not be read is as likely to be a checkout that has
+ * just been moved, or a machine under load. Both refuse the run; only one of them says anything
+ * about the repository (BP-504).
+ */
+export const UNREADABLE_CONFIG = "an unreadable git config";
+
 export async function plantedConfig(
   runner: Runner,
   cwd: string,
@@ -244,11 +253,11 @@ export async function plantedConfig(
   // Measured: exit 128 became exit 0 (BP-346).
   const readable = await git(runner, cwd, ["config", "--local", "--list"]);
   if (readable.code !== 0 || readable.timedOut)
-    return "an unreadable git config";
+    return UNREADABLE_CONFIG;
 
   const result = await git(runner, cwd, CONFIG_LIST_ARGS);
   // Unreadable is not the same as clean: a config this cannot read is one it cannot clear either.
-  if (result.code !== 0 || result.timedOut) return "an unreadable git config";
+  if (result.code !== 0 || result.timedOut) return UNREADABLE_CONFIG;
 
   const entries = parseConfigList(result.stdout);
   const known = new Set(baseline ?? []);
@@ -344,6 +353,11 @@ export async function bindRepository(
       reason: `could not read git config in ${proposedPath}`,
     };
   }
+  // Narrower than the scan `workspace.create` makes: `--local --list` cannot see the worktree
+  // scope and this rule does not judge `include.path`, so a checkout carrying either binds here
+  // and is refused at run time instead — where, since BP-504, it quarantines the project. Aligning
+  // the two is its own ticket: it would refuse checkouts that bind today, so it needs its own
+  // sweep rather than a corner of this one.
   const dangerous = dangerousConfigEntry(config.stdout);
   if (dangerous) {
     return {
