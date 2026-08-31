@@ -18,10 +18,11 @@ final class ProjectSyncRunner {
 
     private let file = ReposFile(path: ReposFile.defaultPath())
 
-    /// `busy` is the worker's own answer to "am I running a task", from the socket. Passed in
-    /// rather than read here, because a stale copy of it is the difference between a refusal and
-    /// deleting a worktree out from under a run.
-    func sync(catalogue: [ProjectCatalogueRow], busy: Bool) async {
+    /// `isBusy` asks the worker "am I running a task" over the socket. A question rather than an
+    /// answer: the value used to be sampled by the caller before the pass, and a clone takes
+    /// minutes, so a worker that picked up a task in between had its checkout deleted underneath
+    /// it. `SyncPass` asks again before each removal (BP-424).
+    func sync(catalogue: [ProjectCatalogueRow], isBusy: @escaping () async -> Bool) async {
         guard !running else { return }
 
         let state = Onboarding.load()
@@ -45,17 +46,6 @@ final class ProjectSyncRunner {
             WorkerProcess.git(args, cwd: cwd, toolPath: state.toolPath)
         })
 
-        for offer in plan.add {
-            let parent = state.checkoutsFolder
-            let result = await Task.detached { setup.add(offer, parent: parent) }.value
-            switch result {
-            case .success(let path):
-                steps.append(.added(project: offer.label, path: path))
-            case .failure(.clone(let reason)), .failure(.grant(let reason)):
-                steps.append(.failed(project: offer.label, reason: reason))
-            }
-        }
-
         let deletion = CheckoutDeletion(
             remove: { try FileManager.default.removeItem(atPath: $0) },
             exists: { FileManager.default.fileExists(atPath: $0) },
@@ -64,14 +54,14 @@ final class ProjectSyncRunner {
             }
         )
 
-        for planned in plan.remove {
-            steps.append(
-                deletion.removeIfSafe(
-                    project: planned.project.label,
-                    path: planned.path,
-                    workerIsBusy: busy,
-                    checking: removal))
-        }
+        let parent = state.checkoutsFolder
+        await SyncPass.run(
+            plan: plan,
+            add: { offer in await Task.detached { setup.add(offer, parent: parent) }.value },
+            isBusy: isBusy,
+            deletion: deletion,
+            removal: removal,
+            onStep: { [weak self] step in self?.steps.append(step) })
     }
 
     func forget() {
