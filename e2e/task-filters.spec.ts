@@ -82,8 +82,13 @@ test("the neighbouring filters answer a typo rather than swallowing it", async (
   const high = await list(request, "?priority=high");
   expect(high.status(), await high.text()).toBe(200);
 
-  // And the older decision, unchanged: an unknown column id matches nothing rather than refusing
+  // The third answer, settled by BP-511: this filter is comma-separated, so it refuses only when
+  // NONE of the ids it was given exists — a real column beside an unknown one is a narrower
+  // request, not a typo
   const status = await list(request, "?status=no-such-column");
-  expect(status.status()).toBe(200);
-  expect(await status.json()).toEqual([]);
+  expect(status.status()).toBe(400);
+  expect((await status.json()).error).toMatch(/project columns:/);
+
+  const narrowed = await list(request, "?status=todo,no-such-column");
+  expect(narrowed.status(), await narrowed.text()).toBe(200);
 });

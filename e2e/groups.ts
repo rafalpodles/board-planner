@@ -19,6 +19,7 @@ export const GROUPS = {
     "sticky-task-header.spec.ts",
     "task-recurrence.spec.ts",
     "task-filters.spec.ts",
+    "assignee-writers.spec.ts",
   ],
   "task-fields": [
     "field-history.spec.ts",
