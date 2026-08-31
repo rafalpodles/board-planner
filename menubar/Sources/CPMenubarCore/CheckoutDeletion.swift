@@ -46,6 +46,12 @@ public struct CheckoutDeletion: Sendable {
     // Not public: the comment above argues for one entry point, and `internal` is what makes
     // that true rather than merely asserted. The tests reach it through @testable.
     func perform(project: String, path: String, worktrees: [String]) -> SyncStep {
+        // What is already gone, in the order it went. A throw stops everything after it, and the
+        // step used to name only the path that failed — so a live worktree could be destroyed and
+        // the operator told about a different path entirely (BP-427). Deletion is the one act
+        // nobody can undo, so the account of it is all they have.
+        var gone: [String] = []
+
         do {
             // The worktrees first: they live beside the checkout, under a root shared with every
             // other project in that folder, so they are removed by name rather than by deleting
@@ -56,11 +62,13 @@ public struct CheckoutDeletion: Sendable {
             // naming the checkout — true, and read as "all of it went".
             for worktree in worktrees {
                 try remove(worktree)
+                gone.append(worktree)
             }
 
             let wasThere = exists(path)
             if wasThere {
                 try remove(path)
+                gone.append(path)
             }
 
             // The grant goes last. Dropped first, a failed delete would leave a directory the
@@ -71,7 +79,12 @@ public struct CheckoutDeletion: Sendable {
                 ? .removed(project: project, path: path)
                 : .forgotten(project: project, path: path)
         } catch {
-            return .failed(project: project, reason: error.localizedDescription)
+            // `gone` is empty only when the very first act threw, which is the case where nothing
+            // happened and `.failed` is the honest word for it.
+            return gone.isEmpty
+                ? .failed(project: project, reason: error.localizedDescription)
+                : .partiallyRemoved(
+                    project: project, removed: gone, reason: error.localizedDescription)
         }
     }
 }

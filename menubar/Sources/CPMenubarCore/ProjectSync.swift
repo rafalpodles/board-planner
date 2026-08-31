@@ -31,6 +31,12 @@ public enum SyncStep: Equatable {
     /// A removal a guard said no to. Not a failure: the checkout is intact and the reason is one
     /// the operator can act on.
     case refused(project: String, reason: String)
+    /// A removal that deleted some of what it meant to and then stopped. Its own case rather than a
+    /// `.failed` carrying a longer sentence, for the reason `.forgotten` is its own case: the
+    /// difference between "nothing happened" and "some of it is gone" is the whole of what the
+    /// operator has afterwards, and a message naming only the path that failed reads as the first
+    /// while meaning the second.
+    case partiallyRemoved(project: String, removed: [String], reason: String)
     case failed(project: String, reason: String)
 }
 

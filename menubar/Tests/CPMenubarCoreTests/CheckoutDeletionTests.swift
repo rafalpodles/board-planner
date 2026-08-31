@@ -49,11 +49,14 @@ final class CheckoutDeletionTests: XCTestCase {
         let step = deletion(r).perform(
             project: "BP", path: "/co", worktrees: ["/wt/one", "/wt/two", "/wt/three"])
 
-        guard case .failed(let project, let reason) = step else {
-            XCTFail("expected a failure, got \(step)")
+        // Partial, not failed: /wt/one is gone and saying only "/wt/two could not be removed"
+        // reads as nothing having happened (BP-427).
+        guard case .partiallyRemoved(let project, let removed, let reason) = step else {
+            XCTFail("expected a partial removal, got \(step)")
             return
         }
         XCTAssertEqual(project, "BP")
+        XCTAssertEqual(removed, ["/wt/one"], "what already went is named")
         XCTAssertTrue(reason.contains("/wt/two"), "the reason names the worktree: \(reason)")
         XCTAssertEqual(r.removed, ["/wt/one"], "it stops at the throw rather than carrying on")
         XCTAssertFalse(r.removed.contains("/co"), "the checkout survives a failed worktree delete")
@@ -111,8 +114,7 @@ final class CheckoutDeletionTests: XCTestCase {
                 if args.contains("--show-toplevel") { return (0, "/co\n") }
                 if args.contains("--git-dir") || args.contains("--git-common-dir") { return (0, ".git") }
                 if args.contains("worktree") {
-                    let listed = (["/co"] + worktrees).map { "worktree \($0)" }.joined(separator: "\n\n")
-                    return (0, listed)
+                    return (0, porcelainZ((["/co"] + worktrees).map { "worktree \($0)" }.joined(separator: "\n\n")))
                 }
                 return (0, "")
             },

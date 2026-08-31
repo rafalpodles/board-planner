@@ -177,6 +177,11 @@ private struct RepositoriesTab: View {
                         .font(.caption2).foregroundStyle(.secondary)
                 case .refused(let project, let reason):
                     Text("Left \(project) alone: \(reason)").font(.caption2).foregroundStyle(.orange)
+                case .partiallyRemoved(let project, let removed, let reason):
+                    // Named in full: this is the one message that reports destruction the operator
+                    // did not ask about and cannot undo.
+                    Text("\(project): stopped after deleting \(removed.joined(separator: ", ")) — \(reason)")
+                        .font(.caption2).foregroundStyle(.red)
                 case .failed(let project, let reason):
                     Text("\(project): \(reason)").font(.caption2).foregroundStyle(.red)
                 }

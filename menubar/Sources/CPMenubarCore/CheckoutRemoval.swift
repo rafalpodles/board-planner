@@ -100,7 +100,7 @@ public struct CheckoutRemoval: Sendable {
             return .refused(reason: "\(path) has stashed changes")
         }
 
-        let worktrees = run(["-C", path, "worktree", "list", "--porcelain"], path)
+        let worktrees = run(["-C", path, "worktree", "list", "--porcelain", "-z"], path)
         guard worktrees.code == 0 else {
             return .refused(reason: "could not list the worktrees of \(path)")
         }
@@ -149,11 +149,30 @@ public struct CheckoutRemoval: Sendable {
     ///
     /// Positional was chosen over deriving the main checkout from `--git-common-dir` and filtering
     /// it by identity, which reads like the stronger guard and is not: fed the truncated listing
-    /// BP-427 describes, identity stops matching and hands the repository back, while the truncated
+    /// BP-427 described, identity stops matching and hands the repository back, while the truncated
     /// entry is still first. The `root` filter below is unreachable for every input real git can
     /// produce, and kept because it is the one that states the intent.
+    ///
+    /// BP-427 has since added `-z`, so that truncation no longer happens — which removes the case
+    /// that made positional the safer of the two rather than merely the simpler. Positional is kept
+    /// because the property it rests on is the one measured across a locked worktree, a prunable
+    /// entry mid-list, four registrations, and `worktree move`; the argument above is recorded as
+    /// it was, with its premise now narrower.
+    /// Split on NUL, not newline. `-z` terminates each attribute with NUL instead of "\n", which
+    /// is the only way a path containing a newline survives the listing: without it such a path
+    /// spans two lines and the parser keeps the prefix — measured, `…/odd/we` out of `…/odd/we\nird`
+    /// — after which that worktree is never status-checked and later fails to delete (BP-427).
+    ///
+    /// The record separator becomes an empty field, which the filter below drops, so the shape the
+    /// rest of this reads is unchanged.
+    private func fields(_ output: String) -> [String] {
+        output.split(separator: "\0", omittingEmptySubsequences: false)
+            .map(String.init)
+            .filter { !$0.isEmpty }
+    }
+
     private func linkedWorktrees(_ output: String, root: String) -> [String] {
-        lines(output)
+        fields(output)
             .compactMap { line in
                 line.hasPrefix("worktree ") ? String(line.dropFirst("worktree ".count)) : nil
             }
