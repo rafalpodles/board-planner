@@ -16,7 +16,12 @@ import { Reporter } from "./reporter.js";
 import { SHUTDOWN_SIGNAL } from "./commands.js";
 import { scrub } from "./scrub.js";
 import { OutcomeKind, Phase, Telemetry } from "./telemetry.js";
-import { BaseUnavailableError, Workspace, Worktree } from "./workspace.js";
+import {
+  BaseUnavailableError,
+  PoisonedCheckoutError,
+  Workspace,
+  Worktree,
+} from "./workspace.js";
 import {
   ClaimedTask,
   DiffStats,
@@ -54,6 +59,11 @@ export interface PipelineDeps {
   signal?: AbortSignal;
   /** Worker-side stderr for faults an operator has to see without opening the board. */
   logError?: (message: string) => void;
+  /**
+   * Stop offering this project until an operator has been. Called when the checkout itself is the
+   * problem, so that refusing a run does not simply hand the same clone to the next one (BP-504).
+   */
+  quarantineProject?: (projectId: string, reason: string) => void;
   /** Injected only so a test can move the run's clock; the run itself reads the wall clock. */
   now?: () => number;
   // Where the run says what it is doing. Left out entirely, the run behaves exactly as it did
@@ -309,6 +319,18 @@ export async function runTask(
     worktree = await workspace.create(task.taskKey, SLUG);
   } catch (error) {
     await quietly(() => workspace.destroy(task.taskKey));
+    // The checkout carries a key git runs on checkout, so it was refused before it ran. The task
+    // did nothing — refunded, exactly as a transport fault is — and the loop is told to stop
+    // claiming, because every other task on this machine meets the same key. The project is
+    // quarantined on top of that: without it, refusing is only the old requeue with the charge
+    // taken off, and something hands the same clone to the next run (BP-504).
+    if (error instanceof PoisonedCheckoutError) {
+      deps.logError?.(`${task.taskKey}: ${String(error)}`);
+      deps.quarantineProject?.(task.projectId, error.finding);
+      settle("released", "the checkout's git config carries an executable key");
+      await reporter.released(task, String(error));
+      return "machine-fault";
+    }
     if (error instanceof BaseUnavailableError) {
       deps.logError?.(`${task.taskKey}: ${String(error)}`);
       // The remote answered and this repository has no such base branch — a default branch of

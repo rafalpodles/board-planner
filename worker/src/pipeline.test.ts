@@ -8,7 +8,7 @@ import { Executor } from "./executor.js";
 import { gitArgs } from "./git-safety.js";
 import { Reporter } from "./reporter.js";
 import { createTelemetry, isOutcome, isQuota, Progress, TelemetryUpdate } from "./telemetry.js";
-import { BaseUnavailableError, Workspace } from "./workspace.js";
+import { BaseUnavailableError, PoisonedCheckoutError, Workspace } from "./workspace.js";
 import { ClaimedTask, DiffStats, ExecutionResult, Gate, SnapshotEntry } from "./types.js";
 import { PipelineDeps, resolveStatusIds, runTask } from "./pipeline.js";
 
@@ -313,6 +313,65 @@ describe("runTask", () => {
     await runTask(h.deps, task);
 
     expect(logError).toHaveBeenCalledWith(expect.stringMatching(/CP-158.*no route to host/));
+  });
+
+  /**
+   * BP-504. The checkout carries a key git would run, and `git worktree add` is what runs it. The
+   * task did nothing to deserve that, and the same key meets the next task on this machine — so
+   * the attempt is refunded, the loop is told to stop claiming, and the project is quarantined so
+   * nothing hands the same clone to another run.
+   */
+  describe("a checkout whose config carries an executable key", () => {
+    const poisoned = () =>
+      new PoisonedCheckoutError("filter.z.smudge (local)");
+
+    it("refunds the attempt rather than charging the task for the machine's compromise", async () => {
+      const h = harness();
+      h.workspace.create.mockRejectedValue(poisoned());
+
+      const disposition = await runTask(h.deps, task);
+
+      expect(disposition).toBe("machine-fault");
+      expect(h.reporter.released).toHaveBeenCalled();
+      expect(h.reporter.requeued, "the attempt was charged").not.toHaveBeenCalled();
+    });
+
+    it("quarantines the project, naming what was found", async () => {
+      const quarantineProject = vi.fn();
+      const h = harness({ quarantineProject });
+      h.workspace.create.mockRejectedValue(poisoned());
+
+      await runTask(h.deps, task);
+
+      expect(quarantineProject).toHaveBeenCalledWith(
+        task.projectId,
+        expect.stringContaining("filter.z.smudge")
+      );
+    });
+
+    it("says so in the worker's own log, where an operator sees it without opening the board", async () => {
+      const logError = vi.fn();
+      const h = harness({ logError });
+      h.workspace.create.mockRejectedValue(poisoned());
+
+      await runTask(h.deps, task);
+
+      expect(logError).toHaveBeenCalledWith(expect.stringMatching(/filter\.z\.smudge/));
+    });
+
+    // The control, and the line either side of it: an ordinary worktree failure is still the
+    // task's, still charges the attempt, and quarantines nothing.
+    it("leaves an ordinary worktree failure alone", async () => {
+      const quarantineProject = vi.fn();
+      const h = harness({ quarantineProject });
+      h.workspace.create.mockRejectedValue(new Error("worktree add failed"));
+
+      const disposition = await runTask(h.deps, task);
+
+      expect(disposition).toBeUndefined();
+      expect(h.reporter.requeued).toHaveBeenCalled();
+      expect(quarantineProject).not.toHaveBeenCalled();
+    });
   });
 
   // Everything else that can go wrong creating a worktree is still the task's problem and still
