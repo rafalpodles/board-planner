@@ -280,7 +280,7 @@ the worktree holds instead. `ExecutionPanel` is untouched and does not collide w
 - Workflow files are never acceptable through this path.
 - The run record stays `gateRejected` and the attempt is not refunded. A delivery writes no
   `RunRecord`. Stated so it does not get "fixed" later by mutating a settled run.
-- Confining the agent to its worktree is BP-382's larger question and is not answered here.
+- Confining the agent to its worktree is tracked as BP-349 and is not answered here.
 
 ## Testing
 
