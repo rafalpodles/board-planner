@@ -20,6 +20,7 @@ import {
   seed,
 } from "./seed";
 import { signIn as arriveSignedIn } from "./session";
+import { dragTo } from "./drag";
 
 /**
  * BP-384: the board is the product's most-used surface and until now had no coverage of its
@@ -93,39 +94,41 @@ function taskPut(page: Page, taskId: { toString(): string }) {
 }
 
 /**
- * Native HTML5 drag, driven by hand: Chromium runs real drags on the OS, so mouse events
- * produce nothing (see run-conflict for the fuller explanation). One live DataTransfer is
- * shared — the card writes its id on dragstart, the column reads it back on drop.
- *
- * When `onto` is given, the dragover goes to that card rather than the column body, so the
- * column computes an insertion position from the pointer instead of appending at the end.
+ * Moves a card by dragging it, for real: see e2e/drag.ts for what the hand-dispatched version
+ * could not test. When `onto` is given the pointer lands near that card's top edge, so the column
+ * computes an insertion position before it instead of appending at the end.
  */
 async function dragCardToColumn(page: Page, card: Locator, column: Locator, onto?: Locator) {
-  const dataTransfer = await page.evaluateHandle(() => new DataTransfer());
   const body = column.locator("[data-column-body]");
   const wasEmpty = (await column.locator(CARDS).count()) === 0;
 
-  await card.dispatchEvent("dragstart", { dataTransfer });
-  await body.dispatchEvent("dragenter", { dataTransfer });
-  if (onto) {
-    // clientY near the top of the card puts the insertion point before it
-    await onto.dispatchEvent("dragover", { dataTransfer, clientY: 1 });
-  } else {
-    await body.dispatchEvent("dragover", { dataTransfer });
-  }
-
-  // The insertion marker is proof a drop index was computed; without one the drop falls
-  // through to the plain status endpoint — a different code path than the one under test.
-  // An empty column draws no marker at all (Column renders the trailing one only above a
-  // card), so there the proof has to come from the request instead — see the empty-column
-  // test below, which asserts the body carries an order only onTaskDrop would send.
-  if (!wasEmpty) {
-    await expect(column.locator("[data-column-body] div.h-0\\.5").first()).toBeAttached();
-  }
-
-  await body.dispatchEvent("drop", { dataTransfer });
-  // No dragend: a successful drop moves the card out from under the locator
-  await dataTransfer.dispose();
+  await dragTo(page, card, onto ?? body, {
+    atTop: Boolean(onto),
+    // The insertion marker is proof a drop index was computed; without one the drop falls
+    // through to the plain status endpoint — a different code path than the one under test.
+    // An empty column draws no marker at all (Column renders the trailing one only above a
+    // card), so there the proof has to come from the request instead — see the empty-column
+    // test below, which asserts the body carries an order only onTaskDrop would send.
+    //
+    // Asserted with the button still down, which the synthetic version could not do: there was
+    // no drag session to be in the middle of.
+    duringDrag: wasEmpty
+      ? undefined
+      : async () => {
+          // The selector is the assertion. A descendant match is happy with either marker, so it
+          // cannot tell a drop appended to the body from one inserted beside a card — with the
+          // hand-dispatched version that distinction could not go wrong, because the dragover was
+          // aimed at the body; with a real drag the landing point is geometry, and geometry drifts.
+          // Aiming the helper 30px lower left this green while "lands in the right place" landed
+          // somewhere else. A card-relative marker is nested inside the card's wrapper, so only
+          // that branch can take the descendant form.
+          await expect(
+            onto
+              ? column.locator("[data-column-body] div.h-0\\.5").first()
+              : column.locator("[data-column-body] > div.h-0\\.5")
+          ).toBeAttached();
+        },
+  });
 }
 
 async function readTask(request: APIRequestContext, taskNumber: number) {
