@@ -304,22 +304,22 @@ final class CheckoutRemovalReachTests: XCTestCase {
         let checkout = cleanCheckout()
         let origin = dir + "/checkout-origin.git"
 
-        // Somebody else pushes. The first version of this test pointed the prefetch ref at HEAD,
-        // which was already on the remote — so the guard found nothing either way and removing the
-        // exclusion did not redden it. The ref has to hold a commit refs/remotes does not.
-        let other = dir + "/other"
-        _ = git(dir, ["clone", "-q", origin, other])
-        FileManager.default.createFile(atPath: other + "/b.txt", contents: Data("b\n".utf8))
-        _ = git(other, ["add", "-A"])
-        _ = git(other, ["commit", "-qm", "theirs"])
-        _ = git(other, ["push", "-q"])
-
-        // What `git maintenance` does hourly, including the `--refmap=`: without it git updates
-        // the remote-tracking ref opportunistically even for an explicit refspec, and then
-        // `--not --remotes` cancels the very commit this test is about.
-        _ = git(
-            checkout,
-            ["fetch", "-q", "--refmap=", "origin", "+refs/heads/main:refs/prefetch/remotes/origin/main"])
+        // The state under test is "a prefetch ref holds a commit no remote-tracking ref has", and
+        // it is built directly rather than by imitating `git maintenance`'s fetch. The first
+        // version pointed the ref at HEAD — already on the remote, so the guard found nothing
+        // either way. The second used `--refmap=` to stop the opportunistic remote-tracking
+        // update; that held on git 2.50 here and not on 2.55 on CI, where the premise assertion
+        // below failed and the test then passed for no reason at all.
+        _ = git(checkout, ["checkout", "-q", "-b", "prefetched"])
+        FileManager.default.createFile(atPath: checkout + "/b.txt", contents: Data("b\n".utf8))
+        _ = git(checkout, ["add", "-A"])
+        _ = git(checkout, ["commit", "-qm", "theirs, arriving by prefetch"])
+        let prefetched = git(checkout, ["rev-parse", "HEAD"]).output
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        _ = git(checkout, ["checkout", "-q", "main"])
+        _ = git(checkout, ["branch", "-qD", "prefetched"])
+        _ = git(checkout, ["update-ref", "refs/prefetch/remotes/origin/main", prefetched])
+        _ = origin
 
         XCTAssertFalse(
             git(checkout, ["log", "--all", "--not", "--remotes", "--oneline"]).output.isEmpty,
@@ -375,6 +375,50 @@ final class CheckoutRemovalReachTests: XCTestCase {
         let reason = refusal(checkout)
         XCTAssertTrue(reason.contains("locked"), reason)
         XCTAssertTrue(reason.contains("external drive"), reason)
+    }
+
+
+    /// The parent sweep excludes refs/prefetch and refs/notes; the nested one did not, so a
+    /// `vendor/thesis` with maintenance enabled refused the operator's own checkout for ever.
+    func testAPrefetchRefInsideANestedRepositoryDoesNotRefuseTheParent() {
+        let checkout = cleanCheckout()
+        let nested = nestedRepo(in: checkout, at: "thesis")
+        let nestedOrigin = dir + "/thesis-origin.git"
+        _ = git(dir, ["init", "-q", "--bare", nestedOrigin])
+        FileManager.default.createFile(atPath: nested + "/chapter.md", contents: Data("one\n".utf8))
+        _ = git(nested, ["add", "-A"])
+        _ = git(nested, ["commit", "-qm", "chapter one"])
+        _ = git(nested, ["remote", "add", "origin", nestedOrigin])
+        _ = git(nested, ["push", "-q", "-u", "origin", "HEAD"])
+
+        _ = git(nested, ["checkout", "-q", "-b", "prefetched"])
+        _ = git(nested, ["commit", "-q", "--allow-empty", "-m", "arriving by prefetch"])
+        let sha = git(nested, ["rev-parse", "HEAD"]).output
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        _ = git(nested, ["checkout", "-q", "main"])
+        _ = git(nested, ["branch", "-qD", "prefetched"])
+        _ = git(nested, ["update-ref", "refs/prefetch/remotes/origin/main", sha])
+
+        XCTAssertFalse(
+            git(nested, ["log", "--all", "--not", "--remotes", "--oneline"]).output.isEmpty,
+            "the premise: a bare --all inside the nested repository counts it as unpushed")
+
+        XCTAssertEqual(verdict(checkout), .go(worktrees: []))
+    }
+
+    func testANoteInsideANestedRepositoryDoesNotRefuseTheParent() {
+        let checkout = cleanCheckout()
+        let nested = nestedRepo(in: checkout, at: "thesis")
+        let nestedOrigin = dir + "/thesis-origin.git"
+        _ = git(dir, ["init", "-q", "--bare", nestedOrigin])
+        FileManager.default.createFile(atPath: nested + "/chapter.md", contents: Data("one\n".utf8))
+        _ = git(nested, ["add", "-A"])
+        _ = git(nested, ["commit", "-qm", "chapter one"])
+        _ = git(nested, ["remote", "add", "origin", nestedOrigin])
+        _ = git(nested, ["push", "-q", "-u", "origin", "HEAD"])
+        _ = git(nested, ["notes", "add", "-m", "read this first"])
+
+        XCTAssertEqual(verdict(checkout), .go(worktrees: []))
     }
 
 }
