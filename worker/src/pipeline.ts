@@ -62,8 +62,12 @@ export interface PipelineDeps {
   /**
    * Stop offering this project until an operator has been. Called when the checkout itself is the
    * problem, so that refusing a run does not simply hand the same clone to the next one (BP-504).
+   *
+   * Required, not optional: an assembly that forgot it would refuse, back off, claim, and refuse
+   * again for ever — the exact loop the quarantine exists to end — and would do it without
+   * anything failing to compile.
    */
-  quarantineProject?: (projectId: string, reason: string) => void;
+  quarantineProject: (projectId: string, reason: string) => void;
   /** Injected only so a test can move the run's clock; the run itself reads the wall clock. */
   now?: () => number;
   // Where the run says what it is doing. Left out entirely, the run behaves exactly as it did
@@ -326,7 +330,14 @@ export async function runTask(
     // taken off, and something hands the same clone to the next run (BP-504).
     if (error instanceof PoisonedCheckoutError) {
       deps.logError?.(`${task.taskKey}: ${String(error)}`);
-      deps.quarantineProject?.(task.projectId, error.finding);
+      // Only a key somebody planted quarantines the project. `unreadable` is git declining to
+      // answer — a checkout being re-cloned, a machine under load, a 60-second timeout — and
+      // latching a project off until the process restarts on the strength of one bad answer would
+      // turn an ordinary transient into an outage nothing on the machine can lift. The run is
+      // refused either way, and a transient one is refused again next time if it persists.
+      if (error.kind === "planted") {
+        deps.quarantineProject(task.projectId, error.finding);
+      }
       settle("released", "the checkout's git config carries an executable key");
       await reporter.released(task, String(error));
       return "machine-fault";

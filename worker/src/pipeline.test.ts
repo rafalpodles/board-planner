@@ -9,6 +9,7 @@ import { gitArgs } from "./git-safety.js";
 import { Reporter } from "./reporter.js";
 import { createTelemetry, isOutcome, isQuota, Progress, TelemetryUpdate } from "./telemetry.js";
 import { BaseUnavailableError, PoisonedCheckoutError, Workspace } from "./workspace.js";
+import { UNREADABLE_CONFIG } from "./repos.js";
 import { ClaimedTask, DiffStats, ExecutionResult, Gate, SnapshotEntry } from "./types.js";
 import { PipelineDeps, resolveStatusIds, runTask } from "./pipeline.js";
 
@@ -169,6 +170,7 @@ function harness(overrides: Partial<PipelineDeps> = {}) {
   // gates/from-entry.test.ts's subject; this file is about the order they run in.
   const gateFor = vi.fn<PipelineDeps["gateFor"]>((entry) => passingGate(entry.key));
   const recordRun = vi.fn<PipelineDeps["recordRun"]>();
+  const quarantineProject = vi.fn<PipelineDeps["quarantineProject"]>();
 
   const deps: PipelineDeps = {
     config,
@@ -181,6 +183,7 @@ function harness(overrides: Partial<PipelineDeps> = {}) {
     collectDiff,
     gateFor,
     recordRun,
+    quarantineProject,
     runner,
     ...overrides,
   };
@@ -198,6 +201,7 @@ function harness(overrides: Partial<PipelineDeps> = {}) {
     collectDiff,
     gateFor,
     recordRun,
+    quarantineProject,
     runner,
   };
 }
@@ -337,16 +341,33 @@ describe("runTask", () => {
     });
 
     it("quarantines the project, naming what was found", async () => {
-      const quarantineProject = vi.fn();
-      const h = harness({ quarantineProject });
+      const h = harness();
       h.workspace.create.mockRejectedValue(poisoned());
 
       await runTask(h.deps, task);
 
-      expect(quarantineProject).toHaveBeenCalledWith(
+      expect(h.quarantineProject).toHaveBeenCalledWith(
         task.projectId,
         expect.stringContaining("filter.z.smudge")
       );
+    });
+
+    /**
+     * The other half of the taxonomy, and the reason the error carries a kind at all. git declining
+     * to answer is a checkout being re-cloned, a machine under load, a 60-second timeout — the run
+     * is still refused, because a config this cannot read is one it cannot vouch for, but latching
+     * the project off until the process restarts on the strength of one bad answer would turn an
+     * ordinary transient into an outage nothing on the machine can lift.
+     */
+    it("refuses a config it could not read without quarantining anything", async () => {
+      const h = harness();
+      h.workspace.create.mockRejectedValue(new PoisonedCheckoutError(UNREADABLE_CONFIG));
+
+      const disposition = await runTask(h.deps, task);
+
+      expect(disposition).toBe("machine-fault");
+      expect(h.reporter.released).toHaveBeenCalled();
+      expect(h.quarantineProject, "a transient read latched the project off").not.toHaveBeenCalled();
     });
 
     it("says so in the worker's own log, where an operator sees it without opening the board", async () => {
@@ -362,15 +383,14 @@ describe("runTask", () => {
     // The control, and the line either side of it: an ordinary worktree failure is still the
     // task's, still charges the attempt, and quarantines nothing.
     it("leaves an ordinary worktree failure alone", async () => {
-      const quarantineProject = vi.fn();
-      const h = harness({ quarantineProject });
+      const h = harness();
       h.workspace.create.mockRejectedValue(new Error("worktree add failed"));
 
       const disposition = await runTask(h.deps, task);
 
       expect(disposition).toBeUndefined();
       expect(h.reporter.requeued).toHaveBeenCalled();
-      expect(quarantineProject).not.toHaveBeenCalled();
+      expect(h.quarantineProject).not.toHaveBeenCalled();
     });
   });
 

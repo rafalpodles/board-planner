@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createWorkspace } from "./workspace.js";
@@ -20,6 +20,10 @@ import { createRunner } from "./exec.js";
  * future git stops running the filter here, this file should say so rather than quietly becoming a
  * test of nothing.
  */
+
+// Real clones, fetches and checkouts, on a machine that also runs other work. The house pattern
+// (wiring.integration.test.ts) is an explicit budget rather than the 5s default.
+const REAL_GIT_TIMEOUT_MS = 30_000;
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, {
@@ -96,7 +100,7 @@ describe("workspace.create against a planted config", () => {
     expect(existsSync(marker), `git ${git(main, "--version").trim()} did not run the filter`).toBe(
       true
     );
-  });
+  }, REAL_GIT_TIMEOUT_MS);
 
   it("refuses, and the payload does not run", async () => {
     plant(main);
@@ -110,6 +114,61 @@ describe("workspace.create against a planted config", () => {
     expect(existsSync(join(dir, "cp-worktrees", "BP-1")), "the worktree was created anyway").toBe(
       false
     );
+  }, REAL_GIT_TIMEOUT_MS);
+
+  /**
+   * The scan reads the repository's own scopes. `$HOME` is not one of them — and it does not have
+   * to be planted through the repository at all: `childEnv()` allowlists HOME because the CLI
+   * authenticates from its session there, and BP-349 says the agent's Write reaches it. So a
+   * `[filter "z"] smudge` in `~/.gitconfig` plus `* filter=z` in `~/.config/git/attributes` made
+   * `git worktree add` run the payload with **nothing planted inside the repository**, which the
+   * scan by itself cannot see and never will.
+   *
+   * What closes it is not a wider scan but `GIT_CONFIG_GLOBAL=/dev/null` on these calls — the
+   * pattern delivery.ts already uses. A filter has to be DEFINED somewhere, and with the global
+   * file out of the picture the only scopes left are the ones the scan reads.
+   */
+  describe("and a key planted in the operator's own HOME rather than the repository", () => {
+    let realHome: string | undefined;
+
+    beforeEach(() => {
+      const home = join(dir, "home");
+      mkdirSync(join(home, ".config", "git"), { recursive: true });
+      writeFileSync(payload, `#!/bin/sh\ntouch "${marker}"\ncat\n`);
+      chmodSync(payload, 0o755);
+      writeFileSync(join(home, ".gitconfig"), `[filter "z"]\n\tsmudge = ${payload}\n`);
+      writeFileSync(join(home, ".config", "git", "attributes"), "* filter=z\n");
+      realHome = process.env.HOME;
+      process.env.HOME = home;
+    });
+
+    afterEach(() => {
+      // Assigned back only when there was one: `process.env.X = undefined` stores the string
+      // "undefined", which is worse than the variable being absent.
+      if (realHome === undefined) delete process.env.HOME;
+      else process.env.HOME = realHome;
+    });
+
+    // The premise, measured rather than assumed, and the control for the test below it: with the
+    // same HOME and a plain `git worktree add`, the payload runs.
+    it("is a live danger — plain git runs it, with nothing in the repository", () => {
+      execFileSync("git", ["worktree", "add", "-B", "raw", "--", join(dir, "raw"), "HEAD"], {
+        cwd: main,
+        stdio: "pipe",
+        env: { ...process.env, GIT_AUTHOR_NAME: "worker", GIT_AUTHOR_EMAIL: "worker@example.com" },
+      });
+
+      expect(existsSync(marker)).toBe(true);
+    }, REAL_GIT_TIMEOUT_MS);
+
+    it("does not run when the worker checks the same tree out", async () => {
+      const worktree = await workspaceFor(main).create("BP-1", "worker");
+
+      // It succeeds: nothing is planted in the repository, so there is nothing to refuse — the
+      // checkout simply does not read the file the key is in.
+      expect(existsSync(join(worktree.path, "a.txt"))).toBe(true);
+      expect(existsSync(marker), "the key in ~/.gitconfig ran anyway").toBe(false);
+    }, REAL_GIT_TIMEOUT_MS);
   });
 
   // The control, and it is not optional: every assertion above holds for a create() that refused
@@ -120,5 +179,5 @@ describe("workspace.create against a planted config", () => {
     expect(worktree.path).toBe(join(dir, "cp-worktrees", "BP-1"));
     expect(existsSync(join(worktree.path, "a.txt"))).toBe(true);
     expect(worktree.baseSha).toBe(git(main, "rev-parse", "HEAD").trim());
-  });
+  }, REAL_GIT_TIMEOUT_MS);
 });
