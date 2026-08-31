@@ -302,9 +302,28 @@ final class CheckoutRemovalReachTests: XCTestCase {
     /// re-arms it. Found by review after the first cut shipped `--all` bare.
     func testAPrefetchRefDoesNotMakeACleanCheckoutRefuse() {
         let checkout = cleanCheckout()
-        let head = git(checkout, ["rev-parse", "HEAD"]).output
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        _ = git(checkout, ["update-ref", "refs/prefetch/remotes/origin/main", head])
+        let origin = dir + "/checkout-origin.git"
+
+        // Somebody else pushes. The first version of this test pointed the prefetch ref at HEAD,
+        // which was already on the remote — so the guard found nothing either way and removing the
+        // exclusion did not redden it. The ref has to hold a commit refs/remotes does not.
+        let other = dir + "/other"
+        _ = git(dir, ["clone", "-q", origin, other])
+        FileManager.default.createFile(atPath: other + "/b.txt", contents: Data("b\n".utf8))
+        _ = git(other, ["add", "-A"])
+        _ = git(other, ["commit", "-qm", "theirs"])
+        _ = git(other, ["push", "-q"])
+
+        // What `git maintenance` does hourly, including the `--refmap=`: without it git updates
+        // the remote-tracking ref opportunistically even for an explicit refspec, and then
+        // `--not --remotes` cancels the very commit this test is about.
+        _ = git(
+            checkout,
+            ["fetch", "-q", "--refmap=", "origin", "+refs/heads/main:refs/prefetch/remotes/origin/main"])
+
+        XCTAssertFalse(
+            git(checkout, ["log", "--all", "--not", "--remotes", "--oneline"]).output.isEmpty,
+            "the premise: a bare --all counts the prefetched commit as unpushed")
 
         XCTAssertEqual(verdict(checkout), .go(worktrees: []))
     }
