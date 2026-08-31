@@ -49,11 +49,15 @@ final class AppModel {
                 state.adopt(status, at: Date())
                 config = try? await client.config()
                 // The picking happens in a browser; this is where the machine catches up with it.
-                // `busy` comes from the status just read rather than from a cached one: the gap
-                // between them is the difference between refusing a removal and deleting a
-                // worktree out from under a run.
+                // The runner is handed the question rather than an answer, because a clone takes
+                // minutes and the answer would be stale by the time a deletion acts on it.
+                //
+                // A socket that will not answer counts as busy — SyncPass.busy(asking:) states why,
+                // and is where that rule is tested.
                 if let catalogue = config?.catalogue {
-                    await ProjectSyncRunner.shared.sync(catalogue: catalogue, busy: status.current != nil)
+                    await ProjectSyncRunner.shared.sync(
+                        catalogue: catalogue,
+                        isBusy: SyncPass.busy(asking: { [client] in try await client.status() }))
                 }
                 for await event in client.stream() {
                     state.apply(event, at: Date())
