@@ -32,6 +32,9 @@ const UNREACHABLE_ERRORS = new Set([
   "MongoNetworkTimeoutError",
   "MongoNotConnectedError",
   "MongoTopologyClosedError",
+  // A request that was mid-operation on the client a reconnect replaced. It is the database going
+  // away, seen from a request that had already started — 503 with a Retry-After, not a 500 (BP-520)
+  "MongoClientClosedError",
 ]);
 
 /**
