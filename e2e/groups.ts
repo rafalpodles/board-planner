@@ -73,6 +73,7 @@ export const GROUPS = {
   ],
   automation: [
     "workers-enrolment.spec.ts",
+    "worker-controls.spec.ts",
     "worker-enrolment-name.spec.ts",
     "run-conflict.spec.ts",
     "run-completion.spec.ts",
