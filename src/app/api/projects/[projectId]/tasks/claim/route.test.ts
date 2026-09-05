@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { BoardCannotClaim } from "@/lib/claim-refusal";
 
 const verifyWorkerCredential = vi.fn();
 const verdictFor = vi.fn();
@@ -255,6 +256,29 @@ describe("POST /tasks/claim", () => {
     const response = await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
     expect(response.status).toBe(204);
+  });
+
+  // The control above is what this is distinct from: a board that cannot claim at all is not an
+  // empty queue, and answering 204 for both left the worker looking idle on a board that was broken
+  // (BP-512). The reason travels in the body, because the worker's log is the only place a
+  // machine's operator will see it.
+  it("says why a board cannot claim at all, rather than reporting an empty queue", async () => {
+    claimNextTask.mockRejectedValue(new BoardCannotClaim("active"));
+
+    const response = await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
+
+    expect(response.status).toBe(409);
+    expect((await response.json()).error).toMatch(/no column meaning In progress/);
+  });
+
+  // Anything else claimNextTask throws is a server fault, and dressing it as a board refusal would
+  // hide an outage behind a message telling the operator to edit their columns
+  it("does not turn an unrelated failure into a board refusal", async () => {
+    claimNextTask.mockRejectedValue(new Error("mongo is having a moment"));
+
+    await expect(
+      POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) })
+    ).rejects.toThrow("mongo is having a moment");
   });
 
   it("returns 404 when the project key does not resolve, without claiming", async () => {

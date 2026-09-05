@@ -150,6 +150,61 @@ test("only the project request failing still draws the charts", async ({ page })
 });
 
 /**
+ * BP-512. A board with no column meaning In progress cannot express the number at all. Summing
+ * zero columns answers 0, which is a statement about the tasks when it is one about the board —
+ * the same reasoning the sprint header applies to a board with no Done column.
+ *
+ * Two things keep this honest. The tasks sit in the backlog: a board that put them nowhere would
+ * also read 0, and then the assertion could not tell the fix from the bug. And the board carries
+ * every role but the one under test: a dashboard keyed on the wrong role would fire the same
+ * warning on a board missing every role, and pass.
+ */
+test("a board with no In-progress column says the count is impossible, rather than 0", async ({
+  page,
+}) => {
+  if (mongoose.connection.readyState === 0) await mongoose.connect(E2E_MONGODB_URI);
+  const handle = mongoose.connection.db;
+  if (!handle) throw new Error("no database handle");
+  const OTHER_ROLES = [
+    { id: "icebox", label: "Icebox", color: "#6b7280", role: "backlog", order: 0 },
+    { id: "ready", label: "Ready", color: "#3b82f6", role: "approved", order: 1 },
+    { id: "checking", label: "Checking", color: "#a855f7", role: "review", order: 3 },
+    { id: "shipped", label: "Shipped", color: "#22c55e", role: "done", order: 4 },
+  ];
+  const IN_FLIGHT = { id: "col_wip", label: "Building", color: "#e11d48", role: "active", order: 2 };
+  await handle.collection("tasks").updateMany({ project: PROJECT_ID }, { $set: { status: "icebox" } });
+  await signIn(page);
+
+  // The control: an In-progress column with nothing in it is a real 0, and the fix must leave it
+  // one — `sum || null` would turn every quiet board's 0 into a dash
+  await test.step("an empty In-progress column still reads 0, and nothing warns", async () => {
+    await handle
+      .collection("projects")
+      .updateOne({ _id: PROJECT_ID }, { $set: { columns: [...OTHER_ROLES, IN_FLIGHT] } });
+    await page.goto(DASHBOARD);
+    await expect(page.getByRole("heading", { name: "Status Breakdown" })).toBeVisible();
+
+    await expect(inProgressCard(page)).toContainText("0");
+    await expect(page.getByTestId("dashboard-no-active-column")).toHaveCount(0);
+  });
+
+  await test.step("without one, the count is impossible and the page says so", async () => {
+    await handle.collection("projects").updateOne({ _id: PROJECT_ID }, { $set: { columns: OTHER_ROLES } });
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "Status Breakdown" })).toBeVisible();
+
+    const warning = page.getByTestId("dashboard-no-active-column");
+    await expect(warning).toBeVisible();
+    await expect(warning).toContainText("In Progress cannot be counted");
+    // A different sentence from the one a failed settings load gets: the settings loaded fine
+    await expect(page.getByTestId("dashboard-settings-warning")).toHaveCount(0);
+
+    await expect(inProgressCard(page)).toContainText("—");
+    await expect(inProgressCard(page)).not.toContainText("0");
+  });
+});
+
+/**
  * A 200 is not a success if the body is empty: `stats` ends up null with nothing rejected, so
  * `whyItFailed` never runs and the banner had no text at all — a red box with only a button.
  */
