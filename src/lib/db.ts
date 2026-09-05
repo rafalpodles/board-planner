@@ -39,6 +39,30 @@ const SERVER_SELECTION_TIMEOUT_MS = 5_000;
 // whose permanence was the bug.
 const FAILURE_COOLDOWN_MS = 1_000;
 
+/**
+ * Let go of the MongoClient behind the current connection, before anything replaces it.
+ *
+ * `mongoose.connect` builds a client and assigns it to the connection *before* awaiting its
+ * `connect()` (`Connection.prototype.createClient`), then overwrites that reference on the next
+ * call. So both a connection the database went away under and an attempt that never succeeded leave
+ * a client nobody holds, with its topology monitor still polling on its own timer. Three
+ * outage/restore cycles took the sockets against the database from 2 to 13, and the first abandoned
+ * monitor was still reporting the server as reachable long after its client had been replaced
+ * (BP-520).
+ */
+async function releaseAbandonedClient(): Promise<void> {
+  try {
+    await mongoose.connection.close();
+  } catch {
+    // The client is being thrown away either way; a failure to close it is not the caller's problem
+    // and must not become the answer to a request that only wanted a connection.
+  }
+}
+
+function openConnection(uri: string): Promise<typeof mongoose> {
+  return mongoose.connect(uri, { serverSelectionTimeoutMS: SERVER_SELECTION_TIMEOUT_MS });
+}
+
 export async function connectDB(): Promise<typeof mongoose> {
   const uri = process.env.MONGODB_URI;
   if (!uri) {
@@ -59,7 +83,10 @@ export async function connectDB(): Promise<typeof mongoose> {
   // Reset cache if connection was lost
   if (cached.conn && mongoose.connection.readyState === 0) {
     cached.conn = null;
-    cached.promise = null;
+    // Closing is the first step of the reconnect rather than something awaited before it: a second
+    // caller arriving while the close was in flight would find the cache already empty, open a
+    // client of its own, and have that one closed underneath it.
+    cached.promise = releaseAbandonedClient().then(() => openConnection(uri));
   }
 
   if (cached.conn) {
@@ -75,9 +102,7 @@ export async function connectDB(): Promise<typeof mongoose> {
   }
 
   if (!cached.promise) {
-    cached.promise = mongoose.connect(uri, {
-      serverSelectionTimeoutMS: SERVER_SELECTION_TIMEOUT_MS,
-    });
+    cached.promise = openConnection(uri);
   }
 
   try {
@@ -94,12 +119,14 @@ export async function connectDB(): Promise<typeof mongoose> {
     if (!unreachable) {
       // A deployment fault: it will not come right on its own, so it is said every time and left to
       // answer 500 rather than being dressed up as an outage somebody should wait out
+      await releaseAbandonedClient();
       cached.promise = null;
       console.error("MongoDB refused the connection as configured:", detail);
       throw err;
     }
 
     cached.failedAt = Date.now();
+    await releaseAbandonedClient();
 
     // Not once per request — every route calls this, and one line each buries the cause under the
     // symptom at exactly the moment somebody is reading the log to find it
