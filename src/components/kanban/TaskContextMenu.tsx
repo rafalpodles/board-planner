@@ -36,22 +36,28 @@ export function TaskContextMenu({
   const ref = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ left: x, top: y });
 
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
     function handleClick(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) {
-        onClose();
+        onCloseRef.current();
       }
     }
     function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") onCloseRef.current();
     }
+    // BP-522: subscribing on onClose too would resubscribe mid-dispatch, whenever a sibling
+    // keydown listener renders the board first — and a listener added during a dispatch does not
+    // see that event, so Escape never reached this handler
     document.addEventListener("mousedown", handleClick);
     document.addEventListener("keydown", handleKey);
     return () => {
       document.removeEventListener("mousedown", handleClick);
       document.removeEventListener("keydown", handleKey);
     };
-  }, [onClose]);
+  }, []);
 
   // Adjust position to stay within viewport
   useEffect(() => {
