@@ -40,6 +40,7 @@ export const GROUPS = {
     "board-panels-on-the-screen.spec.ts",
     "board-move-without-drag.spec.ts",
     "list-columns-on-a-phone.spec.ts",
+    "board-irreversible.spec.ts",
   ],
   project: [
     "project-lifecycle.spec.ts",

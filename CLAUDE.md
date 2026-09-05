@@ -151,6 +151,18 @@ gh api user -q .login            # must print rafalpodles
 gh auth switch --user rafalpodles
 ```
 
+**Commits too.** The author on every commit here is `Rafał Podleś <rafalpodles@gmail.com>` — the
+address the `rafalpodles` account is registered under, so the commit links to it. The global git
+config on this machine is a work account, which is
+what a fresh clone or worktree inherits. The repo-local config overrides it and is shared by every
+worktree of this checkout; check it before the first commit and set it if it is not there:
+
+```bash
+git config user.name             # must print Rafał Podleś
+git config user.email            # must print rafalpodles@gmail.com
+git config user.name "Rafał Podleś" && git config user.email rafalpodles@gmail.com
+```
+
 `gh auth switch` is global machine state shared with every other session, so **the active account can
 flip mid-session** — "it worked ten minutes ago" is not evidence it is still right. Check it
 immediately before each of create / merge / delete, not once at the start.
