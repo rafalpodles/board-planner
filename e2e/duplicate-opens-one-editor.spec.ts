@@ -1,5 +1,8 @@
 import { test, expect, type Page } from "@playwright/test";
+import mongoose from "mongoose";
 import {
+  E2E_MONGODB_URI,
+  PROJECT_ID,
   HELD_TASK_ID,
   HELD_TASK_NUMBER,
   HELD_TASK_TITLE,
@@ -28,8 +31,15 @@ import { signIn } from "./session";
  */
 
 const COPY_TITLE = `Copy of ${SIBLING_TASK_TITLE}`;
-const taskDialog = (page: Page) =>
-  page.getByRole("dialog").filter({ has: page.getByLabel("Task title") });
+const EDITED_TITLE = "Edited a moment before leaving";
+
+async function storedTitle(taskNumber: number): Promise<string | undefined> {
+  if (mongoose.connection.readyState === 0) await mongoose.connect(E2E_MONGODB_URI);
+  const row = await mongoose.connection.db
+    ?.collection("tasks")
+    .findOne({ project: PROJECT_ID, taskNumber });
+  return row?.title as string | undefined;
+}
 
 async function duplicate(page: Page) {
   const created = page.waitForResponse(
@@ -112,4 +122,43 @@ test("duplicating from the board's modal leaves one editor, still in the modal",
   await page.getByRole("button", { name: "Close task" }).click();
   await expect(page).toHaveURL(new RegExp(`/projects/${PROJECT_KEY}$`));
   await expect(page.getByRole("dialog")).toHaveCount(0);
+});
+
+/**
+ * The autosave flushes a pending edit from React's unmount cleanup, which a document load does
+ * not run — so leaving the page for the copy would drop whatever was typed in the 700ms before
+ * the click, silently, under a status line still reading "All changes saved". The modal is the
+ * control: it unmounts, so it was always safe.
+ */
+test.describe("an edit still in the debounce window", () => {
+  test("survives leaving the page for the copy", async ({ page }) => {
+    // The debounce is the other way this edit could reach the server, and whether it wins is a
+    // race against how long the dev server takes to answer the new document. Frozen, it cannot
+    // fire at all, so a green here is the flush and nothing else.
+    await page.clock.install();
+    await openTaskPage(page, SIBLING_TASK_NUMBER, SIBLING_TASK_TITLE);
+
+    await page.getByLabel("Task title").fill(EDITED_TITLE);
+    await page.getByRole("button", { name: /^Duplicate$/ }).click();
+
+    await expect(page).toHaveURL(new RegExp(`/projects/${PROJECT_KEY}/tasks/\\d+$`));
+    await expect
+      .poll(() => storedTitle(SIBLING_TASK_NUMBER), { timeout: 10_000 })
+      .toBe(EDITED_TITLE);
+  });
+
+  test("survives it from the modal too", async ({ page }) => {
+    await page.clock.install();
+    await page.goto(`/projects/${PROJECT_KEY}`);
+    await page.getByRole("link", { name: new RegExp(SIBLING_TASK_TITLE) }).first().click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByLabel("Task title")).toHaveValue(SIBLING_TASK_TITLE);
+
+    await dialog.getByLabel("Task title").fill(EDITED_TITLE);
+    await page.getByRole("button", { name: /^Duplicate$/ }).click();
+
+    await expect
+      .poll(() => storedTitle(SIBLING_TASK_NUMBER), { timeout: 10_000 })
+      .toBe(EDITED_TITLE);
+  });
 });
