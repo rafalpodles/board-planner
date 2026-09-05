@@ -1639,9 +1639,15 @@ export async function storedTask(taskNumber: number): Promise<Record<string, unk
 export const MINE_ACTIVE_NUMBER = 200;
 export const MINE_ACTIVE_TITLE = "Painting the mooring mast";
 
-// The discriminator for role ordering. Its column is one this board invented, so a page keying on
-// column *ids* sorts it last whatever it means; keyed on the role it sits second, between active
-// and approved. Its colour is the board's own, which is the other half of the same fix.
+// Two columns this board invented, and both are discriminators.
+//
+// `Triage Desk` is what role ordering is proved against: keyed on column *ids* it sorts last
+// whatever it means, and keyed on the role it sits second. Its colour is the other half of that
+// same fix.
+//
+// `Shipped` is what the Hide done filter is proved against. The board's seeded done column is
+// called `done`, so a filter written as `status !== "done"` and one written on the column's role
+// agree on it exactly — and the page's filter is the client-side one this spec is about.
 export const MINE_CUSTOM_COLUMN = {
   id: "triage_desk",
   label: "Triage Desk",
@@ -1649,6 +1655,19 @@ export const MINE_CUSTOM_COLUMN = {
   role: "blocked",
   order: 7,
 };
+export const MINE_DONE_COLUMN = {
+  id: "shipped",
+  label: "Shipped",
+  color: "#0f766e",
+  role: "done",
+  order: 8,
+};
+const EXTRA_COLUMNS = [MINE_CUSTOM_COLUMN, MINE_DONE_COLUMN].map((column) => ({
+  _id: new mongoose.Types.ObjectId(),
+  triggersPmReview: false,
+  ...column,
+}));
+
 export const MINE_BLOCKED_NUMBER = 201;
 export const MINE_BLOCKED_TITLE = "Waiting on the rivet order";
 
@@ -1670,21 +1689,42 @@ export const THEIRS_NUMBER = 205;
 export const THEIRS_TITLE = "The member's own rivets";
 
 // On the board the member holds no grant on. Assigned to them, so the only thing keeping it off
-// their list is the project filter — which is what this row is here to prove.
+// their list is the project filter — which is what this row is here to prove. The spec reads it
+// back as the admin, whose list carries no project clause, so that claim has a control.
 export const THEIRS_UNREACHABLE_NUMBER = 2;
 export const THEIRS_UNREACHABLE_TITLE = "On a board the member cannot reach";
 
 export const MINE_OTHER_BOARD_NUMBER = 3;
 export const MINE_OTHER_BOARD_TITLE = "A chore on the other board";
 
+/**
+ * `updatedAt` in minutes before now, per task.
+ *
+ * Deliberately the reverse of the order the page must put them in: the endpoint sorts on
+ * `updatedAt` descending, so a page that dropped its sort altogether would render this list
+ * backwards rather than in the order it happens to have been seeded in. Every value is distinct,
+ * so the secondary key is stated rather than left to Mongo's tie-break.
+ */
+const MINUTES_OLD: Record<number, number> = {
+  [MINE_ORPHAN_NUMBER]: 10,
+  [MINE_DONE_NUMBER]: 20,
+  [MINE_APPROVED_NUMBER]: 30,
+  [MINE_OTHER_BOARD_NUMBER]: 40,
+  [MINE_BLOCKED_NUMBER]: 50,
+  [MINE_ACTIVE_NUMBER]: 60,
+};
+
 export async function seedMyTasks() {
   const db = (await connect()).db!;
   const now = new Date();
   const task = taskFactory(now);
+  const aged = (taskNumber: number) => ({
+    updatedAt: new Date(now.getTime() - (MINUTES_OLD[taskNumber] ?? 0) * 60_000),
+  });
 
   await db
-    .collection("projects")
-    .updateOne({ _id: PROJECT_ID }, { $set: { columns: [...COLUMNS, MINE_CUSTOM_COLUMN] } });
+    .collection<{ columns: unknown[] }>("projects")
+    .updateOne({ _id: PROJECT_ID }, { $push: { columns: { $each: EXTRA_COLUMNS } } });
 
   await db.collection("tasks").insertMany([
     task({
@@ -1694,6 +1734,7 @@ export async function seedMyTasks() {
       status: "in_progress",
       assignee: ADMIN_ID,
       priority: "high",
+      ...aged(MINE_ACTIVE_NUMBER),
     }),
     task({
       _id: id("e2e00000000000000000d502"),
@@ -1701,6 +1742,7 @@ export async function seedMyTasks() {
       title: MINE_BLOCKED_TITLE,
       status: MINE_CUSTOM_COLUMN.id,
       assignee: ADMIN_ID,
+      ...aged(MINE_BLOCKED_NUMBER),
     }),
     task({
       _id: id("e2e00000000000000000d503"),
@@ -1708,13 +1750,15 @@ export async function seedMyTasks() {
       title: MINE_APPROVED_TITLE,
       status: "todo",
       assignee: ADMIN_ID,
+      ...aged(MINE_APPROVED_NUMBER),
     }),
     task({
       _id: id("e2e00000000000000000d504"),
       taskNumber: MINE_DONE_NUMBER,
       title: MINE_DONE_TITLE,
-      status: "done",
+      status: MINE_DONE_COLUMN.id,
       assignee: ADMIN_ID,
+      ...aged(MINE_DONE_NUMBER),
     }),
     task({
       _id: id("e2e00000000000000000d505"),
@@ -1722,6 +1766,7 @@ export async function seedMyTasks() {
       title: MINE_ORPHAN_TITLE,
       status: MINE_ORPHAN_STATUS,
       assignee: ADMIN_ID,
+      ...aged(MINE_ORPHAN_NUMBER),
     }),
     task({
       _id: id("e2e00000000000000000d506"),
@@ -1745,6 +1790,7 @@ export async function seedMyTasks() {
       title: MINE_OTHER_BOARD_TITLE,
       status: "todo",
       assignee: ADMIN_ID,
+      ...aged(MINE_OTHER_BOARD_NUMBER),
     }),
   ]);
 
@@ -1760,19 +1806,33 @@ export async function seedMyTasks() {
 
 /**
  * Everything this reader has, finished. The page has two empty states and they say different
- * things — a fixture with no tasks at all can only reach the first.
+ * things — a fixture with no tasks at all can only reach the first. The board's own `Shipped`
+ * column comes with it, for the same reason seedMyTasks adds it.
  */
 export const MINE_ONLY_DONE_NUMBER = 210;
 export const MINE_ONLY_DONE_TITLE = "The only thing left, and it is done";
 
 export async function seedMyTasksAllDone() {
+  const db = (await connect()).db!;
+  await db
+    .collection<{ columns: unknown[] }>("projects")
+    .updateOne({ _id: PROJECT_ID }, { $push: { columns: { $each: EXTRA_COLUMNS } } });
+  await mongoose.disconnect();
+
   await addTask(
     {
       _id: id("e2e00000000000000000d510"),
       title: MINE_ONLY_DONE_TITLE,
-      status: "done",
+      status: MINE_DONE_COLUMN.id,
       assignee: ADMIN_ID,
     },
     MINE_ONLY_DONE_NUMBER
   );
+}
+
+/** Deletes a project row and nothing else, which is a state the product itself never leaves. */
+export async function deleteProjectRow(projectId: mongoose.Types.ObjectId) {
+  const db = (await connect()).db!;
+  await db.collection("projects").deleteOne({ _id: projectId });
+  await mongoose.disconnect();
 }

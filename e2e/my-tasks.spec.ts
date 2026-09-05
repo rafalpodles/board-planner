@@ -1,28 +1,29 @@
-import { test, expect, type Locator, type Page } from "@playwright/test";
-import mongoose from "mongoose";
+import { test, expect, type APIRequestContext, type Locator, type Page } from "@playwright/test";
+import { ADMIN_AUTH } from "./api";
 import {
   MINE_ACTIVE_NUMBER,
   MINE_ACTIVE_TITLE,
   MINE_APPROVED_NUMBER,
   MINE_BLOCKED_NUMBER,
-  MINE_BLOCKED_TITLE,
   MINE_CUSTOM_COLUMN,
+  MINE_DONE_COLUMN,
   MINE_DONE_NUMBER,
   MINE_DONE_TITLE,
   MINE_ONLY_DONE_TITLE,
   MINE_ORPHAN_NUMBER,
   MINE_ORPHAN_STATUS,
-  MINE_ORPHAN_TITLE,
   MINE_OTHER_BOARD_NUMBER,
   MINE_OTHER_BOARD_TITLE,
-  E2E_MONGODB_URI,
+  MEMBER_USERNAME,
   PROJECT_KEY,
   PROJECT_NAME,
   SECOND_PROJECT_ID,
   SECOND_PROJECT_KEY,
   SECOND_PROJECT_NAME,
   THEIRS_TITLE,
+  THEIRS_UNREACHABLE_NUMBER,
   THEIRS_UNREACHABLE_TITLE,
+  deleteProjectRow,
   seed,
   seedMyTasks,
   seedMyTasksAllDone,
@@ -81,6 +82,16 @@ function chipVariable(taskRow: Locator): Promise<string> {
   );
 }
 
+/** Read as the admin, whose list carries no project clause — the member's cannot see this one. */
+async function theirUnreachableTask(request: APIRequestContext) {
+  const response = await request.get(
+    `/api/projects/${SECOND_PROJECT_KEY}/tasks/${THEIRS_UNREACHABLE_NUMBER}`,
+    { headers: ADMIN_AUTH }
+  );
+  expect(response.status()).toBe(200);
+  return response.json();
+}
+
 async function openMyTasks(page: Page, who: "admin" | "member" = "admin") {
   await signIn(page, who);
   await page.goto("/my-tasks");
@@ -127,9 +138,16 @@ test.describe("a list of my work, across boards", () => {
 
     const hideDone = page.getByLabel("Hide done");
     await expect(hideDone).toBeChecked();
+    // Its column is `shipped`, so only a filter reading the column's ROLE hides it
+    expect(MINE_DONE_COLUMN.id).not.toBe("done");
     await expect(page.getByText(MINE_DONE_TITLE)).toHaveCount(0);
 
     await hideDone.uncheck();
+    // The retrying assertions first: `expect(...).resolves` reads the DOM once, and unchecking
+    // resolves as soon as the input does — before React has committed the row
+    await expect(page.getByText("6 tasks", { exact: true })).toBeVisible();
+    await expect(page.getByText(MINE_DONE_TITLE)).toBeVisible();
+
     // In its place by role — after approved, before the column that no longer exists
     await expect(keysOnScreen(page)).resolves.toEqual([
       key(PROJECT_KEY, MINE_ACTIVE_NUMBER),
@@ -139,7 +157,6 @@ test.describe("a list of my work, across boards", () => {
       key(PROJECT_KEY, MINE_ORPHAN_NUMBER),
       key(SECOND_PROJECT_KEY, MINE_OTHER_BOARD_NUMBER),
     ]);
-    await expect(page.getByText("6 tasks", { exact: true })).toBeVisible();
 
     await hideDone.check();
     await expect(page.getByText(MINE_DONE_TITLE)).toHaveCount(0);
@@ -201,10 +218,19 @@ test.describe("a list of my work, across boards", () => {
     // Not a filter this page applies: the task they cannot see is not on the list they are sent
     const mine = await page.request.get("/api/tasks/mine");
     expect(mine.status()).toBe(200);
-    expect(JSON.stringify(await mine.json())).not.toContain(THEIRS_UNREACHABLE_TITLE);
+    const sent = JSON.stringify(await mine.json());
+    expect(sent).toContain(THEIRS_TITLE);
+    expect(sent).not.toContain(THEIRS_UNREACHABLE_TITLE);
 
-    // And it is theirs — the assignment is real, so what keeps it off the list is the board
+    // The admin's task is not theirs, which is the assignee filter
     await expect(page.getByText(MINE_ACTIVE_TITLE)).toHaveCount(0);
+
+    // And the control the claim above rests on: the hidden task exists and is assigned to this
+    // member. Without it, deleting the row from the fixture would leave every assertion green and
+    // the project filter untested.
+    const hidden = await theirUnreachableTask(page.request);
+    expect(hidden.title).toBe(THEIRS_UNREACHABLE_TITLE);
+    expect(hidden.assignee?.username).toBe(MEMBER_USERNAME);
   });
 });
 
@@ -238,14 +264,16 @@ test("a task whose board is gone takes the whole page down", async ({ page }) =>
   // Not reachable through the product — DELETE /api/projects cascades its tasks first — so the
   // state is built directly. What the page has to survive is the shape the endpoint answers with,
   // and that shape is `project: null`.
-  await mongoose.connect(E2E_MONGODB_URI);
-  await mongoose.connection.db!.collection("projects").deleteOne({ _id: SECOND_PROJECT_ID });
-  await mongoose.disconnect();
+  await deleteProjectRow(SECOND_PROJECT_ID);
 
   await signIn(page);
   await page.goto("/my-tasks");
 
   await expect(page.getByText("Something went wrong")).toBeVisible();
+  // Named, not merely "something threw": the boundary is the root one, so any client error at all
+  // would produce the other two signals. Scoped to the boundary's own <pre>, because the dev
+  // server paints its overlay over the same message.
+  await expect(page.locator("pre").filter({ hasText: /reading '_id'/ })).toBeVisible();
   // The whole shell, not one row: the reader's other five tasks are gone with it
   await expect(page.locator("main")).toHaveCount(0);
   await expect(page.getByText(MINE_ACTIVE_TITLE)).toHaveCount(0);
@@ -269,4 +297,7 @@ test("a failed load says so once, then reads as an empty account", async ({ page
   // than about the request
   await expect(page.getByText("No tasks assigned to you")).toBeVisible();
   await expect(page.getByText("0 tasks", { exact: true })).toBeVisible();
+  // And nothing to act on: a fix that leaves the sentence and adds a retry beside it would
+  // otherwise leave this green
+  await expect(page.getByRole("button", { name: /try again|retry/i })).toHaveCount(0);
 });
