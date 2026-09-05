@@ -56,6 +56,10 @@ async function storedTask(taskNumber: number): Promise<Record<string, unknown> |
   return withDb(async (db) => db.collection("tasks").findOne({ project: PROJECT_ID, taskNumber }));
 }
 
+async function storedTaskTitled(title: string): Promise<Record<string, unknown> | null> {
+  return withDb(async (db) => db.collection("tasks").findOne({ project: PROJECT_ID, title }));
+}
+
 /** Every task on the board, so a new occurrence can be told from the ones already there. */
 async function taskNumbers(): Promise<number[]> {
   return withDb(async (db) => {
@@ -672,7 +676,13 @@ test.describe("duplicating one of these", () => {
     });
   }
 
-  /** The task the POST created, read back from the database rather than from the response. */
+  /**
+   * The task the POST created, read back from the database rather than from the response.
+   *
+   * By title, and not by the taskNumber the response carries: duplicating from the task screen
+   * leaves the page for the copy (BP-521), and a response body cannot be read once the navigation
+   * that discards it has started. The status still can — it arrived with the headers.
+   */
   async function copyCreatedBy(page: Page, act: () => Promise<void>) {
     const posted = page.waitForResponse(
       (r) =>
@@ -681,8 +691,8 @@ test.describe("duplicating one of these", () => {
     );
     await act();
     const response = await posted;
-    expect(response.status(), await response.text()).toBe(201);
-    const created = await storedTask((await response.json()).taskNumber);
+    expect(response.status()).toBe(201);
+    const created = await storedTaskTitled(COPY_TITLE);
     if (!created) throw new Error("the duplicate was answered 201 and is not in the database");
     return created;
   }

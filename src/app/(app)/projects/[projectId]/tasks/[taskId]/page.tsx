@@ -6,6 +6,7 @@ import { ApiProject, ApiTask } from "@/types";
 import { useCanonicalUrl } from "@/hooks/use-canonical-url";
 import { projectPath } from "@/lib/urls";
 import { TaskDetail } from "@/components/tasks/TaskDetail";
+import { TaskSurface } from "@/components/tasks/task-surface";
 
 export default function TaskDetailPage() {
   const { projectId, taskId } = useParams<{ projectId: string; taskId: string }>();
@@ -23,12 +24,14 @@ export default function TaskDetailPage() {
       className="mx-auto flex min-h-0 w-full max-w-[1240px] flex-1 flex-col overflow-clip
         rounded-2xl border border-border bg-bg-card"
     >
-      <TaskDetail
-        projectId={projectId}
-        taskId={taskId}
-        onClose={() => router.push(projectPath(projectId))}
-        onLoaded={(task, project) => setLoaded({ task, project })}
-      />
+      <TaskSurface value="page">
+        <TaskDetail
+          projectId={projectId}
+          taskId={taskId}
+          onClose={() => router.push(projectPath(projectId))}
+          onLoaded={(task, project) => setLoaded({ task, project })}
+        />
+      </TaskSurface>
     </div>
   );
 }

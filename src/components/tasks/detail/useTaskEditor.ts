@@ -153,6 +153,25 @@ export function useTaskEditor(projectId: string, task: ApiTask) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [task._id, projectId]);
 
+  // And a document load is not an unmount, so the cleanup above never runs for it: closing the
+  // tab, following a task key out of a description, or leaving the page for another task
+  // (BP-521). `keepalive` is what lets the write outlive the document it started in.
+  useEffect(() => {
+    const taskId = task._id;
+    const flush = () => {
+      const pending = pendingRef.current;
+      if (pending === "{}") return;
+      fetch(`/api/projects/${projectId}/tasks/${taskId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: pending,
+        keepalive: true,
+      }).catch(() => {});
+    };
+    window.addEventListener("pagehide", flush);
+    return () => window.removeEventListener("pagehide", flush);
+  }, [task._id, projectId]);
+
   const set = useCallback(<K extends keyof TaskDraft>(key: K, value: TaskDraft[K]) => {
     setDraft((d) => ({ ...d, [key]: value }));
   }, []);
