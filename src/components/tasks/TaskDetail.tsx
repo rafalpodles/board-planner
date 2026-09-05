@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
 import { subscribeBoardRefresh } from "@/lib/board-refresh";
 import { taskPath } from "@/lib/urls";
@@ -31,6 +30,7 @@ import { useScrolledBehind } from "@/components/tasks/detail/atoms";
 import { useTaskEditor } from "@/components/tasks/detail/useTaskEditor";
 import type { Trigger } from "@/hooks/use-trigger-autocomplete";
 import { useEditorTriggers } from "@/hooks/use-editor-triggers";
+import { useOpenTask } from "@/components/tasks/task-surface";
 
 interface TaskDetailProps {
   projectId: string;
@@ -137,7 +137,7 @@ function TaskDetailView({
   onTaskChange,
 }: TaskDetailViewProps) {
   const api = useApi();
-  const router = useRouter();
+  const openTask = useOpenTask();
   const { user: currentUser } = useAuth();
   const { toast } = useToast();
 
@@ -259,7 +259,7 @@ function TaskDetailView({
       // the board's context menu duplicates through the same payload
       const created = await api.post(`/api/projects/${projectId}/tasks`, duplicatePayload(task));
       toast("Task duplicated", "success");
-      router.push(taskPath(projectId, created.taskNumber));
+      openTask(taskPath(projectId, created.taskNumber));
     } catch {
       toast("Failed to duplicate task", "error");
     }
