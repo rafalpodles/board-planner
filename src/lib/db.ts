@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import type { MongoClient } from "mongodb";
 import { DatabaseUnavailableError, isDatabaseUnreachable } from "./db-errors";
 
 // Re-exported for the callers that already reach for them here
@@ -39,6 +40,34 @@ const SERVER_SELECTION_TIMEOUT_MS = 5_000;
 // whose permanence was the bug.
 const FAILURE_COOLDOWN_MS = 1_000;
 
+/**
+ * Let go of a MongoClient the connection has replaced.
+ *
+ * `mongoose.connect` assigns its client to the connection *before* awaiting `client.connect()` and
+ * the next call overwrites that reference, so a connection the database went away under leaves a
+ * client nobody holds with its topology monitor still polling. Measured against a real mongod:
+ * without this, six outage/restore cycles took the connections through the proxy from 2 to 13.
+ *
+ * The client rather than `mongoose.connection.close()`, which deletes every model's `$init` and
+ * makes the reconnect re-run `createCollection` and `createIndexes` for all of them.
+ *
+ * Never the client the connection ended up with: `openUri` hands back the existing one when the
+ * monitor has meanwhile marked the server usable again, and closing that is closing the live one.
+ */
+async function releaseAbandonedClient(client: MongoClient | undefined): Promise<void> {
+  if (!client || client === mongoose.connection.getClient()) return;
+  try {
+    await client.close();
+  } catch {
+    // The client is being thrown away either way; a failure to close it is not the caller's problem
+    // and must not become the answer to a request that only wanted a connection.
+  }
+}
+
+function openConnection(uri: string): Promise<typeof mongoose> {
+  return mongoose.connect(uri, { serverSelectionTimeoutMS: SERVER_SELECTION_TIMEOUT_MS });
+}
+
 export async function connectDB(): Promise<typeof mongoose> {
   const uri = process.env.MONGODB_URI;
   if (!uri) {
@@ -59,7 +88,12 @@ export async function connectDB(): Promise<typeof mongoose> {
   // Reset cache if connection was lost
   if (cached.conn && mongoose.connection.readyState === 0) {
     cached.conn = null;
-    cached.promise = null;
+    // The old client is released after the replacement has been attempted, not before it.
+    // readyState 0 says the driver marked the server unknown, not that the client is dead — it goes
+    // on answering queries for seconds afterwards — so closing it first kills the requests already
+    // holding it, and does so while nothing else is connected yet.
+    const abandoned = mongoose.connection.getClient();
+    cached.promise = openConnection(uri).finally(() => releaseAbandonedClient(abandoned));
   }
 
   if (cached.conn) {
@@ -75,9 +109,7 @@ export async function connectDB(): Promise<typeof mongoose> {
   }
 
   if (!cached.promise) {
-    cached.promise = mongoose.connect(uri, {
-      serverSelectionTimeoutMS: SERVER_SELECTION_TIMEOUT_MS,
-    });
+    cached.promise = openConnection(uri);
   }
 
   try {
