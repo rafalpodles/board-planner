@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 interface ShortcutHelpProps {
   open: boolean;
@@ -42,17 +42,23 @@ const SHORTCUT_GROUPS = [
 ];
 
 export function ShortcutHelp({ open, onClose }: ShortcutHelpProps) {
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
     if (!open) return;
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape" || e.key === "?") {
         e.preventDefault();
-        onClose();
+        onCloseRef.current();
       }
     }
+    // BP-522: subscribing on onClose too would resubscribe mid-dispatch, whenever a sibling
+    // keydown listener renders the parent first — and a listener added during a dispatch does
+    // not see that event, so Escape never reached this handler
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 
