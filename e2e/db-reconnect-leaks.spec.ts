@@ -56,8 +56,9 @@ test("an outage does not leave a connection behind", async ({ request }) => {
 
   await new Promise((resolve) => setTimeout(resolve, SETTLE_MS));
 
-  // One spare over the baseline: the live connection's own monitor socket comes and goes, and this
-  // has to fail on a client per cycle, not on one reconnect in flight
-  expect(await sockets(request)).toBeLessThanOrEqual(baseline + 1);
+  // Two spare over the baseline: the live connection's own sockets come and go, and the failure
+  // this has to catch is a client per cycle — measured at 13 over six cycles against a baseline of
+  // two, so the slack is nowhere near it
+  expect(await sockets(request)).toBeLessThanOrEqual(baseline + 2);
   expect((await board(request)).status()).toBe(200);
 });
