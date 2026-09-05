@@ -1539,3 +1539,73 @@ export async function expireAccessToken(accessToken: string): Promise<boolean> {
   await mongoose.disconnect();
   return !!still;
 }
+
+// BP-464. The two agents `update_task` resolves by name, and the two rules that resolution has to
+// keep: a project agent anybody who may edit a TP task may choose, and a personal one of the
+// admin's that only the admin's own tasks may carry. Both runnable — every agent is born empty,
+// and an empty one is a draft a task refuses to carry.
+export const PROJECT_AGENT_NAME = "Board Runner";
+export const PERSONAL_AGENT_NAME = "Admin's own";
+
+const RUNNABLE_COMPOSITION = {
+  analysis: [],
+  implementation: [{ key: "implement" }],
+  verification: [],
+  delivery: [{ key: "push" }],
+};
+
+export const PROJECT_AGENT_ID = id("e2e00000000000000000ab01");
+export const PERSONAL_AGENT_ID = id("e2e00000000000000000ab02");
+
+export async function seedAgents() {
+  const db = (await connect()).db!;
+  const now = new Date();
+  const agent = (over: Record<string, unknown>) => ({
+    description: "",
+    owner: null,
+    project: null,
+    builtIn: false,
+    composition: RUNNABLE_COMPOSITION,
+    createdAt: now,
+    updatedAt: now,
+    ...over,
+  });
+  await db.collection("agents").insertMany([
+    agent({ _id: PROJECT_AGENT_ID, name: PROJECT_AGENT_NAME, scope: "project", project: PROJECT_ID }),
+    agent({ _id: PERSONAL_AGENT_ID, name: PERSONAL_AGENT_NAME, scope: "user", owner: ADMIN_ID }),
+  ]);
+  await mongoose.disconnect();
+}
+
+/**
+ * A sprint on the second board, for the cross-project reference BP-314 closed: named through TP,
+ * it has to be refused as if it did not exist. Requires seedSecondProject().
+ */
+export const FOREIGN_SPRINT_ID = id("e2e00000000000000000c701");
+export const FOREIGN_SPRINT_NAME = "Their sprint";
+
+export async function seedForeignSprint() {
+  const db = (await connect()).db!;
+  const now = new Date();
+  await db.collection("sprints").insertOne({
+    _id: FOREIGN_SPRINT_ID,
+    project: SECOND_PROJECT_ID,
+    name: FOREIGN_SPRINT_NAME,
+    startDate: now,
+    endDate: new Date(now.getTime() + 14 * 86_400_000),
+    goal: "",
+    status: "planned",
+    createdAt: now,
+    updatedAt: now,
+  });
+  await mongoose.disconnect();
+}
+
+/** A task on the seeded board as the database holds it, for the fields the API populates or renames. */
+export async function storedTask(taskNumber: number): Promise<Record<string, unknown>> {
+  const db = (await connect()).db!;
+  const row = await db.collection("tasks").findOne({ project: PROJECT_ID, taskNumber });
+  await mongoose.disconnect();
+  if (!row) throw new Error(`no task ${taskNumber} on the seeded board`);
+  return row as Record<string, unknown>;
+}

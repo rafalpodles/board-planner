@@ -116,6 +116,8 @@ Practicalities that cost real time to rediscover:
 
 - Run one spec with `npx playwright test e2e/<name>.spec.ts`. Machines here are shared, so give a run
   its own ports and database: `E2E_PORT=…  PM_STUB_PORT=…  E2E_MONGODB_URI=mongodb://localhost:27017/<name>_e2e`.
+  A run owns `E2E_PORT` through `E2E_PORT+5` — the model stubs, the webhook receiver and the Mongo proxy
+  all derive from it — so keep concurrent runs at least ten apart.
   The fixture refuses any database whose name does not end in `_e2e`, deliberately.
 - A git worktree needs its own `npm ci`. A symlinked `node_modules` fails: Turbopack refuses a symlink
   pointing outside the project root, and the dev server dies before the first test runs.

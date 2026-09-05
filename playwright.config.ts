@@ -12,7 +12,7 @@ export const PM_STUB_URL = `http://localhost:${PM_STUB_PORT}`;
 
 // The model behind AI task generation, replaced the same way.
 //
-// A run owns E2E_PORT through E2E_PORT+3, and every stub derives from that one number so setting
+// A run owns E2E_PORT through E2E_PORT+5, and every stub derives from that one number so setting
 // it reserves the whole block. Giving each stub a default of its own is what makes two operators
 // following the same "pick two adjacent numbers" habit collide on a port neither of them typed.
 const AI_STUB_PORT = Number(process.env.AI_STUB_PORT ?? PORT + 2);
@@ -29,6 +29,31 @@ export const WEBHOOK_SECRET = "e2e-webhook-signing-secret";
 // would read an empty delivery log whatever the app did.
 const WEBHOOK_RECEIVER_PORT = Number(process.env.WEBHOOK_RECEIVER_PORT ?? PORT + 3);
 export const WEBHOOK_RECEIVER_URL = `http://127.0.0.1:${WEBHOOK_RECEIVER_PORT}`;
+
+// MongoDB, through a proxy the suite can cut (e2e/mongo-proxy.mjs). The dev server is pointed at
+// the proxy rather than at the database, so a test can take the database away and give it back
+// without stopping a mongod other sessions share; seed() keeps talking to the database directly.
+const MONGO_PROXY_PORT = Number(process.env.MONGO_PROXY_PORT ?? PORT + 4);
+const MONGO_PROXY_CONTROL_PORT = Number(process.env.MONGO_PROXY_CONTROL_PORT ?? PORT + 5);
+export const MONGO_PROXY_CONTROL_URL = `http://127.0.0.1:${MONGO_PROXY_CONTROL_PORT}`;
+
+/** The seeded database's URI with its host swapped for the proxy's; credentials and options ride along. */
+function throughMongoProxy(uri: string): string {
+  // One host, plain scheme: the proxy is a single TCP pipe, so a host list or an SRV record has
+  // no meaning behind it — refused here rather than as 503s from the first test
+  if (!/^mongodb:\/\/[^,/]+\/[^?]+/.test(uri)) {
+    throw new Error(
+      "E2E_MONGODB_URI must be a single-host mongodb:// URI naming a database; mongodb+srv and host lists cannot be proxied"
+    );
+  }
+  const url = new URL(uri.replace(/^mongodb:\/\//, "http://"));
+  url.hostname = "127.0.0.1";
+  url.port = String(MONGO_PROXY_PORT);
+  // Pinned to the address it was given. Against a replica set the driver would otherwise follow
+  // the hello's host list straight past the proxy, and the outage test would read 200.
+  url.searchParams.set("directConnection", "true");
+  return url.toString().replace(/^http:\/\//, "mongodb://");
+}
 
 export default defineConfig({
   testDir: "./e2e",
@@ -75,6 +100,20 @@ export default defineConfig({
   })),
   webServer: [
     {
+      // First, so the dev server below never starts against a database it cannot reach
+      command: `node e2e/mongo-proxy.mjs`,
+      url: `${MONGO_PROXY_CONTROL_URL}/health`,
+      reuseExistingServer: false,
+      timeout: 30_000,
+      stdout: "pipe",
+      stderr: "pipe",
+      env: {
+        MONGO_PROXY_PORT: String(MONGO_PROXY_PORT),
+        MONGO_PROXY_CONTROL_PORT: String(MONGO_PROXY_CONTROL_PORT),
+        E2E_MONGODB_URI,
+      },
+    },
+    {
       // Stands in for OpenRouter so a PM turn runs for free and offline; everything the app does
       // with the answer is the production path
       command: `node e2e/openrouter-stub.mjs`,
@@ -115,8 +154,9 @@ export default defineConfig({
       stderr: "pipe",
       env: {
         // Wins over .env.local, which points at the development database. The test asserts this
-        // before it writes anything — see the guard at the top of run-conflict.spec.ts.
-        MONGODB_URI: E2E_MONGODB_URI,
+        // before it writes anything — see the guard at the top of run-conflict.spec.ts. Through the
+        // proxy above, which is what lets mcp-tools.spec.ts take the database away mid-run.
+        MONGODB_URI: throughMongoProxy(E2E_MONGODB_URI),
         NEXT_PUBLIC_APP_URL: BASE_URL,
         // /api/mcp answers 500 without it and will not take NEXT_PUBLIC_APP_URL, which is a
         // build-time literal. Setting it here is not a test convenience: this run is what proved
