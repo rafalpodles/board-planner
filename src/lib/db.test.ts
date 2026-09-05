@@ -2,7 +2,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const connect = vi.fn();
 const close = vi.fn();
-const connection = { readyState: 1, close };
+// `client` rather than the connection's own `close`: the code closes the MongoClient, because
+// closing the connection would make mongoose rebuild every model's indexes on the reconnect.
+const connection: { readyState: number; client?: { close: typeof close } } = {
+  readyState: 1,
+  client: { close },
+};
 
 vi.mock("mongoose", () => ({ default: { connect, connection } }));
 
@@ -35,6 +40,7 @@ describe("connectDB", () => {
     connect.mockReset();
     close.mockReset();
     close.mockResolvedValue(undefined);
+    connection.client = { close };
     connection.readyState = 1;
     delete (globalThis as { mongooseCache?: unknown }).mongooseCache;
   });
@@ -150,6 +156,7 @@ describe("connectDB — a wrong deployment is not an outage", () => {
     connect.mockReset();
     close.mockReset();
     close.mockResolvedValue(undefined);
+    connection.client = { close };
     connection.readyState = 1;
     delete (globalThis as { mongooseCache?: unknown }).mongooseCache;
   });
@@ -258,6 +265,7 @@ describe("connectDB — the state the tests could not see", () => {
     connect.mockReset();
     close.mockReset();
     close.mockResolvedValue(undefined);
+    connection.client = { close };
     connection.readyState = 1;
     delete (globalThis as { mongooseCache?: unknown }).mongooseCache;
   });
@@ -371,6 +379,7 @@ describe("connectDB — the client a reconnect abandons", () => {
     connect.mockReset();
     close.mockReset();
     close.mockResolvedValue(undefined);
+    connection.client = { close };
     connection.readyState = 1;
     delete (globalThis as { mongooseCache?: unknown }).mongooseCache;
   });
@@ -406,14 +415,29 @@ describe("connectDB — the client a reconnect abandons", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
-  it("closes it after a configuration fault too, which fails the same way with a live client", async () => {
+  // A rejected password is a configuration fault, and unlike a malformed URI it fails at
+  // `client.connect()` — after the client exists. `new MongoClient` throwing takes the other
+  // branch, where there is nothing to close and `connection.client` is undefined.
+  it("closes the client a rejected credential left behind", async () => {
     const { connectDB } = await freshModule();
     vi.spyOn(console, "error").mockImplementation(() => {});
-    connect.mockRejectedValue(misconfigured());
+    connect.mockRejectedValue(named("MongoServerError", "Authentication failed."));
 
     await connectDB().catch(() => {});
 
     expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("survives a fault that never built a client at all", async () => {
+    const { connectDB } = await freshModule();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    connect.mockRejectedValue(misconfigured());
+    connection.client = undefined;
+
+    const thrown = await connectDB().catch((e) => e);
+
+    expect(thrown.name).toBe("MongoParseError");
+    expect(close).not.toHaveBeenCalled();
   });
 
   // The control: a healthy connection is handed back, and closing the client under it would end
@@ -427,6 +451,43 @@ describe("connectDB — the client a reconnect abandons", () => {
     await connectDB();
 
     expect(close).not.toHaveBeenCalled();
+  });
+
+  // Both branches await the close, so a close that throws would carry the request off the path
+  // that wraps the outage and nulls the cached promise — and the rejected promise then becomes the
+  // answer to every later request, which is the BP-362 wedge returning through this change
+  it("still answers an outage as an outage when the close of the dead client fails", async () => {
+    const { connectDB, DatabaseUnavailableError } = await freshModule();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    connect.mockRejectedValue(refused());
+    close.mockRejectedValue(new Error("topology already closed"));
+
+    const thrown = await connectDB().catch((e) => e);
+
+    expect(thrown).toBeInstanceOf(DatabaseUnavailableError);
+    expect(
+      (globalThis as { mongooseCache?: { promise: unknown } }).mongooseCache?.promise
+    ).toBeNull();
+  });
+
+  it("reports a reconnect that fails as an outage, not as a connection", async () => {
+    vi.useFakeTimers();
+    const { connectDB, DatabaseUnavailableError } = await freshModule();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    connect.mockResolvedValueOnce({ ok: true }).mockRejectedValue(refused());
+
+    await connectDB();
+    connection.readyState = 0;
+    const thrown = await connectDB().catch((e) => e);
+
+    expect(thrown).toBeInstanceOf(DatabaseUnavailableError);
+    expect(
+      (globalThis as { mongooseCache?: { promise: unknown } }).mongooseCache?.promise
+    ).toBeNull();
+    // And the next request tries again rather than being served the rejection
+    vi.advanceTimersByTime(1_500);
+    connect.mockResolvedValue({ ok: true });
+    await expect(connectDB()).resolves.toEqual({ ok: true });
   });
 
   it("reconnects even when the close fails, rather than answering with that failure", async () => {
@@ -479,4 +540,5 @@ describe("connectDB — the client a reconnect abandons", () => {
     // lines — which is the client the in-flight close then takes with it.
     expect(order).toEqual(["connect", "close starts", "close ends", "connect"]);
     expect(close).toHaveBeenCalledTimes(1);
-  });});
+  });
+});

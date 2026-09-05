@@ -40,19 +40,20 @@ const SERVER_SELECTION_TIMEOUT_MS = 5_000;
 const FAILURE_COOLDOWN_MS = 1_000;
 
 /**
- * Let go of the MongoClient behind the current connection, before anything replaces it.
+ * Let go of the MongoClient the connection is about to replace.
  *
- * `mongoose.connect` builds a client and assigns it to the connection *before* awaiting its
- * `connect()` (`Connection.prototype.createClient`), then overwrites that reference on the next
- * call. So both a connection the database went away under and an attempt that never succeeded leave
- * a client nobody holds, with its topology monitor still polling on its own timer. Three
- * outage/restore cycles took the sockets against the database from 2 to 13, and the first abandoned
- * monitor was still reporting the server as reachable long after its client had been replaced
- * (BP-520).
+ * `mongoose.connect` assigns its client to the connection *before* awaiting `client.connect()`, and
+ * the next call overwrites that reference — so a connection the database went away under and an
+ * attempt that never succeeded both leave a client nobody holds, with its topology monitor still
+ * polling on its own timer.
+ *
+ * The client rather than `mongoose.connection.close()`: closing the connection deletes every
+ * model's `$init`, and the reconnect then re-runs `createCollection` and `createIndexes` for all of
+ * them against a database that has just come back.
  */
 async function releaseAbandonedClient(): Promise<void> {
   try {
-    await mongoose.connection.close();
+    await mongoose.connection.client?.close();
   } catch {
     // The client is being thrown away either way; a failure to close it is not the caller's problem
     // and must not become the answer to a request that only wanted a connection.
