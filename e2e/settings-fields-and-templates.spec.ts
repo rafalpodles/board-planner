@@ -102,8 +102,15 @@ test.describe("custom fields", () => {
     await page.getByLabel("Type", { exact: true }).selectOption("dropdown");
 
     await test.step("a choice field with no options is refused before anything is sent", async () => {
+      let posts = 0;
+      const count = (req: { method(): string; url(): string }) => {
+        if (req.method() === "POST" && req.url().includes("/custom-fields")) posts += 1;
+      };
+      page.on("request", count);
       await page.getByRole("button", { name: "Create field" }).click();
       await expect(page.getByText("A choice field needs at least one option.")).toBeVisible();
+      page.off("request", count);
+      expect(posts, "the refusal is the form's, not the server's").toBe(0);
       expect(await storedFields(request)).toEqual([]);
     });
 
@@ -214,6 +221,47 @@ test.describe("custom fields", () => {
     });
   });
 
+  test("On the card and In the list change what the board and the list show", async ({ page }) => {
+    const difficulty = String(FIELDS.difficulty._id);
+    await seedCustomFields({ [difficulty]: "aa-large" });
+    await openFields(page);
+
+    await fieldRow(page, "Difficulty").getByRole("button", { name: "Edit" }).click();
+    await page.getByText("On the card", { exact: true }).click();
+    await page.getByText("In the list", { exact: true }).click();
+    const saved = fieldWrite(page, "PATCH");
+    await page.getByRole("button", { name: "Save field" }).click();
+    expect((await saved).status()).toBe(200);
+
+    await page.goto(boardUrl);
+    const cardOf = (n: number) => page.locator(`[data-column-body] a[href="/projects/${PROJECT_KEY}/tasks/${n}"]`);
+    // The task holding the value shows it; the one without is the control
+    await expect(cardOf(SIBLING_TASK_NUMBER)).toContainText("L");
+    await expect(cardOf(1)).toBeVisible();
+    await expect(cardOf(1)).not.toContainText("L");
+
+    // A field column is off by default and offered by the column picker; a field not marked
+    // In the list is not offered at all (Points is the control)
+    await page.getByRole("button", { name: "List", exact: true }).click();
+    await page.getByRole("button", { name: "Choose columns" }).click();
+    const columns = page.getByRole("group", { name: "Columns" });
+    await expect(columns.getByRole("checkbox", { name: "Points" })).toHaveCount(0);
+    await columns.getByRole("checkbox", { name: "Difficulty" }).check();
+    await expect(page.getByRole("columnheader", { name: /Difficulty/ })).toBeVisible();
+    await expect(page.locator("tr", { hasText: "Free to move" })).toContainText("L");
+
+    // Archived, the field leaves the card again
+    await openFields(page);
+    const archived = fieldWrite(page, "PATCH");
+    await fieldRow(page, "Difficulty").getByRole("button", { name: "Archive" }).click();
+    expect((await archived).status()).toBe(200);
+    await page.goto(boardUrl);
+    // The view mode is remembered, so the board comes back as the list
+    await page.getByRole("button", { name: "Board", exact: true }).click();
+    await expect(cardOf(SIBLING_TASK_NUMBER)).toBeVisible();
+    await expect(cardOf(SIBLING_TASK_NUMBER)).not.toContainText("L");
+  });
+
   test("the estimate field is created in one click when none exists, then chosen from the numeric fields", async ({
     page,
     request,
@@ -288,16 +336,18 @@ test.describe("task templates", () => {
       );
       await row.getByRole("button", { name: "Edit" }).click();
       await row.getByLabel("Title template").fill("Bug: ");
+      // "doc", not the seed's first category: a new template defaults to that one, so picking it
+      // would prove nothing about the picker
       const picker = row.getByRole("combobox", { name: "Template category" });
+      // TODO(BP-532): opened at the bottom edge of the viewport, the picker's own open scrolls
+      // the settings container and its scroll listener closes it on the same click. Scrolled to
+      // the middle first so the click tests the picker rather than that.
+      await picker.evaluate((el) => el.scrollIntoView({ block: "center" }));
+      await picker.click();
       const options = page.getByRole("listbox", { name: "Template category" });
-      // The picker mounts in a portal on open; a click that lands during the row's own repaint
-      // is lost, so the open is retried rather than assumed
-      await expect(async () => {
-        await picker.click();
-        await expect(options).toBeVisible({ timeout: 1_500 });
-      }).toPass({ timeout: 15_000 });
-      await options.getByRole("option", { name: /^\s*bug\s*$/ }).click();
-      await expect(row.getByRole("combobox", { name: "Template category" })).toContainText("bug");
+      await expect(options).toBeVisible();
+      await options.getByRole("option", { name: /^\s*doc\s*$/ }).click();
+      await expect(picker).toContainText("doc");
       await row.getByLabel("Description").fill("Steps to reproduce");
       await row.getByLabel("Acceptance Criteria").fill("- [ ] reproduced\n- [ ] fixed");
 
@@ -314,19 +364,20 @@ test.describe("task templates", () => {
       expect(taskTemplates[0]).toMatchObject({
         name: "Bug report",
         title: "Bug: ",
-        category: "bug",
+        category: "doc",
         description: "Steps to reproduce",
         acceptanceCriteria: "- [ ] reproduced\n- [ ] fixed",
       });
     });
 
+    let createdNumber = 0;
     await test.step("the new-task form offers it, and a task made from it carries it", async () => {
       await page.goto(boardUrl);
       await page.getByRole("button", { name: "New task" }).click();
       const modal = page.getByRole("dialog", { name: "New Task" });
       await selectLabelled(modal, "Template").selectOption({ label: "Bug report" });
       await expect(modal.getByLabel("Title")).toHaveValue("Bug: ");
-      await expect(selectLabelled(modal, "Category")).toHaveValue("bug");
+      await expect(selectLabelled(modal, "Category")).toHaveValue("doc");
 
       await modal.getByLabel("Title").fill("Bug: the login form forgets the username");
       const created = page.waitForResponse(
@@ -336,9 +387,10 @@ test.describe("task templates", () => {
       const task = await (await created).json();
       expect(task).toMatchObject({
         title: "Bug: the login form forgets the username",
-        category: "bug",
+        category: "doc",
         description: "Steps to reproduce",
       });
+      createdNumber = task.taskNumber;
       expect(task.checklist.map((i: { text: string; done: boolean }) => [i.text, i.done])).toEqual([
         ["reproduced", false],
         ["fixed", false],
@@ -352,7 +404,7 @@ test.describe("task templates", () => {
       const names = await page.getByLabel("Category name").evaluateAll((els) =>
         els.map((el) => (el as HTMLInputElement).value)
       );
-      await page.getByLabel("Category name").nth(names.indexOf("bug")).fill("defect");
+      await page.getByLabel("Category name").nth(names.indexOf("doc")).fill("guide");
 
       const row = templateRow(page, 0);
       await expect(row.locator('input[aria-label="Template name"]')).toHaveValue("Bug report");
@@ -372,11 +424,11 @@ test.describe("task templates", () => {
       await expectToast(page, "Templates saved");
 
       const project = await storedProject(request);
-      expect(project.categories.map((c) => c.name)).toContain("defect");
-      expect(project.categories.map((c) => c.name)).not.toContain("bug");
-      expect(project.taskTemplates[0]).toMatchObject({ name: "Bug report", title: "Defect: ", category: "defect" });
+      expect(project.categories.map((c) => c.name)).toContain("guide");
+      expect(project.categories.map((c) => c.name)).not.toContain("doc");
+      expect(project.taskTemplates[0]).toMatchObject({ name: "Bug report", title: "Defect: ", category: "guide" });
       // And the task made from it moved with the category
-      expect((await readTask(request, 5)).category).toBe("defect");
+      expect((await readTask(request, createdNumber)).category).toBe("guide");
     });
 
     await test.step("a second template with the same name is refused and stays on screen to fix", async () => {
