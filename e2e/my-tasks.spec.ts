@@ -66,11 +66,16 @@ function row(page: Page, projectKey: string, taskNumber: number): Locator {
   return page.locator(`main a[href="/projects/${projectKey}/tasks/${taskNumber}"]`);
 }
 
+/** The status chip. `.first()` because the priority badge beside it carries the same class. */
+function statusChip(taskRow: Locator): Locator {
+  return taskRow.locator("span.chip").first();
+}
+
 /** The value the chip's colour is mixed from, as the browser resolved it. */
 function chipVariable(taskRow: Locator): Promise<string> {
-  return taskRow
-    .locator("span.chip")
-    .evaluate((chip) => getComputedStyle(chip).getPropertyValue("--chip").trim());
+  return statusChip(taskRow).evaluate((chip) =>
+    getComputedStyle(chip).getPropertyValue("--chip").trim()
+  );
 }
 
 async function openMyTasks(page: Page, who: "admin" | "member" = "admin") {
@@ -146,11 +151,11 @@ test.describe("a list of my work, across boards", () => {
     const invented = row(page, PROJECT_KEY, MINE_BLOCKED_NUMBER);
     const orphaned = row(page, PROJECT_KEY, MINE_ORPHAN_NUMBER);
 
-    await expect(invented.locator("span.chip")).toHaveText(MINE_CUSTOM_COLUMN.label);
+    await expect(statusChip(invented)).toHaveText(MINE_CUSTOM_COLUMN.label);
     await expect(chipVariable(invented)).resolves.toBe(MINE_CUSTOM_COLUMN.color);
 
     // No column to ask, so the id the task is stored with is all there is to show
-    await expect(orphaned.locator("span.chip")).toHaveText(MINE_ORPHAN_STATUS);
+    await expect(statusChip(orphaned)).toHaveText(MINE_ORPHAN_STATUS);
     const fallback = await page.evaluate(() =>
       getComputedStyle(document.documentElement).getPropertyValue("--color-status-planned").trim()
     );
@@ -158,10 +163,12 @@ test.describe("a list of my work, across boards", () => {
 
     // The control: the two chips are actually painted differently, which is the point of carrying
     // a colour per column at all
-    const painted = await rows(page)
-      .locator("span.chip")
-      .evaluateAll((chips) => chips.map((chip) => getComputedStyle(chip).backgroundColor));
-    expect(new Set(painted).size).toBeGreaterThan(1);
+    const painted = await Promise.all(
+      [invented, orphaned, row(page, PROJECT_KEY, MINE_ACTIVE_NUMBER)].map((taskRow) =>
+        statusChip(taskRow).evaluate((chip) => getComputedStyle(chip).backgroundColor)
+      )
+    );
+    expect(new Set(painted).size).toBe(3);
   });
 
   test("a row opens the task, and the group heading opens the board", async ({ page }) => {
