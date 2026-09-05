@@ -958,8 +958,10 @@ test.describe("what the machine refuses at the moment it picks the work up", () 
 
     expect(refused.status(), await refused.text()).toBe(409);
     expect((await refused.json()).error).toMatch(/no column meaning In progress/);
-    // Refused before the write, so the task is exactly where it was
-    expect(await read(own)).toMatchObject({ status: APPROVED, runId: "" });
+    // Refused before the write, so the task is exactly where it was and no run holds it
+    const after = await read(own);
+    expect(after.status).toBe(APPROVED);
+    expect(after.execution.runId).toBeUndefined();
 
     // The service says the same thing to a caller that does not go through the route
     await expect(
