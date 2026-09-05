@@ -79,8 +79,15 @@ const control = createControl((req, res) => {
     res.writeHead(200, { "Content-Type": "text/plain" }).end("ok");
     return;
   }
+  // How many connections the app is holding through here, which is what BP-520 is about: a
+  // reconnect that abandons its MongoClient leaves a topology monitor re-establishing on its own
+  // heartbeat, and the count climbs one client per outage rather than staying where it started.
+  if (req.url === "/sockets") {
+    json(res, 200, { live: live.size });
+    return;
+  }
   if (req.method !== "POST") {
-    json(res, 405, { error: "POST /outage or POST /restore" });
+    json(res, 405, { error: "GET /sockets, POST /outage or POST /restore" });
     return;
   }
   if (req.url === "/outage") {
