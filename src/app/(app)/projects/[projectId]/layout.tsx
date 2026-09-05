@@ -1,3 +1,5 @@
+import { ModalOverPage } from "./modal-slot";
+
 // A fragment on purpose: the board's lg:h-dvh → flex-1 → min-h-0 chain runs
 // straight through here, and any wrapper element would break it
 export default function ProjectLayout({
@@ -10,7 +12,7 @@ export default function ProjectLayout({
   return (
     <>
       {children}
-      {modal}
+      <ModalOverPage>{modal}</ModalOverPage>
     </>
   );
 }
