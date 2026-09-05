@@ -1,4 +1,5 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
+import mongoose from "mongoose";
 import {
   MINE_ACTIVE_NUMBER,
   MINE_ACTIVE_TITLE,
@@ -14,8 +15,10 @@ import {
   MINE_ORPHAN_TITLE,
   MINE_OTHER_BOARD_NUMBER,
   MINE_OTHER_BOARD_TITLE,
+  E2E_MONGODB_URI,
   PROJECT_KEY,
   PROJECT_NAME,
+  SECOND_PROJECT_ID,
   SECOND_PROJECT_KEY,
   SECOND_PROJECT_NAME,
   THEIRS_TITLE,
@@ -219,4 +222,51 @@ test("with nothing assigned, and with nothing left to do, the page says which", 
   await page.getByLabel("Hide done").uncheck();
   await expect(page.getByText(MINE_ONLY_DONE_TITLE)).toBeVisible();
   await expect(page.getByText("1 task", { exact: true })).toBeVisible();
+});
+
+/**
+ * The two below assert what the product does today and name the ticket that says it is wrong, so
+ * each turns red on the day it is fixed — which is the signal to rewrite it as the assertion it
+ * should have been. Neither is `test.fail`-marked: that would make *any* failure a pass.
+ */
+
+// TODO(BP-524): a task whose project row is gone should cost that row, not the screen
+test("a task whose board is gone takes the whole page down", async ({ page }) => {
+  await seedSecondProject();
+  await seedMyTasks();
+
+  // Not reachable through the product — DELETE /api/projects cascades its tasks first — so the
+  // state is built directly. What the page has to survive is the shape the endpoint answers with,
+  // and that shape is `project: null`.
+  await mongoose.connect(E2E_MONGODB_URI);
+  await mongoose.connection.db!.collection("projects").deleteOne({ _id: SECOND_PROJECT_ID });
+  await mongoose.disconnect();
+
+  await signIn(page);
+  await page.goto("/my-tasks");
+
+  await expect(page.getByText("Something went wrong")).toBeVisible();
+  // The whole shell, not one row: the reader's other five tasks are gone with it
+  await expect(page.locator("main")).toHaveCount(0);
+  await expect(page.getByText(MINE_ACTIVE_TITLE)).toHaveCount(0);
+});
+
+// TODO(BP-525): a load that failed should not read as an account with no work
+test("a failed load says so once, then reads as an empty account", async ({ page }) => {
+  await seedSecondProject();
+  await seedMyTasks();
+  await signIn(page);
+
+  await page.route("**/api/tasks/mine", (route) => route.abort());
+  await page.goto("/my-tasks");
+
+  // The honest half, and the only half: a toast that goes away on its own. `.first()` because the
+  // dev server renders under StrictMode, which runs the page's fetch effect — and so this toast —
+  // twice.
+  await expect(page.getByTestId("toast").filter({ hasText: "Failed to load tasks" }).first()).toBeVisible();
+
+  // What is left behind is the empty state, which is a statement about this person's work rather
+  // than about the request
+  await expect(page.getByText("No tasks assigned to you")).toBeVisible();
+  await expect(page.getByText("0 tasks", { exact: true })).toBeVisible();
 });
