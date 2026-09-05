@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import Link from "next/link";
 import { useApi } from "@/hooks/use-api";
 import { useToast } from "@/components/ui/Toast";
 import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
 import { PRIORITY_LABELS, DEFAULT_PROJECT_ICON, ColumnRole, Priority, TaskStatus } from "@/types";
 import { ROLE_ORDER } from "@/lib/columns";
 import { projectPath, taskPath } from "@/lib/urls";
@@ -26,6 +27,13 @@ interface MyTask {
   statusColor: string | null;
 }
 
+/**
+ * What the endpoint actually answers. A task whose board has been deleted arrives with no project
+ * at all, and such a row can be neither grouped, named nor linked to — so it never becomes a
+ * MyTask.
+ */
+type IncomingTask = Omit<MyTask, "project"> & { project: MyTask["project"] | null };
+
 // By what a column means, not by what it is called. Keyed on ids this ordered seven names and put
 // every custom column last, so a renamed board sorted arbitrarily against its own workflow.
 const orderOf = (task: MyTask) =>
@@ -34,18 +42,28 @@ const orderOf = (task: MyTask) =>
 export default function MyTasksPage() {
   const [tasks, setTasks] = useState<MyTask[]>([]);
   const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
   const [hideDone, setHideDone] = useState(true);
   const api = useApi();
   const { toast } = useToast();
 
-  useEffect(() => {
+  const load = useCallback(() => {
+    setLoading(true);
+    setFailed(false);
     api
       .get("/api/tasks/mine")
-      .then(setTasks)
-      .catch(() => toast("Failed to load tasks", "error"))
+      .then((mine: IncomingTask[]) =>
+        setTasks(mine.filter((task): task is MyTask => !!task.project))
+      )
+      .catch(() => {
+        setFailed(true);
+        toast("Failed to load tasks", "error");
+      })
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(load, [load]);
 
   const filtered = hideDone ? tasks.filter((t) => t.statusRole !== "done") : tasks;
   const sorted = [...filtered].sort((a, b) => orderOf(a) - orderOf(b));
@@ -64,6 +82,19 @@ export default function MyTasksPage() {
     return (
       <div className="flex justify-center py-12">
         <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary border-t-transparent" />
+      </div>
+    );
+  }
+
+  // Not the empty state: "no tasks assigned to you" is a claim about this person's work, and a
+  // request that never answered supports no claim about it at all
+  if (failed) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
+        <p className="text-sm text-text-muted">Failed to load your tasks.</p>
+        <Button size="sm" onClick={load}>
+          Retry
+        </Button>
       </div>
     );
   }
