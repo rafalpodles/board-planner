@@ -858,11 +858,12 @@ test("a member picks for their own machine; what they cannot switch on is said, 
   expect(await pushed.json()).toMatchObject({ projects: [String(PROJECT_ID)], refused: [outside] });
   expect((await workerRow())?.desiredProjects.map(String)).toEqual([String(PROJECT_ID)]);
 
-  // The machine's own credential cannot open the screen that decides what it clones
+  // The screen that decides what a machine clones is closed to machines: the worker's own
+  // credential is not a person's at all, and a person's API token is refused as a machine's
   const asTheMachine = await request.get(`/api/workers/${WORKER_ID}/projects`, {
     headers: asMachine(),
   });
-  expect(asTheMachine.status()).toBe(403);
+  expect(asTheMachine.status()).toBe(401);
   const asAToken = await request.put(`/api/workers/${WORKER_ID}/projects`, {
     headers: MEMBER_AUTH,
     data: { projects: [] },
