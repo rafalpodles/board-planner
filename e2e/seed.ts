@@ -1554,6 +1554,9 @@ const RUNNABLE_COMPOSITION = {
   delivery: [{ key: "push" }],
 };
 
+export const PROJECT_AGENT_ID = id("e2e00000000000000000ab01");
+export const PERSONAL_AGENT_ID = id("e2e00000000000000000ab02");
+
 export async function seedAgents() {
   const db = (await connect()).db!;
   const now = new Date();
@@ -1568,8 +1571,8 @@ export async function seedAgents() {
     ...over,
   });
   await db.collection("agents").insertMany([
-    agent({ name: PROJECT_AGENT_NAME, scope: "project", project: PROJECT_ID }),
-    agent({ name: PERSONAL_AGENT_NAME, scope: "user", owner: ADMIN_ID }),
+    agent({ _id: PROJECT_AGENT_ID, name: PROJECT_AGENT_NAME, scope: "project", project: PROJECT_ID }),
+    agent({ _id: PERSONAL_AGENT_ID, name: PERSONAL_AGENT_NAME, scope: "user", owner: ADMIN_ID }),
   ]);
   await mongoose.disconnect();
 }

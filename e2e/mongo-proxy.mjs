@@ -11,8 +11,13 @@ import { connect, createServer } from "node:net";
  * MONGODB_URI through MONGO_PROXY_PORT), while seed() keeps talking to the database directly.
  *
  * A bare TCP pipe. It knows nothing of the wire protocol, which is the point: an outage is every
- * live socket destroyed and every new connection refused, exactly what the driver sees when a
- * mongod goes away. POST /outage cuts it, POST /restore lets connections through again.
+ * live socket destroyed and every new one accepted and closed at once — a reset, which is what the
+ * driver sees when a mongod goes away. POST /outage cuts it, POST /restore lets connections through
+ * again.
+ *
+ * No SIGTERM handler, like the other stubs: a run killed hard leaves this holding both ports, and
+ * `reuseExistingServer: false` then stops the next run with "already used" rather than quietly
+ * routing it through a proxy left in outage. Clear it with `lsof -ti:<port> | xargs kill`.
  */
 
 // Loopback only, like the other stubs: on a machine several agents share, a control endpoint on
@@ -22,13 +27,22 @@ const LOOPBACK = "127.0.0.1";
 const PORT = Number(process.env.MONGO_PROXY_PORT ?? 3991);
 const CONTROL_PORT = Number(process.env.MONGO_PROXY_CONTROL_PORT ?? 3992);
 
-const upstream = new URL(
-  (process.env.E2E_MONGODB_URI ?? "mongodb://localhost:27017/boardplanner_e2e").replace(
-    /^mongodb:\/\//,
-    "http://"
-  )
-);
-const UPSTREAM = { host: upstream.hostname, port: Number(upstream.port || 27017) };
+const rawUri = process.env.E2E_MONGODB_URI ?? "mongodb://localhost:27017/boardplanner_e2e";
+// One host, plain scheme: a host list or an SRV record has no meaning behind a single pipe, and
+// the failure would otherwise be 503s from the first test rather than this line. The config makes
+// the same check when it rewrites the dev server's URI; this one guards a proxy started by hand.
+if (!/^mongodb:\/\/[^,/]+\/[^?]+/.test(rawUri)) {
+  console.error(
+    "E2E_MONGODB_URI must be a single-host mongodb:// URI naming a database; mongodb+srv and host lists cannot be proxied"
+  );
+  process.exit(1);
+}
+const upstream = new URL(rawUri.replace(/^mongodb:\/\//, "http://"));
+const UPSTREAM = {
+  // The URL parser keeps the brackets on an IPv6 literal; net.connect wants them off
+  host: upstream.hostname.replace(/^\[|\]$/g, ""),
+  port: Number(upstream.port || 27017),
+};
 
 let outage = false;
 const live = new Set();

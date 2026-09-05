@@ -39,9 +39,19 @@ export const MONGO_PROXY_CONTROL_URL = `http://127.0.0.1:${MONGO_PROXY_CONTROL_P
 
 /** The seeded database's URI with its host swapped for the proxy's; credentials and options ride along. */
 function throughMongoProxy(uri: string): string {
+  // One host, plain scheme: the proxy is a single TCP pipe, so a host list or an SRV record has
+  // no meaning behind it — refused here rather than as 503s from the first test
+  if (!/^mongodb:\/\/[^,/]+\/[^?]+/.test(uri)) {
+    throw new Error(
+      "E2E_MONGODB_URI must be a single-host mongodb:// URI naming a database; mongodb+srv and host lists cannot be proxied"
+    );
+  }
   const url = new URL(uri.replace(/^mongodb:\/\//, "http://"));
   url.hostname = "127.0.0.1";
   url.port = String(MONGO_PROXY_PORT);
+  // Pinned to the address it was given. Against a replica set the driver would otherwise follow
+  // the hello's host list straight past the proxy, and the outage test would read 200.
+  url.searchParams.set("directConnection", "true");
   return url.toString().replace(/^http:\/\//, "mongodb://");
 }
 

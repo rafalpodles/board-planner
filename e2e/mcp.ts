@@ -99,6 +99,7 @@ export function rpcMessage(body: string): RpcMessage {
 }
 
 export type ToolCall = {
+  status: number;
   raw: RpcMessage;
   text: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -153,10 +154,15 @@ export class McpSession {
 
   /** Tool results arrive as text content; every planner tool puts JSON in it. */
   async callTool(name: string, args: Record<string, unknown> = {}): Promise<ToolCall> {
-    const { body } = await this.call("tools/call", { name, arguments: args });
+    const { status, body } = await this.call("tools/call", { name, arguments: args });
     const content = (body.result?.content ?? []) as { type: string; text: string }[];
     const text = content.map((part) => part.text ?? "").join("");
-    return { raw: body, text, parsed: text.startsWith("{") || text.startsWith("[") ? JSON.parse(text) : null };
+    return {
+      status,
+      raw: body,
+      text,
+      parsed: text.startsWith("{") || text.startsWith("[") ? JSON.parse(text) : null,
+    };
   }
 }
 

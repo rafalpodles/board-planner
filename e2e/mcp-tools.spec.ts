@@ -1,7 +1,7 @@
 import { test, expect, type APIRequestContext, type Locator, type Page } from "@playwright/test";
 import mongoose from "mongoose";
 import { MONGO_PROXY_CONTROL_URL } from "../playwright.config";
-import { ADMIN_AUTH } from "./api";
+import { ADMIN_AUTH, SAME_ORIGIN } from "./api";
 import { McpSession, authorize, type ToolCall } from "./mcp";
 import {
   ADMIN_USERNAME,
@@ -16,8 +16,10 @@ import {
   KEPT_TASK_KEY,
   KEPT_TASK_TITLE,
   MEMBER_API_TOKEN,
+  MEMBER_ID,
   MEMBER_USERNAME,
   PERSONAL_AGENT_NAME,
+  PROJECT_AGENT_ID,
   PROJECT_AGENT_NAME,
   PROJECT_ID,
   PROJECT_KEY,
@@ -26,6 +28,7 @@ import {
   SECOND_PROJECT_ID,
   SECOND_PROJECT_KEY,
   SECOND_PROJECT_NAME,
+  SIBLING_TASK_ID,
   SIBLING_TASK_KEY,
   SIBLING_TASK_NUMBER,
   SOURCE_COLUMN,
@@ -82,16 +85,27 @@ async function connected(request: APIRequestContext, token = API_TOKEN): Promise
   return session;
 }
 
+// Both check the transport first: a 401 or a JSON-RPC error carries no `result`, and an
+// `isError ?? false` read off nothing would call that accepted
 function accepted(call: ToolCall) {
+  expect(call.status, call.text).toBe(200);
+  expect(call.raw.result, JSON.stringify(call.raw)).toBeDefined();
   expect(call.raw.result?.isError ?? false, call.text).toBe(false);
 }
 
 function refused(call: ToolCall) {
+  expect(call.status, call.text).toBe(200);
   expect(call.raw.result?.isError, call.text).toBe(true);
 }
 
 test.beforeEach(async () => {
   await seed();
+});
+
+// The outage test cuts the database; a body abandoned by the test timeout never reaches its own
+// restore, and every test after it would read 503s. afterEach runs on a timeout too.
+test.afterEach(async ({ request }) => {
+  await request.post(`${MONGO_PROXY_CONTROL_URL}/restore`);
 });
 
 test("create_task lands on the board with everything it named", async ({ page, request }) => {
@@ -228,6 +242,14 @@ test("change_task_status moves a free task and refuses one a worker holds", asyn
   expect(held.text).toContain(
     `${HELD_TASK_KEY} is being executed by ${WORKER_NAME} (phase ${RUN_PHASE})`
   );
+  // The status the tool cannot carry — PlannerClient keeps only the message — is read off the
+  // same write made directly: a 409, whose words the tool's are, rather than a copy of them
+  const direct = await request.patch(`/api/projects/${PROJECT_ID}/tasks/${HELD_TASK_ID}/status`, {
+    headers: ADMIN_AUTH,
+    data: { status: TARGET_COLUMN.id },
+  });
+  expect(direct.status()).toBe(409);
+  expect(held.text).toContain((await direct.json()).error);
 
   // The way past it exists for a person on the board, and not for this tool: an MCP token is a
   // machine credential, and an unattended agent must not take work off a machine
@@ -390,8 +412,8 @@ test("update_task hands a task over by name: the assignee from the roster, the a
   const nobody = await session.callTool("update_task", { taskKey: SIBLING_TASK_KEY, assignee: "nobody" });
   refused(nobody);
   expect(nobody.text).toContain('"nobody" is not someone this board can be assigned to');
-  // BP-511: refused, not resolved to nobody — the task still belongs to the member
-  expect(String((await storedTask(SIBLING_TASK_NUMBER)).assignee)).not.toBe("null");
+  // BP-511: refused, not resolved to nobody — and not to anybody else either
+  expect(String((await storedTask(SIBLING_TASK_NUMBER)).assignee)).toBe(String(MEMBER_ID));
 
   const armed = await session.callTool("update_task", {
     taskKey: SIBLING_TASK_KEY,
@@ -480,6 +502,9 @@ test("a personal agent stays with its owner's tasks", async ({ request }) => {
   });
   accepted(shared);
   expect(shared.parsed.agent.name).toBe(PROJECT_AGENT_NAME);
+  const row = await storedTask(SIBLING_TASK_NUMBER);
+  expect(String(row.agent)).toBe(String(PROJECT_AGENT_ID));
+  expect(String(row.assignee)).toBe(String(MEMBER_ID));
 });
 
 /**
@@ -514,6 +539,21 @@ test("a token limited to one board cannot write to another", async ({ page, requ
   });
   refused(moved);
 
+  // Those three stopped at the listing the token cannot see past (`getProjectByKey`), which says
+  // nothing about the write gate itself. The same credential at the route is the gate: refused
+  // on the board it was not granted, and — the control — a real write on the one it was
+  const asClient = { ...SAME_ORIGIN, Authorization: `Bearer ${accessToken}` };
+  const straightIn = await request.post(`/api/projects/${SECOND_PROJECT_ID}/tasks`, {
+    headers: asClient,
+    data: { title: "Planted by the route" },
+  });
+  expect(straightIn.status(), await straightIn.text()).toBe(403);
+  const straightHome = await request.post(`/api/projects/${PROJECT_ID}/tasks`, {
+    headers: asClient,
+    data: { title: "Filed by the route" },
+  });
+  expect(straightHome.status(), await straightHome.text()).toBe(201);
+
   // The other board, read with a credential that can see it: one task, where it was, with no
   // comment on it
   const tasks = await request.get(`/api/projects/${SECOND_PROJECT_ID}/tasks`, { headers: ADMIN_AUTH });
@@ -530,15 +570,26 @@ test("a token limited to one board cannot write to another", async ({ page, requ
   // The control: the same three writes land on the board the token was granted
   const created = await session.callTool("create_task", { project: PROJECT_KEY, title: "Filed from inside" });
   accepted(created);
-  expect(created.parsed.taskNumber).toBe(NEXT_TASK_NUMBER);
+  // The route's own write above took NEXT_TASK_NUMBER
+  expect(created.parsed.taskNumber).toBe(NEXT_TASK_NUMBER + 1);
   const noted = await session.callTool("add_comment", { taskKey: SIBLING_TASK_KEY, body: "Said from inside" });
   accepted(noted);
+  expect(noted.parsed.body).toBe("Said from inside");
   const shifted = await session.callTool("change_task_status", {
     taskKey: SIBLING_TASK_KEY,
     status: TARGET_COLUMN.id,
   });
   accepted(shifted);
   expect(shifted.parsed.status).toBe(TARGET_COLUMN.id);
+
+  // And the board holds all three
+  expect((await storedTask(NEXT_TASK_NUMBER + 1)).title).toBe("Filed from inside");
+  expect((await storedTask(SIBLING_TASK_NUMBER)).status).toBe(TARGET_COLUMN.id);
+  const said = await request.get(
+    `/api/projects/${PROJECT_ID}/tasks/${SIBLING_TASK_ID}/comments`,
+    { headers: ADMIN_AUTH }
+  );
+  expect((await said.json()).map((c: { body: string }) => c.body)).toEqual(["Said from inside"]);
 });
 
 /**
@@ -550,26 +601,23 @@ test("an outage answers 503 and says the credential was not the problem", async 
   const session = await connected(request);
 
   await request.post(`${MONGO_PROXY_CONTROL_URL}/outage`);
-  try {
-    const cut = await session.call("tools/list");
-    expect(cut.status, cut.text).toBe(503);
-    expect(JSON.parse(cut.text)).toEqual({
-      error: "temporarily_unavailable",
-      error_description: "The database is unreachable. The credential was not the problem.",
-    });
-    expect(cut.headers["retry-after"]).toBe("5");
-    // Not a challenge: a 401's pointer to the discovery documents would send the client off to
-    // re-authorise for a token that was never the problem
-    expect(cut.headers["www-authenticate"]).toBeUndefined();
-    expect(cut.text).not.toContain("invalid_token");
-  } finally {
-    await request.post(`${MONGO_PROXY_CONTROL_URL}/restore`);
-  }
+  const cut = await session.call("tools/list");
+  expect(cut.status, cut.text).toBe(503);
+  expect(JSON.parse(cut.text)).toEqual({
+    error: "temporarily_unavailable",
+    error_description: "The database is unreachable. The credential was not the problem.",
+  });
+  expect(cut.headers["retry-after"]).toBe("5");
+  // Not a challenge: a 401's pointer to the discovery documents would send the client off to
+  // re-authorise for a token that was never the problem
+  expect(cut.headers["www-authenticate"]).toBeUndefined();
+  expect(cut.text).not.toContain("invalid_token");
+  await request.post(`${MONGO_PROXY_CONTROL_URL}/restore`);
 
   // The control: the same credential, the same session, once the database is back
-  await expect
-    .poll(async () => (await session.call("tools/list")).status, { timeout: 30_000 })
-    .toBe(200);
+  await expect(async () => {
+    expect((await session.call("tools/list")).status).toBe(200);
+  }).toPass({ timeout: 30_000 });
   const tasks = await session.callTool("list_tasks", { project: PROJECT_KEY });
   expect(tasks.text).toContain(HELD_TASK_TITLE);
 });
