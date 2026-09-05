@@ -1630,3 +1630,149 @@ export async function storedTask(taskNumber: number): Promise<Record<string, unk
   if (!row) throw new Error(`no task ${taskNumber} on the seeded board`);
   return row as Record<string, unknown>;
 }
+
+// BP-469. The cross-board list on /my-tasks, which is the one screen whose whole subject is tasks
+// this reader has on boards that agree on nothing but their column roles.
+//
+// Requires seedSecondProject(): the second group's tasks live on that board, and a list that spans
+// exactly one project cannot tell grouping from a heading.
+export const MINE_ACTIVE_NUMBER = 200;
+export const MINE_ACTIVE_TITLE = "Painting the mooring mast";
+
+// The discriminator for role ordering. Its column is one this board invented, so a page keying on
+// column *ids* sorts it last whatever it means; keyed on the role it sits second, between active
+// and approved. Its colour is the board's own, which is the other half of the same fix.
+export const MINE_CUSTOM_COLUMN = {
+  id: "triage_desk",
+  label: "Triage Desk",
+  color: "#8b5cf6",
+  role: "blocked",
+  order: 7,
+};
+export const MINE_BLOCKED_NUMBER = 201;
+export const MINE_BLOCKED_TITLE = "Waiting on the rivet order";
+
+export const MINE_APPROVED_NUMBER = 202;
+export const MINE_APPROVED_TITLE = "Ordering the gondola cable";
+
+export const MINE_DONE_NUMBER = 203;
+export const MINE_DONE_TITLE = "Riveting the keel, finished";
+
+// Left behind by a deleted column: no such id on the board, so the server can resolve neither role
+// nor label nor colour and the page has to show the row anyway.
+export const MINE_ORPHAN_STATUS = "mothballed";
+export const MINE_ORPHAN_NUMBER = 204;
+export const MINE_ORPHAN_TITLE = "Left in a column that is gone";
+
+// Assigned to the member, on the board the member can reach. Two jobs: the admin must not see it
+// (the assignee filter), and it is the member's own control against the one below.
+export const THEIRS_NUMBER = 205;
+export const THEIRS_TITLE = "The member's own rivets";
+
+// On the board the member holds no grant on. Assigned to them, so the only thing keeping it off
+// their list is the project filter — which is what this row is here to prove.
+export const THEIRS_UNREACHABLE_NUMBER = 2;
+export const THEIRS_UNREACHABLE_TITLE = "On a board the member cannot reach";
+
+export const MINE_OTHER_BOARD_NUMBER = 3;
+export const MINE_OTHER_BOARD_TITLE = "A chore on the other board";
+
+export async function seedMyTasks() {
+  const db = (await connect()).db!;
+  const now = new Date();
+  const task = taskFactory(now);
+
+  await db
+    .collection("projects")
+    .updateOne({ _id: PROJECT_ID }, { $set: { columns: [...COLUMNS, MINE_CUSTOM_COLUMN] } });
+
+  await db.collection("tasks").insertMany([
+    task({
+      _id: id("e2e00000000000000000d501"),
+      taskNumber: MINE_ACTIVE_NUMBER,
+      title: MINE_ACTIVE_TITLE,
+      status: "in_progress",
+      assignee: ADMIN_ID,
+      priority: "high",
+    }),
+    task({
+      _id: id("e2e00000000000000000d502"),
+      taskNumber: MINE_BLOCKED_NUMBER,
+      title: MINE_BLOCKED_TITLE,
+      status: MINE_CUSTOM_COLUMN.id,
+      assignee: ADMIN_ID,
+    }),
+    task({
+      _id: id("e2e00000000000000000d503"),
+      taskNumber: MINE_APPROVED_NUMBER,
+      title: MINE_APPROVED_TITLE,
+      status: "todo",
+      assignee: ADMIN_ID,
+    }),
+    task({
+      _id: id("e2e00000000000000000d504"),
+      taskNumber: MINE_DONE_NUMBER,
+      title: MINE_DONE_TITLE,
+      status: "done",
+      assignee: ADMIN_ID,
+    }),
+    task({
+      _id: id("e2e00000000000000000d505"),
+      taskNumber: MINE_ORPHAN_NUMBER,
+      title: MINE_ORPHAN_TITLE,
+      status: MINE_ORPHAN_STATUS,
+      assignee: ADMIN_ID,
+    }),
+    task({
+      _id: id("e2e00000000000000000d506"),
+      taskNumber: THEIRS_NUMBER,
+      title: THEIRS_TITLE,
+      status: "in_progress",
+      assignee: MEMBER_ID,
+    }),
+    task({
+      _id: id("e2e00000000000000000d507"),
+      project: SECOND_PROJECT_ID,
+      taskNumber: THEIRS_UNREACHABLE_NUMBER,
+      title: THEIRS_UNREACHABLE_TITLE,
+      status: "in_progress",
+      assignee: MEMBER_ID,
+    }),
+    task({
+      _id: id("e2e00000000000000000d508"),
+      project: SECOND_PROJECT_ID,
+      taskNumber: MINE_OTHER_BOARD_NUMBER,
+      title: MINE_OTHER_BOARD_TITLE,
+      status: "todo",
+      assignee: ADMIN_ID,
+    }),
+  ]);
+
+  await db
+    .collection("projects")
+    .updateOne({ _id: PROJECT_ID }, { $max: { taskCounter: THEIRS_NUMBER } });
+  await db
+    .collection("projects")
+    .updateOne({ _id: SECOND_PROJECT_ID }, { $max: { taskCounter: MINE_OTHER_BOARD_NUMBER } });
+
+  await mongoose.disconnect();
+}
+
+/**
+ * Everything this reader has, finished. The page has two empty states and they say different
+ * things — a fixture with no tasks at all can only reach the first.
+ */
+export const MINE_ONLY_DONE_NUMBER = 210;
+export const MINE_ONLY_DONE_TITLE = "The only thing left, and it is done";
+
+export async function seedMyTasksAllDone() {
+  await addTask(
+    {
+      _id: id("e2e00000000000000000d510"),
+      title: MINE_ONLY_DONE_TITLE,
+      status: "done",
+      assignee: ADMIN_ID,
+    },
+    MINE_ONLY_DONE_NUMBER
+  );
+}
