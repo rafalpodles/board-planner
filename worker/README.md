@@ -183,6 +183,12 @@ and `SIGINT` both finish the task in flight before the loop exits.
   A board with no `done`-role column at all cannot say what finished means, so it cannot say what
   blocked means either; there the gate is skipped rather than freezing every dependent for good
   with nothing on the task to say why.
+- **A board that cannot claim says so.** A board with no `approved`-role column has nowhere to
+  take work from, and one with no `active`-role column has nowhere to move it; the claim answers
+  409 with the reason rather than the 204 an empty queue gets, the worker logs it once per reason
+  rather than every poll, and the menubar shows it against the project (BP-512). The board's
+  settings refuse to remove the last `active` or `done` column in the first place, so this is for
+  boards saved before that rule existed.
 - **Nothing merges unreviewed.** The review gate is a separate Claude with no memory of writing
   the code, and it sees only the diff.
 - **Nothing executes before the static gates have read the diff.** `protected-paths` refuses

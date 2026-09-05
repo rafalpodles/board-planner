@@ -226,12 +226,23 @@ export function BoardSection({ projectId, project, patchProject, stats }: Sectio
         </div>
       )}
 
+      {!draft.value.columns.some((c) => c.role === "active") && (
+        <div className="mb-3 flex gap-2 rounded-lg border-l-2 border-warning bg-warning/10 px-3 py-2 text-sm">
+          <span aria-hidden>⚠</span>
+          <p className="m-0">
+            No column means <strong>{ROLE_LABELS.active.label}</strong>. A worker has nowhere to
+            move a task it takes, so it claims nothing, and the dashboard cannot count what is in
+            progress.
+          </p>
+        </div>
+      )}
+
       {!draft.value.columns.some((c) => c.role === "approved") && (
         <div className="mb-3 flex gap-2 rounded-lg border-l-2 border-warning bg-warning/10 px-3 py-2 text-sm">
           <span aria-hidden>⚠</span>
           <p className="m-0">
             No column means <strong>{ROLE_LABELS.approved.label}</strong>. Workers and Claude Code
-            have nowhere to take work from, and will stop without reporting anything.
+            have nowhere to take work from.
           </p>
         </div>
       )}

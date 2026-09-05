@@ -80,8 +80,14 @@ export async function resolveStatusIds(
   const unroutable = ROLES.filter((role) => !columns.has(statusIds[role]));
   if (unroutable.length === 0) return statusIds;
 
+  // An empty id is a role no column carries at all, which is a different repair from a column that
+  // was deleted from under an id the board once had
   const detail = unroutable
-    .map((role) => `${role} -> "${statusIds[role]}"`)
+    .map((role) =>
+      statusIds[role]
+        ? `${role} -> "${statusIds[role]}"`
+        : `${role} (no column carries that role)`,
+    )
     .join(", ");
   throw new Error(
     `the board has no column for ${detail}, so a run could not be routed out of it`,

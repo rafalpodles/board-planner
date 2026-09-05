@@ -131,7 +131,38 @@ function statusIdsFrom(columns: BoardColumn[]): StatusIds {
   };
 }
 
-const SEEDED = statusIdsFrom(SEEDED_BOARD);
+// The status kept on the error rather than flattened into its message, so a caller can act on one
+// answer without parsing text
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly detail: string
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+// The board refused the claim as a whole — nothing wrong with the queue or with this machine — in
+// the server's own words. The loop says it once and the menubar shows it, instead of a failed
+// cycle being logged on every poll (BP-512).
+export class ClaimRefused extends Error {
+  constructor(reason: string) {
+    super(reason);
+    this.name = "ClaimRefused";
+  }
+}
+
+function reasonIn(detail: string): string {
+  try {
+    const body = JSON.parse(detail) as { error?: unknown };
+    if (typeof body.error === "string" && body.error.trim()) return body.error.trim();
+  } catch {
+    // not JSON; the raw text is the best there is
+  }
+  return detail.trim() || "the board refused the claim without saying why";
+}
 
 // Only an explicit `false` is a refusal. The caller ends the run on one, so a body that will not
 // parse — a proxy's error page, a server that predates the field — must not read as one.
@@ -228,7 +259,11 @@ export function createApiClient(
     if (!response.ok) {
       if (response.status === 401) warnNotRegistered();
       const detail = await response.text().catch(() => "");
-      throw new Error(`${method} ${path} failed: ${response.status} ${detail}`);
+      throw new ApiError(
+        `${method} ${path} failed: ${response.status} ${detail}`,
+        response.status,
+        detail
+      );
     }
     return response;
   }
@@ -269,7 +304,17 @@ export function createApiClient(
 
   return {
     async claim(projectId, runId) {
-      const response = await send(projectId, "/tasks/claim", "POST", { runId });
+      let response: Response;
+      try {
+        response = await send(projectId, "/tasks/claim", "POST", { runId });
+      } catch (error) {
+        // 409 is the server saying the BOARD cannot claim — no column to take from or move into —
+        // which is neither an empty queue nor this machine failing (BP-512)
+        if (error instanceof ApiError && error.status === 409) {
+          throw new ClaimRefused(reasonIn(error.detail));
+        }
+        throw error;
+      }
       if (response.status === 204) return null;
 
       const raw = (await response.json()) as RawTask;
@@ -355,13 +400,13 @@ export function createApiClient(
       return (await readColumns(projectId)).map((column) => column.id);
     },
 
+    // A role no column carries resolves to "", which resolveStatusIds refuses at run start. It used
+    // to fall back to the seeded id per role, so a board that had demoted its Done column while
+    // keeping the id `done` resolved done -> "done": a column that still existed, now meaning
+    // review, and finished work was delivered into it (BP-512). The seeded board is only for a
+    // project with no columns of its own, which readColumns already handles.
     async statusIds(projectId) {
-      const ids = statusIdsFrom(await readColumns(projectId));
-      return {
-        approved: ids.approved || SEEDED.approved,
-        review: ids.review || SEEDED.review,
-        done: ids.done || SEEDED.done,
-      };
+      return statusIdsFrom(await readColumns(projectId));
     },
 
     // The worker id in the path comes from the same identity that signs the request, so the two

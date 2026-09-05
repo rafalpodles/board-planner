@@ -237,6 +237,24 @@ describe("resolveStatusIds", () => {
     await expect(promise).rejects.toThrow(/checking/);
     await expect(promise).rejects.toThrow(/shipped/);
   });
+
+  // An empty id is what api.statusIds now answers for a role no column carries (BP-512). The
+  // repair is different from a deleted column's — give a column the role, rather than find where
+  // an id went — so the message has to say which it is.
+  it("says when no column carries the role at all, instead of quoting an empty id", async () => {
+    const promise = resolveStatusIds(
+      {
+        statusIds: vi
+          .fn<ApiClient["statusIds"]>()
+          .mockResolvedValue({ ...statuses, done: "" }),
+      },
+      async () => ["ready", "doing", "checking"],
+      "CP"
+    );
+
+    await expect(promise).rejects.toThrow(/done \(no column carries that role\)/);
+    await expect(promise).rejects.not.toThrow(/done -> ""/);
+  });
 });
 
 describe("runTask", () => {
