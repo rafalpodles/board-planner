@@ -308,6 +308,11 @@ private struct PolicyTab: View {
             // two projects genuinely has two answers.
             ForEach(model.config?.projects ?? [], id: \.project) { project in
                 Section("Project \(project.project)") {
+                    // The answer to "why is this machine sitting on a project and doing nothing",
+                    // which the worker has served since BP-379 and nothing here showed (BP-512)
+                    if let blocked = project.blocked, !blocked.isEmpty {
+                        Text("Not claiming: \(blocked)").font(.caption).foregroundStyle(.orange)
+                    }
                     LabeledContent("Base branch", value: project.baseBranch)
                     LabeledContent("Model", value: project.model)
                     LabeledContent("Review model", value: project.reviewModel)

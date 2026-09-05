@@ -597,8 +597,9 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       projects: [...bound.entries()].map(([project, repo]) => ({
         project,
         // Empty when the project is claimable. Non-empty is the answer to "why is this machine
-        // sitting on a project and doing nothing", which otherwise has no answer anywhere.
-        blocked: unusable.get(project) ?? "",
+        // sitting on a project and doing nothing", which otherwise has no answer anywhere — the
+        // checkout failing the gates' own checks, or the board refusing the claim outright.
+        blocked: unusable.get(project) ?? loop.unclaimable(project),
         baseBranch: repo.config.baseBranch,
         model: repo.config.model,
         reviewModel: repo.config.reviewModel,

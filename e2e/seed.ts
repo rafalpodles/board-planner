@@ -664,6 +664,27 @@ export async function demoteDoneColumn() {
   }
 }
 
+/**
+ * Takes the `active` role off the board's only column that carries it, leaving the column in
+ * place, so a worker on this board has nowhere to move a task it takes (BP-512). Written straight
+ * to the database because the columns endpoint refuses to create this state — which is the point
+ * of the specs that use it.
+ */
+export async function demoteActiveColumn() {
+  const db = (await connect()).db!;
+  const result = await db
+    .collection("projects")
+    .updateOne(
+      { _id: PROJECT_ID },
+      { $set: { "columns.$[column].role": "review" } },
+      { arrayFilters: [{ "column.id": "in_progress" }] }
+    );
+  await mongoose.disconnect();
+  if (result.modifiedCount !== 1) {
+    throw new Error(`demoteActiveColumn changed ${result.modifiedCount} boards, expected 1`);
+  }
+}
+
 /** A sprint as the database holds it, for assertions the API's derived counts would blur. */
 export async function storedSprint(sprintId: mongoose.Types.ObjectId) {
   const db = (await connect()).db!;

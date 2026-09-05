@@ -4,11 +4,17 @@ import { withProjectOwner } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { Task } from "@/models/task";
 import { logProjectAudit } from "@/lib/projectAudit";
-import { COLUMN_ROLES, ColumnRole } from "@/types";
+import { COLUMN_ROLES, ColumnRole, ROLE_LABELS } from "@/types";
 import { columnIdsWithRole } from "@/lib/columns";
 
 const MAX_COLUMNS = 12;
 const MAX_LABEL = 40;
+
+// What a board loses with its last column of the role, in the refusal's own words
+const LOAD_BEARING: Partial<Record<ColumnRole, string>> = {
+  done: "sprint progress reads 0% for ever and no worker will take a task from it",
+  active: "a worker has nowhere to move a task it takes, so it claims nothing",
+};
 
 function slugify(label: string): string {
   return label
@@ -94,35 +100,8 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
     });
   }
 
-  /**
-   * The `done` role is load-bearing in four places that all resolve it to `[]` and carry on
-   * silently: a sprint's `doneCount` and the sprint page's progress both read 0 for ever, and the
-   * worker's blocker gate skips itself — dependency enforcement off rather than stuck (BP-280).
-   * Nothing said so, anywhere, and nothing in the audit log either.
-   *
-   * Refused only as a **transition**, never as a state. A board that already has no done column
-   * must keep being able to save every other change — otherwise this fix would lock such a board
-   * out of the very screen where it is repaired, and out of every unrelated column edit besides.
-   * That also means no production census is needed to make this safe: the rule refuses the act
-   * that creates the problem, never the board that already has it.
-   */
-  // Through `effectiveColumns`, like every other reader: a project stored with `columns: []` is
-  // shown the seven defaults everywhere — including this very editor — so reading the raw array
-  // would answer "there was never a Done column" about a board whose admin can see one.
-  const hadDone = columnIdsWithRole(project, "done").length > 0;
-  const willHaveDone = clean.some((c) => c.role === "done");
-  if (hadDone && !willHaveDone) {
-    return NextResponse.json(
-      {
-        error:
-          "A board needs a column meaning Done. Without one, sprint progress reads 0% for ever " +
-          "and the worker stops enforcing task dependencies — both silently. Give another column " +
-          "the Done role first, then remove this one.",
-      },
-      { status: 400 }
-    );
-  }
-
+  // Before the role rule below: a column that still holds tasks is the more local refusal, and
+  // the one whose fix — move the tasks — the person has to make first whatever else is wrong
   const removed = (project.columns || []).filter((c) => !usedIds.has(c.id));
   for (const col of removed) {
     const inUse = await Task.find({ project: projectId, status: col.id })
@@ -134,6 +113,40 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
       const suffix = inUse.length > 10 ? " and more" : "";
       return NextResponse.json(
         { error: `Column "${col.label}" still has tasks: ${keys.join(", ")}${suffix}` },
+        { status: 400 }
+      );
+    }
+  }
+
+  /**
+   * Two roles are load-bearing across the product, and both used to fail silently when a board
+   * lost its last column carrying them. `done`: a sprint's `doneCount` and the sprint page's
+   * progress both read 0 for ever (BP-311). `active`: the dashboard's In Progress read 0, and the
+   * claim had nowhere to move a task into, so the worker claimed nothing and reported an empty
+   * queue (BP-512). Nothing said so, anywhere, and nothing in the audit log either. `approved`
+   * and `review` matter only to a worker, which now refuses the claim naming the missing role, so
+   * a board that runs no worker may still do without them.
+   *
+   * Refused only as a **transition**, never as a state. A board that already lacks one of these
+   * must keep being able to save every other change — otherwise this would lock such a board out
+   * of the very screen where it is repaired, and out of every unrelated column edit besides. That
+   * also means no production census is needed to make this safe: the rule refuses the act that
+   * creates the problem, never the board that already has it.
+   */
+  for (const [role, loses] of Object.entries(LOAD_BEARING) as [ColumnRole, string][]) {
+    // Through `effectiveColumns`, like every other reader: a project stored with `columns: []` is
+    // shown the seven defaults everywhere — including this very editor — so reading the raw array
+    // would answer "there was never a Done column" about a board whose admin can see one.
+    const had = columnIdsWithRole(project, role).length > 0;
+    const willHave = clean.some((c) => c.role === role);
+    if (had && !willHave) {
+      const { label } = ROLE_LABELS[role];
+      return NextResponse.json(
+        {
+          error:
+            `A board needs a column meaning ${label}. Without one, ${loses}. ` +
+            `Give another column the ${label} role first, then remove this one.`,
+        },
         { status: 400 }
       );
     }

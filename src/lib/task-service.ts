@@ -16,6 +16,7 @@ import {
   PRIORITIES,
 } from "@/types";
 import { getColumnIds, defaultStatusFor, roleOf, getProjectColumns, columnIdsWithRole } from "@/lib/columns";
+import { BoardCannotClaim, ROLES_A_RUN_NEEDS } from "@/lib/claim-refusal";
 import { escalationColumnId } from "@/lib/escalation";
 import { isRunnable, normaliseComposition } from "@/lib/agent-rules";
 import { taskKeyOf } from "@/lib/task-key";
@@ -1660,9 +1661,15 @@ export async function claimNextTask(
 
   const project = await Project.findById(projectId, "columns").lean();
   const columns = getProjectColumns(project);
+  // Thrown, not null: null is the empty queue, and a board that cannot claim at all looked exactly
+  // like one with nothing to claim (BP-512). Every role the run will need, in the order it needs
+  // them, not only the two this claim writes — see BoardCannotClaim for what claiming onto a board
+  // that cannot route the outcome did.
+  for (const role of ROLES_A_RUN_NEEDS) {
+    if (!columns.some((c) => c.role === role)) throw new BoardCannotClaim(role);
+  }
   const approved = columns.filter((c) => c.role === "approved").map((c) => c.id);
-  const activeStatus = columns.find((c) => c.role === "active")?.id;
-  if (approved.length === 0 || !activeStatus) return null;
+  const activeStatus = columns.find((c) => c.role === "active")!.id;
 
   // Explicit about presence, not just format: isValid(null | undefined | "") already happens to
   // return false in this bson version, but that is the library's choice, not a guarantee — a
@@ -1671,9 +1678,8 @@ export async function claimNextTask(
 
   // Finished is the done role, not a status called "done": a board that renamed its last column
   // would otherwise read every shipped blocker as still open. A board with NO done-role column
-  // cannot express "finished" at all, so it cannot express "blocked" either — gating on it would
-  // freeze every dependent for good with nothing on the task or in any log saying why, so the gate
-  // is skipped there rather than deadlocking the queue.
+  // cannot express "finished" at all, so it cannot express "blocked" either — such a board is
+  // refused above, before anything is read, rather than having this gate freeze every dependent.
   //
   // Read before the claim rather than joined inside it, because MongoDB cannot join in an update.
   // The claim itself stays the one atomic findOneAndUpdate it was, so two workers still cannot take
@@ -1690,8 +1696,7 @@ export async function claimNextTask(
   // Closing the last two means keeping an open-blocker count on the task itself, maintained by
   // every link and status writer, so the gate can live inside the atomic filter. That is a much
   // larger change than this one.
-  const done = columnIdsWithRole(project, "done");
-  const openBlockers = done.length > 0 ? await openBlockersFor(projectId, approved, done) : [];
+  const openBlockers = await openBlockersFor(projectId, approved, columnIdsWithRole(project, "done"));
 
   // Looked up rather than upserted: a poll must not be what creates the PM account on an instance
   // that has never run one, and an instance without it simply has no PM assignments to honour.
