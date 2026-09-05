@@ -7,10 +7,11 @@ import { useRouter } from "next/navigation";
  * Which of the two routes is drawing the detail view. Only the route knows: on the board the URL
  * is the task's while the page underneath is still the board, so the address cannot be asked.
  *
- * `modal` is the default because it is the older behaviour, and because a view rendered outside
- * either route is not the full page.
+ * There is no default. A renderer that does not say gets the document load, which is heavier than
+ * it needs to be but is never wrong; guessing `modal` would hand a future one BP-521 back, and in
+ * silence.
  */
-const TaskSurfaceContext = createContext<"page" | "modal">("modal");
+const TaskSurfaceContext = createContext<"page" | "modal" | undefined>(undefined);
 
 export function TaskSurface({
   value,
@@ -38,8 +39,8 @@ export function useOpenTask() {
 
   return useCallback(
     (href: string) => {
-      if (surface === "page") window.location.assign(href);
-      else router.push(href);
+      if (surface === "modal") router.push(href);
+      else window.location.assign(href);
     },
     [surface, router]
   );

@@ -133,9 +133,11 @@ test("duplicating from the board's modal leaves one editor, still in the modal",
 test.describe("an edit still in the debounce window", () => {
   test("survives leaving the page for the copy", async ({ page }) => {
     // The debounce is the other way this edit could reach the server, and whether it wins is a
-    // race against how long the dev server takes to answer the new document. Frozen, it cannot
-    // fire at all, so a green here is the flush and nothing else.
+    // race against how long the dev server takes to answer the new document. `install` alone does
+    // not stop it — a 700ms timer still fires under it; `pauseAt` is what holds the clock still,
+    // and with it a green here is the flush and nothing else.
     await page.clock.install();
+    await page.clock.pauseAt(Date.now());
     await openTaskPage(page, SIBLING_TASK_NUMBER, SIBLING_TASK_TITLE);
 
     await page.getByLabel("Task title").fill(EDITED_TITLE);
@@ -149,6 +151,7 @@ test.describe("an edit still in the debounce window", () => {
 
   test("survives it from the modal too", async ({ page }) => {
     await page.clock.install();
+    await page.clock.pauseAt(Date.now());
     await page.goto(`/projects/${PROJECT_KEY}`);
     await page.getByRole("link", { name: new RegExp(SIBLING_TASK_TITLE) }).first().click();
     const dialog = page.getByRole("dialog");

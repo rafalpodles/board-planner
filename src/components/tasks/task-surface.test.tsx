@@ -51,12 +51,12 @@ describe("useOpenTask", () => {
     expect(assign).not.toHaveBeenCalled();
   });
 
-  it("takes the modal's route when nobody says which surface it is", () => {
+  it("takes the heavier way out when nobody says which surface it is", () => {
     render(<Opener />);
 
     screen.getByRole("button", { name: "open" }).click();
 
-    expect(push).toHaveBeenCalledWith("/projects/TP/tasks/5");
-    expect(assign).not.toHaveBeenCalled();
+    expect(assign).toHaveBeenCalledWith("/projects/TP/tasks/5");
+    expect(push).not.toHaveBeenCalled();
   });
 });
