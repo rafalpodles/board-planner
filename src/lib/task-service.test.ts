@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import sift from "sift";
 import { Types } from "mongoose";
 import { CRITERION_TEXT_MAX_LENGTH, TASK_TITLE_MAX_LENGTH } from "@/lib/identifiers";
+import { BoardCannotClaim } from "@/lib/claim-refusal";
 
 // MongoDB's $cond treats only false, null, 0 and missing as false. An **empty string is true** —
 // the opposite of JavaScript. `execution.workerId` defaults to "", so an expression that leaned on
@@ -397,21 +398,29 @@ describe("claimNextTask", () => {
     expect(claimSet(findOneAndUpdate.mock.calls[0]).status).toBe("doing");
   });
 
-  it("returns null when the board has no active column to claim into", async () => {
+  // Refused, not null: null is what an empty queue answers, and for as long as a board with no
+  // column to claim into answered the same, the worker's poll read as idle rather than broken
+  // (BP-512). Asserted through the class AND the words, because the route hands the words to the
+  // worker and a message naming the wrong role would pass the class alone.
+  it("refuses, naming the role, when the board has no active column to claim into", async () => {
     findById.mockReturnValue({
       lean: () => Promise.resolve({ columns: [{ id: "ready", role: "approved", order: 1 }] }),
     });
 
-    expect(await claimNextTask("p1", "worker-a", "run-1")).toBeNull();
+    const claim = claimNextTask("p1", "worker-a", "run-1", OWNER);
+    await expect(claim).rejects.toBeInstanceOf(BoardCannotClaim);
+    await expect(claim).rejects.toThrow(/no column meaning In progress/);
     expect(findOneAndUpdate).not.toHaveBeenCalled();
   });
 
-  it("returns null when the board has no approved column to claim from", async () => {
+  it("refuses, naming the role, when the board has no approved column to claim from", async () => {
     findById.mockReturnValue({
       lean: () => Promise.resolve({ columns: [{ id: "doing", role: "active", order: 1 }] }),
     });
 
-    expect(await claimNextTask("p1", "worker-a", "run-1")).toBeNull();
+    const claim = claimNextTask("p1", "worker-a", "run-1", OWNER);
+    await expect(claim).rejects.toBeInstanceOf(BoardCannotClaim);
+    await expect(claim).rejects.toThrow(/no column meaning Ready to pick up/);
     expect(findOneAndUpdate).not.toHaveBeenCalled();
   });
 

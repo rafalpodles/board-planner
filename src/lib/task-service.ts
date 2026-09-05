@@ -16,6 +16,7 @@ import {
   PRIORITIES,
 } from "@/types";
 import { getColumnIds, defaultStatusFor, roleOf, getProjectColumns, columnIdsWithRole } from "@/lib/columns";
+import { BoardCannotClaim } from "@/lib/claim-refusal";
 import { escalationColumnId } from "@/lib/escalation";
 import { isRunnable, normaliseComposition } from "@/lib/agent-rules";
 import { taskKeyOf } from "@/lib/task-key";
@@ -1662,7 +1663,10 @@ export async function claimNextTask(
   const columns = getProjectColumns(project);
   const approved = columns.filter((c) => c.role === "approved").map((c) => c.id);
   const activeStatus = columns.find((c) => c.role === "active")?.id;
-  if (approved.length === 0 || !activeStatus) return null;
+  // Thrown, not null: null is the empty queue, and a board that cannot claim at all looked exactly
+  // like one with nothing to claim (BP-512)
+  if (approved.length === 0) throw new BoardCannotClaim("approved");
+  if (!activeStatus) throw new BoardCannotClaim("active");
 
   // Explicit about presence, not just format: isValid(null | undefined | "") already happens to
   // return false in this bson version, but that is the library's choice, not a guarantee — a
