@@ -134,14 +134,19 @@ test("Escape closes the bulk-delete confirm rather than emptying the selection u
 });
 
 /**
- * The order-flip case, and the one test here that must NOT freeze the poll.
+ * The order-flip case, and the one test here that must NOT freeze the board's reload.
  *
- * A poll response re-runs both keydown effects, children first, which registers the dialog's
- * listener ahead of the board's. `?` is a toggle on the board's side, so a second listener acting
- * on the same press used to close the help and let the board's toggle reopen it. The help no
- * longer handles `?` at all; the board owns that key.
+ * A reload re-runs the board's keydown effect and so re-registers its listener *after* the open
+ * dialog's. `?` is a toggle on the board's side, so a second listener acting on the same press
+ * used to close the help and let the board's toggle reopen it. The help no longer handles `?` at
+ * all; the board owns that key.
+ *
+ * `R` is the board's own reload shortcut — the same code path as the 10 s poll, without the wait.
+ * Pressing `?` the instant the response lands proves nothing: React has not committed the new
+ * effects yet, so the listeners are still in their original order. Two animation frames put the
+ * press after that commit, which is what makes this test able to fail.
  */
-test("? still closes the help after a poll has reordered the listeners", async ({ page }) => {
+test("? still closes the help after a reload has reordered the listeners", async ({ page }) => {
   await signIn(page);
   await page.goto(`/projects/${PROJECT_KEY}`);
   await expect(card(page)).toBeVisible();
@@ -149,9 +154,13 @@ test("? still closes the help after a poll has reordered the listeners", async (
   await page.keyboard.press("?");
   await expect(help(page)).toBeVisible();
 
-  await page.waitForResponse(
+  const reloaded = page.waitForResponse(
     (r) => /\/api\/projects\/[^/]+\/tasks(\?|$)/.test(new URL(r.url()).pathname + new URL(r.url()).search) && r.ok(),
-    { timeout: 30_000 },
+  );
+  await page.keyboard.press("r");
+  await reloaded;
+  await page.evaluate(
+    () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))
   );
 
   await page.keyboard.press("?");
