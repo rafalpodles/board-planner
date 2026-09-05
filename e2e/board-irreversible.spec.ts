@@ -171,9 +171,11 @@ test.describe("duplicate", () => {
     expect((await created).status()).toBe(201);
     await expectToast(page, "Task duplicated");
 
-    // Minted with the next number and landing in the backlog column, not the original's
+    // Minted with the next number and landing in the backlog column, not the original's.
+    // Tight: the board's ten-second poll would show the copy anyway, and the reload the
+    // duplicate makes is what this waits for
     const copy = card(page, NEXT_TASK_NUMBER);
-    await expect(copy).toHaveCount(1);
+    await expect(copy).toHaveCount(1, { timeout: 2_000 });
     await expect(boardColumn(page, "planned").locator(`a[href="${taskUrl(NEXT_TASK_NUMBER)}"]`)).toContainText(
       `Copy of ${SIBLING_TASK_TITLE}`
     );
@@ -201,13 +203,24 @@ test.describe("duplicate", () => {
     await page.goto(taskUrl(SIBLING_TASK_NUMBER));
     await expect(page.getByLabel("Task title")).toHaveValue(SIBLING_TASK_TITLE);
 
+    const posted = page.waitForRequest(
+      (req) => req.method() === "POST" && req.url().endsWith("/tasks")
+    );
     const created = taskCreated(page);
     await page.getByRole("button", { name: "Duplicate", exact: true }).click();
+    // The same contract as the board's menu, from the other place that sends it
+    const body = (await posted).postDataJSON();
+    expect(body.title).toBe(`Copy of ${SIBLING_TASK_TITLE}`);
+    for (const left of ["status", "assignee", "sprint", "agent"]) {
+      expect(body, `a copy must not send ${left}`).not.toHaveProperty(left);
+    }
     expect((await created).status()).toBe(201);
 
     await expect(page).toHaveURL(new RegExp(`${taskUrl(NEXT_TASK_NUMBER)}$`));
     // TODO(BP-521): the push from a full-page task renders the copy twice — the page and a modal
-    // over it — so this reads the first editor; one editor is what a person should get
+    // over it — so this reads the first editor; one editor is what a person should get. The count
+    // is the limit asserted on purpose: it goes red the day the double render is gone.
+    await expect(page.getByLabel("Task title")).toHaveCount(2);
     await expect(page.getByLabel("Task title").first()).toHaveValue(`Copy of ${SIBLING_TASK_TITLE}`);
 
     const stored = await readTask(request, NEXT_TASK_NUMBER);
@@ -244,8 +257,10 @@ test.describe("delete", () => {
       expect((await deleted).status()).toBe(200);
 
       await expectToast(page, "Task deleted");
-      await expect(card(page, FINISHED_TASK_NUMBER)).toHaveCount(0);
-      await expect(page.locator(CARDS)).toHaveCount(SEEDED_TASKS - 1);
+      // Tight, here and below: the ten-second poll would drop the card on its own, and the
+      // board's own removal is what is under test
+      await expect(card(page, FINISHED_TASK_NUMBER)).toHaveCount(0, { timeout: 1_000 });
+      await expect(page.locator(CARDS)).toHaveCount(SEEDED_TASKS - 1, { timeout: 1_000 });
       expect((await readTask(request, FINISHED_TASK_NUMBER)).status).toBe(404);
     });
   });
@@ -270,8 +285,9 @@ test.describe("delete", () => {
     await dialog.getByRole("button", { name: "Delete" }).click();
     expect((await deleted).status()).toBe(200);
 
-    // Gone, and the screen that showed it goes with it
+    // Gone, and the screen that showed it goes with it: the board loads without it
     await expect(page).toHaveURL(new RegExp(`/projects/${PROJECT_KEY}$`));
+    await expect(page.locator(CARDS)).toHaveCount(SEEDED_TASKS - 1);
     await expect(card(page, FINISHED_TASK_NUMBER)).toHaveCount(0);
     expect((await readTask(request, FINISHED_TASK_NUMBER)).status).toBe(404);
   });
@@ -296,6 +312,7 @@ test.describe("delete", () => {
     await dialog.getByRole("button", { name: "Delete" }).click();
     expect((await deleted).status()).toBe(200);
     await expect(page).toHaveURL(new RegExp(`/projects/${PROJECT_KEY}$`));
+    await expect(page.locator(CARDS)).toHaveCount(SEEDED_TASKS - 1);
     expect((await readTask(request, DECOY_TASK_NUMBER)).status).toBe(404);
   });
 
@@ -349,7 +366,7 @@ test.describe("delete", () => {
       expect((await forced).status()).toBe(200);
 
       await expectToast(page, "Task deleted");
-      await expect(card(page, HELD_TASK_NUMBER)).toHaveCount(0);
+      await expect(card(page, HELD_TASK_NUMBER)).toHaveCount(0, { timeout: 2_000 });
       expect((await readTask(request, HELD_TASK_NUMBER)).status).toBe(404);
     });
   });
@@ -381,11 +398,11 @@ test.describe("bulk delete", () => {
     await (await openMenuOn(page, SIBLING_TASK_NUMBER))
       .getByRole("button", { name: "Delete 2 tasks", exact: true })
       .click();
-    await dialog.getByRole("button", { name: "Delete" }).click();
+    await dialog.getByRole("button", { name: "Delete 2 tasks", exact: true }).click();
     for (const res of await Promise.all(deletes)) expect(res.status()).toBe(200);
 
     await expectToast(page, "Deleted 2 tasks");
-    await expect(page.locator(CARDS)).toHaveCount(SEEDED_TASKS - 2);
+    await expect(page.locator(CARDS)).toHaveCount(SEEDED_TASKS - 2, { timeout: 1_000 });
     expect((await readTask(request, SIBLING_TASK_NUMBER)).status).toBe(404);
     expect((await readTask(request, FINISHED_TASK_NUMBER)).status).toBe(404);
     await expect(page.getByRole("button", { name: "Select", exact: true })).toBeVisible();
@@ -402,14 +419,14 @@ test.describe("bulk delete", () => {
       .click();
     await page
       .getByRole("dialog", { name: "Delete Selected Tasks" })
-      .getByRole("button", { name: "Delete" })
+      .getByRole("button", { name: "Delete 2 tasks", exact: true })
       .click();
     expect((await refused).status()).toBe(409);
     expect((await deleted).status()).toBe(200);
 
     await expectToast(page, `Deleted 1 of 2. ${HELD_TASK_KEY} being executed by a worker.`);
     await expect(card(page, HELD_TASK_NUMBER)).toBeVisible();
-    await expect(card(page, DECOY_TASK_NUMBER)).toHaveCount(0);
+    await expect(card(page, DECOY_TASK_NUMBER)).toHaveCount(0, { timeout: 1_000 });
     expect((await readTask(request, HELD_TASK_NUMBER)).status).toBe(200);
     expect((await readTask(request, DECOY_TASK_NUMBER)).status).toBe(404);
     expect((await storedExecution(HELD_TASK_ID))?.runId).toBe("e2e-run-0001");
@@ -470,41 +487,54 @@ test.describe("sprints from the card menu", () => {
     page,
     request,
   }) => {
+    // A third card in the sprint, so a single removal and a two-card selection can both happen
+    const joined = await request.put(`/api/projects/${PROJECT_ID}/tasks/${SIBLING_TASK_ID}`, {
+      headers: ADMIN_AUTH,
+      data: { sprint: String(PLANNING_SPRINT_ID) },
+    });
+    expect(joined.status(), await joined.text()).toBe(200);
+
     await signIn(page);
     await page.goto(scopedUrl);
     await expect(page.getByRole("heading", { name: PROJECT_NAME })).toBeVisible();
-    // Only the sprint's two tasks: the backlog one and the seed's four are elsewhere
-    await expect(page.locator(CARDS)).toHaveCount(2);
+    // Only the sprint's three tasks: the backlog one and the rest of the seed are elsewhere
+    await expect(page.locator(CARDS)).toHaveCount(3);
     await recordToasts(page);
 
     await test.step("a single card", async () => {
-      const written = taskWrite(page, "PUT", PLANNING_SPRINT_TASK_ID);
-      const menu = await openMenuOn(page, PLANNING_SPRINT_TASK_NUMBER);
+      const written = taskWrite(page, "PUT", SIBLING_TASK_ID);
+      const menu = await openMenuOn(page, SIBLING_TASK_NUMBER);
       await menu.getByRole("button", { name: "Remove from sprint" }).click();
       expect((await written).status()).toBe(200);
       await expectToast(page, "Moved to backlog");
 
       // Tight on purpose: the board also polls every ten seconds and would drop the card on its
       // own, so a patient wait here would pass with the board's own removal deleted
-      await expect(card(page, PLANNING_SPRINT_TASK_NUMBER)).toHaveCount(0, { timeout: 1_000 });
-      await expect(page.locator(CARDS)).toHaveCount(1, { timeout: 1_000 });
-      expect((await readTask(request, PLANNING_SPRINT_TASK_NUMBER)).body.sprint).toBeNull();
+      await expect(card(page, SIBLING_TASK_NUMBER)).toHaveCount(0, { timeout: 1_000 });
+      await expect(page.locator(CARDS)).toHaveCount(2, { timeout: 1_000 });
+      expect((await readTask(request, SIBLING_TASK_NUMBER)).body.sprint).toBeNull();
     });
 
-    await test.step("a selection", async () => {
-      await select(page, [PLANNING_SPRINT_DONE_TASK_NUMBER]);
-      const written = taskWrite(page, "PUT", PLANNING_SPRINT_DONE_TASK_ID);
+    await test.step("a selection, through the bulk path", async () => {
+      await select(page, [PLANNING_SPRINT_TASK_NUMBER, PLANNING_SPRINT_DONE_TASK_NUMBER]);
+      const writes = [
+        taskWrite(page, "PUT", PLANNING_SPRINT_TASK_ID),
+        taskWrite(page, "PUT", PLANNING_SPRINT_DONE_TASK_ID),
+      ];
       const menu = await openMenuOn(page, PLANNING_SPRINT_DONE_TASK_NUMBER);
-      await expect(menu).not.toContainText("tasks selected");
+      await expect(menu).toContainText("2 tasks selected");
       await menu.getByRole("button", { name: "Remove from sprint" }).click();
-      expect((await written).status()).toBe(200);
+      for (const res of await Promise.all(writes)) expect(res.status()).toBe(200);
+      await expectToast(page, "Moved 2 tasks to backlog");
 
       await expect(page.locator(CARDS)).toHaveCount(0, { timeout: 1_000 });
+      expect((await readTask(request, PLANNING_SPRINT_TASK_NUMBER)).body.sprint).toBeNull();
       expect((await readTask(request, PLANNING_SPRINT_DONE_TASK_NUMBER)).body.sprint).toBeNull();
     });
 
-    // Back on the unscoped board, both are still tasks
+    // Back on the unscoped board, all three are still tasks
     await page.goto(boardUrl);
+    await expect(card(page, SIBLING_TASK_NUMBER)).toBeVisible();
     await expect(card(page, PLANNING_SPRINT_TASK_NUMBER)).toBeVisible();
     await expect(card(page, PLANNING_SPRINT_DONE_TASK_NUMBER)).toBeVisible();
   });
@@ -517,6 +547,8 @@ test.describe("selecting without opening", () => {
     await card(page, SIBLING_TASK_NUMBER).click({ modifiers: ["Shift"] });
     await expect(page.getByRole("button", { name: "Select (1)" })).toBeVisible();
     await expect(page).toHaveURL(new RegExp(`/projects/${PROJECT_KEY}$`));
+    // Nor did the anchor open anywhere else
+    expect(page.context().pages()).toHaveLength(1);
 
     await card(page, FINISHED_TASK_NUMBER).click({ modifiers: ["Shift"] });
     await expect(page.getByRole("button", { name: "Select (2)" })).toBeVisible();
@@ -535,15 +567,16 @@ test.describe("selecting without opening", () => {
     const row = page.locator("tr", { hasText: SIBLING_TASK_TITLE });
     await expect(row).toBeVisible();
 
-    await row.click({ modifiers: ["ControlOrMeta"] });
+    const title = row.getByText(SIBLING_TASK_TITLE);
+    await title.click({ modifiers: ["ControlOrMeta"] });
     await expect(page.getByRole("button", { name: "Select (1)" })).toBeVisible();
     await expect(page).toHaveURL(new RegExp(`/projects/${PROJECT_KEY}$`));
 
-    await row.click({ modifiers: ["ControlOrMeta"] });
+    await title.click({ modifiers: ["ControlOrMeta"] });
     await expect(page.getByRole("button", { name: "Select", exact: true })).toBeVisible();
 
     // The control
-    await row.click();
+    await title.click();
     await expect(page).toHaveURL(new RegExp(`${taskUrl(SIBLING_TASK_NUMBER)}$`));
   });
 });
@@ -571,17 +604,20 @@ test.describe("keyboard", () => {
 
     await test.step("v switches the view, r reloads it", async () => {
       await page.keyboard.press("v");
-      await expect(page.getByRole("button", { name: "Board", exact: true })).toBeVisible();
+      await expect(page.getByRole("button", { name: "List", exact: true })).toHaveAttribute("aria-current", "true");
       await expect(page.locator("tr", { hasText: SIBLING_TASK_TITLE })).toBeVisible();
 
+      // Two seconds, not the default thirty: the board polls every ten, and a poll's response
+      // is indistinguishable from the one the key is supposed to cause
       const reloaded = page.waitForResponse(
-        (res) => res.request().method() === "GET" && /\/api\/projects\/[^/]+\/tasks/.test(res.url())
+        (res) => res.request().method() === "GET" && /\/api\/projects\/[^/]+\/tasks/.test(res.url()),
+        { timeout: 2_000 }
       );
       await page.keyboard.press("r");
       expect((await reloaded).status()).toBe(200);
 
       await page.keyboard.press("v");
-      await expect(page.getByRole("button", { name: "List", exact: true })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Board", exact: true })).toHaveAttribute("aria-current", "true");
       await expect(boardColumn(page, "in_progress")).toBeVisible();
     });
   });
@@ -592,14 +628,47 @@ test.describe("keyboard", () => {
    * the dispatch, so it never sees the key (BP-522). Marked to fail so the day it is fixed this
    * goes red and the mark comes off — not skipped, which would hide the fix as well as the bug.
    */
-  test("Escape closes the help", async ({ page }) => {
-    test.fail(true, "BP-522: a real Escape never reaches the help's listener");
+  test("Escape leaves the help open — BP-522, asserted so the fix is noticed", async ({ page }) => {
     await openBoard(page);
     const help = page.getByRole("heading", { name: "Keyboard Shortcuts" });
     await page.keyboard.press("?");
     await expect(help).toBeVisible();
     await page.keyboard.press("Escape");
-    await expect(help).toHaveCount(0, { timeout: 3_000 });
+    await page.waitForTimeout(500);
+    // The limit, not the guarantee: this is what the product does today. When BP-522 is fixed this
+    // goes red, and the assertion flips to toHaveCount(0) — which a fail mark would have hidden.
+    await expect(help).toBeVisible();
+  });
+
+  test("Space opens the focused card, k walks back, and a modifier click opens a new tab", async ({
+    page,
+  }) => {
+    await openBoard(page);
+
+    await card(page, SIBLING_TASK_NUMBER).focus();
+    await page.keyboard.press("Space");
+    await expect(page).toHaveURL(new RegExp(`${taskUrl(SIBLING_TASK_NUMBER)}$`));
+
+    await page.goto(boardUrl);
+    await expect(page.locator(CARDS)).toHaveCount(SEEDED_TASKS);
+    await page.keyboard.press("v");
+    await page.keyboard.press("j");
+    await page.keyboard.press("j");
+    await page.keyboard.press("k");
+    await expect(page.locator("tr.ring-2")).toHaveCount(1);
+    await expect(page.locator("tbody tr").first()).toHaveClass(/ring-2/);
+    await page.keyboard.press("v");
+
+    // ⌘/Ctrl-click and a middle click leave the board where it is and open the card elsewhere
+    for (const how of [{ modifiers: ["ControlOrMeta" as const] }, { button: "middle" as const }]) {
+      const opened = page.context().waitForEvent("page");
+      await card(page, SIBLING_TASK_NUMBER).click(how);
+      const tab = await opened;
+      // The page event fires before the new tab has navigated anywhere
+      await expect(tab).toHaveURL(new RegExp(`${taskUrl(SIBLING_TASK_NUMBER)}$`));
+      await tab.close();
+      await expect(page).toHaveURL(new RegExp(`/projects/${PROJECT_KEY}$`));
+    }
   });
 
   /**
