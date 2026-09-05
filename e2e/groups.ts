@@ -61,6 +61,7 @@ export const GROUPS = {
     "mcp-oauth.spec.ts",
     "mcp-tools.spec.ts",
     "db-reconnect-leaks.spec.ts",
+    "settings-fields-and-templates.spec.ts",
   ],
   people: [
     "day-zero.spec.ts",
