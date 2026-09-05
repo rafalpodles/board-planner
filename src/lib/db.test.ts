@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const connect = vi.fn();
-const connection = { readyState: 1 };
+const close = vi.fn();
+const connection = { readyState: 1, close };
 
 vi.mock("mongoose", () => ({ default: { connect, connection } }));
 
@@ -32,6 +33,8 @@ describe("connectDB", () => {
   beforeEach(() => {
     process.env.MONGODB_URI = "mongodb://127.0.0.1:27017/test";
     connect.mockReset();
+    close.mockReset();
+    close.mockResolvedValue(undefined);
     connection.readyState = 1;
     delete (globalThis as { mongooseCache?: unknown }).mongooseCache;
   });
@@ -145,6 +148,8 @@ describe("connectDB — a wrong deployment is not an outage", () => {
   beforeEach(() => {
     process.env.MONGODB_URI = "mongodb://127.0.0.1:27017/test";
     connect.mockReset();
+    close.mockReset();
+    close.mockResolvedValue(undefined);
     connection.readyState = 1;
     delete (globalThis as { mongooseCache?: unknown }).mongooseCache;
   });
@@ -251,6 +256,8 @@ describe("connectDB — the state the tests could not see", () => {
   beforeEach(() => {
     process.env.MONGODB_URI = "mongodb://127.0.0.1:27017/test";
     connect.mockReset();
+    close.mockReset();
+    close.mockResolvedValue(undefined);
     connection.readyState = 1;
     delete (globalThis as { mongooseCache?: unknown }).mongooseCache;
   });
@@ -352,5 +359,111 @@ describe("connectDB — the state the tests could not see", () => {
     await second.connectDB();
 
     expect(log.mock.calls.filter((c) => String(c[0]).includes("reachable again"))).toHaveLength(1);
+  });
+});
+
+// The client a reconnect leaves behind. `mongoose.connect` assigns its MongoClient to the
+// connection before awaiting `connect()`, and the next call overwrites that reference — so an
+// outage/restore cycle used to strand two clients, each with a topology monitor still polling.
+describe("connectDB — the client a reconnect abandons", () => {
+  beforeEach(() => {
+    process.env.MONGODB_URI = "mongodb://127.0.0.1:27017/test";
+    connect.mockReset();
+    close.mockReset();
+    close.mockResolvedValue(undefined);
+    connection.readyState = 1;
+    delete (globalThis as { mongooseCache?: unknown }).mongooseCache;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("closes the connection it gave up on before opening another", async () => {
+    const order: string[] = [];
+    close.mockImplementation(async () => void order.push("close"));
+    connect.mockImplementation(async () => {
+      order.push("connect");
+      return { ok: true };
+    });
+    const { connectDB } = await freshModule();
+
+    await connectDB();
+    connection.readyState = 0;
+    await connectDB();
+
+    expect(order).toEqual(["connect", "close", "connect"]);
+  });
+
+  it("closes the client an attempt that never connected left behind", async () => {
+    const { connectDB } = await freshModule();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    connect.mockRejectedValue(refused());
+
+    await connectDB().catch(() => {});
+
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes it after a configuration fault too, which fails the same way with a live client", async () => {
+    const { connectDB } = await freshModule();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    connect.mockRejectedValue(misconfigured());
+
+    await connectDB().catch(() => {});
+
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  // The control: a healthy connection is handed back, and closing the client under it would end
+  // every request the process had left
+  it("closes nothing while the connection is the one in use", async () => {
+    const { connectDB } = await freshModule();
+    connect.mockResolvedValue({ ok: true });
+
+    await connectDB();
+    await connectDB();
+    await connectDB();
+
+    expect(close).not.toHaveBeenCalled();
+  });
+
+  it("reconnects even when the close fails, rather than answering with that failure", async () => {
+    const { connectDB } = await freshModule();
+    connect.mockResolvedValue({ ok: true });
+    close.mockRejectedValue(new Error("topology already closed"));
+
+    await connectDB();
+    connection.readyState = 0;
+
+    await expect(connectDB()).resolves.toEqual({ ok: true });
+    expect(connect).toHaveBeenCalledTimes(2);
+  });
+
+  // A second caller arriving while the close is in flight must not have the client it just opened
+  // closed underneath it — which is why the close is the first step of the reconnect rather than
+  // something awaited before the cache is refilled
+  it("does not close the connection a concurrent caller opened during the reset", async () => {
+    let releaseClose: () => void = () => {};
+    close.mockImplementation(() => new Promise<void>((resolve) => (releaseClose = () => resolve())));
+    connect.mockImplementation(async () => {
+      connection.readyState = 1;
+      return { ok: true };
+    });
+    const { connectDB } = await freshModule();
+
+    await connectDB();
+    connection.readyState = 0;
+
+    const first = connectDB();
+    const second = connectDB();
+    await Promise.resolve();
+    releaseClose();
+
+    await expect(first).resolves.toEqual({ ok: true });
+    await expect(second).resolves.toEqual({ ok: true });
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(close).toHaveBeenCalledTimes(1);
   });
 });
