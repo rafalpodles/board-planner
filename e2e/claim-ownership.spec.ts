@@ -936,23 +936,26 @@ test.describe("what the machine refuses at the moment it picks the work up", () 
   });
 
   /**
-   * BP-512. The same claimable task as the control above, on a board whose only In-progress column
-   * has been demoted. The claim used to answer 204 — what an empty queue answers — so a worker on
-   * such a board sat idle for as long as nobody looked at its settings. The task is the control
-   * inside the test: there IS something to claim, so 204 here would be the bug and not the queue.
+   * BP-512. A task built exactly like the one the sibling test above claims with a 200 — that test
+   * is the control for this one — on a board whose only In-progress column has been demoted. The
+   * claim used to answer 204, what an empty queue answers, so a worker on such a board sat idle for
+   * as long as nobody looked at its settings.
    */
   test("says why the board cannot claim, instead of reporting an empty queue", async ({ request }) => {
     const own = await addTask({ assignee: OWNER, assignedBy: OWNER, agent: MINE });
     const handle = await db();
     // Straight to the database: the columns endpoint refuses to create this state now, which is
     // the other half of the same ticket
-    await handle
+    const demoted = await handle
       .collection("projects")
       .updateOne(
         { _id: PROJECT_ID },
         { $set: { "columns.$[column].role": "review" } },
         { arrayFilters: [{ "column.id": ACTIVE }] }
       );
+    // A filter matching nothing would leave the board claiming as usual, and the failure below
+    // would then name the product rather than this fixture
+    expect(demoted.modifiedCount).toBe(1);
 
     const refused = await claim(request, "run-nowhere");
 

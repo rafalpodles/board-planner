@@ -220,6 +220,19 @@ const customBoard = {
   ],
 };
 
+// What a claim needs on top of that: the run has to route its outcome, so a board missing the
+// review or done role is refused before anything is taken (BP-512). Kept apart from customBoard,
+// whose missing review column is what the release tests' "no escalation column" fallback rests on.
+// The finished column is called "shipped", so an implementation comparing against the literal
+// "done" fails every blocker test rather than one.
+const claimableBoard = {
+  columns: [
+    ...customBoard.columns,
+    { id: "checking", label: "Checking", role: "review", order: 3 },
+    { id: "shipped", label: "Shipped", role: "done", order: 4 },
+  ],
+};
+
 // The claim is an update pipeline, so $set and $unset arrive as stages rather than operators
 const claimStages = (call: unknown[]) => call[1] as Record<string, never>[];
 const claimSet = (call: unknown[]) => claimStages(call)[0].$set as unknown as Record<string, unknown>;
@@ -246,7 +259,7 @@ describe("claimNextTask", () => {
   beforeEach(() => {
     findOneAndUpdate.mockReset();
     findById.mockReset();
-    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    findById.mockReturnValue({ lean: () => Promise.resolve(claimableBoard) });
     find.mockReset();
     find.mockReturnValue({ lean: () => Promise.resolve([]) });
   });
@@ -255,12 +268,7 @@ describe("claimNextTask", () => {
   // never consulted. Judged through sift rather than by reading the filter, because what matters
   // is what MongoDB does with $nin over an array field, not that the source says "$nin".
   describe("blockers", () => {
-    // Every test here runs on a board whose finished column is called "shipped", so an
-    // implementation comparing against the literal "done" fails all of them rather than one
-    const shipping = {
-      ...customBoard,
-      columns: [...customBoard.columns, { id: "shipped", label: "Shipped", role: "done", order: 3 }],
-    };
+    const shipping = claimableBoard;
 
     // Real ObjectId hex, not readable labels: blockedBy holds refs, and the claim now refuses ids
     // it cannot cast — labels would make every fixture here vanish before the query saw it
@@ -367,16 +375,21 @@ describe("claimNextTask", () => {
     });
 
     // A board with no done column cannot express "finished", so it cannot express "blocked"
-    // either: every blocker would read as open and every dependent would be frozen for good, with
-    // nothing on the task or in any log saying why
-    it("skips the gate on a board with no done column instead of freezing every dependent", async () => {
-      findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    // either. It used to have the gate skipped — every blocker read as open would have frozen
+    // every dependent for good — and is now refused before the gate is consulted at all (BP-512):
+    // a run on such a board had nowhere to deliver, and the worker handed the task back and
+    // claimed it again on the next pass, for ever.
+    it("never consults the gate on a board with no done column, which is refused outright", async () => {
+      findById.mockReturnValue({
+        lean: () =>
+          Promise.resolve({ columns: claimableBoard.columns.filter((c) => c.role !== "done") }),
+      });
       find.mockReset();
 
-      const filter = await claimFilter();
+      await expect(claimNextTask("p1", "worker-a", "run-1", OWNER)).rejects.toThrow(/Done/);
 
       expect(find).not.toHaveBeenCalled();
-      expect(matches(filter, task({ blockedBy: [OPEN] }))).toBe(true);
+      expect(findOneAndUpdate).not.toHaveBeenCalled();
     });
   });
 
@@ -422,6 +435,36 @@ describe("claimNextTask", () => {
     await expect(claim).rejects.toBeInstanceOf(BoardCannotClaim);
     await expect(claim).rejects.toThrow(/no column meaning Ready to pick up/);
     expect(findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  // The two roles the claim itself never writes but the run needs to end. A task claimed onto a
+  // board without them was handed back at run start with the attempt refunded, and claimed again
+  // on the next pass without a poll interval — a comment on the task every iteration, for ever.
+  it("refuses a board with no review column, where a run could not put its result", async () => {
+    findById.mockReturnValue({
+      lean: () =>
+        Promise.resolve({
+          columns: claimableBoard.columns.filter((c) => c.role !== "review"),
+        }),
+    });
+
+    const claim = claimNextTask("p1", "worker-a", "run-1", OWNER);
+    await expect(claim).rejects.toBeInstanceOf(BoardCannotClaim);
+    await expect(claim).rejects.toThrow(/no column meaning Awaiting review/);
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("refuses a board with no done column, where a run could not deliver", async () => {
+    findById.mockReturnValue({
+      lean: () =>
+        Promise.resolve({ columns: claimableBoard.columns.filter((c) => c.role !== "done") }),
+    });
+
+    const claim = claimNextTask("p1", "worker-a", "run-1", OWNER);
+    await expect(claim).rejects.toBeInstanceOf(BoardCannotClaim);
+    await expect(claim).rejects.toThrow(/no column meaning Done/);
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
+    expect(find).not.toHaveBeenCalled();
   });
 
   it("orders by board position, never lexicographically by priority", async () => {
@@ -1091,6 +1134,7 @@ describe("claiming by assignment", () => {
       { id: "ready", role: "approved", order: 1 },
       { id: "doing", role: "active", order: 2 },
       { id: "checking", role: "review", order: 3, triggersPmReview: true },
+      { id: "shipped", role: "done", order: 4 },
     ],
   };
 
@@ -3165,7 +3209,7 @@ describe("a machine claims its owner's work", () => {
   beforeEach(() => {
     findOneAndUpdate.mockReset();
     findById.mockReset();
-    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    findById.mockReturnValue({ lean: () => Promise.resolve(claimableBoard) });
   });
 
   async function claimFilterFor(ownerId: string | null) {
@@ -3305,7 +3349,7 @@ describe("what a member can and cannot arm by choosing an agent", () => {
   beforeEach(() => {
     findOneAndUpdate.mockReset();
     findById.mockReset();
-    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    findById.mockReturnValue({ lean: () => Promise.resolve(claimableBoard) });
     find.mockReset();
     find.mockReturnValue({ lean: () => Promise.resolve([]) });
   });
@@ -3374,7 +3418,7 @@ describe("whose machine choosing an agent can reach", () => {
 
   beforeEach(() => {
     findById.mockReset();
-    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    findById.mockReturnValue({ lean: () => Promise.resolve(claimableBoard) });
     find.mockReset();
     find.mockReturnValue({ lean: () => Promise.resolve([]) });
     findOne.mockReset();
@@ -3534,7 +3578,7 @@ describe("what a change of hands does to the agent already on the task", () => {
 
   beforeEach(() => {
     findById.mockReset();
-    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    findById.mockReturnValue({ lean: () => Promise.resolve(claimableBoard) });
     find.mockReset();
     find.mockReturnValue({ lean: () => Promise.resolve([]) });
     findOne.mockReset();

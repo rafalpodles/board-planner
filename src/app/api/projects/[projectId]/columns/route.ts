@@ -12,9 +12,7 @@ const MAX_LABEL = 40;
 
 // What a board loses with its last column of the role, in the refusal's own words
 const LOAD_BEARING: Partial<Record<ColumnRole, string>> = {
-  done:
-    "sprint progress reads 0% for ever and the worker stops enforcing task dependencies — " +
-    "both silently",
+  done: "sprint progress reads 0% for ever and no worker will take a task from it",
   active: "a worker has nowhere to move a task it takes, so it claims nothing",
 };
 
@@ -121,12 +119,13 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
   }
 
   /**
-   * Two roles are load-bearing, and both used to fail silently when a board lost its last column
-   * carrying them. `done` in four places that resolve it to `[]` and carry on: a sprint's
-   * `doneCount` and the sprint page's progress both read 0 for ever, and the worker's blocker gate
-   * skips itself — dependency enforcement off rather than stuck (BP-280, BP-311). `active` in the
-   * claim: with nowhere to move a task into, the worker claimed nothing and reported an empty
-   * queue (BP-512). Nothing said so, anywhere, and nothing in the audit log either.
+   * Two roles are load-bearing across the product, and both used to fail silently when a board
+   * lost its last column carrying them. `done`: a sprint's `doneCount` and the sprint page's
+   * progress both read 0 for ever (BP-311). `active`: the dashboard's In Progress read 0, and the
+   * claim had nowhere to move a task into, so the worker claimed nothing and reported an empty
+   * queue (BP-512). Nothing said so, anywhere, and nothing in the audit log either. `approved`
+   * and `review` matter only to a worker, which now refuses the claim naming the missing role, so
+   * a board that runs no worker may still do without them.
    *
    * Refused only as a **transition**, never as a state. A board that already lacks one of these
    * must keep being able to save every other change — otherwise this would lock such a board out

@@ -553,12 +553,39 @@ describe("createApiClient", () => {
     await expect(claim).rejects.toThrow(/failed: 500 boom/);
   });
 
-  // A proxy in front of the server answers 409 with its own page, not the app's JSON
+  // A proxy in front of the server answers 409 with its own page, not the app's JSON. Asserted as
+  // a ClaimRefused with exactly that text: the old client threw an Error whose message merely
+  // CONTAINED it, so a substring match here was green before the change and proved nothing.
   it("keeps a refusal's raw text when the body is not the server's JSON", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 409, text: async () => "<html>conflict</html>" });
     const api = createApiClient(config, fetchMock as never, identityStore);
 
-    await expect(api.claim("CP", "run-1")).rejects.toThrow("<html>conflict</html>");
+    const claim = api.claim("CP", "run-1");
+    await expect(claim).rejects.toBeInstanceOf(ClaimRefused);
+    await expect(claim).rejects.toThrow(/^<html>conflict<\/html>$/);
+  });
+
+  it("says so when a refusal carries no reason at all", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 409, text: async () => "" });
+    const api = createApiClient(config, fetchMock as never, identityStore);
+
+    const claim = api.claim("CP", "run-1");
+    await expect(claim).rejects.toBeInstanceOf(ClaimRefused);
+    await expect(claim).rejects.toThrow(/^the board refused the claim without saying why$/);
+  });
+
+  // The reason is logged and shown as one line, so the server's text is flattened and bounded
+  it("bounds a refusal to one line of at most 300 characters", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      text: async () => JSON.stringify({ error: `first\n\n  second ${"x".repeat(1000)}` }),
+    });
+    const api = createApiClient(config, fetchMock as never, identityStore);
+
+    const claim = api.claim("CP", "run-1");
+    await expect(claim).rejects.toThrow(/^first second x+$/);
+    await claim.catch((error: Error) => expect(error.message.length).toBe(300));
   });
 
   it("falls back for a board that predates column seeding", async () => {

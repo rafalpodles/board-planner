@@ -203,7 +203,7 @@ test.describe("Board · the Done role", () => {
     await roleOf(page, "Done").selectOption("review");
 
     await expect(warning).toBeVisible();
-    await expect(page.getByText(/worker stops enforcing task dependencies/)).toBeVisible();
+    await expect(page.getByText(/a worker will not take a task from this board/)).toBeVisible();
   });
 });
 

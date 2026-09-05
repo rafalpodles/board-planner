@@ -154,14 +154,20 @@ export class ClaimRefused extends Error {
   }
 }
 
+// One line, bounded: the reason goes into the log and onto the menubar as the server wrote it
+const MAX_REASON_CHARS = 300;
+
 function reasonIn(detail: string): string {
+  let reason = "";
   try {
     const body = JSON.parse(detail) as { error?: unknown };
-    if (typeof body.error === "string" && body.error.trim()) return body.error.trim();
+    if (typeof body.error === "string") reason = body.error;
   } catch {
-    // not JSON; the raw text is the best there is
+    // not JSON — a proxy's page, say; the raw text is the best there is
+    reason = detail;
   }
-  return detail.trim() || "the board refused the claim without saying why";
+  reason = reason.replace(/\s+/g, " ").trim().slice(0, MAX_REASON_CHARS);
+  return reason || "the board refused the claim without saying why";
 }
 
 // Only an explicit `false` is a refusal. The caller ends the run on one, so a body that will not

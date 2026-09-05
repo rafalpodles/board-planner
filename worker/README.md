@@ -181,14 +181,17 @@ and `SIGINT` both finish the task in flight before the loop exits.
   and the next poll — seconds later — picks it up.
 
   A board with no `done`-role column at all cannot say what finished means, so it cannot say what
-  blocked means either; there the gate is skipped rather than freezing every dependent for good
-  with nothing on the task to say why.
-- **A board that cannot claim says so.** A board with no `approved`-role column has nowhere to
-  take work from, and one with no `active`-role column has nowhere to move it; the claim answers
-  409 with the reason rather than the 204 an empty queue gets, the worker logs it once per reason
-  rather than every poll, and the menubar shows it against the project (BP-512). The board's
-  settings refuse to remove the last `active` or `done` column in the first place, so this is for
-  boards saved before that rule existed.
+  blocked means either; such a board is refused at the claim (next bullet) rather than having the
+  gate skipped on it.
+- **A board that cannot claim says so.** A run needs four roles — `approved` to take work from,
+  `active` to move it into, `review` and `done` to deliver it to. A board missing any of them is
+  refused at the claim with a 409 naming the role, rather than the 204 an empty queue gets; the
+  worker logs it once per reason rather than every poll, and the menubar shows it against the
+  project (BP-512). Refused at the claim rather than at run start, because a task claimed onto such
+  a board and handed back was claimed again on the very next pass, without a poll interval. The
+  board's settings refuse to remove the last `active` or `done` column in the first place; a run
+  that still finds a role missing — the columns edited between the claim and the run — hands the
+  task back with the attempt charged, so three such runs park it for a person.
 - **Nothing merges unreviewed.** The review gate is a separate Claude with no memory of writing
   the code, and it sees only the diff.
 - **Nothing executes before the static gates have read the diff.** `protected-paths` refuses

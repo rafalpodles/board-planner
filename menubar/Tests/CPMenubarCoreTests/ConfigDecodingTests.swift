@@ -58,13 +58,13 @@ private let SERVED = """
 @Test func readsWhyAProjectIsNotBeingClaimedFrom() throws {
     let refusing = SERVED.replacingOccurrences(
         of: "\"blocked\": \"\"",
-        with: "\"blocked\": \"This board has no column meaning In progress, so nothing moves.\""
+        with: "\"blocked\": \"This board has no column meaning In progress, so there is nowhere to move a task once it is taken. Give a column that role in Settings → Board.\""
     )
 
     let config = try JSONDecoder().decode(ConfigResponse.self, from: Data(refusing.utf8))
 
     #expect(config.projects.first?.blocked
-        == "This board has no column meaning In progress, so nothing moves.")
+        == "This board has no column meaning In progress, so there is nowhere to move a task once it is taken. Give a column that role in Settings → Board.")
 }
 
 // A worker built before the field decodes with it absent, not as a failure that empties the panel

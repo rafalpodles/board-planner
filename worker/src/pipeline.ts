@@ -299,7 +299,12 @@ export async function runTask(
         scrub(`Returned to the queue: ${String(error)}`),
       ),
     );
-    await quietly(() => deps.api.release(task.projectId, task.taskId));
+    // Charged, not refunded. Refunded, the task went back to the head of the queue, and the loop —
+    // which does not sleep after a run — claimed it again at once: a comment on the task every
+    // iteration, without a poll interval, for ever. Three charged attempts park it for a person
+    // instead (BP-512). The claim now refuses such a board before anything is taken, so this is
+    // for columns edited between the claim and the run, and for a server older than that rule.
+    await quietly(() => deps.api.release(task.projectId, task.taskId, { refund: false }));
     // settle, like every other exit: without it the menubar shows the run parked in "claiming"
     // for ever and no AgentRun is written for a task that was genuinely claimed and handed back.
     settle("released", "the board could not route the outcome");

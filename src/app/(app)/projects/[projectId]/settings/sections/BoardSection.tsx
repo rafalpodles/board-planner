@@ -220,8 +220,7 @@ export function BoardSection({ projectId, project, patchProject, stats }: Sectio
           <span aria-hidden>⚠</span>
           <p className="m-0">
             No column means <strong>{ROLE_LABELS.done.label}</strong>. Nothing can be finished:
-            sprint progress cannot be measured, and the worker stops enforcing task dependencies —
-            that one without saying so anywhere.
+            sprint progress cannot be measured, and a worker will not take a task from this board.
           </p>
         </div>
       )}
