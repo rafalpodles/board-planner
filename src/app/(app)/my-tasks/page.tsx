@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import Link from "next/link";
 import { useApi } from "@/hooks/use-api";
 import { useToast } from "@/components/ui/Toast";
@@ -46,22 +46,29 @@ export default function MyTasksPage() {
   const [hideDone, setHideDone] = useState(true);
   const api = useApi();
   const { toast } = useToast();
+  const loadSeq = useRef(0);
 
   const load = useCallback(() => {
+    // A request overtaken by a later one applies nothing: without this, a retry that succeeds is
+    // replaced by the failure of the load it replaced, or the other way round
+    const seq = ++loadSeq.current;
     setLoading(true);
-    setFailed(false);
     api
       .get("/api/tasks/mine")
-      .then((mine: IncomingTask[]) =>
-        setTasks(mine.filter((task): task is MyTask => !!task.project))
-      )
+      .then((mine: IncomingTask[]) => {
+        if (seq !== loadSeq.current) return;
+        setTasks(mine.filter((task): task is MyTask => !!task.project));
+        setFailed(false);
+      })
       .catch(() => {
+        if (seq !== loadSeq.current) return;
         setFailed(true);
         toast("Failed to load tasks", "error");
       })
-      .finally(() => setLoading(false));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+      .finally(() => {
+        if (seq === loadSeq.current) setLoading(false);
+      });
+  }, [api, toast]);
 
   useEffect(load, [load]);
 
@@ -91,7 +98,9 @@ export default function MyTasksPage() {
   if (failed) {
     return (
       <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
-        <p className="text-sm text-text-muted">Failed to load your tasks.</p>
+        <p role="alert" className="text-sm text-text-muted">
+          Failed to load your tasks.
+        </p>
         <Button size="sm" onClick={load}>
           Retry
         </Button>

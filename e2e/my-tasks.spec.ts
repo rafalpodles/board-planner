@@ -281,6 +281,46 @@ test("a task whose board is gone costs that row, not the page", async ({ page })
 
   await expect(page.getByText("Something went wrong")).toHaveCount(0);
   await expect(page.getByText(MINE_OTHER_BOARD_TITLE)).toHaveCount(0);
+
+  // The control the four assertions above rest on: the row really is still being sent, and sent
+  // with no project. Without it, an endpoint that quietly stopped returning it — or a fixture that
+  // stopped producing it — would leave this test green over an unguarded page.
+  const mine = await page.request.get("/api/tasks/mine");
+  expect(mine.status()).toBe(200);
+  const orphan = ((await mine.json()) as { title: string; project: unknown }[]).find(
+    (task) => task.title === MINE_OTHER_BOARD_TITLE
+  );
+  expect(orphan?.project ?? null).toBeNull();
+});
+
+test("a failure that arrives after a later load has succeeded does not replace the list", async ({
+  page,
+}) => {
+  await seedSecondProject();
+  await seedMyTasks();
+  await signIn(page);
+
+  // The page fetches twice on mount under StrictMode. Holding the first request and failing it
+  // late, while the second answers at once, is the ordering a retry also produces — and the one
+  // that used to leave a rendered list replaced by a failure panel.
+  const LATE_FAILURE_MS = 3_000;
+  let seen = 0;
+  await page.route("**/api/tasks/mine", async (route) => {
+    seen += 1;
+    if (seen > 1) return route.continue();
+    await new Promise((settle) => setTimeout(settle, LATE_FAILURE_MS));
+    await route.abort();
+  });
+
+  await page.goto("/my-tasks");
+  await expect(page.getByText(MINE_ACTIVE_TITLE)).toBeVisible();
+
+  await expect.poll(() => seen, { timeout: 30_000 }).toBeGreaterThan(1);
+  await page.waitForTimeout(LATE_FAILURE_MS + 1_000);
+
+  await expect(page.getByText("Failed to load your tasks.")).toHaveCount(0);
+  await expect(page.getByText(MINE_ACTIVE_TITLE)).toBeVisible();
+  await expect(page.getByText("5 tasks", { exact: true })).toBeVisible();
 });
 
 test("a failed load says so, and the retry loads the list", async ({ page }) => {
