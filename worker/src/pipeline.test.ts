@@ -237,6 +237,24 @@ describe("resolveStatusIds", () => {
     await expect(promise).rejects.toThrow(/checking/);
     await expect(promise).rejects.toThrow(/shipped/);
   });
+
+  // An empty id is what api.statusIds now answers for a role no column carries (BP-512). The
+  // repair is different from a deleted column's — give a column the role, rather than find where
+  // an id went — so the message has to say which it is.
+  it("says when no column carries the role at all, instead of quoting an empty id", async () => {
+    const promise = resolveStatusIds(
+      {
+        statusIds: vi
+          .fn<ApiClient["statusIds"]>()
+          .mockResolvedValue({ ...statuses, done: "" }),
+      },
+      async () => ["ready", "doing", "checking"],
+      "CP"
+    );
+
+    await expect(promise).rejects.toThrow(/done \(no column carries that role\)/);
+    await expect(promise).rejects.not.toThrow(/done -> ""/);
+  });
 });
 
 describe("runTask", () => {
@@ -348,8 +366,28 @@ describe("runTask", () => {
 
     expect(h.workspace.create).not.toHaveBeenCalled();
     expect(h.executor.execute).not.toHaveBeenCalled();
-    expect(h.api.release).toHaveBeenCalledWith("CP", "t1");
+    // Charged: a refunded release put the task back at the head of the queue, and the loop —
+    // which does not sleep after a run — claimed it again at once, for ever (BP-512)
+    expect(h.api.release).toHaveBeenCalledWith("CP", "t1", { refund: false });
     expect(h.api.comment.mock.calls[0][2]).toMatch(/shipped/);
+  });
+
+  // The ticket's own shape (BP-512): a Done column demoted to review keeps its id, so the id is
+  // still on the board while no column carries the role. statusIds answers "" for it now, and the
+  // run has to hand the task back — charged — rather than deliver into the column that is left
+  it("hands back a task whose board still has a column called done but none meaning it", async () => {
+    const columnIds = vi
+      .fn<PipelineDeps["columnIds"]>()
+      .mockResolvedValue(["ready", "doing", "checking", "done"]);
+    const h = harness({ columnIds });
+    h.api.statusIds.mockResolvedValue({ ...statuses, done: "" });
+
+    await runTask(h.deps, task);
+
+    expect(h.executor.execute).not.toHaveBeenCalled();
+    expect(h.api.setStatus).not.toHaveBeenCalled();
+    expect(h.api.release).toHaveBeenCalledWith("CP", "t1", { refund: false });
+    expect(h.api.comment.mock.calls[0][2]).toMatch(/done \(no column carries that role\)/);
   });
 
   // This comment is posted directly, before a reporter exists to scrub it

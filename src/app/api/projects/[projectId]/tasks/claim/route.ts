@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { protocolOf, resolveProjectId, withWorker } from "@/lib/middleware";
 import { claimNextTask, releaseExpiredTasks } from "@/lib/task-service";
+import { BoardCannotClaim } from "@/lib/claim-refusal";
 import { Project } from "@/models/project";
 import { Worker } from "@/models/worker";
 import { ownerReachableProjectIds, verdictFor } from "@/lib/worker-service";
@@ -61,7 +62,18 @@ export const POST = withWorker(async (request, { params, worker }) => {
 
   const machineOwnerId = ownerIdOf(worker.owner);
 
-  const task = await claimNextTask(projectId, String(worker._id), runId, machineOwnerId);
+  let task: Awaited<ReturnType<typeof claimNextTask>>;
+  try {
+    task = await claimNextTask(projectId, String(worker._id), runId, machineOwnerId);
+  } catch (error) {
+    // 409 with the reason, never 204: 204 is what an empty queue answers, and a board with no
+    // column to claim into read as an idle machine for as long as nobody happened to look at the
+    // board's settings (BP-512)
+    if (error instanceof BoardCannotClaim) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
+    throw error;
+  }
   if (!task) return new NextResponse(null, { status: 204 });
 
   // Resolved here rather than referenced, so the run means what it meant when it started even if

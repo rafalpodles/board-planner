@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { ApiClient } from "./api.js";
+import { ApiClient, ClaimRefused } from "./api.js";
 import { ClaimedTask } from "./types.js";
 
 export interface LoopDeps {
@@ -28,6 +28,8 @@ export interface Loop {
   pause(): void;
   resume(): void;
   paused(): boolean;
+  /** Why the board refused this project's last claim, or empty when it did not. */
+  unclaimable(projectId: string): string;
 }
 
 export function createLoop(deps: LoopDeps): Loop {
@@ -40,6 +42,9 @@ export function createLoop(deps: LoopDeps): Loop {
   // behind it is ever claimed for again — starvation for as long as the fault lasts, not for one
   // pass. Starting the next pass after that project puts it last instead.
   let faultedLast: string | null = null;
+  // Boards that refused the last claim outright, by the reason the server gave. Kept so the reason
+  // is logged once rather than every poll, and so the menubar can show it (BP-512).
+  const refused = new Map<string, string>();
 
   function passOrder(assignments: string[]): string[] {
     const at = faultedLast === null ? -1 : assignments.indexOf(faultedLast);
@@ -71,6 +76,7 @@ export function createLoop(deps: LoopDeps): Loop {
             if (!running) return;
             try {
               const task = await deps.api.claim(projectId, randomUUID());
+              if (refused.delete(projectId)) log(`project ${projectId} can be claimed from again`);
               if (task) {
                 if ((await deps.execute(task)) === "machine-fault") {
                   machineFault = true;
@@ -80,9 +86,18 @@ export function createLoop(deps: LoopDeps): Loop {
                 claimedAny = true;
               }
             } catch (error) {
-              // runTask reports its own failures to the board, so anything reaching here is the
-              // worker itself breaking — the next pass is the only recovery available
-              log(`worker cycle failed for ${projectId}: ${String(error)}`);
+              if (error instanceof ClaimRefused) {
+                // The board is what is broken, not this worker, and it stays broken until somebody
+                // edits its columns — so said once per reason, not once per poll
+                if (refused.get(projectId) !== error.message) {
+                  refused.set(projectId, error.message);
+                  log(`not claiming for project ${projectId}: ${error.message}`);
+                }
+              } else {
+                // runTask reports its own failures to the board, so anything reaching here is the
+                // worker itself breaking — the next pass is the only recovery available
+                log(`worker cycle failed for ${projectId}: ${String(error)}`);
+              }
             }
           }
         }
@@ -110,6 +125,10 @@ export function createLoop(deps: LoopDeps): Loop {
 
     paused() {
       return pausedState;
+    },
+
+    unclaimable(projectId) {
+      return refused.get(projectId) ?? "";
     },
   };
 }

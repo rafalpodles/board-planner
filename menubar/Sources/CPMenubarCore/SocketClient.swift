@@ -13,6 +13,10 @@ public struct ProjectConfig: Decodable, Sendable {
     public let reviewModel: String
     public let maxDiffLines: Int
     public let taskTimeoutMs: Int
+    // Why this project is not being claimed from — the checkout failing the gates' checks, or the
+    // board refusing the claim outright — or empty when it is. Optional so a worker older than
+    // this field still decodes, for the reason autoMerge's comment above gives (BP-512).
+    public let blocked: String?
 }
 
 public struct GithubAccountChoice: Decodable, Sendable, Identifiable, Equatable {

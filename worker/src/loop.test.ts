@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { ApiClient } from "./api.js";
+import { ApiClient, ClaimRefused } from "./api.js";
 import { createLoop, Loop } from "./loop.js";
 import { ClaimedTask } from "./types.js";
 
@@ -35,20 +35,114 @@ function loopOver(
     execute?: (task: ClaimedTask) => Promise<void | "machine-fault">;
     sleep?: (ms: number) => Promise<void>;
   } = {}
-): { loop: Loop; execute: ReturnType<typeof vi.fn>; sleep: ReturnType<typeof vi.fn> } {
+): {
+  loop: Loop;
+  execute: ReturnType<typeof vi.fn>;
+  sleep: ReturnType<typeof vi.fn>;
+  log: ReturnType<typeof vi.fn>;
+} {
   const execute = vi.fn(overrides.execute ?? (async () => undefined));
   // Stopping on the first idle sleep is what ends every test below
   const sleep = vi.fn(overrides.sleep ?? (async () => loop.stop()));
+  const log = vi.fn();
   const loop = createLoop({
     pollIntervalMs: () => 30_000,
     assignments: () => overrides.assignments ?? ["P1"],
     api,
     execute,
     sleep,
-    log: vi.fn(),
+    log,
   });
-  return { loop, execute, sleep };
+  return { loop, execute, sleep, log };
 }
+
+/**
+ * BP-512. A board with no column to claim into used to answer a claim with 204, exactly like an
+ * empty queue, so a machine on such a board looked idle. The server now refuses with the reason,
+ * api.claim turns that into a ClaimRefused, and the loop has three things to get right about it:
+ * say it once rather than every poll, keep it where the menubar can read it, and let go of it the
+ * moment the board claims again.
+ */
+describe("a board that refuses the claim outright", () => {
+  const REASON = "This board has no column meaning In progress, so nothing moves.";
+
+  it("logs the reason once, not on every pass", async () => {
+    let passes = 0;
+    const api = apiStub(async () => {
+      throw new ClaimRefused(REASON);
+    });
+    const { loop, log } = loopOver(api, {
+      sleep: async () => {
+        if (++passes >= 3) loop.stop();
+      },
+    });
+
+    await loop.start();
+
+    expect(api.claim).toHaveBeenCalledTimes(3);
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(log).toHaveBeenCalledWith(`not claiming for project P1: ${REASON}`);
+    // The control on the wording: it is the board's refusal, not a failed cycle of this worker
+    expect(log).not.toHaveBeenCalledWith(expect.stringContaining("worker cycle failed"));
+  });
+
+  it("keeps the reason where the menubar can read it", async () => {
+    const api = apiStub(async () => {
+      throw new ClaimRefused(REASON);
+    });
+    const { loop } = loopOver(api);
+
+    expect(loop.unclaimable("P1")).toBe("");
+    await loop.start();
+
+    expect(loop.unclaimable("P1")).toBe(REASON);
+    expect(loop.unclaimable("P2")).toBe("");
+  });
+
+  it("says a changed reason again, and lets go of it once the board claims", async () => {
+    let claims = 0;
+    const api = apiStub(async () => {
+      claims += 1;
+      if (claims === 1) throw new ClaimRefused("first reason");
+      if (claims === 2) throw new ClaimRefused("second reason");
+      return null;
+    });
+    const { loop, log } = loopOver(api, {
+      sleep: async () => {
+        if (claims >= 3) loop.stop();
+      },
+    });
+
+    await loop.start();
+
+    expect(log.mock.calls.map(([line]) => line)).toEqual([
+      "not claiming for project P1: first reason",
+      "not claiming for project P1: second reason",
+      "project P1 can be claimed from again",
+    ]);
+    expect(loop.unclaimable("P1")).toBe("");
+  });
+
+  // Same shape as a faulting project, one level down: a board that refuses must not cost a sibling
+  // project its turn in the pass
+  it("still claims from a sibling project in the same pass", async () => {
+    // One task, then P2's queue is empty too — an endless queue never reaches the sleep that ends
+    // the test, so the loop would run until it ran out of memory
+    let handed = false;
+    const api = apiStub(async (projectId: string) => {
+      if (projectId === "P1") throw new ClaimRefused(REASON);
+      if (handed) return null;
+      handed = true;
+      return { ...task, projectId };
+    });
+    const { loop, execute } = loopOver(api, { assignments: ["P1", "P2"] });
+
+    await loop.start();
+
+    expect(execute.mock.calls.map(([t]) => t.projectId)).toEqual(["P2"]);
+    expect(loop.unclaimable("P1")).toBe(REASON);
+  });
+});
 
 describe("createLoop", () => {
   it("runs a claimed task", async () => {
