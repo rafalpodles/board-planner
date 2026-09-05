@@ -4,9 +4,14 @@ const connect = vi.fn();
 const close = vi.fn();
 // `client` rather than the connection's own `close`: the code closes the MongoClient, because
 // closing the connection would make mongoose rebuild every model's indexes on the reconnect.
-const connection: { readyState: number; client?: { close: typeof close } } = {
+const connection: {
+  readyState: number;
+  client?: { close: () => Promise<void> };
+  getClient: () => { close: () => Promise<void> } | undefined;
+} = {
   readyState: 1,
   client: { close },
+  getClient: () => connection.client,
 };
 
 vi.mock("mongoose", () => ({ default: { connect, connection } }));

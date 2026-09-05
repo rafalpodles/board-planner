@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import type { MongoClient } from "mongodb";
 import { DatabaseUnavailableError, isDatabaseUnreachable } from "./db-errors";
 
 // Re-exported for the callers that already reach for them here
@@ -53,8 +54,8 @@ const FAILURE_COOLDOWN_MS = 1_000;
  * Never the client the connection ended up with: `openUri` hands back the existing one when the
  * monitor has meanwhile marked the server usable again, and closing that is closing the live one.
  */
-async function releaseAbandonedClient(client: typeof mongoose.connection.client): Promise<void> {
-  if (!client || client === mongoose.connection.client) return;
+async function releaseAbandonedClient(client: MongoClient | undefined): Promise<void> {
+  if (!client || client === mongoose.connection.getClient()) return;
   try {
     await client.close();
   } catch {
@@ -91,7 +92,7 @@ export async function connectDB(): Promise<typeof mongoose> {
     // readyState 0 says the driver marked the server unknown, not that the client is dead — it goes
     // on answering queries for seconds afterwards — so closing it first kills the requests already
     // holding it, and does so while nothing else is connected yet.
-    const abandoned = mongoose.connection.client;
+    const abandoned = mongoose.connection.getClient();
     cached.promise = openConnection(uri).finally(() => releaseAbandonedClient(abandoned));
   }
 
