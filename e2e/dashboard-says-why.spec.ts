@@ -150,6 +150,46 @@ test("only the project request failing still draws the charts", async ({ page })
 });
 
 /**
+ * BP-512. A board with no column meaning In progress cannot express the number at all. Summing
+ * zero columns answers 0, which is a statement about the tasks when it is one about the board —
+ * the same reasoning the sprint header applies to a board with no Done column. The tasks are in
+ * the backlog on purpose: a board that put them nowhere would also read 0, and then the assertion
+ * below could not tell the fix from the bug.
+ */
+test("a board with no In-progress column says the count is impossible, rather than 0", async ({
+  page,
+}) => {
+  if (mongoose.connection.readyState === 0) await mongoose.connect(E2E_MONGODB_URI);
+  const handle = mongoose.connection.db;
+  if (!handle) throw new Error("no database handle");
+  await handle.collection("projects").updateOne(
+    { _id: PROJECT_ID },
+    {
+      $set: {
+        columns: [
+          { id: "icebox", label: "Icebox", color: "#6b7280", role: "backlog", order: 0 },
+          { id: "shipped", label: "Shipped", color: "#22c55e", role: "done", order: 1 },
+        ],
+      },
+    }
+  );
+  await handle.collection("tasks").updateMany({ project: PROJECT_ID }, { $set: { status: "icebox" } });
+
+  await signIn(page);
+  await page.goto(DASHBOARD);
+  await expect(page.getByRole("heading", { name: "Status Breakdown" })).toBeVisible();
+
+  const warning = page.getByTestId("dashboard-no-active-column");
+  await expect(warning).toBeVisible();
+  await expect(warning).toContainText("In Progress cannot be counted");
+  // A different sentence from the one a failed settings load gets: the settings loaded fine
+  await expect(page.getByTestId("dashboard-settings-warning")).toHaveCount(0);
+
+  await expect(inProgressCard(page)).toContainText("—");
+  await expect(inProgressCard(page)).not.toContainText("0");
+});
+
+/**
  * A 200 is not a success if the body is empty: `stats` ends up null with nothing rejected, so
  * `whyItFailed` never runs and the banner had no text at all — a red box with only a button.
  */

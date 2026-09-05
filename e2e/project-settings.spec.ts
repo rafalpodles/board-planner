@@ -2,6 +2,7 @@ import { test, expect, type APIRequestContext, type Page } from "@playwright/tes
 import { ADMIN_AUTH } from "./api";
 import {
   HELD_TASK_KEY,
+  demoteActiveColumn,
   demoteDoneColumn,
   PROJECT_ID,
   PROJECT_KEY,
@@ -203,6 +204,111 @@ test.describe("Board · the Done role", () => {
 
     await expect(warning).toBeVisible();
     await expect(page.getByText(/worker stops enforcing task dependencies/)).toBeVisible();
+  });
+});
+
+/**
+ * BP-512. The `active` role is the twin of `done`: the claim moves a task into the column that
+ * carries it, and a board with none answered every claim the way an empty queue does. Same rule,
+ * same shape — a transition refused, a state left repairable — and the same four proofs as above,
+ * because a rule copied from Done can be copied wrong in exactly the ways those catch.
+ */
+test.describe("Board · the In-progress role", () => {
+  async function putColumns(request: APIRequestContext, columns: unknown[]) {
+    return request.put(`/api/projects/${PROJECT_ID}/columns`, {
+      headers: ADMIN_AUTH,
+      data: { columns },
+    });
+  }
+
+  test("a board cannot be saved out of having one", async ({ request }) => {
+    const before = await storedColumns(request);
+    const active = before.find((c) => c.role === "active");
+    expect(active, "the seeded board has no In-progress column, so this proves nothing").toBeDefined();
+
+    const res = await putColumns(
+      request,
+      before.map((c) => (c.role === "active" ? { ...c, role: "review" } : c))
+    );
+
+    expect(res.status()).toBe(400);
+    expect((await res.json()).error).toMatch(/needs a column meaning In progress/);
+    expect((await storedColumns(request)).find((c) => c.role === "active")?.id).toBe(active!.id);
+  });
+
+  // The control: moving the role to ANOTHER column is the legitimate edit, and it has to save
+  test("and moving the role to another column still saves", async ({ request }) => {
+    const before = await storedColumns(request);
+
+    const res = await putColumns(
+      request,
+      before.map((c) => {
+        if (c.role === "active") return { ...c, role: "review" };
+        if (c.label === "In Review") return { ...c, role: "active" };
+        return c;
+      })
+    );
+
+    expect(res.status(), await res.text()).toBe(200);
+    expect((await storedColumns(request)).find((c) => c.role === "active")?.label).toBe("In Review");
+  });
+
+  // The transition-not-state half, which is what keeps this from locking a board out of the screen
+  // where it is repaired — see the Done block above for why a state rule passes every other test
+  test("a board that already has none keeps saving unrelated changes, and can be repaired", async ({
+    request,
+  }) => {
+    await demoteActiveColumn();
+    expect((await storedColumns(request)).some((c) => c.role === "active")).toBe(false);
+
+    await test.step("an edit that does not mention In progress still saves", async () => {
+      const unrelated = await putColumns(
+        request,
+        (await storedColumns(request)).map((c) =>
+          c.role === "backlog" ? { ...c, label: "Someday" } : c
+        )
+      );
+
+      expect(unrelated.status(), await unrelated.text()).toBe(200);
+      expect((await storedColumns(request)).map((c) => c.label)).toContain("Someday");
+    });
+
+    await test.step("and the board can be given the role back", async () => {
+      const repaired = await putColumns(
+        request,
+        (await storedColumns(request)).map((c) =>
+          c.label === "In Progress" ? { ...c, role: "active" } : c
+        )
+      );
+
+      expect(repaired.status(), await repaired.text()).toBe(200);
+      expect((await storedColumns(request)).some((c) => c.role === "active")).toBe(true);
+    });
+  });
+
+  test("pressing Save on a draft without one says why, and keeps the work", async ({ page }) => {
+    await signIn(page);
+    await openSection(page, "Board");
+
+    await roleOf(page, "In Progress").selectOption("review");
+    await saveButton(page).click();
+
+    await expect(page.getByText(/needs a column meaning In progress/)).toBeVisible();
+    await expect(saveButton(page)).toBeVisible();
+    await expect(roleOf(page, "In Progress")).toHaveValue("review");
+  });
+
+  test("the settings screen says what such a board loses", async ({ page }) => {
+    await signIn(page);
+    await openSection(page, "Board");
+
+    const warning = page.getByText(/No column means In progress/i);
+    await expect(warning).toHaveCount(0);
+
+    await roleOf(page, "In Progress").selectOption("review");
+
+    await expect(warning).toBeVisible();
+    await expect(page.getByText(/nowhere to move a task it takes/)).toBeVisible();
   });
 });
 
