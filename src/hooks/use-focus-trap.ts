@@ -1,6 +1,6 @@
 "use client";
 
-import { RefObject, useEffect } from "react";
+import { RefObject, useEffect, useRef } from "react";
 import {
   cycleTabWithin,
   openLayerCount,
@@ -25,6 +25,9 @@ export function useFocusTrap({
   returnFocusTo,
   lockScroll = true,
 }: FocusTrapOptions) {
+  const onEscapeRef = useRef(onEscape);
+  onEscapeRef.current = onEscape;
+
   useEffect(() => {
     if (!active) return;
     const container = containerRef.current!;
@@ -56,13 +59,16 @@ export function useFocusTrap({
       const container = containerRef.current;
       if (!container || topmostLayer() !== container) return;
       if (e.key === "Escape") {
-        onEscape();
+        onEscapeRef.current();
         return;
       }
       if (e.key !== "Tab") return;
       cycleTabWithin(container, e);
     }
+    // BP-522: subscribing on onEscape too would resubscribe mid-dispatch, whenever a sibling
+    // keydown listener renders the caller first — and a listener added during a dispatch does not
+    // see that event, so Escape never reached this handler on a board
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
-  }, [active, containerRef, onEscape]);
+  }, [active, containerRef]);
 }
