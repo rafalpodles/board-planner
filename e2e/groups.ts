@@ -57,6 +57,7 @@ export const GROUPS = {
     "project-default-agent.spec.ts",
     "external-integrations.spec.ts",
     "mcp-oauth.spec.ts",
+    "mcp-tools.spec.ts",
   ],
   people: [
     "day-zero.spec.ts",
