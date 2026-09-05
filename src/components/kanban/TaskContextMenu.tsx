@@ -48,9 +48,8 @@ export function TaskContextMenu({
     function handleKey(e: KeyboardEvent) {
       if (e.key === "Escape") onCloseRef.current();
     }
-    // BP-522: subscribing on onClose too would resubscribe mid-dispatch, whenever a sibling
-    // keydown listener renders the board first — and a listener added during a dispatch does not
-    // see that event, so Escape never reached this handler
+    // BP-522: a dep on onClose resubscribes mid-dispatch, and a listener added during a
+    // dispatch never sees that event
     document.addEventListener("mousedown", handleClick);
     document.addEventListener("keydown", handleKey);
     return () => {

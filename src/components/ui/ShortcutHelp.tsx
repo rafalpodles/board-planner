@@ -52,12 +52,8 @@ export function ShortcutHelp({ open, onClose }: ShortcutHelpProps) {
       e.preventDefault();
       onCloseRef.current();
     }
-    // BP-522: subscribing on onClose too would resubscribe mid-dispatch, whenever a sibling
-    // keydown listener renders the parent first — and a listener added during a dispatch does
-    // not see that event, so Escape never reached this handler.
-    //
-    // `?` is deliberately not handled here: the board owns that key as a toggle, and two
-    // listeners acting on one press reopen the dialog whenever the board's runs second
+    // BP-522: a dep on onClose resubscribes mid-dispatch, and a listener added during a
+    // dispatch never sees that event. `?` is the board's, so one listener owns each key
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [open]);

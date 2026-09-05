@@ -16,6 +16,7 @@ import { ListView } from "@/components/kanban/ListView";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
 import { ShortcutHelp } from "@/components/ui/ShortcutHelp";
+import { openLayerCount } from "@/lib/focus-trap";
 import { taskPath } from "@/lib/urls";
 import { NewTaskModal } from "@/components/tasks/NewTaskModal";
 
@@ -126,6 +127,9 @@ export function ProjectBoardView({
         return;
       }
       if (e.key === "Escape") {
+        // BP-522: an open layer owns Escape — clearing the selection under the bulk-delete
+        // confirm relabelled it "delete 0 tasks" and deleting nothing reported success
+        if (openLayerCount() > 0) return;
         setSelectedTasks(new Set());
         setSelectionMode(false);
         setFocusedTaskIndex(-1);

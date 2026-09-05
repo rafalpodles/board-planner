@@ -35,16 +35,21 @@ const cardFor = (page: Page, taskNumber: number) =>
 
 const card = (page: Page) => cardFor(page, DECOY_TASK_NUMBER);
 
-const contextMenu = (page: Page) => page.getByRole("button", { name: "Duplicate", exact: true });
+const contextMenu = (page: Page) => page.getByTestId("task-context-menu");
 
 const selectBox = (page: Page) =>
   page.getByRole("button", { name: `Select ${PROJECT_KEY}-${DECOY_TASK_NUMBER}` });
 
-/** Leaves the poll's request hanging, so no later response can re-order the two listeners. */
+/**
+ * Leaves the board's own reload hanging, so no later response can re-order the two listeners.
+ * GET only: the same path is where a new task is POSTed, and test 2 opens that very form.
+ */
 async function freezeBoardPolling(page: Page) {
   await page.route(
     (url) => /\/api\/projects\/[^/]+\/tasks(\?|$)/.test(url.pathname + url.search),
-    () => {}
+    (route) => {
+      if (route.request().method() !== "GET") return route.continue();
+    }
   );
 }
 
@@ -112,7 +117,7 @@ test("Escape closes the card's context menu", async ({ page }) => {
   await expect(contextMenu(page)).toBeHidden();
 });
 
-test("Escape closes the bulk-delete confirm rather than emptying the selection under it", async ({
+test("Escape closes the bulk-delete confirm and leaves the selection it is about", async ({
   page,
 }) => {
   await openBoard(page);
@@ -125,42 +130,59 @@ test("Escape closes the bulk-delete confirm rather than emptying the selection u
   const confirm = page.getByRole("dialog", { name: "Delete Selected Tasks" });
   await expect(confirm).toBeVisible();
 
-  // Before the fix Escape reached the board and not the dialog, so the dialog stayed open over an
-  // emptied selection and relabelled itself "delete 0 tasks" — confirming then deleted nothing
-  // and said it had succeeded
+  // Escape used to reach the board and not the dialog, so the confirm stayed open over an emptied
+  // selection, relabelled itself "delete 0 tasks", and confirming reported success having deleted
+  // nothing. The dialog closes now — and the selection it was about is still there
   await page.keyboard.press("Escape");
   await expect(confirm).toBeHidden();
-  await expect(page.getByText("0 tasks")).toHaveCount(0);
+  await expect(selectBox(page)).toHaveAttribute("aria-pressed", "true");
+  await expect(
+    page.getByRole("button", { name: `Select ${PROJECT_KEY}-${SIBLING_TASK_NUMBER}` })
+  ).toHaveAttribute("aria-pressed", "true");
 });
 
 /**
  * The order-flip case, and the one test here that must NOT freeze the board's reload.
  *
- * A reload re-runs the board's keydown effect and so re-registers its listener *after* the open
+ * A reload re-runs the board's keydown effect and so re-registers its listener *after* an open
  * dialog's. `?` is a toggle on the board's side, so a second listener acting on the same press
  * used to close the help and let the board's toggle reopen it. The help no longer handles `?` at
  * all; the board owns that key.
  *
- * `R` is the board's own reload shortcut — the same code path as the 10 s poll, without the wait.
- * Pressing `?` the instant the response lands proves nothing: React has not committed the new
- * effects yet, so the listeners are still in their original order. Two animation frames put the
- * press after that commit, which is what makes this test able to fail.
+ * The reorder is what this test is about, so it has to happen before the key is pressed — and it
+ * is not observable in the DOM, because the reload fetches identical data and paints nothing new.
+ * An earlier version waited two animation frames and so passed against the bug it names: React
+ * commits through the scheduler, not through rAF, and the reload awaits three requests of which
+ * this waited on one. Counting the board's own re-subscription is the signal itself, and turns a
+ * setup that did not happen into a timeout rather than a false green.
  */
 test("? still closes the help after a reload has reordered the listeners", async ({ page }) => {
   await signIn(page);
   await page.goto(`/projects/${PROJECT_KEY}`);
   await expect(card(page)).toBeVisible();
 
+  await page.evaluate(() => {
+    const w = window as unknown as { __keydownSubs: number };
+    w.__keydownSubs = 0;
+    const add = document.addEventListener.bind(document);
+    document.addEventListener = ((type: string, ...rest: unknown[]) => {
+      if (type === "keydown") w.__keydownSubs += 1;
+      return (add as (...a: unknown[]) => void)(type, ...rest);
+    }) as typeof document.addEventListener;
+  });
+
   await page.keyboard.press("?");
   await expect(help(page)).toBeVisible();
 
-  const reloaded = page.waitForResponse(
-    (r) => /\/api\/projects\/[^/]+\/tasks(\?|$)/.test(new URL(r.url()).pathname + new URL(r.url()).search) && r.ok(),
+  // With the help open and its listener stable, the board's effect is the only thing left that
+  // re-subscribes to keydown — so this count going up IS the reorder
+  const before = await page.evaluate(
+    () => (window as unknown as { __keydownSubs: number }).__keydownSubs
   );
   await page.keyboard.press("r");
-  await reloaded;
-  await page.evaluate(
-    () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))
+  await page.waitForFunction(
+    (n) => (window as unknown as { __keydownSubs: number }).__keydownSubs > n,
+    before
   );
 
   await page.keyboard.press("?");

@@ -65,9 +65,8 @@ export function useFocusTrap({
       if (e.key !== "Tab") return;
       cycleTabWithin(container, e);
     }
-    // BP-522: subscribing on onEscape too would resubscribe mid-dispatch, whenever a sibling
-    // keydown listener renders the caller first — and a listener added during a dispatch does not
-    // see that event, so Escape never reached this handler on a board
+    // BP-522: a dep on onEscape resubscribes mid-dispatch, and a listener added during a
+    // dispatch never sees that event
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
   }, [active, containerRef]);
