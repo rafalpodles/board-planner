@@ -102,6 +102,24 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
     });
   }
 
+  // Before the role rule below: a column that still holds tasks is the more local refusal, and
+  // the one whose fix — move the tasks — the person has to make first whatever else is wrong
+  const removed = (project.columns || []).filter((c) => !usedIds.has(c.id));
+  for (const col of removed) {
+    const inUse = await Task.find({ project: projectId, status: col.id })
+      .select("taskNumber")
+      .sort({ taskNumber: 1 })
+      .limit(11);
+    if (inUse.length > 0) {
+      const keys = inUse.slice(0, 10).map((t) => `${project.key}-${t.taskNumber}`);
+      const suffix = inUse.length > 10 ? " and more" : "";
+      return NextResponse.json(
+        { error: `Column "${col.label}" still has tasks: ${keys.join(", ")}${suffix}` },
+        { status: 400 }
+      );
+    }
+  }
+
   /**
    * Two roles are load-bearing, and both used to fail silently when a board lost its last column
    * carrying them. `done` in four places that resolve it to `[]` and carry on: a sprint's
@@ -130,22 +148,6 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
             `A board needs a column meaning ${label}. Without one, ${loses}. ` +
             `Give another column the ${label} role first, then remove this one.`,
         },
-        { status: 400 }
-      );
-    }
-  }
-
-  const removed = (project.columns || []).filter((c) => !usedIds.has(c.id));
-  for (const col of removed) {
-    const inUse = await Task.find({ project: projectId, status: col.id })
-      .select("taskNumber")
-      .sort({ taskNumber: 1 })
-      .limit(11);
-    if (inUse.length > 0) {
-      const keys = inUse.slice(0, 10).map((t) => `${project.key}-${t.taskNumber}`);
-      const suffix = inUse.length > 10 ? " and more" : "";
-      return NextResponse.json(
-        { error: `Column "${col.label}" still has tasks: ${keys.join(", ")}${suffix}` },
         { status: 400 }
       );
     }
