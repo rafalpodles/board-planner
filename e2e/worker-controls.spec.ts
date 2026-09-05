@@ -634,10 +634,19 @@ test("a run out of attempts is parked for a person, off the machine, and the wat
     await expect(rows).toContainText(`${HELD_TASK_KEY} needs a human — the run was abandoned`);
   }).toPass({ timeout: 30_000 });
 
-  // And the fleet console no longer shows the machine running it
+  // And the fleet console no longer shows the machine running it. The machine's own row is waited
+  // for first: until /api/admin/workers answers, this page is a spinner with no rows at all, and
+  // "the task key is not on the row" holds trivially there — the same silence a working sweep
+  // produces.
   await signIn(page);
   await page.goto("/settings/workers");
-  await expect(fleetRow(page, WORKER_NAME).getByText(HELD_TASK_KEY, { exact: true })).toHaveCount(0);
+  await expect(fleetRow(page, WORKER_NAME).getByText(WORKER_NAME)).toBeVisible();
+  // Any task key, not just this one. The Running cell reports a single task per machine, chosen
+  // newest-claim-first, and this board leaves a *finished* run on TP-4 whose workerId is the same
+  // machine — so a regression that stopped filtering on a live runId would fill this cell with
+  // TP-4 and leave "TP-1 is not here" perfectly true. Measured: naming the key alone let exactly
+  // that mutation through green.
+  await expect(fleetRow(page, WORKER_NAME).getByText(/^TP-\d+$/)).toHaveCount(0);
 });
 
 test("an admin mints a single-use enrolment token, and a machine spends it on a credential that works", async ({
@@ -761,6 +770,10 @@ test("the checkout picker: what a machine has, what it is given, and what saving
   // Ticking it turned workers on for that project, which is an instance-admin act and audited as one
   expect((await projectRow(SECOND_PROJECT_ID))?.worker.enabled).toBe(true);
   await page.reload();
+  // The row itself first: this screen renders "Loading…" and no labels at all until its own fetch
+  // resolves, and a warning that is absent because nothing has rendered reads exactly like a
+  // warning that is gone
+  await expect(pickerRow(page, SECOND_PROJECT_NAME).getByRole("checkbox")).toBeChecked();
   await expect(pickerRow(page, SECOND_PROJECT_NAME).getByText(/does not run machines/)).toHaveCount(0);
 
   // The machine reads the same decision on its own route — the one it clones from
