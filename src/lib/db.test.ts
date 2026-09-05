@@ -480,14 +480,18 @@ describe("connectDB — the client a reconnect abandons", () => {
     expect(close).not.toHaveBeenCalled();
   });
 
+  // The close is chained onto the promise the caller awaits, so a close that throws would be
+  // handed to the request as the answer to `connectDB()` — the one thing it must never be
   it("reconnects even when the close fails, rather than answering with that failure", async () => {
-    const { connectDB } = await freshModule();
-    connect.mockResolvedValue({ ok: true });
     connect.mockImplementation(async () => {
-      connection.client = { close: vi.fn() };
+      connection.client = {
+        close: vi.fn(async () => {
+          throw new Error("topology already closed");
+        }),
+      };
       return { ok: true };
     });
-    close.mockRejectedValue(new Error("topology already closed"));
+    const { connectDB } = await freshModule();
 
     await connectDB();
     connection.readyState = 0;
