@@ -1,12 +1,12 @@
 "use client";
 
 import { useState, useEffect, type CSSProperties, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
 import { ApiTask, ApiTaskLink, DependencyType } from "@/types";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
 import { taskPath } from "@/lib/urls";
+import { useOpenTask } from "@/components/tasks/task-surface";
 
 const DEPENDENCY_LABELS: { value: DependencyType; label: string }[] = [
   { value: "blocked_by", label: "Blocked by" },
@@ -41,7 +41,7 @@ export function TaskLinks({
   actions,
 }: TaskLinksProps) {
   const api = useApi();
-  const router = useRouter();
+  const openTask = useOpenTask();
   const { toast } = useToast();
   const [allTasks, setAllTasks] = useState<ApiTaskLink[]>([]);
   const [showPicker, setShowPicker] = useState(false);
@@ -97,7 +97,7 @@ export function TaskLinks({
   }
 
   function navigateToTask(taskNumber: number) {
-    router.push(taskPath(projectId, taskNumber));
+    openTask(taskPath(projectId, taskNumber));
   }
 
   const blockedBy = task.blockedBy || [];

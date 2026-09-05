@@ -217,11 +217,11 @@ test.describe("duplicate", () => {
     expect((await created).status()).toBe(201);
 
     await expect(page).toHaveURL(new RegExp(`${taskUrl(NEXT_TASK_NUMBER)}$`));
-    // TODO(BP-521): the push from a full-page task renders the copy twice — the page and a modal
-    // over it — so this reads the first editor; one editor is what a person should get. The count
-    // is the limit asserted on purpose: it goes red the day the double render is gone.
-    await expect(page.getByLabel("Task title")).toHaveCount(2);
-    await expect(page.getByLabel("Task title").first()).toHaveValue(`Copy of ${SIBLING_TASK_TITLE}`);
+    // One editor, and no dialog over it: BP-521 turned the push into a document load, so the
+    // intercepting modal is neither drawn on top of the copy nor left armed behind it.
+    await expect(page.getByLabel("Task title")).toHaveCount(1);
+    await expect(page.getByLabel("Task title")).toHaveValue(`Copy of ${SIBLING_TASK_TITLE}`);
+    await expect(page.getByRole("dialog")).toHaveCount(0);
 
     const stored = await readTask(request, NEXT_TASK_NUMBER);
     expect(stored.body).toMatchObject({ status: "planned", priority: "high", assignee: null });
