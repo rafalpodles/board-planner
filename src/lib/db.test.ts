@@ -444,10 +444,20 @@ describe("connectDB — the client a reconnect abandons", () => {
   // A second caller arriving while the close is in flight must not have the client it just opened
   // closed underneath it — which is why the close is the first step of the reconnect rather than
   // something awaited before the cache is refilled
-  it("does not close the connection a concurrent caller opened during the reset", async () => {
+  it("does not open a client while the close of the last one is still in flight", async () => {
+    const order: string[] = [];
     let releaseClose: () => void = () => {};
-    close.mockImplementation(() => new Promise<void>((resolve) => (releaseClose = () => resolve())));
+    close.mockImplementation(() => {
+      order.push("close starts");
+      return new Promise<void>((resolve) => {
+        releaseClose = () => {
+          order.push("close ends");
+          resolve();
+        };
+      });
+    });
     connect.mockImplementation(async () => {
+      order.push("connect");
       connection.readyState = 1;
       return { ok: true };
     });
@@ -459,11 +469,14 @@ describe("connectDB — the client a reconnect abandons", () => {
     const first = connectDB();
     const second = connectDB();
     await Promise.resolve();
+    await Promise.resolve();
     releaseClose();
 
     await expect(first).resolves.toEqual({ ok: true });
     await expect(second).resolves.toEqual({ ok: true });
-    expect(connect).toHaveBeenCalledTimes(2);
+    // The second caller waits for the reconnect the first one started. Emptying the cache and
+    // awaiting the close instead lets it open a client of its own — "connect" between the two close
+    // lines — which is the client the in-flight close then takes with it.
+    expect(order).toEqual(["connect", "close starts", "close ends", "connect"]);
     expect(close).toHaveBeenCalledTimes(1);
-  });
-});
+  });});
