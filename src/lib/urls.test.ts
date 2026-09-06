@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { projectRefFromPathname, isObjectIdSegment, projectPath, taskPath } from "./urls";
+import {
+  isObjectIdSegment,
+  isTaskPath,
+  projectPath,
+  projectRefFromPathname,
+  taskPath,
+} from "./urls";
 
 describe("projectRefFromPathname", () => {
   // The CP-159 regression: links moved to project keys while the widget still matched a
@@ -80,5 +86,21 @@ describe("path builders", () => {
   it("round-trips through projectRefFromPathname", () => {
     expect(projectRefFromPathname(projectPath("CP"))).toBe("CP");
     expect(projectRefFromPathname(taskPath("CP", "CP-9"))).toBe("CP");
+  });
+});
+
+describe("isTaskPath", () => {
+  it("is a task page, and only with a task on the end of it", () => {
+    expect(isTaskPath("/projects/TP/tasks/4")).toBe(true);
+    expect(isTaskPath("/projects/TP/tasks/TP-4")).toBe(true);
+    expect(isTaskPath("/projects/69a52e3b399b27d3cbb2c5a5/tasks/4")).toBe(true);
+
+    expect(isTaskPath("/projects/TP/tasks")).toBe(false);
+    expect(isTaskPath("/projects/TP")).toBe(false);
+    expect(isTaskPath("/projects/TP/sprints")).toBe(false);
+    expect(isTaskPath("/projects/new/tasks/4")).toBe(false);
+    expect(isTaskPath("/my-tasks")).toBe(false);
+    expect(isTaskPath("")).toBe(false);
+    expect(isTaskPath(null)).toBe(false);
   });
 });

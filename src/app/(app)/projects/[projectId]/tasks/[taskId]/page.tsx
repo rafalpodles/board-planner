@@ -6,7 +6,7 @@ import { ApiProject, ApiTask } from "@/types";
 import { useCanonicalUrl } from "@/hooks/use-canonical-url";
 import { projectPath } from "@/lib/urls";
 import { TaskDetail } from "@/components/tasks/TaskDetail";
-import { TaskSurface } from "@/components/tasks/task-surface";
+import { useDeclareTaskPage } from "@/hooks/use-open-task";
 
 export default function TaskDetailPage() {
   const { projectId, taskId } = useParams<{ projectId: string; taskId: string }>();
@@ -14,6 +14,7 @@ export default function TaskDetailPage() {
   const [loaded, setLoaded] = useState<{ task: ApiTask; project: ApiProject } | null>(null);
 
   useCanonicalUrl(loaded?.project.key, loaded?.task.taskNumber);
+  useDeclareTaskPage();
 
   // The same card the intercepting modal draws, so both routes render one view.
   // `flex-1 min-h-0`: the card takes the height <main> has and the task scrolls inside the
@@ -24,14 +25,12 @@ export default function TaskDetailPage() {
       className="mx-auto flex min-h-0 w-full max-w-[1240px] flex-1 flex-col overflow-clip
         rounded-2xl border border-border bg-bg-card"
     >
-      <TaskSurface value="page">
-        <TaskDetail
-          projectId={projectId}
-          taskId={taskId}
-          onClose={() => router.push(projectPath(projectId))}
-          onLoaded={(task, project) => setLoaded({ task, project })}
-        />
-      </TaskSurface>
+      <TaskDetail
+        projectId={projectId}
+        taskId={taskId}
+        onClose={() => router.push(projectPath(projectId))}
+        onLoaded={(task, project) => setLoaded({ task, project })}
+      />
     </div>
   );
 }
