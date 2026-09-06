@@ -1,11 +1,21 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { describe, expect, it, vi } from "vitest";
 import { ApiClient, ClaimRefused, PhaseEvent } from "./api.js";
 import { ControlDeps } from "./control.js";
 import { Runner } from "./exec.js";
-import { LocalConfigView, LocalServer, LocalServerDeps } from "./local-server.js";
+import {
+  LocalConfigView,
+  LocalServer,
+  LocalServerDeps,
+} from "./local-server.js";
 import { Store } from "./outbox.js";
 import { PreflightReport } from "./preflight.js";
 import { Heartbeat, HeartbeatDeps } from "./registration.js";
@@ -27,7 +37,10 @@ function gitConfigPairs(env: NodeJS.ProcessEnv): [string, string][] {
   const count = Number(env.GIT_CONFIG_COUNT ?? 0);
   const pairs: [string, string][] = [];
   for (let index = 0; index < count; index += 1) {
-    pairs.push([env[`GIT_CONFIG_KEY_${index}`] ?? "", env[`GIT_CONFIG_VALUE_${index}`] ?? ""]);
+    pairs.push([
+      env[`GIT_CONFIG_KEY_${index}`] ?? "",
+      env[`GIT_CONFIG_VALUE_${index}`] ?? "",
+    ]);
   }
   return pairs;
 }
@@ -39,7 +52,11 @@ const ENV = {
   CP_STATE_DIR: STATE_DIR,
 };
 
-const IDENTITY = JSON.stringify({ workerId: "6a7c686f70ed274cf658b1b3", credential: "cpw_x", heartbeatMs: 60_000 });
+const IDENTITY = JSON.stringify({
+  workerId: "6a7c686f70ed274cf658b1b3",
+  credential: "cpw_x",
+  heartbeatMs: 60_000,
+});
 
 function memoryStore(contents: string): Store {
   let text = contents;
@@ -67,7 +84,10 @@ function fakeHeartbeat(bindingErrors: string[] = []): Heartbeat {
 // request ever leaves — what is under test is which component each seam was joined to.
 function harness(overrides: Partial<WorkerDeps> = {}) {
   const heartbeat = fakeHeartbeat();
-  const local: LocalServer = { ready: Promise.resolve(), close: vi.fn().mockResolvedValue(undefined) };
+  const local: LocalServer = {
+    ready: Promise.resolve(),
+    close: vi.fn().mockResolvedValue(undefined),
+  };
 
   const seen = {
     heartbeat: undefined as HeartbeatDeps | undefined,
@@ -88,8 +108,11 @@ function harness(overrides: Partial<WorkerDeps> = {}) {
     uid: 501,
     realpath: (path) => path,
     stat: () => ({ uid: 501, mode: 0o40700 }),
-    fetchImpl: vi.fn().mockResolvedValue({ ok: false, status: 404 }) as unknown as typeof fetch,
-    createStore: (path) => memoryStore(path.endsWith("worker.json") ? IDENTITY : ""),
+    fetchImpl: vi
+      .fn()
+      .mockResolvedValue({ ok: false, status: 404 }) as unknown as typeof fetch,
+    createStore: (path) =>
+      memoryStore(path.endsWith("worker.json") ? IDENTITY : ""),
     createApi: () =>
       ({
         claim: vi.fn().mockResolvedValue(null),
@@ -187,7 +210,9 @@ describe("the worker's lifecycle", () => {
     worker.shutdown();
     await running;
 
-    expect(logError).toHaveBeenCalledWith(expect.stringContaining("local control socket unavailable"));
+    expect(logError).toHaveBeenCalledWith(
+      expect.stringContaining("local control socket unavailable"),
+    );
   });
 });
 
@@ -200,7 +225,8 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
   // A second checkout on the same machine, for the tests about what a quarantine covers
   const OTHER_REPO = "/repos/other";
   const OTHER_REMOTE = "git@github.com:owner/other.git";
-  const remoteFor = (cwd?: string) => (cwd === OTHER_REPO ? OTHER_REMOTE : REMOTE);
+  const remoteFor = (cwd?: string) =>
+    cwd === OTHER_REPO ? OTHER_REMOTE : REMOTE;
   const BASE_SHA = "cafef00d";
   const SERVER_RUN_ID = "run-minted-by-the-server";
   const AGENT_SECRET = "cpw_deadbeef0123456789abcdef01234567";
@@ -221,21 +247,52 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       agentId: "a1",
       name: "Default",
       sequence: [
-        { key: "implement", kind: "step", name: "Implement", prompt: "make the change", capability: "edit" },
-        { key: "protected-paths", kind: "gate", name: "Protected files", gateKind: "protected-paths" },
+        {
+          key: "implement",
+          kind: "step",
+          name: "Implement",
+          prompt: "make the change",
+          capability: "edit",
+        },
+        {
+          key: "protected-paths",
+          kind: "gate",
+          name: "Protected files",
+          gateKind: "protected-paths",
+        },
         { key: "diff-size", kind: "gate", name: "Size", gateKind: "diff-size" },
-        { key: "test-presence", kind: "gate", name: "Test written", gateKind: "test-presence" },
+        {
+          key: "test-presence",
+          kind: "gate",
+          name: "Test written",
+          gateKind: "test-presence",
+        },
         { key: "build", kind: "gate", name: "Builds", gateKind: "build" },
-        { key: "test-run", kind: "gate", name: "Tests pass", gateKind: "test-run" },
+        {
+          key: "test-run",
+          kind: "gate",
+          name: "Tests pass",
+          gateKind: "test-run",
+        },
         { key: "review", kind: "gate", name: "Reviewed", gateKind: "review" },
         { key: "push", kind: "step", name: "Push", deterministic: true },
-        { key: "pull-request", kind: "step", name: "Pull request", deterministic: true },
+        {
+          key: "pull-request",
+          kind: "step",
+          name: "Pull request",
+          deterministic: true,
+        },
       ],
     },
   };
 
   // The task the worker moves on to, so a refusal that settles late has a live run to endanger
-  const NEXT_TASK: ClaimedTask = { ...CLAIMED, taskId: "t2", taskKey: "CP-10", taskNumber: 10 };
+  const NEXT_TASK: ClaimedTask = {
+    ...CLAIMED,
+    taskId: "t2",
+    taskKey: "CP-10",
+    taskNumber: 10,
+  };
 
   const RESULT_PAYLOAD = {
     status: "completed",
@@ -278,7 +335,8 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
   // 17 bytes: small enough that every line is cut, and a tick apart, the way a real pipe flushes
   function pipeFlushes(text: string): string[] {
     const parts: string[] = [];
-    for (let index = 0; index < text.length; index += 17) parts.push(text.slice(index, index + 17));
+    for (let index = 0; index < text.length; index += 17)
+      parts.push(text.slice(index, index + 17));
     return parts;
   }
 
@@ -290,19 +348,29 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     // What `config --list --show-scope` answers. Only that listing: `--local --list` is what
     // bindRepository scans, and a key visible to both would be refused at binding time instead —
     // which is the path BP-346 records as the one an include.path or worktree-scope key evades.
-    scopedConfig: string | Record<string, string> = ""
+    scopedConfig: string | Record<string, string> = "",
   ): Runner {
     const scopedFor = (cwd?: string) =>
-      typeof scopedConfig === "string" ? scopedConfig : (scopedConfig[cwd ?? ""] ?? "");
+      typeof scopedConfig === "string"
+        ? scopedConfig
+        : (scopedConfig[cwd ?? ""] ?? "");
     return {
       async run(command, args, opts) {
         everyCall.push([command, ...args]);
         if (command === "git" && args.includes("--show-scope")) {
-          return { code: 0, stdout: scopedFor(opts.cwd), stderr: "", timedOut: false };
+          return {
+            code: 0,
+            stdout: scopedFor(opts.cwd),
+            stderr: "",
+            timedOut: false,
+          };
         }
         // everyCall keeps argv only, and the base lookup's hardening lives entirely in its
         // environment — workspace.ts composes those two calls' env instead of their args.
-        if (command === "git" && (args[0] === "ls-remote" || args[0] === "fetch")) {
+        if (
+          command === "git" &&
+          (args[0] === "ls-remote" || args[0] === "fetch")
+        ) {
           remoteCalls.push({ args, env: opts.env ?? {} });
         }
         if (command === "claude") {
@@ -317,13 +385,23 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         // The base is resolved off the wire now, so ls-remote has to answer with the ref it was
         // asked for; whether the *right* ref is picked out is gate-integrity's subject, on real git
         if (args[0] === "ls-remote") {
-          return { code: 0, stdout: `${BASE_SHA}\t${args[args.length - 1]}\n`, stderr: "", timedOut: false };
+          return {
+            code: 0,
+            stdout: `${BASE_SHA}\t${args[args.length - 1]}\n`,
+            stderr: "",
+            timedOut: false,
+          };
         }
         // workspace.ts verifies the fetched sha with `rev-parse --verify <sha>^{commit}` before
         // trusting it as the base; collectDiff then refuses anything that is not an object id, so
         // this has to answer with one rather than the content-free "" every other call gets
         if (args.includes("--verify")) {
-          return { code: 0, stdout: `${BASE_SHA}\n`, stderr: "", timedOut: false };
+          return {
+            code: 0,
+            stdout: `${BASE_SHA}\n`,
+            stderr: "",
+            timedOut: false,
+          };
         }
         // bindRepository insists the path is its own toplevel; every other git call is content-free
         return {
@@ -360,8 +438,10 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       stateFiles?: Record<string, string>;
       // Claimed in order, one per pass of the loop, then the queue runs dry
       tasks?: ClaimedTask[];
-      // The board refusing every claim outright, in the server's words (BP-512)
-      claimRefusal?: string;
+      // The board refusing the claim outright, in the server's words (BP-512). A string refuses
+      // every project; a map refuses only the projects it names, which is what it takes to put one
+      // project's board refusal next to a sibling's quarantine.
+      claimRefusal?: string | Record<string, string>;
       onAgentStart?: (nth: number) => void;
       // What the checkout's scoped git config says, for the tests about a planted key
       scopedConfig?: string | Record<string, string>;
@@ -377,13 +457,17 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       // throttled by MIN_REFRESH_INTERVAL_MS and would otherwise return without doing anything,
       // which makes "survives a rebind" a claim no test could see.
       clockJumpOnSleepMs?: number;
-    } = {}
+    } = {},
   ) {
     let seenHeartbeat: HeartbeatDeps | undefined;
     const stateDir = mkdtempSync(join(tmpdir(), "cp-wiring-run-"));
-    writeFileSync(join(stateDir, "repos.json"), JSON.stringify({ repos: opts.repos ?? [REPO] }), {
-      mode: 0o600,
-    });
+    writeFileSync(
+      join(stateDir, "repos.json"),
+      JSON.stringify({ repos: opts.repos ?? [REPO] }),
+      {
+        mode: 0o600,
+      },
+    );
 
     for (const [name, contents] of Object.entries(opts.stateFiles ?? {})) {
       writeFileSync(join(stateDir, name), contents, { mode: 0o600 });
@@ -408,8 +492,12 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     let localConfig: (() => LocalConfigView) | undefined;
 
     const api = {
-      claim: vi.fn<ApiClient["claim"]>(async () => {
-        if (opts.claimRefusal) throw new ClaimRefused(opts.claimRefusal);
+      claim: vi.fn<ApiClient["claim"]>(async (projectId) => {
+        const refusal =
+          typeof opts.claimRefusal === "string"
+            ? opts.claimRefusal
+            : opts.claimRefusal?.[projectId];
+        if (refusal) throw new ClaimRefused(refusal);
         return queue[claims++] ?? null;
       }),
       setStatus: vi.fn<ApiClient["setStatus"]>().mockResolvedValue(undefined),
@@ -417,7 +505,11 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       release: vi.fn<ApiClient["release"]>().mockResolvedValue(undefined),
       statusIds: vi
         .fn<ApiClient["statusIds"]>()
-        .mockResolvedValue({ approved: "todo", review: "in_review", done: "done" }),
+        .mockResolvedValue({
+          approved: "todo",
+          review: "in_review",
+          done: "done",
+        }),
       columnIds: vi
         .fn<ApiClient["columnIds"]>()
         .mockResolvedValue(["todo", "in_progress", "in_review", "done"]),
@@ -435,7 +527,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         opts.onAgentStart,
         everyCall,
         remoteCalls,
-        opts.scopedConfig
+        opts.scopedConfig,
       ),
       hostname: () => "host-1",
       // the loop only sleeps once it has nothing left to claim, which is one pass after the run
@@ -467,7 +559,9 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
           // Work policy travels with the assignment now: it describes the project, so two projects
           // on one machine can resolve differently.
           assignments: (
-            opts.assignments ?? [{ project: "p1", remote: opts.assignmentRemote ?? REMOTE }]
+            opts.assignments ?? [
+              { project: "p1", remote: opts.assignmentRemote ?? REMOTE },
+            ]
           ).map((assignment) => ({
             ...assignment,
             ...(opts.extraAssignmentFields ?? {}),
@@ -475,7 +569,8 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
           })),
         }),
       })) as unknown as typeof fetch,
-      createStore: (path) => memoryStore(path.endsWith("worker.json") ? IDENTITY : ""),
+      createStore: (path) =>
+        memoryStore(path.endsWith("worker.json") ? IDENTITY : ""),
       createApi: () => api as unknown as ApiClient,
       createTelemetry: () => telemetry,
       // A checkout with what the gates need, unless a test says otherwise. Left to the real
@@ -489,9 +584,9 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
             ? "{}"
             : path.endsWith("package.json")
               ? JSON.stringify({ scripts: { build: "tsc", test: "vitest" } })
-              // Everything else still comes off the real filesystem, which is how the state
-              // directory written by `stateFiles` reaches the worker.
-              : existsSync(path)
+              : // Everything else still comes off the real filesystem, which is how the state
+                // directory written by `stateFiles` reaches the worker.
+                existsSync(path)
                 ? readFileSync(path, "utf8")
                 : null),
       startHeartbeat: (heartbeatDeps) => {
@@ -501,12 +596,17 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       connectControl: () => ({ close: vi.fn() }),
       startLocalServer: (localDeps) => {
         localConfig = localDeps.config;
-        return { ready: Promise.resolve(), close: vi.fn().mockResolvedValue(undefined) };
+        return {
+          ready: Promise.resolve(),
+          close: vi.fn().mockResolvedValue(undefined),
+        };
       },
     });
     stop = () => worker.shutdown();
 
-    const clock = vi.spyOn(Date, "now").mockImplementation(() => wallClock() + clockOffset);
+    const clock = vi
+      .spyOn(Date, "now")
+      .mockImplementation(() => wallClock() + clockOffset);
     try {
       await worker.run();
     } finally {
@@ -538,7 +638,11 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
   // a run that can last the full task timeout with the agent still working.
   it("aborts the run in flight when the worker is asked to shut down", async () => {
     const stateDir = mkdtempSync(join(tmpdir(), "cp-shutdown-"));
-    writeFileSync(join(stateDir, "repos.json"), JSON.stringify({ repos: [REPO] }), { mode: 0o600 });
+    writeFileSync(
+      join(stateDir, "repos.json"),
+      JSON.stringify({ repos: [REPO] }),
+      { mode: 0o600 },
+    );
     let sawAbort = false;
     let claims = 0;
     let reachedSleep = false;
@@ -551,15 +655,31 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
           // shutdown aborts synchronously, so the signal is already aborted by the time we look —
           // registering a listener first and only then calling shutdown would wait forever
           if (!opts.signal?.aborted) {
-            await new Promise<void>((resolve) => opts.signal?.addEventListener("abort", () => resolve()));
+            await new Promise<void>((resolve) =>
+              opts.signal?.addEventListener("abort", () => resolve()),
+            );
           }
           sawAbort = opts.signal?.aborted === true;
           return { code: 143, stdout: "", stderr: "aborted", timedOut: false };
         }
         if (args[0] === "ls-remote") {
-          return { code: 0, stdout: `${REPO}\t${args[args.length - 1]}\n`, stderr: "", timedOut: false };
+          return {
+            code: 0,
+            stdout: `${REPO}\t${args[args.length - 1]}\n`,
+            stderr: "",
+            timedOut: false,
+          };
         }
-        return { code: 0, stdout: args.includes("rev-parse") ? REPO : args.includes("get-url") ? REMOTE : "", stderr: "", timedOut: false };
+        return {
+          code: 0,
+          stdout: args.includes("rev-parse")
+            ? REPO
+            : args.includes("get-url")
+              ? REMOTE
+              : "",
+          stderr: "",
+          timedOut: false,
+        };
       },
     };
 
@@ -589,22 +709,36 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       fetchImpl: vi.fn().mockResolvedValue({
         ok: true,
         status: 200,
-        json: async () => ({ assignments: [{ project: "p1", remote: REMOTE }] }),
+        json: async () => ({
+          assignments: [{ project: "p1", remote: REMOTE }],
+        }),
       }) as unknown as typeof fetch,
-      createStore: (path) => memoryStore(path.endsWith("worker.json") ? IDENTITY : ""),
+      createStore: (path) =>
+        memoryStore(path.endsWith("worker.json") ? IDENTITY : ""),
       createApi: () =>
         ({
           claim: vi.fn(async () => (claims++ === 0 ? CLAIMED : null)),
           setStatus: vi.fn().mockResolvedValue(undefined),
           comment: vi.fn().mockResolvedValue(undefined),
           release: vi.fn().mockResolvedValue(undefined),
-          statusIds: vi.fn().mockResolvedValue({ approved: "todo", review: "in_review", done: "done" }),
-          columnIds: vi.fn().mockResolvedValue(["todo", "in_progress", "in_review", "done"]),
+          statusIds: vi
+            .fn()
+            .mockResolvedValue({
+              approved: "todo",
+              review: "in_review",
+              done: "done",
+            }),
+          columnIds: vi
+            .fn()
+            .mockResolvedValue(["todo", "in_progress", "in_review", "done"]),
           postEvent: async () => ({ applied: true }),
         }) as unknown as ApiClient,
       startHeartbeat: () => fakeHeartbeat(),
       connectControl: () => ({ close: vi.fn() }),
-      startLocalServer: () => ({ ready: Promise.resolve(), close: vi.fn().mockResolvedValue(undefined) }),
+      startLocalServer: () => ({
+        ready: Promise.resolve(),
+        close: vi.fn().mockResolvedValue(undefined),
+      }),
     });
     shutdown = () => worker.shutdown();
 
@@ -635,16 +769,27 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       }
       return {
         code: 0,
-        stdout: args.includes("rev-parse") ? REPO : args.includes("get-url") ? REMOTE : "",
+        stdout: args.includes("rev-parse")
+          ? REPO
+          : args.includes("get-url")
+            ? REMOTE
+            : "",
         stderr: "",
         timedOut: false,
       };
     },
   };
 
-  async function runAgainstUnreachableRemote(options: { passes: number; endlessQueue?: boolean }) {
+  async function runAgainstUnreachableRemote(options: {
+    passes: number;
+    endlessQueue?: boolean;
+  }) {
     const stateDir = mkdtempSync(join(tmpdir(), "cp-machine-fault-"));
-    writeFileSync(join(stateDir, "repos.json"), JSON.stringify({ repos: [REPO] }), { mode: 0o600 });
+    writeFileSync(
+      join(stateDir, "repos.json"),
+      JSON.stringify({ repos: [REPO] }),
+      { mode: 0o600 },
+    );
 
     const counts = { claims: 0, sleeps: 0 };
     let stop = (): void => {};
@@ -657,8 +802,16 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       setStatus: vi.fn().mockResolvedValue(undefined),
       comment: vi.fn().mockResolvedValue(undefined),
       release: vi.fn().mockResolvedValue(undefined),
-      statusIds: vi.fn().mockResolvedValue({ approved: "todo", review: "in_review", done: "done" }),
-      columnIds: vi.fn().mockResolvedValue(["todo", "in_progress", "in_review", "done"]),
+      statusIds: vi
+        .fn()
+        .mockResolvedValue({
+          approved: "todo",
+          review: "in_review",
+          done: "done",
+        }),
+      columnIds: vi
+        .fn()
+        .mockResolvedValue(["todo", "in_progress", "in_review", "done"]),
       postEvent: async () => ({ applied: true }),
       postRun: vi.fn().mockResolvedValue(undefined),
     };
@@ -685,13 +838,19 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       fetchImpl: vi.fn().mockResolvedValue({
         ok: true,
         status: 200,
-        json: async () => ({ assignments: [{ project: "p1", remote: REMOTE }] }),
+        json: async () => ({
+          assignments: [{ project: "p1", remote: REMOTE }],
+        }),
       }) as unknown as typeof fetch,
-      createStore: (path) => memoryStore(path.endsWith("worker.json") ? IDENTITY : ""),
+      createStore: (path) =>
+        memoryStore(path.endsWith("worker.json") ? IDENTITY : ""),
       createApi: () => api as unknown as ApiClient,
       startHeartbeat: () => fakeHeartbeat(),
       connectControl: () => ({ close: vi.fn() }),
-      startLocalServer: () => ({ ready: Promise.resolve(), close: vi.fn().mockResolvedValue(undefined) }),
+      startLocalServer: () => ({
+        ready: Promise.resolve(),
+        close: vi.fn().mockResolvedValue(undefined),
+      }),
     });
     stop = () => worker.shutdown();
 
@@ -720,12 +879,17 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
   // writes the card another identical comment and fires another webhook, Slack message and
   // notification with it: ~120 an hour at the default interval.
   it("comments once about a base it cannot resolve, however many passes hit the same fault", async () => {
-    const { api, counts } = await runAgainstUnreachableRemote({ passes: 3, endlessQueue: true });
+    const { api, counts } = await runAgainstUnreachableRemote({
+      passes: 3,
+      endlessQueue: true,
+    });
 
     expect(counts.claims).toBe(3);
     expect(api.release).toHaveBeenCalledTimes(3);
     expect(api.comment).toHaveBeenCalledTimes(1);
-    expect(api.comment.mock.calls[0][2]).toMatch(/Returned to the queue: .*could not resolve base branch main/s);
+    expect(api.comment.mock.calls[0][2]).toMatch(
+      /Returned to the queue: .*could not resolve base branch main/s,
+    );
   });
 
   // The whole run, as the board would see it: the three stage boundaries it got past, the three
@@ -758,7 +922,11 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     const { posted } = await runOneTask();
 
     expect(posted.length).toBeGreaterThan(0);
-    expect(posted.every((event) => typeof event.phase === "string" && event.phase !== "")).toBe(true);
+    expect(
+      posted.every(
+        (event) => typeof event.phase === "string" && event.phase !== "",
+      ),
+    ).toBe(true);
     expect(posted.map((event) => event.phase)).not.toContain(undefined);
   });
 
@@ -767,7 +935,9 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
   it("carries an event off the agent's own stream to the server", async () => {
     const { phases, telemetry } = await runOneTask();
 
-    expect(phases.filter((phase) => phase === "agent").length).toBeGreaterThan(1);
+    expect(phases.filter((phase) => phase === "agent").length).toBeGreaterThan(
+      1,
+    );
     // and it really is the stream: only a parsed tool_use can produce a tool
     expect(telemetry.recent()).toContainEqual({
       phase: "agent",
@@ -818,9 +988,15 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
 
     // Both halves of the lookup, and named rather than counted: an empty list would satisfy every
     // assertion below it.
-    expect(remoteCalls.map((call) => call.args[0])).toEqual(["ls-remote", "fetch"]);
+    expect(remoteCalls.map((call) => call.args[0])).toEqual([
+      "ls-remote",
+      "fetch",
+    ]);
     for (const call of remoteCalls) {
-      expect(gitConfigPairs(call.env)).toContainEqual(["protocol.ext.allow", "never"]);
+      expect(gitConfigPairs(call.env)).toContainEqual([
+        "protocol.ext.allow",
+        "never",
+      ]);
     }
   });
 
@@ -836,11 +1012,13 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
   // gh's own resolution, and the reason is on the operator's log rather than inside a 403 later.
   it("says so and carries on when the pinned account has no token to give", async () => {
     const { logError } = await runOneTask(undefined, undefined, {
-      stateFiles: { "github.json": JSON.stringify({ account: "logged-out-account" }) },
+      stateFiles: {
+        "github.json": JSON.stringify({ account: "logged-out-account" }),
+      },
     });
 
     expect(logError).toHaveBeenCalledWith(
-      expect.stringContaining("logged-out-account")
+      expect.stringContaining("logged-out-account"),
     );
   });
 
@@ -904,14 +1082,18 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
   it("puts no credential and no repository path on the socket", async () => {
     const { localConfig } = await runOneTask();
 
-    expect(JSON.stringify(localConfig?.())).not.toMatch(/cp_admin_token|cpw_|\/repos\/demo/);
+    expect(JSON.stringify(localConfig?.())).not.toMatch(
+      /cp_admin_token|cpw_|\/repos\/demo/,
+    );
   });
 
   it("runs the agent on today's models when the server's policy names none", async () => {
     const { claudeArgs } = await runOneTask();
 
     expect(claudeArgs[claudeArgs.indexOf("--model") + 1]).toBe("opus");
-    expect(claudeArgs[claudeArgs.indexOf("--fallback-model") + 1]).toBe("sonnet");
+    expect(claudeArgs[claudeArgs.indexOf("--fallback-model") + 1]).toBe(
+      "sonnet",
+    );
   });
 
   it("addresses every event to the task and the run the server itself minted", async () => {
@@ -985,15 +1167,23 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
   // run is tokens spent on work whose result will be refused.
   describe("a task taken from the run that holds it", () => {
     it("stops the run when the server says it no longer holds the task", async () => {
-      const run = await runOneTask(async (event) => ({ applied: event.phase !== "agent" }));
+      const run = await runOneTask(async (event) => ({
+        applied: event.phase !== "agent",
+      }));
 
       // released, not gate-rejected: the run ended where the refusal arrived
       expect(run.api.release).toHaveBeenCalledWith("p1", "t1");
-      expect(run.api.setStatus).not.toHaveBeenCalledWith("p1", "t1", "in_review");
-      expect(run.phases.some((phase) => phase.startsWith("gates:"))).toBe(false);
+      expect(run.api.setStatus).not.toHaveBeenCalledWith(
+        "p1",
+        "t1",
+        "in_review",
+      );
+      expect(run.phases.some((phase) => phase.startsWith("gates:"))).toBe(
+        false,
+      );
       // said once, not once per phase still in flight while the run unwinds
       const lost = run.logError.mock.calls.filter(([message]) =>
-        message.includes("no longer has run")
+        message.includes("no longer has run"),
       );
       expect(lost).toHaveLength(1);
     });
@@ -1009,7 +1199,9 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
 
       const run = await runOneTask(
         async (event) =>
-          event.taskId === "t1" && event.phase === "agent" ? late : { applied: true },
+          event.taskId === "t1" && event.phase === "agent"
+            ? late
+            : { applied: true },
         undefined,
         {
           tasks: [CLAIMED, NEXT_TASK],
@@ -1017,12 +1209,14 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
           onAgentStart: (nth) => {
             if (nth === 2) deliverLate();
           },
-        }
+        },
       );
 
       expect(run.api.setStatus).toHaveBeenCalledWith("p1", "t2", "in_review");
       expect(run.api.release).not.toHaveBeenCalled();
-      expect(run.logError).not.toHaveBeenCalledWith(expect.stringContaining("no longer has run"));
+      expect(run.logError).not.toHaveBeenCalledWith(
+        expect.stringContaining("no longer has run"),
+      );
     });
 
     it("aborts nothing when the refusal lands with no run in flight at all", async () => {
@@ -1032,7 +1226,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       });
 
       const run = await runOneTask(async (event) =>
-        event.phase === "agent" ? late : { applied: true }
+        event.phase === "agent" ? late : { applied: true },
       );
 
       // the loop has stopped by now, so there is no run for a refusal to be about
@@ -1040,7 +1234,9 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       await new Promise((resolve) => setImmediate(resolve));
 
       expect(run.api.setStatus).toHaveBeenCalledWith("p1", "t1", "in_review");
-      expect(run.logError).not.toHaveBeenCalledWith(expect.stringContaining("no longer has run"));
+      expect(run.logError).not.toHaveBeenCalledWith(
+        expect.stringContaining("no longer has run"),
+      );
     });
   });
 
@@ -1053,7 +1249,9 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       });
 
       expect(run.claimed).toBe(false);
-      expect(run.bindingErrors.join(" ")).toMatch(/no checkout of git@github\.com:someone\/else\.git/);
+      expect(run.bindingErrors.join(" ")).toMatch(
+        /no checkout of git@github\.com:someone\/else\.git/,
+      );
     });
 
     // The gates run `npm ci` and `npm run build` unconditionally, so a repository without a
@@ -1062,15 +1260,19 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     it("adds the bound repository's own shortcomings to the report", async () => {
       const run = await runOneTask(undefined, undefined, {
         readFile: (path) =>
-          path.endsWith("package.json") ? JSON.stringify({ scripts: { test: "vitest" } }) : null,
+          path.endsWith("package.json")
+            ? JSON.stringify({ scripts: { test: "vitest" } })
+            : null,
       });
 
       const report = run.heartbeatDeps?.preflight?.();
       expect(report?.ok).toBe(false);
       expect(report?.checks.filter((c) => !c.ok).map((c) => c.name)).toEqual(
-        expect.arrayContaining(["package-lock.json", "build script"])
+        expect.arrayContaining(["package-lock.json", "build script"]),
       );
-      expect(report?.checks.find((c) => c.name === "package-lock.json")?.detail).toContain(REPO);
+      expect(
+        report?.checks.find((c) => c.name === "package-lock.json")?.detail,
+      ).toContain(REPO);
     });
 
     // BP-379. Found by running it: MP-75 was claimed from a repository with no lockfile and no
@@ -1079,7 +1281,9 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     it("does not claim from a repository its own checks already failed", async () => {
       const run = await runOneTask(undefined, undefined, {
         readFile: (path) =>
-          path.endsWith("package.json") ? JSON.stringify({ scripts: { lint: "eslint" } }) : null,
+          path.endsWith("package.json")
+            ? JSON.stringify({ scripts: { lint: "eslint" } })
+            : null,
       });
 
       expect(run.claimed).toBe(false);
@@ -1089,13 +1293,17 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     it("says which project it is refusing, and why, rather than idling silently", async () => {
       const run = await runOneTask(undefined, undefined, {
         readFile: (path) =>
-          path.endsWith("package.json") ? JSON.stringify({ scripts: { lint: "eslint" } }) : null,
+          path.endsWith("package.json")
+            ? JSON.stringify({ scripts: { lint: "eslint" } })
+            : null,
       });
 
       expect(run.logError).toHaveBeenCalledWith(
-        expect.stringContaining("not claiming for project p1")
+        expect.stringContaining("not claiming for project p1"),
       );
-      expect(run.logError).toHaveBeenCalledWith(expect.stringContaining("package-lock.json"));
+      expect(run.logError).toHaveBeenCalledWith(
+        expect.stringContaining("package-lock.json"),
+      );
     });
 
     // "Why is this machine sitting on a project and doing nothing" has to be answerable from the
@@ -1103,10 +1311,14 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     it("says on the socket why the project is not being worked on", async () => {
       const run = await runOneTask(undefined, undefined, {
         readFile: (path) =>
-          path.endsWith("package.json") ? JSON.stringify({ scripts: { lint: "eslint" } }) : null,
+          path.endsWith("package.json")
+            ? JSON.stringify({ scripts: { lint: "eslint" } })
+            : null,
       });
 
-      expect(run.localConfig?.().projects[0].blocked).toContain("package-lock.json");
+      expect(run.localConfig?.().projects[0].blocked).toContain(
+        "package-lock.json",
+      );
     });
 
     /**
@@ -1161,7 +1373,10 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         // happened — "no rebind" and "a rebind that preserved the quarantine" look identical from
         // the claim count — so raising the throttle constant, or changing the sleep budget, would
         // silently turn it into a copy of the test above.
-        expect(run.rebinds, "no rebind happened, so this proves nothing").toBeGreaterThan(1);
+        expect(
+          run.rebinds,
+          "no rebind happened, so this proves nothing",
+        ).toBeGreaterThan(1);
         expect(run.api.claim).toHaveBeenCalledTimes(1);
       });
 
@@ -1180,11 +1395,13 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       });
 
       it("never checks anything out of the poisoned clone", async () => {
-        const run = await runOneTask(undefined, undefined, { scopedConfig: PLANTED });
+        const run = await runOneTask(undefined, undefined, {
+          scopedConfig: PLANTED,
+        });
 
         expect(
           run.everyCall.some((call) => call.join(" ").includes("worktree add")),
-          "the worktree was created anyway"
+          "the worktree was created anyway",
         ).toBe(false);
       });
 
@@ -1206,9 +1423,10 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         const blocked = run.localConfig?.().projects ?? [];
         expect(blocked).toHaveLength(2);
         for (const project of blocked) {
-          expect(project.blocked, `project ${project.project} was left claimable`).toContain(
-            "filter.z.smudge"
-          );
+          expect(
+            project.blocked,
+            `project ${project.project} was left claimable`,
+          ).toContain("filter.z.smudge");
         }
       });
 
@@ -1229,9 +1447,10 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         const blocked = run.localConfig?.().projects ?? [];
         expect(blocked).toHaveLength(2);
         for (const project of blocked) {
-          expect(project.blocked, `project ${project.project} was left claimable`).toContain(
-            "filter.z.smudge"
-          );
+          expect(
+            project.blocked,
+            `project ${project.project} was left claimable`,
+          ).toContain("filter.z.smudge");
         }
       });
 
@@ -1242,14 +1461,21 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
        * reported itself through this list since BP-379.
        */
       it("reports itself as a failed check, so the console says the machine stopped on purpose", async () => {
-        const run = await runOneTask(undefined, undefined, { scopedConfig: PLANTED });
+        const run = await runOneTask(undefined, undefined, {
+          scopedConfig: PLANTED,
+        });
 
         const report = run.heartbeatDeps?.preflight?.();
         expect(report?.ok).toBe(false);
-        const check = report?.checks.find((c) => c.name === "checkout quarantined");
+        const check = report?.checks.find(
+          (c) => c.name === "checkout quarantined",
+        );
         expect(check?.detail).toContain("filter.z.smudge");
         expect(check?.detail).toContain(REPO);
-        expect(check?.detail, "the report does not say how to recover").toContain("restart");
+        expect(
+          check?.detail,
+          "the report does not say how to recover",
+        ).toContain("restart");
       });
 
       // The control for the one above: a healthy machine does not report a quarantine it has not
@@ -1258,7 +1484,9 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         const run = await runOneTask(undefined, undefined, {});
 
         const report = run.heartbeatDeps?.preflight?.();
-        expect(report?.checks.some((c) => c.name === "checkout quarantined")).toBe(false);
+        expect(
+          report?.checks.some((c) => c.name === "checkout quarantined"),
+        ).toBe(false);
       });
 
       /**
@@ -1272,26 +1500,102 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       it("shows the gate requirement when that is the only reason, which is the reachable half", async () => {
         const run = await runOneTask(undefined, undefined, {
           readFile: (path) =>
-            path.endsWith("package.json") ? JSON.stringify({ scripts: { lint: "eslint" } }) : null,
+            path.endsWith("package.json")
+              ? JSON.stringify({ scripts: { lint: "eslint" } })
+              : null,
         });
 
-        expect(run.localConfig?.().projects[0].blocked).toContain("package-lock.json");
+        expect(run.localConfig?.().projects[0].blocked).toContain(
+          "package-lock.json",
+        );
+      });
+
+      /**
+       * The board's own refusal (BP-512) is the third reason `blocked` can carry, and unlike the
+       * gate one it really can sit next to a quarantine. Not on the project that hit the poison —
+       * a successful claim clears its refusal before the run starts — but on a SIBLING bound to
+       * the same checkout: `p2`'s board refuses, then `p1`'s run poisons the checkout they share,
+       * and `p2` is dropped from the pass before its board is ever asked again. Its refusal is
+       * frozen at whatever the board last said, and the checkout is the thing an operator has to
+       * go and fix, so that is what the cockpit shows.
+       */
+      it("shows the quarantine over a sibling's older board refusal, which outlives it", async () => {
+        const run = await runOneTask(undefined, undefined, {
+          scopedConfig: PLANTED,
+          // p2 first: a machine fault ends the pass, so p1 has to be claimed after p2 has been
+          // refused, or the refusal is never recorded at all and this passes for the wrong reason.
+          assignments: [
+            { project: "p2", remote: REMOTE },
+            { project: "p1", remote: REMOTE },
+          ],
+          claimRefusal: {
+            p2: "This board has no column meaning In progress, so nothing moves.",
+          },
+        });
+
+        const p2 = run
+          .localConfig?.()
+          .projects.find((project) => project.project === "p2");
+        expect(
+          p2?.blocked,
+          "the board refusal was never recorded, so nothing was chosen between",
+        ).not.toBe("");
+        expect(p2?.blocked).toContain("filter.z.smudge");
+      });
+
+      /**
+       * The control: the same two projects and the same refusal, with nothing planted. Without it,
+       * a `claimRefusal` map that named a project no assignment carries would leave `blocked`
+       * showing the quarantine above for the ordinary reason that it was the only reason set.
+       */
+      it("shows the board's refusal when that is all there is", async () => {
+        const run = await runOneTask(undefined, undefined, {
+          assignments: [
+            { project: "p2", remote: REMOTE },
+            { project: "p1", remote: REMOTE },
+          ],
+          claimRefusal: {
+            p2: "This board has no column meaning In progress, so nothing moves.",
+          },
+        });
+
+        const projects = run.localConfig?.().projects ?? [];
+        expect(
+          projects.find((project) => project.project === "p2")?.blocked,
+        ).toBe(
+          "This board has no column meaning In progress, so nothing moves.",
+        );
+        expect(
+          projects.find((project) => project.project === "p1")?.blocked,
+          "the sibling was blocked by something, so the refusal above is not the only thing at work",
+        ).toBe("");
       });
 
       it("says on the socket why the project is not being worked on", async () => {
-        const run = await runOneTask(undefined, undefined, { scopedConfig: PLANTED });
+        const run = await runOneTask(undefined, undefined, {
+          scopedConfig: PLANTED,
+        });
 
-        expect(run.localConfig?.().projects[0].blocked).toContain("filter.z.smudge");
+        expect(run.localConfig?.().projects[0].blocked).toContain(
+          "filter.z.smudge",
+        );
       });
 
       it("says it in the worker's own log too, with the finding and what an operator has to do", async () => {
-        const run = await runOneTask(undefined, undefined, { scopedConfig: PLANTED });
+        const run = await runOneTask(undefined, undefined, {
+          scopedConfig: PLANTED,
+        });
 
         const said = run.logError.mock.calls.map((call) => String(call[0]));
-        const line = said.find((message) => message.startsWith("quarantining "));
+        const line = said.find((message) =>
+          message.startsWith("quarantining "),
+        );
         // One line carrying all three: which checkout, what is in it, and the way out. Asserted on
         // the same string rather than across three calls — a reader gets one line, not a set.
-        expect(line, `no quarantine line among ${JSON.stringify(said)}`).toBeDefined();
+        expect(
+          line,
+          `no quarantine line among ${JSON.stringify(said)}`,
+        ).toBeDefined();
         expect(line).toContain(REPO);
         expect(line).toContain("filter.z.smudge");
         expect(line).toContain("restarted");
@@ -1305,13 +1609,15 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
        * option is what says the attempt came back.
        */
       it("hands the task back rather than charging it for the machine's compromise", async () => {
-        const run = await runOneTask(undefined, undefined, { scopedConfig: PLANTED });
+        const run = await runOneTask(undefined, undefined, {
+          scopedConfig: PLANTED,
+        });
 
         expect(run.api.release).toHaveBeenCalled();
         expect(run.api.release).not.toHaveBeenCalledWith(
           expect.anything(),
           expect.anything(),
-          expect.objectContaining({ refund: false })
+          expect.objectContaining({ refund: false }),
         );
       });
     });
@@ -1332,15 +1638,18 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     // refuses to claim at all. The cockpit has to show the board's reason in the same place.
     it("says on the socket why the board itself refused the claim", async () => {
       const run = await runOneTask(undefined, undefined, {
-        claimRefusal: "This board has no column meaning In progress, so nothing moves.",
+        claimRefusal:
+          "This board has no column meaning In progress, so nothing moves.",
       });
 
       expect(run.claimed).toBe(false);
       expect(run.localConfig?.().projects[0].blocked).toBe(
-        "This board has no column meaning In progress, so nothing moves."
+        "This board has no column meaning In progress, so nothing moves.",
       );
       expect(run.logError).toHaveBeenCalledWith(
-        expect.stringContaining("not claiming for project p1: This board has no column meaning")
+        expect.stringContaining(
+          "not claiming for project p1: This board has no column meaning",
+        ),
       );
     });
 
@@ -1354,7 +1663,9 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
 
       const report = run.heartbeatDeps?.preflight?.();
       const repoNames = ["package-lock.json", "build script", "test script"];
-      expect(report?.checks.filter((c) => repoNames.includes(c.name) && !c.ok)).toEqual([]);
+      expect(
+        report?.checks.filter((c) => repoNames.includes(c.name) && !c.ok),
+      ).toEqual([]);
     });
 
     // A server that sends a path alongside the remote must not get one used
@@ -1363,7 +1674,9 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         extraAssignmentFields: { proposedPath: "/etc", path: "/etc" },
       });
 
-      expect(run.workspacePaths.some((arg) => arg.startsWith("/etc"))).toBe(false);
+      expect(run.workspacePaths.some((arg) => arg.startsWith("/etc"))).toBe(
+        false,
+      );
     });
   });
 });
@@ -1409,7 +1722,9 @@ describe("preflight's place in the wiring", () => {
     worker.shutdown();
     await running;
 
-    expect(setPath).toHaveBeenCalledWith("/opt/homebrew/bin:/Users/me/.local/bin:/usr/bin:/bin");
+    expect(setPath).toHaveBeenCalledWith(
+      "/opt/homebrew/bin:/Users/me/.local/bin:/usr/bin:/bin",
+    );
   });
 
   it("leaves the PATH alone when every tool is already reachable from it", async () => {
@@ -1445,14 +1760,18 @@ describe("preflight's place in the wiring", () => {
 
   it("keeps the worker running when preflight itself blows up", async () => {
     const { worker, logError, seen } = preflightHarness({
-      runPreflight: vi.fn().mockRejectedValue(new Error("no shell on this machine")),
+      runPreflight: vi
+        .fn()
+        .mockRejectedValue(new Error("no shell on this machine")),
     });
 
     const running = worker.run();
     worker.shutdown();
     await expect(running).resolves.toBeUndefined();
 
-    expect(logError).toHaveBeenCalledWith(expect.stringContaining("preflight could not run"));
+    expect(logError).toHaveBeenCalledWith(
+      expect.stringContaining("preflight could not run"),
+    );
     expect(seen.heartbeat?.preflight?.()).toBeUndefined();
   });
 });
