@@ -3,6 +3,7 @@ import { homedir, tmpdir } from "os";
 import { join } from "path";
 import { describe, it, expect, vi, afterAll } from "vitest";
 import { bindRepository, createAllowlistReader, RepoDeps, repoInventory } from "./repos.js";
+import { configListZ } from "./config-list.fixtures.js";
 
 function depsWith(over: Partial<{
   allowlist: string[];
@@ -14,7 +15,7 @@ function depsWith(over: Partial<{
   fileUid: number;
   workerId: string;
 }> = {}): RepoDeps {
-  const gitConfig = over.gitConfig ?? "";
+  const gitConfig = configListZ(over.gitConfig ?? "");
   const toplevel = over.toplevel;
   return {
     runner: {

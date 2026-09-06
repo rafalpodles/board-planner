@@ -16,7 +16,12 @@ import { Reporter } from "./reporter.js";
 import { SHUTDOWN_SIGNAL } from "./commands.js";
 import { scrub } from "./scrub.js";
 import { OutcomeKind, Phase, Telemetry } from "./telemetry.js";
-import { BaseUnavailableError, Workspace, Worktree } from "./workspace.js";
+import {
+  BaseUnavailableError,
+  PoisonedCheckoutError,
+  Workspace,
+  Worktree,
+} from "./workspace.js";
 import {
   ClaimedTask,
   DiffStats,
@@ -49,6 +54,7 @@ export interface PipelineDeps {
   recordRun: (projectId: string, record: RunRecord) => void;
   signal?: AbortSignal;
   logError?: (message: string) => void;
+  quarantineProject: (projectId: string, reason: string) => void;
   now?: () => number;
   telemetry?: Pick<Telemetry, "emit" | "emitEvent">;
 }
@@ -265,6 +271,20 @@ export async function runTask(
     worktree = await workspace.create(task.taskKey, SLUG);
   } catch (error) {
     await quietly(() => workspace.destroy(task.taskKey));
+    if (error instanceof PoisonedCheckoutError) {
+      deps.logError?.(`${task.taskKey}: ${String(error)}`);
+      if (error.kind === "planted") {
+        deps.quarantineProject(task.projectId, error.finding);
+      }
+      settle(
+        "released",
+        error.kind === "planted"
+          ? "the checkout's git config carries an executable key"
+          : "the checkout's git config could not be read"
+      );
+      await reporter.released(task, String(error));
+      return "machine-fault";
+    }
     if (error instanceof BaseUnavailableError) {
       deps.logError?.(`${task.taskKey}: ${String(error)}`);
       if (error.kind === "configuration") {

@@ -3,6 +3,7 @@ import { reviewGate } from "./review.js";
 import { CommandResult, Runner } from "../exec.js";
 import { ClaimedTask, DiffStats, GateContext } from "../types.js";
 import { claimedTask } from "../__fixtures__/task.js";
+import { scopedConfigListZ } from "../config-list.fixtures.js";
 
 const TIMEOUT_MS = 5000;
 
@@ -283,7 +284,7 @@ describe("reviewGate", () => {
   it("refuses rather than checking out when the config carries something git would run", async () => {
     const run = vi.fn<Runner["run"]>(async (command, args) =>
       command === "git" && args.includes("--list")
-        ? { code: 0, stdout: "local\tfilter.z.smudge=/tmp/theirs.sh\n", stderr: "", timedOut: false }
+        ? { code: 0, stdout: scopedConfigListZ("filter.z.smudge=/tmp/theirs.sh"), stderr: "", timedOut: false }
         : { code: 0, stdout: "", stderr: "", timedOut: false }
     );
 

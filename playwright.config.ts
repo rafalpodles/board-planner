@@ -20,6 +20,9 @@ const MONGO_PROXY_PORT = Number(process.env.MONGO_PROXY_PORT ?? PORT + 4);
 const MONGO_PROXY_CONTROL_PORT = Number(process.env.MONGO_PROXY_CONTROL_PORT ?? PORT + 5);
 export const MONGO_PROXY_CONTROL_URL = `http://127.0.0.1:${MONGO_PROXY_CONTROL_PORT}`;
 
+const MCP_SERVER_STUB_PORT = Number(process.env.MCP_SERVER_STUB_PORT ?? PORT + 6);
+export const MCP_SERVER_STUB_URL = `http://127.0.0.1:${MCP_SERVER_STUB_PORT}`;
+
 function throughMongoProxy(uri: string): string {
   if (!/^mongodb:\/\/[^,/]+\/[^?]+/.test(uri)) {
     throw new Error(
@@ -86,6 +89,15 @@ export default defineConfig({
       stdout: "pipe",
       stderr: "pipe",
       env: { AI_STUB_PORT: String(AI_STUB_PORT) },
+    },
+    {
+      command: `node e2e/mcp-server-stub.mjs`,
+      url: `${MCP_SERVER_STUB_URL}/health`,
+      reuseExistingServer: false,
+      timeout: 30_000,
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { MCP_SERVER_STUB_PORT: String(MCP_SERVER_STUB_PORT) },
     },
     {
       command: `node e2e/webhook-receiver.mjs`,

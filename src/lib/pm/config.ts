@@ -10,6 +10,7 @@ import { encryptSecret, decryptSecret, isEncryptionConfigured } from "@/lib/encr
 import { isAllowedMcpServerUrl } from "@/lib/url-validation";
 import { sameEndpoint } from "@/lib/host-bound-secrets";
 import { isValidTimezone } from "./autonomy";
+import { MAX_TOOL_ALLOWLIST as MAX_MCP_ALLOWLIST } from "./tool-budget";
 
 const MAX_MODEL_LENGTH = 100;
 const MAX_NOTES_LENGTH = 5000;
@@ -17,7 +18,7 @@ const MAX_LINKS = 20;
 const MAX_LABEL_LENGTH = 100;
 const MAX_URL_LENGTH = 500;
 const MAX_MCP_SERVERS = 5;
-const MAX_MCP_ALLOWLIST = 50;
+
 const MCP_NAME_RE = /^[a-z0-9-]{1,32}$/;
 
 export function validatePmConfig(

@@ -4,24 +4,10 @@ import { decryptSecret, encryptSecret } from "@/lib/encryption";
 import { resolveMcpAuthToken } from "./config";
 import { refreshTokens } from "./mcp-oauth";
 import { McpClient, McpToolDef } from "./mcp-client";
+import { isReadSafe } from "./read-safe";
 import { OrToolDefinition } from "./openrouter";
 
-export const MAX_MCP_CALLS_PER_TURN = 20;
-const MCP_RESULT_MAX_CHARS = 8000;
-const READ_SAFE_NAME_RE = /^(search|list|get|read|fetch|query|describe|find)/i;
-const WRITE_VERBS = new Set([
-  "create", "update", "delete", "write", "append", "replace", "insert", "remove", "set", "patch",
-  "post", "send", "move", "archive", "upload", "edit", "destroy", "drop", "purge", "clear",
-  "reset", "rename", "assign", "close", "merge", "approve", "revoke", "execute", "invoke", "trigger",
-]);
-
-function tokensOf(name: string): string[] {
-  return name
-    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-    .split(/[^A-Za-z0-9]+/)
-    .filter(Boolean)
-    .map((t) => t.toLowerCase());
-}
+export { isReadSafe } from "./read-safe";
 
 export interface McpRuntimeTool {
   exposedName: string;
@@ -37,13 +23,10 @@ export interface McpRuntime {
   serverNames: string[];
 }
 
-export function isReadSafe(tool: McpToolDef): boolean {
-  const tokens = tokensOf(tool.name);
-  const nameLooksReadOnly =
-    READ_SAFE_NAME_RE.test(tool.name) && !tokens.some((t) => WRITE_VERBS.has(t));
-  return nameLooksReadOnly && tool.annotations?.readOnlyHint !== false;
-}
+import { assessToolBudget, describeToolBudget } from "./tool-budget";
 
+export const MAX_MCP_CALLS_PER_TURN = 20;
+const MCP_RESULT_MAX_CHARS = 8000;
 function sanitizeName(raw: string): string {
   return raw.replace(/[^A-Za-z0-9_-]/g, "_");
 }
@@ -174,6 +157,15 @@ export async function discoverMcpTools(projectId: string, servers: IPmMcpServer[
       });
     }
   }
+
+  const budget = assessToolBudget(
+    runtime.serverNames.map((name) => ({
+      name,
+      count: [...runtime.tools.values()].filter((t) => t.serverName === name).length,
+    }))
+  );
+  if (budget.over) console.warn(`[pm/mcp] ${describeToolBudget(budget)}`);
+
   return runtime;
 }
 

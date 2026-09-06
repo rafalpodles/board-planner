@@ -1,0 +1,143 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 196" width="960" height="196" role="img" aria-label="A task moves through a worker run: claim, worktree, agent, gates, push, pull request — and stops at the review column for a person.">
+<style>
+
+    .l{font-family:ui-sans-serif,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif}
+    .t{font-size:14px;fill:#e6edf3;font-weight:600}
+    .m{font-size:13px;fill:#8b949e}
+    .s{font-size:12px;fill:#8b949e}
+    .base{fill:#0d1117;stroke:#30363d;stroke-width:1.5}
+    .lit{fill:#0d1f36;stroke:#58a6ff;stroke-width:1.5;opacity:0}
+    .lit.you{fill:#1d1330;stroke:#bc8cff}
+    .wire{stroke:#1f2937;stroke-width:2.5;stroke-linecap:round}
+    .flow{stroke:#58a6ff;stroke-width:2.5;stroke-linecap:round;stroke-dasharray:28;stroke-dashoffset:28}
+    .dot{fill:#1f2937}
+    .tick{fill:#3fb950;opacity:0}
+    .chip{fill:#0d1f36;stroke:#58a6ff;stroke-width:1.5}
+    .chipt{font-size:12px;fill:#58a6ff;font-weight:600}
+    .stopbox{fill:#1d1330;stroke:#bc8cff;stroke-width:1.5}
+    .stopt{font-size:12px;fill:#d2a8ff;font-weight:600}
+    .wall{stroke:#bc8cff;stroke-width:2.5;stroke-linecap:round;opacity:0}
+
+    [class*="a-"]{animation-duration:10s;animation-iteration-count:infinite;animation-timing-function:linear}
+
+    @keyframes lit0{0%,8%{opacity:0}8%{animation-timing-function:cubic-bezier(.23,1,.32,1)}10%,92%{opacity:1}100%{opacity:0}}
+    .a-lit0{animation-name:lit0}
+
+    @keyframes flow0{0%,9%{stroke-dashoffset:28}16%,92%{stroke-dashoffset:0}100%{stroke-dashoffset:0;opacity:0}}
+    .a-flow0{animation-name:flow0}
+
+    @keyframes lit1{0%,16%{opacity:0}16%{animation-timing-function:cubic-bezier(.23,1,.32,1)}18%,92%{opacity:1}100%{opacity:0}}
+    .a-lit1{animation-name:lit1}
+
+    @keyframes flow1{0%,17%{stroke-dashoffset:28}24%,92%{stroke-dashoffset:0}100%{stroke-dashoffset:0;opacity:0}}
+    .a-flow1{animation-name:flow1}
+
+    @keyframes lit2{0%,24%{opacity:0}24%{animation-timing-function:cubic-bezier(.23,1,.32,1)}26%,92%{opacity:1}100%{opacity:0}}
+    .a-lit2{animation-name:lit2}
+
+    @keyframes flow2{0%,25%{stroke-dashoffset:28}44%,92%{stroke-dashoffset:0}100%{stroke-dashoffset:0;opacity:0}}
+    .a-flow2{animation-name:flow2}
+
+    @keyframes lit3{0%,44%{opacity:0}44%{animation-timing-function:cubic-bezier(.23,1,.32,1)}46%,92%{opacity:1}100%{opacity:0}}
+    .a-lit3{animation-name:lit3}
+
+    @keyframes flow3{0%,45%{stroke-dashoffset:28}63%,92%{stroke-dashoffset:0}100%{stroke-dashoffset:0;opacity:0}}
+    .a-flow3{animation-name:flow3}
+
+    @keyframes lit4{0%,63%{opacity:0}63%{animation-timing-function:cubic-bezier(.23,1,.32,1)}65%,92%{opacity:1}100%{opacity:0}}
+    .a-lit4{animation-name:lit4}
+
+    @keyframes flow4{0%,64%{stroke-dashoffset:28}70%,92%{stroke-dashoffset:0}100%{stroke-dashoffset:0;opacity:0}}
+    .a-flow4{animation-name:flow4}
+
+    @keyframes lit5{0%,70%{opacity:0}70%{animation-timing-function:cubic-bezier(.23,1,.32,1)}72%,92%{opacity:1}100%{opacity:0}}
+    .a-lit5{animation-name:lit5}
+
+    @keyframes flow5{0%,71%{stroke-dashoffset:28}78%,92%{stroke-dashoffset:0}100%{stroke-dashoffset:0;opacity:0}}
+    .a-flow5{animation-name:flow5}
+
+    @keyframes lit6{0%,78%{opacity:0}78%{animation-timing-function:cubic-bezier(.23,1,.32,1)}80%,92%{opacity:1}100%{opacity:0}}
+    .a-lit6{animation-name:lit6}
+
+    @keyframes tick0{0%,46%{opacity:0;transform:scale(.6)}46%{animation-timing-function:cubic-bezier(.23,1,.32,1)}47.5%,92%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(1)}}
+    .a-tick0{animation-name:tick0;transform-box:fill-box;transform-origin:center}
+
+    @keyframes tick1{0%,48.5%{opacity:0;transform:scale(.6)}48.5%{animation-timing-function:cubic-bezier(.23,1,.32,1)}50%,92%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(1)}}
+    .a-tick1{animation-name:tick1;transform-box:fill-box;transform-origin:center}
+
+    @keyframes tick2{0%,51%{opacity:0;transform:scale(.6)}51%{animation-timing-function:cubic-bezier(.23,1,.32,1)}52.5%,92%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(1)}}
+    .a-tick2{animation-name:tick2;transform-box:fill-box;transform-origin:center}
+
+    @keyframes tick3{0%,53.5%{opacity:0;transform:scale(.6)}53.5%{animation-timing-function:cubic-bezier(.23,1,.32,1)}55%,92%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(1)}}
+    .a-tick3{animation-name:tick3;transform-box:fill-box;transform-origin:center}
+
+    @keyframes tick4{0%,56%{opacity:0;transform:scale(.6)}56%{animation-timing-function:cubic-bezier(.23,1,.32,1)}57.5%,92%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(1)}}
+    .a-tick4{animation-name:tick4;transform-box:fill-box;transform-origin:center}
+
+    @keyframes tick5{0%,58.5%{opacity:0;transform:scale(.6)}58.5%{animation-timing-function:cubic-bezier(.23,1,.32,1)}60%,92%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(1)}}
+    .a-tick5{animation-name:tick5;transform-box:fill-box;transform-origin:center}
+
+    @keyframes chipIn{0%,2%{opacity:0;transform:translateY(6px)}2%{animation-timing-function:cubic-bezier(.23,1,.32,1)}6%,92%{opacity:1;transform:translateY(0)}100%{opacity:0;transform:translateY(0)}}
+    .a-chip{animation-name:chipIn;opacity:0}
+    @keyframes stopIn{0%,80%{opacity:0;transform:translateY(6px)}80%{animation-timing-function:cubic-bezier(.23,1,.32,1)}84%,92%{opacity:1;transform:translateY(0)}100%{opacity:0;transform:translateY(0)}}
+    .a-stop{animation-name:stopIn;opacity:0}
+    @keyframes wallIn{0%,78%{opacity:0}78%{animation-timing-function:cubic-bezier(.23,1,.32,1)}81%,92%{opacity:1}100%{opacity:0}}
+    .a-wall{animation-name:wallIn;opacity:0}
+    @media (prefers-reduced-motion:reduce){
+      [class*="a-"]{animation:none}
+      .lit,.tick,.wall,.a-chip,.a-stop,.a-wall{opacity:1}
+      .flow{stroke-dashoffset:0}
+    }
+</style>
+<g class="l">
+<g class="a-chip"><rect class="chip" x="20" y="10" width="196" height="30" rx="8"/><text class="chipt" x="36" y="30">ORB-14 · you approved it</text></g>
+<rect class="base" x="20" y="66" width="104" height="38" rx="10"/>
+<rect class="lit a-lit0" x="20" y="66" width="104" height="38" rx="10"/>
+<text class="t" x="72.0" y="90.0" text-anchor="middle">claim</text>
+<line class="wire" x1="127" y1="85.0" x2="145" y2="85.0"/>
+<line class="flow a-flow0" x1="127" y1="85.0" x2="145" y2="85.0"/>
+<rect class="base" x="148" y="66" width="118" height="38" rx="10"/>
+<rect class="lit a-lit1" x="148" y="66" width="118" height="38" rx="10"/>
+<text class="t" x="207.0" y="90.0" text-anchor="middle">worktree</text>
+<line class="wire" x1="269" y1="85.0" x2="287" y2="85.0"/>
+<line class="flow a-flow1" x1="269" y1="85.0" x2="287" y2="85.0"/>
+<rect class="base" x="290" y="66" width="104" height="38" rx="10"/>
+<rect class="lit a-lit2" x="290" y="66" width="104" height="38" rx="10"/>
+<text class="t" x="342.0" y="90.0" text-anchor="middle">agent</text>
+<line class="wire" x1="397" y1="85.0" x2="415" y2="85.0"/>
+<line class="flow a-flow2" x1="397" y1="85.0" x2="415" y2="85.0"/>
+<rect class="base" x="418" y="66" width="104" height="38" rx="10"/>
+<rect class="lit a-lit3" x="418" y="66" width="104" height="38" rx="10"/>
+<text class="t" x="470.0" y="90.0" text-anchor="middle">gates</text>
+<line class="wire" x1="525" y1="85.0" x2="543" y2="85.0"/>
+<line class="flow a-flow3" x1="525" y1="85.0" x2="543" y2="85.0"/>
+<rect class="base" x="546" y="66" width="104" height="38" rx="10"/>
+<rect class="lit a-lit4" x="546" y="66" width="104" height="38" rx="10"/>
+<text class="t" x="598.0" y="90.0" text-anchor="middle">push</text>
+<line class="wire" x1="653" y1="85.0" x2="671" y2="85.0"/>
+<line class="flow a-flow4" x1="653" y1="85.0" x2="671" y2="85.0"/>
+<rect class="base" x="674" y="66" width="134" height="38" rx="10"/>
+<rect class="lit a-lit5" x="674" y="66" width="134" height="38" rx="10"/>
+<text class="t" x="741.0" y="90.0" text-anchor="middle">pull request</text>
+<line class="wire" x1="811" y1="85.0" x2="833" y2="85.0"/>
+<line class="flow a-flow5" x1="811" y1="85.0" x2="833" y2="85.0"/>
+<rect class="base" x="836" y="66" width="104" height="38" rx="10"/>
+<rect class="lit you a-lit6" x="836" y="66" width="104" height="38" rx="10"/>
+<text class="t" x="888.0" y="90.0" text-anchor="middle">you</text>
+<circle class="dot" cx="427.5" cy="128" r="5"/>
+<circle class="tick a-tick0" cx="427.5" cy="128" r="5"/>
+<circle class="dot" cx="444.5" cy="128" r="5"/>
+<circle class="tick a-tick1" cx="444.5" cy="128" r="5"/>
+<circle class="dot" cx="461.5" cy="128" r="5"/>
+<circle class="tick a-tick2" cx="461.5" cy="128" r="5"/>
+<circle class="dot" cx="478.5" cy="128" r="5"/>
+<circle class="tick a-tick3" cx="478.5" cy="128" r="5"/>
+<circle class="dot" cx="495.5" cy="128" r="5"/>
+<circle class="tick a-tick4" cx="495.5" cy="128" r="5"/>
+<circle class="dot" cx="512.5" cy="128" r="5"/>
+<circle class="tick a-tick5" cx="512.5" cy="128" r="5"/>
+<text class="s" x="470.0" y="152" text-anchor="middle">six checks</text>
+<line class="wall a-wall" x1="822" y1="58" x2="822" y2="114"/>
+<g class="a-stop"><rect class="stopbox" x="768" y="122" width="172" height="30" rx="8"/><text class="stopt" x="784" y="142">stops · needs review</text></g>
+<text class="m" x="20" y="184">Every phase is reported onto the task, so its comments are the run log. Nothing merges unless your agent carries a Merge step.</text>
+</g></svg>

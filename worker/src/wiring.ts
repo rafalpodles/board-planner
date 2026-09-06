@@ -174,6 +174,34 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   let preflight: PreflightReport | null = null;
   let repoChecks: PreflightCheck[] = [];
   const unusable = new Map<string, string>();
+  const quarantined = new Map<string, string>();
+
+  const checkoutOf = (projectId: string): string =>
+    bound.get(projectId)?.path ?? `project:${projectId}`;
+
+  const quarantineReasonFor = (projectId: string): string | undefined =>
+    quarantined.get(checkoutOf(projectId));
+
+  function quarantineProject(projectId: string, reason: string): void {
+    const checkout = checkoutOf(projectId);
+    if (quarantined.has(checkout)) return;
+    quarantined.set(
+      checkout,
+      `${checkout}: its git config carries ${reason}. Remove the key, then restart this worker.`
+    );
+    deps.logError(
+      `quarantining ${checkout}: its git config carries ${reason}. ` +
+        `Nothing on this machine will claim for any project on that checkout again until the key ` +
+        `is gone and this worker is restarted.`
+    );
+  }
+
+  const quarantineChecks = (): PreflightCheck[] =>
+    [...quarantined.entries()].map(([checkout, detail]) => ({
+      name: "checkout quarantined",
+      ok: false,
+      detail,
+    }));
 
   function configFor(projectId: string): WorkerConfig | null {
     const identity = loadIdentity(identityStore);
@@ -422,6 +450,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
           gateFor: gateFromEntry,
           recordRun: (project, record) => outbox.add({ kind: "run", projectId: project, record }),
           logError: deps.logError,
+          quarantineProject,
           runner: deps.runner,
           signal,
           telemetry,
@@ -443,7 +472,10 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
 
   const loop = createLoop({
     pollIntervalMs: () => policy.pollIntervalMs,
-    assignments: () => [...bound.keys()].filter((projectId) => !unusable.has(projectId)),
+    assignments: () =>
+      [...bound.keys()].filter(
+        (projectId) => !unusable.has(projectId) && !quarantineReasonFor(projectId)
+      ),
     api,
     execute,
     sleep: deps.sleep,
@@ -463,7 +495,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     repos: () => (inventoryError ? undefined : inventory),
     preflight: () => {
       if (!preflight) return undefined;
-      const checks = [...preflight.checks, ...repoChecks];
+      const checks = [...preflight.checks, ...repoChecks, ...quarantineChecks()];
       return { ok: checks.every((c) => c.ok), account: preflight.account, checks };
     },
     forgetEnrolmentToken: bootstrap.enrolmentTokenFile
@@ -503,7 +535,8 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       pollIntervalMs: policy.pollIntervalMs,
       projects: [...bound.entries()].map(([project, repo]) => ({
         project,
-        blocked: unusable.get(project) ?? loop.unclaimable(project),
+        blocked:
+          quarantineReasonFor(project) ?? unusable.get(project) ?? loop.unclaimable(project),
         baseBranch: repo.config.baseBranch,
         model: repo.config.model,
         reviewModel: repo.config.reviewModel,

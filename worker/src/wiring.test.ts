@@ -12,6 +12,7 @@ import { Heartbeat, HeartbeatDeps } from "./registration.js";
 import { createTelemetry } from "./telemetry.js";
 import { ClaimedTask } from "./types.js";
 import { createWorker, WorkerDeps } from "./wiring.js";
+import { scopedConfigListZ } from "./config-list.fixtures.js";
 
 const STATE_DIR = "/tmp/cp-wiring-test-state";
 
@@ -181,6 +182,9 @@ describe("the worker's lifecycle", () => {
 describe("telemetry, from the agent's stdout to the two sinks", () => {
   const REPO = "/repos/demo";
   const REMOTE = "git@github.com:owner/repo.git";
+  const OTHER_REPO = "/repos/other";
+  const OTHER_REMOTE = "git@github.com:owner/other.git";
+  const remoteFor = (cwd?: string) => (cwd === OTHER_REPO ? OTHER_REMOTE : REMOTE);
   const BASE_SHA = "cafef00d";
   const SERVER_RUN_ID = "run-minted-by-the-server";
   const AGENT_SECRET = "cpw_deadbeef0123456789abcdef01234567";
@@ -260,11 +264,17 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     claudeCalls: string[][] = [],
     onAgentStart?: (nth: number) => void,
     everyCall: string[][] = [],
-    remoteCalls: RemoteCall[] = []
+    remoteCalls: RemoteCall[] = [],
+    scopedConfig: string | Record<string, string> = ""
   ): Runner {
+    const scopedFor = (cwd?: string) =>
+      typeof scopedConfig === "string" ? scopedConfig : (scopedConfig[cwd ?? ""] ?? "");
     return {
       async run(command, args, opts) {
         everyCall.push([command, ...args]);
+        if (command === "git" && args.includes("--show-scope")) {
+          return { code: 0, stdout: scopedFor(opts.cwd), stderr: "", timedOut: false };
+        }
         if (command === "git" && (args[0] === "ls-remote" || args[0] === "fetch")) {
           remoteCalls.push({ args, env: opts.env ?? {} });
         }
@@ -285,7 +295,11 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         }
         return {
           code: 0,
-          stdout: args.includes("rev-parse") ? REPO : args.includes("get-url") ? REMOTE : "",
+          stdout: args.includes("rev-parse")
+            ? (opts.cwd ?? REPO)
+            : args.includes("get-url")
+              ? remoteFor(opts.cwd)
+              : "",
           stderr: "",
           timedOut: false,
         };
@@ -302,13 +316,20 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       readFile?: (path: string) => string | null;
       stateFiles?: Record<string, string>;
       tasks?: ClaimedTask[];
-      claimRefusal?: string;
+      claimRefusal?: string | Record<string, string>;
       onAgentStart?: (nth: number) => void;
+      scopedConfig?: string | Record<string, string>;
+      repos?: string[];
+      assignments?: { project: string; remote: string }[];
+      passes?: number;
+      clockJumpOnSleepMs?: number;
     } = {}
   ) {
     let seenHeartbeat: HeartbeatDeps | undefined;
     const stateDir = mkdtempSync(join(tmpdir(), "cp-wiring-run-"));
-    writeFileSync(join(stateDir, "repos.json"), JSON.stringify({ repos: [REPO] }), { mode: 0o600 });
+    writeFileSync(join(stateDir, "repos.json"), JSON.stringify({ repos: opts.repos ?? [REPO] }), {
+      mode: 0o600,
+    });
 
     for (const [name, contents] of Object.entries(opts.stateFiles ?? {})) {
       writeFileSync(join(stateDir, name), contents, { mode: 0o600 });
@@ -323,11 +344,17 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     const queue = opts.tasks ?? [CLAIMED];
     const logError = vi.fn();
     let claims = 0;
+    let slept = 0;
+    let clockOffset = 0;
+    let serverFetch = vi.fn();
+    const wallClock = Date.now;
     let localConfig: (() => LocalConfigView) | undefined;
 
     const api = {
-      claim: vi.fn<ApiClient["claim"]>(async () => {
-        if (opts.claimRefusal) throw new ClaimRefused(opts.claimRefusal);
+      claim: vi.fn<ApiClient["claim"]>(async (projectId) => {
+        const refusal =
+          typeof opts.claimRefusal === "string" ? opts.claimRefusal : opts.claimRefusal?.[projectId];
+        if (refusal) throw new ClaimRefused(refusal);
         return queue[claims++] ?? null;
       }),
       setStatus: vi.fn<ApiClient["setStatus"]>().mockResolvedValue(undefined),
@@ -348,15 +375,24 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     let stop = (): void => {};
     const worker = createWorker({
       env: { ...ENV, CP_STATE_DIR: stateDir },
-      runner: streamingRunner(claudeCalls, opts.onAgentStart, everyCall, remoteCalls),
+      runner: streamingRunner(
+        claudeCalls,
+        opts.onAgentStart,
+        everyCall,
+        remoteCalls,
+        opts.scopedConfig
+      ),
       hostname: () => "host-1",
-      sleep: async () => stop(),
+      sleep: async () => {
+        clockOffset += opts.clockJumpOnSleepMs ?? 0;
+        if (++slept >= (opts.passes ?? 1)) stop();
+      },
       log: vi.fn(),
       logError,
       uid: 501,
       realpath: (path) => path,
       stat: () => ({ uid: 501, mode: 0o40700 }),
-      fetchImpl: vi.fn().mockResolvedValue({
+      fetchImpl: (serverFetch = vi.fn().mockResolvedValue({
         ok: true,
         status: 200,
         json: async () => ({
@@ -368,16 +404,15 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
               repositoryUrl: "https://github.com/owner/sandbox",
             },
           ],
-          assignments: [
-            {
-              project: "p1",
-              remote: opts.assignmentRemote ?? REMOTE,
-              ...(opts.extraAssignmentFields ?? {}),
-              ...(policy ? { policy } : {}),
-            },
-          ],
+          assignments: (
+            opts.assignments ?? [{ project: "p1", remote: opts.assignmentRemote ?? REMOTE }]
+          ).map((assignment) => ({
+            ...assignment,
+            ...(opts.extraAssignmentFields ?? {}),
+            ...(policy ? { policy } : {}),
+          })),
         }),
-      }) as unknown as typeof fetch,
+      })) as unknown as typeof fetch,
       createStore: (path) => memoryStore(path.endsWith("worker.json") ? IDENTITY : ""),
       createApi: () => api as unknown as ApiClient,
       createTelemetry: () => telemetry,
@@ -403,9 +438,11 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     });
     stop = () => worker.shutdown();
 
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => wallClock() + clockOffset);
     try {
       await worker.run();
     } finally {
+      clock.mockRestore();
       rmSync(stateDir, { recursive: true, force: true });
     }
 
@@ -424,6 +461,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       claudeArgs: claudeCalls[0] ?? [],
       localConfig,
       heartbeatDeps: seenHeartbeat,
+      rebinds: serverFetch.mock.calls.length,
     };
   }
 
@@ -903,6 +941,232 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       });
 
       expect(run.localConfig?.().projects[0].blocked).toContain("package-lock.json");
+    });
+
+    describe("a checkout carrying a key git would run on checkout", () => {
+      const PLANTED = scopedConfigListZ("filter.z.smudge=touch /tmp/pwned", "worktree");
+
+      it("does not claim for that project again on the next pass", async () => {
+        const run = await runOneTask(undefined, undefined, {
+          scopedConfig: PLANTED,
+          tasks: [CLAIMED, CLAIMED],
+          passes: 2,
+        });
+
+        expect(run.api.claim).toHaveBeenCalledTimes(1);
+      });
+
+      it("keeps claiming over the same budget when nothing is planted", async () => {
+        const run = await runOneTask(undefined, undefined, {
+          tasks: [CLAIMED, CLAIMED],
+          passes: 2,
+        });
+
+        expect(run.api.claim.mock.calls.length).toBeGreaterThan(1);
+      });
+
+      it("stays quarantined across a rebind", async () => {
+        const run = await runOneTask(undefined, undefined, {
+          scopedConfig: PLANTED,
+          tasks: [CLAIMED, CLAIMED],
+          passes: 2,
+          clockJumpOnSleepMs: 60_000,
+        });
+
+        expect(run.rebinds, "no rebind happened, so this proves nothing").toBeGreaterThan(1);
+        expect(run.api.claim).toHaveBeenCalledTimes(1);
+      });
+
+      it("re-binds and keeps claiming over that same jump when nothing is planted", async () => {
+        const run = await runOneTask(undefined, undefined, {
+          tasks: [CLAIMED, CLAIMED],
+          passes: 2,
+          clockJumpOnSleepMs: 60_000,
+        });
+
+        expect(run.rebinds).toBeGreaterThan(1);
+        expect(run.api.claim.mock.calls.length).toBeGreaterThan(1);
+      });
+
+      it("never checks anything out of the poisoned clone", async () => {
+        const run = await runOneTask(undefined, undefined, { scopedConfig: PLANTED });
+
+        expect(
+          run.everyCall.some((call) => call.join(" ").includes("worktree add")),
+          "the worktree was created anyway"
+        ).toBe(false);
+      });
+
+      it("covers every project bound to the same checkout, not only the one that hit it", async () => {
+        const run = await runOneTask(undefined, undefined, {
+          scopedConfig: PLANTED,
+          assignments: [
+            { project: "p1", remote: REMOTE },
+            { project: "p2", remote: REMOTE },
+          ],
+        });
+
+        const blocked = run.localConfig?.().projects ?? [];
+        expect(blocked).toHaveLength(2);
+        for (const project of blocked) {
+          expect(project.blocked, `project ${project.project} was left claimable`).toContain(
+            "filter.z.smudge"
+          );
+        }
+      });
+
+      it("leaves a clean checkout on the same machine claimable", async () => {
+        const run = await runOneTask(undefined, undefined, {
+          repos: [REPO, OTHER_REPO],
+          assignments: [
+            { project: "p1", remote: REMOTE },
+            { project: "p2", remote: OTHER_REMOTE },
+          ],
+          scopedConfig: { [REPO]: PLANTED },
+          tasks: [CLAIMED, { ...CLAIMED, projectId: "p2", taskId: "t2" }],
+          passes: 2,
+        });
+
+        const projects = run.localConfig?.().projects ?? [];
+        expect(projects.find((project) => project.project === "p1")?.blocked).toContain(
+          "filter.z.smudge"
+        );
+        expect(
+          projects.find((project) => project.project === "p2")?.blocked,
+          "the clean checkout was quarantined along with the poisoned one"
+        ).toBe("");
+        expect(run.api.claim.mock.calls.map((call) => call[0])).toContain("p2");
+      });
+
+      it("quarantines a second poisoned checkout too", async () => {
+        const run = await runOneTask(undefined, undefined, {
+          repos: [REPO, OTHER_REPO],
+          assignments: [
+            { project: "p1", remote: REMOTE },
+            { project: "p2", remote: OTHER_REMOTE },
+          ],
+          scopedConfig: { [REPO]: PLANTED, [OTHER_REPO]: PLANTED },
+          tasks: [CLAIMED, { ...CLAIMED, projectId: "p2", taskId: "t2" }],
+          passes: 2,
+        });
+
+        const blocked = run.localConfig?.().projects ?? [];
+        expect(blocked).toHaveLength(2);
+        for (const project of blocked) {
+          expect(project.blocked, `project ${project.project} was left claimable`).toContain(
+            "filter.z.smudge"
+          );
+        }
+      });
+
+      it("reports itself as a failed check, so the console says the machine stopped on purpose", async () => {
+        const run = await runOneTask(undefined, undefined, { scopedConfig: PLANTED });
+
+        const report = run.heartbeatDeps?.preflight?.();
+        expect(report?.ok).toBe(false);
+        const check = report?.checks.find((c) => c.name === "checkout quarantined");
+        expect(check?.detail).toContain("filter.z.smudge");
+        expect(check?.detail).toContain(REPO);
+        expect(check?.detail, "the report does not say how to recover").toContain("restart");
+      });
+
+      it("reports no such check when nothing is planted", async () => {
+        const run = await runOneTask(undefined, undefined, {});
+
+        const report = run.heartbeatDeps?.preflight?.();
+        expect(report?.checks.some((c) => c.name === "checkout quarantined")).toBe(false);
+      });
+
+      it("shows the gate requirement when that is the only reason, which is the reachable half", async () => {
+        const run = await runOneTask(undefined, undefined, {
+          readFile: (path) =>
+            path.endsWith("package.json") ? JSON.stringify({ scripts: { lint: "eslint" } }) : null,
+        });
+
+        expect(run.localConfig?.().projects[0].blocked).toContain("package-lock.json");
+      });
+
+      it("says on the socket why the project is not being worked on", async () => {
+        const run = await runOneTask(undefined, undefined, { scopedConfig: PLANTED });
+
+        const blocked = run.localConfig?.().projects[0].blocked;
+        expect(blocked).toContain("filter.z.smudge");
+        expect(blocked).toContain(REPO);
+        expect(blocked, "the way out is not on the screen a person is looking at").toContain(
+          "restart"
+        );
+      });
+
+      it("shows the quarantine over a sibling's older board refusal, which outlives it", async () => {
+        const run = await runOneTask(undefined, undefined, {
+          scopedConfig: PLANTED,
+          assignments: [
+            { project: "p2", remote: REMOTE },
+            { project: "p1", remote: REMOTE },
+          ],
+          claimRefusal: { p2: "This board has no column meaning In progress, so nothing moves." },
+        });
+
+        const p2 = run.localConfig?.().projects.find((project) => project.project === "p2");
+        expect(p2?.blocked, "nothing was chosen between: no reason was recorded").not.toBe("");
+        expect(p2?.blocked).toContain("filter.z.smudge");
+      });
+
+      it("shows the board's refusal when that is all there is", async () => {
+        const run = await runOneTask(undefined, undefined, {
+          assignments: [
+            { project: "p2", remote: REMOTE },
+            { project: "p1", remote: REMOTE },
+          ],
+          claimRefusal: { p2: "This board has no column meaning In progress, so nothing moves." },
+        });
+
+        const projects = run.localConfig?.().projects ?? [];
+        expect(projects.find((project) => project.project === "p2")?.blocked).toBe(
+          "This board has no column meaning In progress, so nothing moves."
+        );
+        expect(
+          projects.find((project) => project.project === "p1")?.blocked,
+          "the sibling was blocked too, so the refusal above is not the only thing at work"
+        ).toBe("");
+      });
+
+      it("says it once, however many passes go by", async () => {
+        const run = await runOneTask(undefined, undefined, {
+          scopedConfig: PLANTED,
+          tasks: [CLAIMED, CLAIMED],
+          passes: 3,
+          clockJumpOnSleepMs: 60_000,
+        });
+
+        const quarantineLines = run.logError.mock.calls
+          .map((call) => String(call[0]))
+          .filter((line) => line.startsWith("quarantining "));
+        expect(run.rebinds, "no rebind happened, so this proves nothing").toBeGreaterThan(1);
+        expect(quarantineLines).toHaveLength(1);
+      });
+
+      it("says it in the worker's own log too, with the finding and what an operator has to do", async () => {
+        const run = await runOneTask(undefined, undefined, { scopedConfig: PLANTED });
+
+        const said = run.logError.mock.calls.map((call) => String(call[0]));
+        const line = said.find((message) => message.startsWith("quarantining "));
+        expect(line, `no quarantine line among ${JSON.stringify(said)}`).toBeDefined();
+        expect(line).toContain(REPO);
+        expect(line).toContain("filter.z.smudge");
+        expect(line).toContain("restarted");
+      });
+
+      it("hands the task back rather than charging it for the machine's compromise", async () => {
+        const run = await runOneTask(undefined, undefined, { scopedConfig: PLANTED });
+
+        expect(run.api.release).toHaveBeenCalled();
+        expect(run.api.release).not.toHaveBeenCalledWith(
+          expect.anything(),
+          expect.anything(),
+          expect.objectContaining({ refund: false })
+        );
+      });
     });
 
     it("claims as before from a repository that has what the gates need", async () => {

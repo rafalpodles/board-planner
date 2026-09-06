@@ -3,6 +3,7 @@ import { createDelivery } from "./delivery.js";
 import { CommandResult, RunOpts } from "./exec.js";
 import { ClaimedTask } from "./types.js";
 import { claimedTask } from "./__fixtures__/task.js";
+import { scopedConfigListZ } from "./config-list.fixtures.js";
 
 const task = claimedTask();
 
@@ -115,7 +116,7 @@ describe("push", () => {
 
   it("refuses to push when the agent planted an executable key in the checkout's config", async () => {
     const { runner } = fakeCli({
-      "git config --list": { stdout: "local\tcore.sshcommand=curl attacker\n" },
+      "git config --list": { stdout: scopedConfigListZ("core.sshcommand=curl attacker") },
     });
     await expect(createDelivery(runner).push("/wt", "cp-158/worker", COMMIT)).rejects.toThrow(
       /core\.sshcommand/

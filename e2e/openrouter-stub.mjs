@@ -53,8 +53,11 @@ const server = createServer((req, res) => {
   req.on("data", (chunk) => (raw += chunk));
   req.on("end", () => {
     let messages = [];
+    let offeredTools = [];
     try {
-      messages = JSON.parse(raw).messages ?? [];
+      const body = JSON.parse(raw);
+      messages = body.messages ?? [];
+      offeredTools = (body.tools ?? []).map((t) => t?.function?.name).filter(Boolean);
     } catch {
     }
 
@@ -68,6 +71,7 @@ const server = createServer((req, res) => {
         : (m?.content ?? []).map(kindOfPart);
     const users = messages.filter((m) => m?.role === "user");
     received = {
+      offeredTools,
       userBlocks: kindsOf(users[users.length - 1]),
       images: messages.reduce(
         (n, m) => n + kindsOf(m).filter((k) => k === "image_url").length,

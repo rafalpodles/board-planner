@@ -304,7 +304,26 @@ describe("the base lookup runs with the environment production gives it", () => 
       remoteUrl
     );
 
-    await expect(workspace.create("BP-1", "worker")).rejects.toThrow(/transport 'ext' not allowed/);
+    await expect(workspace.create("BP-1", "worker")).rejects.toMatchObject({
+      name: "PoisonedCheckoutError",
+      message: expect.stringContaining("protocol.allow"),
+    });
     expect(existsSync(marker)).toBe(false);
   });
+
+  it("does not execute a program named by the remote URL either", async () => {
+    const clean = join(dir, "clean");
+    execFileSync("git", ["clone", "--quiet", remoteUrl, clean], { stdio: "pipe" });
+    const program = join(dir, "payload.sh");
+
+    const workspace = createWorkspace(
+      { repoPath: clean, worktreeRoot: join(dir, "wt2"), baseBranch: "main" } as WorkerConfig,
+      createRunner(),
+      productionRemoteEnv,
+      `ext::${program} %S`
+    );
+
+    await expect(workspace.create("BP-2", "worker")).rejects.toThrow(/transport 'ext' not allowed/);
+    expect(existsSync(marker)).toBe(false);
+  }, 30_000);
 });
