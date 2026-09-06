@@ -331,6 +331,9 @@ test.describe("choosing an MCP server's tools", () => {
       {
         ...(server("linked", "/wide") as object),
         authType: "oauth",
+        // Not a state the app produces — the callback always writes a token alongside
+        // status:"connected". Forced here because e2e runs without ENCRYPTION_KEY, and safe
+        // because both consumers read `oauth.status` and `!server.oauth`, never the token.
         oauth: { status: "connected", clientId: "e2e-client", accessToken: "", refreshToken: "" },
       },
     ]);
@@ -344,10 +347,12 @@ test.describe("choosing an MCP server's tools", () => {
     await page.getByRole("button", { name: "Disconnect linked" }).click();
     await disconnected;
 
-    // The edit is still there and still unsaved: the Save bar is the proof it was not adopted
-    await expect(page.getByLabel("Tool allowlist for narrow")).toHaveValue("list_narrow_alpha");
+    // Not "the text is still on screen" — under the bug it is, which is what made it look saved.
+    // The Save bar's own count is the discriminating signal, and Discard below is a positive
+    // assertion the broken code cannot satisfy at any timing: with the baseline moved, Discard
+    // leaves the edit in place instead of clearing it (BP-574 review).
+    await expect(page.getByText("1 unsaved change")).toBeVisible();
     const save = page.getByRole("button", { name: "Save changes" });
-    await expect(save).toBeVisible();
 
     // and it reaches the database when actually saved
     const saved = page.waitForResponse(

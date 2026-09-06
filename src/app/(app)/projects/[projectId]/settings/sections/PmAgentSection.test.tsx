@@ -322,3 +322,52 @@ describe("the flood warning's arithmetic", () => {
     );
   });
 });
+
+/**
+ * The narrower window the first fix left open: a disconnect awaits a round trip, and the writes
+ * that follow it must not rewind to the arrays captured when the button was clicked (BP-574
+ * review).
+ */
+describe("editing while a disconnect is in flight", () => {
+  it("keeps what was typed during the round trip", async () => {
+    renderSection(true);
+    let land: (value: unknown) => void = () => {};
+    api.post.mockImplementation(() => new Promise((resolve) => (land = resolve)));
+
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect notion" }));
+    fireEvent.change(screen.getByLabelText("Tool allowlist for jira"), {
+      target: { value: "typed_during_the_flight" },
+    });
+
+    land({ ok: true });
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("OAuth connection removed", "success"));
+
+    expect((screen.getByLabelText("Tool allowlist for jira") as HTMLInputElement).value).toBe(
+      "typed_during_the_flight"
+    );
+    expect(dirtyCount()).toBe(1);
+  });
+});
+
+/**
+ * The half of the behaviour `rebase` exists for, and which the dirty-count test alone cannot see:
+ * the connection is destroyed server-side, so Discard must not put "Connected" back.
+ */
+describe("Discard after a disconnect", () => {
+  it("does not resurrect the connection", async () => {
+    renderSection(true);
+    api.post.mockResolvedValue({ ok: true });
+
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect notion" }));
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("OAuth connection removed", "success"));
+    expect(screen.queryByRole("button", { name: "Disconnect notion" })).toBeNull();
+
+    register.mock.calls.at(-1)?.[0]?.discard?.();
+
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Disconnect notion" })).toBeNull()
+    );
+    // The control: Connect is what an unconfigured row offers, so the row is still there
+    expect(screen.getByRole("button", { name: "Connect notion" })).toBeTruthy();
+  });
+});
